@@ -14,10 +14,17 @@ int vibe_send_descriptor(int socket, int fd);
 
 // recvmsg(2) of one message from the Unix socket `socket`, taking the one descriptor it carries, close-on-exec from
 // its arrival (MSG_CMSG_CLOEXEC): no program this process starts meanwhile inherits it. The descriptor; -1 and errno
-// otherwise: recvmsg's own, EPIPE at the end of the stream (the peer has gone), EBADMSG when the message carried no
-// descriptor or more than one (every one that came is closed, and those the room here couldn't take the kernel
-// dropped itself). Credentials that came along (SO_PASSCRED) are passed over.
+// otherwise: recvmsg's own, EPIPE at the end of the stream (the peer has gone: the socket is shut for reading), EBADMSG
+// when the message carried no descriptor or more than one (every one that came is closed, and those the room here
+// couldn't take the kernel dropped itself), or came cut short (MSG_CTRUNC). A message of no bytes and no descriptor
+// from a peer still there (SOCK_SEQPACKET reads it as 0, as it does the end) is EBADMSG; one whose sender closed its
+// end right after it is EPIPE, as the next read would be. Credentials that came along (SO_PASSCRED) are passed over.
 int vibe_receive_descriptor(int socket);
+
+// Tests only. vibe_receive_descriptor with only `room` bytes for the kernel to fill with control data (at most what
+// vibe_receive_descriptor gives it): room for one descriptor, against a message of two, is how a test sees a message
+// the kernel cut short (MSG_CTRUNC) refused, which the full room never brings about on 64-bit Linux.
+int vibe_receive_descriptor_in_room(int socket, size_t room);
 
 // Tests only. sendmsg(2) of `count` bytes over the Unix socket `fd` with credentials the sender names itself
 // (SCM_CREDENTIALS): `pid`, `uid`, `gid`. The kernel checks them: a pid other than the sender's own is refused (EPERM)

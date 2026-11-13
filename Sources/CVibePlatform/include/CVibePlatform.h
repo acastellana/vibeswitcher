@@ -58,6 +58,8 @@ int vibe_filesystem_type(const char *path, unsigned long *type);
 // macro. The pointer is untyped so that this header needs no <signal.h>.
 pid_t vibe_signal_sender(const void *info);
 
-#include "CVibePlatform_descriptors.h"
 #endif
+// Outside the __linux__ block, as every header of this umbrella must be: on the Mac it comes out empty (its own
+// __linux__ guard), and the module's umbrella has no header it leaves out (-Wincomplete-umbrella).
+#include "CVibePlatform_descriptors.h"
 #endif

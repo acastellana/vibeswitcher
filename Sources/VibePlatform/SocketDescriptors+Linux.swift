@@ -13,8 +13,10 @@ extension Platform.Sockets {
 
     /// The descriptor the next message on `socket` carries, close-on-exec from its arrival (`MSG_CMSG_CLOEXEC`), so no
     /// program started meanwhile inherits it. Exactly one is taken: a message carrying none or more than one gives nil
-    /// (`errno` EBADMSG), and every descriptor it carried is closed. nil too at the end of the stream (EPIPE) and when
-    /// the read fails (its `errno`). Waits for a message as the socket's reads do.
+    /// (`errno` EBADMSG), and every descriptor it carried is closed. nil too at the end of the stream (EPIPE: the peer
+    /// has closed or shut its end) and when the read fails (its `errno`). On a `SOCK_SEQPACKET` socket an empty message
+    /// from a peer still there reads as 0 bytes, as the end does, and is told apart: EBADMSG, the connection still
+    /// open. Waits for a message as the socket's reads do.
     public static func receiveDescriptor(over socket: Int32) -> Int32? {
         let fd = vibe_receive_descriptor(socket)
         return fd >= 0 ? fd : nil

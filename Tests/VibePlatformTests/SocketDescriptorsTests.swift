@@ -7,15 +7,22 @@ import Testing
 /// with `SocketsTests.passVariable` set to "WHAT:SOCKET:FD" (SOCKET its end of a pair, FD a pipe's writing end, both
 /// handed down), this binary sends one message on SOCKET before any test of its own, closes FD, stays until the test
 /// closes its end (so its line of /proc is there while the test reads who sent), and exits 0. WHAT is a count: a
-/// message carrying that many copies of FD, `Platform.Sockets.sendDescriptor` for one; or "claim": one byte, "m", with
-/// credentials naming this process (`vibe_send_claiming`). It exits 2 when it can't read the variable, 4 when the send
-/// failed.
+/// message carrying that many copies of FD, `Platform.Sockets.sendDescriptor` for one; or a claim (`vibe_send_claiming`)
+/// of one byte, "m", with credentials naming this process ("claim"), or naming its parent, the test ("claimParent"), or
+/// a uid not its own ("claimUid"). A claim the kernel refuses (EPERM) is followed by a plain "r", with no credentials
+/// of its own making, so that the test reads the refusal rather than waits for nothing. It exits 2 when it can't read
+/// the variable, 4 when a send failed otherwise.
 private func passOverThePairIfAsked() {
     guard let asked = getenv(SocketsTests.passVariable).map({ String(cString: $0) }) else { return }
     let words = asked.split(separator: ":").map(String.init)
     guard words.count == 3, let socket = Int32(words[1]), let fd = Int32(words[2]) else { _exit(2) }
-    if words[0] == "claim" {
-        guard vibe_send_claiming(socket, "m", 1, getpid(), getuid(), getgid()) == 1 else { _exit(4) }
+    let claims: [String: (pid_t, uid_t)] = [
+        "claim": (getpid(), getuid()), "claimParent": (getppid(), getuid()), "claimUid": (getpid(), getuid() &+ 1),
+    ]
+    if let (pid, uid) = claims[words[0]] {
+        if vibe_send_claiming(socket, "m", 1, pid, uid, getgid()) != 1 {
+            guard errno == EPERM, send(socket, "r", 1, Int32(MSG_NOSIGNAL)) == 1 else { _exit(4) }
+        }
     } else if let count = Int(words[0]) {
         let sent = count == 1 ? Platform.Sockets.sendDescriptor(fd, over: socket)
             : SocketsTests.sendRights(Array(repeating: fd, count: count), over: socket)
@@ -110,13 +117,27 @@ extension SocketsTests {
         return ready == 1
     }
 
+    /// `Platform.Sockets.receiveDescriptor`, or with `room` the shim's tests-only form that gives the kernel only that
+    /// many bytes of control data to fill (`vibe_receive_descriptor_in_room`).
+    static func receiveDescriptor(over socket: Int32, room: Int?) -> Int32? {
+        guard let room else { return Platform.Sockets.receiveDescriptor(over: socket) }
+        let fd = vibe_receive_descriptor_in_room(socket, room)
+        return fd >= 0 ? fd : nil
+    }
+
+    /// Room for exactly one descriptor, as 64-bit Linux lays it out: 16 of header and 4 a descriptor
+    /// (`CMSG_LEN(sizeof(int))`). A second would need 4 more.
+    static let roomForOne = 20
+
     /// Closes the test's end of the pair, which ends the helper, and reaps it: how it ended.
     static func finish(_ helper: pid_t, closing testEnd: Int32) -> SpawnTests.Ended {
         Sys.close(testEnd)
         return SpawnTests.ended(helper)
     }
 
-    @Test func aDescriptorSentOverAPairArrivesClosedOnExec() throws {
+    /// With the receiver's whole room, and with room for that one only: the room alone refuses nothing (the control
+    /// for `aMessageCutToOneDescriptorGivesNone`).
+    @Test(arguments: [nil, roomForOne]) func aDescriptorSentOverAPairArrivesClosedOnExec(room: Int?) throws {
         let pair = try Self.seqpacketPair()
         let pipe = try SpawnTests.newPipe()
         defer { Sys.close(pipe.reading) }
@@ -130,7 +151,7 @@ extension SocketsTests {
 
         try #require(Self.readable(pair.test), "the helper sent nothing")
         errno = 0
-        let received = try #require(Platform.Sockets.receiveDescriptor(over: pair.test), "nothing received: errno \(errno)")
+        let received = try #require(Self.receiveDescriptor(over: pair.test, room: room), "nothing received: errno \(errno)")
         defer { Sys.close(received) }
         #expect(fcntl(received, F_GETFD) & FD_CLOEXEC != 0, "the descriptor came without close-on-exec")
         #expect(Sys.write(received, "through", 7) == 7)
@@ -144,8 +165,8 @@ extension SocketsTests {
     }
 
     /// A message carrying `count` descriptors, other than one, gives none, and keeps none: once the helper's copies are
-    /// closed too, nothing holds the pipe's writing end.
-    static func nothingIsTaken(fromAMessageCarrying count: Int) throws {
+    /// closed too, nothing holds the pipe's writing end. `room` as `receiveDescriptor(over:room:)` takes it.
+    static func nothingIsTaken(fromAMessageCarrying count: Int, room: Int? = nil) throws {
         let pair = try Self.seqpacketPair()
         let pipe = try SpawnTests.newPipe()
         defer { Sys.close(pipe.reading) }
@@ -159,7 +180,7 @@ extension SocketsTests {
 
         try #require(Self.readable(pair.test), "the helper sent nothing")
         errno = 0
-        let received = Platform.Sockets.receiveDescriptor(over: pair.test)
+        let received = Self.receiveDescriptor(over: pair.test, room: room)
         let code = errno
         if let received { Sys.close(received) }
         try #require(received == nil && code == EBADMSG, "received \(String(describing: received)), errno \(code)")
@@ -175,12 +196,41 @@ extension SocketsTests {
         try Self.nothingIsTaken(fromAMessageCarrying: 2)
     }
 
-    /// None at all, and more than the receiver's room (whose rest the kernel drops: `MSG_CTRUNC`).
+    /// None at all, and more than the receiver's room: with 16, the twelve that fit are refused as more than one, and
+    /// the four the kernel dropped it closed itself (no copy of the pipe's end is left here either way).
     @Test(arguments: [0, 16]) func aMessageWithNoDescriptorOrManyGivesNone(count: Int) throws {
         try Self.nothingIsTaken(fromAMessageCarrying: count)
     }
 
-    /// The end of the stream gives none too.
+    /// A message of two that the room cut to one (the kernel drops the other and says so: `MSG_CTRUNC`) is refused,
+    /// not taken for a message of one. With the receiver's whole room this can't come about on 64-bit Linux (what is
+    /// left for descriptors there is 8-byte aligned, room for none or for two), so the test gives the kernel room for
+    /// one only.
+    @Test func aMessageCutToOneDescriptorGivesNone() throws {
+        try Self.nothingIsTaken(fromAMessageCarrying: 2, room: Self.roomForOne)
+    }
+
+    /// On a `SOCK_SEQPACKET` socket a message of no bytes reads as 0, as the end of the stream does: from a peer still
+    /// there it is a message carrying nothing (EBADMSG), not a hang-up, and the pair goes on.
+    @Test func anEmptyMessageFromAPeerStillThereIsNotTheEnd() throws {
+        let pair = try Self.seqpacketPair()
+        defer { [pair.test, pair.helper].forEach { Sys.close($0) } }
+        try #require(send(pair.helper, nil, 0, Int32(MSG_NOSIGNAL)) == 0, "no empty message sent: \(errno)")
+        errno = 0
+        let empty = Platform.Sockets.receiveDescriptor(over: pair.test)
+        let code = errno
+        if let empty { Sys.close(empty) }
+        #expect(empty == nil)
+        #expect(code == EBADMSG, "errno \(code)")
+
+        let pipe = try SpawnTests.newPipe()
+        defer { [pipe.reading, pipe.writing].forEach { Sys.close($0) } }
+        try #require(Platform.Sockets.sendDescriptor(pipe.writing, over: pair.helper), "the pair is gone: \(errno)")
+        let next = try #require(Platform.Sockets.receiveDescriptor(over: pair.test), "nothing after: errno \(errno)")
+        Sys.close(next)
+    }
+
+    /// The end of the stream gives none too, and says the peer has gone (EPIPE).
     @Test func aPairWhoseOtherEndHasGoneGivesNone() throws {
         let pair = try Self.seqpacketPair()
         defer { Sys.close(pair.test) }
@@ -213,6 +263,32 @@ extension SocketsTests {
         if let sender = got.sender, case .line(let line) = Platform.Processes.System.statLine(helper) {
             #expect(sender.startTicks == line.startTicks)
         }
+
+        ended = Self.finish(helper, closing: pair.test)
+        #expect(ended?.exit == 0, "\(String(describing: ended))")
+    }
+
+    /// The host's refusals rest on the kernel checking what a sender claims: a claim naming another process (the
+    /// test, the helper's parent) or another uid is refused at the send (EPERM), so the claim goes out as credentials
+    /// the kernel reads, not as bytes it lets by. The helper then sends a plain "r", and the test reads that, as itself.
+    /// Root may name anyone, so this runs only for an account that isn't.
+    @Test(.enabled(if: geteuid() != 0), arguments: ["claimParent", "claimUid"])
+    func aSenderClaimingAnotherIsRefusedAtTheSend(claim: String) throws {
+        let pair = try Self.seqpacketPair()
+        Platform.Sockets.enableCredentials(pair.test)
+        let helper: pid_t
+        do { helper = try Self.passer(claim, socket: pair.helper) } catch {
+            Sys.close(pair.test)
+            throw error
+        }
+        var ended: SpawnTests.Ended?
+        defer { if ended == nil { _ = Self.finish(helper, closing: pair.test) } }
+
+        try #require(Self.readable(pair.test), "the helper sent nothing")
+        let got = Self.received(pair.test)
+        #expect(got.count == 1 && got.text == "r", "the claim went through: \(got)")
+        #expect(got.sender?.pid == helper)
+        #expect(got.sender?.uid == getuid())
 
         ended = Self.finish(helper, closing: pair.test)
         #expect(ended?.exit == 0, "\(String(describing: ended))")
