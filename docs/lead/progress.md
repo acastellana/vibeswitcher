@@ -2841,3 +2841,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 21:12 Planned design-a-team-of: Design: a team of workers on one task, with a shared board
 - 2026-11-13 21:12 Started a worker on design-a-team-of
 - 2026-11-13 21:12 Automatically (auto_advance): Started a worker on design-a-team-of (Design: a team of workers on one task, with a shared board).
+- 2026-11-13 21:50 Pipeline held: design-a-team-of ready to merge with none landing; cause: a merge in progress
+- 2026-11-13 21:51 Merged design-a-team-of: Design: a team of workers on one task, with a shared board (no audit: review none) (build 40766073a6b2)
+- 2026-11-13 21:51 Flaky in design-a-team-of's merge: sleepRecoveryRetriesAfterLoadDropsWithoutANewInterruption(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
