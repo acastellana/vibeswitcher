@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
@@ -115,6 +115,76 @@ try {
       assert.ok(answer.error, `The user's host must refuse ${Object.keys(request)[0]} by its path`);
     }
     console.log('PASS: the user\'s host refuses the test stand-in for the app, and nothing by its path is the app.');
+
+    // Linux: the app is the host's server child, through its connector (S2). A scratch host whose --server is a script
+    // that never asks for a connection: neither this audit's client by the path nor a client the script itself starts
+    // (by the path too: its connector isn't the client's) may do what only the app may.
+    const serverFolder = path.join(folder, 'srv');
+    await mkdir(serverFolder);
+    const serverSocket = path.join(serverFolder, 'h.sock');
+    const appOnly = [
+      { proveApp: { answer: Buffer.alloc(32, 1).toString('base64') } },
+      { replaceAppKey: { key: Buffer.alloc(32, 7).toString('base64') } },
+      { handover: { executable: binary } },
+      { vault: { _0: { issue: { role: 'lead', root: path.join(serverFolder, 'repo') } } } },
+      { spawn: { _0: { cwd: serverFolder, command: 'true', env: {}, cols: 80, rows: 24, keepShell: false, label: 'Audit', agent: null } } },
+    ];
+    const frames = appOnly.map((request, index) => {
+      const payload = Buffer.from(JSON.stringify({ seq: index + 1, request }));
+      const head = Buffer.alloc(5);
+      head.writeUInt32BE(payload.length + 1);
+      return Buffer.concat([head, payload]);
+    });
+    await writeFile(path.join(serverFolder, 'server-requests'), Buffer.concat(frames));
+    // Its arguments: --host-connector N --host-socket PATH, then its root's. Its client connects by the path (dash can't
+    // close the connector, above 9, for it: a byte the client sent on it would be refused as another sender's anyway,
+    // ServerChildTests.aChildOfTheServerIsNotTheApp). It ends, its group with it, once the host has gone.
+    const script = path.join(serverFolder, 'server.sh');
+    await writeFile(script, [
+      '#!/bin/sh',
+      'dir=$(dirname "$4")',
+      '(cat "$dir/server-requests"; exec sleep 3600) | nc -U "$4" >"$dir/server-replies" &',
+      'while kill -0 $PPID 2>/dev/null; do sleep 1; done',
+      'kill 0',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    const served = spawn(binary, ['--socket', serverSocket, '--lock', path.join(serverFolder, 'h.lock'), '--exit-with', String(process.pid),
+      '--idle-exit', '600', '--housekeeping', '3600', '--server', script], {
+      env: { PATH: '/usr/bin:/bin', HOME: home, VIBESWITCHER_HOME: path.join(home, '.vibeswitcher'), TMPDIR: folder, SHELL: '/bin/sh' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    others.push(served);
+    let serverSaid = '';
+    served.stderr.on('data', bytes => { serverSaid += bytes; });
+    await eventually(async () => serverSaid.includes('server child pid'));
+    assert.match(serverSaid, /server child pid \d+ started/, 'The scratch host must start its server child');
+    const audit = await connect(serverSocket);
+    for (const request of appOnly) {
+      const answer = await audit(request);
+      assert.ok(answer.error || answer.vault?._0?.refused, `The audit's own client must be refused ${Object.keys(request)[0]}: ${JSON.stringify(answer)}`);
+    }
+    // The script's client's answers, as its nc wrote them.
+    const answers = await eventually(async () => {
+      let bytes;
+      try { bytes = await readFile(path.join(serverFolder, 'server-replies')); } catch { return null; }
+      const found = new Map();
+      while (bytes.length >= 4 && bytes.length >= 4 + bytes.readUInt32BE()) {
+        const size = bytes.readUInt32BE();
+        if (bytes[4] === 0) {
+          const message = JSON.parse(bytes.subarray(5, 4 + size));
+          if (message.replyTo != null) found.set(message.replyTo, message.event);
+        }
+        bytes = bytes.subarray(4 + size);
+      }
+      return found.size >= appOnly.length ? found : null;
+    });
+    appOnly.forEach((request, index) => {
+      const answer = answers.get(index + 1);
+      assert.ok(answer && (answer.error || answer.vault?._0?.refused),
+        `A client the server child starts must be refused ${Object.keys(request)[0]}: ${JSON.stringify(answer)}`);
+    });
+    assert.doesNotMatch(serverSaid, /app connection made/);
+    console.log('PASS: with a server child, neither a client by the path nor a client the server starts is the app.');
   }
 } finally {
   clients.forEach(client => client.destroy());

@@ -192,6 +192,24 @@ if let handoverPath, let state = restoring {
 }
 // A scratch host's test stand-in for the app on Linux: refused by the user's host (see `TestAppPrincipal`).
 TestAppPrincipal.adopt(arguments: arguments, restored: restoring?.testAppConnector, ownsLaunchers: ownsLaunchers, server: server)
+// The app on Linux: the server child, started from a sealed copy of `--server PATH`, through its connector (see
+// `ServerChild`). Each `--server-arg X` of a scratch host gives the child X, after its own arguments; the user's host
+// refuses them. The Mac has none. `--server` stays in what a build this one hands over to is started with: without an
+// install root (Task 9d) the new image's server is the same file.
+if let image = value(after: "--server") {
+    let serverArguments = arguments.indices.dropLast().filter { arguments[$0] == "--server-arg" }.map { arguments[$0 + 1] }
+    if Platform.CodeIdentity.isAvailable {
+        log("ignored --server: this system has no server child (the app proves itself by its code)")
+    } else {
+        if ownsLaunchers, !serverArguments.isEmpty { log("refused --server-arg: the user's host passes its server no test arguments") }
+        let launch = ServerChild.Launch(image: image, socketPath: config.socketPath,
+                                        arguments: ["--root", VibePaths.root.path,
+                                                    "--node-root", URL(fileURLWithPath: executable).deletingLastPathComponent().path]
+                                            + (ownsLaunchers ? [] : serverArguments),
+                                        environment: config.baseEnvironment)
+        _ = ServerChild.start(launch, server: server)
+    }
+}
 // Holding the user's lock now: no other host runs, so other builds' launchers can go (not for a scratch host on
 // its own lock, which runs beside the real one).
 for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path)) ?? [] where ownsLaunchers && name != "launcher-\(build)" {

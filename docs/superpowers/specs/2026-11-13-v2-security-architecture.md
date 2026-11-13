@@ -356,18 +356,20 @@ connector, its socket check and `status` in the engine plan's E1 and E8.
 S11 (chiefly: a worker that tries can restart the host into its own files, act as any session, and work on the user's
 own shell and Claude Code) are acceptable while the only project on the node is VibeSwitcher's own and interop is off.
 
-**Held by:** `LeadVaultHostTests.aConnectionWhoseProcessExecsTheAppIsntTheApp` (the Mac's rule, unchanged); planned:
-stage 2 plan task 4b, task 8.
+**Held by:** `LeadVaultHostTests.aConnectionWhoseProcessExecsTheAppIsntTheApp` (the Mac's rule, unchanged);
+`ServerChildTests.theServerChildsConnectorConnectionsAreTheApp`, `ServerChildTests.aConnectionFromAnotherProcessIsNotTheApp`,
+`ServerChildTests.aChildOfTheServerIsNotTheApp`, `ServerChildTests.anotherProcessWritingOnTheServersConnectionMakesItNobodys`,
+`ServerChildTests.theServerIsStartedAgainAfterItDies`, `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`,
+`ServerChildTests.aServerChildThatIsDumpableIsNotTheApp`, `ServerChildTests.appConnectionsDontCountTowardMaxClients`,
+`ServerChildTests.aHostWithAServerChildDoesNotExitIdle`, `ServerChildTests.theServerHelperIsNotDumpable`,
+`ServerChildTests.theServerChildIsToldItsSocketAndFolder`, `ServerChildTests.theMacStartsNoServerChild`,
+`ServerLintTests.theServerNeverExecs`, and the audit's Linux case in host-access.test.mjs (stage 2 Task 8a); planned:
+stage 2 plan task 4b, task 8b.
 
 **Tests to write:** Task 4b: `HostIdentitySeamTests.theMacsAppIsStillTheCdhashCheck`,
-`aConnectorConnectionIsTheAppWithNoChallenge`, `noConnectionByPathIsTheAppOnLinux`. Task 8:
-`ServerChildTests.theServerChildsConnectorConnectionsAreTheApp`, `aConnectionFromAnotherProcessIsNotTheApp`,
-`aChildOfTheServerIsNotTheApp`, `anotherProcessWritingOnTheServersConnectionMakesItNobodys`,
-`theServerIsStartedAgainAfterItDies`, `aServerFileRewrittenInPlaceIsNotWhatRestarts`, `theServerChildSurvivesAHandover`,
-`aHostWithAServerChildDoesNotExitIdle`, `theServerHelperIsNotDumpable`, `theMacStartsNoServerChild`,
-`aServerChildThatIsDumpableIsNotTheApp`, `appConnectionsDontCountTowardMaxClients`, `aSquattedHostPathIsBoundAgain`,
-`theHostWritesStartsAndServerRestartsToStderr`; `ServerLintTests.theServerNeverExecs`. The audit's Linux case in
-`host-access.test.mjs`.
+`aConnectorConnectionIsTheAppWithNoChallenge`, `noConnectionByPathIsTheAppOnLinux`. Task 8b:
+`ServerChildTests.theServerChildSurvivesAHandover`, `aSquattedHostPathIsBoundAgain`,
+`theHostWritesStartsAndServerRestartsToStderr` (Task 8a's are under Held by).
 
 ## S3. The user's voice before signed approvals
 

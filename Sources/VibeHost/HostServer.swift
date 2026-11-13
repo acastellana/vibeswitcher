@@ -140,6 +140,8 @@ public final class HostServer {
     /// The app's connectors, by the number of the end `openAppConnector` gave out (see V2/AppConnector.swift): none
     /// on the Mac.
     var appConnectors: [Int32: AppConnector] = [:]
+    /// The server child, the app on Linux (see V2/ServerChild.swift): none on the Mac, nor without `--server`.
+    var serverChild: ServerChild?
 
     public init(config: Config) {
         self.config = config
@@ -937,7 +939,7 @@ public final class HostServer {
         for session in sessions.values {
             if let exit = session.info.exit, now.timeIntervalSince(exit.at) > config.keepEnded { forget(session.id) }
         }
-        if !clients.isEmpty || sessions.values.contains(where: { $0.info.isLive }) {
+        if !clients.isEmpty || sessions.values.contains(where: { $0.info.isLive }) || serverChild?.isRunning == true {
             lastBusy = now
         } else if let idle = config.idleExit, now.timeIntervalSince(lastBusy) >= idle {
             log.note("host: idle \(Int(idle)) s with no session and no app, exiting")
