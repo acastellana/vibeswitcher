@@ -356,15 +356,18 @@ extension LeadToolset {
     /// time, each only while max_workers (live members count) and the Mac's limits leave room; the rest stay queued,
     /// named, and start on a later start_worker or auto_advance pass. Members run on Claude, whatever the task's agent.
     /// Nil when `task` isn't such a task: start_worker then starts (or refuses) its integrator as for any task.
+    /// `neverStarted` (auto_advance): only members no worker was started for; one whose worker ended is the lead's.
     /// Called holding start_worker's lock.
-    func startMembers(_ task: LeadTask, sessions: [LeadSessionInfo], overrideUsage: Bool) throws -> MCPToolResult? {
+    func startMembers(_ task: LeadTask, sessions: [LeadSessionInfo], overrideUsage: Bool, neverStarted: Bool = false) throws -> MCPToolResult? {
         guard let team = task.team, task.isTeam, LeadTeam.isSplit(team), task.status == .running,
               let integrator = task.worker, sessions.contains(where: { $0.id == integrator && $0.live }) else { return nil }
         let slug = task.slug
         if let problem = LeadTeam.problem(team, slug: slug, root: root) {
             throw Problem(text: "No member of \(slug) started: its team as the board holds it isn't valid (\(problem)). Tell the user.")
         }
-        let pending = team.dropFirst().filter { member in member.worker.map { id in !sessions.contains { $0.id == id && $0.live } } ?? true }
+        let pending = team.dropFirst().filter { member in
+            member.worker.map { id in !neverStarted && !sessions.contains { $0.id == id && $0.live } } ?? true
+        }
         guard !pending.isEmpty else {
             throw Problem(text: "\(slug)'s integrator and every member of its team already run. Send its integrator what to do with message, or stop_worker first.")
         }
@@ -382,7 +385,7 @@ extension LeadToolset {
             guard var current = board.task(slug), current.status == .running,
                   let member = current.team?.first(where: { $0.name == waiting.name }), let from = member.from else { break }
             // Started meanwhile: never twice.
-            if let worker = member.worker, live.contains(worker) { continue }
+            if let worker = member.worker, live.contains(worker) || neverStarted { continue }
             let running = board.tasks.filter { $0.status == .running }.count + LeadTeam.memberWorkers(board, live: live)
             guard running < maxWorkers(workflow) else {
                 held = "\(running) workers already run (\(maxWorkersText(workflow)))"
@@ -457,7 +460,7 @@ extension LeadToolset {
         try exclusively("start-worker") {
             guard let task = try store.read().task(slug), task.autoAdvance != false,
                   (task.team ?? []).dropFirst().contains(where: { $0.worker == nil }) else { throw LeadAdvance.NotDue() }
-            guard let result = try startMembers(task, sessions: try hostSessions("no member of \(slug) was started"), overrideUsage: false) else {
+            guard let result = try startMembers(task, sessions: try hostSessions("no member of \(slug) was started"), overrideUsage: false, neverStarted: true) else {
                 throw LeadAdvance.NotDue()
             }
             return result.text
