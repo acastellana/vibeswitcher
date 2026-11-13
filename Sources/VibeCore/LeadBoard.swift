@@ -999,6 +999,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var receipt: LeadReceipt?
     /// Where its time went while it waited on an audit or a merge's test run (see `LeadWaits`); nil before any.
     public var waits: LeadWaits?
+    /// A team task's members, 2 to 4, member 1 the integrator on the task's own branch (see `LeadTeam`); nil: a plain
+    /// task, one worker, as before. Not `members`: that's the sessions the witness watches.
+    public var team: [LeadTeamMember]?
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }
