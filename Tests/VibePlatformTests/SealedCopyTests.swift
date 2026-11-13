@@ -3,39 +3,12 @@ import Testing
 @testable import VibePlatform
 
 #if os(Linux)
-/// What the helpers below need of the kernel that the platform doesn't give the tests: `prctl(PR_SET_DUMPABLE)`, which
-/// makes a helper as private as the host is from its first statement, and `pidfd_getfd`, which takes a descriptor
-/// of another process as a worker would. Both are C functions Swift can't call by name (`prctl` is variadic, and
-/// `pidfd_getfd` is in a header Swift's Glibc doesn't import), so they are looked up by name in the C library.
-/// `Platform.ProcessSelf.harden()` (Task 3a) replaces `undumpable()` once both are in one branch.
+/// What the helpers below need of the kernel: `pidfd_getfd`, which takes a descriptor of another process as a worker
+/// would, through the shim.
 enum KernelCalls {
-    private static let library = dlopen(nil, RTLD_NOW)
-
-    private static func symbol<T>(_ name: String, as type: T.Type) -> T? {
-        dlsym(library, name).map { unsafeBitCast($0, to: type) }
-    }
-
-    /// 0 when this process is now non-dumpable, else the errno.
-    static func undumpable() -> Int32 {
-        typealias Prctl = @convention(c) (Int32, UInt, UInt, UInt, UInt) -> Int32
-        // PR_SET_DUMPABLE.
-        guard let prctl = symbol("prctl", as: Prctl.self) else { return ENOSYS }
-        return prctl(4, 0, 0, 0, 0) == 0 ? 0 : errno
-    }
-
     /// A copy, in this process, of descriptor `target` of the process `pidfd` names: the copy, or minus the errno.
     static func takeDescriptor(_ pidfd: Int32, _ target: Int32) -> Int32 {
-        typealias PidfdGetfd = @convention(c) (Int32, Int32, UInt32) -> Int32
-        typealias Syscall = @convention(c) (Int, Int, Int, Int) -> Int
-        let taken: Int32
-        if let pidfdGetfd = symbol("pidfd_getfd", as: PidfdGetfd.self) {
-            taken = pidfdGetfd(pidfd, target, 0)
-        } else if let syscall = symbol("syscall", as: Syscall.self) {
-            // SYS_pidfd_getfd, 438 on every architecture.
-            taken = Int32(truncatingIfNeeded: syscall(438, Int(pidfd), Int(target), 0))
-        } else {
-            return -ENOSYS
-        }
+        let taken = vibe_pidfd_getfd(pidfd, target, 0)
         return taken >= 0 ? taken : -errno
     }
 }
@@ -70,9 +43,8 @@ private func actAsSealedCopyHelperIfAsked() {
         }
     }
     func harden() {
-        let code = KernelCalls.undumpable()
-        guard code == 0 else {
-            say("couldn't harden: \(code)")
+        guard Platform.ProcessSelf.harden() else {
+            say("couldn't harden: \(errno)")
             _exit(2)
         }
     }

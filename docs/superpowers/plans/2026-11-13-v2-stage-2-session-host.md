@@ -556,10 +556,11 @@ answers are recorded.
   `fcntl` on the Mac, as `UnixSocket` does today) and `accept(_ listener: Int32) -> Int32` (`accept4(…, SOCK_CLOEXEC)`
   on Linux; `accept` then `fcntl` on the Mac).
 - `Platform.Sockets.pair(type: Int32) -> (Int32, Int32)?`: `SOCK_STREAM` or `SOCK_SEQPACKET`, close-on-exec from its
-  making on Linux (`SOCK_CLOEXEC`); on the Mac `socketpair` then `fcntl`, as today.
+  making on Linux (`SOCK_CLOEXEC`); on the Mac `socketpair` then `fcntl`, as today. `SOCK_SEQPACKET` is Linux's alone: the Mac's Unix domain
+  has none, and `pair` gives nil there (`theMacHasNoSeqpacketSocket`), so the seqpacket tests below run on Linux only.
 - `Sys.pipeClosedOnExec(_ fds: inout [Int32]) -> Int32`: `pipe2(O_CLOEXEC)` on Linux; `pipe` and `fcntl` on the Mac.
 
-- [ ] **Step 1: Failing tests**, on both systems unless marked.
+- [x] **Step 1: Failing tests**, on both systems unless marked.
   - `aNewTerminalIsNamedAsTheTableNamesIt`: open one; start a helper mode of the test binary through
     `Platform.Spawn` with stdin `.path(devicePath, flags: Platform.Terminals.launcherOpenFlags)`, stdout and stderr
     `.sameAsStdin`, group `.ownSession`; the helper calls `Platform.Terminals.makeControlling(0)` and sleeps, as the
@@ -574,9 +575,9 @@ answers are recorded.
   - `aPairIsClosedOnExecFromItsMaking` (both types); `aSeqpacketPairKeepsMessageBoundaries` (two 1-byte sends are two
     1-byte reads); `aPipeIsClosedOnExec`; `aSocketIsClosedOnExecFromItsMaking`;
     `anAcceptedConnectionIsClosedOnExecFromItsMaking`.
-- [ ] **Step 2: Implement.** The Mac's `open` is the existing `openpty` body with `openptyLock` and the two `fcntl`
+- [x] **Step 2: Implement.** The Mac's `open` is the existing `openpty` body with `openptyLock` and the two `fcntl`
   lines, moved; the Mac's `makeSocket`, `accept` and `pair` are today's calls with their `fcntl`.
-- [ ] **Step 3:** push; both green (the host job too: nothing in `VibeHost` uses these yet); commit ("v2: terminals,
+- [x] **Step 3:** push; both green (the host job too: nothing in `VibeHost` uses these yet); commit ("v2: terminals,
   sockets, pairs and pipes through the platform, close-on-exec from their making").
 
 **Done when:** `bash scripts/test.sh --filter VibePlatformTests` is green on Linux and the Mac's platform job is green.
@@ -603,7 +604,7 @@ answers are recorded.
 - `Platform.Processes.isDumpable(_ pid: pid_t) -> Bool?`: Linux, false when `/proc/<pid>/fd` is root's while the
   process's uid isn't root's, true when it is the process's own uid's, nil when it can't be read (gone); nil on the Mac.
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `aHardenedProcesssMemoryCantBeOpened` (Linux): the helper hardens and sleeps; the test's
     `open("/proc/<pid>/mem")` fails with `EACCES`. Without `harden()` it opens, which is the failing form.
   - `aHardenedProcesssDescriptorsCantBeTaken` (Linux): `pidfd_getfd` of the helper's descriptor 0 fails `EPERM`.
@@ -614,8 +615,8 @@ answers are recorded.
   - `aPidsTokenIsItsPeerToken` (Linux): `Platform.Processes.token(pid)` of a helper equals the `peerToken` of a
     connection the helper opens; after the helper ends and a new one runs, the old token isn't `sameImage` as any
     new one. `thereIsNoTokenForAPidOnTheMac` (Mac).
-- [ ] **Step 2: Implement.** Helper modes only; never in the test process (Global Constraints).
-- [ ] **Step 3:** push; both green; commit ("v2: the process's own hardening, and other processes' tokens, through
+- [x] **Step 2: Implement.** Helper modes only; never in the test process (Global Constraints).
+- [x] **Step 3:** push; both green; commit ("v2: the process's own hardening, and other processes' tokens, through
   the platform").
 
 **Done when:** the tests pass on Linux, and the Mac's platform job asserts the Mac's forms do nothing.
@@ -653,7 +654,7 @@ The mechanism of S2-D5 and S2-D7. **Awaits:** decision 6 rests on this task's me
   that descriptor (returning its number, for a new image that adopts rather than closes it): the first act of every
   image a sealed copy starts, so no dumpable program after it (a session's) ever holds a copy.
 
-- [ ] **Step 1: Failing tests** (Linux unless marked; each copy that must stay private is made in a hardened helper).
+- [x] **Step 1: Failing tests** (Linux unless marked; each copy that must stay private is made in a hardened helper).
   - `aChildStartedFromASealedCopyIsNotDumpableFromItsExec`: a hardened helper makes a sealed copy of `/bin/sleep`
     and starts it as a child as above; from the moment its pid is printed until 2 s later, the test polls
     `pidfd_getfd(child, 0)` and `open("/proc/<child>/mem")`: every try is refused. The same child started from the
@@ -680,8 +681,8 @@ The mechanism of S2-D5 and S2-D7. **Awaits:** decision 6 rests on this task's me
     on GitHub's Ubuntu runners), `ServerChildTests` and the other suites that start hosts as processes run
     `.serialized` on Linux, said in their files.
   - `thereAreNoSealedCopiesOnTheMac` (Mac): `.failure(ENOTSUP)`.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; both green; commit ("v2: sealed in-memory copies of the images the host starts, measured").
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; both green; commit ("v2: sealed in-memory copies of the images the host starts, measured").
 
 **Done when:** the tests pass on Linux, the measurement is recorded, and the Mac's platform job is green.
 
@@ -705,15 +706,15 @@ The platform half of the connector (S2-D1) and of Task 7's namespace tests (S5).
   `SCM_CREDENTIALS` naming `pid`. Task 7 runs it from a helper started under `/usr/bin/unshare --user
   --map-root-user --pid --fork` (util-linux), which a runner may refuse: those tests skip there, saying why.
 
-- [ ] **Step 1: Failing tests** (Linux).
+- [x] **Step 1: Failing tests** (Linux).
   - `aDescriptorSentOverAPairArrivesClosedOnExec`: a helper sends the write end of a pipe over a `SOCK_SEQPACKET`
     pair; the test receives it, it is close-on-exec, and bytes written to it come out of the test's read end.
   - `aMessageWithTwoDescriptorsGivesNone`: both are closed (the pipe's read end sees end-of-file once the helper's
     copies are closed too).
   - `aSenderClaimingItsOwnPidIsBelieved`: `vibe_send_claiming` with the helper's own pid arrives with that sender
     (the control for Task 7's refusals).
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; both green; commit ("v2: descriptors passed over a pair, through the platform").
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; both green; commit ("v2: descriptors passed over a pair, through the platform").
 
 **Done when:** the tests pass on Linux and the Mac's platform job is green.
 
