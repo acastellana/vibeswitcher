@@ -2608,14 +2608,46 @@ extension Worktrees {
     }
 
     /// The members of the task `slug` the repository holds a worktree or a branch of (`agent/<slug>--<name>`), by
-    /// name, sorted. `Slug.make` never makes a "--" and a member's name holds none, so these are the task's alone.
-    public static func members(root: String, slug: String) -> [String] {
+    /// name, sorted. `team`, the board's stored members (the integrator left out), is taken over what the disk holds
+    /// when given: only those of them with a branch, or something at their folder. Without it, the branches named so,
+    /// and the folders that are a member's worktree (`memberCheckout`: never a symlink, or a folder git doesn't list
+    /// on that branch). `Slug.make` never makes a "--" and a member's name holds none, so these are the task's alone.
+    public static func members(root: String, slug: String, team: [String]? = nil) -> [String] {
         let prefix = slug + LeadTeam.joiner
+        if let team {
+            return Set(team).filter { name in
+                LeadTeam.nameProblem(name) == nil
+                    && (Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch(prefix + name))"], in: root).ok
+                        || (try? FileManager.default.attributesOfItem(atPath: path(root: root, slug: prefix + name))) != nil)
+            }.sorted()
+        }
         let refs = Git.run(["for-each-ref", "--format=%(refname)", "refs/heads/\(branch(prefix))*"], in: root).output
             .split(separator: "\n").map { String($0.dropFirst("refs/heads/".count + branch(prefix).count)) }
         let folders = ((try? FileManager.default.contentsOfDirectory(atPath: (path(root: root, slug: "") as NSString).standardizingPath)) ?? [])
             .filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+            .filter { LeadTeam.nameProblem($0) == nil && memberCheckout(root: root, slug: slug, member: $0) != nil }
         return Set(refs + folders).filter { LeadTeam.nameProblem($0) == nil }.sorted()
+    }
+
+    /// Member `name`'s worktree of the task `slug`, when its folder is one: a real directory (not a symlink, which could
+    /// lead to another task's worktree) that git lists as a worktree of this repository on `agent/<slug>--<name>`. Nil
+    /// otherwise, whatever is there.
+    public static func memberCheckout(root: String, slug: String, member name: String) -> String? {
+        let member = memberSlug(slug, member: name)
+        let folder = path(root: root, slug: member)
+        var info = stat()
+        guard lstat(folder, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { return nil }
+        let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+        // Its parent resolved, its own name as it is: it's no symlink (above).
+        let expected = (real((folder as NSString).deletingLastPathComponent) as NSString).appendingPathComponent((folder as NSString).lastPathComponent)
+        let listed = Git.run(["worktree", "list", "--porcelain"], in: root)
+        guard listed.ok else { return nil }
+        var current: String?
+        for line in listed.output.components(separatedBy: "\n") {
+            if line.hasPrefix("worktree ") { current = String(line.dropFirst("worktree ".count)) }
+            if line == "branch refs/heads/\(branch(member))", let current, real(current) == expected { return folder }
+        }
+        return nil
     }
 
     /// What a member's worktree and branch hold that removing them would lose: its uncommitted files (untracked ones
@@ -2641,15 +2673,17 @@ extension Worktrees {
 
     /// Each member of the task `slug` (`members`) whose worktree or branch holds work (`MemberWork`); a failure when
     /// git can't say, so nothing is taken for lost.
-    public static func memberWork(root: String, slug: String, base: String, merged: String?) -> Swift.Result<[MemberWork], Failure> {
-        let team = "refs/heads/\(branch(slug))"
-        let keep = ["refs/heads/\(base)", team].filter { Git.run(["rev-parse", "--verify", "--quiet", $0], in: root).ok } + (merged.map { [$0] } ?? [])
+    public static func memberWork(root: String, slug: String, base: String, merged: String?, team: [String]? = nil) -> Swift.Result<[MemberWork], Failure> {
+        let teamBranch = "refs/heads/\(branch(slug))"
+        let keep = ["refs/heads/\(base)", teamBranch].filter { Git.run(["rev-parse", "--verify", "--quiet", $0], in: root).ok } + (merged.map { [$0] } ?? [])
         var found: [MemberWork] = []
-        for name in members(root: root, slug: slug) {
+        for name in members(root: root, slug: slug, team: team) {
             let member = memberSlug(slug, member: name), memberBranch = branch(member)
             var work = MemberWork(name: name, branch: memberBranch, uncommitted: [], untaken: [])
             let folder = path(root: root, slug: member)
-            if FileManager.default.fileExists(atPath: folder) {
+            // Only in its own worktree: git status in anything else at that name (a leftover folder, a symlink to
+            // another task's worktree) would read that one's files.
+            if memberCheckout(root: root, slug: slug, member: name) != nil {
                 let status = Git.run(["status", "--porcelain=v2", "-z", "--untracked-files=all"], in: folder)
                 guard status.ok else { return .failure(Failure(description: "Can't read \(folder)'s uncommitted files: \(status.error)")) }
                 work.uncommitted = uncommitted(porcelain: status.output)
@@ -2669,11 +2703,15 @@ extension Worktrees {
     /// checked `memberWork` first. What still runs in a worktree is ended first, as `remove` does. Each is tried; the
     /// ones that couldn't go are named in the failure. The names removed.
     @discardableResult
-    public static func removeMembers(root: String, slug: String) throws -> [String] {
+    public static func removeMembers(root: String, slug: String, team: [String]? = nil) throws -> [String] {
         var removed: [String] = [], failed: [String] = []
-        for name in members(root: root, slug: slug) {
+        for name in members(root: root, slug: slug, team: team) {
             let member = memberSlug(slug, member: name), folder = path(root: root, slug: member)
-            if FileManager.default.fileExists(atPath: folder) {
+            if memberCheckout(root: root, slug: slug, member: name) == nil, (try? FileManager.default.attributesOfItem(atPath: folder)) != nil {
+                // Something else at its folder (a symlink, a folder git doesn't list on its branch): left as it is, its
+                // branch still removed below.
+                failed.append("\(folder) (it isn't \(name)'s worktree on \(branch(member)): left as it is)")
+            } else if FileManager.default.fileExists(atPath: folder) {
                 SessionStrays.endInside(folder: folder)
                 let gone = Git.run(["worktree", "remove", "--force", folder], in: root)
                 guard gone.ok else { failed.append("\(folder) (\(gone.error))"); continue }

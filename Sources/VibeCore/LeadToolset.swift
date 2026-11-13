@@ -674,7 +674,7 @@ public final class LeadToolset: MCPToolset {
                             properties: ["text": P(type: "string", description: "One line: what's done or under way")], required: ["text"]),
                 MCPToolInfo(name: "answer_findings", description: "Answer your task's open audit findings by id: fixed (commit the fix first) or disagree, with a reason. The lead sees the answers, and the re-audit judges them: it checks each fix, and closes a finding whose disagreement it accepts.",
                             properties: ["answers": P(type: "array", description: Self.answersShape, items: "object")], required: ["answers"]),
-            ]
+            ] + teamTools
         case .verifier?:
             return [MCPToolInfo(name: "submit_audit", description: "Your verdict on the worker's branch, with evidence and your findings. Only this moves a task to done; an open Important finding holds its merge back.",
                                 properties: ["completion": P(type: "string", description: "Does the branch do what the contract asks?", options: ["complete", "incomplete", "blocked"]),
@@ -702,7 +702,7 @@ public final class LeadToolset: MCPToolset {
                                          "review": Self.reviewProperty, "audit_reason": Self.auditReasonProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
                                          "advisor": Self.advisorProperty, "effort": Self.effortProperty,
-                                         "origin": Self.originProperty]),
+                                         "origin": Self.originProperty, "team": Self.teamProperty]),
                 MCPToolInfo(name: "dismiss_finding", description: "Close one of a task's open audit findings with a reason (it isn't a problem, it's out of scope, the user accepted it): it no longer holds the merge back, and no verifier raises it again. An Important finding's reason must cite something that can be checked, or it's refused: a file and line (path/File.swift:123), a decision's timestamp as decisions.md has it (2026-11-07 20:08:15), or the question id of the user's answer (its full id, or question 1A2B3C4D). If the only evidence is your memory, record_decision first and cite it, or ask_user. A Nit or Pre-existing finding takes any reason.",
                             properties: ["task": task, "id": P(type: "string", description: "The finding's id (F2), or <task>:<id>"),
                                          "reason": P(type: "string", description: "Why, in one line (it's kept with the finding); for an Important finding, with its citation")],
@@ -718,7 +718,7 @@ public final class LeadToolset: MCPToolset {
                                          "into": P(type: "string", description: "With status folded: the task (its slug) that carries this one's work"),
                                          "review": Self.reviewProperty, "audit_reason": Self.auditReasonProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
-                                         "advisor": Self.advisorProperty, "effort": Self.effortProperty,
+                                         "advisor": Self.advisorProperty, "effort": Self.effortProperty, "team": Self.teamProperty,
                                          "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status"),
                                          "exception": P(type: "object", description: "A deviation from the contract you accept, recorded as your sealed note, an object of scope (files or a glob, as in .gitignore, from the repository's root; a string or a list), reason and evidence, each required. An audit's verifier sees the exceptions recorded before that audit started, in your notes; one recorded later isn't presented as covering an audit under way, and the result says so. It decides nothing about review: no floor, sensitive path or audit goes by it"),
                                          "accept_verdict": P(type: "boolean", description: "With exception: settle the task's verdict on its head, when it's suspect with no Important finding and its only concern is an edit outside the boundaries: the task goes on to merge with no new audit, and the record shows the verdict and who accepted what. The exception's scope must cover every file the verdict names, and it covers only those; a sensitive path isn't accepted this way (audit again, with the exception recorded). Refused for any other verdict, which is handled as ever"),
@@ -910,6 +910,7 @@ public final class LeadToolset: MCPToolset {
             case "ask_lead": return try askLead(arguments)
             case "progress": return try progress(arguments)
             case "answer_findings": return try answerFindings(arguments)
+            case "split": return try split()
             case "submit_audit": return try submitAudit(arguments, by: member)
             default: return fail("No tool \(name).")
             }
@@ -945,8 +946,12 @@ public final class LeadToolset: MCPToolset {
         // A worker or verifier acts on its own task only, whatever it passes: its session's, by slug, not
         // whatever the board (which anyone can edit) says that slug is.
         if role != .lead {
-            guard let taskID, try store.read().taskIndex(taskID) != nil else { throw Problem(text: "Your task isn't on the board any more.") }
-            return taskID
+            guard let taskID else { throw Problem(text: "Your task isn't on the board any more.") }
+            let board = try store.read()
+            if board.taskIndex(taskID) != nil { return taskID }
+            // A team task's member: its grant is for <slug>--<name> (`LeadTeam.seat`).
+            guard let seat = LeadTeam.seat(taskID, in: board) else { throw Problem(text: "Your task isn't on the board any more.") }
+            return seat.task.slug
         }
         guard let wanted = arguments["task"] as? String, let task = try store.read().task(wanted) ?? store.archived().first(where: { $0.id == wanted || $0.slug == wanted }) else {
             throw Problem(text: "No such task on the board. Use status to see the tasks.")
@@ -1165,6 +1170,7 @@ public final class LeadToolset: MCPToolset {
         let auditReason = try Self.auditReasonArgument(arguments, review: givenReview) ?? nil
         let review: LeadTask.Review? = agent == .codex || auditReason != nil ? .audit : givenReview
         let taskOrigin = try Self.originArgument(arguments) ?? (origin != nil ? .audit : nil)
+        let parts = try Self.teamArgument(arguments)
         let task = try store.update { board -> LeadTask in
             var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
             task.review = review
@@ -1178,6 +1184,7 @@ public final class LeadToolset: MCPToolset {
             task.effort = effort
             task.doneCheck = doneCheck
             task.agent = agent == .claude ? nil : agent
+            if let parts, !parts.isEmpty { _ = try LeadTeam.set(parts, on: &task, root: root) }
             board.tasks.append(task)
             return task
         }
@@ -1461,7 +1468,7 @@ public final class LeadToolset: MCPToolset {
         + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
 
     static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "audit_reason", "reroll",
-                                          "after", "auto_advance", "budget_min", "model", "agent", "advisor", "effort", "done_check", "exception", "accept_verdict", "hold_audit"]
+                                          "after", "auto_advance", "budget_min", "model", "agent", "advisor", "effort", "done_check", "exception", "accept_verdict", "hold_audit", "team"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -1511,6 +1518,7 @@ public final class LeadToolset: MCPToolset {
         let effort = try effortArgument(arguments)
         let doneCheck = try doneCheckArgument(arguments)
         let agent = try agentArgument(arguments)
+        let parts = try Self.teamArgument(arguments)
         let given = try Self.exceptionArgument(arguments["exception"])
         let acceptVerdict = try Self.flagArgument(arguments, "accept_verdict") ?? false
         let holdAudit = try Self.flagArgument(arguments, "hold_audit")
@@ -1630,6 +1638,7 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].after = try Self.afterList(strings(arguments["after"]), on: store.withArchive(board), for: slug)
                 changed.append(board.tasks[index].after.map { "after \($0.joined(separator: ", "))" } ?? "after cleared")
             }
+            if let parts { changed.append(try LeadTeam.set(parts, on: &board.tasks[index], root: root)) }
             if let auto {
                 board.tasks[index].autoAdvance = auto ? nil : false
                 changed.append(auto ? "auto_advance on for it" : "auto_advance off for it (nothing moves on it by itself)")
@@ -1957,8 +1966,12 @@ public final class LeadToolset: MCPToolset {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
         let refused = "\(slug) wasn't re-rolled"
         let folder = (Worktrees.path(root: root, slug: slug) as NSString).standardizingPath
-        let ours = Set([task.worker, task.verifier].compactMap { $0 } + (task.panel?.sessions ?? []))
-        let sessions = try hostSessions(refused + "; nothing was changed").filter { $0.live && (ours.contains($0.id) || Self.isTeamSession($0, in: folder)) }
+        // A team task's members too: their workers, and what runs in their worktrees.
+        let folders = [folder] + (task.team ?? []).dropFirst().map { (Worktrees.path(root: root, slug: Worktrees.memberSlug(slug, member: $0.name)) as NSString).standardizingPath }
+        let ours = Set([task.worker, task.verifier].compactMap { $0 } + (task.panel?.sessions ?? []) + (task.team ?? []).compactMap(\.worker))
+        let sessions = try hostSessions(refused + "; nothing was changed").filter { session in
+            session.live && (ours.contains(session.id) || folders.contains { Self.isTeamSession(session, in: $0) })
+        }
         let endings = try endItself(try end(sessions, refused: refused), refused: refused)
         let failed = endings.filter { $0.failure != nil }
         guard failed.isEmpty else {
@@ -1984,6 +1997,12 @@ public final class LeadToolset: MCPToolset {
                 if stash.ok, !stash.output.isEmpty, Git.run(["branch", name + "-uncommitted", stash.output], in: root).ok {
                     kept.append("its uncommitted changes as \(name)-uncommitted")
                 }
+            }
+        }
+        // A team task's members' branches kept beside its own, then their worktrees and branches gone.
+        if task.isTeam || !Worktrees.members(root: root, slug: slug).isEmpty {
+            do { kept += try rerollMembers(task, archive: archive.flatMap { Int($0.dropFirst("archive/\(slug)-".count)) } ?? number) } catch let problem as Problem {
+                throw Problem(text: "\(refused) all the way: \(problem.text). \(kept.isEmpty ? "" : "Kept: \(kept.joined(separator: ", ")). ")Tell the user.")
             }
         }
         let untracked = Worktrees.isWorktree(root: root, slug: slug) ? Worktrees.leftovers(root: root, slug: slug) : []
@@ -2015,6 +2034,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].panel = nil
             board.tasks[index].worktree = nil
             board.tasks[index].branch = nil
+            LeadTeam.reset(&board.tasks[index])
             board.tasks[index].evidence = nil
             board.tasks[index].outdatedEvidence = nil
             board.tasks[index].report = nil
@@ -2278,7 +2298,7 @@ public final class LeadToolset: MCPToolset {
 
     /// Runs `body` holding the lock `run/<name>.lock` in the project's folder, waiting for it while another thread or
     /// process holds it.
-    private func exclusively<T>(_ name: String, _ body: () throws -> T) throws -> T {
+    func exclusively<T>(_ name: String, _ body: () throws -> T) throws -> T {
         let path = (store.folder as NSString).appendingPathComponent("run/\(name).lock")
         try? VibePaths.ensurePrivate(URL(fileURLWithPath: (path as NSString).deletingLastPathComponent, isDirectory: true))
         // Its own open file: flock locks are per open file, so another thread's open of it waits too.
@@ -2304,6 +2324,11 @@ public final class LeadToolset: MCPToolset {
         }
         // One worker per worktree: two sessions editing the same files would undo each other.
         let sessions = try hostSessions("whether \(slug)'s worker still runs isn't known; no worker was started")
+        // A team task: its stored team checked first; once split, with its integrator running, its members start.
+        if let team = task.team, task.isTeam, let problem = LeadTeam.problem(team, slug: slug, root: root) {
+            throw Problem(text: "Not started: \(slug)'s team as the board holds it isn't valid (\(problem)). Set it again with update_task(\(slug), team: …).")
+        }
+        if replacing == nil, let members = try startMembers(task, sessions: sessions, overrideUsage: overrideUsage) { return members }
         if let worker = task.worker, worker != replacing, sessions.contains(where: { $0.id == worker && $0.live }) {
             throw Problem(text: "\(slug)'s worker is still running. Send it what to do with message, or stop_worker first.")
         }
@@ -2315,6 +2340,7 @@ public final class LeadToolset: MCPToolset {
         try checkSettings(workflow, not: "Not started")
         try checkBattery(not: "Not started")
         let running = board.tasks.filter { $0.status == .running && $0.id != task.id }.count
+            + LeadTeam.memberWorkers(board, live: Set(sessions.filter(\.live).map(\.id)))
         let limit = maxWorkers(workflow)
         guard running < limit else {
             throw Problem(text: "\(running) workers already run (\(maxWorkersText(workflow))). Wait for one to finish; you'll get a message.")
@@ -2442,7 +2468,7 @@ public final class LeadToolset: MCPToolset {
         // The base's red as its brief says it (none for its fix's own worker): what this worker was told.
         let red = store.load().mainRed.flatMap { $0.fixes.contains(slug) ? nil : $0 }
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(briefed.title)", trust: true,
-                                 prompt: LeadPrompts.worker(task: briefed, root: root, workflow: workflow, mainRed: red),
+                                 prompt: LeadPrompts.worker(task: briefed, root: root, workflow: workflow, mainRed: red, team: LeadTeam.integratorBrief(briefed)),
                                  start: (note.map { $0 + " " } ?? "") + "Start on your task (it's in your instructions)." + finish
                                     + " Call progress at each milestone. When done, call report.",
                                  model: runModel, advisor: run.advisor, effort: run.effort, branch: base, agent: agent)
@@ -2462,6 +2488,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].blocker = nil
             board.tasks[index].status = .running
             board.tasks[index].worker = session
+            if board.tasks[index].isTeam { board.tasks[index].team?[0].worker = session }
             board.tasks[index].launched([session], on: codex ? Self.codexMarker(model) : model, advisor: run.advisor, effort: run.effort)
             if codex { board.tasks[index].codexWorked = true }
             board.tasks[index].routed = route?.why
@@ -2733,7 +2760,7 @@ public final class LeadToolset: MCPToolset {
     /// server at once (2.1.311 asks no trust question in a worktree), and one that asks before the bind waits for its
     /// role. Then, with `toolsWait`, waits for its tools to connect: a session that never gets them is ended and the call
     /// fails, rather than leave a worker that can't report. Its launch files go in the vault's folder.
-    private func launch(_ role: LeadLaunch.Role, task slug: String, name: String, in folder: String, label: String, trust: Bool,
+    func launch(_ role: LeadLaunch.Role, task slug: String, name: String, in folder: String, label: String, trust: Bool,
                         prompt: String, start: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
                         branch: String? = nil, auditing: String? = nil,
                         finder: LeadVault.Finder? = nil, agent: LeadTask.WorkerAgent = .claude) throws -> String {
@@ -4859,7 +4886,7 @@ public final class LeadToolset: MCPToolset {
         let refused = "\(slug)'s sessions can't be checked; nothing was cleaned up"
         let folder = (Worktrees.path(root: root, slug: slug) as NSString).standardizingPath
         // A team task's members too: their workers, and what runs in their worktrees.
-        let memberWorktrees = Worktrees.members(root: root, slug: slug).map { Worktrees.path(root: root, slug: Worktrees.memberSlug(slug, member: $0)) }
+        let memberWorktrees = Worktrees.members(root: root, slug: slug, team: Self.memberNames(task)).map { Worktrees.path(root: root, slug: Worktrees.memberSlug(slug, member: $0)) }
         let folders = [folder] + memberWorktrees.map { ($0 as NSString).standardizingPath }
         let workers = [task.worker, task.verifier] + (task.team ?? []).map(\.worker)
         let sessions = try hostSessions(refused).filter { session in
@@ -4891,7 +4918,7 @@ public final class LeadToolset: MCPToolset {
         freed += removeFolder((store.folder as NSString).appendingPathComponent("audit/\(slug)"))
         // Its members' worktrees and sub-branches before its own: their build folders first, as for its own.
         freed += memberWorktrees.reduce(0) { $0 + removeFolder(($1 as NSString).appendingPathComponent(".build")) }
-        try Worktrees.removeMembers(root: root, slug: slug)
+        try Worktrees.removeMembers(root: root, slug: slug, team: Self.memberNames(task))
         if FileManager.default.fileExists(atPath: worktree) || branchHead(Worktrees.branch(slug)) != nil {
             try Worktrees.remove(root: root, slug: slug, force: true)
         }
@@ -4926,7 +4953,7 @@ public final class LeadToolset: MCPToolset {
     /// touched; with `force` it's returned, for the reply to name as dropped.
     private func memberWork(_ task: LeadTask, force: Bool, base: String) throws -> [Worktrees.MemberWork] {
         let slug = task.slug
-        switch Worktrees.memberWork(root: root, slug: slug, base: base, merged: task.merged?.branchHead) {
+        switch Worktrees.memberWork(root: root, slug: slug, base: base, merged: task.merged?.branchHead, team: Self.memberNames(task)) {
         case .failure(let failure):
             guard force else {
                 throw Problem(text: "Not cleaned up: can't tell whether \(slug)'s members' worktrees hold work (\(failure.description)), so they and its own stay. cleanup(\(slug), force: true) removes them anyway.")
@@ -5069,7 +5096,7 @@ public final class LeadToolset: MCPToolset {
     /// Why no worker or verifier may start now on the Mac as `mac` has it (`not`: what didn't happen); nil when one may.
     /// With `what`, a refusal is kept (see `LeadWitness.RoomWaits`) so this lead is woken once there's room for `need`
     /// more sessions. The limits are the user's, Mac-wide: the text never suggests changing them.
-    private func macRefusal(_ mac: MacLoad, not: String, what: String? = nil, need: Int = 1) -> String? {
+    func macRefusal(_ mac: MacLoad, not: String, what: String? = nil, need: Int = 1) -> String? {
         let limits = macLimits()
         var over: [String] = []
         if mac.isBusy(threshold: limits.loadLimit) { over.append("its load (the greater of its 1- and 5-minute averages) is above load_threshold") }
@@ -5169,7 +5196,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// Removes a folder, if it's there; returns what it took.
-    private func removeFolder(_ path: String) -> Int64 {
+    func removeFolder(_ path: String) -> Int64 {
         guard FileManager.default.fileExists(atPath: path) else { return 0 }
         let bytes = DiskSpace.size(of: path)
         return (try? FileManager.default.removeItem(atPath: path)) == nil ? 0 : bytes
@@ -5288,7 +5315,7 @@ public final class LeadToolset: MCPToolset {
     /// A board change whose refusal (`BoardError`) is the lead's to read, not a failure.
     /// The host's sessions. One that can't be read is a refusal saying what didn't happen (`refused`), never "no
     /// sessions": a second worker started in a live worktree would undo the first's work.
-    private func hostSessions(_ refused: String) throws -> [LeadSessionInfo] {
+    func hostSessions(_ refused: String) throws -> [LeadSessionInfo] {
         do { return try listed() } catch {
             throw Problem(text: "The session host can't be read (\(error)), so \(refused). Try again in a moment; if it keeps failing, tell the user (VibeSwitcher may be restarting its session host).")
         }
@@ -5307,7 +5334,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// As `macLoad`, a census that can't be read a refusal saying what didn't happen (`refused`).
-    private func macLoad(_ sessions: [LeadSessionInfo], load: Double?, except folder: String?, refused: String) throws -> MacLoad {
+    func macLoad(_ sessions: [LeadSessionInfo], load: Double?, except folder: String?, refused: String) throws -> MacLoad {
         do { return try macLoad(sessions, load: load, except: folder) } catch {
             throw Problem(text: "The session host's count of every project's team sessions can't be read (\(error)), so \(refused). Try again in a moment; if it keeps failing, tell the user (VibeSwitcher may be restarting its session host).")
         }
@@ -5784,6 +5811,7 @@ public final class LeadToolset: MCPToolset {
     static let overBudgetStatus = "over_budget"
 
     private func report(_ arguments: [String: Any]) throws -> MCPToolResult {
+        try refuseMember("report")
         let reportedAt = Date().timeIntervalSince1970
         let slug = try taskSlug(arguments)
         let summary = try text(arguments, "summary", missing: "Say what changed and how you checked it, or what blocks you.")
@@ -6007,7 +6035,8 @@ public final class LeadToolset: MCPToolset {
     private func askLead(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
         let question = try text(arguments, "question", missing: "Ask something.")
-        guard try tellLead("The worker on \(slug) asks: \(question)\nAnswer with message(\(slug), …).", about: "worker \(slug)") else {
+        let asker = askerText(slug)
+        guard try tellLead("\(asker.who) asks: \(question)\nAnswer with message(\(slug), …)\(asker.answer).", about: "worker \(slug)") else {
             throw Problem(text: "There's no lead running to ask. Decide what you can within your contract, or report blocked.")
         }
         // Waiting on the answer isn't a stall (see `LeadStall`); the lead's next message answers it.
@@ -6022,7 +6051,7 @@ public final class LeadToolset: MCPToolset {
         let slug = try taskSlug(arguments)
         let text = try self.text(arguments, "text", missing: "Say what's done or under way.")
         // One line (several are joined), short enough for the lane; the board keeps the latest ones.
-        let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        let line = (memberSeat().map { "\($0.member.name): " } ?? "") + text.split(whereSeparator: \.isNewline).joined(separator: " ")
         let checkpoint = LeadCheckpoint(text: line.count > 300 ? String(line.prefix(300)) + "…" : line)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -6041,6 +6070,7 @@ public final class LeadToolset: MCPToolset {
     /// disagreed with, with a reason. Kept on the task for the lead (board) and the next audit; refused whole when an id
     /// isn't an open finding, a disagreement has no reason, or nothing is committed since the audit for a fix.
     private func answerFindings(_ arguments: [String: Any]) throws -> MCPToolResult {
+        try refuseMember("answer_findings")
         let slug = try taskSlug(arguments)
         var value = arguments["answers"]
         if let text = value as? String { value = try? JSONSerialization.jsonObject(with: Data(text.utf8)) }

@@ -1243,13 +1243,17 @@ public enum LeadPrompts {
     }
 
     /// `lints`: the repository's lint tests (`Policy.lintTests(in: root)` unless given).
+    /// A team task's worker (`LeadTeam`): `branch`, its own when it isn't the task's (a member's, `agent/<slug>--<name>`),
+    /// and `team`, its part and the team's rules (`LeadTeam.integratorBrief`, `memberBrief`), before the contract. A
+    /// plain task's brief passes neither, and is as it was.
     public static func worker(task: LeadTask, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load(),
-                              lints: [String]? = nil, screenshots: String?? = nil, mainRed: LeadMainRed? = nil) -> String {
+                              lints: [String]? = nil, screenshots: String?? = nil, mainRed: LeadMainRed? = nil,
+                              branch: String? = nil, team: String? = nil) -> String {
         // The base red when it starts (`LeadMainRed.workerText`), but for a worker whose task fixes it.
         let red = mainRed.flatMap { $0.fixes.contains(task.slug) ? nil : "Main red: " + $0.workerText(base: workflow.base) + "\n" } ?? ""
         return """
         You are a worker for the project lead of \(root). You have one task, below. Work in this worktree on branch \
-        agent/\(task.slug), and nowhere else.
+        \(branch ?? "agent/\(task.slug)"), and nowhere else.
 
         \(WorkingPolicy.section(policy))
 
@@ -1286,7 +1290,7 @@ public enum LeadPrompts {
         \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))
         Stuck: report blocked with exactly what you need. Don't fake a pass: never weaken or delete tests.
         \(red)\(task.workerAgent == .codex ? "\n" + codexWorker + "\nGit commands a Claude worker's rules refuse, which you hold yourself: \(deniedGit(workflow)).\n" : "")
-        \(WorkerBrief.render(task))
+        \(team.map { $0 + "\n\n" } ?? "")\(WorkerBrief.render(task))
         """
     }
 

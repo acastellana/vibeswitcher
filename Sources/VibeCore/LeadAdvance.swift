@@ -457,6 +457,8 @@ public final class LeadAdvance: @unchecked Sendable {
         }
         guard !onHold else { return }
         starts(workflow)
+        // A split team's members never started (`LeadToolset.teamsToStart`), as there's room.
+        for slug in lead.teamsToStart() { step("members|\(slug)") { try lead.advanceMembers(slug) } }
         let batching = lead.batching(workflow)
         ready = []
         for task in tasks where task.status == .review { review(task.slug, busy: busy, batching: batching) }
