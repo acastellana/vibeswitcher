@@ -1277,6 +1277,15 @@ on both, and S5's `Held by:` names them.
   handovers (not in `handoverFlags`), and the handed-over secret becomes the next image's vault (line 129). **On the
   Mac that stays as it is** (the switch reads `Platform.CodeIdentity.isAvailable`), and Task 1's line in
   `v2-mac-tasks.md` records it. Non-seam edits.
+- **`ownsLaunchers` by the lock file's identity, not its spelling** (found by the commit security review of Task 5a,
+  2026-11-13): today `ownsLaunchers` is `lockPath == VibePaths.hostLock.path` (`main.swift:34`), a comparison of
+  strings, so `--lock ~/.vibeswitcher//host.lock`, a `..` or a symlink to the user's lock names the user's lock and
+  yet makes a host that honours every test-only flag (`--test-app-pid`, `--test-app-connector` make any pid the app).
+  On Linux it becomes "the lock this host holds is the user's lock file": the held descriptor's `st_dev` and `st_ino`
+  equal those of `VibePaths.hostLock` (`lstat`, no link followed, a link being refused as a lock), through a
+  `Platform.Files.sameFile(_ fd: Int32, _ path: String) -> Bool`. Tests: `aSecondSpellingOfTheUsersLockIsTheUsersLock`
+  (`//`, `/./`, `..`, and a symlink, which is refused) and `aScratchLockIsNotTheUsers`. On the Mac the comparison
+  stays as it is (a line in `v2-mac-tasks.md`).
 - Modify, for "unreadable is the host only by token" (S2-D5). Step 1 first lists every reader of another process's
   `/proc` entries in `VibeCore`, `VibeHost` and the executables, with **the process it runs in**: the host
   (`HostServer.executable(of:)`, the orphan sweep in `HostProcesses`, `session(of:)`'s ancestry), the hook, the tool
