@@ -90,7 +90,10 @@ extension Platform.Sockets {
     /// it), and with bytes read says who sent them: the process that made the write, were it a child of the one
     /// that connected (`SCM_CREDENTIALS`). One read never holds bytes of two senders: it stops where the sender
     /// changes. nil when the bytes came with no sender (`enableCredentials` wasn't in force as they were sent) or the
-    /// sender has gone since. Descriptors sent along are closed, never kept.
+    /// sender has gone since **and its pid wasn't given again**: the kernel names the sender by its pid alone, and its
+    /// start is read here afterwards, so a sender that wrote and ended, its pid given to a new process before this
+    /// read, comes as that new process (the security architecture document's S5; Linux 6.5's `SCM_PIDFD` closes
+    /// that). Descriptors sent along are closed, never kept.
     public static func receive(_ fd: Int32, into buffer: UnsafeMutableRawBufferPointer) -> (count: Int, sender: Platform.PeerToken?) {
         var sender = vibe_ucred()
         let count = vibe_receive_credentials(fd, buffer.baseAddress, buffer.count, &sender)

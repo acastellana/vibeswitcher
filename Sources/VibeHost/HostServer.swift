@@ -157,6 +157,7 @@ public final class HostServer {
         }
         // Holding the lock: any socket file left behind is stale.
         listenFD = try UnixSocket.listen(path: config.socketPath)
+        Platform.Sockets.enableCredentials(listenFD)
         serve()
     }
 
@@ -171,6 +172,7 @@ public final class HostServer {
         for fd in [lockFD, listenFD] { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
         // The socket keeps the backlog the build that first listened gave it (16, before): listening again sets ours.
         _ = Sys.listen(listenFD, SOMAXCONN)
+        Platform.Sockets.enableCredentials(listenFD)
         var state = state
         let secrets = HostHandover.takeSecrets(from: &state)
         queue.sync {
@@ -291,9 +293,9 @@ public final class HostServer {
     /// A client served from now on: its reads, its requests and its end.
     private func add(_ client: ClientConnection) {
         let key = ObjectIdentifier(client)
-        client.onRead = { [weak self, weak client] in
+        client.onRead = { [weak self, weak client] sender in
             guard let self, let client else { return }
-            self.checkPeer(client)
+            self.checkSender(client, sender: sender)
         }
         client.onFrame = { [weak self, weak client] kind, payload in
             guard let self, let client else { return }
@@ -667,9 +669,13 @@ public final class HostServer {
     /// Who the process on `client` is to the lead's vault (see `identify`).
     func caller(of client: ClientConnection) -> LeadVault.Caller { client.caller }
 
-    /// The kernel names whichever process last used the client's socket, not the one that connected: after a
+    /// The Mac: the kernel names whichever process last used the client's socket, not the one that connected: after a
     /// connector forks a child to write and execs the app's binary (or anything else), the token names the child,
-    /// or the new image. Anything but the process accepted makes the connection nobody's.
+    /// or the new image, even for bytes the host hasn't read yet. Anything but the process accepted makes the
+    /// connection nobody's. Each read is checked by its own sender (`checkSender`, V2/SenderCheck.swift); this is the
+    /// re-read when the host handles, replies, delivers and broadcasts.
+    /// Linux: `SO_PEERCRED` names the process that connected for good, so this re-read changes nothing while it lives
+    /// (connector clients, a pair naming the host, are skipped); each read's sender is `checkSender`'s.
     private func checkPeer(_ client: ClientConnection) {
         // A pair the host made names the host itself for good: a connector's connection isn't checked this way.
         guard !client.viaConnector, client.caller != .unknown || client.runsAppCode else { return }
@@ -801,7 +807,7 @@ public final class HostServer {
                            }, testAppConnector: testAppConnectorForHandover)
     }
 
-    private func log(_ text: String) {
+    func log(_ text: String) {
         FileHandle.standardError.write(Data("vibeswitcher-host: \(text)\n".utf8))
     }
 
@@ -860,7 +866,7 @@ public final class HostServer {
         }
     }
 
-    private func updateAttachment(_ id: UUID) {
+    func updateAttachment(_ id: UUID) {
         let watching = clients.filter { $0.value.attached.contains(id) }
         sessions[id]?.clientsAttached = !watching.isEmpty
         if let current = primary[id], watching[current] == nil { primary[id] = watching.keys.first }

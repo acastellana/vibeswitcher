@@ -25,12 +25,15 @@ final class ClientConnection {
     var viaConnector = false
     var attached: Set<UUID> = []
     var onFrame: ((HostFrame.Kind, Data) -> Void)?
-    /// After bytes arrive, before any of their frames is handled.
-    var onRead: (() -> Void)?
+    /// After bytes arrive, before any of their frames is handled, with the process that sent them (nil: none known;
+    /// see `Platform.Sockets.receive`). Told nil again before a frame made of two senders' bytes is handled.
+    var onRead: ((Platform.PeerToken?) -> Void)?
     var onClose: (() -> Void)?
 
     private let queue: DispatchQueue
     private var decoder = HostFrameDecoder()
+    /// Who sent the bytes `decoder` holds (see `FrameSenders`).
+    private var senders = FrameSenders()
     private var readSource: DispatchSourceRead?
     private var writeSource: DispatchSourceWrite?
     private struct Pending {
@@ -149,6 +152,7 @@ final class ClientConnection {
             do {
                 while !closed, framesRead < 64, let frame = try decoder.next() {
                     framesRead += 1
+                    if senders.take(5 + frame.payload.count) { onRead?(nil) }
                     onFrame?(frame.kind, frame.payload)
                 }
                 return !closed
@@ -159,10 +163,11 @@ final class ClientConnection {
         }
         guard deliver() else { return }
         while !closed, bytesRead < 256 * 1024, framesRead < 64 {
-            let count = Sys.read(fd, &buffer, buffer.count)
+            let (count, sender) = buffer.withUnsafeMutableBytes { Platform.Sockets.receive(fd, into: $0) }
             if count > 0 {
                 bytesRead += count
-                onRead?()
+                onRead?(sender)
+                senders.append(count, from: sender)
                 decoder.append(Data(buffer[0..<count]))
                 guard deliver() else { return }
             } else if count < 0, errno == EINTR {

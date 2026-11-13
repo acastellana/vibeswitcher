@@ -630,13 +630,13 @@ it, would otherwise speak with its connector's identity. On the Mac `LOCAL_PEERT
 **Held by:** `SocketsTests.receivedBytesComeWithTheirSender`, `SocketsTests.eachMessagesSenderIsTheProcessThatWroteIt`,
 `SocketsTests.sendersAreKnownOnlyFromWhenTheyWereAskedFor`,
 `SocketsTests.aPeerTokenComparesEqualForTheSameProcessAndDiffersForAnother`,
-`SocketsTests.descriptorsSentAlongAreClosed`; planned: stage 2 plan task 7.
-
-**Tests to write:** Task 7: `PeerPerMessageTests.aForkedChildWritingOnALeadsConnectionMakesItNobodys`,
-`aFrameSplitAcrossTwoSendersIsHandledAsNobodys`, `theAcceptedProcessKeepsItsIdentityOverAThousandWrites`,
-`aMissingSenderMakesTheConnectionNobodys`; `SocketsTests.bytesFromAReapedSenderComeWithNoSender`,
-`aSenderCannotClaimAnotherPid` (outside a namespace of its own: `EPERM`),
-`aSenderInItsOwnPidNamespaceCanNameOnlyItsOwnProcesses`.
+`SocketsTests.descriptorsSentAlongAreClosed`, `PeerPerMessageTests.aForkedChildWritingOnALeadsConnectionMakesItNobodys`,
+`PeerPerMessageTests.aFrameSplitAcrossTwoSendersIsHandledAsNobodys`,
+`PeerPerMessageTests.theAcceptedProcessKeepsItsIdentityOverAThousandWrites`,
+`PeerPerMessageTests.aForkedWriterIsStillCaughtWhenTheHostBroadcasts` (the Mac),
+`PeerPerMessageTests.aMissingSenderMakesTheConnectionNobodys`, `SocketsTests.bytesFromAReapedSenderComeWithNoSender`,
+`SocketsTests.aSenderCannotClaimAnotherPid`, `SocketsTests.aSenderInItsOwnPidNamespaceCanNameOnlyItsOwnProcesses`
+(where the runner allows an unprivileged user namespace).
 
 ## S6. Hardening
 

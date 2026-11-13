@@ -77,6 +77,46 @@ private let writeToAGonePeerWhenAsked: @convention(c) () -> Void = { writeToAGon
 private let writeToAGonePeerWhenAsked: @convention(c) () -> Void = { writeToAGonePeerIfAsked() }
 #endif
 
+#if os(Linux)
+/// The test binary's helper mode for `aSenderInItsOwnPidNamespaceCanNameOnlyItsOwnProcesses`: started under
+/// `unshare --user --map-root-user --pid --fork` with `SocketsTests.namespaceVariable` set to "SOCKET:PID" (SOCKET its
+/// end of a `SOCK_SEQPACKET` pair, handed down; PID the test's, a number of the namespace outside), this binary is
+/// pid 1 of a pid namespace of its own and root of a user namespace of its own, so it may name any process of its pid
+/// namespace in the credentials it sends. Before any test of its own it starts a child (`sleep`), then sends three
+/// claims (`vibe_send_claiming`), each a message: its own pid ("own N"), its child's ("child N"), and the test's
+/// ("outside"); a claim the kernel refuses is followed by a plain "refused ERRNO", sent as itself. It stays until the
+/// test closes its end, and exits 0, which ends the namespace and its child. It exits 2 when it can't read the
+/// variable, 3 when the child didn't start, 4 when a send failed otherwise.
+private func claimInAPidNamespaceIfAsked() {
+    guard let asked = getenv(SocketsTests.namespaceVariable).map({ String(cString: $0) }) else { return }
+    let words = asked.split(separator: ":")
+    guard words.count == 2, let socket = Int32(words[0]), let outside = pid_t(words[1]) else { _exit(2) }
+    var sleeper = Platform.Spawn(executable: "/bin/sleep", arguments: ["sleep", "600"])
+    sleeper.stdin = .path("/dev/null", flags: O_RDONLY)
+    sleeper.stdout = .path("/dev/null", flags: O_WRONLY)
+    sleeper.keep = []
+    guard case .success(let child) = sleeper.start() else { _exit(3) }
+    func claim(_ text: String, naming pid: pid_t) {
+        let bytes = Array(text.utf8)
+        guard vibe_send_claiming(socket, bytes, bytes.count, pid, getuid(), getgid()) != bytes.count else { return }
+        let refusal = Array("refused \(errno)".utf8)
+        guard send(socket, refusal, refusal.count, Int32(MSG_NOSIGNAL)) == refusal.count else { _exit(4) }
+    }
+    claim("own \(getpid())", naming: getpid())
+    claim("child \(child)", naming: child)
+    claim("outside", naming: outside)
+    var byte: UInt8 = 0
+    while true {
+        let count = read(socket, &byte, 1)
+        if count == 0 || (count < 0 && errno != EINTR) { break }
+    }
+    _exit(0)
+}
+
+@_used @_section(".init_array")
+private let claimInAPidNamespaceWhenAsked: @convention(c) () -> Void = { claimInAPidNamespaceIfAsked() }
+#endif
+
 /// `Platform.Sockets`: an address and its limit, a write to a peer that has gone, and who is at the other end. The
 /// sockets are a test's own, in the run's scratch folder; a child is the test binary itself or `/bin/sh`, and is
 /// reaped.
@@ -671,6 +711,123 @@ struct SocketsTests {
         #expect(got.sender?.pid == (askingForSenders ? getpid() : nil))
         // The pipe's end: no one has its writing end any more.
         #expect(Self.eventually { Sys.read(pipeEnds[0], &read, 1) == 0 }, "a descriptor sent along is still open in this process")
+    }
+
+    /// A sender that wrote, ended and was reaped before the read is no one: its bytes come with no sender. (Had its
+    /// pid been given to another process in between, they would come as that process's: `receive`'s caveat, the
+    /// security architecture document's S5. With pid_max in the millions, not within this test.)
+    @Test func bytesFromAReapedSenderComeWithNoSender() throws {
+        let ends = try Self.pair()
+        defer { [ends.reading, ends.writing].forEach { Sys.close($0) } }
+        Platform.Sockets.enableCredentials(ends.reading)
+        var spawn = SpawnTests.shell("echo gone")
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .descriptor(ends.writing)
+        let child = try spawn.start().get()
+        let ended = SpawnTests.ended(child)
+        #expect(ended.exit == 0, "\(ended)")
+
+        let got = Self.received(ends.reading)
+        #expect(got.text == "gone\n")
+        #expect(got.sender == nil, "pid \(child), reaped, came as \(String(describing: got.sender))")
+    }
+
+    /// The kernel checks the pid a sender names in its own credentials: outside a namespace of its own, a process
+    /// naming another (here this process naming its parent and a child of its own) is refused at the send, EPERM.
+    /// Root may name anyone, so this runs only for an account that isn't.
+    @Test(.enabled(if: geteuid() != 0)) func aSenderCannotClaimAnotherPid() throws {
+        let ends = try Self.pair()
+        defer { [ends.reading, ends.writing].forEach { Sys.close($0) } }
+        Platform.Sockets.enableCredentials(ends.reading)
+        let held = try SpawnTests.held(.inherit)
+        defer {
+            Sys.close(held.release)
+            _ = SpawnTests.ended(held.pid)
+        }
+        for other in [getppid(), held.pid] {
+            errno = 0
+            let sent = vibe_send_claiming(ends.writing, "m", 1, other, getuid(), getgid())
+            let code = errno
+            #expect(sent == -1 && code == EPERM, "naming pid \(other): sent \(sent), errno \(code)")
+        }
+        // Naming itself is no claim at all: it arrives as itself.
+        #expect(vibe_send_claiming(ends.writing, "s", 1, getpid(), getuid(), getgid()) == 1)
+        let got = Self.received(ends.reading)
+        #expect(got.text == "s")
+        #expect(got.sender?.pid == getpid())
+    }
+
+    static let namespaceVariable = "VIBE_SOCKETS_TEST_NAMESPACE"
+    static let unshare = "/usr/bin/unshare"
+
+    /// Why this runner can't make a user and pid namespace without privileges (GitHub's Ubuntu 24.04 runners refuse
+    /// one, through AppArmor); nil when it can.
+    static let noPidNamespace: String? = {
+        guard FileManager.default.isExecutableFile(atPath: unshare) else { return "no \(unshare)" }
+        var probe = Platform.Spawn(executable: unshare, arguments: ["unshare", "--user", "--map-root-user", "--pid", "--fork", "/bin/true"])
+        probe.stdin = .path("/dev/null", flags: O_RDONLY)
+        probe.stdout = .path("/dev/null", flags: O_WRONLY)
+        probe.stderr = .path("/dev/null", flags: O_WRONLY)
+        guard case .success(let pid) = probe.start() else { return "\(unshare) didn't start" }
+        let ended = SpawnTests.ended(pid)
+        return ended.exit == 0 ? nil : "this runner refuses an unprivileged user namespace (unshare: \(ended))"
+    }()
+
+    /// What any process of the user can do (unprivileged user namespaces are on): make a user and pid namespace of
+    /// its own, where it holds `CAP_SYS_ADMIN` and may name another process in its credentials. It can name only the
+    /// processes of that namespace, its own: its own pid and its child's arrive as themselves (their pids outside),
+    /// and a pid of the namespace outside (the test's) is refused at the send. The helper is this binary
+    /// (`claimInAPidNamespaceIfAsked`).
+    @Test(.enabled(if: geteuid() != 0 && SocketsTests.noPidNamespace == nil,
+                   "needs an unprivileged user and pid namespace: \(SocketsTests.noPidNamespace ?? "")"))
+    func aSenderInItsOwnPidNamespaceCanNameOnlyItsOwnProcesses() throws {
+        let pair = try Self.seqpacketPair()
+        Platform.Sockets.enableCredentials(pair.test)
+        try #require(getenv(Self.namespaceVariable) == nil)
+        let binary = try #require(Bundle.main.executablePath)
+        var spawn = Platform.Spawn(executable: Self.unshare, arguments: ["unshare", "--user", "--map-root-user", "--pid", "--fork", binary]
+            + ProcessInfo.processInfo.arguments.dropFirst())
+        spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
+            + ["\(Self.namespaceVariable)=\(pair.helper):\(getpid())"]
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .path("/dev/null", flags: O_WRONLY)
+        spawn.keep = [pair.helper]
+        let started = spawn.start()
+        Sys.close(pair.helper)
+        let unshared: pid_t
+        do { unshared = try started.get() } catch {
+            Sys.close(pair.test)
+            throw error
+        }
+        var ended: SpawnTests.Ended?
+        defer { if ended == nil { _ = Self.finish(unshared, closing: pair.test) } }
+        func parent(of pid: pid_t) -> pid_t? {
+            guard case .brief(let brief) = Platform.Processes.brief(pid) else { return nil }
+            return brief.ppid
+        }
+
+        var got: [(text: String, count: Int, sender: Platform.PeerToken?)] = []
+        for _ in 0..<3 {
+            try #require(Self.readable(pair.test), "the helper sent \(got.count) messages: \(got.map(\.text))")
+            got.append(Self.received(pair.test))
+        }
+        // Its own pid there (1): itself, unshare's child.
+        #expect(got[0].text == "own 1", "\(got[0])")
+        let helper = try #require(got[0].sender)
+        #expect(helper.uid == getuid())
+        #expect(parent(of: helper.pid) == unshared)
+        // Its child's pid there: that child, a process of its own, under its pid outside.
+        #expect(got[1].text.hasPrefix("child "), "\(got[1])")
+        let child = try #require(got[1].sender)
+        #expect(child.pid != helper.pid && "child \(child.pid)" != got[1].text)
+        #expect(child.uid == getuid())
+        #expect(parent(of: child.pid) == helper.pid)
+        // A pid outside its namespace: no such process there, refused.
+        #expect(got[2].text.hasPrefix("refused "), "\(got[2])")
+        #expect(got[2].sender?.pid == helper.pid)
+
+        ended = Self.finish(unshared, closing: pair.test)
+        #expect(ended?.exit == 0, "\(String(describing: ended))")
     }
     #endif
 }

@@ -8,9 +8,10 @@ import VibeCore
 /// stream pair, keeps one end as a client that is the app from its first byte, and hands the other back over the
 /// connector (`SCM_RIGHTS`). The client's half is `HostConnector` (VibeCore).
 ///
-/// Until Task 7 the bytes on such a connection aren't checked for their sender: `checkPeer`'s `SO_PEERCRED` re-read
-/// names the host itself on a pair it made, and Task 7's check of each message replaces it. No user's host runs on
-/// Linux before then (the document's Principals).
+/// The bytes on such a connection are checked for their sender as an accepted connection's are (Task 7,
+/// `checkSender` in SenderCheck.swift): the host's end has its senders passed from its creation, and a message from
+/// any process but the one it was made for makes it no one's. (`checkPeer`'s `SO_PEERCRED` re-read would name the host
+/// itself on a pair it made, and skips it.)
 ///
 /// The Mac has no connector (its app proves itself by its code, `AppProof`): `openAppConnector` gives nil there.
 final class AppConnector {
