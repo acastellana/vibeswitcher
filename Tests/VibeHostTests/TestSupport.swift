@@ -2,6 +2,13 @@ import Foundation
 import Testing
 import VibeCore
 
+/// `nc`'s flags before `-U`, so that it hangs up once its input ends, as the tests' scripts expect. The Mac's nc does
+/// by itself. Ubuntu's (OpenBSD's netcat with Debian's patches) keeps the connection open after its input ends, until
+/// the far end closes it (measured 2026-11-13), and the host doesn't close a client's connection before the client
+/// hangs up: every test that waits for nc's end hung there. `-N` shuts down nc's sending half at its input's end, so the
+/// host sees the end and closes the connection.
+let ncHangsUpFlags: [String] = Platform.CodeIdentity.isAvailable ? [] : ["-N"]
+
 /// Set when `refuseTheAccountRoot` has run (a test in each target checks it did).
 var homeGuardRan = false
 

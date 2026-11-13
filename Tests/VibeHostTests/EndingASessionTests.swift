@@ -56,7 +56,12 @@ struct EndingASessionTests {
             [carryingInput, otherInput, noneInput].forEach { try? $0.fileHandleForWriting.close() }
             [setsid, job].forEach { kill($0, SIGKILL) }
         }
-        #expect(await eventually { SessionStrays.carrying(session: session.id).map(\.pid) == [carrying.processIdentifier] })
+        // Of what the test started, only the one carrying its id. (The session's own processes carry it too where their
+        // environment can be read: on Linux its shell, perls and sleep; Apple's can't be read.)
+        let byTest = Set([carrying, other, none, sleep].map(\.processIdentifier))
+        #expect(await eventually {
+            Set(SessionStrays.carrying(session: session.id).map(\.pid)).intersection(byTest) == [carrying.processIdentifier]
+        }, "\(SessionStrays.carrying(session: session.id).map(\.pid)); carrying \(carrying.processIdentifier)")
 
         let ended = Date()
         client.send(.kill(id: session.id))

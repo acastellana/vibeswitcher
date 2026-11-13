@@ -41,7 +41,7 @@ func ensureLauncher() -> String {
     if HostBuild.id(ofExecutableAt: launcher) != build || !FileManager.default.isExecutableFile(atPath: launcher) {
         let partial = launcher + ".partial-\(getpid())"
         try? FileManager.default.removeItem(atPath: partial)
-        guard (try? FileManager.default.copyItem(atPath: executable, toPath: partial)) != nil,
+        guard (try? Platform.Files.copyKeepingModificationDate(atPath: executable, toPath: partial)) != nil,
               rename(partial, launcher) == 0 else { return executable }
     }
     return launcher

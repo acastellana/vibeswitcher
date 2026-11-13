@@ -41,9 +41,19 @@ import Testing
             #!/bin/sh
             config=""
             while [ $# -gt 0 ]; do [ "$1" = "--mcp-config" ] && config="$2"; shift; done
-            server=$(plutil -extract mcpServers.vibeswitcher.command raw -o - "$config")
+            # The Mac's plutil reads the config; where there's none (Linux), python3 reads it the same way.
+            at() {
+                if command -v plutil > /dev/null; then plutil -extract "$1" raw -o - "$config"; return; fi
+                python3 -c 'import json, sys
+            value = json.load(open(sys.argv[2]))
+            for key in sys.argv[1].split("."):
+                try: value = value[int(key)] if isinstance(value, list) else value[key]
+                except (IndexError, KeyError, ValueError): sys.exit(1)
+            print(value)' "$1" "$config"
+            }
+            server=$(at mcpServers.vibeswitcher.command)
             i=0
-            while arg=$(plutil -extract mcpServers.vibeswitcher.args.$i raw -o - "$config" 2>/dev/null); do set -- "$@" "$arg"; i=$((i + 1)); done
+            while arg=$(at mcpServers.vibeswitcher.args.$i 2>/dev/null); do set -- "$@" "$arg"; i=$((i + 1)); done
             export \(env)
             w='\(worker)'
             : > "$w/in"

@@ -50,6 +50,9 @@ enum TestHosts {
             throw CancellationError()
         }
         guard let (hostEnd, testEnd) = Platform.Sockets.pair(type: Platform.Sockets.seqpacket) else { throw CancellationError() }
+        // Its senders passed from its making, as the host's own connectors' are (`openAppConnector`): a request this
+        // process sends before the host has adopted its end would otherwise come with no sender, and be refused.
+        Platform.Sockets.enableCredentials(hostEnd)
         // Foundation's `Process` hands a child nothing from 3 up: the host's stdin carries the connector.
         host.standardInput = FileHandle(fileDescriptor: hostEnd, closeOnDealloc: false)
         host.arguments = arguments + [TestAppPrincipal.pidFlag, String(getpid()), TestAppPrincipal.connectorFlag, "0"]

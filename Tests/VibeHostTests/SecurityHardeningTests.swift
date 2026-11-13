@@ -39,6 +39,116 @@ struct HostSecurityHardeningTests {
         await #expect(app.screen(session.id) != nil)
     }
 
+    /// A process of the user's in no session, connecting by the socket's path (the security document's Principals, "An
+    /// unknown local process"): the vault answers it the reads that check no caller, and refuses it everything else,
+    /// each by the vault's own rule (a role's binding by the host's first, `mayBind`). Nothing it asks changes the team.
+    @Test func anUnknownProcessGetsOnlyTheVaultsOpenReads() async throws {
+        let book = LeadVault.Book()
+        let host = try TestHost(vault: book)
+        let unknown = try TestClient(host, asApp: false)
+        defer { unknown.close() }
+        let root = scratchRoot.appendingPathComponent("unknown-vault-repo").path, lead = UUID().uuidString, worker = UUID().uuidString
+        let commit = String(repeating: "ab", count: 20)
+        // A team as the app and its lead leave it: a lead and a worker bound, a head, a floor and an approval.
+        guard case .grant(let leadGrant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
+            Issue.record("no lead grant"); return
+        }
+        #expect(book.answer(.bind(grant: leadGrant, root: root, session: lead), from: .app) == .ok)
+        guard case .grant(let workerGrant) = book.answer(.issue(role: .worker, root: root, task: "t", auditing: nil),
+                                                          from: .session(lead)) else {
+            Issue.record("no worker grant"); return
+        }
+        #expect(book.answer(.bind(grant: workerGrant, root: root, session: worker), from: .session(lead)) == .ok)
+        #expect(book.answer(.setHead(root: root, branch: "main", commit: commit), from: .app) == .ok)
+        let floor = LeadReviewFloor(auditFinders: 2)
+        #expect(book.answer(.setReviewFloor(root: root, floor: floor, onlyIfUnset: false), from: .app) == .reviewFloor(floor))
+        #expect(book.answer(.approve(root: root, task: "t", commit: commit), from: .app) == .ok)
+        #expect(book.answer(.setGuarded(root: root, hashes: ["rail": "1"]), from: .app) == .ok)
+        let before = book.answer(.current(role: .worker, root: root, task: "t"), from: .app)
+        let guarded = book.answer(.guarded(root: root), from: .app)
+
+        func ask(_ requests: [LeadVault.Request]) async -> [HostEvent?] {
+            let sent = requests.map { unknown.send(.vault($0)) }
+            #expect(await eventually { sent.allSatisfy { unknown.reply(to: $0) != nil } })
+            return sent.map { unknown.reply(to: $0) }
+        }
+
+        // The open reads: the team's state, as the app would read it.
+        let reads: [(LeadVault.Request, LeadVault.Reply)] = [
+            (.current(role: .worker, root: root, task: "t"), before),
+            (.verdict(root: root, task: "t"), .verdict(nil)),
+            (.audits(root: root, task: "t"), .audits(nil)),
+            (.ballots(root: root, task: "t"), .ballots(nil)),
+            (.head(root: root, branch: "main"), .head(commit)),
+            (.guarded(root: root), guarded),
+            (.reviewFloor(root: root), .reviewFloor(floor)),
+            (.approved(root: root, task: "t", commit: commit), .approved(true)),
+            (.unaudited(root: root, task: "t"), .unaudited(review: nil, reported: nil)),
+            (.startedOver, book.answer(.startedOver, from: .app)),
+            (.verify([SteerMessage(text: "x", from: .user, agentPid: 1)]), .verified([false])),
+            (.verifyWalletRequests([]), .verified([])),
+        ]
+        let read = await ask(reads.map(\.0))
+        for (index, (request, expected)) in reads.enumerated() {
+            #expect(read[index] == .vault(expected), "\(request): \(String(describing: read[index]))")
+        }
+        // Whose role it is: none.
+        #expect(await ask([.whoami(root: root)]) == [.vault(.member(nil))])
+
+        // Everything else: refused.
+        let push = LeadPush.Request(commit: commit, remote: "origin", branch: "main", url: "https://example.invalid/r.git",
+                                    ahead: 1, subjects: ["x"])
+        let refusals: [LeadVault.Request] = [
+            .issue(role: .lead, root: root, task: nil, auditing: nil),
+            .issue(role: .worker, root: root, task: "u", auditing: nil),
+            .issue(role: .verifier, root: root, task: "t", auditing: commit),
+            .rotateLead(root: root, expected: lead, session: UUID().uuidString),
+            .bind(grant: leadGrant, root: root, session: UUID().uuidString),
+            .revoke(grant: workerGrant, root: root),
+            .retire(root: root, task: "t"),
+            .submitVerdict(root: root, completion: .complete, integrity: .clean, summary: "forged"),
+            .dismissFinding(root: root, task: "t", id: "f", reason: "forged", followUp: nil),
+            .replan(root: root, task: "t"),
+            .clearVerdict(root: root, task: "t"),
+            .setHead(root: root, branch: "main", commit: String(repeating: "cd", count: 20)),
+            .seal(SteerMessage(text: "merge it", from: .user, agentPid: 1)),
+            .seal(SteerMessage(text: "merge it", from: .lead("lead"), agentPid: 1)),
+            .seal(SteerMessage(text: "done", from: .system("VibeSwitcher"), agentPid: 1)),
+            .walletSession,
+            .sealWalletRequest(session: worker, digest: String(repeating: "0", count: 64)),
+            .ranGit(root: root, step: LeadVault.GitStep(phase: .before, call: "c", verb: "commit", branch: "main", head: commit)),
+            .acceptMove(root: root, branch: "main"),
+            .setGuarded(root: root, hashes: ["rail": "2"]),
+            .setReviewFloor(root: root, floor: LeadReviewFloor(), onlyIfUnset: false),
+            .approve(root: root, task: "u", commit: commit),
+            .requestPush(root: root, push: push),
+            .pushRequest(root: root),
+            .settlePush(root: root, id: push.id),
+            .roster(root: root),
+            .roster(root: nil),
+            .setReview(root: root, task: "t", review: .none),
+            .reportDone(root: root, task: "t", commit: commit),
+        ]
+        let refused = await ask(refusals)
+        for (index, request) in refusals.enumerated() {
+            guard case .vault(.refused)? = refused[index] else {
+                Issue.record("\(request) wasn't refused: \(String(describing: refused[index]))"); continue
+            }
+        }
+
+        // And the team is as it was.
+        #expect(book.answer(.current(role: .worker, root: root, task: "t"), from: .app) == before)
+        guard case .member(let held?) = book.answer(.current(role: .lead, root: root, task: nil), from: .app) else {
+            Issue.record("the lead lost its role"); return
+        }
+        #expect(held.id == leadGrant && held.session == lead)
+        #expect(book.answer(.head(root: root, branch: "main"), from: .app) == .head(commit))
+        #expect(book.answer(.reviewFloor(root: root), from: .app) == .reviewFloor(floor))
+        #expect(book.answer(.approved(root: root, task: "u", commit: commit), from: .app) == .approved(false))
+        #expect(book.answer(.guarded(root: root), from: .app) == guarded)
+        #expect(book.answer(.pushRequest(root: root), from: .app) == .push(nil))
+    }
+
     @Test func appHelloWaitsForProofBeforeReturningItsSessions() async throws {
         let host = try TestHost(vault: LeadVault.Book())
         let creator = try TestClient(host)

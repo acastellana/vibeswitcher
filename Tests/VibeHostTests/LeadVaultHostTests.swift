@@ -44,7 +44,7 @@ struct LeadVaultHostTests {
     /// `answers`. The connection stays open until `stop` exists, which the test makes once the replies are in: however
     /// long a busy Mac takes to answer, nc doesn't hang up first.
     func nc(_ host: TestHost, _ requests: URL, _ answers: URL, until stop: URL) -> String {
-        "(cat '\(requests.path)'; while [ ! -f '\(stop.path)' ]; do sleep 0.05; done) | /usr/bin/nc -U '\(host.socket)' > '\(answers.path)'"
+        "(cat '\(requests.path)'; while [ ! -f '\(stop.path)' ]; do sleep 0.05; done) | /usr/bin/nc \((ncHangsUpFlags + ["-U"]).joined(separator: " ")) '\(host.socket)' > '\(answers.path)'"
     }
 
     /// `nc(…)` from this process (outside every session), once the replies to `seqs` are in.
@@ -73,7 +73,7 @@ struct LeadVaultHostTests {
     func viaNC(_ socket: String, proof key: SymmetricKey?, _ requests: [HostRequest]) async throws -> [Int: HostEvent] {
         let nc = Process()
         nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
-        nc.arguments = ["-U", socket]
+        nc.arguments = ncHangsUpFlags + ["-U", socket]
         let input = Pipe(), output = Pipe()
         nc.standardInput = input
         nc.standardOutput = output

@@ -74,7 +74,8 @@ struct ShellTidyHostTests {
     }
 
     /// A command that failed, or was killed, leaves its shell where it is, however long ago: its row says it failed.
-    @Test(arguments: ["echo tried; exit-with() { return $1; }; exit-with 3", "sh -c 'kill -TERM $$'"])
+    /// (`exit_with`, not `exit-with`: Ubuntu's /bin/sh is dash, which refuses a function name with a hyphen.)
+    @Test(arguments: ["echo tried; exit_with() { return $1; }; exit_with 3", "sh -c 'kill -TERM $$'"])
     func aRunShellWhoseCommandFailedStays(command: String) async throws {
         let host = try TestHost()
         let app = try TestClient(host)
