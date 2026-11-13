@@ -2871,3 +2871,10 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 22:13 Automatically (auto_advance): Started the audit of team-task-model-members at 85bedfda (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-13 22:14 Audit of team-task-model-members: complete, clean, round 1: 1 Nit open
 - 2026-11-13 22:15 Audit of team-wall-store-append: complete, clean, round 1: 2 Nit open
+- 2026-11-13 22:23 Automatically (auto_advance): Started the audit of teammate-sender-a-frame at 72378b9c (Its review is audit).
+- 2026-11-13 22:23 Exception on teammate-sender-a-frame by lead of vibeswitcher: edits to Sources/VibeCore/LeadVault.swift, Sources/VibeSwitcher/**/LeadController.swift, Sources/**/LeadController.swift accepted. Reason: Adding a case to SteerMessage.Sender forces every exhaustive switch over it to handle the new case, or the build fails. The two edits are the minimum: maySeal refuses .teammate for every caller but th…
+- 2026-11-13 22:23 Sent teammate-sender-a-frame's audit contract v2 (it had v1)
+- 2026-11-13 22:23 Sent teammate-sender-a-frame's worker contract v2 (it had v1)
+- 2026-11-13 22:26 Audit of teammate-sender-a-frame: incomplete, suspect, round 1: 1 Important open, 2 Nit open
+- 2026-11-13 22:30 Merged team-wall-store-append: Team wall store: append-only posts with caps and lints (in a batch: team-wall-store-append, team-task-model-members landed on one test run) (build 40766073a6b2)
+- 2026-11-13 22:30 Merged team-task-model-members: Team task model: members on a board task (in a batch: team-wall-store-append, team-task-model-members landed on one test run) (build 40766073a6b2)
