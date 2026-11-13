@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -42,7 +41,7 @@ final class DroppingHost {
                 if let hello = Self.frame(fd), drop == .beforeReply,
                    let payload = try? HostCoding.encode(HostEventEnvelope(replyTo: hello.seq, event: .welcome(protocolVersion: HostProtocol.version, hostBuild: 0, sessions: []))) {
                     let frame = HostFrame.encode(.control, payload)
-                    _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+                    _ = frame.withUnsafeBytes { Sys.write(fd, $0.baseAddress, $0.count) }
                     _ = Self.frame(fd)
                 }
                 close(fd)
@@ -59,7 +58,7 @@ final class DroppingHost {
         var buffer = [UInt8](repeating: 0, count: 65_536)
         while true {
             if let frame = try? decoder.next() { return try? HostCoding.decode(HostRequestEnvelope.self, from: frame.payload) }
-            let read = Darwin.read(fd, &buffer, buffer.count)
+            let read = Sys.read(fd, &buffer, buffer.count)
             guard read > 0 else { return nil }
             decoder.append(Data(buffer[0..<read]))
         }

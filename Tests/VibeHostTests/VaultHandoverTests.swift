@@ -1,5 +1,3 @@
-import CryptoKit
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -23,7 +21,7 @@ final class Courier {
     var command: String {
         """
         i=1; while :; do while [ ! -f '\(folder)/go'$i ]; do sleep 0.05; done; \
-        (cat '\(folder)/req'$i; while [ ! -f '\(folder)/stop'$i ]; do sleep 0.05; done) | /usr/bin/nc -U '\(socket)' > '\(folder)/ans'$i; \
+        (cat '\(folder)/req'$i; while [ ! -f '\(folder)/stop'$i ]; do sleep 0.05; done) | /usr/bin/nc \((ncHangsUpFlags + ["-U"]).joined(separator: " ")) '\(socket)' > '\(folder)/ans'$i; \
         i=$((i+1)); done
         """
     }

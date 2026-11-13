@@ -561,12 +561,20 @@ with the sandbox.
 `LeadVaultHostTests.aLeadCanReadAndTypeIntoItsWorkerButCannotAccessAnotherProject`,
 `VerifierBranchCodeHostTests.aVerifiersBashCantSubmitItsVerdictAndItsToolServerStillDoes`,
 `HostSecurityHardeningTests.unknownClientsCannotReadMutateOrSubscribeToSessions` (on the Mac now; on Linux from Task
-5b); planned: stage 2 plan task 6.
+5b), `HostedSessionTerminalTests.aSessionsTerminalIsTheTablesName`,
+`HostedSessionTerminalTests.aProcessOnTheSessionsTerminalIsThatSessions`,
+`HostedSessionTerminalTests.theHookStateFileOfASessionIsDirectlyInState`,
+`HostedSessionTerminalTests.aProcessThatTookASessionsTerminalFirstIsNotThatSession`,
+`HostedSessionTerminalTests.aLauncherThatCantTakeItsTerminalExits`,
+`HostedSessionTerminalTests.aReusedProgramPidIsNotTheSession`,
+`HostedSessionTerminalTests.anAncestorYoungerThanItsChildBreaksTheChain`,
+`HostedSessionTerminalTests.aChildReparentedWhileItsChainIsReadBreaksIt`,
+`HostedSessionTerminalTests.aReapedSessionIsNotLive` (Task 6; on Linux only: the four from
+`aProcessThatTookASessionsTerminalFirstIsNotThatSession` to `anAncestorYoungerThanItsChildBreaksTheChain`, and
+`aReapedSessionIsNotLive`, which `TIOCGSID` holds, as a session leader that exits leaves its terminal with no session;
+`aChildReparentedWhileItsChainIsReadBreaksIt` runs on both systems); planned: stage 2 plan task 10.
 
-**Tests to write:** Task 6: `HostedSessionTerminalTests.aSessionsTerminalIsTheTablesName`,
-`aProcessOnTheSessionsTerminalIsThatSessions`, `theHookStateFileOfASessionIsDirectlyInState`,
-`aProcessThatTookASessionsTerminalFirstIsNotThatSession`, `aLauncherThatCantTakeItsTerminalExits`,
-`aReusedProgramPidIsNotTheSession`, `anAncestorYoungerThanItsChildBreaksTheChain`. Task 10:
+**Tests to write:** Task 10:
 `VerifierBranchCodeHostTests.anEscapedVerifierCommandWithoutSetsidIsNobodys`,
 `BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup`. With the connector:
 `aConnectorConnectionIsItsSession`, `branchCodeHasNoConnector`, `theConnectorSurvivesAHandover`, and the measurement
@@ -622,13 +630,13 @@ it, would otherwise speak with its connector's identity. On the Mac `LOCAL_PEERT
 **Held by:** `SocketsTests.receivedBytesComeWithTheirSender`, `SocketsTests.eachMessagesSenderIsTheProcessThatWroteIt`,
 `SocketsTests.sendersAreKnownOnlyFromWhenTheyWereAskedFor`,
 `SocketsTests.aPeerTokenComparesEqualForTheSameProcessAndDiffersForAnother`,
-`SocketsTests.descriptorsSentAlongAreClosed`; planned: stage 2 plan task 7.
-
-**Tests to write:** Task 7: `PeerPerMessageTests.aForkedChildWritingOnALeadsConnectionMakesItNobodys`,
-`aFrameSplitAcrossTwoSendersIsHandledAsNobodys`, `theAcceptedProcessKeepsItsIdentityOverAThousandWrites`,
-`aMissingSenderMakesTheConnectionNobodys`; `SocketsTests.bytesFromAReapedSenderComeWithNoSender`,
-`aSenderCannotClaimAnotherPid` (outside a namespace of its own: `EPERM`),
-`aSenderInItsOwnPidNamespaceCanNameOnlyItsOwnProcesses`.
+`SocketsTests.descriptorsSentAlongAreClosed`, `PeerPerMessageTests.aForkedChildWritingOnALeadsConnectionMakesItNobodys`,
+`PeerPerMessageTests.aFrameSplitAcrossTwoSendersIsHandledAsNobodys`,
+`PeerPerMessageTests.theAcceptedProcessKeepsItsIdentityOverAThousandWrites`,
+`PeerPerMessageTests.aForkedWriterIsStillCaughtWhenTheHostBroadcasts` (the Mac),
+`PeerPerMessageTests.aMissingSenderMakesTheConnectionNobodys`, `SocketsTests.bytesFromAReapedSenderComeWithNoSender`,
+`SocketsTests.aSenderCannotClaimAnotherPid`, `SocketsTests.aSenderInItsOwnPidNamespaceCanNameOnlyItsOwnProcesses`
+(where the runner allows an unprivileged user namespace).
 
 ## S6. Hardening
 

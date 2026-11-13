@@ -258,7 +258,8 @@ struct ClearDraftTests {
     }
 
     /// A scratch program in a real host session draws Claude's box with a dim suggestion and draws it again on ^C;
-    /// what's typed into it is written to a file.
+    /// what's typed into it is written to a file. (Each byte read in octal and printed with `\NNN`: Ubuntu's /bin/sh is
+    /// dash, whose printf has no `\x`.)
     @Test func aScratchSessionsSuggestionIsClearedAndTypedOver() async throws {
         let root = scratch()
         let typedFile = root.appendingPathComponent("typed").path
@@ -269,8 +270,8 @@ struct ClearDraftTests {
         stty raw -echo
         draw
         while :; do
-          c=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' ')
-          if [ "$c" = "03" ]; then draw; echo cleared >> '\(typedFile).log'; else printf "\\x$c" >> '\(typedFile)'; fi
+          c=$(dd bs=1 count=1 2>/dev/null | od -An -to1 | tr -d ' ')
+          if [ "$c" = "003" ]; then draw; echo cleared >> '\(typedFile).log'; else printf "\\\\$c" >> '\(typedFile)'; fi
         done
         """.write(toFile: script, atomically: true, encoding: .utf8)
         let host = try TestHost()
@@ -347,7 +348,7 @@ struct StyledScreenHostTests {
                 func answer(_ seq: Int, _ event: HostEvent) {
                     guard let payload = try? HostCoding.encode(HostEventEnvelope(replyTo: seq, event: event)) else { return }
                     let frame = HostFrame.encode(.control, payload)
-                    _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+                    _ = frame.withUnsafeBytes { Sys.write(fd, $0.baseAddress, $0.count) }
                 }
                 var decoder = HostFrameDecoder()
                 var buffer = [UInt8](repeating: 0, count: 65_536)

@@ -8,9 +8,10 @@ import VibeCore
 /// stream pair, keeps one end as a client that is the app from its first byte, and hands the other back over the
 /// connector (`SCM_RIGHTS`). The client's half is `HostConnector` (VibeCore).
 ///
-/// Until Task 7 the bytes on such a connection aren't checked for their sender: `checkPeer`'s `SO_PEERCRED` re-read
-/// names the host itself on a pair it made, and Task 7's check of each message replaces it. No user's host runs on
-/// Linux before then (the document's Principals).
+/// The bytes on such a connection are checked for their sender as an accepted connection's are (Task 7,
+/// `checkSender` in SenderCheck.swift): the host's end has its senders passed from its creation, and a message from
+/// any process but the one it was made for makes it no one's. (`checkPeer`'s `SO_PEERCRED` re-read would name the host
+/// itself on a pair it made, and skips it.)
 ///
 /// The Mac has no connector (its app proves itself by its code, `AppProof`): `openAppConnector` gives nil there.
 final class AppConnector {
@@ -20,6 +21,9 @@ final class AppConnector {
     var sender: Platform.PeerToken?
     let requireNonDumpable: Bool
     let onDumpable: ((pid_t) -> Void)?
+    /// A scratch host's test stand-in (see `TestAppPrincipal`): the test process's pid, which a handover carries with
+    /// the descriptor. Nil for every other connector.
+    var testPid: pid_t?
     private var source: DispatchSourceRead?
     /// The connections made through it, ended with it.
     private var made: [Made] = []
@@ -96,6 +100,35 @@ extension HostServer {
             }
         }
         return theirs
+    }
+
+    /// Takes `fd`, an end of a `SOCK_SEQPACKET` pair this process inherited, as an app connector whose other end is
+    /// `pid`'s: a scratch host's test stand-in for the app on Linux (see `TestAppPrincipal`), never dumpable-checked
+    /// (a test process is dumpable). Made close-on-exec and nonblocking, its senders passed, and read on the host's
+    /// queue as `openAppConnector`'s end is; registered under its own number, which a handover carries
+    /// (`testAppConnectorForHandover`). False, and `fd` left alone, on the Mac (no connector there) and when `fd`
+    /// isn't open.
+    func adoptTestAppConnector(_ fd: Int32, pid: pid_t) -> Bool {
+        guard !Platform.CodeIdentity.isAvailable, fcntl(fd, F_SETFD, FD_CLOEXEC) == 0 else { return false }
+        Platform.Sockets.enableCredentials(fd)
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        let connector = AppConnector(fd: fd, sender: Platform.Processes.token(pid), requireNonDumpable: false, onDumpable: nil)
+        connector.testPid = pid
+        onQueue {
+            appConnectors.removeValue(forKey: fd)?.close()
+            appConnectors[fd] = connector
+            connector.start(on: queue) { [weak self, weak connector] in
+                guard let self, let connector else { return }
+                self.answer(connector, fd)
+            }
+        }
+        return true
+    }
+
+    /// The test stand-in's connector, for a handover's state (see `HostHandover.State.testAppConnector`): nil when
+    /// there is none, or it has closed. On `queue`.
+    var testAppConnectorForHandover: HostHandover.TestAppConnector? {
+        appConnectors.values.first { $0.testPid != nil && !$0.closed }.map { HostHandover.TestAppConnector(fd: $0.fd, pid: $0.testPid!) }
     }
 
     /// The process whose requests on `connector` are answered from now on (the child started with it).

@@ -1,0 +1,5 @@
+AppCodeTests.swift  the whole file: the app's code told by its cdhash (`AppCode`, Platform.CodeIdentity), read through Mach's task_info and proc_pidinfo; Linux has no code identity (Platform.CodeIdentity.isAvailable is false)
+AppKeyTests.swift  the whole file (aHeldKeyIsReplacedOnlyByTheAppsCodeWhileNoSessionRuns, aHostWithNoKeyTakesOnlyTheFirstFromTheAppsCode): nc as the app's code, proving, enrolling and replacing the app's key; the Linux app is a connector's connection and holds no key
+LeadVaultHostTests.swift  aConnectionWhoseProcessExecsTheAppIsntTheApp, theAppsCodeIsntTheAppUntilItAnswersTheChallenge: nc as the app's code, a raw-socket client proving the app's key (viaNC with a proof); the Linux app is a connector's connection and holds no key
+ParserCostTests.swift  measure: what it prints is footprint's (/usr/bin/footprint), which Linux doesn't have; its helpers (parsers(of:), the tool runner) run on both
+UpgradeFromLeadHostTests.swift  the whole file: it builds the host of the commit before PR #1 with /usr/bin/xcrun's swift, the Mac's toolchain, to hand the user's Mac host of then over to this build

@@ -76,6 +76,13 @@ that two pushes haven't explained comes here too, with the experiment that will 
   that doesn't use that flag inherits them while a status line runs. Left as it is on `v2` (no behaviour change on
   the Mac; `CloseOnExecLintTests` lists it). Check whether the status-line process spawns anything else meanwhile,
   and mark them close-on-exec on main if it does.
+- **Each message's sender (stage 2 Task 7)**: `PeerPerMessageTests/aForkedWriterIsStillCaughtWhenTheHostBroadcasts`
+  can't tell `checkPeer`'s re-read at `broadcast` from the check of each read's sender: the host's read source may
+  read the child's bytes first, and either makes the connection no one's. Check on a real Mac, by hand, that with the
+  host's queue held while a forked child writes on a lead's connection, a broadcast alone makes it `.unknown`. Also
+  that the four session-based `PeerPerMessageTests` start their lead at all there: the helper runs through the
+  session's `/bin/sh`, which SIP keeps DYLD_ variables from, so the test sets `DYLD_FRAMEWORK_PATH` and
+  `DYLD_LIBRARY_PATH` on its command line (the hosted runner, SIP off, doesn't show this).
 - **The two replaced oracles**: the raw Darwin reads `IndexLockTests` and `ProcessTableTests` checked against, now
   platform calls; restore them under `#if canImport(Darwin)`.
 

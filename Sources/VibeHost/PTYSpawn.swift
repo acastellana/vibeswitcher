@@ -13,8 +13,8 @@ public enum PTYSpawn {
     /// What the launcher does with `--pty-exec`; call it first thing in its `main`.
     public static func execIfLaunched(_ arguments: [String]) {
         guard arguments.count > 2, arguments[1] == "--pty-exec" else { return }
-        _ = Platform.Terminals.makeControlling(0)
-        let program = Array(arguments[2...])
+        // Its terminal made its controlling terminal; on Linux, its own or it exits 127 (see `SessionIdentityChecks`).
+        let program = SessionIdentityChecks.takeTerminal(Array(arguments[2...]))
         let argv = program.map { strdup($0) } + [nil]
         execv(program[0], argv)
         // On the session's terminal, so its window says which program wasn't there (the shell named by $SHELL, say)
@@ -25,8 +25,9 @@ public enum PTYSpawn {
     }
 
     /// `failure`: posix_spawn's errno when it couldn't start the launcher (0 when the terminal couldn't be made).
+    /// `launcherFlags`: before the program, for the launcher (`SessionIdentityChecks.launcherFlags`).
     static func spawn(launcher: String, executable: String, args: [String], env: [String], directory: String,
-                      size: inout winsize, failure: inout Int32) -> (pid: pid_t, masterFD: Int32)? {
+                      size: inout winsize, failure: inout Int32, launcherFlags: [String] = []) -> (pid: pid_t, masterFD: Int32)? {
         // Both ends close-on-exec (from their making on Linux), the slave's path named from the master: see
         // `Platform.Terminals.open`.
         guard case .success(let terminal) = Platform.Terminals.open(rows: size.ws_row, cols: size.ws_col) else { return nil }
@@ -38,7 +39,7 @@ public enum PTYSpawn {
 
         // In a session of its own, the terminal its only descriptors (opened by its path, so the launcher's own
         // `makeControlling` takes it), with default signals and an empty mask.
-        var spawn = Platform.Spawn(executable: launcher, arguments: [launcher, "--pty-exec", executable] + args.dropFirst())
+        var spawn = Platform.Spawn(executable: launcher, arguments: [launcher, "--pty-exec"] + launcherFlags + [executable] + args.dropFirst())
         spawn.stdin = .path(terminal.devicePath, flags: Platform.Terminals.launcherOpenFlags)
         spawn.stdout = .sameAsStdin
         spawn.stderr = .sameAsStdin

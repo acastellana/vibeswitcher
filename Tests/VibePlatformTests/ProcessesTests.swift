@@ -795,11 +795,29 @@ struct ProcessesTests {
         #expect(checked > 0, "none of \(threads.count) threads lasted")
     }
 
-    /// The Mac has no token for a pid (an audit token can't be had for another process without privileges), and
-    /// reads no other process's dumpable state.
+    /// A process's link is one read of it: this process's names its parent and terminal as its record does, its token
+    /// names it, and the same pid started at another tick isn't it.
+    @Test(.enabled(if: onLinux, "Linux's /proc; the Mac reads no links"))
+    func aLinkIsItsProcessAsOneReadGivesIt() throws {
+        let link = try #require(Processes.link(getpid()))
+        #expect(link.pid == getpid())
+        #expect(link.parent == getppid())
+        #expect(link.terminal == Processes.kernelRecord(getpid())?.terminal)
+        let token = try #require(Processes.token(getpid()))
+        #expect(link.isProcess(of: token))
+        var later = link
+        later.startTicks += 1
+        #expect(!later.isProcess(of: token))
+        #expect(Processes.link(0) == nil)
+        #expect(Processes.link(-1) == nil)
+    }
+
+    /// The Mac has no token for a pid (an audit token can't be had for another process without privileges), reads
+    /// no other process's dumpable state, and no links.
     @Test(.enabled(if: !onLinux, "the Mac's forms; Linux's are tested above"))
     func thereIsNoTokenForAPidOnTheMac() {
         #expect(Processes.token(getpid()) == nil)
         #expect(Processes.isDumpable(getpid()) == nil)
+        #expect(Processes.link(getpid()) == nil)
     }
 }

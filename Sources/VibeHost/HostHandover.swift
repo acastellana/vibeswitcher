@@ -63,9 +63,25 @@ public enum HostHandover {
         public var secretFD: Int32?
         /// In the order they were started.
         public var sessions: [Session]
+        /// A scratch host's test stand-in for the app on Linux (see `TestAppPrincipal`), carried so the new image
+        /// takes it again. Nil: none (every other host, the Mac's always), and from builds before it.
+        public var testAppConnector: TestAppConnector?
 
         /// Every descriptor the new image must inherit.
-        var descriptors: [Int32] { [lockFD, listenFD] + [secretFD].compactMap { $0 } + sessions.compactMap(\.masterFD) }
+        var descriptors: [Int32] {
+            [lockFD, listenFD] + [secretFD, testAppConnector?.fd].compactMap { $0 } + sessions.compactMap(\.masterFD)
+        }
+    }
+
+    /// The host's end of a test's app connector, and the test process it expects (see `TestAppPrincipal`).
+    public struct TestAppConnector: Codable, Equatable {
+        public var fd: Int32
+        public var pid: Int32
+
+        public init(fd: Int32, pid: Int32) {
+            self.fd = fd
+            self.pid = pid
+        }
     }
 
     public enum Failure: Error, Equatable, CustomStringConvertible {

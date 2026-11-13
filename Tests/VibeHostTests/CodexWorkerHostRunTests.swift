@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -219,7 +218,7 @@ import Testing
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        Platform.Sockets.noSigPipe(input.fileHandleForWriting.fileDescriptor)
         try process.run()
         defer { if process.isRunning { process.terminate() } }
         var buffer = Data()

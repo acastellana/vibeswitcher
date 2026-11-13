@@ -1,3 +1,4 @@
+#if canImport(Darwin)
 import CryptoKit
 import Darwin
 import Foundation
@@ -433,3 +434,4 @@ import Testing
         #expect(Self.agentFilesUnderBuild() == [])
     }
 }
+#endif

@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -27,23 +26,10 @@ import Testing
 
     func sessionLog(_ host: ScratchHostProcess) -> String { (try? String(contentsOfFile: host.sessionLog, encoding: .utf8)) ?? "" }
 
-    /// The parser processes the host runs now (its children started with `--parse-session`).
-    /// Blocking (one `ps`): the conditions `eventually` polls read it.
-    func parsers(of host: pid_t) -> [pid_t] {
-        let ps = Process()
-        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-        ps.arguments = ["-ax", "-o", "pid=,ppid=,command="]
-        let pipe = Pipe()
-        ps.standardOutput = pipe
-        try? ps.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        waitForEnd(ps)
-        return output.split(separator: "\n").compactMap { line in
-            let fields = line.split(separator: " ", maxSplits: 2)
-            guard fields.count == 3, pid_t(fields[1]) == host, fields[2].contains("--parse-session") else { return nil }
-            return pid_t(fields[0])
-        }
-    }
+    /// The parser processes the host runs now (its children started with `--parse-session`), read from the process
+    /// table (`OrphanSweepTests.parsers`), not from a `ps` this process starts: on Linux Foundation didn't always see
+    /// that `ps` end while other tests started processes (2026-11-13: a zombie for 300 s).
+    func parsers(of host: pid_t) -> [pid_t] { OrphanSweepTests.parsers(of: host) }
 
     /// How late each of the clock's lines reached `client`, from when it's called (see `clock`).
     final class Lateness {
@@ -65,7 +51,9 @@ import Testing
         private func received(_ data: Data, at now: TimeInterval) {
             lock.lock()
             defer { lock.unlock() }
-            partial += String(decoding: data, as: UTF8.self)
+            // Without the terminal's carriage returns: "\r\n" is one Character, which Linux's Foundation doesn't split at
+            // "\n" (the Mac's, through NSString, does).
+            partial += String(decoding: data.filter { $0 != 13 }, as: UTF8.self)
             var lines = partial.components(separatedBy: "\n")
             partial = lines.removeLast()
             for line in lines {

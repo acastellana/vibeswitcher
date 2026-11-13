@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -19,7 +18,7 @@ import Testing
 
         /// Takes the connection already made to it (the client's connect returned, so it's in the backlog).
         func accept() {
-            peer = Darwin.accept(listener, nil, nil)
+            peer = Sys.accept(listener, nil, nil)
             _ = fcntl(peer, F_SETFL, fcntl(peer, F_GETFL) & ~O_NONBLOCK)
             var timeout = timeval(tv_sec: Int(hangGuard), tv_usec: 0)
             setsockopt(peer, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
@@ -34,7 +33,7 @@ import Testing
                     if let envelope = try? HostCoding.decode(HostRequestEnvelope.self, from: frame.payload) { got.append(envelope) }
                     continue
                 }
-                let read = Darwin.read(peer, &buffer, buffer.count)
+                let read = Sys.read(peer, &buffer, buffer.count)
                 guard read > 0 else { break }
                 decoder.append(Data(buffer[0..<read]))
             }
@@ -83,7 +82,7 @@ import Testing
             entered.signal()
             // Held as a loaded Mac's kernel holds it; on the caller's queue it isn't (it would hang the test, not fail it).
             if !onCallers { _ = gate.wait(timeout: .now() + hangGuard) }
-            return Darwin.write(fd, bytes, count)
+            return Sys.write(fd, bytes, count)
         }
         host.accept()
         let first = UUID(), second = UUID()
@@ -110,7 +109,7 @@ import Testing
         let full = DispatchSemaphore(value: 0)
         let connection = try HostConnection(path: host.path, queue: queue, appKey: nil) { fd, bytes, count in
             writes.note(onCallersQueue: DispatchQueue.getSpecific(key: Self.callers) == true)
-            let written = Darwin.write(fd, bytes, count)
+            let written = Sys.write(fd, bytes, count)
             let code = errno
             if written < 0, code == EAGAIN { full.signal() }
             errno = code

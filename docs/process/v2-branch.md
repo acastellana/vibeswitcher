@@ -30,8 +30,8 @@ Then both workflows (`v2 linux`, `v2 macos`) are green before anything else join
 Both workflows run for a push to `v2` or by hand, and for nothing else; `scripts/ci/check-workflows.sh` refuses a
 workflow that says otherwise, and the Ubuntu run starts with it.
 
-- **`v2 linux`** (Ubuntu 24.04), two jobs, each the workflow check, the pinned Swift, then `scripts/test.sh` with a
-  filter: `platform` (`VibePlatformTests`) and `core` (`VibeCoreTests|VibeNodeTests`).
+- **`v2 linux`** (Ubuntu 24.04), three jobs, each the workflow check, the pinned Swift, then `scripts/test.sh` with a
+  filter: `platform` (`VibePlatformTests`), `core` (`VibeCoreTests|VibeNodeTests`) and `host` (`VibeHostTests`).
 - **`v2 macos`** (GitHub's hosted Mac), four jobs, each building everything and running its part of the suite through
   `scripts/ci/macos-tests.sh`, without the tests listed, each with its reason, in `scripts/ci/macos-runner-skips.txt`:
   `platform` (`VibePlatformTests`), `core` (`VibeCoreTests|VibeNodeTests`), `host` (`VibeHostTests`) and `app`

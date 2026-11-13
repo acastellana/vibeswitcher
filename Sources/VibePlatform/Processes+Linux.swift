@@ -432,6 +432,17 @@ extension Platform.Processes.System {
         return Platform.PeerToken(pid: pid, uid: uid, startTicks: line.startTicks)
     }
 
+    /// Its one line of stat: parent, start and terminal of the same process.
+    static func link(_ pid: pid_t) -> Platform.Processes.Link? {
+        guard pid > 0, case .line(let line) = statLine(pid) else { return nil }
+        return Platform.Processes.Link(pid: pid, parent: line.ppid, startTicks: line.startTicks,
+                                       terminal: Platform.Terminals.name(device: dev_t(line.terminal)))
+    }
+
+    static func names(_ token: Platform.PeerToken, _ link: Platform.Processes.Link) -> Bool {
+        token.pid == link.pid && token.startTicks == link.startTicks
+    }
+
     /// The owner of its /proc/<pid>/fd, between two reads of its stat that find it neither ending nor a zombie. The
     /// kernel (`task_dump_owner`) gives fd to root while the process is non-dumpable, and also once it has no memory:
     /// a process that ends drops its memory (`exit_mm`) before it is a zombie, so a dumpable one, read then, would

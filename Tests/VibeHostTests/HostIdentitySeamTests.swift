@@ -24,16 +24,28 @@ import Testing
 
     /// Starts `executable 600` with its starter (a shell) ended at once, as a tool server is once its agent ends: its
     /// pid. Its parent is then whatever the kernel gives an orphan of this process.
+    ///
+    /// The starter is started through the platform and waited for by its pid: Foundation's `Process` on Linux tells
+    /// that a child ended by a socket the child inherits, which the orphan would hold for as long as it runs (so the
+    /// starter's end would never be seen).
     static func orphan(_ executable: String) async throws -> pid_t {
-        let starter = Process()
-        starter.executableURL = URL(fileURLWithPath: "/bin/sh")
+        var pipe: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&pipe) == 0)
         // Its output elsewhere: the pipe ends with the shell.
-        starter.arguments = ["-c", "\"$0\" 600 < /dev/null > /dev/null 2>&1 & echo $!", executable]
-        let pipe = Pipe()
-        starter.standardOutput = pipe
-        try starter.run()
-        let output = await offPool { pipe.fileHandleForReading.readDataToEndOfFile() }
-        _ = await offPool { waitForEnd(starter) }
+        var starter = Platform.Spawn(executable: "/bin/sh", arguments: ["/bin/sh", "-c", "\"$0\" 600 < /dev/null > /dev/null 2>&1 & echo $!",
+                                                                       executable])
+        starter.stdin = .path("/dev/null", flags: O_RDONLY)
+        starter.stdout = .descriptor(pipe[1])
+        starter.keep = []
+        let started = starter.start()
+        Sys.close(pipe[1])
+        defer { Sys.close(pipe[0]) }
+        guard case .success(let shell) = started else { throw CancellationError() }
+        let output = await offPool { FileHandle(fileDescriptor: pipe[0], closeOnDealloc: false).readDataToEndOfFile() }
+        await offPool {
+            var status: Int32 = 0
+            while waitpid(shell, &status, 0) < 0, errno == EINTR {}
+        }
         return try #require(pid_t(String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
     }
 
@@ -179,11 +191,12 @@ import Testing
     // MARK: The app's connector (Task 4b2)
 
     /// A host for the connector's tests: a vault, a log, and the test runner as its `appExecutable` (as `TestHost`
-    /// sets it), with no connector but the test's own (Task 5a's stand-in, when it comes, is left out of these).
+    /// sets it), with no connector but the test's own (Task 5a's stand-in left out). The host removes `dir` once
+    /// it has stopped, its log in it written to the last.
     func connectorHost() throws -> (host: TestHost, log: String, dir: String) {
         let dir = try Self.folder()
         let log = dir + "/host.log"
-        return (try TestHost(vault: LeadVault.Book(), log: log), log, dir)
+        return (try TestHost(vault: LeadVault.Book(), log: log, appConnector: false, removing: dir), log, dir)
     }
 
     static func said(_ log: String) -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
@@ -193,7 +206,6 @@ import Testing
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac's app proves itself by its code"))
     func aConnectorConnectionIsTheAppWithNoChallenge() throws {
         let (host, _, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
         let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
         defer {
             host.server.closeAppConnector(connector)
@@ -231,7 +243,6 @@ import Testing
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's rule; the Mac's app proves itself by its code"))
     func noConnectionByPathIsTheAppOnLinux() async throws {
         let (host, _, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
         let connector = try #require(host.server.openAppConnector(expecting: Platform.Processes.token(getpid()), requireNonDumpable: false,
                                                                   onDumpable: nil))
         defer {
@@ -257,12 +268,11 @@ import Testing
         }
     }
 
-    /// A child of the helper the host expects writes the byte: no connection comes back, and the host's log says
-    /// why; the helper's own request is still answered after it.
+    /// A child of the helper the host expects writes the byte, alive while the host reads it: no connection comes
+    /// back, and the host's log names the child; the helper's own request is still answered after it.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
     func aConnectorRequestFromAnotherSenderMakesNoConnection() async throws {
-        let (host, log, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let (host, log, _) = try connectorHost()
         let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
         defer {
             host.server.closeAppConnector(connector)
@@ -273,11 +283,14 @@ import Testing
         let token = try #require(Platform.Processes.token(helper.pid))
         host.server.setAppConnectorSender(token, for: connector)
 
-        #expect(try helper.ask("child-ask") == "sent 0")
-        // The child named, or (ended and reaped before the host read its byte) no one: refused either way.
-        let refusal = "refused an app connection through connector \(connector): a request from "
+        let sent = try helper.ask("child-ask")
+        let child = try #require(sent.hasPrefix("sent ") ? Int32(sent.dropFirst("sent ".count)) : nil, "\(sent)")
+        // The child still runs (it waits for `child-end`), so the host reads a sender it can name: refused for being
+        // another process, not for being gone, which the check on the sender alone would not catch.
+        let refusal = "refused an app connection through connector \(connector): a request from pid \(child), not pid \(helper.pid)"
         #expect(await eventually { Self.said(log).contains(refusal) }, "\(Self.said(log))")
-        #expect(Self.said(log).contains("not pid \(helper.pid)"), "\(Self.said(log))")
+        #expect(!Self.said(log).contains("a sender gone or unnamed"), "\(Self.said(log))")
+        #expect(try helper.ask("child-end") == "ended 0")
         #expect(try helper.ask("pending") == "none")
         #expect(!Self.said(log).contains("app connection made"), "\(Self.said(log))")
         // Its own request, after: answered.
@@ -290,8 +303,7 @@ import Testing
     /// said once in its log, rather than refuse an empty request without end.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
     func aConnectorShutForWritingIsClosed() async throws {
-        let (host, log, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let (host, log, _) = try connectorHost()
         let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
         defer {
             host.server.closeAppConnector(connector)
@@ -320,8 +332,7 @@ import Testing
     /// in the log, and handed to `onDumpable` (the server child's end, Task 8a): no connection is made.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
     func aDumpableSenderGetsNoConnection() async throws {
-        let (host, log, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let (host, log, _) = try connectorHost()
         let lock = NSLock()
         var dumpable: [pid_t] = []
         func ended() -> [pid_t] {
@@ -355,7 +366,7 @@ import Testing
     /// (The plan names a `sessions` request; there is none: `census` is the app-only request that answers at once.)
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
     func aConnectorConnectionHoldsNoRequestForAProof() async throws {
-        let host = try TestHost()
+        let host = try TestHost(appConnector: false)
         let connector = try #require(host.server.openAppConnector(expecting: Platform.Processes.token(getpid()), requireNonDumpable: false,
                                                                   onDumpable: nil))
         HostConnection.register(connector: connector, for: host.socket)
@@ -372,6 +383,98 @@ import Testing
             return
         }
         #expect(!app.hasEvent { if case .challenge = $0 { return true } else { return false } })
+    }
+
+    // MARK: The app's stand-ins in the tests (Task 5a)
+
+    /// Whether `client`'s `census` is answered as the app's (true), refused (false), or not at all in the hang guard
+    /// (nil).
+    static func census(_ client: TestClient) async -> Bool? {
+        let seq = client.send(.census)
+        guard await eventually({ client.reply(to: seq) != nil }) else { return nil }
+        if case .census? = client.reply(to: seq) { return true }
+        return false
+    }
+
+    /// The Mac's in-process test host opens no connector: its app is this process's code proving its key, as always.
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's app proves itself; Linux's stand-in is a connector"))
+    func theMacsTestHostHasNoPrincipal() async throws {
+        let host = try TestHost()
+        #expect(host.appConnector == nil)
+        #expect(HostConnection.connector(for: host.socket) == nil)
+        let app = try TestClient(host)
+        #expect(await Self.census(app) == true)
+        #expect(app.hasEvent { if case .challenge = $0 { return true } else { return false } })
+        #expect(await Self.census(try TestClient(host, asApp: false)) == false)
+    }
+
+    /// Linux's in-process test host opens a connector for this process and registers it for its socket: its app's
+    /// clients go through it and are the app with no challenge; a client by the path, with the app's key or without,
+    /// isn't. A host whose `appExecutable` is another program opens none.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's stand-in; the Mac's app proves itself by its code"))
+    func aLinuxTestHostsAppIsItsConnector() async throws {
+        let host = try TestHost()
+        let connector = try #require(host.appConnector)
+        #expect(HostConnection.connector(for: host.socket) == connector)
+        let app = try TestClient(host)
+        #expect(await Self.census(app) == true)
+        #expect(!app.hasEvent { if case .challenge = $0 { return true } else { return false } })
+        #expect(await Self.census(try TestClient(host, asApp: false)) == false)
+        #expect(await Self.census(try TestClient(socket: host.socket, appKey: host.appKey, viaConnector: false)) == false)
+
+        let other = try TestHost(appExecutable: "/usr/bin/nc")
+        #expect(other.appConnector == nil && HostConnection.connector(for: other.socket) == nil)
+    }
+
+    /// A scratch host started as a process takes this process as its app through the connector it was started with
+    /// (`TestHosts.connectAsApp`), on its stdin: what this process sends through it is the app's, and what it sends
+    /// by the path isn't. The connector is carried across a handover: after one, it still is the app's way in.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's stand-in; the Mac's app proves itself by its code"))
+    func aScratchHostProcessTakesTheTestAsItsAppAcrossAHandover() async throws {
+        let host = try await ScratchHostProcess()
+        defer { host.stop() }
+        #expect(await eventually { host.log.contains("test stand-in for the app: connector ") }, "\(host.log)")
+        let (app, _, build, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        #expect(build == host.oldBuild)
+        #expect(await Self.census(app) == true)
+        #expect(await Self.census(try TestClient(socket: host.socket, appKey: host.appKey, viaConnector: false)) == false)
+
+        let seq = app.send(.handover(executable: host.newBinary))
+        #expect(await eventually { app.reply(to: seq) != nil })
+        #expect(app.reply(to: seq) == .ok, "\(host.log)")
+        #expect(await eventually { host.log.contains("took over") }, "\(host.log)")
+        #expect(host.log.contains("carried over"), "\(host.log)")
+        let (after, _, newBuild, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        #expect(newBuild == host.newBuild)
+        #expect(await Self.census(after) == true)
+        #expect(await Self.census(try TestClient(socket: host.socket, appKey: host.appKey, viaConnector: false)) == false)
+    }
+
+    /// The user's host (here a scratch home's: its lock is that home's own, `~/.vibeswitcher/host.lock`, the one the
+    /// user's host takes by default) refuses the stand-in's flags, saying so, and nothing by its path is the app.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's stand-in; the Mac has none"))
+    func theUsersHostRefusesTheTestStandIn() async throws {
+        let dir = try Self.folder()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let home = dir + "/home", socket = dir + "/h.sock", output = dir + "/host.out"
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: output, contents: nil)
+        let host = Process()
+        host.executableURL = URL(fileURLWithPath: hostLauncher)
+        // Its housekeeping (which, in the user's host, ends orphaned tool servers beside the build) never comes.
+        host.arguments = ["--socket", socket, "--lock", home + "/.vibeswitcher/host.lock", "--idle-exit", "600", "--housekeeping", "3600"]
+        host.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin", "TMPDIR": dir + "/"]
+        let said = try FileHandle(forWritingTo: URL(fileURLWithPath: output))
+        host.standardOutput = said
+        host.standardError = said
+        #expect(try TestHosts.connectAsApp(host))
+        try TestHosts.run(host)
+        defer { TestHosts.end(host) }
+        #expect(await eventually { Self.said(output).contains("vibeswitcher-host: started") }, "\(Self.said(output))")
+        #expect(Self.said(output).contains("refused \(TestAppPrincipal.pidFlag) and \(TestAppPrincipal.connectorFlag)"),
+                "\(Self.said(output))")
+        #expect(!Self.said(output).contains("test stand-in for the app: connector"), "\(Self.said(output))")
+        #expect(await Self.census(try TestClient(socket: socket, appKey: SymmetricKey(size: .bits256), viaConnector: false)) == false)
     }
 
     // MARK: Who may spawn (Task 4b2)

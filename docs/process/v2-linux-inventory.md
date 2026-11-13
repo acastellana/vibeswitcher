@@ -197,3 +197,26 @@ Also measured there:
 Ten at once take 2.1 GB, under a quarter of a GitHub Ubuntu runner's 16 GB (4 GB): the suites that start hosts as
 processes (`ServerChildTests` and the others) needn't run `.serialized` on Linux for the copies' sake. A copy's
 memory is gone when its last descriptor closes.
+
+## The session host's tests on Linux: what differed (2026-11-13)
+
+Measured while sorting `VibeHostTests` on this machine (kernel 5.15.167.4-microsoft-standard-WSL2, Ubuntu 24.04, Swift
+6.4.2), the stage 2 plan's Task 5b. None of these is the Mac's behaviour changing; each is a thing the tests or the
+host took from the Mac:
+
+- **Foundation's file copy doesn't keep the modification date** (swift-corelibs-foundation's `copyItem`: the copy is
+  dated when it was made). The host names its launcher copy by that date (`HostBuild.id`), so a host that went back
+  after a failed handover said it was the newer build. `Platform.Files.copyKeepingModificationDate` sets the date on
+  Linux; the Mac's copy keeps it by itself.
+- **`components(separatedBy: "\n")` doesn't split `"\r\n"`** on Linux's Foundation (one `Character`); the Mac's, through
+  `NSString`, does. A test reading a terminal's lines drops the carriage returns first.
+- **`/bin/sh` is dash**: no function name with a hyphen, no `\x` in `printf`; run with `-i` it doesn't exec a lone
+  command (a session's program stays `sh` over `sleep`; `exec sleep` makes it `sleep`); and a background job's
+  redirections keep a copy of its stdout (fd 10) until they are all made, so a pipe read to its end waits for the
+  job's FIFO to open.
+- **Ubuntu's `nc` (OpenBSD's with Debian's patches) keeps the connection after its input ends** until the far end
+  closes it; the host doesn't close a client that hasn't hung up. The tests pass `-N` there.
+- **Foundation's `Process` didn't see a child end while a process the child started still held what it had inherited**
+  (a starter `sh` a zombie with `isRunning` true for 300 s, its background job holding a socket of the test process's).
+  Tests that start a process which leaves another behind use `Platform.Spawn` and `waitpid`.
+- **No `plutil`**: the fake `claude` of `WorkerToolsTests` reads its config with `python3` where `plutil` is missing.

@@ -1,6 +1,6 @@
-import Darwin
 import Foundation
 import Testing
+import VibeCore
 @testable import VibeHost
 
 /// The host's housekeeping ends what outlived what it served: a tool server (vibeswitcher-mcp beside the host) whose
@@ -9,19 +9,43 @@ import Testing
 /// looks twice a second, told to end tool servers (only the user's own host does unasked).
 @Suite(hostTestLimit) struct OrphanSweepTests {
     /// Starts `executable` reading `input` (a FIFO) with launchd as its parent (its starter exits at once), as a tool
-    /// server is once its agent ends: its pid. The caller opens `input` for writing (which lets it start) and keeps it
-    /// open, so it waits on its input as a tool server does.
-    static func orphan(_ executable: String, input: String) throws -> pid_t {
-        let starter = Process()
-        starter.executableURL = URL(fileURLWithPath: "/bin/sh")
-        // Its output first: while it waits on the FIFO it mustn't hold this pipe (read to its end below).
-        starter.arguments = ["-c", "\"$0\" > /dev/null 2>&1 < \"$1\" & echo $!", executable, input]
-        let pipe = Pipe()
-        starter.standardOutput = pipe
-        try starter.run()
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        waitForEnd(starter)
-        return try #require(pid_t(String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
+    /// server is once its agent ends: its pid, and `input` opened for writing (which lets it start). The caller keeps
+    /// that open, so it waits on its input as a tool server does.
+    ///
+    /// The starter is the platform's spawn, which hands it nothing of this process's but its stdout, and is waited
+    /// for by pid. Started with Foundation's `Process`, on Linux its end wasn't seen while the job ran (2026-11-13: the
+    /// starter a zombie, `isRunning` still true for 300 s, the job and then the tool server holding a socket they
+    /// inherited from this process). Its line is read, not the pipe to its end: dash (Ubuntu's /bin/sh) keeps a copy
+    /// of the job's stdout (on fd 10, to restore after its redirections) until the job has opened the FIFO.
+    static func orphan(_ executable: String, input: String) async throws -> (pid: pid_t, writer: FileHandle) {
+        var pipe: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&pipe) == 0)
+        var starter = Platform.Spawn(executable: "/bin/sh", arguments: ["/bin/sh", "-c", "\"$0\" > /dev/null 2>&1 < \"$1\" & echo $!",
+                                                                       executable, input])
+        starter.stdin = .path("/dev/null", flags: O_RDONLY)
+        starter.stdout = .descriptor(pipe[1])
+        starter.keep = []
+        let started = starter.start()
+        Sys.close(pipe[1])
+        defer { Sys.close(pipe[0]) }
+        guard case .success(let shell) = started else { throw CancellationError() }
+        let output = await offPool { () -> Data in
+            let reading = FileHandle(fileDescriptor: pipe[0], closeOnDealloc: false)
+            var output = Data()
+            while !output.contains(UInt8(ascii: "\n")) {
+                let chunk = reading.availableData
+                guard !chunk.isEmpty else { break }
+                output.append(chunk)
+            }
+            return output
+        }
+        let pid = try #require(pid_t(String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
+        let writer = try await offPool { try FileHandle(forWritingTo: URL(fileURLWithPath: input)) }
+        await offPool {
+            var status: Int32 = 0
+            while waitpid(shell, &status, 0) < 0, errno == EINTR {}
+        }
+        return (pid, writer)
     }
 
     /// A FIFO in `folder`, and its write end (opened once the reader is there).
@@ -32,10 +56,8 @@ import Testing
     }
 
     static func parent(of pid: pid_t) -> pid_t? {
-        var short = proc_bsdshortinfo()
-        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size else { return nil }
-        return pid_t(short.pbsi_ppid)
+        guard case .brief(let brief) = Platform.Processes.brief(pid) else { return nil }
+        return brief.ppid
     }
 
     static func alive(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 }
@@ -69,13 +91,11 @@ import Testing
         let toolServer = host.dir + "/old/vibeswitcher-mcp"
         try FileManager.default.copyItem(atPath: built, toPath: toolServer)
         let input = Self.fifo(in: host.dir, "orphan-input")
-        let orphaned = try await Self.orphan(toolServer, input: input)
-        let writer = try FileHandle(forWritingTo: URL(fileURLWithPath: input))
+        let (orphaned, writer) = try await Self.orphan(toolServer, input: input)
         defer { try? writer.close() }
         // Another build's, left to launchd too: not this host's to end.
         let otherInput = Self.fifo(in: host.dir, "other-input")
-        let other = try await Self.orphan(built, input: otherInput)
-        let otherWriter = try FileHandle(forWritingTo: URL(fileURLWithPath: otherInput))
+        let (other, otherWriter) = try await Self.orphan(built, input: otherInput)
         defer {
             kill(other, SIGKILL)
             try? otherWriter.close()
@@ -104,7 +124,8 @@ import Testing
         // A few more looks: the others stay.
         await pause(2)
         #expect(served.isRunning && switched.isRunning && Self.parent(of: switched.processIdentifier) == getpid())
-        #expect(Self.alive(other) && Self.parent(of: other) == 1, "\(notes())")
+        // Its parent is the one an orphan gets: launchd on the Mac, the user's systemd here (`orphanParents`).
+        #expect(Self.alive(other) && Self.parent(of: other).map(HostProcesses.orphanParents.contains) == true, "\(notes())")
         for kept in [served.processIdentifier, switched.processIdentifier, other] { #expect(!notes().contains("pid \(kept)"), "\(notes())") }
     }
 
@@ -116,8 +137,7 @@ import Testing
         let toolServer = host.dir + "/old/vibeswitcher-mcp"
         try FileManager.default.copyItem(atPath: built, toPath: toolServer)
         let input = Self.fifo(in: host.dir, "orphan-input")
-        let orphaned = try await Self.orphan(toolServer, input: input)
-        let writer = try FileHandle(forWritingTo: URL(fileURLWithPath: input))
+        let (orphaned, writer) = try await Self.orphan(toolServer, input: input)
         defer {
             kill(orphaned, SIGKILL)
             try? writer.close()
@@ -133,8 +153,8 @@ import Testing
     /// What the housekeeping takes for a parser: `launcher --parse-session`, not a session's program or anything else.
     @Test func aParserIsToldFromOtherChildren() async throws {
         var pair: [Int32] = [-1, -1]
-        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
-        defer { pair.forEach { Darwin.close($0) } }
+        #expect(socketpair(AF_UNIX, Platform.Sockets.stream, 0, &pair) == 0)
+        defer { pair.forEach { Sys.close($0) } }
         let parser = Process()
         parser.executableURL = URL(fileURLWithPath: hostLauncher)
         parser.arguments = ["--parse-session", "80", "24"]
@@ -186,9 +206,12 @@ import Testing
             writers.forEach { try? $0.close() }
         }
         let orphanInput = Self.fifo(in: dir, "orphan-input"), otherInput = Self.fifo(in: dir, "other-input")
-        let orphaned = try await Self.orphan(toolServer, input: orphanInput), other = try await Self.orphan(Self.built, input: otherInput)
-        ended += [orphaned, other]
-        writers += [try FileHandle(forWritingTo: URL(fileURLWithPath: orphanInput)), try FileHandle(forWritingTo: URL(fileURLWithPath: otherInput))]
+        let (orphaned, orphanWriter) = try await Self.orphan(toolServer, input: orphanInput)
+        ended.append(orphaned)
+        writers.append(orphanWriter)
+        let (other, otherWriter) = try await Self.orphan(Self.built, input: otherInput)
+        ended.append(other)
+        writers.append(otherWriter)
         let served = Process()
         served.executableURL = URL(fileURLWithPath: toolServer)
         served.standardInput = Pipe()

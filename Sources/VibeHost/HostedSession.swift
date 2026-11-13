@@ -15,6 +15,11 @@ public final class HostedSession {
 
     public private(set) var info: HostSession
     public var id: UUID { info.id }
+    /// Its program's token (pid and start ticks), read at spawn and again on restore: what `session(of:)` matches on
+    /// Linux. Nil on the Mac (see `SessionIdentityChecks`).
+    var programToken: Platform.PeerToken?
+    /// Whether it still counts as live to who a process is, on Linux (see `SessionIdentityChecks.holdsIdentity`).
+    var holdsIdentity: Bool { SessionIdentityChecks.holdsIdentity(isLive: info.isLive, closed: closed, master: masterFD, program: info.childPID) }
     /// Each chunk the program printed.
     public var onOutput: ((Data) -> Void)?
     /// Title, size or exit changed.
@@ -133,15 +138,18 @@ public final class HostedSession {
 
     /// `launcher`: an executable that handles `--pty-exec` (see `PTYSpawn`) and `--parse-session` (see `SessionParser`),
     /// normally the host itself.
+    /// `launcherTestDelay`: see `HostServer.Config.launcherTestDelay`.
     public static func spawn(_ request: SpawnRequest, shell: String, launcher: String, baseEnvironment: [String: String],
-                             ringCapacity: Int, queue: DispatchQueue, parser: ParserOptions = ParserOptions()) throws -> HostedSession {
+                             ringCapacity: Int, queue: DispatchQueue, parser: ParserOptions = ParserOptions(),
+                             launcherTestDelay: TimeInterval? = nil) throws -> HostedSession {
         try spawn(request, shell: shell, launcher: launcher, baseEnvironment: baseEnvironment, ringCapacity: ringCapacity, queue: queue,
-                  parser: parser, timers: .dispatch)
+                  parser: parser, timers: .dispatch, launcherTestDelay: launcherTestDelay)
     }
 
     /// `timers`: a test's, on its own clock (see `SessionTimers`).
     static func spawn(_ request: SpawnRequest, shell: String, launcher: String, baseEnvironment: [String: String],
-                      ringCapacity: Int, queue: DispatchQueue, parser: ParserOptions, timers: SessionTimers) throws -> HostedSession {
+                      ringCapacity: Int, queue: DispatchQueue, parser: ParserOptions, timers: SessionTimers,
+                      launcherTestDelay: TimeInterval? = nil) throws -> HostedSession {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: request.cwd, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw Failure.noSuchFolder(request.cwd)
@@ -153,12 +161,12 @@ public final class HostedSession {
         let env = environment(base: baseEnvironment, extra: request.env, id: id)
         var code: Int32 = 0
         guard let child = PTYSpawn.spawn(launcher: launcher, executable: shell, args: args, env: env, directory: request.cwd, size: &size,
-                                         failure: &code) else {
+                                         failure: &code, launcherFlags: SessionIdentityChecks.launcherFlags(testDelay: launcherTestDelay)) else {
             throw code == 0 ? Failure.spawnFailed : Failure.couldntStart(LaunchPreflight.couldntStart(launcher, in: request.cwd, code: code))
         }
         // ptsname_r: ptsname's buffer is shared between threads, and sessions start from several at once.
         let name = Platform.Terminals.devicePath(master: child.masterFD) ?? ""
-        let tty = name.hasPrefix("/dev/") ? String(name.dropFirst(5)) : name
+        let tty = Platform.Terminals.name(devicePath: name)
         _ = fcntl(child.masterFD, F_SETFL, fcntl(child.masterFD, F_GETFL) | O_NONBLOCK)
         // Not inherited by sessions started later: another session holding this PTY open would keep it alive.
         _ = fcntl(child.masterFD, F_SETFD, FD_CLOEXEC)
@@ -167,6 +175,7 @@ public final class HostedSession {
                                cols: cols, rows: rows, exit: nil)
         let session = HostedSession(info: info, masterFD: child.masterFD, queue: queue, ringCapacity: ringCapacity, launcher: launcher,
                                     parser: parser, timers: timers)
+        session.programToken = SessionIdentityChecks.programStarted(child.pid)
         session.startParser(replay: Data())
         session.start()
         return session
@@ -190,6 +199,7 @@ public final class HostedSession {
         let fd = saved.masterFD.flatMap { HostHandover.isOpen($0) ? $0 : nil }
         if fd == nil, saved.masterFD != nil, info.isLive { info.exit = .init(status: -1, at: Date()) }
         let session = HostedSession(info: info, masterFD: fd ?? -1, queue: queue, ringCapacity: ringCapacity, launcher: launcher, parser: parser)
+        if fd != nil, info.isLive { session.programToken = SessionIdentityChecks.programRestored(info.childPID) }
         if let ended = saved.ended {
             // Released already: only its last screen.
             session.ended = (ended.screen, ended.runs, ended.history)

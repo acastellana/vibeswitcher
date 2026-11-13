@@ -1,3 +1,4 @@
+#if canImport(Darwin)
 import Darwin
 import Foundation
 import Testing
@@ -31,3 +32,4 @@ struct AppCodeTests {
         #expect(!AppCode.runs(token, executable: hostLauncher))
     }
 }
+#endif

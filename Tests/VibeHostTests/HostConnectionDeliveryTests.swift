@@ -1,5 +1,3 @@
-import CryptoKit
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -214,7 +212,7 @@ import Testing
         let allDecoded = DispatchSemaphore(value: 0)
         let burst = screens(1_000, of: UUID())
         // A bound none of it reaches, however many reads it comes in: here the reader mustn't stop.
-        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) },
+        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Sys.write($0, $1, $2) },
                                             backlog: .init(bytes: 64 << 20, batches: 1 << 20)) { tap in
             guard case .decoded = tap else { return }
             if DispatchQueue.getSpecific(key: Self.callers) == true { _ = decodedOnCallers.add() }
@@ -243,7 +241,7 @@ import Testing
         let queue = callersQueue()
         let log = Log()
         let ended = DispatchSemaphore(value: 0)
-        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) }) { tap in
+        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Sys.write($0, $1, $2) }) { tap in
             if case .ended = tap { ended.signal() }
         }
         watch(connection, on: queue, log: log)
@@ -311,7 +309,7 @@ import Testing
         let decoded = Counter()
         let burst = flood(of: UUID())
         let frames = try burst.map(frame)
-        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) },
+        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Sys.write($0, $1, $2) },
                                             backlog: Self.smallBacklog) { tap in
             switch tap {
             case .decoded: _ = decoded.add()
@@ -357,14 +355,13 @@ import Testing
         let log = Log()
         let paused = DispatchSemaphore(value: 0)
         let frames = try flood(of: UUID()).map(frame)
-        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) },
+        let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Sys.write($0, $1, $2) },
                                             backlog: Self.smallBacklog) { tap in
             if case .paused = tap { paused.signal() }
         }
         watch(connection, on: queue, log: log)
         host.accept()
-        var on: Int32 = 1
-        setsockopt(host.peer, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        Platform.Sockets.noSigPipe(socket: host.peer)
         let release = DispatchSemaphore(value: 0)
         await hold(queue, until: release) { connection.close() }
         let written = DispatchSemaphore(value: 0)
@@ -389,15 +386,14 @@ import Testing
         let log = Log()
         let paused = DispatchSemaphore(value: 0)
         let frames = try flood(of: UUID()).map(frame)
-        var connection: HostConnection? = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Darwin.write($0, $1, $2) },
+        var connection: HostConnection? = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { Sys.write($0, $1, $2) },
                                                              backlog: Self.smallBacklog) { tap in
             if case .paused = tap { paused.signal() }
         }
         weak var freed = connection
         watch(connection!, on: queue, log: log)
         host.accept()
-        var on: Int32 = 1
-        setsockopt(host.peer, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        Platform.Sockets.noSigPipe(socket: host.peer)
         let release = DispatchSemaphore(value: 0)
         await hold(queue, until: release)
         let written = DispatchSemaphore(value: 0)
@@ -426,7 +422,7 @@ extension HostConnectionWriteTests.StandIn {
         return bytes.withUnsafeBytes { buffer -> Bool in
             var offset = 0
             while offset < buffer.count {
-                let written = Darwin.write(peer, buffer.baseAddress! + offset, buffer.count - offset)
+                let written = Sys.write(peer, buffer.baseAddress! + offset, buffer.count - offset)
                 if written < 0, errno == EINTR { continue }
                 guard written > 0 else { return false }
                 offset += written
@@ -436,5 +432,5 @@ extension HostConnectionWriteTests.StandIn {
     }
 
     /// The end of what the host sends: the connection reads to its end.
-    func hangUp() { shutdown(peer, SHUT_WR) }
+    func hangUp() { shutdown(peer, Int32(SHUT_WR)) }
 }

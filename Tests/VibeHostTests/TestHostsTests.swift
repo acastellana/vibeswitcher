@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -33,6 +32,10 @@ import Testing
     /// Whether `pid` is a process at all (a zombie counts: not yet reaped).
     func exists(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 || errno == EPERM }
 
+    /// `keepRunning` as the session's program itself, so that it's "sleep" once running: the Mac's /bin/sh (bash) execs
+    /// a lone command by itself, Ubuntu's (dash) run with `-i` stays a shell over it.
+    let execKeepRunning = "exec " + keepRunning
+
     /// A test that fails with its host still running and live sessions on it, never stopping it: the host goes.
     @Test func aFailingTestsHostIsEnded() async throws {
         var pid: pid_t = 0, dir = "", session: pid_t = 0
@@ -43,7 +46,7 @@ import Testing
             pid = host.pid
             dir = host.dir
             let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
-            session = try await client.spawn(keepRunning).childPID
+            session = try await client.spawn(execKeepRunning).childPID
             // Running on its terminal (a session the host leaves before it has one never sees it hang up).
             #expect(await eventually { (ProcessTable.info(pid: session)?.comm ?? "") == "sleep" })
             #expect(exists(pid) && TestHosts.running.contains(pid))
@@ -105,7 +108,7 @@ import Testing
         try TestHosts.run(host, owner: runner.processIdentifier)
         #expect(await eventually { FileManager.default.fileExists(atPath: socket) })
         let client = try TestClient(socket: socket, appKey: key)
-        let session = try await client.spawn(keepRunning)
+        let session = try await client.spawn(execKeepRunning)
         // Its program running: one still starting (a fresh launcher copy waits on its first exec on a busy Mac) has no
         // terminal yet, so the hangup when its host dies never reaches it.
         #expect(await eventually { (ProcessTable.info(pid: session.childPID)?.comm ?? "") == "sleep" })
@@ -119,12 +122,11 @@ import Testing
         #expect(await eventually(timeout: 30) { !exists(session.childPID) })
     }
 
-    /// Waits for `pid`'s exit (any process, not only a child: a kqueue watch), up to `timeout`. True once it's gone.
+    /// Waits for `pid`'s exit (any process, not only a child: the platform's watch), up to `timeout`. True once it's
+    /// gone.
     func waitForExit(of pid: pid_t, timeout: TimeInterval) async -> Bool {
         let gone = DispatchSemaphore(value: 0)
-        let watch = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global())
-        watch.setEventHandler { gone.signal() }
-        watch.resume()
+        let watch = Platform.ProcessExit.watch(pid, queue: .global()) { gone.signal() }
         defer { watch.cancel() }
         // Gone before the watch began: no exit comes.
         if kill(pid, 0) != 0, errno == ESRCH { return true }
@@ -155,7 +157,7 @@ import Testing
         #expect(await eventually { connected = try? TestClient(socket: socket, appKey: key); return connected != nil })
         let client = try #require(connected)
         var sessions: [pid_t] = []
-        for _ in 0..<2 { sessions.append(try await client.spawn(keepRunning).childPID) }
+        for _ in 0..<2 { sessions.append(try await client.spawn(execKeepRunning).childPID) }
         #expect(await eventually { sessions.allSatisfy { (ProcessTable.info(pid: $0)?.comm ?? "") == "sleep" } })
         #expect(host.isRunning)
         kill(bench.processIdentifier, SIGKILL)

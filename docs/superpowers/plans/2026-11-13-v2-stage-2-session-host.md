@@ -92,8 +92,11 @@ errors in 8 of 13 files), `docs/process/v2-stage1-recon.md` §1.2, §1.7, §1.9 
   6. a field added to a `Codable` record as an optional, so the format number stays and older builds still read it;
   7. a `HostRequest` kind with its `HostProtocol.Capability`, sent only to a host whose welcome lists it (Task 8b's
      `hostNotes`, the only one this plan expects).
+  8. a member of `HostServer` made `internal` from `private`, so a `V2/` file in the same module can call it rather
+     than copy it (added 2026-11-13 after Task 7 needed `log(_:)` and `updateAttachment(_:)`; Task 5a's
+     `handoverState` argument is kind 4).
 
-  Kinds 4 to 7 each get a line in `docs/process/v2-port-map.md`'s Non-seam edits: file, line, why, merge cost. The
+  Kinds 4 to 8 each get a line in `docs/process/v2-port-map.md`'s Non-seam edits: file, line, why, merge cost. The
   ones this plan expects are listed in its tasks; an executor who needs another stops and asks.
 - **No behaviour change on the Mac.** Every Darwin form is the old body moved. Where Linux gains something (the
   connector, the server child, hardening, sealed images, the handover through sealed memory, the spawn rules), the
@@ -737,7 +740,7 @@ whose Mac form stays `pipe` then `fcntl`). Test: `Tests/VibeCoreTests/CloseOnExe
 `docs/guide/development.md`); `HostServerTests.aSpawnDuringAnAcceptInheritsNoConnection` (in
 `Tests/VibeHostTests/HostServerTests.swift`, run on the Mac now and on Linux from 5a).
 
-- [ ] **Step 1: Switch each site, mechanically.**
+- [x] **Step 1: Switch each site, mechanically.**
   - `PTYSpawn.spawn` onto `Platform.Terminals.open` and `Platform.Spawn` (stdin `.path(devicePath, flags:
     Platform.Terminals.launcherOpenFlags)`, stdout and stderr `.sameAsStdin`, group `.ownSession`, directory,
     environment, `keep: []` stated; the slave closed once `start()` returns). `execIfLaunched` uses `Platform.Terminals.makeControlling(0)`, its result still
@@ -760,7 +763,7 @@ whose Mac form stays `pipe` then `fcntl`). Test: `Tests/VibeCoreTests/CloseOnExe
     `Sys.pipeClosedOnExec`; `HostStart`'s `open("/dev/null", O_RDONLY)` takes `O_CLOEXEC`; `SecretChannel`'s
     `socketpair` becomes `Platform.Sockets.pair`, its `SO_SNDBUF` rule unchanged (the Mac's channel; on Linux it goes
     in 9c); the `VibePlatform` pipes above become `Sys.pipeClosedOnExec`.
-- [ ] **Step 2: The lint and the race test.**
+- [x] **Step 2: The lint and the race test.**
   - `CloseOnExecLintTests.noBareSocketAcceptOrOpen`, matching calls, not substrings: a name at a word boundary not
     preceded by `.` (so `ChaChaPoly.open(` and `posix_spawn_file_actions_addopen(`, which opens in the child, aren't
     matched). In `Sources/VibeHost`, `Sources/vibeswitcher-host`, `Sources/VibeCore/UnixSocket.swift` and, once it
@@ -785,7 +788,7 @@ whose Mac form stays `pipe` then `fcntl`). Test: `Tests/VibeCoreTests/CloseOnExe
     matters for a spawn on another thread. It is shown failing (in 5a, where it first runs on Linux) only with
     `PTYSpawn`'s `keep` made nil and the connections left open on exec (the accept made with plain `accept`, and
     no `FD_CLOEXEC` in `configure`); either guard alone holds it, which is why the lints carry both rules.
-- [ ] **Step 3:** push; the Mac's host and app jobs green (`VibeHostTests` there exercise each site); commit ("v2: the
+- [x] **Step 3:** push; the Mac's host and app jobs green (`VibeHostTests` there exercise each site); commit ("v2: the
   host's terminals, spawns and exit watches through the platform; descriptors close-on-exec from creation").
 
 #### Task 4b1: The server's peers, identity and orphans
@@ -813,7 +816,7 @@ whose Mac form stays `pipe` then `fcntl`). Test: `Tests/VibeCoreTests/CloseOnExe
   `/bin/sh -c 'sleep 30 & echo $!'` through `Platform.Spawn`, reads the pid, waits for the shell, reads that pid's
   parent from `Platform.Processes.record`, and ends it. Non-seam edit.
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `theMacsAppIsStillTheCdhashCheck` (Mac): a `Config` with only `appExecutable` set; the app's code answering the
     challenge with the key is `.app`; another process is refused `proveApp`.
   - `anOrphanedToolServerIsFoundOnLinux` (Linux): a tool-server stand-in whose parent ended is listed by
@@ -821,10 +824,10 @@ whose Mac form stays `pipe` then `fcntl`). Test: `Tests/VibeCoreTests/CloseOnExe
     pid 1: the subreaper depends on where the tests run).
   - `aLiveToolServerWhoseParentIsTheTestIsNotAnOrphan` (Linux): a stand-in that is the test process's child, with
     the test process among the scratch host's ancestors, isn't listed.
-- [ ] **Step 2: Switch the sites.** `audit_token_t` to `Platform.PeerToken` (lines 13 and 663); `watch(owner:)`
+- [x] **Step 2: Switch the sites.** `audit_token_t` to `Platform.PeerToken` (lines 13 and 663); `watch(owner:)`
   (line 197) to `ProcessExit.watch`, kept; `executable(of:)` (691) forwards; the `HostProcesses` reads (944-960) to
   `Platform.Processes.record`, and `orphans(running:)` over every member of `orphanParents`.
-- [ ] **Step 3:** push; the Mac's host job green, and its **app job** green with the eleven app test files unchanged:
+- [x] **Step 3:** push; the Mac's host job green, and its **app job** green with the eleven app test files unchanged:
   that is the proof the Mac's app identity is intact; commit ("v2: the host's peers and identity through the platform").
 
 #### Task 4b2: The app's connector, and who may spawn
@@ -870,7 +873,7 @@ The host's and the client's halves of S2-D1's connector, before any server child
   `.app` and for a live session the vault binds to the lead role. `main.swift` sets it for the user's host on Linux
   (Task 4c).
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `HostIdentitySeamTests.aConnectorConnectionIsTheAppWithNoChallenge` (Linux): a scratch host built without
     `TestHost`'s stand-in opens a connector expecting a helper's token; the helper asks for a connection, sends
     `hello` and an app-only request (`census`, a `vault .issue(role: .lead, …)` on a scratch repository): its first
@@ -888,8 +891,8 @@ The host's and the client's halves of S2-D1's connector, before any server child
   - `HostIdentitySeamTests.aConnectorConnectionHoldsNoRequestForAProof` (Linux; it needs a host, so it lives in
     `VibeHostTests` and first runs in 5a): through a connector, with an app key given and no `hello` sent, a
     `sessions` request is answered.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; the Mac's host and app jobs green; commit ("v2: the app's connector on Linux, and spawn only
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; the Mac's host and app jobs green; commit ("v2: the app's connector on Linux, and spawn only
   from the app and a lead where told").
 
 #### Task 4c: The handover, the vault and the host's main
@@ -905,15 +908,15 @@ The host's and the client's halves of S2-D1's connector, before any server child
 - Create: `Sources/VibePlatform/Keychain.swift`, `Keychain+Darwin.swift` (the `SecItem` bodies of
   `VaultStorage.swift` 122-149, moved), `Keychain+Linux.swift`
 
-- [ ] **Step 1: Switch.** `HostHandover.probe` uses `Platform.Spawn` with stdout `.descriptor` of the
+- [x] **Step 1: Switch.** `HostHandover.probe` uses `Platform.Spawn` with stdout `.descriptor` of the
   `Sys.pipeClosedOnExec` pipe and `keep: []`; `exec` uses `Platform.Spawn(keep:).replaceProcess()`.
   `VaultStorage.keychainKey()` and `removeKeychainKey` forward to `Platform.Keychain`. `main.swift`'s `sigaction` line
   through `Platform.Signals`; `config.spawnNeedsLead = ownsLaunchers && !Platform.CodeIdentity.isAvailable` (Non-seam
   edit).
-- [ ] **Step 2: Build.** `swift build --build-system native` on Linux builds every portable target, `VibeHost` and
+- [x] **Step 2: Build.** `swift build --build-system native` on Linux builds every portable target, `VibeHost` and
   `vibeswitcher-host` included; `linux-core-errors.sh` reports 0; the lint's pending list is empty. Each Non-seam edit
   of Task 4 is in the port map.
-- [ ] **Step 3:** push; the Mac's host and app jobs green; commit ("v2: the session host builds on Linux").
+- [x] **Step 3:** push; the Mac's host and app jobs green; commit ("v2: the session host builds on Linux").
 
 **Done when** (Task 4): both systems build everything, `bash scripts/test.sh` on Linux is as green as before, the
 close-on-exec lint passes, and the Mac's host and app jobs are green.
@@ -934,12 +937,12 @@ create `Tests/VibeHostTests/MacOnlyTests.txt`; `Tests/VibePlatformTests/MacOnlyT
 `.github/workflows/v2-linux.yml` (a `host` job, 90 minutes); `Sources/vibeswitcher-host/main.swift` and
 `Sources/VibeHost/V2/TestAppPrincipal.swift` (the scratch host's stand-in).
 
-- [ ] **Step 1: Compile.** The 30 test files that import Darwin get the smallest change that compiles:
+- [x] **Step 1: Compile.** The 30 test files that import Darwin get the smallest change that compiles:
   `EndedSessionTests` uses `Platform.Processes.openDescriptorCount`; `HostStopReapsTests` uses
   `Platform.Processes.record`; `TestHostsTests` uses `Platform.ProcessExit`; `HostHandoverTests` uses
   `Platform.Processes.executable`; a test that runs `/bin/zsh` takes `Platform.Tools.loginShell`. Listed Mac-only with
   reasons: `AppCodeTests` (cdhash), `ParserCostTests` (`/usr/bin/footprint`), `UpgradeFromLeadHostTests` (`xcrun`).
-- [ ] **Step 2: The app's stand-ins on Linux.**
+- [x] **Step 2: The app's stand-ins on Linux.**
   - **In-process hosts.** On Linux, a `TestHost` whose `appExecutable` is the default (the test runner) opens an app
     connector expecting the test process's token, with `requireNonDumpable: false` (the test process is dumpable,
     Global Constraints), and registers it for its socket (`HostConnection.register`, unregistered in `deinit`).
@@ -972,10 +975,10 @@ create `Tests/VibeHostTests/MacOnlyTests.txt`; `Tests/VibePlatformTests/MacOnlyT
     user's host) with `--test-app-pid` of its own pid and `--test-app-connector 3` (a pipe on that number), and is
     refused every app-only request.
   - Each of the 29 files that use `TestHost` is checked, not assumed.
-- [ ] **Step 3: The home guard** in its Linux form (`.init_array`, SIGPIPE ignored), as in the other test targets.
-- [ ] **Step 4: 4a's, 4b1's and 4b2's Linux tests run**, each shown failing by reverting its change (4a's race test
+- [x] **Step 3: The home guard** in its Linux form (`.init_array`, SIGPIPE ignored), as in the other test targets.
+- [x] **Step 4: 4a's, 4b1's and 4b2's Linux tests run**, each shown failing by reverting its change (4a's race test
   as 4a says: `keep` made nil, a plain `accept`, and no `FD_CLOEXEC` in `configure`).
-- [ ] **Step 5:** push; the new Linux `host` job runs; commit ("v2: VibeHostTests build on Linux, with the app's
+- [x] **Step 5:** push; the new Linux `host` job runs; commit ("v2: VibeHostTests build on Linux, with the app's
   stand-ins as connectors").
 
 #### Task 5b: Run and sort, and the audit
@@ -987,25 +990,25 @@ be misread as "the test assumes the Mac" or counted toward the tenth.
 **Files:** `Tests/VibeHostTests/` as found; `Tests/VibeHostTests/MacOnlyTests.txt`;
 `Tests/VibeHostTests/SecurityHardeningTests.swift` (the `HostSecurityHardeningTests` suite); `scripts/test.sh`.
 
-- [ ] **Step 1: Run and sort**, after Task 6a, in stage 1's order (the platform wrong; the test assumes the Mac; the
+- [x] **Step 1: Run and sort**, after Task 6a, in stage 1's order (the platform wrong; the test assumes the Mac; the
   Mac's own). Stop and report if more than a tenth of the 55 files (five) would be listed whole or wrapped by `#if`
   **beyond the ones this plan already lists** (`AppCodeTests`, `ParserCostTests`, `UpgradeFromLeadHostTests`); tests
   listed by name (5a's app-key cases) are counted apart, each with its reason, and this plan's own Mac-only and
   Linux-only tests use runtime traits (Global Constraints), so they list nothing. Stop too if a failure shows a change
   in the Mac's behaviour. `HostHandoverStateTests` (the state file, the secret channel) run on
   Linux against today's file and channel until Task 9c lists their file and channel cases Mac-only.
-- [ ] **Step 2: An unknown process's vault requests.**
+- [x] **Step 2: An unknown process's vault requests.**
   `HostSecurityHardeningTests.anUnknownProcessGetsOnlyTheVaultsOpenReads` (both): a process in no session, by path,
   gets answers to the vault's reads that check no caller (`current`, `verdict`, `audits`, `ballots`, `head`,
   `guarded`, `reviewFloor`, `approved`, `unaudited`, `startedOver`, `verify`, `verifyWalletRequests`) and is refused
   every other vault request (`issue`, `bind`, `seal`, `setReviewFloor`, `approve`, `submitVerdict`, …), each by the
   vault's own check (the document, Principals).
-- [ ] **Step 3: The audit.** `Tests/SecurityAudit/host-access.test.mjs` runs on Linux unchanged: a fresh
+- [x] **Step 3: The audit.** `Tests/SecurityAudit/host-access.test.mjs` runs on Linux unchanged: a fresh
   `--app-executable` still grants nothing (lines 63-83). `library-injection.test.mjs` tests the Mac's Hardened Runtime:
   `scripts/test.sh` skips it on Linux, saying so; on Linux the unit's `UnsetEnvironment=` and the static build hold
   that line for the host's start (the document's S9, T27; the bootstrap path, step 8). The audit's Linux case for the
   server child is Task 8a's.
-- [ ] **Step 4:** push; both green; commit ("v2: VibeHostTests and the host audit pass on Linux").
+- [x] **Step 4:** push; both green; commit ("v2: VibeHostTests and the host audit pass on Linux").
 
 **Done when:** `bash scripts/test.sh --filter VibeHostTests` and the audit are green on Ubuntu with every skip listed,
 and the `v2 linux` host job is green.
@@ -1021,7 +1024,7 @@ The bug: `HostedSession.spawn` names the terminal `pts/3` on Linux (`ptsname_r`'
 terminal fails without an error: `session(of:)`'s terminal fallback, `VibePaths.stateFile(tty:)` (which would even
 write `state/pts/3.json`), the steer inbox, `HostRuntime.steer`, `LeadAgent.running(on:)`.
 
-- [ ] **Step 1: Failing tests** (Linux; run on the Mac too, where they pass):
+- [x] **Step 1: Failing tests** (Linux; run on the Mac too, where they pass):
   - `aSessionsTerminalIsTheTablesName`: a scratch host spawns `sleep 30`; `HostSession.tty` equals
     `ProcessTable.info(pid:)?.tty` of the program, and starts `ttypts` on Linux.
   - `aProcessOnTheSessionsTerminalIsThatSessions`: a second process on that terminal is `session(of:)`'s session.
@@ -1029,9 +1032,9 @@ write `state/pts/3.json`), the steer inbox, `HostRuntime.steer`, `LeadAgent.runn
     its parent folder.
 
   Shown failing against lines 160-162 as Task 4a left them.
-- [ ] **Step 2: Fix.** The tty is `Platform.Terminals.name(devicePath:)` of the device path (a call switched to the
+- [x] **Step 2: Fix.** The tty is `Platform.Terminals.name(devicePath:)` of the device path (a call switched to the
   platform; on the Mac `/dev/ttys003` still gives `ttys003`).
-- [ ] **Step 3:** push; both green; commit ("v2: a session's terminal is named as the process table names it").
+- [x] **Step 3:** push; both green; commit ("v2: a session's terminal is named as the process table names it").
 
 **Done when:** the three pass on both systems.
 
@@ -1067,7 +1070,7 @@ The document's S4 fixes (T14, T42). Linux only; the Mac's paths are unchanged.
 - A session whose program `HostedSession.reap(_:until:)` (its own queue) has reaped counts as not live before the next
   identity question is answered.
 
-- [ ] **Step 1: Failing tests** (Linux).
+- [x] **Step 1: Failing tests** (Linux).
   - `aProcessThatTookASessionsTerminalFirstIsNotThatSession`: a helper calls `setsid` and spins opening the lowest
     free `/dev/pts/N` (without `O_NOCTTY`, so it becomes its controlling terminal); a scratch host with a launcher
     test delay spawns a session, whose terminal the helper takes; the session never becomes live, ends with the
@@ -1081,8 +1084,8 @@ The document's S4 fixes (T14, T42). Linux only; the Mac's paths are unchanged.
     session's.
   - `aReapedSessionIsNotLive`: a program reaped by `reap(_:until:)` and not yet processed by the session's queue is
     not live to `session(of:)`.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; both green; commit ("v2: a session's terminal is its own from the start; programs matched by
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; both green; commit ("v2: a session's terminal is its own from the start; programs matched by
   token").
 
 **Done when:** the five pass on Linux, the Mac's host job is green, and S4's `Held by:` names them.
@@ -1106,7 +1109,7 @@ process's). Non-seam edits: the `onRead` hook and the decoder's sender list. Tes
 
 **Awaits:** decision 1 (for app connections the expected sender is the server child's token).
 
-- [ ] **Step 1: Failing tests**, both systems unless marked.
+- [x] **Step 1: Failing tests**, both systems unless marked.
   - `aForkedChildWritingOnALeadsConnectionMakesItNobodys`: a client is bound as a team's lead; a helper started with
     that connection's descriptor (`keep: [fd]`) writes a `sessions` request; the connection's caller is `.unknown`, and
     the next lead-only request is refused.
@@ -1132,10 +1135,10 @@ process's). Non-seam edits: the `onRead` hook and the decoder's sender list. Tes
 
   On Linux the first two fail before the change, because `SO_PEERCRED` is fixed at connect. On the Mac they pass
   already, through `LOCAL_PEERTOKEN`, and keep passing.
-- [ ] **Step 2: Implement.** `PeerToken.sameImage` is the comparison. On the Mac `receive` returns the token after the
+- [x] **Step 2: Implement.** `PeerToken.sameImage` is the comparison. On the Mac `receive` returns the token after the
   read, so one code path serves both. `Platform.Sockets.enableCredentials` (`SO_PASSCRED`) on Linux; on the Mac it
   does nothing, since `LOCAL_PEERTOKEN` needs no option.
-- [ ] **Step 3:** push; both green; commit ("v2: each message's sender, on accepted and connector connections").
+- [x] **Step 3:** push; both green; commit ("v2: each message's sender, on accepted and connector connections").
 
 **Done when:** the tests pass on both systems (the namespace test where a namespace can be made), the host job is green
 on both, and S5's `Held by:` names them.

@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Testing
 @testable import VibeCore
@@ -45,7 +44,7 @@ struct LeadVaultHostTests {
     /// `answers`. The connection stays open until `stop` exists, which the test makes once the replies are in: however
     /// long a busy Mac takes to answer, nc doesn't hang up first.
     func nc(_ host: TestHost, _ requests: URL, _ answers: URL, until stop: URL) -> String {
-        "(cat '\(requests.path)'; while [ ! -f '\(stop.path)' ]; do sleep 0.05; done) | /usr/bin/nc -U '\(host.socket)' > '\(answers.path)'"
+        "(cat '\(requests.path)'; while [ ! -f '\(stop.path)' ]; do sleep 0.05; done) | /usr/bin/nc \((ncHangsUpFlags + ["-U"]).joined(separator: " ")) '\(host.socket)' > '\(answers.path)'"
     }
 
     /// `nc(…)` from this process (outside every session), once the replies to `seqs` are in.
@@ -74,7 +73,7 @@ struct LeadVaultHostTests {
     func viaNC(_ socket: String, proof key: SymmetricKey?, _ requests: [HostRequest]) async throws -> [Int: HostEvent] {
         let nc = Process()
         nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
-        nc.arguments = ["-U", socket]
+        nc.arguments = ncHangsUpFlags + ["-U", socket]
         let input = Pipe(), output = Pipe()
         nc.standardInput = input
         nc.standardOutput = output
@@ -246,6 +245,9 @@ struct LeadVaultHostTests {
         await #expect(!screen(app, lead.id).contains("PWNED"))
     }
 
+    // The Mac's alone (MacOnlyTests.txt): the app here is nc proving its key, and the Linux app is a connector's
+    // connection and holds no key.
+    #if canImport(Darwin)
     /// The exec trick: a worker's shell leaves its session (double fork, setsid), connects, forks a child that keeps
     /// the connection, and execs the app's binary in the process that connected; the child then asks as "the app".
     /// Here the app is `/usr/bin/nc` (a binary that stays up, `nc -lU`), and the host is tried accepting at once and
@@ -369,6 +371,7 @@ struct LeadVaultHostTests {
         guard case .vault(.seal)? = got[2] else { Issue.record("the key didn't make nc the app: \(String(describing: got[2]))"); return }
         #expect(got[3] == .vault(.ok))
     }
+    #endif
 
     @Test func aProcessOutsideEverySessionCantKillOrHandOver() async throws {
         let host = try TestHost()

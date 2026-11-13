@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -59,7 +58,7 @@ import Testing
         let claude = [
             "set +m", team.environment + "cd \(sh(team.root))",
             env.map { "export \($0.key)=\(sh($0.value))" }.joined(separator: "; "),
-            "run() { if [ -n \"${CLAUDE_CODE_SHELL_PREFIX:-}\" ]; then \"$CLAUDE_CODE_SHELL_PREFIX\" \"$1\"; else /bin/zsh -c \"$1\"; fi; }",
+            "run() { if [ -n \"${CLAUDE_CODE_SHELL_PREFIX:-}\" ]; then \"$CLAUDE_CODE_SHELL_PREFIX\" \"$1\"; else \(Platform.Tools.loginShell) -c \"$1\"; fi; }",
             "while [ ! -f \(sh(folder + "/go")) ]; do sleep 0.05; done",
             "tail -n +1 -f \(sh(folder + "/a.in")) | run \(sh(serverLine)) > \(sh(folder + "/a.out")) 2> \(sh(folder + "/a.err")) &",
             "run \(sh("sh " + sh(base.path + ".sh")))",

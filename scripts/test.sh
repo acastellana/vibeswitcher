@@ -104,10 +104,21 @@ end_leftovers() {
 
 # Each $1/*.test.mjs with node, its output as it goes, a failing one named; then one line: how many passed. Returns 1
 # when any failed, or when there were none.
+# $1: the folder; any further arguments: files in it not run here, each with its reason after a colon
+# ("library-injection.test.mjs:why"), said as it is skipped.
 run_web_tests() {
-    local dir=$1 file passed=0 total=0 failed=""
+    local dir=$1 file passed=0 total=0 failed="" skip skipped
+    shift
     for file in "$dir"/*.test.mjs; do
         [[ -f $file ]] || continue
+        skipped=""
+        for skip in "$@"; do
+            [[ ${file##*/} == "${skip%%:*}" ]] && skipped=${skip#*:}
+        done
+        if [[ -n $skipped ]]; then
+            echo "web test skipped: $file: $skipped"
+            continue
+        fi
         total=$((total + 1))
         if node "$file"; then
             passed=$((passed + 1))
@@ -319,10 +330,12 @@ else
             # Their scratch host listens on a Unix socket, which Codex's sandbox refuses (network off): the probe
             # times out, and every Codex worker's run would fail on it. The merge's and an audit's runs have them.
             echo "security socket/signing tests: skipped inside Codex's sandbox, which refuses their scratch host's socket"
-        elif [[ -n $on_linux ]]; then
-            echo "security socket/signing tests: skipped on Linux until the session host builds here"
         elif [[ -x .build/debug/vibeswitcher-host ]]; then
-            run_web_tests Tests/SecurityAudit || status=1
+            # library-injection tests the Mac's Hardened Runtime (codesign, DYLD_INSERT_LIBRARIES): on Linux the
+            # unit's UnsetEnvironment= and the static build hold that line for the host's start instead.
+            run_web_tests Tests/SecurityAudit \
+                ${on_linux:+"library-injection.test.mjs:the Mac's Hardened Runtime and code signing; Linux has neither"} \
+                || status=1
         else
             echo "security socket/signing tests: no built host at .build/debug/vibeswitcher-host"
             status=1

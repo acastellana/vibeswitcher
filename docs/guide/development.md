@@ -99,7 +99,7 @@ bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint
 | `ElapsedTimeLint` | A correctness test judging an elapsed time against a bare number (`took < 0.05`, `Date().timeIntervalSince(x) < 5`): it judges the order of events, a baseline from the same test, or it's a `.perf` bench; the short allow list is in `ElapsedTimeLintTests.swift`. |
 | `HomePathLint` | A path under the home folder worked out once per process. |
 | `KeychainLint` | A test that can reach the real keychain. |
-| `MacOnlyTestsLint` | A file of `Tests/VibeCoreTests` wrapped whole in `#if canImport(Darwin)` that `Tests/VibeCoreTests/MacOnlyTests.txt` doesn't list with its reason; or a file listed there that is gone or has no such wrap. |
+| `MacOnlyTestsLint` | A file of `Tests/VibeCoreTests` or `Tests/VibeHostTests` wrapped whole in `#if canImport(Darwin)` that its target's `MacOnlyTests.txt` doesn't list with its reason; a file listed there that is gone or has no such wrap; or a tenth of a target's files listed, besides those its plan counts apart. |
 | `PlatformLint` | A libc or Apple-only import, or an `#if os(`/`canImport(`, in the portable targets outside `VibePlatform` and `VibeCore/MacOnly`; or a file on its pending list (`Tests/VibePlatformTests/PlatformLintPending.txt`) that no longer has one; or two tracked paths (a folder's too) that differ only in case, which are one on the Mac. |
 | `PreferencesLint` | A test that makes a defaults suite in the real `~/Library/Preferences`. |
 | `PrivateNamesLint` | A mention of the user's other projects (the list is in the test); write a stand-in, `project-b` or `project-c`. |

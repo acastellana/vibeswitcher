@@ -1,7 +1,7 @@
-import Darwin
 import Foundation
 import SwiftTerm
 import Testing
+import VibeCore
 @testable import VibeHost
 
 /// Claude Code 2.1.304's status rows (the status line under the box, the spinner row, the permission prompt) at 110 and
@@ -47,7 +47,7 @@ struct StatusRowsTests {
     /// cells: a wide character's second cell (NUL) a space, as on Terminal.app's screen; trailing blanks dropped.
     static func parsed(_ bytes: [UInt8], cols: Int, rows: Int) throws -> [String] {
         var fds: [Int32] = [0, 0]
-        try #require(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0)
+        try #require(socketpair(AF_UNIX, Platform.Sockets.stream, 0, &fds) == 0)
         let (ours, its) = (fds[0], fds[1])
         // Ends when our end closes.
         Thread {

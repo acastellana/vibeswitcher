@@ -1,4 +1,4 @@
-import CryptoKit
+#if canImport(Darwin)
 import Foundation
 import Testing
 @testable import VibeCore
@@ -86,3 +86,4 @@ extension LeadVaultHostTests {
         expectNoSecrets(logged(sessionLog()), [first, second, impostor])
     }
 }
+#endif
