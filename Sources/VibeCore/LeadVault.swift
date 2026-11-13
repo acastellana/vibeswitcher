@@ -1282,6 +1282,9 @@ extension LeadVault {
                       state.teams.values.contains(where: { $0.members.contains { $0.role == role && $0.task == words[1] && $0.session == session } })
                 else { return "Only VibeSwitcher seals a message as its own (a worker or verifier, only its report about its own task)." }
                 return nil
+            case .teammate:
+                // Nothing posts as a teammate yet: until the wall's delivery says who may, only the app seals one.
+                return "Only VibeSwitcher seals a message as a teammate's."
             }
         }
 

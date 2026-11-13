@@ -2069,6 +2069,7 @@ final class LeadController: ObservableObject {
         case .user: return "the user"
         case .lead(let name): return name
         case .system(let about): return "VibeSwitcher (\(about))"
+        case .teammate(let member, let task): return "teammate \(member) on \(task)"
         }
     }
 
