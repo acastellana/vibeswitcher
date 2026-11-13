@@ -2865,3 +2865,9 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 22:01 Planned team-view-member-lines: Team view: member lines and the wall, in the app
 - 2026-11-13 22:02 Planned main-red-green-and: Main-red, green and catch-up notices reach every team member (review audit)
 - 2026-11-13 22:02 Planned merge-dry-run-and: Merge dry run and a receipt for a kept experiment arm (review audit, for irreversible)
+- 2026-11-13 22:12 Released team-wall-store-append's worker (idle since its done report on 1e44111d) while its audit runs
+- 2026-11-13 22:12 Automatically (auto_advance): Started the audit of team-wall-store-append at 1e44111d (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-13 22:13 Released team-task-model-members's worker (idle since its done report on 85bedfda) while its audit runs
+- 2026-11-13 22:13 Automatically (auto_advance): Started the audit of team-task-model-members at 85bedfda (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-13 22:14 Audit of team-task-model-members: complete, clean, round 1: 1 Nit open
+- 2026-11-13 22:15 Audit of team-wall-store-append: complete, clean, round 1: 2 Nit open
