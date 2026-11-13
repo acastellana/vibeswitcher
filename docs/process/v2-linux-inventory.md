@@ -108,3 +108,40 @@ hosted runner. What it asks of the code:
 - **What remains of stage 1** ([its plan](../superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md#remaining-work-revised-2026-11-13)):
   R10, a real Claude Code session from working to needs-you to done, which waits for the user's Claude Code config
   folder; and R3's confirmation that every `v2 linux` and `v2 macos` job is green on one commit.
+
+## Sealed copies: the measurement (2026-11-13)
+
+Stage 2's Task 3b, on this machine: kernel 5.15.167.4-microsoft-standard-WSL2, Ubuntu 24.04 under WSL2, 24 cores,
+three other builds running beside it. `SealedCopyTests` in `Tests/VibePlatformTests/SealedCopyTests.swift`, run by
+`bash scripts/test.sh --filter SealedCopyTests`, and three times more under `scripts/test-under-load.sh --load 24`.
+
+**The measurement holds.** A helper of the test binary, non-dumpable from its first statement, made a sealed copy of
+`/bin/sleep` (a memfd, all four seals, `0111`) and started it as a child from `/proc/self/fd/<n>`. From the moment
+the child's pid was known until 2 s later the test tried, every 2 ms, `pidfd_getfd` of the child's descriptor 0 and
+an open of `/proc/<child>/mem`: 942 of each, every one refused (`EPERM`, `EACCES`), none let through. The same child
+started from the readable `/bin/sleep` was taken on the first try of each (955 of 955 when the copy was left
+readable, the failing form). So the exec windows of the security document's S6 are closed on this kernel: the
+measurement decision 6 rests on passes here.
+
+Also measured there:
+
+- A copy held by a non-dumpable process can't be opened for writing (`EACCES`), `chmod`ded (`EACCES`) or taken
+  (`pidfd_getfd`: `EPERM`) by another process of the user; its holder's own `write` and `ftruncate` fail `EPERM`
+  (the seals). A copy held by a dumpable process is `chmod`ded and taken, which is why only a hardened process
+  makes them.
+- A copy runs as it was read after its file is rewritten in place (no process runs the file, so no `ETXTBSY`), and
+  the bytes `withBytes` gives are those, not the file's new ones.
+- A script's copy left `0555` runs; made `0111` it can't (`/bin/sh` exits 2, refused the read).
+
+**What copies cost** (`VIBE_SEALED_COPY_COST=1 bash scripts/test.sh --filter SealedCopyTests/whatCopiesCost`):
+
+| Copy | Size | Time | `Shmem` |
+| --- | --- | --- | --- |
+| `vibeswitcher-mcp` (debug) | 56.2 MB | 21 ms | +53.3 MB |
+| the test binary (debug, `VibeSwitcherPackageTests.xctest`) | 202.3 MB | 66 ms | +192.5 MB |
+| ten copies of the test binary at once | 2,023 MB | 123 ms | +2,100 MB |
+| `vibeswitcher-host` (debug) | not built on Linux yet (Task 4); measured once it is | | |
+
+Ten at once take 2.1 GB, under a quarter of a GitHub Ubuntu runner's 16 GB (4 GB): the suites that start hosts as
+processes (`ServerChildTests` and the others) needn't run `.serialized` on Linux for the copies' sake. A copy's
+memory is gone when its last descriptor closes.
