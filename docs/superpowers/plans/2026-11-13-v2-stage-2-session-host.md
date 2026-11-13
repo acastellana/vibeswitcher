@@ -1360,6 +1360,10 @@ on both, and S5's `Held by:` names them.
   scratch host from `--image-path` (appended by a handing-over host, S2-D7) or, at a scratch host's fresh start, its
   executable as today. `--node-root` and `--image-path` join `handoverFlags`. The server child is started with
   `--node-root` and `--node` from here on (Task 8a). Non-seam edits.
+  A `--node` host also refuses a `--server` other than `<node-root>/bin/vibeswitcher-server` (compared after both
+  are resolved, a link refused), before the hash check: the server is the install's by its place as well as its
+  bytes (the commit security review of Task 8a, 2026-11-14: `--server` names the app's principal, so the user's
+  host takes none but its own). Test: `theUsersHostTakesOnlyItsInstallsServer`.
 - Test: `Tests/VibeHostTests/HostHardeningTests.swift`, `HandoverLinuxTests.swift`
 
 - [ ] **Step 1: Failing tests** (Linux). The two `build-info` tests are in `HandoverLinuxTests`, as the document's S9
