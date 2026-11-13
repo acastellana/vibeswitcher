@@ -2825,3 +2825,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 19:43 Started a worker on every-worker-is-told
 - 2026-11-13 19:43 Automatically (auto_advance): Sent every-worker-is-told's worker the open Important findings every-worker-is-told:F1 from its audit at a6e28237 (in a new worker: its last one was released during the audit).
 - 2026-11-13 19:44 Audit of agents-md-and-the: complete, clean, round 1: 2 Nit open
+- 2026-11-13 20:04 Pipeline held: agents-md-and-the ready to merge with none landing; cause: a merge in progress
+- 2026-11-13 20:05 Merged agents-md-and-the: AGENTS.md and the worker brief say what workers kept rediscovering (build a0474fa83c82)
