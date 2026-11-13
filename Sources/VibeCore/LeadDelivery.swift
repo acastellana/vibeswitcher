@@ -50,31 +50,45 @@ public enum LeadDelivery {
     static let frameOpeners: Set<Character> = ["[", "【", "〔", "〖", "〘", "〚", "⟦", "⦋", "⦍", "⦏", "⁅", "❲", "﹝"]
 
     /// `text` with every bracket that opens something reading as our frame (`[VibeSwitcher`, in any case or width,
-    /// with spaces, dashes, dots or invisible characters between the letters) turned into `(`: a teammate's post can't
-    /// pass as VibeSwitcher's, the lead's or the user's. As many characters as `text`, so its parts fall where they would.
+    /// with spaces, dashes, dots, accents or invisible characters between the letters) turned into `(`: a teammate's
+    /// post can't pass as VibeSwitcher's, the lead's or the user's. Read code point by code point, so an invisible
+    /// mark that joins the bracket's or a letter's character (U+0600 before `[`, a zero-width joiner after a letter)
+    /// hides nothing; the whole character holding such a bracket becomes `(`, so the text keeps its count of
+    /// characters and its parts fall where they would.
     public static func defanged(_ text: String) -> String {
         var chars = Array(text)
+        // Every code point, with the character it's in.
+        var scalars: [(scalar: Unicode.Scalar, char: Int)] = []
+        for (index, char) in chars.enumerated() { for scalar in char.unicodeScalars { scalars.append((scalar, index)) } }
         let word = Array("vibeswitcher")
-        for index in chars.indices {
-            let folded = String(chars[index]).folding(options: [.widthInsensitive, .diacriticInsensitive], locale: nil)
-            guard let first = folded.first, frameOpeners.contains(first) else { continue }
+        func folded(_ scalar: Unicode.Scalar) -> String {
+            String(scalar).folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive], locale: nil)
+        }
+        for (position, entry) in scalars.enumerated() {
+            guard let first = folded(entry.scalar).first, frameOpeners.contains(first) else { continue }
             var matched = 0
-            var next = index + 1
-            while next < chars.count, matched < word.count {
-                let letter = String(chars[next]).folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive], locale: nil)
-                if letter == String(word[matched]) { matched += 1 }
-                else if !letter.unicodeScalars.allSatisfy(skippable) { break }
+            var next = position + 1
+            while next < scalars.count, matched < word.count {
+                let scalar = scalars[next].scalar
+                if folded(scalar) == String(word[matched]) { matched += 1 }
+                else if !skippable(scalar) { break }
                 next += 1
             }
-            if matched == word.count { chars[index] = "(" }
+            if matched == word.count { chars[entry.char] = "(" }
         }
-        return String(chars)
+        let result = String(chars)
+        // A `(` can't join its neighbours' characters as the bracket's did; were it ever to, every opener goes.
+        return result.count == text.count ? result : String(text.map { char in
+            char.unicodeScalars.contains { folded($0).first.map(frameOpeners.contains) ?? false } ? "(" : char
+        })
     }
 
     /// What may sit between a forged frame's letters and still read as the word: spaces, invisible characters,
-    /// dashes, dots and underscores.
+    /// accents and other marks, dashes, dots and underscores.
     private static func skippable(_ scalar: Unicode.Scalar) -> Bool {
-        CharacterSet.whitespacesAndNewlines.contains(scalar) || scalar.properties.generalCategory == .format
+        let category = scalar.properties.generalCategory
+        return CharacterSet.whitespacesAndNewlines.contains(scalar)
+            || [.format, .nonspacingMark, .enclosingMark, .spacingMark, .control].contains(category)
             || ["-", "_", ".", "·", "‐", "‑", "–", "—"].contains(Character(scalar))
     }
 }

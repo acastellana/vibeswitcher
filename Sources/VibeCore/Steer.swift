@@ -579,7 +579,8 @@ public enum SteerReply {
         // A message longer than one delivery: its next part, alone, saying which (see `nextPart`).
         if let message = messages.first, let part = nextPart(message), part.count > 1 {
             let chars = Array(shown(message))
-            let text = String(chars[part.range])
+            // `shown` keeps the count (`defanged`); clamped all the same, so a slip can't trap.
+            let text = String(chars[min(part.range.lowerBound, chars.count)..<min(part.range.upperBound, chars.count)])
             return [header, senderLine(message.from) + "\n\n" + partLine(part.index, of: part.count) + "\n" + quote(text) + closing(message.from)]
                 .joined(separator: separator)
         }
