@@ -146,8 +146,7 @@ if let testSecret { server.secretsForHandover = { testSecret } }
 // outlive the host either way; they lose their terminal. The handler only writes the signal and its sender to a
 // pipe. A handover's exec puts the signals back to their defaults: the new build installs its own here.
 var signalPipe: [Int32] = [-1, -1]
-pipe(&signalPipe)
-signalPipe.forEach { _ = fcntl($0, F_SETFD, FD_CLOEXEC) }
+_ = Sys.pipeClosedOnExec(&signalPipe)
 nonisolated(unsafe) var signalPipeWriter = signalPipe[1]
 for number in [SIGTERM, SIGINT] {
     Platform.Signals.onSignal([number]) { number, info, _ in

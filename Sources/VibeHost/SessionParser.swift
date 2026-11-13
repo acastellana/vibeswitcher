@@ -47,17 +47,18 @@ public enum SessionParser {
     /// The lines of history the phone can ask for, read on demand (see `HistoryRead`).
     static let historyScrollback = 5_000
 
-    /// What the parser does with `--parse-session COLS ROWS [--scrollback LINES]`; call it first thing in `main`. Never
-    /// returns then.
+    /// What the parser does with `--parse-session COLS ROWS [--scrollback LINES] [--host-pid PID]`; call it first thing
+    /// in `main`. Never returns then.
     public static func runIfAsked(_ arguments: [String]) {
         guard arguments.count >= 4, arguments[1] == "--parse-session", let cols = Int(arguments[2]), let rows = Int(arguments[3]) else { return }
         let scrollback = arguments.firstIndex(of: "--scrollback").flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
         signal(SIGPIPE, SIG_IGN)
-        // Ends with the host, even while stuck mid-parse (when it would never read the end of the link).
-        let host = getppid()
-        let watch = DispatchSource.makeProcessSource(identifier: host, eventMask: .exit, queue: .global())
-        watch.setEventHandler { _exit(0) }
-        watch.resume()
+        // Ends with the host, even while stuck mid-parse (when it would never read the end of the link). The host
+        // names itself (`--host-pid`): a host already gone as this starts left it to whoever adopts orphans, which on
+        // Linux is the user's systemd, not pid 1, so the parent read here would be that and never end.
+        let named = arguments.firstIndex(of: "--host-pid").flatMap { arguments.indices.contains($0 + 1) ? pid_t(arguments[$0 + 1]) : nil }
+        let host = named ?? getppid()
+        let watch = Platform.ProcessExit.watch(host, queue: .global()) { _exit(0) }
         if getppid() != host || host == 1 { _exit(0) }
         withExtendedLifetime(watch) {
             run(fd: 0, cols: cols, rows: rows, scrollback: scrollback ?? Self.scrollback, testHooks: arguments.contains("--parser-test-hooks"))
@@ -245,39 +246,22 @@ final class ParserLink {
     /// with default signals and nothing else of the host's (no PTY).
     static func start(launcher: String, cols: Int, rows: Int, scrollback: Int = SessionParser.scrollback, options: ParserOptions,
                       queue: DispatchQueue) -> ParserLink? {
-        var pair: [Int32] = [-1, -1]
-        guard socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0 else { return nil }
-        let (ours, theirs) = (pair[0], pair[1])
-        _ = fcntl(ours, F_SETFD, FD_CLOEXEC)
-        _ = fcntl(theirs, F_SETFD, FD_CLOEXEC)
-        var noSigPipe: Int32 = 1
-        setsockopt(ours, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+        guard let (ours, theirs) = Platform.Sockets.pair(type: Platform.Sockets.stream) else { return nil }
+        Platform.Sockets.noSigPipe(socket: ours)
 
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
-        posix_spawnattr_setpgroup(&attributes, 0)
-        var all: sigset_t = ~0
-        var none: sigset_t = 0
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_adddup2(&actions, theirs, 0)
-        posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
-        posix_spawn_file_actions_addinherit_np(&actions, 2)
-
-        let arguments = [launcher, "--parse-session", String(cols), String(rows), "--scrollback", String(scrollback)]
+        let arguments = [launcher, "--parse-session", String(cols), String(rows), "--scrollback", String(scrollback),
+                         "--host-pid", String(getpid())]
             + (options.testHooks ? ["--parser-test-hooks"] : [])
-        let argv = arguments.map { strdup($0) } + [nil]
-        let envp: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin"), nil]
-        defer { (argv + envp).forEach { free($0) } }
-        var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, launcher, &actions, &attributes, argv, envp)
+        var spawn = Platform.Spawn(executable: launcher, arguments: arguments)
+        spawn.stdin = .descriptor(theirs)
+        spawn.stdout = .path("/dev/null", flags: O_WRONLY)
+        spawn.stderr = .inherit
+        spawn.group = .ownGroup
+        spawn.environment = ["PATH=/usr/bin:/bin"]
+        spawn.keep = []
+        let spawned = spawn.start()
         Sys.close(theirs)
-        guard spawned == 0 else {
+        guard case .success(let pid) = spawned else {
             Sys.close(ours)
             return nil
         }

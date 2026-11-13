@@ -74,7 +74,7 @@ public final class HostedSession {
     private var historyReads: [HistoryRead] = []
     private var readSource: DispatchSourceRead?
     private var writeSource: DispatchSourceWrite?
-    private var exitSource: DispatchSourceProcess?
+    private var exitSource: (any Platform.Cancellable)?
     /// Backs up `exitSource`, which misses a program that exits before it's registered (it's registered
     /// asynchronously, and a process that already exited can't be watched): a look 50 ms in, then less and less often
     /// (see `exitPollDelays`), not every second for the session's life (30 sessions woke the host 30 times a second).
@@ -157,8 +157,7 @@ public final class HostedSession {
             throw code == 0 ? Failure.spawnFailed : Failure.couldntStart(LaunchPreflight.couldntStart(launcher, in: request.cwd, code: code))
         }
         // ptsname_r: ptsname's buffer is shared between threads, and sessions start from several at once.
-        var buffer = [CChar](repeating: 0, count: 128)
-        let name = ptsname_r(child.masterFD, &buffer, buffer.count) == 0 ? String(cString: buffer) : ""
+        let name = Platform.Terminals.devicePath(master: child.masterFD) ?? ""
         let tty = name.hasPrefix("/dev/") ? String(name.dropFirst(5)) : name
         _ = fcntl(child.masterFD, F_SETFL, fcntl(child.masterFD, F_GETFL) | O_NONBLOCK)
         // Not inherited by sessions started later: another session holding this PTY open would keep it alive.
@@ -318,10 +317,9 @@ public final class HostedSession {
 
     /// Whether `pid` is on its way out (or a zombie already).
     static func isExiting(_ pid: pid_t) -> Bool {
-        var short = proc_bsdshortinfo()
-        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size else { return false }
-        return short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0
+        // The short record, zombies included (the Mac's PROC_PIDT_SHORTBSDINFO, as this always read).
+        guard case .brief(let brief) = Platform.Processes.brief(pid) else { return false }
+        return brief.state == .zombie || brief.exiting
     }
 
     private func resumeReadingIfCaughtUp() {
@@ -345,10 +343,7 @@ public final class HostedSession {
 
         // Ended (and reaped) already: its pid may belong to someone else now.
         guard info.isLive else { return }
-        let exit = DispatchSource.makeProcessSource(identifier: info.childPID, eventMask: .exit, queue: queue)
-        exit.setEventHandler { [weak self] in self?.exitEvent() }
-        exit.resume()
-        exitSource = exit
+        exitSource = Platform.ProcessExit.watch(info.childPID, queue: queue) { [weak self] in self?.exitEvent() }
 
         let poll = timers.make(.exitPoll, queue) { [weak self] in
             guard let self else { return }
@@ -629,7 +624,7 @@ public final class HostedSession {
             return
         }
         if heldResize == nil {
-            let later = resizeLater ?? { [queue] wait, write in queue.asyncAfter(deadline: .now() + wait, execute: write) }
+            let later = resizeLater ?? { [queue] wait, write in queue.asyncAfter(deadline: .now() + wait) { write() } }
             later(wait) { [weak self] in
                 guard let self, let held = self.heldResize else { return }
                 self.heldResize = nil

@@ -256,7 +256,7 @@ public final class HostServer {
 
     private func acceptAll() {
         while true {
-            let fd = Sys.accept(listenFD, nil, nil)
+            let fd = Platform.Sockets.accept(listenFD)
             guard fd >= 0 else { return }
             guard UnixSocket.peerUID(fd) == getuid() else {
                 Sys.close(fd)

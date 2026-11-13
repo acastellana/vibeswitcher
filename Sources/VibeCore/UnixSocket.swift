@@ -43,7 +43,7 @@ public enum UnixSocket {
     }
 
     private static func connectOnce(path: String) throws -> Int32 {
-        let fd = socket(AF_UNIX, Platform.Sockets.stream, 0)
+        let fd = Platform.Sockets.makeSocket(type: Platform.Sockets.stream)
         guard fd >= 0 else { throw Failure.system("socket", errno) }
         do {
             var address = try address(path)
@@ -66,7 +66,7 @@ public enum UnixSocket {
     /// would otherwise be refused once a short queue fills, before the host's next accept.
     public static func listen(path: String) throws -> Int32 {
         unlink(path)
-        let fd = socket(AF_UNIX, Platform.Sockets.stream, 0)
+        let fd = Platform.Sockets.makeSocket(type: Platform.Sockets.stream)
         guard fd >= 0 else { throw Failure.system("socket", errno) }
         do {
             var address = try address(path)

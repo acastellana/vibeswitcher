@@ -156,7 +156,7 @@ public enum HostHandover {
     /// the server's queue.
     static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit) throws {
         var pipe: [Int32] = [-1, -1]
-        guard Sys.pipe(&pipe) == 0 else { throw Failure.probe("no pipe") }
+        guard Sys.pipeClosedOnExec(&pipe) == 0 else { throw Failure.probe("no pipe") }
         defer { Sys.close(pipe[0]) }
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
@@ -260,13 +260,10 @@ public enum HostHandover {
     enum SecretChannel {
         /// The reading end, holding `secret` and then end-of-file.
         static func make(_ secret: Data) throws -> Int32 {
-            var pair: [Int32] = [-1, -1]
-            guard socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0 else { throw Failure.secretTooLarge(secret.count) }
-            let (reader, writer) = (pair[0], pair[1])
+            guard let (reader, writer) = Platform.Sockets.pair(type: Platform.Sockets.stream) else { throw Failure.secretTooLarge(secret.count) }
             var room = Int32(min(secret.count + 65_536, 8 << 20))
             setsockopt(writer, SOL_SOCKET, SO_SNDBUF, &room, socklen_t(MemoryLayout<Int32>.size))
             setsockopt(reader, SOL_SOCKET, SO_RCVBUF, &room, socklen_t(MemoryLayout<Int32>.size))
-            for fd in [reader, writer] { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
             _ = fcntl(writer, F_SETFL, fcntl(writer, F_GETFL) | O_NONBLOCK)
             var written = 0
             secret.withUnsafeBytes { raw in

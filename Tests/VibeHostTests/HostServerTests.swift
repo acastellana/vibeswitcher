@@ -336,6 +336,62 @@ struct HostServerTests {
         var info = stat()
         #expect(stat(host.socket, &info) == 0 && info.st_mode & 0o777 == 0o600)
     }
+
+    /// No session's program holds a connection the host accepted while it was starting that session: the accept is
+    /// close-on-exec from its making (accept4 on Linux), and the launcher keeps nothing but its terminal (`keep: []`,
+    /// with which the spawn closes everything from 3 up). Either alone holds it. One thread makes 200 connections
+    /// while sessions start, each of whose programs lists its own descriptors.
+    @Test func aSpawnDuringAnAcceptInheritsNoConnection() async throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let scratch = Scratch()
+        let folder = scratch.url("fds")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // What lists the descriptors of the process that runs it: Linux's, else the Mac's.
+        let listing = FileManager.default.fileExists(atPath: "/proc/self/fd") ? "ls /proc/self/fd" : "ls /dev/fd"
+
+        final class Connections: @unchecked Sendable {
+            let lock = NSLock()
+            var fds: [Int32] = []
+            let done = DispatchSemaphore(value: 0)
+        }
+        let connections = Connections()
+        let socket = host.socket
+        DispatchQueue.global().async {
+            for _ in 0..<200 {
+                guard let fd = try? UnixSocket.connect(path: socket, patience: 5) else { continue }
+                connections.lock.lock()
+                connections.fds.append(fd)
+                connections.lock.unlock()
+            }
+            connections.done.signal()
+        }
+        let outputs = (0..<20).map { folder.appendingPathComponent("fds-\($0)").path }
+        let seqs = outputs.map { output in
+            client.send(.spawn(SpawnRequest(cwd: folder.path, command: "\(listing) > '\(output).part' && mv '\(output).part' '\(output)'",
+                                            env: [:], cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil)))
+        }
+        #expect(await eventually { seqs.allSatisfy { client.reply(to: $0) != nil } })
+        for seq in seqs {
+            guard case .spawned = client.reply(to: seq) else {
+                Issue.record("not spawned: \(String(describing: client.reply(to: seq)))")
+                continue
+            }
+        }
+        #expect(await eventually { outputs.allSatisfy { FileManager.default.fileExists(atPath: $0) } })
+        #expect(await offPool { connections.done.wait(timeout: .now() + hangGuard) } == .success)
+        connections.lock.lock()
+        connections.fds.forEach { close($0) }
+        let made = connections.fds.count
+        connections.lock.unlock()
+        #expect(made > 0)
+        for output in outputs {
+            let text = (try? String(contentsOfFile: output, encoding: .utf8)) ?? ""
+            let fds = text.split(whereSeparator: \.isWhitespace).compactMap { Int32($0) }.sorted()
+            // 0 to 2, then the listing's own: one, or two where ls also keeps the folder it started in.
+            #expect(fds.starts(with: [0, 1, 2]) && fds.count <= 5 && fds.allSatisfy { $0 < 5 }, "\(output): \(fds)")
+        }
+    }
 }
 
 struct HostCallTests {

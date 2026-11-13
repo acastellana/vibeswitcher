@@ -13,7 +13,7 @@ public enum HostStart {
         var info = stat()
         guard fstat(0, &info) == 0, info.st_mode & S_IFMT == S_IFIFO else { return nil }
         defer {
-            let null = open("/dev/null", O_RDONLY)
+            let null = open("/dev/null", O_RDONLY | O_CLOEXEC)
             if null >= 0, null != 0 { dup2(null, 0); close(null) }
         }
         var data = Data()

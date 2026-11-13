@@ -18,13 +18,12 @@ extension Platform {
     static func runPiped(_ command: String, input: Data, patience: TimeInterval, stopSignals: [Int32],
                          opening open: (pid_t) -> Int32) -> Data {
         var toChild: [Int32] = [-1, -1], fromChild: [Int32] = [-1, -1]
-        guard pipe(&toChild) == 0 else { return Data() }
-        guard pipe(&fromChild) == 0 else {
+        // Close-on-exec from their making: this process's ends reach no other child it starts meanwhile.
+        guard Sys.pipeClosedOnExec(&toChild) == 0 else { return Data() }
+        guard Sys.pipeClosedOnExec(&fromChild) == 0 else {
             toChild.forEach { close($0) }
             return Data()
         }
-        // This process's ends reach no other child it starts meanwhile.
-        for end in toChild + fromChild { _ = fcntl(end, F_SETFD, FD_CLOEXEC) }
         var spawn = Spawn(executable: "/bin/sh", arguments: ["/bin/sh", "-c", command])
         spawn.stdin = .descriptor(toChild[0])
         spawn.stdout = .descriptor(fromChild[1])
@@ -191,11 +190,8 @@ private final class StopSignalNotes: @unchecked Sendable {
         guard !signals.isEmpty else { return -1 }
         if readEnd < 0 {
             var ends: [Int32] = [-1, -1]
-            guard pipe(&ends) == 0 else { return -1 }
-            for end in ends {
-                _ = fcntl(end, F_SETFD, FD_CLOEXEC)
-                _ = fcntl(end, F_SETFL, fcntl(end, F_GETFL) | O_NONBLOCK)
-            }
+            guard Sys.pipeClosedOnExec(&ends) == 0 else { return -1 }
+            for end in ends { _ = fcntl(end, F_SETFL, fcntl(end, F_GETFL) | O_NONBLOCK) }
             readEnd = ends[0]
             stopNotesWriteEnd = ends[1]
         }
