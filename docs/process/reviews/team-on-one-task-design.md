@@ -71,8 +71,8 @@ November 9, 2026, [changelog](https://antigravity.google/docs/changelog))
   doesn't restore in-process teammates. "Teammates sometimes fail to mark tasks as completed, which blocks dependent
   tasks." Each teammate starts in the lead's permission mode.
 
-**What carries over.** Both split the work so pieces don't collide, and both give each piece a fresh context. Both
-make waiting free, or nearly. Both treat a peer's words as not the user's. Neither runs an independent audit of the
+**What carries over.** Both split the work so pieces don't collide, and both give each piece a fresh context.
+Antigravity makes waiting free. Claude Code's docs don't say what a waiting teammate costs. Both treat a peer's words as not the user's. Neither runs an independent audit of the
 whole: Antigravity's `@verifier` is a member that reads the board. Neither gives each worker an isolated checkout by
 default. VibeSwitcher keeps both of those, the audit and the isolated checkout.
 
@@ -136,7 +136,7 @@ team branch). After the merge, cleanup removes the members' worktrees and sub-br
 
 **The wall: who posts, who reads, how a post arrives.**
 
-- **Who posts.** Members post with `post(text, to: [@member…] | @all, needs_answer?)`. The lead may also post. Its
+- **Who posts.** Members post with `post(text, to: [@member…] | @all, needs_answer?, reply_to?)`. The lead may also post. Its
   post is marked as the lead's, but it is still not a contract change: those stay `update_task` and `message`. The
   user doesn't post. As in Antigravity, the user steers through the lead. Verifiers have no tool for the wall.
 - **Who reads.** Members read it with `wall(since?)`, and the lead sees it in `board(task)`. The user sees it in the
@@ -144,8 +144,9 @@ team branch). After the merge, cleanup removes the members' worktrees and sub-br
 - **How a post arrives.** A post that names a member (or `@all`) is delivered once to each named live member, by
   `deliver` with a new sender, `.teammate(member, task)`. Delivery uses the main-red pattern: a per-member cursor,
   `wallSeen`, is claimed under the board's lock and rolled back if the delivery didn't go. A working member gets the
-  post at its next step. Only a `needs_answer` post may wake an idle member (`.type`). Any other post waits and rides
-  along with that member's next message or turn, so one FYI doesn't cost three turns.
+  post at its next step. Two kinds of post may wake an idle member (`.type`): a `needs_answer` post, and a reply
+  (`reply_to`) to that member's own open `needs_answer` post. The reply also closes the question's deadline. Any
+  other post waits and rides along with that member's next message or turn, so one FYI doesn't cost three turns.
 - **Size and expiry.** A post holds at most 1,500 characters ("point to a file on your branch" for more). A member may
   post 20 an hour, and a wall holds at most 200 posts. The wall lives in the lead's private folder
   (`~/.vibeswitcher/lead/<project>/walls/<slug>.jsonl`), never in the repository, and is append-only while the task
@@ -159,8 +160,9 @@ only from the lead. A team task's receipt adds up its members' minutes and token
 
 ## 4. What must hold
 
-- **Verifiers never read the wall.** The wall is stored under `~/.vibeswitcher/lead/`, which every verifier is
-  already denied (`privateFiles`). The verifier's tools and prompt never include it: posts are delivered by
+- **Verifiers never read the wall.** The wall is stored under `~/.vibeswitcher/lead/`, which `privateFiles`
+  already denies to every verifier's Read and Edit tools. That rule doesn't cover a shell read, which is part of the
+  residual risk below. The verifier's tools and prompt never include it: posts are delivered by
   `deliver`, never through `sent()`, so they never become sealed lead notes. A test asserts that a team task's verifier
   prompt and tool list hold no post text. Residual risk: a delivered post sits in the member's transcript, which a
   verifier's Read isn't denied today. For team tasks, deny the verifier `Read` of the members' transcript folders, or
@@ -174,7 +176,7 @@ only from the lead. A team task's receipt adds up its members' minutes and token
   default, 20 at most. If it passes with no answer, VibeSwitcher tells the asker: "no answer from @x: go on with a
   stated assumption (post it), or ask_lead". It also tells the lead. While its deadline runs, the asker is shown as
   "waiting on @x", not as a `LeadStall`. After it, the usual stall rules apply. There is no blocking tool: a member
-  that has nothing else to do ends its turn, and the answer is typed in.
+  that has nothing else to do ends its turn. The answer, a post with `reply_to`, wakes it at once.
 - **Secrets and private names are linted out of posts.** Before a post is stored or delivered, it passes the same
   `RecordLint` lists (private names, secret shapes) and `LeadMail.masked`. A failing post is refused, with what
   matched, and nothing is stored.
@@ -191,14 +193,21 @@ tasks chained with `after`, and the parts would collide in `Sandbox.swift` (3 co
 before instance 1 starts. A3 (log watcher, with one analyser per log kind) is the candidate.
 
 **Run both ways.** Both arms start from the same main commit. Arm A is today's split, run and merged normally. Arm B
-is the team task. It goes through the same audit (same verifier model) and the same full suite on that commit, and is
-marked `kept`, not merged, unless the user picks it. This builds B2 twice, about one extra B2 of worker time. These are
-matched instances of one task, not a replay of past tasks (backlog C4's open question isn't touched).
+is the team task. It goes through the same audit (same verifier model), then through the merge's own rebase and test
+run as a dry run, without the fast-forward (T13). It is then marked `kept`, not merged, unless the user picks it. This
+builds B2 twice, about one extra B2 of worker time. These are matched instances of one task, not a replay of past
+tasks (backlog C4's open question isn't touched).
 
-**Measures, and where each is already recorded.**
+**One endpoint for both arms: merge-ready.** That is the moment the merge's test run passes after a passing audit.
+For arm A, it is the test run of the last of its tasks to merge. For arm B, it is the dry run's. Both times then
+include the merge's suite and its waits for load and a slot. A `kept` task gets no receipt today: `update_task` clears
+it, and `LeadReceipt.Ending` is only merged, folded or abandoned. T13 gives a kept experiment arm a receipt with a
+`kept` ending, so both arms' measures come from the same place.
 
-- Wall-clock from first start to merged (A) or merge-ready (B). Source: `LeadReceipt.wall`, plus the audit and test
-  waits (`LeadWaits`).
+**Measures, and where each is recorded** (arm B's receipt via T13).
+
+- Wall-clock from the first task's start to merge-ready. Source: `LeadReceipt.startedAt`, the merge or dry run's
+  test-run end, and the audit and test waits (`LeadWaits`).
 - Worker-minutes, summed over members. Source: `LeadReceipt.worked`.
 - Tokens: workers, verifiers and the lead. Source: `LeadReceipt.worker`/`verifier`, and the lead's day in
   `lead-tokens.json` (`LeadTokenLedger`).
@@ -229,15 +238,16 @@ files, `LeadTeam.swift` and `LeadWall.swift`, so the hot edits stay thin.
 | T3 | Team task model: `members` (name, part, worker, branch, worktree, `wallSeen`, `mainRedTold`) on `LeadTask`, Codable with old boards | `LeadBoard.swift` (sensitive), new `LeadTeam.swift` | no | none |
 | T4 | Member worktrees on `agent/<slug>--<m>`; cleanup removes them with the task's | `Worktrees` (merge path) | **yes** | T3 |
 | T5 | `split` and member start: brief per member (its part, the integrator's name, the wall rules) | `LeadToolset` start path, `LeadWorkflow` brief | **yes** | T3, T4 |
-| T6 | Worker tools `post` and `wall`, delivery to named members once (the main-red pattern), wake only for `needs_answer` | `LeadToolset` tools/call, `LeadWall.swift` | **yes** | T1, T2, T5 |
+| T6 | Worker tools `post` and `wall`, delivery to named members once (the main-red pattern), wake only for `needs_answer` and for a reply to the member's own open question | `LeadToolset` tools/call, `LeadWall.swift` | **yes** | T1, T2, T5 |
 | T7 | `take_part` (the integrator's tool), and `part_done`: a member's done that starts no audit | `LeadToolset`, `LeadAdvance` | **yes** | T6 |
 | T8 | Main-red, green and catch-up notices to every member | `LeadToolset` (`tellRunningWorkers`) | **yes** | T7 |
 | T9 | Peer-wait deadline: the notice to the asker and the lead; `LeadStall` skips a member within its deadline | `LeadWitness`/`LeadStall`, `LeadWall.swift` | no | T6 |
 | T10 | Verifier exclusion: a test that a team task's verifier prompt and tools hold no post text; deny the verifier `Read` of the members' transcript folders | `LeadLaunch` (sensitive), tests | no | T3 |
 | T11 | Receipt per team: members' minutes and tokens summed and listed; walls kept 14 days | `LeadReceipt.swift` | no | T3 |
 | T12 | Minimal UI: member lines in the team task's lane, and a Wall section in the detail; a `team wall` sandbox command | `TeamViews.swift`, `Sandbox.swift` | no | T6 |
+| T13 | Experiment arm's end: `merge(dry_run)` runs the rebase and the test command on a scratch ref without the fast-forward, and records when it passed; a `kept` task keeps a receipt with a `kept` ending instead of having it cleared | merge path, `LeadToolset` (`update_task`), `LeadReceipt.swift` | **yes** | T8 |
 
-T1, T2 and T3 can run side by side. T4 to T8 form one chain through the hot files, about 2.5 hours of serial work.
+T1, T2 and T3 can run side by side. T4 to T8 and T13 form one chain through the hot files, about 3 hours of serial work.
 T9 to T12 can run beside that chain once their inputs merge. The fuller UI (filters, a user-facing wall view) waits
 for "adopt".
 
