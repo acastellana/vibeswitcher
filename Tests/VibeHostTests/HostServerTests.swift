@@ -18,18 +18,22 @@ final class TestHost {
     /// this process and registers for its socket (`appConnector`), so this process's clients through it are the app.
     /// Nil on the Mac, and for a host whose `appExecutable` isn't this process's binary or that is told to open none.
     private(set) var appConnector: Int32?
+    /// A scratch folder removed once the host has stopped (`removing`): its log, if in it, is written to the last.
+    private let removing: String?
 
     /// `appExecutable`: by default this test process's own binary, so its clients are the app (they answer the
     /// challenge too; on Linux they go through `appConnector`). Another (`/usr/bin/nc`): this process isn't the app.
     /// `appConnector: false`: no connector even so (a test of the connector opens its own).
     /// `holdsKey: false`: a host that holds no app key yet (one handed over from a build before keys).
     /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`, `spawnNeedsLead`: the config's (see
-    /// `HostServer.Config`).
+    /// `HostServer.Config`). `removing`: a folder removed after the host stops (a test's `defer` runs before it does,
+    /// and the host's last log line would make its log's folder again).
     init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = HostServer.executable(of: getpid()), log: String? = nil,
          holdsKey: Bool = true, submittedGrace: TimeInterval = HostServer.submittedGrace, housekeeping: TimeInterval? = nil,
          capabilities: [String] = HostServer.capabilities, inputUnitHold: TimeInterval = InputOrder.holdLimit,
-         maxSessions: Int = 256, spawnNeedsLead: Bool = false, appConnector: Bool = true) throws {
+         maxSessions: Int = 256, spawnNeedsLead: Bool = false, appConnector: Bool = true, removing: String? = nil) throws {
         lock = socket + ".lock"
+        self.removing = removing
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
         config.idleExit = nil
@@ -66,6 +70,7 @@ final class TestHost {
         }
         server.stop(terminateSessions: true)
         unlink(lock)
+        if let removing { try? FileManager.default.removeItem(atPath: removing) }
     }
 }
 

@@ -9,8 +9,9 @@ import Testing
 ///
 /// - `ask`: a connection asked for over the connector (`HostConnector.connect`), kept as its connection: "connected",
 ///   or "refused <why>".
-/// - `child-ask`: a child of its own (a shell, the connector its stdout) writes the byte on it and ends: "sent <wait
-///   status>".
+/// - `child-ask`: a child of its own (a shell, the connector its stdout) writes the byte on it and stays, waiting on
+///   its stdin, so the host reads a live sender: "sent <child's pid>".
+/// - `child-end`: that child's stdin closed, which ends it, and the child reaped: "ended <wait status>".
 /// - `pending`: whether a message waits on the connector, without reading it: "message" or "none".
 /// - `empty`: a message of no bytes sent on the connector: "sent", or "unsent <errno>".
 /// - `shut`: the connector shut for writing (`shutdown(SHUT_WR)`), kept open: "shut", or "unshut <errno>".
@@ -34,6 +35,16 @@ enum AppConnectorHelper {
             return result > 0
         }
         var connection: Int32 = -1
+        // The `child-ask` child and the write end of its stdin, which keeps it alive until `child-end` closes it.
+        var child: (pid: pid_t, stdin: Int32)?
+        func endChild() -> Int32 {
+            guard let running = child else { return -1 }
+            child = nil
+            close(running.stdin)
+            var status: Int32 = 0
+            while waitpid(running.pid, &status, 0) < 0, errno == EINTR {}
+            return status
+        }
         var decoder = HostFrameDecoder()
         var pending: [UInt8] = []
         var byte: UInt8 = 0
@@ -59,20 +70,34 @@ enum AppConnectorHelper {
                     say("refused \(error)")
                 }
             case "child-ask":
-                // The connector as its stdout: a shell's redirections reach descriptors 0 to 9 only.
-                var spawn = Platform.Spawn(executable: "/bin/sh", arguments: ["/bin/sh", "-c", "printf c"])
-                spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+                // The connector as its stdout: a shell's redirections reach descriptors 0 to 9 only. It stays until
+                // its stdin ends: one that ended before the host read its byte would be no sender at all.
+                guard child == nil else {
+                    say("unstarted \(EBUSY)")
+                    continue
+                }
+                var stdin: [Int32] = [-1, -1]
+                guard Sys.pipeClosedOnExec(&stdin) == 0 else {
+                    say("unstarted \(errno)")
+                    continue
+                }
+                var spawn = Platform.Spawn(executable: "/bin/sh", arguments: ["/bin/sh", "-c", "printf c; read line; exit 0"])
+                spawn.stdin = .descriptor(stdin[0])
                 spawn.stdout = .descriptor(connector)
                 spawn.stderr = .path("/dev/null", flags: O_WRONLY)
                 spawn.keep = []
-                switch spawn.start() {
-                case .success(let child):
-                    var status: Int32 = 0
-                    while waitpid(child, &status, 0) < 0, errno == EINTR {}
-                    say("sent \(status)")
+                let started = spawn.start()
+                close(stdin[0])
+                switch started {
+                case .success(let pid):
+                    child = (pid, stdin[1])
+                    say("sent \(pid)")
                 case .failure(let failure):
+                    close(stdin[1])
                     say("unstarted \(failure.code)")
                 }
+            case "child-end":
+                say(child == nil ? "unended" : "ended \(endChild())")
             case "pending":
                 say(ready(connector, for: POLLIN, within: 0) ? "message" : "none")
             case "empty":
@@ -123,6 +148,7 @@ enum AppConnectorHelper {
             }
         }
         if connection >= 0 { close(connection) }
+        _ = endChild()
         _exit(0)
     }
 

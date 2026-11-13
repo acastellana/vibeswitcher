@@ -191,11 +191,12 @@ import Testing
     // MARK: The app's connector (Task 4b2)
 
     /// A host for the connector's tests: a vault, a log, and the test runner as its `appExecutable` (as `TestHost`
-    /// sets it), with no connector but the test's own (Task 5a's stand-in left out).
+    /// sets it), with no connector but the test's own (Task 5a's stand-in left out). The host removes `dir` once
+    /// it has stopped, its log in it written to the last.
     func connectorHost() throws -> (host: TestHost, log: String, dir: String) {
         let dir = try Self.folder()
         let log = dir + "/host.log"
-        return (try TestHost(vault: LeadVault.Book(), log: log, appConnector: false), log, dir)
+        return (try TestHost(vault: LeadVault.Book(), log: log, appConnector: false, removing: dir), log, dir)
     }
 
     static func said(_ log: String) -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
@@ -205,7 +206,6 @@ import Testing
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac's app proves itself by its code"))
     func aConnectorConnectionIsTheAppWithNoChallenge() throws {
         let (host, _, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
         let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
         defer {
             host.server.closeAppConnector(connector)
@@ -243,7 +243,6 @@ import Testing
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's rule; the Mac's app proves itself by its code"))
     func noConnectionByPathIsTheAppOnLinux() async throws {
         let (host, _, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
         let connector = try #require(host.server.openAppConnector(expecting: Platform.Processes.token(getpid()), requireNonDumpable: false,
                                                                   onDumpable: nil))
         defer {
@@ -269,12 +268,11 @@ import Testing
         }
     }
 
-    /// A child of the helper the host expects writes the byte: no connection comes back, and the host's log says
-    /// why; the helper's own request is still answered after it.
+    /// A child of the helper the host expects writes the byte, alive while the host reads it: no connection comes
+    /// back, and the host's log names the child; the helper's own request is still answered after it.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
     func aConnectorRequestFromAnotherSenderMakesNoConnection() async throws {
-        let (host, log, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let (host, log, _) = try connectorHost()
         let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
         defer {
             host.server.closeAppConnector(connector)
@@ -285,11 +283,14 @@ import Testing
         let token = try #require(Platform.Processes.token(helper.pid))
         host.server.setAppConnectorSender(token, for: connector)
 
-        #expect(try helper.ask("child-ask") == "sent 0")
-        // The child named, or (ended and reaped before the host read its byte) no one: refused either way.
-        let refusal = "refused an app connection through connector \(connector): a request from "
+        let sent = try helper.ask("child-ask")
+        let child = try #require(sent.hasPrefix("sent ") ? Int32(sent.dropFirst("sent ".count)) : nil, "\(sent)")
+        // The child still runs (it waits for `child-end`), so the host reads a sender it can name: refused for being
+        // another process, not for being gone, which the check on the sender alone would not catch.
+        let refusal = "refused an app connection through connector \(connector): a request from pid \(child), not pid \(helper.pid)"
         #expect(await eventually { Self.said(log).contains(refusal) }, "\(Self.said(log))")
-        #expect(Self.said(log).contains("not pid \(helper.pid)"), "\(Self.said(log))")
+        #expect(!Self.said(log).contains("a sender gone or unnamed"), "\(Self.said(log))")
+        #expect(try helper.ask("child-end") == "ended 0")
         #expect(try helper.ask("pending") == "none")
         #expect(!Self.said(log).contains("app connection made"), "\(Self.said(log))")
         // Its own request, after: answered.
@@ -302,8 +303,7 @@ import Testing
     /// said once in its log, rather than refuse an empty request without end.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
     func aConnectorShutForWritingIsClosed() async throws {
-        let (host, log, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let (host, log, _) = try connectorHost()
         let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
         defer {
             host.server.closeAppConnector(connector)
@@ -332,8 +332,7 @@ import Testing
     /// in the log, and handed to `onDumpable` (the server child's end, Task 8a): no connection is made.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
     func aDumpableSenderGetsNoConnection() async throws {
-        let (host, log, dir) = try connectorHost()
-        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let (host, log, _) = try connectorHost()
         let lock = NSLock()
         var dumpable: [pid_t] = []
         func ended() -> [pid_t] {
