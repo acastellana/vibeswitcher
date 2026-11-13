@@ -52,4 +52,23 @@ struct ClockTests {
         #expect(here >= 1_000_000, "\(here) ns after \(rounds) rounds (sum \(sum))")
         #expect(there < here, "a new thread's \(there) ns against this one's \(here) ns")
     }
+
+    /// `later` runs the work on the queue it is given, once the wait is over. The test waits on the work's signal;
+    /// the semaphore's bound only ends a run whose work never comes.
+    @Test func laterRunsTheWorkOnItsQueueAfterTheWait() {
+        let queue = DispatchQueue(label: "ClockTests.later")
+        let key = DispatchSpecificKey<Bool>()
+        queue.setSpecific(key: key, value: true)
+        let ran = DispatchSemaphore(value: 0)
+        var onQueue = false, waited: TimeInterval = 0
+        let started = Platform.Clock.awakeSeconds()
+        Platform.Clock.later(0.05, on: queue) {
+            onQueue = DispatchQueue.getSpecific(key: key) == true
+            waited = Platform.Clock.awakeSeconds() - started
+            ran.signal()
+        }
+        #expect(ran.wait(timeout: .now() + 60) == .success)
+        #expect(onQueue)
+        #expect(waited >= 0.049, "ran after \(waited) s")
+    }
 }

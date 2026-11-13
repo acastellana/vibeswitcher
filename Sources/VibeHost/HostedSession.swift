@@ -624,7 +624,7 @@ public final class HostedSession {
             return
         }
         if heldResize == nil {
-            let later: (TimeInterval, @escaping () -> Void) -> Void = resizeLater ?? { [queue] wait, write in queue.asyncAfter(deadline: .now() + wait, execute: write) }
+            let later = resizeLater ?? { [queue] wait, write in Platform.Clock.later(wait, on: queue, write) }
             later(wait) { [weak self] in
                 guard let self, let held = self.heldResize else { return }
                 self.heldResize = nil
