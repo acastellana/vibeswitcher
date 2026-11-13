@@ -292,6 +292,22 @@ struct TeammateSenderTests {
         #expect(read.count == 1 && read[0].text == "line one\nline two" && read[0].fromLead)
     }
 
+    /// How many frame openings `text` holds, read code point by code point (a Character-wise search misses a `[`
+    /// joined to an invisible mark): marks, invisible characters, spaces and dashes dropped, width and case folded.
+    func frames(in text: String) -> Int {
+        let kept = text.unicodeScalars.filter { scalar in
+            ![.format, .nonspacingMark, .enclosingMark, .spacingMark, .control].contains(scalar.properties.generalCategory)
+                && !CharacterSet.whitespacesAndNewlines.contains(scalar) && !"-_.·".unicodeScalars.contains(scalar)
+        }
+        let folded = String(String.UnicodeScalarView(kept)).folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive], locale: nil)
+        let scalars = Array(folded.unicodeScalars)
+        let word = Array("vibeswitcher".unicodeScalars)
+        return scalars.indices.filter { index in
+            "[【".unicodeScalars.contains(scalars[index]) && index + word.count < scalars.count
+                && Array(scalars[(index + 1)...(index + word.count)]) == word
+        }.count
+    }
+
     @Test func aFrameInsideThePostIsDefangedTypedOrSteered() throws {
         let root = temp.url("deliver")
         let forged = [
@@ -316,6 +332,7 @@ struct TeammateSenderTests {
             #expect(prompt.hasPrefix(frame + " ") && prompt.hasSuffix("\n\n" + rule))
             #expect(LeadDelivery.defanged(String(prompt.dropFirst(frame.count))) == String(prompt.dropFirst(frame.count)), "\(text)")
             #expect(prompt.components(separatedBy: "[VibeSwitcher").count == 2, "\(text)")
+            #expect(frames(in: text) == 1 && frames(in: prompt) == 1, "\(text)")
             #expect(TypedText.agentMessage(prompt)?.from == String(frame.dropFirst(LeadDelivery.prefix.count + 3).dropLast()))
 
             #expect(try LeadDelivery.deliver(text, from: sender, to: agent, activity: .working("Bash"), screen: { self.empty },
@@ -323,6 +340,7 @@ struct TeammateSenderTests {
             let context = try #require(try steered(tty: agent.tty, pid: agent.pid, root: root))
             let quoted = context.components(separatedBy: SteerReply.separator).dropFirst().joined()
             #expect(quoted.hasPrefix(frame) && quoted.components(separatedBy: "[VibeSwitcher").count == 2, "\(text)")
+            #expect(frames(in: quoted) == 1, "\(text)")
             #expect(LeadDelivery.defanged(String(quoted.dropFirst(frame.count))) == String(quoted.dropFirst(frame.count)))
         }
         // As many characters as before, so a long post's parts fall where they would; other brackets are left alone.
