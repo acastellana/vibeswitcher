@@ -27,7 +27,10 @@ public enum LeadDelivery {
         case .user: return text
         case .lead(let name): return "\(prefix) · from \(name), not the user] \(text)"
         case .system(let about): return "\(prefix) · \(about), not the user] \(text)"
-        case .teammate(let member, let task): return teammateFrame(member: member, task: task) + " " + defanged(text) + "\n\n" + teammateRule
+        // Every line of the post quoted, as when steered: nothing in it (the rule, a blank line, a frame at a line's
+        // start, a lookalike of either) reads as where the post ends or what follows it; only the rule we add is bare.
+        case .teammate(let member, let task):
+            return teammateFrame(member: member, task: task) + "\n" + SteerReply.quote(defanged(text)) + "\n\n" + teammateRule
         }
     }
 
