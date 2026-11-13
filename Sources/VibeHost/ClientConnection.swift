@@ -10,7 +10,7 @@ final class ClientConnection {
 
     let fd: Int32
     /// The process that connected, as it ran when the host accepted it (see `HostServer.identify`).
-    var peer: audit_token_t?
+    var peer: Platform.PeerToken?
     /// Who that process is to the lead's vault, told when the host accepted it; `.unknown` for good once anything
     /// else sends on the connection.
     var caller: LeadVault.Caller = .unknown
@@ -20,6 +20,9 @@ final class ClientConnection {
     let challenge = AppProof.challenge()
     /// The app (or tool server) on the other end, as it was when it connected.
     let peerPID: pid_t?
+    /// A connection the host made for the app through its connector (see `HostServer.openAppConnector`), not one it
+    /// accepted: the app's from its first byte, sent no challenge, not counted toward `maxClients`.
+    var viaConnector = false
     var attached: Set<UUID> = []
     var onFrame: ((HostFrame.Kind, Data) -> Void)?
     /// After bytes arrive, before any of their frames is handled.
@@ -41,9 +44,14 @@ final class ClientConnection {
     private(set) var queuedBytes = 0
     private(set) var closed = false
 
-    init(fd: Int32, queue: DispatchQueue) {
+    convenience init(fd: Int32, queue: DispatchQueue) {
+        self.init(fd: fd, queue: queue, peerPID: UnixSocket.peerPID(fd))
+    }
+
+    /// `peerPID`: the process on the other end, where the socket can't say (a pair the host made: it names the host).
+    init(fd: Int32, queue: DispatchQueue, peerPID: pid_t?) {
         self.fd = fd
-        peerPID = UnixSocket.peerPID(fd)
+        self.peerPID = peerPID
         self.queue = queue
     }
 

@@ -18,11 +18,12 @@ final class TestHost {
     /// `appExecutable`: by default this test process's own binary, so its clients are the app (they answer the
     /// challenge too).
     /// `holdsKey: false`: a host that holds no app key yet (one handed over from a build before keys).
-    /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`: the config's (see `HostServer.Config`).
+    /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`, `spawnNeedsLead`: the config's (see
+    /// `HostServer.Config`).
     init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = HostServer.executable(of: getpid()), log: String? = nil,
          holdsKey: Bool = true, submittedGrace: TimeInterval = HostServer.submittedGrace, housekeeping: TimeInterval? = nil,
          capabilities: [String] = HostServer.capabilities, inputUnitHold: TimeInterval = InputOrder.holdLimit,
-         maxSessions: Int = 256) throws {
+         maxSessions: Int = 256, spawnNeedsLead: Bool = false) throws {
         lock = socket + ".lock"
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
@@ -40,6 +41,7 @@ final class TestHost {
         if let housekeeping { config.housekeepingInterval = housekeeping }
         config.capabilities = capabilities
         config.inputUnitHold = inputUnitHold
+        config.spawnNeedsLead = spawnNeedsLead
         server = HostServer(config: config)
         try server.start()
         readyAt = Date()
@@ -63,9 +65,10 @@ final class TestClient {
     /// Answers the host's challenge with its app key (the app's client); `asApp: false`, it doesn't (another process).
     convenience init(_ host: TestHost, asApp: Bool = true) throws { try self.init(socket: host.socket, appKey: asApp ? host.appKey : nil) }
 
-    init(socket: String, appKey: SymmetricKey? = nil) throws {
+    /// `viaConnector: false`: by the socket's path even where a connector is registered for it (see `HostConnector`).
+    init(socket: String, appKey: SymmetricKey? = nil, viaConnector: Bool = true) throws {
         try queue.sync {
-            connection = try HostConnection(path: socket, queue: queue, appKey: appKey)
+            connection = try HostConnection(path: socket, queue: queue, appKey: appKey, viaConnector: viaConnector)
             connection.onEvent = { [weak self] e in self?.with { $0.events.append(e) } }
             connection.onOutput = { [weak self] id, data in self?.with { $0.output[id, default: Data()].append(data) } }
             connection.onClose = { [weak self] in self?.with { $0.closed = true } }
@@ -335,6 +338,67 @@ struct HostServerTests {
         #expect(UnixSocket.peerUID(fd) == getuid())
         var info = stat()
         #expect(stat(host.socket, &info) == 0 && info.st_mode & 0o777 == 0o600)
+    }
+
+    /// No session's program holds a connection the host accepted while sessions were starting. Two guards hold it:
+    /// the launcher keeps nothing but its terminal (`keep: []`, with which the spawn closes everything from 3 up), and
+    /// each connection is close-on-exec before any session can be spawned after its accept, because `acceptAll` and
+    /// the session spawns run on the host's one serial queue, and `acceptAll` marks each connection (`configure`'s
+    /// FD_CLOEXEC, on Linux after accept4's SOCK_CLOEXEC) before it gives the queue back. So no spawn of the host
+    /// falls between an accept and its mark, and this test can't show accept4 on its own: that is
+    /// `SocketsTests.anAcceptedConnectionIsClosedOnExecFromItsMaking` and `CloseOnExecLintTests`. It fails only with
+    /// `keep` nil and the connections left open on exec (plain `accept` and no FD_CLOEXEC in `configure`). One
+    /// thread makes 200 connections while sessions start, each of whose programs lists its own descriptors.
+    @Test func aSpawnDuringAnAcceptInheritsNoConnection() async throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let scratch = Scratch()
+        let folder = scratch.url("fds")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // What lists the descriptors of the process that runs it: Linux's, else the Mac's.
+        let listing = FileManager.default.fileExists(atPath: "/proc/self/fd") ? "ls /proc/self/fd" : "ls /dev/fd"
+
+        final class Connections: @unchecked Sendable {
+            let lock = NSLock()
+            var fds: [Int32] = []
+            let done = DispatchSemaphore(value: 0)
+        }
+        let connections = Connections()
+        let socket = host.socket
+        DispatchQueue.global().async {
+            for _ in 0..<200 {
+                guard let fd = try? UnixSocket.connect(path: socket, patience: 5) else { continue }
+                connections.lock.lock()
+                connections.fds.append(fd)
+                connections.lock.unlock()
+            }
+            connections.done.signal()
+        }
+        let outputs = (0..<20).map { folder.appendingPathComponent("fds-\($0)").path }
+        let seqs = outputs.map { output in
+            client.send(.spawn(SpawnRequest(cwd: folder.path, command: "\(listing) > '\(output).part' && mv '\(output).part' '\(output)'",
+                                            env: [:], cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil)))
+        }
+        #expect(await eventually { seqs.allSatisfy { client.reply(to: $0) != nil } })
+        for seq in seqs {
+            guard case .spawned = client.reply(to: seq) else {
+                Issue.record("not spawned: \(String(describing: client.reply(to: seq)))")
+                continue
+            }
+        }
+        #expect(await eventually { outputs.allSatisfy { FileManager.default.fileExists(atPath: $0) } })
+        #expect(await offPool { connections.done.wait(timeout: .now() + hangGuard) } == .success)
+        connections.lock.lock()
+        connections.fds.forEach { close($0) }
+        let made = connections.fds.count
+        connections.lock.unlock()
+        #expect(made > 0)
+        for output in outputs {
+            let text = (try? String(contentsOfFile: output, encoding: .utf8)) ?? ""
+            let fds = text.split(whereSeparator: \.isWhitespace).compactMap { Int32($0) }.sorted()
+            // 0 to 2, then the listing's own: one, or two where ls also keeps the folder it started in.
+            #expect(fds.starts(with: [0, 1, 2]) && fds.count <= 5 && fds.allSatisfy { $0 < 5 }, "\(output): \(fds)")
+        }
     }
 }
 

@@ -156,29 +156,21 @@ public enum HostHandover {
     /// the server's queue.
     static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit) throws {
         var pipe: [Int32] = [-1, -1]
-        guard Sys.pipe(&pipe) == 0 else { throw Failure.probe("no pipe") }
+        guard Sys.pipeClosedOnExec(&pipe) == 0 else { throw Failure.probe("no pipe") }
         defer { Sys.close(pipe[0]) }
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
-        var all: sigset_t = ~0
-        var none: sigset_t = 0
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-        posix_spawn_file_actions_adddup2(&actions, pipe[1], 1)
-        posix_spawn_file_actions_addinherit_np(&actions, 2)
-        let words = [executable, "--handover-probe", statePath]
-        let argv: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
-        defer { argv.forEach { free($0) } }
-        var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
+        // Every signal at its default and none blocked, as at a fresh start; nothing but its stdin, stdout and stderr.
+        var spawn = Platform.Spawn(executable: executable, arguments: [executable, "--handover-probe", statePath])
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .descriptor(pipe[1])
+        spawn.stderr = .inherit
+        spawn.keep = []
+        let spawned = spawn.start()
         Sys.close(pipe[1])
-        guard spawned == 0 else { throw Failure.probe(String(cString: strerror(spawned))) }
+        let pid: pid_t
+        switch spawned {
+        case .success(let started): pid = started
+        case .failure(let error): throw Failure.probe(String(cString: strerror(error.code)))
+        }
 
         _ = fcntl(pipe[0], F_SETFL, fcntl(pipe[0], F_GETFL) | O_NONBLOCK)
         var output = Data()
@@ -214,33 +206,12 @@ public enum HostHandover {
     /// (besides 0–2); nil keeps every descriptor not marked close-on-exec. Returns only when that failed, with
     /// nothing changed.
     public static func exec(_ executable: String, arguments: [String], inherit: [Int32]?) -> Failure {
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        var flags = POSIX_SPAWN_SETEXEC | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
-        if inherit != nil { flags |= POSIX_SPAWN_CLOEXEC_DEFAULT }
-        posix_spawnattr_setflags(&attributes, Int16(flags))
         // Default handling and an empty mask, as at a fresh start (the host ignores SIGPIPE and SIGHUP, and its queue's
-        // threads block most signals; `main` sets up its own).
-        var all: sigset_t = ~0
-        var none: sigset_t = 0
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        for fd in [0, 1, 2] + (inherit ?? []) { posix_spawn_file_actions_addinherit_np(&actions, fd) }
-        // An in-place exec refuses to hand on a descriptor marked close-on-exec (EBADF): unmark the ones it keeps
-        // (everything else still closes), and mark them again if it fails.
-        let marked = (inherit ?? []).filter { fcntl($0, F_GETFD) & FD_CLOEXEC != 0 }
-        marked.forEach { _ = fcntl($0, F_SETFD, 0) }
-        defer { marked.forEach { _ = fcntl($0, F_SETFD, FD_CLOEXEC) } }
-        let words = [executable] + arguments
-        let argv: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
-        defer { argv.forEach { free($0) } }
-        var pid: pid_t = 0
-        let result = posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
-        return .exec(result == 0 ? EINVAL : result)
+        // threads block most signals; `main` sets up its own). A descriptor it keeps is handed on even when it is
+        // marked close-on-exec (`Platform.Spawn.replaceProcess` unmarks it, and marks it again if the exec fails).
+        var spawn = Platform.Spawn(executable: executable, arguments: [executable] + arguments)
+        spawn.keep = inherit
+        return .exec(spawn.replaceProcess())
     }
 
     /// The secrets the build before handed over (`HostServer.secretsForHandover`), exactly the bytes it gave; nil when
@@ -260,13 +231,10 @@ public enum HostHandover {
     enum SecretChannel {
         /// The reading end, holding `secret` and then end-of-file.
         static func make(_ secret: Data) throws -> Int32 {
-            var pair: [Int32] = [-1, -1]
-            guard socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0 else { throw Failure.secretTooLarge(secret.count) }
-            let (reader, writer) = (pair[0], pair[1])
+            guard let (reader, writer) = Platform.Sockets.pair(type: Platform.Sockets.stream) else { throw Failure.secretTooLarge(secret.count) }
             var room = Int32(min(secret.count + 65_536, 8 << 20))
             setsockopt(writer, SOL_SOCKET, SO_SNDBUF, &room, socklen_t(MemoryLayout<Int32>.size))
             setsockopt(reader, SOL_SOCKET, SO_RCVBUF, &room, socklen_t(MemoryLayout<Int32>.size))
-            for fd in [reader, writer] { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
             _ = fcntl(writer, F_SETFL, fcntl(writer, F_GETFL) | O_NONBLOCK)
             var written = 0
             secret.withUnsafeBytes { raw in

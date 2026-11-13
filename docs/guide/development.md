@@ -86,13 +86,14 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
 ```
 
 | Lint | What it catches |
 | --- | --- |
 | `AccessibilityLint` | An SF Symbol the app shows that's neither named for VoiceOver nor hidden from it. |
 | `AgentExportLint` | A script or test that writes a git tree into the worktree with its agent files (AGENTS.md, `CLAUDE*.md`, `.claude/`, `.mcp.json`). |
+| `CloseOnExecLint` | A descriptor made in the session host, its launcher, `UnixSocket` or `VibePlatform` that isn't close-on-exec from the call that makes it (a bare `socket(`, `socketpair(`, `accept(` or `pipe(`, or an `open(` naming flags without `O_CLOEXEC`), outside the exemptions the test lists with their reasons; or a `Platform.Spawn` in the host that doesn't name what its child keeps. |
 | `DebugAidsLint` | A notification handler that writes a session's screen where the (unknown) sender says. |
 | `DocLinksLint` | A relative link or `#anchor` in README.md or `docs/**/*.md` that doesn't resolve, an image in `docs/images` no doc shows, or a lint suite missing from the command above. |
 | `ElapsedTimeLint` | A correctness test judging an elapsed time against a bare number (`took < 0.05`, `Date().timeIntervalSince(x) < 5`): it judges the order of events, a baseline from the same test, or it's a `.perf` bench; the short allow list is in `ElapsedTimeLintTests.swift`. |

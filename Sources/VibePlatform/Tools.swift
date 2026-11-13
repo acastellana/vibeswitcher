@@ -198,8 +198,8 @@ extension Platform {
         /// its process group are killed).
         static func run(_ command: [String], timeout: TimeInterval) -> Ran {
             var ends: [Int32] = [-1, -1]
-            guard !command.isEmpty, pipe(&ends) == 0 else { return .failed }
-            for end in ends { _ = fcntl(end, F_SETFD, FD_CLOEXEC) }
+            // Close-on-exec from its making on Linux (pipe2); the Mac's is pipe, then FD_CLOEXEC, as it always was.
+            guard !command.isEmpty, Sys.pipeClosedOnExec(&ends) == 0 else { return .failed }
             var spawn = Platform.Spawn(executable: command[0], arguments: command)
             spawn.stdin = .path("/dev/null", flags: O_RDONLY)
             spawn.stdout = .descriptor(ends[1])

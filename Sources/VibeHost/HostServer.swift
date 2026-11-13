@@ -57,6 +57,9 @@ public final class HostServer {
         /// The process this host ends with (`--exit-with`, a bench's): once it's gone, every session is ended and the
         /// host exits, however it went (SIGKILL too). Nil: none, as for the app's host, which outlives the app.
         public var owner: pid_t?
+        /// Only the app and a live session the vault binds to the lead role may `spawn` (the user's host on Linux, the
+        /// security architecture document's S2). False: any live session may, as always.
+        public var spawnNeedsLead = false
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -118,7 +121,7 @@ public final class HostServer {
     private var acceptSource: DispatchSourceRead?
     private var housekeeping: DispatchSourceTimer?
     /// The watch on `Config.owner`.
-    private var ownerWatch: DispatchSourceProcess?
+    private var ownerWatch: (any Platform.Cancellable)?
     private var lastBusy = Date()
     private var stopped = false
     /// A `shutdown` was accepted: the host stops in a moment and starts nothing more.
@@ -131,6 +134,9 @@ public final class HostServer {
     /// Per session, its input from every client in order (see `InputOrder`).
     private var inputOrders: [UUID: InputOrder] = [:]
     private var handingOver = false
+    /// The app's connectors, by the number of the end `openAppConnector` gave out (see V2/AppConnector.swift): none
+    /// on the Mac.
+    var appConnectors: [Int32: AppConnector] = [:]
 
     public init(config: Config) {
         self.config = config
@@ -194,10 +200,7 @@ public final class HostServer {
 
     /// See `Config.owner`.
     private func watch(owner: pid_t) {
-        let source = DispatchSource.makeProcessSource(identifier: owner, eventMask: .exit, queue: queue)
-        source.setEventHandler { [weak self] in self?.ownerGone(owner) }
-        source.resume()
-        ownerWatch = source
+        ownerWatch = Platform.ProcessExit.watch(owner, queue: queue) { [weak self] in self?.ownerGone(owner) }
         // Gone before the watch began: no exit comes.
         queue.async { if Sys.kill(owner, 0) != 0, errno == ESRCH { self.ownerGone(owner) } }
     }
@@ -237,6 +240,7 @@ public final class HostServer {
             self.acceptSource?.cancel()
             self.housekeeping?.cancel()
             self.ownerWatch?.cancel()
+            self.closeAppConnectors()
             self.clients.values.forEach { $0.close() }
             self.clients = [:]
             for session in self.sessions.values {
@@ -252,17 +256,18 @@ public final class HostServer {
         if DispatchQueue.getSpecific(key: Self.queueKey) != nil { work() } else { queue.sync(execute: work) }
     }
 
-    private static let queueKey = DispatchSpecificKey<Bool>()
+    static let queueKey = DispatchSpecificKey<Bool>()
 
     private func acceptAll() {
         while true {
-            let fd = Sys.accept(listenFD, nil, nil)
+            let fd = Platform.Sockets.accept(listenFD)
             guard fd >= 0 else { return }
             guard UnixSocket.peerUID(fd) == getuid() else {
                 Sys.close(fd)
                 continue
             }
-            guard clients.count < max(1, config.maxClients) else {
+            // The app's connections through its connector don't count: full slots never lock it out.
+            guard clients.values.filter({ !$0.viaConnector }).count < max(1, config.maxClients) else {
                 Sys.close(fd)
                 continue
             }
@@ -274,20 +279,39 @@ public final class HostServer {
             case .app: client.runsAppCode = true
             case let caller: client.caller = caller
             }
-            let key = ObjectIdentifier(client)
-            client.onRead = { [weak self, weak client] in
-                guard let self, let client else { return }
-                self.checkPeer(client)
-            }
-            client.onFrame = { [weak self, weak client] kind, payload in
-                guard let self, let client else { return }
-                self.handle(kind, payload, from: client)
-            }
-            client.onClose = { [weak self] in self?.dropClient(key) }
-            clients[key] = client
+            add(client)
             client.send(HostEventEnvelope(replyTo: nil, event: .challenge(client.challenge, keyless: appKey == nil)))
             client.start()
         }
+    }
+
+    /// A client served from now on: its reads, its requests and its end.
+    private func add(_ client: ClientConnection) {
+        let key = ObjectIdentifier(client)
+        client.onRead = { [weak self, weak client] in
+            guard let self, let client else { return }
+            self.checkPeer(client)
+        }
+        client.onFrame = { [weak self, weak client] kind, payload in
+            guard let self, let client else { return }
+            self.handle(kind, payload, from: client)
+        }
+        client.onClose = { [weak self] in self?.dropClient(key) }
+        clients[key] = client
+    }
+
+    /// A connection the host made for the app through its connector (see `openAppConnector`), on `fd`, its other end
+    /// handed to `peer`: the app's from its first byte, sent no challenge (it gets the welcome when it says hello).
+    /// Nil once the host has stopped. On `queue`.
+    func addAppClient(fd: Int32, peer: Platform.PeerToken) -> ClientConnection? {
+        guard !stopped else { return nil }
+        let client = ClientConnection(fd: fd, queue: queue, peerPID: peer.pid)
+        client.peer = peer
+        client.caller = .app
+        client.viaConnector = true
+        add(client)
+        client.start()
+        return client
     }
 
     /// The key the app proves itself with: the vault's, or (a host that keeps none) the configured or enrolled one.
@@ -377,7 +401,10 @@ public final class HostServer {
             // A census is counts only (see `HostCensus`): nothing in it reaches a session.
             if caller == .app { return true }
             guard case .session(let id) = caller, let id = UUID(uuidString: id) else { return false }
-            return sessions[id]?.info.isLive == true
+            guard sessions[id]?.info.isLive == true else { return false }
+            // Where only leads may: the session the vault binds to a team's lead role (`leads` of itself).
+            if case .spawn = request, config.spawnNeedsLead { return config.vault?.leads(id.uuidString, caller: caller) == true }
+            return true
         case .shutdown, .handover:
             return caller == .app
         case .attach(let id, _, _), .detach(let id), .input(let id, _, _), .inputUnit(let id, _, _),
@@ -640,7 +667,8 @@ public final class HostServer {
     /// connector forks a child to write and execs the app's binary (or anything else), the token names the child,
     /// or the new image. Anything but the process accepted makes the connection nobody's.
     private func checkPeer(_ client: ClientConnection) {
-        guard client.caller != .unknown || client.runsAppCode else { return }
+        // A pair the host made names the host itself for good: a connector's connection isn't checked this way.
+        guard !client.viaConnector, client.caller != .unknown || client.runsAppCode else { return }
         if let accepted = client.peer, let now = UnixSocket.peerToken(client.fd), now.sameImage(as: accepted) { return }
         log("pid \(client.peer?.pid ?? 0) is no longer the one sending on its connection: it's no one to the vault now")
         client.caller = .unknown
@@ -660,7 +688,7 @@ public final class HostServer {
     /// another's. A worker's branch's code that merge, an audit or init_command runs from a session (the lead's tool
     /// server, see `BranchCode`) is no session's: anything below its wrapper, short of a session started under it
     /// (a test suite's own host's), isn't the session above it, nor any by terminal.
-    func identify(_ token: audit_token_t?) -> LeadVault.Caller {
+    func identify(_ token: Platform.PeerToken?) -> LeadVault.Caller {
         guard let token, token.pid > 1, ProcessTable.ancestry(of: token.pid) != nil else { return .unknown }
         if let session = session(of: token.pid) { return .session(session) }
         if let app = config.appExecutable, AppCode.runs(token, executable: app) { return .app }
@@ -688,11 +716,8 @@ public final class HostServer {
         return nil
     }
 
-    static func executable(of pid: pid_t) -> String? {
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        return String(cString: buffer)
-    }
+    /// The file `pid`'s program was started from (see `Platform.Processes.executable`).
+    static func executable(of pid: pid_t) -> String? { Platform.Processes.executable(pid) }
 
     /// Re-executes as `executable`, keeping every session (see `HostHandover`). The new build is probed first (off the
     /// queue, so the sessions carry on meanwhile); then, on the queue, the sessions are saved as they are at that moment
@@ -941,22 +966,122 @@ enum HostProcesses {
         return arguments.count >= 2 && arguments[1] == "--parse-session"
     }
 
-    /// The user's processes running `executable` whose parent is launchd: their own parent ended. Only launchd's
-    /// children are looked at (a few hundred, not the whole table), each one's path only when it's the user's.
+    /// The processes an orphan of this host's is given as its parent: launchd (pid 1) on the Mac, as always. On
+    /// Linux pid 1 and the subreaper above this host, if any (the user's systemd, or under WSL a terminal's relay),
+    /// which takes an orphan there before pid 1 does: the host is no subreaper itself before the bootstrap (the stage
+    /// 2 plan's S2-D6), so where its own orphans go is where its sessions' do. Found the first time it's asked
+    /// (`probeOrphanParent`), as the parent the kernel gives an orphan of a probe of the host's own, and again
+    /// whenever the one found has ended since (`subreaper`).
+    static var orphanParents: Set<pid_t> {
+        Platform.CodeIdentity.isAvailable ? [1] : Set([1] + [subreaper.current()].compactMap { $0 })
+    }
+
+    /// Linux's subreaper, as last found. A subreaper can end while the host runs on (WSL's relay ends with its
+    /// terminal; the host ignores SIGHUP), and its pid be given to another process later: the children of that one
+    /// aren't orphans (an agent's would be its live tool servers), and the host's orphans go elsewhere now.
+    static let subreaper = OrphanParent<Platform.PeerToken>.live(probe: probeOrphanParent)
+
+    /// The parent the kernel gives an orphan (other than pid 1), kept as a token of that process: asked for, it's
+    /// the one found as long as that process runs, and found again (`probe`) once it has ended. A probe that finds
+    /// none isn't asked again (as for the first). Thread-safe.
+    final class OrphanParent<Token> {
+        private let lock = NSLock()
+        private let probe: () -> pid_t?
+        private let token: (pid_t) -> Token?
+        private let same: (Token, Token) -> Bool
+        private var found: (pid: pid_t, token: Token?)?
+        private var probed = false
+
+        /// `token` reads a process's token now (nil when it has gone); `same` tells whether two are of one process.
+        init(probe: @escaping () -> pid_t?, token: @escaping (pid_t) -> Token?, same: @escaping (Token, Token) -> Bool) {
+            self.probe = probe
+            self.token = token
+            self.same = same
+        }
+
+        /// The parent: the one found while it runs (pid 1 isn't checked: it outlives everything), found again
+        /// when it has ended; nil when there is none, or the one just found ended before its token was read.
+        func current() -> pid_t? {
+            lock.lock()
+            defer { lock.unlock() }
+            if probed {
+                guard let found else { return nil }
+                if found.pid == 1 { return 1 }
+                if let then = found.token, let now = token(found.pid), same(now, then) { return found.pid }
+            }
+            probed = true
+            found = nil
+            guard let pid = probe() else { return nil }
+            if pid == 1 {
+                found = (pid, nil)
+                return pid
+            }
+            guard let now = token(pid) else {
+                probed = false
+                return nil
+            }
+            found = (pid, now)
+            return pid
+        }
+    }
+
+    /// The parent an orphan of this process is given: a shell started here starts `sleep` in the background and ends,
+    /// and the sleep's parent then is the answer; the sleep is ended. nil when the probe couldn't run or read it.
+    static func probeOrphanParent() -> pid_t? {
+        var ends: [Int32] = [-1, -1]
+        guard Sys.pipeClosedOnExec(&ends) == 0 else { return nil }
+        // The sleep's own output isn't the pipe, so the pipe ends with the shell.
+        var spawn = Platform.Spawn(executable: "/bin/sh", arguments: ["/bin/sh", "-c", "sleep 30 < /dev/null > /dev/null 2>&1 & echo $!"])
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .descriptor(ends[1])
+        spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        spawn.environment = ["PATH=/usr/bin:/bin"]
+        spawn.keep = []
+        let started = spawn.start()
+        Sys.close(ends[1])
+        defer { Sys.close(ends[0]) }
+        guard case .success(let shell) = started else { return nil }
+        var output: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: 64)
+        while output.count < 64 {
+            let count = Sys.read(ends[0], &buffer, buffer.count)
+            if count > 0 { output += buffer[0..<count] } else if count < 0, errno == EINTR { continue } else { break }
+        }
+        var status: Int32 = 0
+        while waitpid(shell, &status, 0) < 0, errno == EINTR {}
+        // The shell has exited (collected), so the sleep was given its new parent.
+        guard let sleeper = pid_t(String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)),
+              sleeper > 1, case .record(let record) = Platform.Processes.record(sleeper) else { return nil }
+        // Its own (the one just started, 30 s from ending), whether or not it has become `sleep` yet.
+        if record.uid == geteuid() { Sys.kill(sleeper, SIGKILL) }
+        return record.ppid > 0 && record.ppid != shell ? record.ppid : nil
+    }
+
+    /// The user's processes running `executable` whose parent is one an orphan has (`orphanParents`): their own
+    /// parent ended. Only those parents' children are looked at (a few hundred, not the whole table), each one's path
+    /// only when it's the user's.
     static func orphans(running executable: String) -> [pid_t] {
         let target = URL(fileURLWithPath: executable).resolvingSymlinksInPath().path
-        return children(of: 1).filter { pid in
-            var short = proc_bsdshortinfo()
-            let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size else { return false }
-            return isOrphan(parent: pid_t(short.pbsi_ppid), uid: short.pbsi_uid, running: target) { HostServer.executable(of: pid) }
+        let parents = orphanParents
+        return parents.sorted().flatMap { children(of: $0) }.filter { pid in
+            guard case .brief(let brief) = Platform.Processes.brief(pid) else { return false }
+            return isOrphan(parent: brief.ppid, uid: brief.uid, running: target, parents: parents) { HostServer.executable(of: pid) }
         }
     }
 
     /// Whether a process with this parent and uid, running what `path` says (asked last), is an orphan of `target`'s
-    /// (a resolved path): launchd its parent, the user's, and exactly that file.
-    static func isOrphan(parent: pid_t, uid: uid_t, running target: String, user: uid_t = geteuid(), path: () -> String?) -> Bool {
-        guard parent == 1, uid == user, let path = path() else { return false }
+    /// (a resolved path): its parent one of `parents` (launchd on the Mac), the user's, and exactly that file.
+    static func isOrphan(parent: pid_t, uid: uid_t, running target: String, parents: Set<pid_t> = orphanParents, user: uid_t = geteuid(),
+                         path: () -> String?) -> Bool {
+        guard parents.contains(parent), uid == user, let path = path() else { return false }
         return URL(fileURLWithPath: path).resolvingSymlinksInPath().path == target
+    }
+}
+
+extension HostProcesses.OrphanParent where Token == Platform.PeerToken {
+    /// One that reads each process's token as `Platform.Processes.token` does (its pid, user and start), so a pid
+    /// given to a later process doesn't pass for the one found (`sameImage(as:)`).
+    static func live(probe: @escaping () -> pid_t?) -> HostProcesses.OrphanParent<Platform.PeerToken> {
+        .init(probe: probe, token: { Platform.Processes.token($0) }, same: { $0.sameImage(as: $1) })
     }
 }

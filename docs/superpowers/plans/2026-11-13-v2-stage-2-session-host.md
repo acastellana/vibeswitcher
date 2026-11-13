@@ -776,11 +776,15 @@ whose Mac form stays `pipe` then `fcntl`). Test: `Tests/VibeCoreTests/CloseOnExe
     `Sources/vibeswitcher-host` sets `keep`.
   - `aSpawnDuringAnAcceptInheritsNoConnection`: a scratch host takes 200 connections from one thread while it spawns
     sessions whose program lists its own open descriptors (`/proc/self/fd` on Linux, `/dev/fd` on the Mac): each
-    lists 0 to 2 and the one its listing opened, nothing else. Two guards hold this on Linux: the accept's
-    `SOCK_CLOEXEC`, and `keep: []`, with which `Platform.Spawn` closes everything from 3 up in the child
-    (`Spawn+Linux.swift:95-107`). It is shown failing (in 5a, where it first runs on Linux) only with both removed
-    (the accept made with plain `accept`, and `PTYSpawn`'s `keep` made nil); each alone holds it, which is why the
-    lints carry both rules.
+    lists 0 to 2 and the one its listing opened, nothing else. Two guards hold this: `keep: []`, with which
+    `Platform.Spawn` closes everything from 3 up in the child (`Spawn+Linux.swift:95-107`), and the connection
+    being close-on-exec before any session spawn after its accept. `acceptAll` and the session spawns run on the
+    host's one serial queue, and `acceptAll` marks each connection before it gives the queue back (accept4's
+    `SOCK_CLOEXEC` on Linux, and `UnixSocket.configure`'s `FD_CLOEXEC` on both). So this test can't show accept4
+    on its own: that is `SocketsTests.anAcceptedConnectionIsClosedOnExecFromItsMaking` and the lint, and accept4
+    matters for a spawn on another thread. It is shown failing (in 5a, where it first runs on Linux) only with
+    `PTYSpawn`'s `keep` made nil and the connections left open on exec (the accept made with plain `accept`, and
+    no `FD_CLOEXEC` in `configure`); either guard alone holds it, which is why the lints carry both rules.
 - [ ] **Step 3:** push; the Mac's host and app jobs green (`VibeHostTests` there exercise each site); commit ("v2: the
   host's terminals, spawns and exit watches through the platform; descriptors close-on-exec from creation").
 
@@ -970,7 +974,7 @@ create `Tests/VibeHostTests/MacOnlyTests.txt`; `Tests/VibePlatformTests/MacOnlyT
   - Each of the 29 files that use `TestHost` is checked, not assumed.
 - [ ] **Step 3: The home guard** in its Linux form (`.init_array`, SIGPIPE ignored), as in the other test targets.
 - [ ] **Step 4: 4a's, 4b1's and 4b2's Linux tests run**, each shown failing by reverting its change (4a's race test
-  as 4a says, with both guards removed).
+  as 4a says: `keep` made nil, a plain `accept`, and no `FD_CLOEXEC` in `configure`).
 - [ ] **Step 5:** push; the new Linux `host` job runs; commit ("v2: VibeHostTests build on Linux, with the app's
   stand-ins as connectors").
 

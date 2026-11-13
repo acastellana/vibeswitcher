@@ -40,16 +40,17 @@ let portableTargets: [Target] = [
     // The command line, installed as `vibeswitcher` (a folder named so would be the app's on the Mac).
     .executableTarget(name: "vibeswitcher-cli", dependencies: ["VibeNode", "VibeCore"]),
     .testTarget(name: "VibeNodeTests", dependencies: ["VibeNode", "VibeCore"], swiftSettings: testSettings),
-    // Still to come: each of `notYetPortableTargets` when it compiles on Linux (the session host: stage 2).
+    // The session host's internals: PTYs, replay buffers, the socket server (stage 2).
+    .target(name: "VibeHost", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm"), crypto]),
+    // The session host: keeps the sessions running while their clients come and go.
+    .executableTarget(name: "vibeswitcher-host", dependencies: ["VibeHost"]),
+    // Still to come: the host's tests, `VibeHostTests` (stage 2's Task 5a).
 ]
 // VIBE_LINUX_ALL=1 adds the portable targets that don't compile on Linux yet, only to count their errors
 // (scripts/ci/linux-core-errors.sh). The package's dependencies are the same with and without it, and so is
 // Package.resolved.
 let measuring = Context.environment["VIBE_LINUX_ALL"] == "1"
-let notYetPortableTargets: [Target] = [
-    .target(name: "VibeHost", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm"), crypto]),
-    .executableTarget(name: "vibeswitcher-host", dependencies: ["VibeHost"]),
-]
+let notYetPortableTargets: [Target] = []
 
 let package = Package(
     name: "VibeSwitcher",

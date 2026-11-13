@@ -35,7 +35,7 @@ int vibe_send_descriptor(int socket, int fd) {
 
 // Whether `socket` is shut for reading, which a Unix socket is once its peer has closed or shut its end: a poll that
 // doesn't wait. A failed poll says gone, as before this check was made.
-static int vibe_peer_has_gone(int socket) {
+int vibe_peer_has_gone(int socket) {
     struct pollfd waiting = { .fd = socket, .events = POLLRDHUP };
     int ready;
     do ready = poll(&waiting, 1, 0); while (ready < 0 && errno == EINTR);

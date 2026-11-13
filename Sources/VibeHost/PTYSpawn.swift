@@ -13,7 +13,7 @@ public enum PTYSpawn {
     /// What the launcher does with `--pty-exec`; call it first thing in its `main`.
     public static func execIfLaunched(_ arguments: [String]) {
         guard arguments.count > 2, arguments[1] == "--pty-exec" else { return }
-        _ = ioctl(0, TIOCSCTTY, 0)
+        _ = Platform.Terminals.makeControlling(0)
         let program = Array(arguments[2...])
         let argv = program.map { strdup($0) } + [nil]
         execv(program[0], argv)
@@ -24,78 +24,35 @@ public enum PTYSpawn {
         _exit(127)
     }
 
-    private static let openptyLock = NSLock()
-
     /// `failure`: posix_spawn's errno when it couldn't start the launcher (0 when the terminal couldn't be made).
     static func spawn(launcher: String, executable: String, args: [String], env: [String], directory: String,
                       size: inout winsize, failure: inout Int32) -> (pid: pid_t, masterFD: Int32)? {
-        var master: Int32 = -1
-        var slave: Int32 = -1
-        // One at a time: on macOS 27, openpty called from several threads at once fails for some of them (errno -6),
-        // and sessions start from several threads at once.
-        openptyLock.lock()
-        let opened = openpty(&master, &slave, nil, nil, &size)
-        openptyLock.unlock()
-        guard opened == 0 else { return nil }
-        _ = fcntl(master, F_SETFD, FD_CLOEXEC)
-        _ = fcntl(slave, F_SETFD, FD_CLOEXEC)
+        // Both ends close-on-exec (from their making on Linux), the slave's path named from the master: see
+        // `Platform.Terminals.open`.
+        guard case .success(let terminal) = Platform.Terminals.open(rows: size.ws_row, cols: size.ws_col) else { return nil }
+        let master = terminal.master
         // Held open until the program has opened the terminal (posix_spawn returns once it has): macOS clears a
         // terminal's window size when its last slave descriptor closes, and a program that started on a 0×0 terminal
         // and never got a resize (no view attached) drew nothing: Codex's TUI (task codex-s-tui-renders).
-        defer { close(slave) }
-        // From the master (the kernel names it): ttyname's buffer is shared between threads, and on a busy Mac it
-        // can find no name yet for a terminal just made.
-        var buffer = [CChar](repeating: 0, count: 128)
-        let name = ptsname_r(master, &buffer, buffer.count) == 0 ? String(cString: buffer) : nil
-        guard let name else {
+        defer { close(terminal.slave) }
+
+        // In a session of its own, the terminal its only descriptors (opened by its path, so the launcher's own
+        // `makeControlling` takes it), with default signals and an empty mask.
+        var spawn = Platform.Spawn(executable: launcher, arguments: [launcher, "--pty-exec", executable] + args.dropFirst())
+        spawn.stdin = .path(terminal.devicePath, flags: Platform.Terminals.launcherOpenFlags)
+        spawn.stdout = .sameAsStdin
+        spawn.stderr = .sameAsStdin
+        spawn.group = .ownSession
+        spawn.directory = directory
+        spawn.environment = env
+        spawn.keep = []
+        switch spawn.start() {
+        case .success(let pid):
+            return (pid, master)
+        case .failure(let error):
+            failure = error.code
             close(master)
             return nil
         }
-
-        var attributes: posix_spawnattr_t?
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT
-                                                   | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
-        var all: sigset_t = ~0
-        var none: sigset_t = 0
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_addopen(&actions, 0, name, O_RDWR, 0)
-        posix_spawn_file_actions_adddup2(&actions, 0, 1)
-        posix_spawn_file_actions_adddup2(&actions, 0, 2)
-        posix_spawn_file_actions_addchdir_np(&actions, directory)
-
-        let launch = [launcher, "--pty-exec", executable] + args.dropFirst()
-        let argv = cStrings(launch)
-        let envp = cStrings(env)
-        defer {
-            release(argv, count: launch.count)
-            release(envp, count: env.count)
-        }
-        var pid: pid_t = 0
-        let code = posix_spawn(&pid, launcher, &actions, &attributes, argv, envp)
-        guard code == 0 else {
-            failure = code
-            close(master)
-            return nil
-        }
-        return (pid, master)
-    }
-
-    private static func cStrings(_ strings: [String]) -> UnsafeMutablePointer<UnsafeMutablePointer<CChar>?> {
-        let array = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: strings.count + 1)
-        for (index, string) in strings.enumerated() { array[index] = strdup(string) }
-        array[strings.count] = nil
-        return array
-    }
-
-    private static func release(_ array: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>, count: Int) {
-        for index in 0..<count { free(array[index]) }
-        array.deallocate()
     }
 }

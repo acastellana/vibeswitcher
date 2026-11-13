@@ -1,2 +1,0 @@
-Sources/VibeHost/AppCode.swift
-Sources/VibeHost/VaultStorage.swift

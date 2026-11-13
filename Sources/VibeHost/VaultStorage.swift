@@ -1,5 +1,4 @@
 import Foundation
-import Security
 import VibeCore
 
 /// Where the host keeps the lead's vault (see `LeadVault.Book`) across its restarts: one file, sealed (ChaChaPoly)
@@ -123,28 +122,15 @@ public struct VaultStorage {
 
     /// The vault's key from the login Keychain, made the first time. Never asks you (the host has no window to ask
     /// from): nil when the Keychain won't give it without asking (a rebuilt host without the stable signing
-    /// identity, see scripts/setup-signing.sh), and then nothing is saved.
+    /// identity, see scripts/setup-signing.sh), and then nothing is saved. The Keychain is the platform's
+    /// (`Platform.Keychain`); Linux has none, and the vault there lives in memory only.
     public static func keychainKey(service: String = keychainService, account: String = "vault") -> SymmetricKey? {
-        SecKeychainSetUserInteractionAllowed(false)
-        defer { SecKeychainSetUserInteractionAllowed(true) }
-        let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                   kSecAttrAccount as String: account]
-        var found: CFTypeRef?
-        var query = item
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        let status = SecItemCopyMatching(query as CFDictionary, &found)
-        if status == errSecSuccess, let data = found as? Data, data.count == 32 { return SymmetricKey(data: data) }
-        guard status == errSecItemNotFound else { return nil }
-        let data = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
-        var add = item
-        add[kSecValueData as String] = data
-        add[kSecAttrLabel as String] = "VibeSwitcher lead vault"
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess ? SymmetricKey(data: data) : nil
+        Platform.Keychain.key(service: service, account: account, label: "VibeSwitcher lead vault", size: 32) {
+            SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+        }.map { SymmetricKey(data: $0) }
     }
 
     public static func removeKeychainKey(service: String, account: String = "vault") {
-        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                       kSecAttrAccount as String: account] as CFDictionary)
+        Platform.Keychain.remove(service: service, account: account)
     }
 }

@@ -69,6 +69,9 @@ if ownsLaunchers || arguments.contains("--end-orphaned-tool-servers") {
 }
 // A scratch host's parsers can be told to stall or trap (tests), and watched more closely.
 config.parser.testHooks = !ownsLaunchers && arguments.contains("--parser-test-hooks")
+// On Linux the user's host starts a session only for the app and for a session the vault binds to the lead role
+// (`HostServer.Config.spawnNeedsLead`); on the Mac, and in a scratch host, any client may, as before.
+config.spawnNeedsLead = ownsLaunchers && !Platform.CodeIdentity.isAvailable
 if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), limit > 0 { config.parser.stallLimit = limit }
 // The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
 config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
@@ -146,8 +149,7 @@ if let testSecret { server.secretsForHandover = { testSecret } }
 // outlive the host either way; they lose their terminal. The handler only writes the signal and its sender to a
 // pipe. A handover's exec puts the signals back to their defaults: the new build installs its own here.
 var signalPipe: [Int32] = [-1, -1]
-pipe(&signalPipe)
-signalPipe.forEach { _ = fcntl($0, F_SETFD, FD_CLOEXEC) }
+_ = Sys.pipeClosedOnExec(&signalPipe)
 nonisolated(unsafe) var signalPipeWriter = signalPipe[1]
 for number in [SIGTERM, SIGINT] {
     Platform.Signals.onSignal([number]) { number, info, _ in

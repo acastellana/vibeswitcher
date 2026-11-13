@@ -49,14 +49,11 @@ extension Platform.FolderWatch {
             var ends: [Int32] = [-1, -1]
             // IN_ONLYDIR: a file's watch would never tell of anything asked for here.
             guard inotify_add_watch(inotify, path, Self.entryEvents | Self.folderEvents | UInt32(IN_ONLYDIR)) >= 0,
-                  pipe(&ends) == 0 else {
+                  Sys.pipeClosedOnExec(&ends) == 0 else {
                 close(inotify)
                 return nil
             }
-            for end in ends {
-                _ = fcntl(end, F_SETFD, FD_CLOEXEC)
-                _ = fcntl(end, F_SETFL, fcntl(end, F_GETFL) | O_NONBLOCK)
-            }
+            for end in ends { _ = fcntl(end, F_SETFL, fcntl(end, F_GETFL) | O_NONBLOCK) }
             self.inotify = inotify
             wakeRead = ends[0]
             wakeWrite = ends[1]

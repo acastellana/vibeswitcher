@@ -25,10 +25,16 @@ struct KeychainLintTests {
         return code(in: folder).filter { $0.lines.contains { $0.contains(regex) } }.map(\.path)
     }
 
-    /// The Keychain is called from two places only: the app's key store and the host's vault key.
+    /// The Keychain is called from two places only: the app's key store and the host's vault key (its `SecItem` calls
+    /// in the platform's Mac form, `Platform.Keychain`, which `VaultStorage.keychainKey()` forwards to).
     @Test func onlyTheKeyStoresCallTheKeychain() {
         #expect(Self.files(in: "Sources", matching: #"\bSec(Item|Keychain)\w*\("#)
-            == ["Sources/VibeCore/MacOnly/AppProof+Keychain.swift", "Sources/VibeHost/VaultStorage.swift"])
+            == ["Sources/VibeCore/MacOnly/AppProof+Keychain.swift", "Sources/VibePlatform/Keychain+Darwin.swift"])
+    }
+
+    /// Only the vault's key store reaches the platform's Keychain: `VaultStorage`'s two forwards.
+    @Test func onlyTheVaultReachesThePlatformsKeychain() {
+        #expect(Self.files(in: "Sources", matching: #"\bPlatform\.Keychain\."#) == ["Sources/VibeHost/VaultStorage.swift"])
     }
 
     /// The app's Keychain store is made by the app alone (its one client); every other client, a default one too, has
@@ -44,9 +50,10 @@ struct KeychainLintTests {
         #expect(main.lines.filter { $0.contains("VaultStorage.keychainKey(") }.allSatisfy { $0.contains("ownsLaunchers ?") })
     }
 
-    /// In the tests, only the live test touches the Keychain or the app's store, and it runs only when asked for.
+    /// In the tests, only the live test touches the Keychain or the app's store, and it runs only when asked for: the
+    /// platform's `Platform.Keychain` too, which on the Mac is the real login Keychain to any test that can see it.
     @Test func onlyTheGatedLiveTestReachesTheKeychain() throws {
-        let reaching = Self.files(in: "Tests", matching: #"\bSec(Item|Keychain)\w*\(|KeychainStore\(|KeychainSecret\(|VaultStorage\.keychainKey\(|removeKeychainKey\(|AppDelegate\("#)
+        let reaching = Self.files(in: "Tests", matching: #"\bSec(Item|Keychain)\w*\(|KeychainStore\(|KeychainSecret\(|VaultStorage\.keychainKey\(|removeKeychainKey\(|Platform\.Keychain\.|AppDelegate\("#)
         #expect(reaching.filter { !$0.hasSuffix("/KeychainLintTests.swift") } == ["Tests/VibeCoreTests/KeychainLiveTests.swift"])
         let live = try #require(Self.code(in: "Tests").first { $0.path.hasSuffix("/KeychainLiveTests.swift") }).lines
         let gate = try #require(live.firstIndex { $0.hasPrefix("@Suite(.enabled(if: ProcessInfo.processInfo.environment[\"VIBESWITCHER_KEYCHAIN_LIVE\"] == \"1\"))") })
