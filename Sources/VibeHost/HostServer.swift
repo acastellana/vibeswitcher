@@ -60,6 +60,9 @@ public final class HostServer {
         /// Only the app and a live session the vault binds to the lead role may `spawn` (the user's host on Linux, the
         /// security architecture document's S2). False: any live session may, as always.
         public var spawnNeedsLead = false
+        /// How long each session's launcher waits before it takes its terminal (see `SessionIdentityChecks`), so a test
+        /// can take the terminal first. A scratch host's tests only; nil: none, as for every other host.
+        public var launcherTestDelay: TimeInterval?
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -455,7 +458,8 @@ public final class HostServer {
             }
             do {
                 let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
-                                                      ringCapacity: config.ringCapacity, queue: queue, parser: config.parser)
+                                                      ringCapacity: config.ringCapacity, queue: queue, parser: config.parser,
+                                                      launcherTestDelay: config.launcherTestDelay)
                 // Only once it started: a spawn that fails leaves the ended sessions as they were.
                 for ended in room {
                     log.note("host: at its limit of \(max(1, config.maxSessions)) sessions, forgetting \(Self.short(ended.id)), ended \(Int(-ended.at.timeIntervalSinceNow)) s ago")
@@ -696,8 +700,11 @@ public final class HostServer {
     }
 
     /// The live session `pid` runs in (its program or anything under it, by parent processes, or with the session's
-    /// terminal), by id; nil for none. Branch code (see `identify`) runs in none.
-    func session(of pid: pid_t) -> String? {
+    /// terminal), by id; nil for none. Branch code (see `identify`) runs in none. On Linux, by token, with the chain
+    /// and the session's terminal checked (see `SessionIdentityChecks`); `links`: how it reads a process there (tests
+    /// give a table).
+    func session(of pid: pid_t, reading links: (pid_t) -> Platform.Processes.Link? = Platform.Processes.link) -> String? {
+        if !Platform.CodeIdentity.isAvailable { return SessionIdentityChecks.session(of: pid, among: Array(sessions.values), reading: links, note: { log.note($0) }) }
         guard pid > 1, let ancestry = ProcessTable.ancestry(of: pid) else { return nil }
         let live = sessions.values.filter { $0.info.isLive }
         // Nearest first: the session found is the innermost one it runs in.

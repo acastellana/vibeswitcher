@@ -213,4 +213,32 @@ extension Platform.Processes {
     /// Any process may make itself non-dumpable, so an unreadable process is no one in particular: only its pid and
     /// start (`token`) tell it is the session host, a parser or the server (the security architecture document's S6).
     public static func isDumpable(_ pid: pid_t) -> Bool? { System.isDumpable(pid) }
+
+    /// One link of a process's ancestry, as one read gives it: its parent, when it started and its controlling
+    /// terminal, all of the same process (the session host's check of who a caller is, the security architecture
+    /// document's S4).
+    public struct Link: Equatable, Sendable {
+        public var pid: pid_t
+        public var parent: pid_t
+        /// When it started, in the system's clock ticks since boot: a process started later has no fewer.
+        public var startTicks: UInt64
+        /// Its controlling terminal's name (`Terminals`), nil for none.
+        public var terminal: String?
+
+        public init(pid: pid_t, parent: pid_t, startTicks: UInt64, terminal: String?) {
+            self.pid = pid
+            self.parent = parent
+            self.startTicks = startTicks
+            self.terminal = terminal
+        }
+
+        /// Whether `token` names this process: the same pid, started at the same tick, not the pid given again.
+        /// The Mac's tokens carry no start ticks: false (the Mac reads no links).
+        public func isProcess(of token: Platform.PeerToken) -> Bool { System.names(token, self) }
+    }
+
+    /// The process `pid` as one read gives it (`Link`). Linux: its line of /proc/<pid>/stat; nil when it has gone,
+    /// or the number is a thread's. The Mac: nil (its records carry no start ticks; the host there matches a process by
+    /// its pid, `ProcessTable.ancestry`).
+    public static func link(_ pid: pid_t) -> Link? { System.link(pid) }
 }

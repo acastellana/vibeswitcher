@@ -561,12 +561,17 @@ with the sandbox.
 `LeadVaultHostTests.aLeadCanReadAndTypeIntoItsWorkerButCannotAccessAnotherProject`,
 `VerifierBranchCodeHostTests.aVerifiersBashCantSubmitItsVerdictAndItsToolServerStillDoes`,
 `HostSecurityHardeningTests.unknownClientsCannotReadMutateOrSubscribeToSessions` (on the Mac now; on Linux from Task
-5b); planned: stage 2 plan task 6.
+5b), `HostedSessionTerminalTests.aSessionsTerminalIsTheTablesName`,
+`HostedSessionTerminalTests.aProcessOnTheSessionsTerminalIsThatSessions`,
+`HostedSessionTerminalTests.theHookStateFileOfASessionIsDirectlyInState`,
+`HostedSessionTerminalTests.aProcessThatTookASessionsTerminalFirstIsNotThatSession`,
+`HostedSessionTerminalTests.aLauncherThatCantTakeItsTerminalExits`,
+`HostedSessionTerminalTests.aReusedProgramPidIsNotTheSession`,
+`HostedSessionTerminalTests.anAncestorYoungerThanItsChildBreaksTheChain`,
+`HostedSessionTerminalTests.aChildReparentedWhileItsChainIsReadBreaksIt`,
+`HostedSessionTerminalTests.aReapedSessionIsNotLive` (Task 6, the last six on Linux only); planned: stage 2 plan task 10.
 
-**Tests to write:** Task 6: `HostedSessionTerminalTests.aSessionsTerminalIsTheTablesName`,
-`aProcessOnTheSessionsTerminalIsThatSessions`, `theHookStateFileOfASessionIsDirectlyInState`,
-`aProcessThatTookASessionsTerminalFirstIsNotThatSession`, `aLauncherThatCantTakeItsTerminalExits`,
-`aReusedProgramPidIsNotTheSession`, `anAncestorYoungerThanItsChildBreaksTheChain`. Task 10:
+**Tests to write:** Task 10:
 `VerifierBranchCodeHostTests.anEscapedVerifierCommandWithoutSetsidIsNobodys`,
 `BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup`. With the connector:
 `aConnectorConnectionIsItsSession`, `branchCodeHasNoConnector`, `theConnectorSurvivesAHandover`, and the measurement

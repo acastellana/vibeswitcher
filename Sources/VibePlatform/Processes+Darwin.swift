@@ -286,5 +286,11 @@ extension Platform.Processes.System {
 
     /// nil: the Mac has no dumpable state another process can read.
     static func isDumpable(_ pid: pid_t) -> Bool? { nil }
+
+    /// nil: the Mac's records carry no start ticks (see `Platform.Processes.link`).
+    static func link(_ pid: pid_t) -> Platform.Processes.Link? { nil }
+
+    /// false: an audit token carries no start ticks.
+    static func names(_ token: Platform.PeerToken, _ link: Platform.Processes.Link) -> Bool { false }
 }
 #endif
