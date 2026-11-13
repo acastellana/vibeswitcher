@@ -271,8 +271,8 @@ public enum LeadLaunch {
     /// about 30 KB (a team's `git diff main...HEAD`) is saved to `<folder>/<its session>/tool-results/` for it to Read
     /// back. There, every session's transcript (`*.jsonl`, the verifier's own included) and every entry already in the
     /// folder at its launch (earlier sessions' folders: the integrator's tool results, subagents, memory) are denied;
-    /// only the verifier's own session's folder, made after this, isn't. An entry whose name a rule can't hold as it is
-    /// denies that folder whole.
+    /// only the verifier's own session's folder, made after this, isn't. An entry whose name a rule can't hold as it is,
+    /// or a folder that's there but can't be listed, denies that folder whole.
     public static func memberTranscripts(root: String, slug: String, team: [LeadTeamMember]?, cwd: String? = nil,
                                          home: String = VibePaths.home) -> [String] {
         guard let team, !team.isEmpty else { return [] }
@@ -292,7 +292,13 @@ public enum LeadLaunch {
             let whole = ["Read(\(rule))", "Read(\(rule)/**)"]
             guard own.contains(folder) else { return whole }
             let listed = (home as NSString).appendingPathComponent(".claude/projects/\(folder)")
-            let entries = ((try? FileManager.default.contentsOfDirectory(atPath: listed)) ?? []).sorted()
+            let entries: [String]
+            do { entries = try FileManager.default.contentsOfDirectory(atPath: listed).sorted() } catch {
+                // Not there yet, it holds no earlier session; there but not listable, it's denied whole.
+                var info = stat()
+                guard lstat(listed, &info) != 0, errno == ENOENT else { return whole }
+                entries = []
+            }
             guard entries.allSatisfy({ $0.unicodeScalars.allSatisfy(safe.contains) }) else { return whole }
             // `memory*` too: `setAsideMemory`, after this, renames one.
             return ["Read(\(rule)/*.jsonl)", "Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)"] + entries.flatMap { ["Read(\(rule)/\($0))", "Read(\(rule)/\($0)/**)"] }

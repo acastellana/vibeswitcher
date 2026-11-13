@@ -171,6 +171,29 @@ struct TeamVerifierLaunchTests {
         #expect(whole.contains("Read(\(rule))") && whole.contains("Read(\(rule)/**)") && !whole.contains { $0.contains("a b") })
     }
 
+    /// The verifier's own folder can't be listed (here it can't be read; any failure but its not being there): which
+    /// earlier sessions it holds is unknown, so it's denied whole. Not there yet, it holds none: its transcripts only.
+    @Test func itsOwnFolderThatCantBeListedIsDeniedWhole() throws {
+        let root = try root()
+        let home = temp.url("home").path
+        let team = try LeadTeam.make(slug: "journeys", root: root, parts: [("lead", "glue"), ("ui", "views")])
+        let name = (LeadLaunch.claudeProjectFolder(team[0].worktree, home: home) as NSString).lastPathComponent
+        let folder = (home as NSString).appendingPathComponent(".claude/projects/\(name)")
+        let rule = "~/.claude/projects/\(name)"
+        func mine() -> Set<String> {
+            Set(LeadLaunch.memberTranscripts(root: root, slug: "journeys", team: team, cwd: team[0].worktree, home: home)
+                .filter { $0.hasPrefix("Read(\(rule)") && !$0.hasPrefix("Read(\(rule)--") })
+        }
+        #expect(mine() == ["Read(\(rule)/*.jsonl)", "Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)"])
+
+        try FileManager.default.createDirectory(atPath: folder + "/0d3e2d68-d467-49bc-b4db-9f13858722ab/tool-results",
+                                                withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: folder)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder) }
+        #expect((try? FileManager.default.contentsOfDirectory(atPath: folder)) == nil, "the folder still lists")
+        #expect(mine() == ["Read(\(rule))", "Read(\(rule)/**)"])
+    }
+
     @Test func aBoardThatCantBeReadStartsNoVerifier() throws {
         let root = try root()
         let store = BoardStore(root: root)
