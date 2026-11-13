@@ -889,6 +889,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The commit whose verdict's open Important findings VibeSwitcher last sent its worker by itself (`LeadAdvance`):
     /// each verdict's are sent once.
     public var autoSentBack: String?
+    /// The tests its worker was last told the base is red on (`LeadMainRed.workerText`, in its brief or a message);
+    /// nil: told it's green again, or never told (`LeadToolset.mainRedNews`).
+    public var mainRedTold: [String]?
     /// The audit VibeSwitcher last started again by itself after its verifier ended without a verdict (`LeadAdvance`).
     public var verifierRetry: LeadVerifierRetry?
     /// Its time budget in minutes as the lead set it (add_task's and update_task's budget_min; 0: none); nil: the

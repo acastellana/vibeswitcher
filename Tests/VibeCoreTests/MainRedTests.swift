@@ -130,4 +130,125 @@ extension MergeBatchTests {
         try BoardStore(root: root).update { board in board.mainRed?.fixes = ["fix-other"] }
         #expect(lead.mainRedHold("add-y") == nil)
     }
+
+    // MARK: The workers are told
+
+    /// `slugs` added and their workers started: each one's session.
+    func running(_ lead: LeadToolset, root: String, _ slugs: [String]) throws -> [String] {
+        try slugs.map { slug in
+            #expect(!lead.call("add_task", ["title": slug, "goal": "g", "acceptance": ["a"]]).isError)
+            let started = lead.call("start_worker", ["task": slug])
+            #expect(!started.isError, "\(started.text)")
+            return try #require(board(root).task(slug)?.worker)
+        }
+    }
+
+    /// Main red (as a merge's rerun and the base's run found it): each running worker is sent one message naming the
+    /// test and saying it isn't theirs; the same red again sends nothing; main green again sends one more. No verifier
+    /// and no worker that isn't running (one in review, its audit under way) hears of it. On 2026-11-12, 9 workers
+    /// each tracked down main's red PrivateNamesLint on their own.
+    @Test func eachRunningWorkerIsToldOnceThatMainIsRedAndOnceThatItsGreenAgain() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false])
+        try audited(lead, runtime, root: root, "add-x", ["x.txt": "x\n"])
+        let verifier = try #require(board(root).task("add-x")?.verifier)
+        let reviewed = try #require(board(root).task("add-x")?.worker)
+        let workers = try running(lead, root: root, ["work-a", "work-b"])
+        let told = { (session: String) in runtime.steered.filter { $0.target == session }.map(\.text) }
+        #expect(workers.allSatisfy { told($0).isEmpty })
+        let head = Git.run(["rev-parse", "main"], in: root).output
+        let red = (red: ["breaks()"], all: true, output: Self.failure)
+
+        lead.mainIsRed(red, rerun: Self.failure, slug: "add-x", onto: head, workflow: lead.workflow)
+        for worker in workers {
+            let said = told(worker)
+            #expect(said.count == 1, "\(said)")
+            #expect(said.first?.hasPrefix("main is red: breaks() fail on main itself") == true, "\(said)")
+            #expect(said.first?.contains("They aren't yours to fix") == true, "\(said)")
+        }
+        // Its fix, planned at the front, is named.
+        let fix = try #require(board(root).mainRed?.fixes.first)
+        #expect(told(workers[0]).first?.contains("(\(fix) fixes them)") == true, "\(told(workers[0]))")
+
+        // The same red again (another merge finds it): nothing more.
+        lead.mainIsRed(red, rerun: Self.failure, slug: "add-x", onto: head, workflow: lead.workflow)
+        #expect(workers.allSatisfy { told($0).count == 1 })
+
+        // A merge's run passes on main: one "green again" each.
+        lead.noteMainGreen(.passed(head), rerun: nil)
+        #expect(board(root).mainRed == nil)
+        for worker in workers {
+            let said = told(worker)
+            #expect(said.count == 2 && said.last?.hasPrefix("main is green again") == true, "\(said)")
+        }
+        // Green again stays quiet.
+        lead.noteMainGreen(.passed(head), rerun: nil)
+        #expect(workers.allSatisfy { told($0).count == 2 })
+        #expect(told(verifier).isEmpty && told(reviewed).isEmpty, "\(told(verifier)) \(told(reviewed))")
+    }
+
+    /// A worker in review when main turned red (F1: told nothing then) hears of it with the next message that goes to
+    /// it, the audit's findings that send it back to work say (`LeadAdvance.sendBack` sends through `sent`), once;
+    /// and, green again while it's still not running, with the next one after that.
+    @Test func aWorkerNotRunningWhenMainTurnedRedHearsItWithItsNextMessage() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false])
+        try audited(lead, runtime, root: root, "add-x", ["x.txt": "x\n"])
+        let reviewed = try #require(board(root).task("add-x")?.worker)
+        #expect(board(root).task("add-x")?.status != .running)
+        let told = { runtime.steered.filter { $0.target == reviewed }.map(\.text) }
+        let head = Git.run(["rev-parse", "main"], in: root).output
+        lead.mainIsRed((["breaks()"], true, Self.failure), rerun: Self.failure, slug: "add-x", onto: head, workflow: lead.workflow)
+        #expect(told().isEmpty, "\(told())")
+
+        #expect(!lead.call("message", ["task": "add-x", "text": "Your branch's audit left 1 Important finding open."]).isError)
+        #expect(told().count == 1 && told()[0].hasPrefix("Your branch's audit left") && told()[0].contains("main is red: breaks() fail on main itself"), "\(told())")
+        #expect(!lead.call("message", ["task": "add-x", "text": "And another thing."]).isError)
+        #expect(told().count == 2 && !told()[1].contains("main is red"), "\(told())")
+
+        // Green while it isn't running: no message of its own, but the next one says it.
+        try BoardStore(root: root).update { board in board.tasks[board.taskIndex("add-x")!].status = .review }
+        lead.noteMainGreen(.passed(head), rerun: nil)
+        #expect(told().count == 2, "\(told())")
+        #expect(!lead.call("message", ["task": "add-x", "text": "Go on."]).isError)
+        #expect(told().count == 3 && told()[2].contains("main is green again: a merge's run passed on main, breaks() among it"), "\(told())")
+        #expect(!lead.call("message", ["task": "add-x", "text": "Thanks."]).isError)
+        #expect(told().count == 4 && !told()[3].contains("main is"), "\(told())")
+    }
+
+    /// F2: a merge whose tests passed on their rerun (each test it was for shown passing) is green on the base too,
+    /// as a first-time pass is; one whose filtered rerun showed none of them passing isn't.
+    @Test func aMergePassingOnItsRerunClearsMainRed() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false])
+        let worker = try running(lead, root: root, ["work-a"])[0]
+        let told = { runtime.steered.filter { $0.target == worker }.map(\.text) }
+        let head = Git.run(["rev-parse", "main"], in: root).output
+        lead.mainIsRed((["breaks()"], true, Self.failure), rerun: Self.failure, slug: "work-a", onto: head, workflow: lead.workflow)
+        #expect(told().count == 1)
+        let plan = MergeRerun.Plan(tests: ["flaky()"], filtered: true, command: "bash scripts/test.sh --filter flaky")
+        lead.noteMainGreen(.passedOnRerun(commit: head, failed: Self.failure, rerun: "✔ Test run with 0 tests passed after 0.001 seconds."), rerun: plan)
+        #expect(board(root).mainRed != nil && told().count == 1, "\(told())")
+        lead.noteMainGreen(.passedOnRerun(commit: head, failed: Self.failure, rerun: "✔ Test flaky() passed after 0.001 seconds."), rerun: plan)
+        #expect(board(root).mainRed == nil)
+        #expect(told().count == 2 && told()[1].hasPrefix("main is green again"), "\(told())")
+    }
+
+    /// A worker started while main is red has the line in its brief (but the fix's own worker); one started when it's
+    /// green doesn't.
+    @Test func aWorkerStartedWhileMainIsRedHasItInItsBrief() throws {
+        let (root, _, lead) = try team(["auto_advance": false])
+        let brief = { (slug: String) in
+            try String(contentsOf: vault.runFolder(root: root, name: "worker-\(slug)").appendingPathComponent("prompt.md"), encoding: .utf8)
+        }
+        _ = try running(lead, root: root, ["while-green"])
+        #expect(!(try brief("while-green")).contains("Main red:"))
+
+        let head = Git.run(["rev-parse", "main"], in: root).output
+        try BoardStore(root: root).update { board in
+            board.mainRed = LeadMainRed(tests: ["PrivateNamesLint"], onto: head, at: 0, all: true, fixes: ["fix-lint"], lines: [])
+        }
+        _ = try running(lead, root: root, ["while-red", "fix-lint"])
+        let red = try brief("while-red")
+        #expect(red.contains("Main red: main is red: PrivateNamesLint fail on main itself (\(head.prefix(8)))"), "\(red)")
+        #expect(red.contains("They aren't yours to fix (fix-lint fixes them)"), "\(red)")
+        #expect(!(try brief("fix-lint")).contains("Main red:"))
+    }
 }

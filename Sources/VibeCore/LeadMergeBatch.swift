@@ -195,7 +195,7 @@ extension LeadToolset {
             if runs == 1 { firstCores = MergeSample.cores(in: check) ?? testedCores }
             // Which of the lead's records its failure named, for the next merge (`LeadRecords.commitBeforeMerge`).
             if recorded, let failing = check.failingOutputs { records.noteMergeRun(failing: failing) }
-            if recorded { noteMainGreen(check) }
+            if recorded { noteMainGreen(check, rerun: plan) }
             if recorded, let plan {
                 switch check {
                 case .passedOnRerun(let tip, _, let again):

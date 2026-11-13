@@ -1244,8 +1244,10 @@ public enum LeadPrompts {
 
     /// `lints`: the repository's lint tests (`Policy.lintTests(in: root)` unless given).
     public static func worker(task: LeadTask, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load(),
-                              lints: [String]? = nil, screenshots: String?? = nil) -> String {
-        """
+                              lints: [String]? = nil, screenshots: String?? = nil, mainRed: LeadMainRed? = nil) -> String {
+        // The base red when it starts (`LeadMainRed.workerText`), but for a worker whose task fixes it.
+        let red = mainRed.flatMap { $0.fixes.contains(task.slug) ? nil : "Main red: " + $0.workerText(base: workflow.base) + "\n" } ?? ""
+        return """
         You are a worker for the project lead of \(root). You have one task, below. Work in this worktree on branch \
         agent/\(task.slug), and nowhere else.
 
@@ -1283,7 +1285,7 @@ public enum LeadPrompts {
         \(Policy.workerFindings)
         \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))
         Stuck: report blocked with exactly what you need. Don't fake a pass: never weaken or delete tests.
-        \(task.workerAgent == .codex ? "\n" + codexWorker + "\nGit commands a Claude worker's rules refuse, which you hold yourself: \(deniedGit(workflow)).\n" : "")
+        \(red)\(task.workerAgent == .codex ? "\n" + codexWorker + "\nGit commands a Claude worker's rules refuse, which you hold yourself: \(deniedGit(workflow)).\n" : "")
         \(WorkerBrief.render(task))
         """
     }

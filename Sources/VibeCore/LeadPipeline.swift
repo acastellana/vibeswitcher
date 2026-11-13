@@ -35,6 +35,24 @@ public struct LeadMainRed: Codable, Equatable, Sendable {
             + (fixes.isEmpty ? "" : " To fix first: \(fixes.joined(separator: ", ")) (at the front of the plan).")
             + (all ? " Until one lands (or \(base) moves), auto_advance merges only the fix: every other merge would fail on them too." : "")
     }
+
+    /// What each running worker is told once (and a worker started while it's red has in its brief), but its fixes':
+    /// the failing tests are the base's, not theirs to track down. The names are VibeSwitcher's record of the merge's
+    /// run, never a worker's words.
+    public func workerText(base: String) -> String {
+        "\(base) is red: \(names) fail on \(base) itself (\(onto.prefix(8))), as a merge's run and the same run on \(base) found. "
+            + "They aren't yours to fix" + (fixes.isEmpty ? "" : " (\(fixes.joined(separator: ", ")) fixes them)")
+            + ": if your tests or lints fail only on them, don't track them down; say so in your report and go on."
+    }
+
+    /// What a worker told the base was red on `tests` is told once it's green again (a merge's run passed on it).
+    public static func greenText(tests: [String], base: String) -> String {
+        "\(base) is green again: a merge's run passed on \(base), \(names(tests)) among it. "
+            + "A failure of them in your tests is no longer \(base)'s once your branch has \(base)'s fix."
+    }
+
+    private var names: String { Self.names(tests) }
+    private static func names(_ tests: [String]) -> String { String(tests.joined(separator: ", ").prefix(300)) }
 }
 
 /// The pipeline watch: finished work that stops landing is seen within minutes, its cause named, and the lead told

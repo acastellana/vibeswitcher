@@ -2439,8 +2439,10 @@ public final class LeadToolset: MCPToolset {
         // A worker granted on it before (the vault's own record, not the board's status or attempts, which anyone may
         // write) makes this one a later round: small_task_min's drop is for the first. Unreadable: taken as later.
         let laterWorker = (try? vault.smallTaskFacts(root: root, task: slug)).map { $0?.startedAt != nil } ?? true
+        // The base's red as its brief says it (none for its fix's own worker): what this worker was told.
+        let red = store.load().mainRed.flatMap { $0.fixes.contains(slug) ? nil : $0 }
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(briefed.title)", trust: true,
-                                 prompt: LeadPrompts.worker(task: briefed, root: root, workflow: workflow),
+                                 prompt: LeadPrompts.worker(task: briefed, root: root, workflow: workflow, mainRed: red),
                                  start: (note.map { $0 + " " } ?? "") + "Start on your task (it's in your instructions)." + finish
                                     + " Call progress at each milestone. When done, call report.",
                                  model: runModel, advisor: run.advisor, effort: run.effort, branch: base, agent: agent)
@@ -2471,7 +2473,10 @@ public final class LeadToolset: MCPToolset {
             // The contract its brief was written from: an update_task from here on is sent to it (sendWorkerContractChange).
             board.tasks[index].workerBrief = LeadWorkerBrief(version: briefed.contractRevision, contract: briefed.contract)
             board.tasks[index].genericBrief = nil
+            board.tasks[index].mainRedTold = red?.tests
         }
+        // Main turned red or green while it launched (its brief has what was before): told now.
+        if store.load().mainRed?.tests != red?.tests { tellRunningWorkers() }
         // An update_task while it started went to no worker yet (the board named none, or the one before): sent now.
         let amended = sendWorkerContractChange(slug).map { " " + $0 } ?? ""
         try? store.appendProgress("Started a worker on \(slug)\(routed)")
@@ -2608,7 +2613,23 @@ public final class LeadToolset: MCPToolset {
         let text = try self.text(arguments, "text", missing: "Nothing to send.")
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
         let clear = arguments["clear_draft"] as? Bool ?? false
-        let delivered = try deliver(slug, worker: worker, text: text, clearDraft: clear)
+        // The base's red (or green again) that its worker hasn't heard goes with it: one in review missed the news
+        // (`tellRunningWorkers`), and this may send it back to work.
+        var news: (told: [String]?, before: [String]?)?
+        var sending = text
+        try? store.update { board in
+            guard let index = board.taskIndex(slug), board.tasks[index].worker == worker,
+                  let said = Self.mainRedNews(board.tasks[index], red: board.mainRed, base: base) else { return }
+            news = (said.told, board.tasks[index].mainRedTold)
+            board.tasks[index].mainRedTold = said.told
+            sending += "\n\n" + said.text
+        }
+        let delivered: LeadDelivery.Delivered
+        do { delivered = try deliver(slug, worker: worker, text: sending, clearDraft: clear) } catch {
+            if let news { untell(slug, worker: worker, news.told, back: news.before) }
+            throw error
+        }
+        if let news, !Self.went(delivered) { untell(slug, worker: worker, news.told, back: news.before) }
         // Kept for the verifier: what the lead accepts here (an edit outside the contract's files) is in scope.
         let note = leadNote(.message, text, on: slug)
         try store.update { board in
@@ -3749,7 +3770,7 @@ public final class LeadToolset: MCPToolset {
                                               begun: { begun = ($0, LoadRecorder.averages() ?? []) })
         // Which of the lead's records its failure named, for the next merge (`LeadRecords.commitBeforeMerge`).
         if let failing = checked.failingOutputs { records.noteMergeRun(failing: failing) }
-        noteMainGreen(checked)
+        noteMainGreen(checked, rerun: rerun)
         if let folder = mergeStats() {
             let start = begun?.at ?? called
             var sample = MergeSample(check: checked, rerun: rerun, project: (root as NSString).lastPathComponent, task: slug,
@@ -4157,7 +4178,55 @@ public final class LeadToolset: MCPToolset {
                                       + (record.fixes.isEmpty ? "" : "; to fix first: \(record.fixes.joined(separator: ", "))")) }
             _ = try? tellLead(text, about: LeadAdvance.sender)
         }
+        tellRunningWorkers()
         return text
+    }
+
+    /// What `task`'s worker hasn't heard of the base's red (`red`, the board's) and is told with its next message: the
+    /// red tests, when they aren't the ones it was told (`LeadTask.mainRedTold`), or green again, when it was told red
+    /// and the base isn't; and what it was told then. Nil when that's no news, or for a task fixing the red. The text is
+    /// VibeSwitcher's own record of the failing tests, never a worker's words.
+    static func mainRedNews(_ task: LeadTask, red: LeadMainRed?, base: String) -> (text: String, told: [String]?)? {
+        if let red {
+            guard !red.fixes.contains(task.slug), task.mainRedTold.map(Set.init) != Set(red.tests) else { return nil }
+            return (red.workerText(base: base), red.tests)
+        }
+        return task.mainRedTold.map { (LeadMainRed.greenText(tests: $0, base: base), nil) }
+    }
+
+    /// Tells each running task's live worker (never a verifier) the base's red or green that's news to it
+    /// (`mainRedNews`), one message each. One in review, failed or blocked hears it with the message that sends it back
+    /// to work (`sent`).
+    func tellRunningWorkers() {
+        guard let live = try? listed().filter(\.live).map(\.id) else { return }
+        // Claimed under the board's lock: two merges finding the same red at once send it once.
+        var sends: [(slug: String, worker: String, news: (text: String, told: [String]?), before: [String]?)] = []
+        try? store.update { board in
+            for index in board.tasks.indices where board.tasks[index].status == .running {
+                let task = board.tasks[index]
+                guard let worker = task.worker, worker != task.stopped, live.contains(worker),
+                      let news = Self.mainRedNews(task, red: board.mainRed, base: base) else { continue }
+                board.tasks[index].mainRedTold = news.told
+                sends.append((task.slug, worker, news, task.mainRedTold))
+            }
+        }
+        for send in sends {
+            let delivered = try? deliver(send.slug, worker: send.worker, text: send.news.text, clearDraft: false)
+            if delivered.map(Self.went) != true { untell(send.slug, worker: send.worker, send.news.told, back: send.before) }
+        }
+    }
+
+    /// A delivery that went (into its context, or its inbox), not one typed and left in its box.
+    private static func went(_ delivered: LeadDelivery.Delivered) -> Bool {
+        if case .notSubmitted = delivered { return false } else { return true }
+    }
+
+    /// `slug`'s worker didn't get the base's red or green it was claimed told (`told`): its next message says it.
+    private func untell(_ slug: String, worker: String, _ told: [String]?, back before: [String]?) {
+        try? store.update { board in
+            guard let index = board.taskIndex(slug), board.tasks[index].worker == worker, board.tasks[index].mainRedTold == told else { return }
+            board.tasks[index].mainRedTold = before
+        }
     }
 
     /// Whether `red` no longer holds merges: one of its fixes landed, or the base moved past `red.onto` by anything but
@@ -4173,10 +4242,17 @@ public final class LeadToolset: MCPToolset {
         return log.output.split(separator: "\n").contains { $0 != Substring(LeadRecords.subject) }
     }
 
-    /// A merge's first run passed on the base at `onto`: nothing is red there that it ran.
-    func noteMainGreen(_ check: Worktrees.Check) {
-        guard case .passed = check, store.load().mainRed != nil else { return }
+    /// A merge's run passed on the base at `onto`, first time or on its rerun (`plan`'s, which shows each test it was
+    /// for passing): nothing is red there that it ran. Running workers told it was red are told it's green again.
+    func noteMainGreen(_ check: Worktrees.Check, rerun plan: MergeRerun.Plan?) {
+        switch check {
+        case .passed: break
+        case .passedOnRerun(_, _, let again): guard let plan, MergeRerun.unshown(plan, rerun: again).isEmpty else { return }
+        default: return
+        }
+        guard store.load().mainRed != nil else { return }
         try? store.update { board in board.mainRed = nil }
+        tellRunningWorkers()
     }
 
     /// Why auto_advance doesn't merge `slug` now: the base is red on tests that are the whole failure of every merge
