@@ -2801,3 +2801,9 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 18:33 Planned measure-how-often: Measure how often workers repeat the same search or pitfall (review audit)
 - 2026-11-13 18:33 Started a worker on measure-how-often
 - 2026-11-13 18:33 Automatically (auto_advance): Started a worker on measure-how-often (Measure how often workers repeat the same search or pitfall).
+- 2026-11-13 18:56 Automatically (auto_advance): Started the audit of measure-how-often at 8d5e655c (Its review is audit).
+- 2026-11-13 18:56 Planned agents-md-and-the: AGENTS.md and the worker brief say what workers kept rediscovering
+- 2026-11-13 18:56 Released measure-how-often's worker (idle since its done report on 8d5e655c) while its audit runs
+- 2026-11-13 18:56 Automatically (auto_advance): Released measure-how-often's worker, idle since its done report on 8d5e655c, while its audit runs (ended pid 21592 (Worker: Measure how often workers repeat the same search or pitfall)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-13 18:56 Planned every-worker-is-told: Every worker is told once when main is red (review audit)
+- 2026-11-13 18:59 Audit of measure-how-often: complete, clean, round 1: 4 Nit open
