@@ -158,7 +158,7 @@ public final class HostedSession {
         }
         // ptsname_r: ptsname's buffer is shared between threads, and sessions start from several at once.
         let name = Platform.Terminals.devicePath(master: child.masterFD) ?? ""
-        let tty = name.hasPrefix("/dev/") ? String(name.dropFirst(5)) : name
+        let tty = Platform.Terminals.name(devicePath: name)
         _ = fcntl(child.masterFD, F_SETFL, fcntl(child.masterFD, F_GETFL) | O_NONBLOCK)
         // Not inherited by sessions started later: another session holding this PTY open would keep it alive.
         _ = fcntl(child.masterFD, F_SETFD, FD_CLOEXEC)

@@ -85,13 +85,21 @@ struct HostedSessionTests {
         probe.queue.sync { session.close() }
     }
 
+    /// The lines of `text` that are paths under /dev, as `tty` prints its terminal.
+    static func devicePaths(in text: String) -> [String] {
+        text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.hasPrefix("/dev/") }
+    }
+
     @Test func runsTheCommandInThePTYAndRecordsTheExit() async throws {
         let probe = SessionProbe()
         let session = try start("echo out:$PROBE; tty; exit 3", probe: probe)
         #expect(await eventually { probe.text.contains("out:yes") }, "\(probe.diagnosis(session))")
         let tty = probe.queue.sync { session.info.tty }
-        #expect(tty.hasPrefix("ttys"))
-        #expect(await eventually { probe.text.contains("/dev/\(tty)") }, "\(probe.diagnosis(session))")   // the PTY is its terminal
+        #expect(tty.hasPrefix(Platform.CodeIdentity.isAvailable ? "ttys" : "ttypts"))
+        // The PTY is its terminal: the device `tty` prints is the one the session is named for ("/dev/ttys003" is
+        // "ttys003" on the Mac, "/dev/pts/3" is "ttypts3" on Linux; see `Platform.Terminals.name`).
+        #expect(await eventually { Self.devicePaths(in: probe.text).contains { Platform.Terminals.name(devicePath: $0) == tty } },
+                "\(probe.diagnosis(session))")
         #expect(await eventually { probe.lastChange?.exit?.status == 3 })
         probe.end(session)
     }
@@ -104,7 +112,9 @@ struct HostedSessionTests {
                                 probe: probe)
         let tty = probe.queue.sync { session.info.tty }
         #expect(await eventually { probe.text.contains("tpgid=") }, "\(probe.diagnosis(session))")
-        #expect(probe.text.contains("ctty=\(tty)"), "\(probe.diagnosis(session))")
+        // ps names a terminal by its path under /dev ("ttys003" on the Mac, "pts/3" on Linux).
+        let ctty = probe.text.components(separatedBy: "ctty=").dropFirst().first?.split(whereSeparator: \.isWhitespace).first.map(String.init)
+        #expect(ctty.map { Platform.Terminals.name(devicePath: "/dev/" + $0) } == tty, "\(probe.diagnosis(session))")
         #expect(!probe.text.contains("tpgid=0"))
         probe.end(session)
     }
