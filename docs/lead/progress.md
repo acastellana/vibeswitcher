@@ -2925,3 +2925,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 23:22 Planned team-verifier-close-two: Team verifier: close two remaining reads of members' posts (review audit, for security)
 - 2026-11-13 23:22 Audit of team-tasks-the-verifier: complete, clean, round 2: 1 Important closed, 1 Nit closed
 - 2026-11-13 23:25 Exception on split-the-integrator by lead of vibeswitcher: edits to Sources/VibeCore/LeadAdvance.swift accepted. Reason: The integrator's tool server can't start workers (LeadVault refuses issue from anyone but the lead, and that rule stays). So split records the split and wakes the lead; the lead's server starts the me…
+- 2026-11-13 23:33 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: 8 tasks paused since 23:33 (7 planned, 1 in review).
+- 2026-11-13 23:42 Merged team-tasks-the-verifier: Team tasks: the verifier can't see posts or members' transcripts (build 40766073a6b2)
