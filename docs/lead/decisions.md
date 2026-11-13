@@ -420,3 +420,11 @@ The user, 2026-11-12: "you need to be extremely proactive and try to make sure t
 
 The user asked whether to adopt a board like Antigravity's /swarm and chose to measure first. Over 150 worker sessions in 7 days, repeats a tip would have prevented plus concurrent clashes cost 3.0% of worker time (docs/process/reviews/worker-rediscovery-2026-11.md, audited), and all of the tip-preventable part was one incident: main red on 2026-11-12. Cheaper fixes cover it: agents-md-and-the and every-worker-is-told.
 
+## 2026-11-13 22:00:08 ¿Construyo el modo equipo (2 a 4 workers en una tarea, con un muro de mensajes) y hago el experimento? Son 13 tareas pequeñas, unas 3 horas en serie por los archivos delicados más el resto en paralelo. Después se construye la misma función del backlog (B2, recorridos de interfaz en el sandbox) de las dos maneras, lo que cuesta más o menos un B2 extra de trabajo. Se adopta solo si el equipo llega a "listo para mezclar" al menos un 25 % antes, con como mucho 1,5 veces los tokens y sin más hallazgos importantes, en 2 de 2 pruebas. → Sí: construir y hacer el experimento con B2 dos veces
+
+The lead proposed it with a 30 min timer and the user didn't answer in time, so it went ahead (question 6080384A). Why it was asked: El diseño está listo y el tablero está vacío; dijiste que vamos hacia swarms.
+
+## 2026-11-13 22:00:45 Build the team mode from docs/process/reviews/team-on-one-task-design.md (13 tasks, T1 to T13) and run its experiment: backlog B2 built both ways from one commit, adopted only if the team arm reaches merge-ready at least 25% sooner, on at most 1.5 times the tokens, with no more Important findings, on 2 of 2 instances. For team tasks the verifier is denied Read of the members' transcripts (T10); backlog B7, if built, must exclude team posts.
+
+The user said the project is going toward swarms. The 2026-11-13 measurement only covered tips between independent tasks and can't see the gain from teams on one larger task, so the lead proposed building it with a pre-set bar; the proposal's 30-minute timer passed with no other answer (question 6080384A). The transcript rule keeps the audit independent of what members told each other; it is the lead's call as architecture.
+

@@ -2846,3 +2846,19 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 21:51 Flaky in design-a-team-of's merge: sleepRecoveryRetriesAfterLoadDropsWithoutANewInterruption(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
 - 2026-11-13 21:51 Automatically (auto_advance): Merged design-a-team-of (Design: a team of workers on one task, with a shared board) into main at da71e019, review none: on its worker's done report on 2177f127 and the full test run. (Its first test run failed on sleepRecoveryRetriesAfterLoadDropsWithoutANewInterruption(), (the test command, naming no test) and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026-11-13-design-a-team-of-da71e019.log.)
 - 2026-11-13 21:51 Automatically (auto_advance): Cleaned up design-a-team-of (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-13 22:00 Planned team-wall-store-append: Team wall store: append-only posts with caps and lints (review audit, for security)
+- 2026-11-13 22:00 Started a worker on team-wall-store-append
+- 2026-11-13 22:00 Automatically (auto_advance): Started a worker on team-wall-store-append (Team wall store: append-only posts with caps and lints).
+- 2026-11-13 22:00 Planned teammate-sender-a-frame: Teammate sender: a frame for a teammate's post that can't be forged (review audit, for security)
+- 2026-11-13 22:00 Started a worker on teammate-sender-a-frame
+- 2026-11-13 22:00 Automatically (auto_advance): Started a worker on teammate-sender-a-frame (Teammate sender: a frame for a teammate's post that can't be forged).
+- 2026-11-13 22:00 Planned team-task-model-members: Team task model: members on a board task (review audit)
+- 2026-11-13 22:00 Started a worker on team-task-model-members
+- 2026-11-13 22:00 Automatically (auto_advance): Started a worker on team-task-model-members (Team task model: members on a board task).
+- 2026-11-13 22:00 Planned member-worktrees-a-sub: Member worktrees: a sub-branch and worktree per team member (review audit, for irreversible)
+- 2026-11-13 22:01 Planned team-tasks-the-verifier: Team tasks: the verifier can't see posts or members' transcripts (review audit, for security)
+- 2026-11-13 22:01 Planned team-receipt-members: Team receipt: members' minutes and tokens summed and listed
+- 2026-11-13 22:01 Planned split-the-integrator: Split: the integrator starts its team's members (review audit)
+- 2026-11-13 22:01 Planned wall-tools-members-post: Wall tools: members post and read, each post delivered once (review audit, for security)
+- 2026-11-13 22:01 Planned take-part-the-integrator: take_part: the integrator takes a member's finished part (review audit)
+- 2026-11-13 22:01 Planned peer-wait-deadline-no: Peer-wait deadline: no member waits on a teammate without a limit (review audit)
