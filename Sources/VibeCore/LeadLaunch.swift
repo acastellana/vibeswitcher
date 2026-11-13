@@ -257,6 +257,45 @@ public enum LeadLaunch {
         return (home as NSString).appendingPathComponent(".claude/projects/\(name)")
     }
 
+    /// What a team task's verifier may not read on top of `deny(.verifier)`: the Claude Code project folders of the
+    /// task's members (`~/.claude/projects/<folder>`, `claudeProjectFolder`), where their transcripts are, and with
+    /// them every teammate's post delivered into one. Each member's worktree (the integrator's is the task's own, the
+    /// others' `<slug>--<name>`) by its path as given and as resolved, and the task's own worktree whatever its team
+    /// says: the audit stays independent of what the members told each other (docs/lead/decisions.md, 2026-11-13;
+    /// team-on-one-task-design.md, 4). The folder itself and everything in it, `~` being the session's own home, where
+    /// Claude Code keeps them. Read rules hold Grep and Glob too; a shell read outside the worktree isn't one the
+    /// verifier's hook lets run (`hooks`). None for a plain task: its rules stay `deny(.verifier)`'s.
+    public static func memberTranscripts(root: String, slug: String, team: [LeadTeamMember]?) -> [String] {
+        guard let team, !team.isEmpty else { return [] }
+        let worktrees = [Worktrees.path(root: root, slug: slug)] + team.map(\.worktree)
+        let spellings = worktrees.flatMap { [$0, URL(fileURLWithPath: $0).resolvingSymlinksInPath().path] }
+        let folders = Set(spellings.map { claudeProjectFolder($0, home: "~") }).sorted()
+        return folders.flatMap { ["Read(\($0))", "Read(\($0)/**)"] }
+    }
+
+    /// The members of the task `task` (its slug or id) on the board of `root`, or nil: a plain task, or none on the
+    /// board (none yet is an empty board). Only the tasks' names and teams are decoded, so a board this build reads
+    /// partly still says. Throws when the board is there but can't be read or isn't a board's JSON: a team task's
+    /// verifier must not start without its members' rules (`memberTranscripts`).
+    static func team(root: String, task: String) throws -> [LeadTeamMember]? {
+        struct Teams: Decodable {
+            struct Task: Decodable { var id: String?; var slug: String?; var team: [LeadTeamMember]? }
+            var tasks: [Task]?
+        }
+        let file = (BoardStore(root: root).folder as NSString).appendingPathComponent("board.json")
+        guard let data = FileManager.default.contents(atPath: file) else {
+            let code = errno
+            guard access(file, F_OK) == 0 else { return nil }
+            throw BoardError(text: "\(file) couldn't be read (\(String(cString: strerror(code)))), so the verifier wasn't started.")
+        }
+        let tasks: [Teams.Task]
+        do { tasks = try JSONDecoder().decode(Teams.self, from: data).tasks ?? [] } catch {
+            throw BoardError(text: "\(file) doesn't read as a board (\(error)), so the verifier wasn't started.")
+        }
+        let found = tasks.first { $0.id == task || $0.slug == task }
+        return found?.team?.isEmpty == false ? found?.team : nil
+    }
+
     /// Moves aside the auto-memory Claude Code keeps for a session started in `cwd`, a task's worktree (by its path as
     /// given and as resolved, each only while it's still a worktree's path), before a verifier starts there: to `memory.set-aside-<time>` beside it, which nothing loads and the
     /// audit can still read. Returns the folders moved. The main checkout's own memory (where Claude Code 2.1.319 keeps
@@ -329,8 +368,12 @@ public enum LeadLaunch {
                                    to: URL(fileURLWithPath: mcpFile))
         // Where it's started (the task's worktree, else `root`): the hook's paths stay in it.
         let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
+        // A team task's verifier is also denied its members' transcripts, its team as the board has it: a board that
+        // can't be read starts no verifier, rather than one without those rules (none yet is an empty board).
+        var rules = deny(role, base: branch, records: records)
+        if role == .verifier, let task { rules += memberTranscripts(root: root, slug: task, team: try team(root: root, task: task)) }
         var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
-                                                       "deny": deny(role, base: branch, records: records)]]
+                                                       "deny": rules]]
         var env = environment(role)
         if role == .verifier {
             // Never started with its commands as itself (see `verifierEnvironment`).
