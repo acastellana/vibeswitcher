@@ -2809,3 +2809,9 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 18:59 Audit of measure-how-often: complete, clean, round 1: 4 Nit open
 - 2026-11-13 19:19 Pipeline held: measure-how-often ready to merge with none landing; cause: every test slot held
 - 2026-11-13 19:23 Merged measure-how-often: Measure how often workers repeat the same search or pitfall (build a0474fa83c82)
+- 2026-11-13 19:23 Automatically (auto_advance): Merged measure-how-often (Measure how often workers repeat the same search or pitfall) into main at 276a95af, on its passing audit and the full test run.
+- 2026-11-13 19:23 Started a worker on agents-md-and-the
+- 2026-11-13 19:23 Automatically (auto_advance): Started a worker on agents-md-and-the (AGENTS.md and the worker brief say what workers kept rediscovering), its after tasks done (measure-how-often).
+- 2026-11-13 19:24 Started a worker on every-worker-is-told
+- 2026-11-13 19:24 Automatically (auto_advance): Started a worker on every-worker-is-told (Every worker is told once when main is red), its after tasks done (measure-how-often).
+- 2026-11-13 19:24 Automatically (auto_advance): Cleaned up measure-how-often (freed 1.6 GB of build output and temporary folders). It stays done.

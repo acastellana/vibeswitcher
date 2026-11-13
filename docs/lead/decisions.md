@@ -416,3 +416,7 @@ The user, 2026-11-12: "you need to be extremely proactive and try to make sure t
 
 2026-11-12: a batch of 6 lost 2 tasks (a-calm-mac-merge, small-non-sensitive) to conflicts with others in the same stack, all touching LeadToolset and the merge path, which costs another round of catching up and testing.
 
+## 2026-11-13 19:24:12 No shared notes board between workers for now. Revisit when a second incident appears where several workers each track down the same shared trap, or when a rerun of scripts/worker-rediscovery.py puts tip-preventable repeats plus concurrent clashes over 5% of worker time.
+
+The user asked whether to adopt a board like Antigravity's /swarm and chose to measure first. Over 150 worker sessions in 7 days, repeats a tip would have prevented plus concurrent clashes cost 3.0% of worker time (docs/process/reviews/worker-rediscovery-2026-11.md, audited), and all of the tip-preventable part was one incident: main red on 2026-11-12. Cheaper fixes cover it: agents-md-and-the and every-worker-is-told.
+
