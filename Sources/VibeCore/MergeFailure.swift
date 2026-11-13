@@ -30,6 +30,15 @@ public enum MergeFailure {
 
     /// One line for the setback and the progress log: the failing tests (the first one first) or the first error line,
     /// that the run stopped when it did, else that the output names nothing. Never a line of the output's own choosing.
+    /// `reason(in:)` for a branch's setback when `red` failed on the base too (`MergeRerun.redOnBase`): the branch's own
+    /// failing tests only, and those said to be the base's, not the branch's.
+    public static func reason(in output: String, redOnBase red: [String]) -> String {
+        guard !red.isEmpty else { return reason(in: output) }
+        let own = TestFailures(output: readable(output)).tests.filter { !red.contains($0) }
+        let base = "\(clip(red.joined(separator: ", "), namedWidth)) failed on the base too: not this branch's"
+        return own.isEmpty ? reason(in: output) + " (" + base + ")" : clip(own.joined(separator: ", "), namedWidth) + " (" + base + ")"
+    }
+
     public static func reason(in output: String) -> String {
         let text = readable(output)
         let failures = TestFailures(output: text)

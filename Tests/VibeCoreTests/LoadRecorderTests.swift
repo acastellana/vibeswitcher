@@ -312,10 +312,12 @@ struct LoadReportScriptTests {
         lines = [sample(24 * 60, load: 100)]
         try LoadStats.append(try LoadStats.line(lines[0]), to: LoadStats.fileName("load", for: start.addingTimeInterval(86_400)), in: stats)
         // Two merges: one at load 30 that failed its first run, one at load 10 that passed.
-        let merges = [MergeSample(t: LoadStats.stamp(start.addingTimeInterval(70 * 60)), project: "proj", task: "a", load: [30, 30, 30],
+        var merges = [MergeSample(t: LoadStats.stamp(start.addingTimeInterval(70 * 60)), project: "proj", task: "a", load: [30, 30, 30],
                                   waitedS: 0, slotWaitS: 5, durationS: 600, firstRun: "failed", reran: ["x()"], rerunWhole: false, result: "passed_on_rerun"),
                       MergeSample(t: LoadStats.stamp(start.addingTimeInterval(5 * 60)), project: "proj", task: "b", load: [10, 10, 10],
                                   waitedS: 0, slotWaitS: 1, durationS: 300, firstRun: "passed", reran: nil, rerunWhole: nil, result: "passed")]
+        // The first's run got 9 cores (vs-heavy's width); the second's line has none.
+        merges[0].cores = 9
         for merge in merges { try merge.append(in: stats, at: start) }
         // Freezes: one at load 30 (its .txt and .log, counted once), two at load 60, one at 13:00 with no sample near.
         let names = DateFormatter()
@@ -336,6 +338,10 @@ struct LoadReportScriptTests {
         #expect(rows.contains { $0.first == "unsampled" && $0.dropFirst().first == "1" }, "\(output)")
         #expect(output.contains("Memory pressure: normal 90 min, warn 10 min"), "\(output)")
         #expect(output.contains("swift-frontend") && !output.contains("100.0"), "\(output)")
+        // During the merge runs (70–80 min, with the freeze at 75.2; 5–10 min, none): 15 minutes, one freeze; by width.
+        #expect(output.contains("During merge runs: 2 runs, 15 min, 1 freezes, 4.00 per hour"), "\(output)")
+        #expect(output.contains("  width 9: 1 runs, 10 min, 1 freezes, 6.00 per hour"), "\(output)")
+        #expect(output.contains("  width -: 1 runs, 5 min, 0 freezes, 0.00 per hour"), "\(output)")
 
         let bad = try await report(["--home", home.path, "30-10-2026"])
         #expect(bad.status == 2 && bad.output.contains("isn't a day"), "\(bad.output)")

@@ -251,8 +251,8 @@ struct LeadDoneEvidenceTests: LeadTeamFixture {
         var workflow = LeadWorkflow()
         workflow.baseBranch = "project-lead"
         let brief = LeadPrompts.worker(task: task, root: "/repo", workflow: workflow, policy: "", lints: [])
-        #expect(brief.contains("Evidence: report done with `evidence`, one entry per acceptance check: check (its number, 1 for the first, or its text), how (the command you ran and what it printed, the test's name, or what you looked at), result (what it showed), and screenshots (the paths of any screenshots you took, optional)."))
-        #expect(brief.contains("A done report without an entry for every check is refused, naming the ones missing; blocked needs none."))
+        // The entry's fields, and the refusal of a done without them, are the report tool's (below), not repeated here.
+        #expect(brief.contains("Evidence: report done with `evidence`, one entry per acceptance check (one for the goal when there are none)"))
         #expect(brief.contains("Blind check: before you report done, start a fresh subagent with the Agent tool whose prompt holds only your task's contract (the Task section below, as written) and the output of `git diff project-lead...HEAD`: not your reasoning, notes or summary."))
         #expect(brief.contains("Ask it for any problem that would block the merge, each with a concrete failure scenario (the input or state, and what goes wrong then), and nothing cosmetic. Fix what it finds, or say why not."))
         #expect(brief.contains("Then put in `blind_check` what it found"))

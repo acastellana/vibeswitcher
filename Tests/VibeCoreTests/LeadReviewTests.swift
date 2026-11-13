@@ -333,6 +333,62 @@ struct LeadPolicyPromptTests {
         }
     }
 
+    /// A doubt about behaviour is settled, never parked where it can't hold the merge; no new severity comes with it.
+    @Test func aVerifierSettlesADoubtInOneOfThreeWays() {
+        let prompt = LeadPrompts.verifier(task: Self.task, root: "/r", workflow: LeadWorkflow())
+        #expect(prompt.contains(LeadPrompts.settleDoubts))
+        for needle in ["Important with its failure_scenario", "dropped, because the code refutes it", "a Nit whose evidence starts \"Unresolved:\"",
+                       "the one fact that decides it and the command that would settle it", "Style and naming Nits aren't doubts"] {
+            #expect(LeadPrompts.settleDoubts.contains(needle), "missing \(needle)")
+        }
+        #expect(prompt.contains("Nit: everything else, style, naming, a doubt left Unresolved as below,"))
+        #expect(!prompt.contains("style, naming, a doubt, an edit"))
+        #expect(prompt.contains("Pre-existing: already wrong before this branch") && !prompt.contains("severity: Unresolved"))
+    }
+
+    /// Before an Important finding: what reaches its line, named in the evidence. Holds on a re-audit as on a first one.
+    @Test func anImportantFindingNamesWhatReachesItsLine() {
+        let reaudit = LeadPrompts.Reaudit(round: 2, since: "aaaaaaaa1111", head: "bbbbbbbb2222", open: [], known: [], stat: "", diff: nil, base: "main", scope: .since)
+        for prompt in [LeadPrompts.verifier(task: Self.task, root: "/r", workflow: LeadWorkflow()),
+                       LeadPrompts.verifier(task: Self.task, root: "/r", workflow: LeadWorkflow(), reaudit: reaudit)] {
+            #expect(prompt.contains("read the callers, guards and tests that reach that line and name them in its evidence"))
+        }
+    }
+
+    /// The first audit names the contract's invariant and walks past the happy path; a re-audit keeps to its findings.
+    @Test func aFirstAuditNamesTheInvariantAndWalksTheSkippedStates() {
+        let first = LeadPrompts.verifier(task: Self.task, root: "/r", workflow: LeadWorkflow())
+        #expect(first.contains(LeadPrompts.invariantWalk))
+        for needle in ["Name the invariant the contract implies", "a run that failed or was stopped", "work still in flight", "the other branch of each condition"] {
+            #expect(LeadPrompts.invariantWalk.contains(needle), "missing \(needle)")
+        }
+        let reaudit = LeadPrompts.Reaudit(round: 2, since: "aaaaaaaa1111", head: "bbbbbbbb2222", open: [], known: [], stat: "", diff: nil, base: "main", scope: .since)
+        #expect(!LeadPrompts.verifier(task: Self.task, root: "/r", workflow: LeadWorkflow(), reaudit: reaudit).contains(LeadPrompts.invariantWalk))
+    }
+
+    /// What nobody asked for is asked about by the verifier's check and the contract finder's brief alike, and only there.
+    @Test func theVerifierAndTheContractFinderAskWhatNobodyAskedFor() {
+        for needle in ["what the diff does that the contract doesn't ask for", "quotes the contract line", "It is a Nit unless it does harm or the user would see it",
+                       "Never raise one for a routine call listed in the worker's done report"] {
+            #expect(LeadPrompts.unrequested.contains(needle), "missing \(needle)")
+        }
+        #expect(LeadPrompts.verifier(task: Self.task, root: "/r", workflow: LeadWorkflow()).contains(LeadPrompts.unrequested))
+        #expect(LeadPrompts.Focus.contract.brief(sensitive: []).contains(LeadPrompts.unrequested))
+        for focus in LeadPrompts.Focus.allCases where focus != .contract {
+            #expect(!focus.brief(sensitive: []).contains(LeadPrompts.unrequested), "\(focus)")
+        }
+    }
+
+    /// The states REVIEW.md lists have to reach the verifier whole: LeadRisk clips the file at guideLimit.
+    @Test func reviewGuideListsTheSkippedStatesAndFitsTheLimit() throws {
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let guide = try String(contentsOf: repo.appendingPathComponent(LeadRisk.guideFile), encoding: .utf8)
+        for needle in ["A run that crashed or was stopped", "An operation still running", "clean but not conflicted"] {
+            #expect(guide.contains(needle), "missing \(needle)")
+        }
+        #expect(guide.utf8.count < LeadRisk.guideLimit, "\(guide.utf8.count) bytes")
+    }
+
     @Test func theLeadIsToldWhenToChooseAnAuditAndThatNitsNeverBecomeTasks() {
         let prompt = LeadPrompts.lead(project: "acme", root: "/r", workflow: LeadWorkflow.parse("---\nmerge_policy: auto\n---"))
         for needle in [LeadPrompts.Policy.leadReview, LeadPrompts.Policy.leadUnaudited, LeadPrompts.Policy.nits, "security", "irreversible operations",

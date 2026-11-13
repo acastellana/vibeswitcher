@@ -563,6 +563,49 @@ struct LeadStallTests {
         #expect(LeadStall.detect(held, task: Self.task(), now: Date(timeIntervalSince1970: Self.loadRunsTurnEnded + 11 * 60)).map(\.reason) == [.undelivered])
     }
 
+    /// fix-the-flaky-test-22's worker on 2026-11-12 (texts cut short): at 11:16:30 it ran its load run in the
+    /// foreground with a 60 min timeout; Claude Code holds a foreground call 10 min at most, so at 11:26:32 it moved
+    /// the run to the background (`timedOutAfterMs`), and the worker ended its turn to wait. The witness dated the job
+    /// from that result, 10 min after its shell started, matched no shell to it, and told the lead at 11:28 that it
+    /// had "no process any more"; it finished with exit 0 at 11:29:23. Three more the same day, the same way.
+    static let movedToTheBackground = lines([
+        #"{"type":"assistant","timestamp":"2026-11-12T10:16:30.965Z","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01B5ghRGfxFJVZM4tXkiCaTa","name":"Bash","input":{"command":"scripts/test-under-load.sh --load 24 -r 3 -f 'zzStressReleased' 2>&1 | tail -4","description":"Measure the stress failure rate under load after the fix","timeout":3600000}}],"stop_reason":"tool_use"}}"#,
+        #"{"type":"user","timestamp":"2026-11-12T10:26:32.923Z","isSidechain":false,"message":{"role":"user","content":[{"tool_use_id":"toolu_01B5ghRGfxFJVZM4tXkiCaTa","type":"tool_result","content":"Command did not complete within its 600s timeout and was moved to the background (ID: bccrnbt3j). Output is being written to: /private/tmp/claude-501/…/tasks/bccrnbt3j.output. You will be notified when it completes.","is_error":false}]},"toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false,"backgroundTaskId":"bccrnbt3j","timedOutAfterMs":600000}}"#,
+        #"{"type":"assistant","timestamp":"2026-11-12T10:26:53.442Z","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"I'm waiting on the background load run (task `bccrnbt3j`) to finish."}],"stop_reason":"end_turn"}}"#,
+        #"{"type":"system","subtype":"turn_duration","timestamp":"2026-11-12T10:26:53.500Z","isSidechain":false}"#,
+    ])
+    static let movedCallMade = 1_794_478_590.965  // 10:16:30.965Z, the call
+    static let movedResult = 1_794_479_192.923  // 10:26:32.923Z, its result: moved to the background
+
+    @Test func aJobMovedToTheBackgroundAtItsTimeoutIsDatedFromItsStartAndIsntCalledDead() throws {
+        let tail = try #require(TranscriptTail.read(Self.movedToTheBackground))
+        let job = try #require(tail.background.first)
+        #expect(job.id == "bccrnbt3j" && job.isShell)
+        // Its shell started as the call was made, not as it was moved: dated from its result less the time it ran.
+        #expect(job.startedAt == Self.movedResult - 600)
+        // Its shell, alive, started a second after the call: the job, not one that died.
+        let shell = Self.shell("bash -c scripts/test-under-load.sh --load 24 -r 3 -f zzStressReleased", startedAt: Self.movedCallMade + 1)
+        var seen = Self.seen(Self.movedToTheBackground, shells: [shell])
+        (seen.backgroundTasks, seen.shellsRead) = (tail.background, true)
+        #expect(seen.diedJob == nil)
+        #expect(seen.liveNamedJob?.shell.pid == shell.pid)
+        // 11:28:37, when the lead was told it had no process: nothing to tell.
+        let now = Date(timeIntervalSince1970: 1_794_479_317)
+        #expect(LeadWitness.events(board: Self.board(), seen: ["w1": seen], now: now).isEmpty)
+        // With its shell really gone, it's still told as gone.
+        var gone = Self.seen(Self.movedToTheBackground)
+        (gone.backgroundTasks, gone.shellsRead) = (tail.background, true)
+        #expect(gone.diedJob?.id == "bccrnbt3j")
+        // Which, moved by Claude Code, isn't certain: the lead is told it may still run, and to read its output.
+        gone.since = Date(timeIntervalSince1970: 1_794_479_213.5)
+        let told = LeadWitness.events(board: Self.board(), seen: ["w1": gone], now: now)
+        let stopped = try #require(told.first { $0.key.contains("|stopped-") }, "\(told.map(\.text))")
+        #expect(stopped.text.contains("stopped without calling report: the background job it waited on (Measure the stress failure rate under load after the fix, started \(Self.clock(Self.movedResult - 600))) shows no process started with it, but Claude Code moved it to the background after 10 min in the foreground, so the job may still be running, moved to the background by Claude Code: read its output file before taking it for gone"), "\(stopped.text)")
+        #expect(!stopped.text.contains("has no process any more"), "\(stopped.text)")
+        // One started in the background is said gone, as it was.
+        #expect(TranscriptTail.Background(id: "b", what: "Run the eval", startedAt: nil).goneText == "the background job it waited on (Run the eval) has no process any more")
+    }
+
     @Test func onceItsBackgroundTaskReportedTenMinutesCount() throws {
         // Its completion notice came at 14:28:09 and (say) it didn't go on: idle from then, stalled 10 min on.
         var data = Self.waitingOnItsLoadRuns

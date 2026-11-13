@@ -524,7 +524,13 @@ The lead's reasoning lives in the repository, in `records_dir` (`docs/lead` by d
 `progress.md`, `incidents.md` and `decisions-archive.md`. The lead can't commit, so its tool server commits these files
 to the lead's branch, after each merge and at most every 5 minutes, as "Lead: decisions and progress". Your staged and
 unstaged changes are left alone. `archive_decisions` moves old entries to `decisions-archive.md` unchanged. Workers may
-not edit that folder.
+not edit that folder. The lead's recording tools refuse text the repository's lints would fail on there (another
+project's name, a credential's shape), and `redact_record` replaces one existing line that fails them; the records
+commit carries that before the next merge, naming it in its message.
+
+When finished work stops landing (a task ready to merge for 20 minutes with no merge since), the lead gets one report
+naming the cause: main red, its own records failing a lint, every test slot held, the load hold, gate code not
+installed, or a merge still running with its expected end. It's repeated at most every 30 minutes, and status shows it.
 
 `workflow.md` (in `.vibeswitcher/`, git-ignored) holds the limits and commands below. The lead changes it with its
 `configure` tool, which keeps your comments. The guard rails (the test and setup commands, `merge_policy`,

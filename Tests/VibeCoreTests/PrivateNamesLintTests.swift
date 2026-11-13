@@ -11,11 +11,11 @@ struct PrivateNamesLintTests {
     static let repo = SecretShapeLintTests.repo
     let temp = Scratch()
 
-    /// Each private name as two halves, matched with an optional "-", "_", "." or space between them.
-    static let names: [(String, String)] = [("stake", "gen"), ("gen", "swap")]
+    /// Each private name as two halves, matched with an optional "-", "_", "." or space between them: the list the
+    /// lead's recording tools refuse too (`RecordLint`: one list, never a copy).
+    static let names = RecordLint.privateNames
 
-    static let pattern = try! NSRegularExpression(
-        pattern: names.map { "\($0.0)[-_. ]?\($0.1)" }.joined(separator: "|"), options: [.caseInsensitive])
+    static let pattern = RecordLint.privateNamesPattern
 
     /// "docs/…/file.md:12" for each line naming one, in order. A file that isn't UTF-8 is read as Latin-1, as
     /// SecretShapeLintTests does, so a name in it is still found.

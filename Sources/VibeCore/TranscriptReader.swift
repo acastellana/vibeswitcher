@@ -514,15 +514,30 @@ public struct TranscriptTail: Equatable, Sendable {
         public var id: String
         /// What it is: the call's description, or its command.
         public var what: String
+        /// When it started: its call's result for one started in the background; for a foreground call Claude Code
+        /// moved there at its timeout, that result less the time it had run (`movedAfter`).
         public var startedAt: Double?
         /// A shell, with a process to look for. A background agent runs inside its parent and has none.
         public var isShell: Bool
+        /// A foreground call Claude Code moved to the background once it had run this long (its `timedOutAfterMs`, 10
+        /// min at most): nil for one started in the background. Its result comes that long after its shell started.
+        public var movedAfter: Double?
 
-        public init(id: String, what: String, startedAt: Double?, isShell: Bool = true) {
+        public init(id: String, what: String, startedAt: Double?, isShell: Bool = true, movedAfter: Double? = nil) {
             self.id = id
             self.what = what
             self.startedAt = startedAt
             self.isShell = isShell
+            self.movedAfter = movedAfter
+        }
+
+        /// What the lead is told once no process of it is found. Of one Claude Code moved to the background that isn't
+        /// certain (on 2026-11-12 five such were told as gone while they ran on, dated from the move), so it says so.
+        public var goneText: String {
+            guard let movedAfter else { return "the background job it waited on (\(text)) has no process any more" }
+            return "the background job it waited on (\(text)) shows no process started with it, but Claude Code moved it to the "
+                + "background after \(Worktrees.duration(movedAfter)) in the foreground, so the job may still be running, moved to "
+                + "the background by Claude Code: read its output file before taking it for gone"
         }
 
         /// "Final swift test and two load runs, started 14:17".
@@ -708,7 +723,7 @@ public struct TranscriptTail: Equatable, Sendable {
     private static func background(_ lines: [Data.SubSequence]) -> [Background] {
         // Only the lines that can say so are parsed.
         let marks = ["backgroundTaskId", "async_launched", "task-notification"].map { Data($0.utf8) }
-        var started: [(id: String, call: String?, what: String?, at: Double?, shell: Bool)] = []
+        var started: [(id: String, call: String?, what: String?, at: Double?, shell: Bool, moved: Double?)] = []
         var done = Set<String>()
         for line in lines where marks.contains(where: { line.range(of: $0) != nil }) {
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
@@ -725,11 +740,15 @@ public struct TranscriptTail: Equatable, Sendable {
             guard let id else { continue }
             let call = ((object["message"] as? [String: Any])?["content"] as? [[String: Any]])?
                 .first { $0["type"] as? String == "tool_result" }?["tool_use_id"] as? String
-            started.append((id, call, result["description"] as? String, ChatReader.date(object["timestamp"])?.timeIntervalSince1970, result["backgroundTaskId"] is String))
+            // A foreground call that ran past Claude Code's limit (10 min at most) is moved to the background, its result
+            // written then: its shell started that long before (2026-11-12: five live jobs told as gone, dated from the move).
+            let moved = (result["timedOutAfterMs"] as? NSNumber).map { $0.doubleValue / 1000 }.flatMap { $0 > 0 ? $0 : nil }
+            let at = ChatReader.date(object["timestamp"])?.timeIntervalSince1970
+            started.append((id, call, result["description"] as? String, at.map { $0 - (moved ?? 0) }, result["backgroundTaskId"] is String, moved))
         }
         let open = started.filter { !done.contains($0.id) && !($0.call.map(done.contains) ?? false) }
         return open.map { Background(id: $0.id, what: $0.what ?? $0.call.flatMap { description(of: $0, in: lines) } ?? "a background task",
-                                     startedAt: $0.at, isShell: $0.shell) }
+                                     startedAt: $0.at, isShell: $0.shell, movedAfter: $0.moved) }
     }
 
     /// The texts of `<task-notification>`s a line carries.

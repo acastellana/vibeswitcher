@@ -87,6 +87,7 @@ Run them before you call a change done; they take seconds:
 
 ```sh
 bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|PreferencesLint|PrivateNamesLint|PhoneMainSyncLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md runs them: every `…LintTests` type
 ```
 
 | Lint | What it catches |

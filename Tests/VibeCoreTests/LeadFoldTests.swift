@@ -151,14 +151,17 @@ struct LeadFoldTests: LeadTeamFixture {
         #expect(LeadTaskScore(abandoned, questions: []).mergedWithoutTests == nil)
     }
 
-    @Test func theLeadIsToldWhenToFoldAbandonOrRemove() {
+    @Test func theLeadIsToldWhenToFoldAbandonOrRemove() throws {
         let prompt = LeadPrompts.lead(project: "p", root: "/r", workflow: LeadWorkflow())
         #expect(prompt.contains("failed is for work that was tried and didn't pass"))
-        #expect(prompt.contains("Folded when another task carries its work"))
-        #expect(prompt.contains("update_task(task, status: folded, into: the task that carries it)"))
-        #expect(prompt.contains("Abandoned when nothing will carry it"))
-        #expect(prompt.contains("update_task(task, status: abandoned, reason: why)"))
-        #expect(prompt.contains("Removed only for a record made by mistake that never ran"))
+        #expect(prompt.contains("folded when another task carries its work, abandoned when nothing will (update_task says each)"))
+        #expect(prompt.contains("stop_worker if its worker runs, then cleanup(task)"))
+        // How to set each, and removed, is update_task's own description.
+        let description = try #require(try lead(repo(), FakeRuntime()).tools.first { $0.name == "update_task" }).description
+        for needle in ["folded into another task that carries its work", "abandoned with a reason when nothing will carry it",
+                       "removed: only for a record made by mistake that never ran"] {
+            #expect(description.contains(needle), "\(needle)")
+        }
         #expect(LeadToolset.settableStates.contains(.folded) && LeadToolset.settableStates.contains(.abandoned))
         #expect(Set(LeadTask.Status.allCases) == Set(LeadTask.Status.attentionOrder))
     }

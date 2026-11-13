@@ -30,19 +30,37 @@ public struct MacSleepLog: Equatable, Sendable {
         a.spans == b.spans && a.since == b.since && a.last?.wall == b.last?.wall && a.last?.awake == b.last?.awake
     }
 
-    /// Takes a look at the clocks.
-    public mutating func note(_ time: MacTime) { note(wall: time.wall().timeIntervalSince1970, awake: time.awake()) }
+    /// A sleep this look found: the wall clock at the look before and at this one, and how long of that the Mac slept.
+    public struct Wake: Equatable, Sendable {
+        public var from: Double
+        public var to: Double
+        public var slept: TimeInterval
 
-    public mutating func note(wall: Double, awake: TimeInterval) {
+        public init(from: Double, to: Double, slept: TimeInterval) {
+            self.from = from
+            self.to = to
+            self.slept = slept
+        }
+    }
+
+    /// Takes a look at the clocks: the sleep since the last look, if the Mac slept (see `SleepCost`).
+    @discardableResult
+    public mutating func note(_ time: MacTime) -> Wake? { note(wall: time.wall().timeIntervalSince1970, awake: time.awake()) }
+
+    @discardableResult
+    public mutating func note(wall: Double, awake: TimeInterval) -> Wake? {
         if since == nil { since = wall }
+        var woke: Wake?
         if let last {
             let slept = (wall - last.wall) - (awake - last.awake)
             if slept >= Self.jitter {
                 spans.append(Span(from: last.wall, to: wall, slept: slept))
                 if spans.count > Self.keep { spans.removeFirst(spans.count - Self.keep) }
+                woke = Wake(from: last.wall, to: wall, slept: slept)
             }
         }
         last = (wall, awake)
+        return woke
     }
 
     /// What the log says of `from` to `to`.
@@ -111,7 +129,7 @@ public enum StallCause: Codable, Equatable, Sendable {
     /// the process table shows a shell it may be waiting on.
     case backgroundJob(what: String, pid: Int32, startedAt: Double, named: Bool)
     /// The background job its transcript says it waits on has no process any more.
-    case jobDied(what: String, startedAt: Double?)
+    case jobDied(what: String, startedAt: Double?, movedAfter: Double? = nil)
     /// Nothing read says why: what was read, as it was.
     case unknown(read: [String])
 
@@ -144,8 +162,8 @@ public enum StallCause: Codable, Equatable, Sendable {
         case let .backgroundJob(what, pid, startedAt, named):
             return "waiting on its own background job (\(what)): pid \(pid), started \(LeadBoard.clock(startedAt)), still alive after \(LeadToolset.age(now.timeIntervalSince1970 - startedAt))"
                 + (named ? "" : "; its transcript names no task it waits on, only this shell")
-        case let .jobDied(what, startedAt):
-            return "the background job it waited on (\(what)\(startedAt.map { ", started \(LeadBoard.clock($0))" } ?? "")) has no process any more"
+        case let .jobDied(what, startedAt, movedAfter):
+            return TranscriptTail.Background(id: "", what: what, startedAt: startedAt, movedAfter: movedAfter).goneText
         case .unknown(let read):
             return "couldn't tell why. What was read: " + read.joined(separator: "; ")
         }
@@ -232,7 +250,7 @@ extension LeadStall {
         let sleep = seen.sleep.reading(from: from, to: at)
         // What the process table shows of its own job comes first: alive, it's what the worker waits on however long the
         // Mac slept (the sleep is said beside it); gone, no amount of sleep brings it back.
-        if let died = seen.diedJob { return .jobDied(what: died.what, startedAt: died.startedAt) }
+        if let died = seen.diedJob { return .jobDied(what: died.what, startedAt: died.startedAt, movedAfter: died.movedAfter) }
         if reason == .idle || reason == .undelivered, background != nil {
             if let job = seen.liveNamedJob {
                 return .backgroundJob(what: job.task.what, pid: job.shell.pid, startedAt: job.shell.startedAt.timeIntervalSince1970, named: true)

@@ -433,7 +433,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
     @Test func workersAreToldWhereScratchGoesAndVerifiersStillLookForLeftovers() {
         let task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
         let worker = LeadPrompts.worker(task: task, root: "/r", workflow: LeadWorkflow())
-        #expect(worker.contains("goes in your session's TMPDIR or your scratchpad, never inside the worktree"))
+        #expect(worker.contains("in your session's TMPDIR or your scratchpad, never inside the worktree"))
         #expect(worker.contains("an untracked file left in the worktree goes in your report, not through rm"))
         #expect(LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow()).contains("leftovers"))
         let finder = LeadPrompts.Finder(index: 1, size: 2, focus: .contract, commit: "abc", logs: [], run: "passed", sensitive: [], nitCap: 5)
@@ -533,11 +533,12 @@ struct LeadGuardRailsTests: LeadTeamFixture {
             let brief = String(decoding: try launchFile("--append-system-prompt-file", name, runtime), as: UTF8.self)
             let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
             let tmpdir = try #require(runtime.environments[spawn.id]?["TMPDIR"])
-            // Explained away: the TMPDIR's files stay.
-            #expect(brief.contains(LeadPrompts.scratchFiles), "\(name)")
-            for words in ["TMPDIR", "scratchpad", "don't rm", "cleaned up", "permission prompt"] {
-                #expect(LeadPrompts.scratchFiles.contains(words), "\(words)")
-            }
+            // Explained away: the TMPDIR's files stay (the worker's files rule says it with where its builds go).
+            let said = name.hasPrefix("worker") ? LeadPrompts.workerFiles : LeadPrompts.scratchFiles
+            #expect(brief.contains(said), "\(name)")
+            for words in ["TMPDIR", "scratchpad", "permission prompt"] { #expect(said.contains(words), "\(name): \(words)") }
+            #expect(LeadPrompts.scratchFiles.contains("don't rm") && LeadPrompts.scratchFiles.contains("cleaned up"))
+            #expect(LeadPrompts.workerFiles.contains("Don't rm any of it: cleanup removes it all"))
             // No rule lets rm through: in the TMPDIR it isn't needed, anywhere else it asks.
             #expect(!rules.allow.contains { $0 == "Bash" || $0.hasPrefix("Bash(*") || $0.hasPrefix("Bash(rm") }, "\(name): \(rules.allow)")
             for command in ["rm -f $TMPDIR/x", "rm -f \(tmpdir)x", "rm -f $TMPDIR/*.log $TMPDIR/new_send.swift", "rm -f ~/x", "rm -rf ~/",
@@ -561,8 +562,8 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(brief.contains("`git rm <path>` is for tracked files your change deletes"))
         // An untracked file left in the worktree is named in the report, never removed: the brief no longer asks for it,
         // and neither does the audit's word to the lead about leftovers.
-        #expect(brief.contains("If an untracked file is left there anyway, don't rm it: name it in your report"))
-        #expect(brief.contains("Cleanup removes them with the worktree, so don't rm what's there: name a big one in your report"))
+        #expect(brief.contains("Name in your report a big build folder (a full disk stops every session) or an untracked file left in the worktree"))
+        #expect(brief.contains("Don't rm any of it: cleanup removes it all"))
         for words in ["remove your leftovers", "the lead has you remove", "lists nothing untracked", "delete big files",
                       "delete big scratch files", "once you're done with them"] {
             #expect(!brief.contains(words), "\(words)")
@@ -755,9 +756,8 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         for step in ["`git merge main`", "`git add`", "`git commit`", "`git merge --abort`", "without `git -C`"] {
             #expect(brief.contains(step), "\(step)")
         }
-        // No rebase to run: the brief names one only in the list of what its rules refuse.
-        #expect(brief.contains(LeadPrompts.deniedGit(workflow)))
-        #expect(!brief.replacingOccurrences(of: LeadPrompts.deniedGit(workflow), with: "").contains("`git rebase"))
+        // No rebase to run: the brief names none (its rules refuse the ones that rewrite, and say so when tried).
+        #expect(!brief.contains("`git rebase"))
 
         // The worker does just that, reports, passes its audit again, and merge lands it: main stays a line, the work
         // one commit on top of what main was, holding the worker's resolution.

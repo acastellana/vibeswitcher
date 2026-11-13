@@ -867,6 +867,20 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// auto_advance's audit sample draw for it (see `LeadAuditSample`), made once at its first done report on review
     /// none's path, with its seed; sampled: its review became audit. nil: none drawn (sampling off, or never on that path).
     public var auditSample: LeadAuditSample?
+    /// small_task_min dropped its review from audit to none for its first round (see `LeadSmallTask`): its minutes of
+    /// work, the commit, and why it went back to audit once it did. nil: never dropped.
+    public var smallTask: LeadSmallTask?
+    /// Why the lead keeps it audited whatever small_task_min says (add_task's and update_task's `audit_reason`); nil:
+    /// none given.
+    public var auditReason: AuditReason?
+
+    /// What the lead may file an audit task for that small_task_min never drops.
+    public enum AuditReason: String, Codable, Sendable, CaseIterable {
+        case security, irreversible
+
+        /// "security", " Irreversible ": the reason; nil for anything else.
+        public init?(text: String) { self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased()) }
+    }
     /// The tasks (their slugs) that must be done before it starts by itself (add_task's and update_task's `after`; see
     /// `LeadAdvance`); nil or empty: none.
     public var after: [String]?
@@ -883,6 +897,19 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The model its worker runs on, as `claude --model` takes it (add_task's and update_task's `model`: sonnet for a
     /// mechanical task, say); nil: the project's Claude command's, as before.
     public var model: String?
+    /// The advisor its Claude worker consults at decision points (add_task's and update_task's `advisor`: fable, opus or
+    /// none); nil: workflow.md's worker_advisor. fable marks it hard (`hard`).
+    public var advisor: String?
+    /// Its worker's reasoning effort (add_task's and update_task's `effort`: low, medium, high, xhigh); nil: high for a
+    /// hard task, else the CLI's default (see `LeadLaunch.workerRun`).
+    public var effort: String?
+    /// The advisor and effort each of its sessions was started with, by session, as `launchedModels` (its current
+    /// members only; a session started with neither has no entry): what status and its start report show.
+    public var launchedAdvisors: [String: String]?
+    public var launchedEfforts: [String: String]?
+    /// The command its worker's done report runs first (add_task's and update_task's `done_check`; "off": none); nil:
+    /// workflow.md's done_check_command, else `LeadDoneCheck`'s default.
+    public var doneCheck: String?
     /// The model each of its workers and verifiers was started on, by session (`claude --model`'s name; "" for Claude's
     /// default), its current members only: which model a session's usage-limit refusal holds back (see
     /// `AccountUsage.fromRefusal`), whatever the task's model or verifier_model says since.
@@ -934,10 +961,28 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     }
 
     /// Notes that `sessions` were started on `model` (nil: Claude's default), keeping only its members' entries.
-    public mutating func launched(_ sessions: [String], on model: String?) {
+    public mutating func launched(_ sessions: [String], on model: String?, advisor: String? = nil, effort: String? = nil) {
         var kept = (launchedModels ?? [:]).filter { members.contains($0.key) }
         for session in sessions { kept[session] = model ?? "" }
         launchedModels = kept.isEmpty ? nil : kept
+        var advisors = (launchedAdvisors ?? [:]).filter { members.contains($0.key) }
+        var efforts = (launchedEfforts ?? [:]).filter { members.contains($0.key) }
+        for session in sessions {
+            advisors[session] = advisor
+            efforts[session] = effort
+        }
+        launchedAdvisors = advisors.isEmpty ? nil : advisors
+        launchedEfforts = efforts.isEmpty ? nil : efforts
+    }
+
+    /// The lead marked it hard (advisor: fable): concurrency, root-cause debugging, many parts at once, architecture.
+    /// Its worker consults Fable, runs at effort high unless it sets one, and auto prefers Claude for it.
+    public var hard: Bool { AccountUsage.family(advisor) == "fable" }
+
+    /// The model its Claude worker is meant to run on: its own, else Fable once it's been re-rolled
+    /// (`LeadLaunch.rerollModel`); nil: the project's command's. Its own always wins.
+    public var intendedModel: String? {
+        model ?? (rerolls?.isEmpty == false ? LeadLaunch.rerollModel : nil)
     }
     /// How long its workers have worked on it, in seconds, as the witness counted (see `LeadBudget.counts`): waiting
     /// on a prompt, the lead or the user, and its audits, don't count.
@@ -1326,6 +1371,9 @@ public struct LeadFlake: Codable, Equatable, Sendable {
 public struct LeadBoard: Codable, Equatable, Sendable {
     /// The lead's session (host id) and agent pid, so answers and events can be steered into it.
     public var leadSession: String?
+    /// The model the lead's session was started on (`LeadLaunch.leadModelVariable`, as its tool server read it); nil:
+    /// Claude's default or not known. What a refusal its session stops at is kept for.
+    public var leadModel: String?
     public var leadPid: Int32?
     public var leadTTY: String?
     /// The branch the lead builds on and merges into: the one checked out when it first started here.
@@ -1353,6 +1401,12 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// and receipts read (`BoardStore.batchCopy`): the batch is told from this file alone (`BatchSummary.batch`).
     /// Those a mark has taken in leave with the next archive. Optional: boards before the archive have none.
     public var archivedBatch: [LeadTask]?
+    /// Tests a merge found red on the base itself (`LeadMainRed`): the pipeline watch's cause, and, while the failure is
+    /// theirs alone and the base hasn't moved, what holds auto_advance's merges but their fixes'. Optional: older
+    /// boards have none.
+    public var mainRed: LeadMainRed?
+    /// The pipeline watch's state (`LeadPipeline`): when it last told the lead what holds the merges. Optional.
+    public var pipeline: LeadPipeline.Told?
 
     public static let keptReports = 50
     /// Past these, the oldest updates and closed questions move to the board's archive (`BoardStore.archive`).

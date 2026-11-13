@@ -14,7 +14,8 @@
 # waits, saying whose it waits for), and each holds one of vs-heavy's Mac-wide slots for heavy work for the whole run
 # (it runs itself under Resources/bin/vs-heavy, waiting in its line, its holder note naming the loops). Before it
 # burns it waits while the 1-minute load is over --max-load, saying so; memory under the floor or a nearly full disk
-# it refuses at once, saying what to wait for. --wait bounds the waits for the other load run and for the load.
+# it refuses at once, saying what to wait for. --wait bounds the waits for the other load run and for the load. A
+# refusal for a busy Mac (the load, memory, the other load run) is its last line and exits 75, nothing started.
 # Each busy loop is its own watchdog: it stops when this script, its parent or the session's claude process is gone,
 # or after --max-time, so a turn that ends without this shell ending leaves no load behind. The live busy loops' pids
 # are kept in --pid-file and killed by pid on any exit, Ctrl-C too; never by name.
@@ -193,11 +194,14 @@ owned() {
         exit 1
     done
 }
+# A refusal because the Mac is busy (its load, its memory, the other load run) is its own status, 75 (EX_TEMPFAIL: try
+# again later), its line the last it says: a worker reads why its run ended and that nothing ran, not a test failure.
+busy_status=75
 refuse_loaded() {
     echo "not starting: the Mac is already loaded, its 1-minute load is $1 (over $max_load, 2 × $cores cores)." \
         "Wait until the first of \`uptime\`'s load averages is under $max_load (the other sessions' builds and tests" \
-        "finishing; it falls within a minute or two once they're done), then run this again."
-    exit 1
+        "finishing; it falls within a minute or two once they're done), then run this again (exit $busy_status)."
+    exit "$busy_status"
 }
 # Until when it may wait, for the other load run and the load together (set once, before vs-heavy).
 wait_until=${waited_until:-$(($(date +%s) + wait))}
@@ -228,8 +232,8 @@ free_memory() {
 memory=$(free_memory)
 if [[ -z $memory || $memory -lt $memory_floor ]]; then
     echo "not starting: only ${memory:-?} % of memory is free (under the floor of $memory_floor %). Wait until" \
-        "\`memory_pressure -Q\` shows at least $memory_floor % free (another session's build or test run finishing)."
-    exit 1
+        "\`memory_pressure -Q\` shows at least $memory_floor % free (another session's build or test run finishing) (exit $busy_status)."
+    exit "$busy_status"
 fi
 
 # Not on a nearly full disk: a full one stops every session on this Mac, not just these runs.
@@ -270,8 +274,8 @@ if [[ $inner -eq 0 ]]; then
         fi
         owned
         if [[ $(date +%s) -ge $wait_until ]]; then
-            echo "not starting: another load run still burns after --wait $wait s ($holder); run this again once it's done"
-            exit 1
+            echo "not starting: another load run still burns after --wait $wait s ($holder); run this again once it's done (exit $busy_status)"
+            exit "$busy_status"
         fi
         sleep 0.5
     done

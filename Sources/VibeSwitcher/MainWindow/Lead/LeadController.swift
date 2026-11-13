@@ -202,13 +202,36 @@ final class PowerLook: @unchecked Sendable {
         power = LeadWitness.Power(read: read, limit: { [unowned self] in self.limit }, file: file)
     }
 
-    func look(limit: Int) -> String? {
+    /// Under `lock`: when the hold told last began (wall clock), while it lasts.
+    private var heldSince: Double?
+
+    /// What a look tells the leads: the witness's text, and the hold it's about: `since` it began, and `ended` when
+    /// this look ends it.
+    struct Told: Equatable {
+        var text: String
+        var since: Double?
+        var ended = false
+    }
+
+    func look(limit: Int, now: Date = Date()) -> Told? {
         lock.lock()
         defer { lock.unlock() }
         looks += 1
         if Thread.isMainThread { lookedOnMain += 1 }
         self.limit = limit
-        return power?.look()
+        guard let text = power?.look() else { return nil }
+        let held = power?.watch.heldUnder != nil
+        let since = heldSince
+        heldSince = held ? (since ?? now.timeIntervalSince1970) : nil
+        return Told(text: text, since: held ? heldSince : since, ended: !held && since != nil)
+    }
+
+    /// What `told` says to the lead of the project whose board is `board`: under a hold, the tasks it pauses there and
+    /// since when; at its end, how long it lasted.
+    static func text(_ told: Told, board: LeadBoard?, now: Date = Date()) -> String {
+        guard let since = told.since else { return told.text }
+        if told.ended { return told.text + " The hold since \(LeadBoard.clock(since)) lasted \(SleepCost.duration(now.timeIntervalSince1970 - since))." }
+        return told.text + (board.map { " Here, " + SleepCost.pausedText($0, since: since) + "." } ?? "")
     }
 }
 
@@ -290,6 +313,8 @@ struct WitnessWork {
     /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
     var working: Set<String> = []
     var notesWork = false
+    /// Every session the look saw at work (`LeadBudget.works`): the vault counts its workers' tasks' time from these.
+    var busySessions: Set<String> = []
     /// The Mac's sleep as of the look: the count takes only time awake (`LeadBudget.awake`).
     var sleep = MacSleepLog()
     /// The stall to keep on each task (`LeadWitness.stalls`), and whether the board's change for it.
@@ -321,12 +346,15 @@ struct WitnessWork {
         if let recoveryRoot {
             // This initializer runs on the boards' queue. Never lock/read the ledger or write a nudge on main.
             let recovering = LeadSleepRecovery.enqueue(sleepInterruptions, root: recoveryRoot)
-            messages = messages.filter { !$0.keys.contains(where: recovering.contains) }
+            // Workers Fable's refusal halted: the lead's loop starts each again on Opus; told by it, not here.
+            let moving = LeadUsageFallback.enqueue(LeadUsageFallback.halts(board: board, seen: seen), root: recoveryRoot)
+            messages = messages.filter { !$0.keys.contains(where: recovering.contains) && !$0.keys.contains(where: moving.contains) }
         }
         step?("stuckPrompts")
         stuckPrompts = LeadWitness.stuckPrompts(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
         step?("working")
         working = LeadBudget.working(board: board, seen: seen)
+        busySessions = Set(seen.filter { LeadBudget.works($0.value) }.keys)
         // The count not on board.json yet (`LeadBudgetClock`): a few bytes, read here off the main thread.
         let clock = recoveryRoot.map { BoardStore(root: $0).budgetClock() } ?? LeadBudgetClock()
         notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970, clock: clock, sleep: sleep)
@@ -425,6 +453,8 @@ final class LeadController: ObservableObject {
     /// Witness events already told, so each is told once.
     /// How long the Mac has slept since this app started, noted at each witness look (`MacSleepLog`).
     private var macSleep = MacSleepLog()
+    /// What the Mac's sleep paused of the boards' work in flight (see `SleepWatch`).
+    let sleepWatch: SleepWatch
     private var missingJobs = LeadWitness.MissingJobs()
     private var told: Set<String> = []
     /// When the witness first saw each verifier that auto_advance audits again end without a verdict (by root and
@@ -571,6 +601,9 @@ final class LeadController: ObservableObject {
     private var refreshing = false
     private var refreshAgain = false
     private let vault: LeadVault
+    /// What the vault was last told was at work, per project, and when (`LeadVault.noteWorking`).
+    private var workingTold: [String: (sessions: Set<String>, at: Date)] = [:]
+    static let workingEvery: TimeInterval = 30
     /// Leads whose role another session of their project holds now (VibeSwitcher started a new lead), by window
     /// session: the window says so, and what's typed into them goes to the live lead (see `ReplacedLead`).
     @Published private(set) var replacedLeads: [UUID: ReplacedLead] = [:]
@@ -603,9 +636,11 @@ final class LeadController: ObservableObject {
     let installer: ToolInstaller
 
     init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, inbox: URL = VibePaths.root,
-         home: String = VibePaths.home, keepAwake: KeepAwake = KeepAwake(), sweepsRoles: Bool = false, claudeCommand: @escaping (String) -> String) {
+         home: String = VibePaths.home, keepAwake: KeepAwake = KeepAwake(), sleepWatch: SleepWatch = SleepWatch(), sweepsRoles: Bool = false,
+         claudeCommand: @escaping (String) -> String) {
         self.host = host
         self.keepAwake = keepAwake
+        self.sleepWatch = sleepWatch
         self.store = store
         self.vault = vault
         self.inbox = inbox
@@ -691,6 +726,9 @@ final class LeadController: ObservableObject {
             case .typed:
                 self.deliver("VibeSwitcher took the \(span) as the user's: they ran it from its window. Merges start from there now.",
                              from: .system("VibeSwitcher, from what the user sent in the window"), root: root)
+            case .card(let ids):
+                self.deliver("VibeSwitcher took the \(span) as your own: the user ran your vs-shell card\(ids.count == 1 ? "" : "s") \(ids.joined(separator: ", ")). Merges start from there now.",
+                             from: .system("VibeSwitcher, from your vs-shell card the user ran"), root: root)
             case .you:
                 self.deliver("The user accepted the \(span) in VibeSwitcher: merges start from there now.",
                              from: .system("the user, in the window"), root: root)
@@ -1065,11 +1103,14 @@ final class LeadController: ObservableObject {
                     self.holders[root] = nil
                     self.markReplaced(holders: self.holders)
                 }
+                // lead_model (Fable unless set), Opus while Fable is held back; lead_advisor only on Opus.
+                let run = Self.leadRun(workflow, base: base, home: home)
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy),
                     start: LeadPrompts.leadStart(root: root, goal: goal, note: Self.commandLineNote, replaced: handed),
-                    server: Self.serverPath, name: name, folder: vault.runFolder(root: root, name: name), cwd: root)
+                    server: Self.serverPath, name: name, model: run.model, advisor: run.advisor,
+                    folder: vault.runFolder(root: root, name: name), cwd: root)
                 return (grant, launch)
             }
             if case .failure = prepared, let issued { try? vault.revoke(issued, root: root) }
@@ -1536,6 +1577,8 @@ final class LeadController: ObservableObject {
         if read != decisions { decisions = read }
         baseMoves.look(roots)
         pushes.look(roots)
+        // Before anything is judged: a look just after a sleep sees that sleep, and what it paused is counted.
+        if let notice = sleepWatch.look(&macSleep, boards: loaded) { tellUser(notice.title, notice.body) }
         configHolds.look(roots)
         for (root, board) in loaded {
             for event in AlertRules.look(previous: previous[root], board: board, project: (root as NSString).lastPathComponent,
@@ -1754,12 +1797,12 @@ final class LeadController: ObservableObject {
         guard let watch = power else { return then(nil) }
         let limit = powerLimit()
         powerQueue.async { [weak self] in
-            let text = watch.look(limit: limit)
+            let told = watch.look(limit: limit)
             DispatchQueue.main.async {
-                defer { then(text) }
-                guard let self, let text else { return }
+                defer { then(told?.text) }
+                guard let self, let told else { return }
                 for root in self.leadRoots {
-                    self.deliver(text, from: .system("witness"), root: root)
+                    self.deliver(PowerLook.text(told, board: self.boards[root]), from: .system("witness"), root: root)
                     // The lead's tool server looks again at what it held (see `LeadAdvance`).
                     LeadAdvance.nudge(root: root)
                 }
@@ -1824,8 +1867,7 @@ final class LeadController: ObservableObject {
         let hosted = team.hosted
         var seen: [String: LeadWitness.Seen] = [:]
         let now = Date()
-        // Before anything is judged: a look just after a sleep sees that sleep.
-        macSleep.note(.real)
+        // The clocks were noted as this refresh began (`refreshed`, `SleepWatch`): a look just after a sleep sees it.
         let awake = MacTime.real.awake()
         let workers = Set(board.tasks.compactMap(\.worker))
         for id in board.tasks.flatMap(\.members) {
@@ -1951,6 +1993,15 @@ final class LeadController: ObservableObject {
                     self?.stopForBudget(task, root: root, worker: agent, defaultMinutes: budget)
                 }
             }
+        }
+        // The vault's own count of working time (`LeadVault.noteWorking`), which small_task_min goes by: the board's is
+        // anyone's to write. Told when the set changes, else at most every `workingEvery`.
+        let busy = work.busySessions
+        let lastTold = workingTold[root]
+        if lastTold.map({ $0.sessions != busy || now.timeIntervalSince($0.at) >= Self.workingEvery }) ?? !busy.isEmpty {
+            workingTold[root] = (busy, now)
+            let vault = self.vault
+            reads.async { _ in try? vault.noteWorking(root: root, sessions: Array(busy), at: at) }
         }
         // On the board too, for status and the Team view, until the worker moves again.
         let stalls = work.stalls
@@ -2152,6 +2203,13 @@ final class LeadController: ObservableObject {
         }
     }
 
+    /// What a lead starts on (`LeadLaunch.leadRun`): its command's model (else Claude's settings in `home`) is what no
+    /// `--model` would run, and the account's kept usage says whether Fable is held back.
+    static func leadRun(_ workflow: LeadWorkflow, base: String, home: String) -> LeadLaunch.Run {
+        LeadLaunch.leadRun(workflow, defaultModel: LeadWorkflow.claudeModel(command: base, home: home),
+                           fableHeldBack: AccountUsageStore().load().fableHeldBack() != nil)
+    }
+
     private func cancelRotation(_ root: String, now: Date) {
         rotationEvent("cancelled")
         rotationAsked[root] = nil
@@ -2176,9 +2234,10 @@ final class LeadController: ObservableObject {
                 let workflow = LeadWorkflow.load(from: BoardStore(root: root).folder + "/workflow.md")
                 let start = LeadPrompts.leadStart(root: root, goal: nil, note: Self.commandLineNote,
                                                    replaced: (old.tty, file), scheduledNote: noteFile)
+                let run = Self.leadRun(workflow, base: base, home: home)
                 let launch = try LeadLaunch.prepare(role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy), start: start,
-                    server: Self.serverPath, name: "lead-\(Slug.make(project, taken: []))",
+                    server: Self.serverPath, name: "lead-\(Slug.make(project, taken: []))", model: run.model, advisor: run.advisor,
                     folder: vault.runFolder(root: root, name: "scheduled-\(UUID().uuidString)"), cwd: root)
                 return (launch, policy)
             }

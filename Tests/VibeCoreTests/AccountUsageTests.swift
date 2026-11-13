@@ -328,25 +328,26 @@ struct AccountUsageTests: LeadTeamFixture {
         runtime.usageLimits[verifier] = refusal
         let status = call(lead, "status").text
         #expect(status.contains("the fable limit (seven_day_overage_included): reached (Claude refused a request at it)"), "\(status)")
-        let refused = call(lead, "audit", ["task": "two"])
-        #expect(refused.isError && refused.text.contains("Not audited, no verifier started: the account's usage is near a limit, the fable limit")
-                && refused.text.contains("configure verifier_model"), "\(refused.text)")
+        // Fable held back: no audit starts on it; the next one starts on Opus instead (`LeadUsageFallback`).
+        #expect(lead.usageHold(model: "fable", sessions: try runtime.sessions()) != nil)
+        let moved = call(lead, "audit", ["task": "two"])
+        #expect(!moved.isError, "\(moved.text)")
+        let command = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-two'") }?.command)
+        #expect(LeadWorkflow.claudeModel(command: command) == "opus", "\(command)")
         // Kept: once the verifier has gone, the limit still holds until its reset.
         runtime.usageLimits = [:]
         try runtime.kill(verifier)
-        #expect(call(lead, "audit", ["task": "two"]).isError)
-        // Up to its reset, by the lead's clock, and no longer.
+        #expect(lead.usageHold(model: "fable", sessions: nil) != nil && lead.auditModel(lead.workflow) == "opus")
+        // Up to its reset, by the lead's clock, and no longer: audits on Fable again.
         let reset = Date(timeIntervalSince1970: try #require(refusal.resetsAt))
         lead.usageClock = { reset.addingTimeInterval(-1) }
-        #expect(call(lead, "audit", ["task": "two"]).isError)
+        #expect(lead.usageHold(model: "fable", sessions: nil) != nil && lead.auditModel(lead.workflow) == "opus")
         lead.usageClock = { reset }
-        #expect(lead.usageHold(model: "fable", sessions: nil) == nil)
+        #expect(lead.usageHold(model: "fable", sessions: nil) == nil && lead.auditModel(lead.workflow) == "fable")
         lead.usageClock = { Self.now }
         // A worker on sonnet isn't held back by Fable's limit.
         let sonnet = call(lead, "start_worker", ["task": "three"])
         #expect(!sonnet.isError, "\(sonnet.text)")
-        // The lead overrides.
-        #expect(!call(lead, "audit", ["task": "two", "override_usage": true]).isError)
     }
 
     /// The blind check's case: the lead moves audits to opus after a verifier stopped at the Fable limit, the stopped
@@ -361,7 +362,8 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(!call(lead, "audit", ["task": "one"]).isError)
         let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
         runtime.usageLimits[verifier] = try activeFableRefusal()
-        #expect(call(lead, "audit", ["task": "two"]).isError)
+        // The audit would go to Opus by itself now (`LeadUsageFallback`); the lead setting it is the same.
+        #expect(lead.fableFallback(sessions: try runtime.sessions()) != nil && lead.auditModel(lead.workflow) == "opus")
         #expect(!call(lead, "configure", ["verifier_model": "opus"]).isError)
         let moved = call(lead, "audit", ["task": "two"])
         #expect(!moved.isError, "\(moved.text)")
