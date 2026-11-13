@@ -890,7 +890,8 @@ public enum LeadPrompts {
         /// and the diff catches far more of a worker's mistakes than its own review of them.
         public static func blindCheck(base: String) -> String {
             "start a fresh subagent with the Agent tool whose prompt holds only your task's contract (the Task section below, "
-                + "as written) and the output of `git diff \(base)...HEAD`: not your reasoning, notes or summary. Ask it for any "
+                + "as written) and the output of `git diff \(base)...HEAD`: not your reasoning, notes or summary. Run that diff "
+                + "as a command of its own and paste its output (a `>` to a file is refused). Ask it for any "
                 + "problem that would block the merge, each with a concrete failure scenario (the input or state, and what goes "
                 + "wrong then), and nothing cosmetic. Fix what it finds, or say why not."
         }
@@ -923,7 +924,10 @@ public enum LeadPrompts {
                 + "a finding's fix), then its passing run after it: a test that would pass either way doesn't cover the fix. "
                 + "Run it by reverting the fix locally and restoring it, in this worktree: with everything committed, take the "
                 + "fix out with `git diff <pre-fix> HEAD -- <the fix's files> | git apply -R` (not the test's files), run the "
-                + "test, and put the fix back with the same command without `-R`; `git status` is clean again."
+                + "test, and put the fix back with the same command without `-R`; `git status` is clean again. Each runs as a "
+                + "command of its own, the commit spelled out: no `$VAR`, nothing after `git apply`, the test run separately. "
+                + "To put back a file you changed but didn't commit (`git checkout --` and `git restore` are blocked): "
+                + "`git diff HEAD -- <file> | git apply -R`."
         }
 
         /// How a re-audit checks a fixed finding's test: from the worker's evidence, since the verifier is read-only and

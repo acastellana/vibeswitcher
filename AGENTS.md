@@ -31,8 +31,9 @@ A new sheet goes in the sheet list in `Sources/VibeSwitcher/Sandbox.swift`.
 ## Practices
 
 - A test waits on the event it checks (a file, a reply, a semaphore, an injected clock): a fixed sleep races on a busy Mac.
-- Show a fix's test failing without the fix: `git diff <pre-fix> HEAD -- <fix files> | git apply -R`, run the test,
-  then re-apply with the same command without `-R`.
-- Long or many-core jobs (full suites, release builds, mutation testing, fuzzing, VMs, load and perf runs) run under
-  `vs-heavy`: VibeSwitcher tells the lead of one that holds several cores for minutes outside it.
+  Helpers: each target's TestSupport.swift (`eventually`/`until`, `hangGuard`, `offPool`, `Scratch`); `LeadTeamFixture` in LeadToolsetTests.
+- TemporaryFolderLint: a test's files go in a `Scratch` (a socket: `shortFolder`), never `/tmp` or `temporaryDirectory`.
+- Show a fix's test failing without the fix: `git diff <pre-fix> HEAD -- <fix files> | git apply -R`, test, then without `-R`.
+- A failed merge's log is copied into the task's worktree, `.vibeswitcher/merge-failure/`: `~/.vibeswitcher/lead` is refused.
+- Long or many-core jobs (full suites, release builds, mutation, fuzzing, VMs, load and perf runs) run under `vs-heavy`.
 - `docs/lead/` is the lead's record: only the lead edits it.
