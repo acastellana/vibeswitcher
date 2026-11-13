@@ -2862,3 +2862,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 22:01 Planned wall-tools-members-post: Wall tools: members post and read, each post delivered once (review audit, for security)
 - 2026-11-13 22:01 Planned take-part-the-integrator: take_part: the integrator takes a member's finished part (review audit)
 - 2026-11-13 22:01 Planned peer-wait-deadline-no: Peer-wait deadline: no member waits on a teammate without a limit (review audit)
+- 2026-11-13 22:01 Planned team-view-member-lines: Team view: member lines and the wall, in the app
+- 2026-11-13 22:02 Planned main-red-green-and: Main-red, green and catch-up notices reach every team member (review audit)
+- 2026-11-13 22:02 Planned merge-dry-run-and: Merge dry run and a receipt for a kept experiment arm (review audit, for irreversible)
