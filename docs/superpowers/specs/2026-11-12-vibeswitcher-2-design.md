@@ -776,6 +776,9 @@ of the branch on a real Mac; what that finds is fixed before anything new is bui
   target would differ from the app's `VibeSwitcher` only in case (2026-11-13).
 - The order to the bootstrap, the engine's outline and what the user is asked at its start are in
   [the bootstrap path](../plans/2026-11-13-v2-bootstrap-path.md) (2026-11-13).
+- **The bootstrap's decisions** ([the list](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user)):
+  every recommendation accepted, as written there, trade-offs 1 to 11 and so D1 to D20 (the user, 2026-11-13: "go for
+  it"). The machine actions M1 to M10 are the user's, each asked for at the step that needs it.
 
 ## Open decisions
 
@@ -784,10 +787,6 @@ For the user:
 1. **Pre-releases for other people from `v2`** (stage 8), before the branch lands, or nothing public until then.
 2. **What the renewed phone app keeps** from today's (stage 7 starts by listing it).
 3. **First-version cuts**: dictation, the spoken briefing, Statistics, dev previews and freeze reports are "later".
-4. **Before the bootstrap:** the decisions of the security architecture and the plans, and what only the user can do
-   on the machine, are one list:
-   [Decisions awaiting the user](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user). Its answers
-   are recorded here, under Decided, before stage 2's Task 2.
 
 ## Left to the builder
 
