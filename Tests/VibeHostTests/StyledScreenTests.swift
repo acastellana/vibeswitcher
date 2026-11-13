@@ -347,7 +347,7 @@ struct StyledScreenHostTests {
                 func answer(_ seq: Int, _ event: HostEvent) {
                     guard let payload = try? HostCoding.encode(HostEventEnvelope(replyTo: seq, event: event)) else { return }
                     let frame = HostFrame.encode(.control, payload)
-                    _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+                    _ = frame.withUnsafeBytes { Sys.write(fd, $0.baseAddress, $0.count) }
                 }
                 var decoder = HostFrameDecoder()
                 var buffer = [UInt8](repeating: 0, count: 65_536)

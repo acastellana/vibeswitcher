@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -91,26 +90,13 @@ import Testing
         #expect(await eventually { !host.isRunning })
     }
 
-    /// The PTYs' own ends (`/dev/ptmx`) the process has open.
+    /// The PTYs' own ends (`/dev/ptmx`; Linux may name one through its devpts, `/dev/pts/ptmx`) the process has open.
     private func ptyMasters(of pid: pid_t) -> Int {
-        let size = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
-        guard size > 0 else { return -1 }
-        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(size) / MemoryLayout<proc_fdinfo>.stride + 16)
-        let used = fds.withUnsafeMutableBytes { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
-        return fds.prefix(Int(used) / MemoryLayout<proc_fdinfo>.stride).filter { fd in
-            guard fd.proc_fdtype == PROX_FDTYPE_VNODE else { return false }
-            var info = vnode_fdinfowithpath()
-            guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &info, Int32(MemoryLayout<vnode_fdinfowithpath>.size)) > 0 else { return false }
-            return withUnsafeBytes(of: info.pvip.vip_path) { String(cString: $0.bindMemory(to: CChar.self).baseAddress!) } == "/dev/ptmx"
-        }.count
+        Platform.Processes.openFiles(pid).filter { $0 == "/dev/ptmx" || $0 == "/dev/pts/ptmx" }.count
     }
 
     private func openDescriptors(of pid: pid_t) -> Int {
-        let size = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
-        guard size > 0 else { return -1 }
-        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(size) / MemoryLayout<proc_fdinfo>.stride + 16)
-        let used = fds.withUnsafeMutableBytes { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
-        return Int(used) / MemoryLayout<proc_fdinfo>.stride
+        Platform.Processes.openDescriptorCount(pid) ?? -1
     }
 }
 
@@ -118,7 +104,7 @@ import Testing
 struct TooLargeReplyTests {
     @Test func aReplyTooLargeToSendBecomesAnError() async throws {
         var fds: [Int32] = [0, 0]
-        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0)
+        #expect(socketpair(AF_UNIX, Platform.Sockets.stream, 0, &fds) == 0)
         defer { close(fds[1]) }
         _ = fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK)
         let queue = DispatchQueue(label: "too-large")

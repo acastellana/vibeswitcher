@@ -1,5 +1,3 @@
-import CryptoKit
-import Darwin
 import Foundation
 import SwiftTerm
 import Testing
@@ -50,19 +48,23 @@ final class ScratchHostProcess {
         newBuild = HostBuild.id(ofExecutableAt: newBinary)
 
         process.executableURL = URL(fileURLWithPath: oldBinary)
-        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", sessionLog, AppProof.hostStdinFlag] + extra
+        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", sessionLog] + extra
         process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin",
                                "TMPDIR": dir + "/"]
         files.createFile(atPath: dir + "/host.log", contents: nil)
         let log = try FileHandle(forWritingTo: URL(fileURLWithPath: dir + "/host.log"))
         process.standardOutput = log
         process.standardError = log
-        let stdin = Pipe()
-        stdin.fileHandleForWriting.write(appKey.data)
-        try stdin.fileHandleForWriting.close()
-        process.standardInput = stdin
+        // On Linux the app is a connector's connections: this process, through the one the host is started with.
+        if try !TestHosts.connectAsApp(process) {
+            process.arguments! += [AppProof.hostStdinFlag]
+            let stdin = Pipe()
+            stdin.fileHandleForWriting.write(appKey.data)
+            try stdin.fileHandleForWriting.close()
+            process.standardInput = stdin
+        }
         try TestHosts.run(process)
-        #expect(await eventually { (try? UnixSocket.connect(path: socket)).map { Darwin.close($0); return true } ?? false })
+        #expect(await eventually { (try? UnixSocket.connect(path: socket)).map { Sys.close($0); return true } ?? false })
     }
 
     var pid: pid_t { process.processIdentifier }
@@ -70,9 +72,8 @@ final class ScratchHostProcess {
 
     /// The executable the host's process runs now.
     var runningExecutable: String? {
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        return URL(fileURLWithPath: String(cString: buffer)).resolvingSymlinksInPath().path
+        guard let path = Platform.Processes.executable(pid) else { return nil }
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     }
 
     /// A script standing in for a build: `body` is its shell code.
@@ -457,6 +458,6 @@ struct HostHandoverStateTests {
     static func identity(_ fd: Int32) -> [UInt64]? {
         var info = stat()
         guard fstat(fd, &info) == 0 else { return nil }
-        return [UInt64(UInt32(bitPattern: info.st_dev)), info.st_ino]
+        return [UInt64(truncatingIfNeeded: info.st_dev), UInt64(info.st_ino)]
     }
 }

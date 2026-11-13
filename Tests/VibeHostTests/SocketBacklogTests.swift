@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -19,7 +18,7 @@ import Testing
             return results
         }
         let fds = results.compactMap { try? $0.get() }
-        fds.forEach { Darwin.close($0) }
+        fds.forEach { Sys.close($0) }
         #expect(fds.count == 64, "refused: \(results.compactMap { if case .failure(let e) = $0 { return "\(e)" } else { return nil } })")
     }
 
@@ -32,7 +31,7 @@ import Testing
         let lockFD = open(lock, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         #expect(flock(lockFD, LOCK_EX | LOCK_NB) == 0)
         let (_, listenFD) = try refusingSocket(path)
-        #expect(Darwin.listen(listenFD, 16) == 0)
+        #expect(Sys.listen(listenFD, 16) == 0)
         UnixSocket.configure(listenFD)
         var config = HostServer.Config(socketPath: path, lockPath: lock, shell: "/bin/sh", launcher: hostLauncher,
                                        baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 43)
@@ -51,13 +50,13 @@ import Testing
             return results
         }
         let fds = results.compactMap { try? $0.get() }
-        fds.forEach { Darwin.close($0) }
+        fds.forEach { Sys.close($0) }
         #expect(fds.count == 64)
     }
 
     /// A socket file bound but not listening: every connect to it is refused.
     private func refusingSocket(_ path: String = scratchSocketPath()) throws -> (path: String, fd: Int32) {
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = socket(AF_UNIX, Platform.Sockets.stream, 0)
         var address = try UnixSocket.address(path)
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
@@ -68,7 +67,7 @@ import Testing
 
     @Test func aRefusedConnectIsRetriedWithBackoffThenFails() throws {
         let (path, fd) = try refusingSocket()
-        defer { Darwin.close(fd); unlink(path) }
+        defer { Sys.close(fd); unlink(path) }
         var pauses: [TimeInterval] = []
         #expect(throws: UnixSocket.Failure.system("connect", ECONNREFUSED)) {
             try UnixSocket.connect(path: path, patience: 1) { pauses.append($0) }
@@ -80,19 +79,19 @@ import Testing
 
     @Test func aRefusedConnectSucceedsOnceTheHostListens() throws {
         let (path, fd) = try refusingSocket()
-        defer { Darwin.close(fd); unlink(path) }
+        defer { Sys.close(fd); unlink(path) }
         var pauses = 0
         let client = try UnixSocket.connect(path: path, patience: 1) { _ in
             pauses += 1
-            if pauses == 2 { Darwin.listen(fd, SOMAXCONN) }
+            if pauses == 2 { Sys.listen(fd, SOMAXCONN) }
         }
-        Darwin.close(client)
+        Sys.close(client)
         #expect(pauses == 2)
     }
 
     @Test func noPatienceFailsAtOnce() throws {
         let (path, fd) = try refusingSocket()
-        defer { Darwin.close(fd); unlink(path) }
+        defer { Sys.close(fd); unlink(path) }
         var pauses = 0
         #expect(throws: UnixSocket.Failure.system("connect", ECONNREFUSED)) {
             try UnixSocket.connect(path: path) { _ in pauses += 1 }

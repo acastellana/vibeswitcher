@@ -28,6 +28,33 @@ private let fakeTheDisk: @convention(c) () -> Void = {
     }
 }
 
+#if os(Linux)
+// The section that holds initializers is named by the object format: Mach-O's name, above, is accepted on Linux and
+// never run there, and ELF's doesn't compile on the Mac. So on Linux the same two run from ELF's. A write to a pipe or
+// socket whose reader has gone is then an error (EPIPE) for the test that made it, not the end of the whole run (see
+// VibeCoreTests' TestSupport.swift).
+@_used @_section(".init_array")
+private let refuseTheAccountRootOnLinux: @convention(c) () -> Void = {
+    signal(SIGPIPE, SIG_IGN)
+    refuseTheAccountRoot()
+}
+@_used @_section(".init_array")
+private let fakeTheDiskOnLinux: @convention(c) () -> Void = { fakeTheDisk() }
+
+/// Every `Process()` in this target, on Linux: Foundation's, started with no signal blocked (see VibeCoreTests'
+/// TestSupport.swift: a child started from a libdispatch thread inherits its blocked signals, and a scratch host
+/// never hears the SIGTERM that ends it).
+final class Process: Foundation.Process, @unchecked Sendable {
+    override func run() throws {
+        var none = sigset_t(), before = sigset_t()
+        sigemptyset(&none)
+        pthread_sigmask(SIG_SETMASK, &none, &before)
+        defer { pthread_sigmask(SIG_SETMASK, &before, nil) }
+        try super.run()
+    }
+}
+#endif
+
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
 /// This counts awake time through `MacTime`, so a sleep cannot exhaust a wait at the wake.
 /// This is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
@@ -158,8 +185,14 @@ func scratchSocketPath() -> String { "\(shortScratchRoot)/vsh-\(UUID().uuidStrin
 
 /// The built `vibeswitcher-host`, which starts each session's program (`--pty-exec`).
 let hostLauncher: String = {
-    // The test bundle sits in the build folder, next to the executables it depends on.
-    Bundle(for: TestBundleAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
+    // The test bundle sits in the build folder, next to the executables it depends on. The Mac's bundle is a folder
+    // there; Linux's is one executable, and Foundation calls the folder that is in its bundle.
+    #if os(Linux)
+    let products = Bundle(for: TestBundleAnchor.self).bundleURL
+    #else
+    let products = Bundle(for: TestBundleAnchor.self).bundleURL.deletingLastPathComponent()
+    #endif
+    return products.appendingPathComponent("vibeswitcher-host").path
 }()
 
 private final class TestBundleAnchor {}

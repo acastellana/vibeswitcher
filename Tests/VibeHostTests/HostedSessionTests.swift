@@ -99,8 +99,8 @@ struct HostedSessionTests {
     /// The session scan finds agents by their controlling terminal: the PTY must be it, not just stdin.
     @Test func thePTYIsTheControllingTerminal() async throws {
         let probe = SessionProbe()
-        // zsh, the usual login shell, doesn't claim a terminal itself (bash does).
-        let session = try start("echo ctty=$(ps -o tty= -p $$) tpgid=$(ps -o tpgid= -p $$ | tr -d ' ')", shell: "/bin/zsh",
+        // The system's login shell: on the Mac zsh, which doesn't claim a terminal itself (bash, Linux's, does).
+        let session = try start("echo ctty=$(ps -o tty= -p $$) tpgid=$(ps -o tpgid= -p $$ | tr -d ' ')", shell: Platform.Tools.loginShell,
                                 probe: probe)
         let tty = probe.queue.sync { session.info.tty }
         #expect(await eventually { probe.text.contains("tpgid=") }, "\(probe.diagnosis(session))")

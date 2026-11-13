@@ -78,7 +78,7 @@ config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.append
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
                                      "--handover-fallback-app": true, "--app-executable": true,
-                                     HostStart.appKeyFlag: false]
+                                     HostStart.appKeyFlag: false].merging(TestAppPrincipal.handoverFlags) { $1 }
 config.arguments = arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
     if result.skip { result.skip = false; return }
     if let takesValue = handoverFlags[item.element] { result.skip = takesValue; return }
@@ -190,6 +190,8 @@ if let handoverPath, let state = restoring {
         exit(1)
     }
 }
+// A scratch host's test stand-in for the app on Linux: refused by the user's host (see `TestAppPrincipal`).
+TestAppPrincipal.adopt(arguments: arguments, restored: restoring?.testAppConnector, ownsLaunchers: ownsLaunchers, server: server)
 // Holding the user's lock now: no other host runs, so other builds' launchers can go (not for a scratch host on
 // its own lock, which runs beside the real one).
 for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path)) ?? [] where ownsLaunchers && name != "launcher-\(build)" {

@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Testing
 @testable import VibeCore
@@ -15,15 +14,21 @@ final class TestHost {
     /// The app's key (see `AppProof`): a `TestClient` of this host answers its challenge with it, as the app does.
     let appKey = SymmetricKey(size: .bits256)
 
+    /// On Linux, which has no code identity, the app is a connector's connections: the connector this host opens for
+    /// this process and registers for its socket (`appConnector`), so this process's clients through it are the app.
+    /// Nil on the Mac, and for a host whose `appExecutable` isn't this process's binary or that is told to open none.
+    private(set) var appConnector: Int32?
+
     /// `appExecutable`: by default this test process's own binary, so its clients are the app (they answer the
-    /// challenge too).
+    /// challenge too; on Linux they go through `appConnector`). Another (`/usr/bin/nc`): this process isn't the app.
+    /// `appConnector: false`: no connector even so (a test of the connector opens its own).
     /// `holdsKey: false`: a host that holds no app key yet (one handed over from a build before keys).
     /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`, `spawnNeedsLead`: the config's (see
     /// `HostServer.Config`).
     init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = HostServer.executable(of: getpid()), log: String? = nil,
          holdsKey: Bool = true, submittedGrace: TimeInterval = HostServer.submittedGrace, housekeeping: TimeInterval? = nil,
          capabilities: [String] = HostServer.capabilities, inputUnitHold: TimeInterval = InputOrder.holdLimit,
-         maxSessions: Int = 256, spawnNeedsLead: Bool = false) throws {
+         maxSessions: Int = 256, spawnNeedsLead: Bool = false, appConnector: Bool = true) throws {
         lock = socket + ".lock"
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
@@ -44,10 +49,21 @@ final class TestHost {
         config.spawnNeedsLead = spawnNeedsLead
         server = HostServer(config: config)
         try server.start()
+        // The Mac opens none (`openAppConnector` is nil there): its app proves itself by its code and key, as always.
+        if appConnector, appExecutable != nil, appExecutable == HostServer.executable(of: getpid()),
+           let connector = server.openAppConnector(expecting: Platform.Processes.token(getpid()), requireNonDumpable: false, onDumpable: nil) {
+            HostConnection.register(connector: connector, for: socket)
+            self.appConnector = connector
+        }
         readyAt = Date()
     }
 
     deinit {
+        if let appConnector {
+            if HostConnection.connector(for: socket) == appConnector { HostConnection.unregister(path: socket) }
+            server.closeAppConnector(appConnector)
+            Sys.close(appConnector)
+        }
         server.stop(terminateSessions: true)
         unlink(lock)
     }
@@ -62,13 +78,18 @@ final class TestClient {
     private(set) var closed = false
     var connection: HostConnection!
 
-    /// Answers the host's challenge with its app key (the app's client); `asApp: false`, it doesn't (another process).
-    convenience init(_ host: TestHost, asApp: Bool = true) throws { try self.init(socket: host.socket, appKey: asApp ? host.appKey : nil) }
+    /// Answers the host's challenge with its app key (the app's client; on Linux, through the host's connector);
+    /// `asApp: false`, it doesn't (another process, by the socket's path).
+    convenience init(_ host: TestHost, asApp: Bool = true) throws {
+        try self.init(socket: host.socket, appKey: asApp ? host.appKey : nil, viaConnector: asApp)
+    }
 
-    /// `viaConnector: false`: by the socket's path even where a connector is registered for it (see `HostConnector`).
-    init(socket: String, appKey: SymmetricKey? = nil, viaConnector: Bool = true) throws {
+    /// `viaConnector`: through a connector registered for the socket where there is one (see `HostConnector`), the
+    /// app's way on Linux; false, by the socket's path even so. Nil: as the app when it has the app's key (`appKey`),
+    /// else by the path, as another process would.
+    init(socket: String, appKey: SymmetricKey? = nil, viaConnector: Bool? = nil) throws {
         try queue.sync {
-            connection = try HostConnection(path: socket, queue: queue, appKey: appKey, viaConnector: viaConnector)
+            connection = try HostConnection(path: socket, queue: queue, appKey: appKey, viaConnector: viaConnector ?? (appKey != nil))
             connection.onEvent = { [weak self] e in self?.with { $0.events.append(e) } }
             connection.onOutput = { [weak self] id, data in self?.with { $0.output[id, default: Data()].append(data) } }
             connection.onClose = { [weak self] in self?.with { $0.closed = true } }
@@ -197,11 +218,13 @@ struct HostServerTests {
         // the slow client is attached (told to go), however long that takes.
         let session = try await watcher.spawn("read go; head -c \(ClientConnection.maxQueued * 3 / 2) /dev/zero | tr '\\0' x; echo; echo all-done; "
             + keepRunning)
-        // A client that attaches and then never reads: the host must not wait for it.
-        let fd = try UnixSocket.connect(path: host.socket)
+        // A client that attaches and then never reads: the host must not wait for it. The app's: on Linux one made
+        // through the host's connector, which the host sends no challenge, so it attaches at once.
+        let fd = try host.appConnector.map { try HostConnector.connect(over: $0, timeout: hangGuard) } ?? UnixSocket.connect(path: host.socket)
         defer { close(fd) }
         let attach = HostFrame.encode(.control, try HostCoding.encode(HostRequestEnvelope(seq: 1, request:
             .attach(id: session.id, cols: 80, rows: 24))))
+        if host.appConnector != nil { _ = attach.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) } }
         var decoder = HostFrameDecoder()
         var buffer = [UInt8](repeating: 0, count: 65_536)
         /// Reads what the slow client has been sent until `done` says stop (or the hang guard passes).
@@ -451,7 +474,7 @@ struct HostCallTests {
             func answer(_ seq: Int, _ event: HostEvent) {
                 guard let payload = try? HostCoding.encode(HostEventEnvelope(replyTo: seq, event: event)) else { return }
                 let frame = HostFrame.encode(.control, payload)
-                _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+                _ = frame.withUnsafeBytes { Sys.write(fd, $0.baseAddress, $0.count) }
             }
             while true {
                 // Busy for a while once it has said hello (another client, a big replay). The case itself, not a

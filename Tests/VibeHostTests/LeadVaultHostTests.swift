@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Testing
 @testable import VibeCore
@@ -246,6 +245,9 @@ struct LeadVaultHostTests {
         await #expect(!screen(app, lead.id).contains("PWNED"))
     }
 
+    // The Mac's alone (MacOnlyTests.txt): the app here is nc proving its key, and the Linux app is a connector's
+    // connection and holds no key.
+    #if canImport(Darwin)
     /// The exec trick: a worker's shell leaves its session (double fork, setsid), connects, forks a child that keeps
     /// the connection, and execs the app's binary in the process that connected; the child then asks as "the app".
     /// Here the app is `/usr/bin/nc` (a binary that stays up, `nc -lU`), and the host is tried accepting at once and
@@ -369,6 +371,7 @@ struct LeadVaultHostTests {
         guard case .vault(.seal)? = got[2] else { Issue.record("the key didn't make nc the app: \(String(describing: got[2]))"); return }
         #expect(got[3] == .vault(.ok))
     }
+    #endif
 
     @Test func aProcessOutsideEverySessionCantKillOrHandOver() async throws {
         let host = try TestHost()

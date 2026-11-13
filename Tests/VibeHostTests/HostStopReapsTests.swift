@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 import VibeCore
@@ -15,7 +14,7 @@ struct HostStopReapsTests {
         host.server.stop(terminateSessions: true)
         // Its program gets SIGHUP, SIGKILL 5 s on: gone from the process table, not left a zombie.
         #expect(await eventually(timeout: 60) { Self.state(of: running.childPID) == nil },
-                "pid \(running.childPID) is \(Self.state(of: running.childPID) == SZOMB ? "a zombie" : "still running")")
+                "pid \(running.childPID) is \(Self.state(of: running.childPID) == .zombie ? "a zombie" : "still running")")
     }
 
     /// A session told to end and closed at once (as the host's stop does, and tests that start sessions themselves)
@@ -34,15 +33,12 @@ struct HostStopReapsTests {
         let pid = probe.queue.sync { session.info.childPID }
         probe.queue.sync { session.terminate(); session.close() }
         #expect(await eventually(timeout: 60) { Self.state(of: pid) == nil },
-                "pid \(pid) is \(Self.state(of: pid) == SZOMB ? "a zombie" : "still running")")
+                "pid \(pid) is \(Self.state(of: pid) == .zombie ? "a zombie" : "still running")")
     }
 
-    /// The process's state (`SRUN`, `SZOMB`…), nil once it's gone from the process table (reaped).
-    static func state(of pid: pid_t) -> Int32? {
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
-        return Int32(info.kp_proc.p_stat)
+    /// The process's state (running, a zombie…), nil once it's gone from the process table (reaped): the kernel's own
+    /// record, zombies included.
+    static func state(of pid: pid_t) -> Platform.Processes.State? {
+        Platform.Processes.kernelRecord(pid)?.state
     }
 }

@@ -44,7 +44,11 @@ let portableTargets: [Target] = [
     .target(name: "VibeHost", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm"), crypto]),
     // The session host: keeps the sessions running while their clients come and go.
     .executableTarget(name: "vibeswitcher-host", dependencies: ["VibeHost"]),
-    // Still to come: the host's tests, `VibeHostTests` (stage 2's Task 5a).
+    // Depends on the host executable too: sessions are started through it (`--pty-exec`). Fixtures: terminal output
+    // captured from scratch programs. MacOnlyTests.txt: the test files compiled only on the Mac, each with its reason
+    // (`MacOnlyTestsLintTests`).
+    .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"],
+                exclude: ["MacOnlyTests.txt"], resources: [.copy("Fixtures")], swiftSettings: testSettings),
 ]
 // VIBE_LINUX_ALL=1 adds the portable targets that don't compile on Linux yet, only to count their errors
 // (scripts/ci/linux-core-errors.sh). The package's dependencies are the same with and without it, and so is
@@ -97,9 +101,9 @@ let package = Package(
         .executableTarget(name: "vibeswitcher-cli", dependencies: ["VibeNode", "VibeCore"]),
         .testTarget(name: "VibeNodeTests", dependencies: ["VibeNode", "VibeCore"], swiftSettings: testSettings),
         // Depends on the host executable too: sessions are started through it (`--pty-exec`). Fixtures: terminal
-        // output captured from scratch programs.
+        // output captured from scratch programs. MacOnlyTests.txt: as the Linux half says.
         .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"],
-                    resources: [.copy("Fixtures")], swiftSettings: testSettings),
+                    exclude: ["MacOnlyTests.txt"], resources: [.copy("Fixtures")], swiftSettings: testSettings),
         // The app's menus and window commands. The host too: a scratch one runs the sessions of a test of the app's client.
         // Fixtures: the chat bench's made-up transcript, read from the source tree (`ChatBenchTests`).
         .testTarget(name: "VibeSwitcherTests", dependencies: ["VibeSwitcher", "VibeCore", "VibeHost", "vibeswitcher-host"],

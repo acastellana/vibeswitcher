@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -110,6 +109,8 @@ import Testing
         }
     }
 
+    // The Mac's alone: what it prints is footprint's (/usr/bin/footprint), which Linux doesn't have.
+    #if canImport(Darwin)
     @Test(.enabled(if: binary != nil)) func measure() async throws {
         let binary = try #require(Self.binary)
         let dir = "\(shortScratchRoot)/vshm-\(UUID().uuidString.prefix(8))", home = dir + "/home", socket = dir + "/h.sock"
@@ -168,4 +169,5 @@ import Testing
         await pause(3)
         await measure("printing (4 printers, a full-screen redraw, after a 20,000-line burst)")
     }
+    #endif
 }

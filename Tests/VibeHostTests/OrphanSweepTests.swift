@@ -1,6 +1,6 @@
-import Darwin
 import Foundation
 import Testing
+import VibeCore
 @testable import VibeHost
 
 /// The host's housekeeping ends what outlived what it served: a tool server (vibeswitcher-mcp beside the host) whose
@@ -32,10 +32,8 @@ import Testing
     }
 
     static func parent(of pid: pid_t) -> pid_t? {
-        var short = proc_bsdshortinfo()
-        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size else { return nil }
-        return pid_t(short.pbsi_ppid)
+        guard case .brief(let brief) = Platform.Processes.brief(pid) else { return nil }
+        return brief.ppid
     }
 
     static func alive(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 }
@@ -133,8 +131,8 @@ import Testing
     /// What the housekeeping takes for a parser: `launcher --parse-session`, not a session's program or anything else.
     @Test func aParserIsToldFromOtherChildren() async throws {
         var pair: [Int32] = [-1, -1]
-        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
-        defer { pair.forEach { Darwin.close($0) } }
+        #expect(socketpair(AF_UNIX, Platform.Sockets.stream, 0, &pair) == 0)
+        defer { pair.forEach { Sys.close($0) } }
         let parser = Process()
         parser.executableURL = URL(fileURLWithPath: hostLauncher)
         parser.arguments = ["--parse-session", "80", "24"]

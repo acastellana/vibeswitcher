@@ -20,8 +20,11 @@ const child = spawn(binary, ['--socket', socketPath, '--lock', path.join(folder,
   stdio: 'ignore',
 });
 const clients = [];
-const deadline = Date.now() + 20000;
+// Hosts started after the first, ended with it.
+const others = [];
+// Each wait's own: a second host's start isn't held to what the first one's left.
 async function eventually(action) {
+  const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
     const result = await action();
     if (result) return result;
@@ -29,9 +32,9 @@ async function eventually(action) {
   }
   throw new Error('Scratch host probe timed out');
 }
-async function connect() {
+async function connect(at = socketPath) {
   const socket = await eventually(async () => {
-    const candidate = net.createConnection(socketPath);
+    const candidate = net.createConnection(at);
     try { await once(candidate, 'connect'); return candidate; }
     catch { candidate.destroy(); return null; }
   });
@@ -83,12 +86,44 @@ try {
     assert.ok(answer.error, `Must refuse ${Object.keys(request)[0]}`);
   }
   console.log('PASS: unknown processes cannot spawn, discover, read, attach, type, resize or shut down the scratch host.');
+  // Linux: the tests' stand-in for the app (a connector named by --test-app-connector, for the process named by
+  // --test-app-pid) is a scratch host's only. The user's host (here the scratch home's: no --lock, so it holds that
+  // home's own) refuses both flags, saying so, and what reaches it by its path is still nobody: every request only the
+  // app may make is refused. The Mac has no connector (and its user's host would read the login Keychain).
+  if (process.platform === 'linux') {
+    const usersSocket = path.join(folder, 'users.sock');
+    const usersHome = path.join(folder, 'users-home');
+    await mkdir(usersHome);
+    const users = spawn(binary, ['--socket', usersSocket, '--exit-with', String(process.pid), '--idle-exit', '600',
+      '--housekeeping', '3600', '--test-app-pid', String(process.pid), '--test-app-connector', '3'], {
+      env: { PATH: '/usr/bin:/bin', HOME: usersHome, VIBESWITCHER_HOME: path.join(usersHome, '.vibeswitcher'),
+        TMPDIR: folder, SHELL: '/bin/sh' },
+      stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
+    });
+    others.push(users);
+    let said = '';
+    users.stderr.on('data', bytes => { said += bytes; });
+    await eventually(async () => said.includes('started'));
+    assert.match(said, /refused --test-app-pid and --test-app-connector/, 'The user\'s host must refuse the test stand-in');
+    const byPath = await connect(usersSocket);
+    for (const request of [
+      { census: {} }, { replaceAppKey: { key: Buffer.alloc(32, 7).toString('base64') } },
+      { spawn: { _0: { cwd: usersHome, command: 'true', env: {}, cols: 80, rows: 24, keepShell: false, label: 'Audit', agent: null } } },
+      { handover: { executable: binary } }, { shutdown: {} },
+    ]) {
+      const answer = await byPath(request);
+      assert.ok(answer.error, `The user's host must refuse ${Object.keys(request)[0]} by its path`);
+    }
+    console.log('PASS: the user\'s host refuses the test stand-in for the app, and nothing by its path is the app.');
+  }
 } finally {
   clients.forEach(client => client.destroy());
-  if (child.exitCode == null && child.signalCode == null) {
-    child.kill('SIGTERM');
-    await Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(resolve, 3000))]);
-    if (child.exitCode == null && child.signalCode == null) { child.kill('SIGKILL'); await once(child, 'exit'); }
+  for (const host of [child, ...others]) {
+    if (host.exitCode == null && host.signalCode == null) {
+      host.kill('SIGTERM');
+      await Promise.race([once(host, 'exit'), new Promise(resolve => setTimeout(resolve, 3000))]);
+      if (host.exitCode == null && host.signalCode == null) { host.kill('SIGKILL'); await once(host, 'exit'); }
+    }
   }
   await rm(folder, { recursive: true, force: true });
 }

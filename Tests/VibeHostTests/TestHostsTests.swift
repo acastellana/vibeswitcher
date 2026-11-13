@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
@@ -119,12 +118,11 @@ import Testing
         #expect(await eventually(timeout: 30) { !exists(session.childPID) })
     }
 
-    /// Waits for `pid`'s exit (any process, not only a child: a kqueue watch), up to `timeout`. True once it's gone.
+    /// Waits for `pid`'s exit (any process, not only a child: the platform's watch), up to `timeout`. True once it's
+    /// gone.
     func waitForExit(of pid: pid_t, timeout: TimeInterval) async -> Bool {
         let gone = DispatchSemaphore(value: 0)
-        let watch = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global())
-        watch.setEventHandler { gone.signal() }
-        watch.resume()
+        let watch = Platform.ProcessExit.watch(pid, queue: .global()) { gone.signal() }
         defer { watch.cancel() }
         // Gone before the watch began: no exit comes.
         if kill(pid, 0) != 0, errno == ESRCH { return true }

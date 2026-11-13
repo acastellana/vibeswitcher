@@ -791,7 +791,7 @@ public final class HostServer {
                                    saved.openedByApp = openedByApp.contains(id) && !Self.another(lastInput[id])
                                    return saved
                                }
-                           })
+                           }, testAppConnector: testAppConnectorForHandover)
     }
 
     private func log(_ text: String) {
