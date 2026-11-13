@@ -936,11 +936,63 @@ enum HostProcesses {
     }
 
     /// The processes an orphan of this host's is given as its parent: launchd (pid 1) on the Mac, as always. On
-    /// Linux pid 1 and the subreaper above this host, if any (the user's systemd, on this machine), which takes an
-    /// orphan there before pid 1 does: the host is no subreaper itself before the bootstrap (the stage 2 plan's
-    /// S2-D6), so where its own orphans go is where its sessions' do. Found once, the first time it's asked
-    /// (`probeOrphanParent`), as the parent the kernel gives an orphan of a probe of the host's own.
-    static let orphanParents: Set<pid_t> = Platform.CodeIdentity.isAvailable ? [1] : Set([1] + [probeOrphanParent()].compactMap { $0 })
+    /// Linux pid 1 and the subreaper above this host, if any (the user's systemd, or under WSL a terminal's relay),
+    /// which takes an orphan there before pid 1 does: the host is no subreaper itself before the bootstrap (the stage
+    /// 2 plan's S2-D6), so where its own orphans go is where its sessions' do. Found the first time it's asked
+    /// (`probeOrphanParent`), as the parent the kernel gives an orphan of a probe of the host's own, and again
+    /// whenever the one found has ended since (`subreaper`).
+    static var orphanParents: Set<pid_t> {
+        Platform.CodeIdentity.isAvailable ? [1] : Set([1] + [subreaper.current()].compactMap { $0 })
+    }
+
+    /// Linux's subreaper, as last found. A subreaper can end while the host runs on (WSL's relay ends with its
+    /// terminal; the host ignores SIGHUP), and its pid be given to another process later: the children of that one
+    /// aren't orphans (an agent's would be its live tool servers), and the host's orphans go elsewhere now.
+    static let subreaper = OrphanParent<Platform.PeerToken>.live(probe: probeOrphanParent)
+
+    /// The parent the kernel gives an orphan (other than pid 1), kept as a token of that process: asked for, it's
+    /// the one found as long as that process runs, and found again (`probe`) once it has ended. A probe that finds
+    /// none isn't asked again (as for the first). Thread-safe.
+    final class OrphanParent<Token> {
+        private let lock = NSLock()
+        private let probe: () -> pid_t?
+        private let token: (pid_t) -> Token?
+        private let same: (Token, Token) -> Bool
+        private var found: (pid: pid_t, token: Token?)?
+        private var probed = false
+
+        /// `token` reads a process's token now (nil when it has gone); `same` tells whether two are of one process.
+        init(probe: @escaping () -> pid_t?, token: @escaping (pid_t) -> Token?, same: @escaping (Token, Token) -> Bool) {
+            self.probe = probe
+            self.token = token
+            self.same = same
+        }
+
+        /// The parent: the one found while it runs (pid 1 isn't checked: it outlives everything), found again
+        /// when it has ended; nil when there is none, or the one just found ended before its token was read.
+        func current() -> pid_t? {
+            lock.lock()
+            defer { lock.unlock() }
+            if probed {
+                guard let found else { return nil }
+                if found.pid == 1 { return 1 }
+                if let then = found.token, let now = token(found.pid), same(now, then) { return found.pid }
+            }
+            probed = true
+            found = nil
+            guard let pid = probe() else { return nil }
+            if pid == 1 {
+                found = (pid, nil)
+                return pid
+            }
+            guard let now = token(pid) else {
+                probed = false
+                return nil
+            }
+            found = (pid, now)
+            return pid
+        }
+    }
 
     /// The parent an orphan of this process is given: a shell started here starts `sleep` in the background and ends,
     /// and the sleep's parent then is the answer; the sleep is ended. nil when the probe couldn't run or read it.
@@ -992,5 +1044,13 @@ enum HostProcesses {
                          path: () -> String?) -> Bool {
         guard parents.contains(parent), uid == user, let path = path() else { return false }
         return URL(fileURLWithPath: path).resolvingSymlinksInPath().path == target
+    }
+}
+
+extension HostProcesses.OrphanParent where Token == Platform.PeerToken {
+    /// One that reads each process's token as `Platform.Processes.token` does (its pid, user and start), so a pid
+    /// given to a later process doesn't pass for the one found (`sameImage(as:)`).
+    static func live(probe: @escaping () -> pid_t?) -> HostProcesses.OrphanParent<Platform.PeerToken> {
+        .init(probe: probe, token: { Platform.Processes.token($0) }, same: { $0.sameImage(as: $1) })
     }
 }

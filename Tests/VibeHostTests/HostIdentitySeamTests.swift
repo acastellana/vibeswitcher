@@ -70,6 +70,60 @@ import Testing
         #expect(reason.contains("isn't VibeSwitcher's"), "\(reason)")
     }
 
+    /// The subreaper is kept as its token, not its pid: asked again, it's the one found while that process runs (no
+    /// new probe); once it has ended, or its pid is another process's (another token), it's found again, so a later
+    /// process given that pid isn't taken for it (its children aren't orphans). pid 1 is never checked, and a probe
+    /// that found none isn't run again. Tokens here are numbers.
+    @Test func aSubreaperThatEndedIsFoundAgain() {
+        var tokens: [pid_t: Int] = [4242: 1, 5151: 7]
+        var answers: [pid_t?] = [4242, 5151, 1, nil]
+        var probes = 0
+        var asked: [pid_t] = []
+        let parent = HostProcesses.OrphanParent<Int>(probe: {
+            probes += 1
+            return answers.removeFirst()
+        }, token: { pid in
+            asked.append(pid)
+            return tokens[pid]
+        }, same: { $0 == $1 })
+
+        #expect(parent.current() == 4242 && probes == 1)
+        #expect(parent.current() == 4242 && probes == 1)
+        // It ended and its pid went to another process: found again.
+        tokens[4242] = 2
+        #expect(parent.current() == 5151 && probes == 2)
+        // It ended: found again, now pid 1, whose token isn't read.
+        tokens[5151] = nil
+        asked = []
+        #expect(parent.current() == 1 && probes == 3)
+        #expect(parent.current() == 1 && probes == 3)
+        #expect(asked == [5151])
+        // A probe that finds none stays so.
+        let none = HostProcesses.OrphanParent<Int>(probe: { probes += 1; return answers.removeFirst() }, token: { tokens[$0] }, same: { $0 == $1 })
+        #expect(none.current() == nil && probes == 4)
+        #expect(none.current() == nil && probes == 4)
+    }
+
+    /// The same with real tokens (`Platform.Processes.token`): a process found as the subreaper is kept while it runs
+    /// and dropped for a new probe once it has ended.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's subreaper; the Mac's orphans are launchd's"))
+    func aSubreaperIsKeptAsItsTokenOnLinux() async throws {
+        let stand = Process()
+        stand.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        stand.arguments = ["600"]
+        try stand.run()
+        defer { if stand.isRunning { kill(stand.processIdentifier, SIGKILL) } }
+        var probes = 0
+        let found = stand.processIdentifier
+        let parent = HostProcesses.OrphanParent<Platform.PeerToken>.live { probes += 1; return probes == 1 ? found : nil }
+
+        #expect(parent.current() == found && probes == 1)
+        #expect(parent.current() == found && probes == 1)
+        kill(found, SIGKILL)
+        _ = await offPool { waitForEnd(stand) }
+        #expect(parent.current() == nil && probes == 2)
+    }
+
     /// A tool server whose agent ended is the child of the parent an orphan of this process gets (the user's
     /// systemd here, pid 1 elsewhere): the sweep lists it, and that parent is among `orphanParents`. Asserted so, not
     /// by naming the parent: the subreaper depends on where the tests run.
