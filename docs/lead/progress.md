@@ -2815,3 +2815,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 19:24 Started a worker on every-worker-is-told
 - 2026-11-13 19:24 Automatically (auto_advance): Started a worker on every-worker-is-told (Every worker is told once when main is red), its after tasks done (measure-how-often).
 - 2026-11-13 19:24 Automatically (auto_advance): Cleaned up measure-how-often (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-13 19:40 Automatically (auto_advance): Started the audit of every-worker-is-told at a6e28237 (Its review is audit).
+- 2026-11-13 19:40 Released every-worker-is-told's worker (idle since its done report on a6e28237) while its audit runs
+- 2026-11-13 19:40 Automatically (auto_advance): Released every-worker-is-told's worker, idle since its done report on a6e28237, while its audit runs (ended pid 75646 (Worker: Every worker is told once when main is red)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
