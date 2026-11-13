@@ -4851,13 +4851,19 @@ public final class LeadToolset: MCPToolset {
         // Commits that didn't merge: nothing is touched, its worker still running included.
         let base = workflow.base
         if let refusal = unmergedRefusal(task, force: force, base: base) { throw refusal }
+        // A team task's members' work that would be lost, likewise.
+        _ = try memberWork(task, force: force, base: base)
         // Only the ones still running are ended: a session that's gone (lost with a replaced host) has nothing to kill.
         // Its worker and verifier, and any earlier one still running in its worktree (a verifier a later audit
         // replaced is off the board, not ended).
         let refused = "\(slug)'s sessions can't be checked; nothing was cleaned up"
         let folder = (Worktrees.path(root: root, slug: slug) as NSString).standardizingPath
+        // A team task's members too: their workers, and what runs in their worktrees.
+        let memberWorktrees = Worktrees.members(root: root, slug: slug).map { Worktrees.path(root: root, slug: Worktrees.memberSlug(slug, member: $0)) }
+        let folders = [folder] + memberWorktrees.map { ($0 as NSString).standardizingPath }
+        let workers = [task.worker, task.verifier] + (task.team ?? []).map(\.worker)
         let sessions = try hostSessions(refused).filter { session in
-            session.live && ([task.worker, task.verifier].contains(session.id) || Self.isTeamSession(session, in: folder))
+            session.live && (workers.contains(session.id) || folders.contains { Self.isTeamSession(session, in: $0) })
         }
         // One the host didn't end, cleanup ends itself: its processes, the user's carrying its session's id.
         let endings = try endItself(try end(sessions, refused: refused), refused: refused)
@@ -4868,16 +4874,24 @@ public final class LeadToolset: MCPToolset {
         }
         // Its sessions' temporary folders and TMPDIRs, found by the worktree's path while it's still there to resolve.
         let worktree = Worktrees.path(root: root, slug: slug)
-        let temporary = ClaudeScratch.folders(for: worktree, in: scratchRoot) + SessionTemp.folders(for: worktree, in: sessionTempRoot)
+        let temporary = ([worktree] + memberWorktrees).flatMap { ClaudeScratch.folders(for: $0, in: scratchRoot) + SessionTemp.folders(for: $0, in: sessionTempRoot) }
         // Again now its sessions are ended: a commit made while they were going counts too.
+        let endedSaid = " (Its sessions were ended: \(endings.map(\.said).joined(separator: ", ")).)"
         if let refusal = unmergedRefusal(task, force: force, base: base) {
-            throw endings.isEmpty ? refusal : Problem(text: refusal.text + " (Its sessions were ended: \(endings.map(\.said).joined(separator: ", ")).)")
+            throw endings.isEmpty ? refusal : Problem(text: refusal.text + endedSaid)
+        }
+        let dropped: [Worktrees.MemberWork]
+        do { dropped = try memberWork(task, force: force, base: base) } catch let refusal as Problem {
+            throw endings.isEmpty ? refusal : Problem(text: refusal.text + endedSaid)
         }
         // Merged work is in main; leftovers in the worktree (build output) can go. Abandoned work goes only on request.
         // The build folder goes first and whatever git makes of the rest: it's most of the space.
         var freed = removeFolder((worktree as NSString).appendingPathComponent(".build"))
         // Its audits' shared build and test logs.
         freed += removeFolder((store.folder as NSString).appendingPathComponent("audit/\(slug)"))
+        // Its members' worktrees and sub-branches before its own: their build folders first, as for its own.
+        freed += memberWorktrees.reduce(0) { $0 + removeFolder(($1 as NSString).appendingPathComponent(".build")) }
+        try Worktrees.removeMembers(root: root, slug: slug)
         if FileManager.default.fileExists(atPath: worktree) || branchHead(Worktrees.branch(slug)) != nil {
             try Worktrees.remove(root: root, slug: slug, force: true)
         }
@@ -4896,12 +4910,39 @@ public final class LeadToolset: MCPToolset {
             return board.tasks[index]
         }
         // Its workers and verifiers, this one and any before it, are history now: off the session list.
-        for session in (try? listed()) ?? [] where !session.live && Self.isTeamSession(session, in: folder) {
+        for session in (try? listed()) ?? [] where !session.live && folders.contains(where: { Self.isTeamSession(session, in: $0) }) {
             runtime.forget(session.id)
         }
         let ended = endings.isEmpty ? "" : "; " + endings.map(\.said).joined(separator: ", ")
-        return MCPToolResult(text: "Cleaned up \(slug)" + ended + (freed > 0 ? " (freed \(DiskSpace.text(freed)) of build output and temporary folders)." : ".")
-                             + (after.map { " " + Self.cleanedState(before: task, after: $0) } ?? ""))
+        let members = memberWorktrees.isEmpty ? "" : "; with its members' worktrees and branches (\(memberWorktrees.count))"
+        let droppedSaid = dropped.isEmpty ? "" : " Dropped, as force said: " + dropped.map(\.text).joined(separator: "; ") + "."
+        return MCPToolResult(text: "Cleaned up \(slug)" + ended + members + (freed > 0 ? " (freed \(DiskSpace.text(freed)) of build output and temporary folders)." : ".")
+                             + droppedSaid + (after.map { " " + Self.cleanedState(before: task, after: $0) } ?? ""))
+    }
+
+    /// A team task's members' work cleanup would lose (`Worktrees.memberWork`): uncommitted files in a member's
+    /// worktree whatever the task's state, and, for a done task, commits on a member's branch the integrator didn't
+    /// take (as `unmergedRefusal` for the task's own branch). Without `force` that's refused, naming them, nothing
+    /// touched; with `force` it's returned, for the reply to name as dropped.
+    private func memberWork(_ task: LeadTask, force: Bool, base: String) throws -> [Worktrees.MemberWork] {
+        let slug = task.slug
+        switch Worktrees.memberWork(root: root, slug: slug, base: base, merged: task.merged?.branchHead) {
+        case .failure(let failure):
+            guard force else {
+                throw Problem(text: "Not cleaned up: can't tell whether \(slug)'s members' worktrees hold work (\(failure.description)), so they and its own stay. cleanup(\(slug), force: true) removes them anyway.")
+            }
+            return []
+        case .success(let found):
+            let lost = found.compactMap { work -> Worktrees.MemberWork? in
+                var work = work
+                if task.status != .done { work.untaken = [] }
+                return work.uncommitted.isEmpty && work.untaken.isEmpty ? nil : work
+            }
+            guard !lost.isEmpty, !force else { return lost }
+            throw Problem(text: "Not cleaned up: \(lost.count == 1 ? "a member's" : "members'") worktree or branch holds work that would be lost: "
+                          + Redaction.secrets(in: lost.map(\.text).joined(separator: "; ")) + ". Its worktrees, branches and sessions stay. "
+                          + "Have it committed and taken into \(Worktrees.branch(slug)), or cleanup(\(slug), force: true) to drop it.")
+        }
     }
 
     /// A task's state as status and the board say it: folded, abandoned (`LeadTask.isAbandoned`), or its status.

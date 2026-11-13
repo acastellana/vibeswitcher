@@ -2557,3 +2557,134 @@ extension Worktrees {
         }
     }
 }
+
+// MARK: Team members' worktrees
+
+/// A team task's other members (`LeadTeam`, docs/process/reviews/team-on-one-task-design.md "The unit"): each works in
+/// `.vibeswitcher/worktrees/<slug>--<name>` on `agent/<slug>--<name>`, branched from a commit of the team branch
+/// `agent/<slug>`, and goes with the task's cleanup. The integrator is the task's own worktree and branch.
+extension Worktrees {
+    /// What names member `name`'s worktree and branch on the task `slug`: `<slug>--<name>`.
+    public static func memberSlug(_ slug: String, member name: String) -> String { slug + LeadTeam.joiner + name }
+
+    /// Makes member `name`'s worktree on `agent/<slug>--<name>`, branched from `commit`, which must be on the team
+    /// branch `agent/<slug>`. Idempotent: when the member's branch is already there and holds `commit`, its worktree
+    /// is the one returned (added again on that branch if it's gone), and the branch stays where it is, its member's
+    /// commits kept. Refused, nothing changed, when the name can't be a member's, `commit` isn't on the team branch, the
+    /// member's branch is there without `commit` (made from another commit: it's not reset), or something else is in
+    /// the way (a folder that isn't its worktree, the branch checked out elsewhere).
+    @discardableResult
+    public static func createMember(root: String, slug: String, member name: String, from commit: String) throws -> String {
+        if let problem = LeadTeam.nameProblem(name) { throw Failure(description: problem) }
+        let team = branch(slug), member = memberSlug(slug, member: name)
+        let path = path(root: root, slug: member), memberBranch = branch(member)
+        let resolved = Git.run(["rev-parse", "--verify", "--quiet", "\(commit)^{commit}"], in: root)
+        guard resolved.ok, !resolved.output.isEmpty else { throw Failure(description: "No commit \(commit) in this repository.") }
+        let sha = resolved.output
+        guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(team)"], in: root).ok else {
+            throw Failure(description: "There's no team branch \(team) to branch \(name) from.")
+        }
+        guard Git.run(["merge-base", "--is-ancestor", sha, "refs/heads/\(team)"], in: root).ok else {
+            throw Failure(description: "\(commit) isn't on \(team): a member branches from a commit of its team's branch.")
+        }
+        try BoardStore(root: root).ensureExcluded()
+        let exists = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(memberBranch)"], in: root).ok
+        if exists {
+            guard Git.run(["merge-base", "--is-ancestor", sha, "refs/heads/\(memberBranch)"], in: root).ok else {
+                let head = Git.run(["rev-parse", "--short=8", "refs/heads/\(memberBranch)"], in: root).output
+                throw Failure(description: "\(memberBranch) is already there, at \(head), without \(sha.prefix(8)): it isn't made again (that would drop what it holds).")
+            }
+            if isWorktree(root: root, slug: member) { return path }
+            if let elsewhere = checkout(of: memberBranch, root: root) {
+                throw Failure(description: "\(memberBranch) is checked out at \(elsewhere), not at \(path).")
+            }
+        }
+        guard !FileManager.default.fileExists(atPath: path) else {
+            throw Failure(description: "\(path) is there and isn't \(name)'s worktree on \(memberBranch): it's left as it is.")
+        }
+        let result = Git.run(["worktree", "add", "-q"] + (exists ? [path, memberBranch] : ["-b", memberBranch, path, sha]), in: root)
+        guard result.ok else { throw Failure(description: result.error.isEmpty ? "git worktree add failed" : result.error) }
+        return path
+    }
+
+    /// The members of the task `slug` the repository holds a worktree or a branch of (`agent/<slug>--<name>`), by
+    /// name, sorted. `Slug.make` never makes a "--" and a member's name holds none, so these are the task's alone.
+    public static func members(root: String, slug: String) -> [String] {
+        let prefix = slug + LeadTeam.joiner
+        let refs = Git.run(["for-each-ref", "--format=%(refname)", "refs/heads/\(branch(prefix))*"], in: root).output
+            .split(separator: "\n").map { String($0.dropFirst("refs/heads/".count + branch(prefix).count)) }
+        let folders = ((try? FileManager.default.contentsOfDirectory(atPath: (path(root: root, slug: "") as NSString).standardizingPath)) ?? [])
+            .filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+        return Set(refs + folders).filter { LeadTeam.nameProblem($0) == nil }.sorted()
+    }
+
+    /// What a member's worktree and branch hold that removing them would lose: its uncommitted files (untracked ones
+    /// included, ignored ones not), and the commits on its branch that neither `base`, the team branch, nor `merged`
+    /// (the team branch's head its merge took) holds: its part's commits the integrator didn't take.
+    public struct MemberWork: Equatable, Sendable {
+        public var name: String
+        public var branch: String
+        public var uncommitted: [Uncommitted]
+        public var untaken: [String]
+
+        /// "lexer (agent/x--lexer): uncommitted a.swift (modified); 2 commits not taken: 1a2b3c4d, 5e6f7a8b".
+        public var text: String {
+            var parts: [String] = []
+            if !uncommitted.isEmpty { parts.append("uncommitted " + uncommitted.map { "\($0.path) (\($0.state))" }.joined(separator: ", ")) }
+            if !untaken.isEmpty {
+                parts.append("\(untaken.count) commit\(untaken.count == 1 ? "" : "s") not taken: "
+                             + untaken.prefix(3).map { String($0.prefix(8)) }.joined(separator: ", ") + (untaken.count > 3 ? ", …" : ""))
+            }
+            return "\(name) (\(branch)): " + parts.joined(separator: "; ")
+        }
+    }
+
+    /// Each member of the task `slug` (`members`) whose worktree or branch holds work (`MemberWork`); a failure when
+    /// git can't say, so nothing is taken for lost.
+    public static func memberWork(root: String, slug: String, base: String, merged: String?) -> Swift.Result<[MemberWork], Failure> {
+        let team = "refs/heads/\(branch(slug))"
+        let keep = ["refs/heads/\(base)", team].filter { Git.run(["rev-parse", "--verify", "--quiet", $0], in: root).ok } + (merged.map { [$0] } ?? [])
+        var found: [MemberWork] = []
+        for name in members(root: root, slug: slug) {
+            let member = memberSlug(slug, member: name), memberBranch = branch(member)
+            var work = MemberWork(name: name, branch: memberBranch, uncommitted: [], untaken: [])
+            let folder = path(root: root, slug: member)
+            if FileManager.default.fileExists(atPath: folder) {
+                let status = Git.run(["status", "--porcelain=v2", "-z", "--untracked-files=all"], in: folder)
+                guard status.ok else { return .failure(Failure(description: "Can't read \(folder)'s uncommitted files: \(status.error)")) }
+                work.uncommitted = uncommitted(porcelain: status.output)
+            }
+            let ref = "refs/heads/\(memberBranch)"
+            if Git.run(["rev-parse", "--verify", "--quiet", ref], in: root).ok {
+                let listed = Git.run(["rev-list", ref, "--not"] + keep, in: root)
+                guard listed.ok else { return .failure(Failure(description: "Can't tell which of \(memberBranch)'s commits were taken: \(listed.error)")) }
+                work.untaken = listed.output.split(separator: "\n").map(String.init)
+            }
+            if !work.uncommitted.isEmpty || !work.untaken.isEmpty { found.append(work) }
+        }
+        return .success(found)
+    }
+
+    /// Removes every member's worktree and branch of the task `slug` (`members`), whatever they hold: the caller has
+    /// checked `memberWork` first. What still runs in a worktree is ended first, as `remove` does. Each is tried; the
+    /// ones that couldn't go are named in the failure. The names removed.
+    @discardableResult
+    public static func removeMembers(root: String, slug: String) throws -> [String] {
+        var removed: [String] = [], failed: [String] = []
+        for name in members(root: root, slug: slug) {
+            let member = memberSlug(slug, member: name), folder = path(root: root, slug: member)
+            if FileManager.default.fileExists(atPath: folder) {
+                SessionStrays.endInside(folder: folder)
+                let gone = Git.run(["worktree", "remove", "--force", folder], in: root)
+                guard gone.ok else { failed.append("\(folder) (\(gone.error))"); continue }
+            }
+            if Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch(member))"], in: root).ok {
+                let deleted = Git.run(["branch", "-D", branch(member)], in: root)
+                guard deleted.ok else { failed.append("\(branch(member)) (\(deleted.error))"); continue }
+            }
+            removed.append(name)
+        }
+        guard failed.isEmpty else { throw Failure(description: "These couldn't be removed: " + failed.joined(separator: "; ")) }
+        return removed
+    }
+}
