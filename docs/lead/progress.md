@@ -2581,3 +2581,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-12 12:24 Automatically (auto_advance): Cleaned up docs-guide-development (freed 1.6 GB of build output and temporary folders). It stays done.
 - 2026-11-12 12:24 Update: Today: the prompt-audit reminder and AGENTS.md fixes landed — **Landed:**
 - 2026-11-13 18:35 Fetched origin/main at 2404fe5e: main is 24 commits ahead of origin/main and 87 commits behind it
+- 2026-11-13 18:35 Planned merge-github-s-main-2: Merge GitHub's main (2404fe5e) from the other Mac, resolving AGENTS.md (review audit)
+- 2026-11-13 18:35 Automatically (auto_advance): Didn't start merge-github-s-main-2: merge-github-s-main-2's worker not started: ~/.claude/skills changed outside a team session: it carries code that runs (hooks, MCP servers, shell startup, git's commands), so only the user's Accept seals it, whoever made the change. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change, they accept it there; if not, they set it back first.
+- 2026-11-13 18:36 Automatically fetched origin/main at 2404fe5e: 87 commits from the other Mac at origin/main (2404fe5ef41ade6e65f37acbdf1bb2d4aabc330f): merge_remote would stop: merging origin/main into main conflicts in AGENTS.md. It never picks a side for code: ask the user to resolve it (or plan a task that does).
+- 2026-11-13 18:39 Started a worker on merge-github-s-main-2
+- 2026-11-13 18:39 Automatically (auto_advance): Started a worker on merge-github-s-main-2 (Merge GitHub's main (2404fe5e) from the other Mac, resolving AGENTS.md).
