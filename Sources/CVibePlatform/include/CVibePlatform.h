@@ -64,4 +64,5 @@ pid_t vibe_signal_sender(const void *info);
 #include "CVibePlatform_terminals.h"
 #include "CVibePlatform_self.h"
 #include "CVibePlatform_sealed.h"
+#include "CVibePlatform_descriptors.h"
 #endif
