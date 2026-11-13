@@ -2827,3 +2827,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 19:44 Audit of agents-md-and-the: complete, clean, round 1: 2 Nit open
 - 2026-11-13 20:04 Pipeline held: agents-md-and-the ready to merge with none landing; cause: a merge in progress
 - 2026-11-13 20:05 Merged agents-md-and-the: AGENTS.md and the worker brief say what workers kept rediscovering (build a0474fa83c82)
+- 2026-11-13 20:06 Automatically (auto_advance): Merged agents-md-and-the (AGENTS.md and the worker brief say what workers kept rediscovering) into main at 3fdff65d, on its passing audit and the full test run.
+- 2026-11-13 20:06 Automatically (auto_advance): Cleaned up agents-md-and-the (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-11-13 20:09 The worker on every-worker-is-told answered findings: every-worker-is-told:F1 fixed at 3acd0a92: 0289852d: each task records what its worker was last told (LeadTask.mainRedTold: its brief, the broadcast, or a message). tellRunningWorkers sends only what's news to running workers. Every message through sent() (LeadAdvance.sendBack's findings, a merge-failure send-back, the lead's own message) appends the red or green news the worker hasn't heard yet, so a worker that was in review, failed or blocked when main turned red hears it with the message tha…
