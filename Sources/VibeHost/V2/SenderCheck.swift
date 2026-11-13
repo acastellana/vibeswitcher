@@ -29,25 +29,44 @@ enum SenderCheck {
 
 /// The senders of the bytes a connection's frame decoder holds and hasn't handed out as frames yet, run by run, so
 /// that a frame made of two senders' bytes is known as one.
+///
+/// At most `cap` runs are noted: the bytes after them are noted only as of more than one sender (`unnoted`), until
+/// they are all taken out. So a peer that has two processes take turns writing a byte each costs the host a fixed
+/// amount of memory, and time linear in the bytes, however many runs a frame holds. That reports a frame of one
+/// sender's bytes among them as two senders', which changes no outcome: more than one run means two reads whose
+/// senders weren't the same process, at least one of them not the process accepted (or none), and `onRead` was told
+/// each read's sender before its bytes were noted here, so the connection is no one's already, for good.
 struct FrameSenders {
+    /// The runs noted at most, before the rest are `unnoted`.
+    static let cap = 64
+
     private var runs: [(count: Int, sender: Platform.PeerToken?)] = []
+    /// Bytes after `runs` whose senders aren't noted, more than one.
+    private var unnoted = 0
+
+    /// The runs noted (at most `cap`), for tests.
+    var notedRuns: Int { runs.count }
 
     /// `count` bytes appended to the decoder, from `sender`.
     mutating func append(_ count: Int, from sender: Platform.PeerToken?) {
         guard count > 0 else { return }
-        if let last = runs.last, Self.same(last.sender, sender) {
+        if unnoted > 0 {
+            unnoted += count
+        } else if let last = runs.last, Self.same(last.sender, sender) {
             runs[runs.count - 1].count += count
-        } else {
+        } else if runs.count < Self.cap {
             runs.append((count, sender))
+        } else {
+            unnoted = count
         }
     }
 
     /// The first `count` bytes taken out (a frame the decoder handed out): whether they came from more than one
-    /// sender (two runs of no known sender count as two).
+    /// sender (two runs of no known sender count as two, and any unnoted byte as another sender's).
     mutating func take(_ count: Int) -> Bool {
-        var left = count, first: Platform.PeerToken??, mixed = false
-        while left > 0, !runs.isEmpty {
-            let run = runs[0]
+        var left = count, first: Platform.PeerToken??, mixed = false, used = 0
+        while left > 0, used < runs.count {
+            let run = runs[used]
             if let seen = first {
                 if !Self.same(seen, run.sender) { mixed = true }
             } else {
@@ -55,7 +74,12 @@ struct FrameSenders {
             }
             let taken = min(left, run.count)
             left -= taken
-            if taken == run.count { runs.removeFirst() } else { runs[0].count -= taken }
+            if taken == run.count { used += 1 } else { runs[used].count -= taken }
+        }
+        runs.removeFirst(used)
+        if left > 0, unnoted > 0 {
+            unnoted -= min(left, unnoted)
+            mixed = true
         }
         return mixed
     }

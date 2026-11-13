@@ -117,6 +117,13 @@ import Testing
     /// The Mac's re-read when the host sends kept (`checkPeer` at `broadcast`, which names whoever last used the peer's
     /// socket, even with bytes the host hasn't read yet): a child writes the start of a frame on the lead's connection,
     /// a broadcast follows (a session the app starts), and the lead's next request is refused.
+    ///
+    /// *Doesn't tell the two checks apart:* nothing keeps the host's read source from reading the child's two bytes
+    /// before the broadcast, and the check of each read's sender (`checkSender`) then makes the connection no one's
+    /// first, so this passes with `checkPeer` gone from `broadcast`. Holding the host's queue while the child writes
+    /// and broadcasting from inside it would need a way into `broadcast` or the host's clients, both private to
+    /// `HostServer` (a member this plan's kinds of edit don't list). It shows the outcome the Mac has today; the
+    /// re-read itself is `checkPeer`'s unchanged body (docs/process/v2-mac-tasks.md, "Also to check").
     @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's LOCAL_PEERTOKEN re-read at broadcast; Linux reads each message's sender"))
     func aForkedWriterIsStillCaughtWhenTheHostBroadcasts() async throws {
         let (host, app, lead) = try await leadsConnection()
@@ -135,10 +142,11 @@ import Testing
     /// The rule itself (`SenderCheck.keepsIdentity`): only the process accepted keeps a connection's identity. A
     /// missing sender (no credentials, or gone) is never it, nor is another process, nor anyone when none was accepted.
     @Test func aMissingSenderMakesTheConnectionNobodys() throws {
-        var ends: [Int32] = [-1, -1]
-        try #require(socketpair(AF_UNIX, Platform.Sockets.stream, 0, &ends) == 0)
+        // Close-on-exec from its making where the system can (`Platform.Sockets.pair`): VibeHostTests run in
+        // parallel, and a test's spawn meanwhile mustn't inherit it.
+        let pair = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+        let ends = [pair.0, pair.1]
         defer { ends.forEach { Sys.close($0) } }
-        for end in ends { _ = fcntl(end, F_SETFD, FD_CLOEXEC) }
         Platform.Sockets.enableCredentials(ends[0])
         // This process: on both systems the pair names its maker, and its own write comes as itself.
         let accepted = try #require(Platform.Sockets.peerToken(ends[0]))
@@ -190,6 +198,45 @@ import Testing
         // One sender's bytes, read twice; the end of one sender's bytes and the start of another's; the rest of the
         // other's; two reads of no known sender; nothing left.
         #expect(taken == [false, true, false, true, false])
+    }
+
+    /// Two processes taking turns writing a byte each of the largest frame (`HostFrame.maxPayload`): the decoder's
+    /// note of who sent its bytes keeps at most `FrameSenders.cap` runs, so it is taken out in time linear in the
+    /// bytes, as two senders'. Then it is empty, and notes runs again as before.
+    @Test func aFrameOfAMillionTurnsIsNotedInBoundedRuns() throws {
+        // Runs of no known sender never join, so a byte each is a run each, as two processes' turns would be.
+        var senders = FrameSenders()
+        let frame = 5 + HostFrame.maxPayload
+        for _ in 0..<frame { senders.append(1, from: nil) }
+        try #require(senders.notedRuns <= FrameSenders.cap, "\(senders.notedRuns) runs noted for a frame of \(frame) turns")
+        let started = ContinuousClock.now
+        let mixed = senders.take(frame)
+        #expect(ContinuousClock.now - started < .seconds(hangGuard))
+        #expect(mixed)
+        #expect(senders.notedRuns == 0)
+
+        // Empty again: one sender's bytes are one sender's.
+        senders.append(3, from: nil)
+        let one = senders.take(3)
+        #expect(!one)
+        #expect(senders.notedRuns == 0)
+    }
+
+    /// Past `FrameSenders.cap` runs, the frames still noted are told as they were sent, and the rest as two senders'.
+    @Test func framesPastTheNotedRunsAreTwoSenders() {
+        var senders = FrameSenders()
+        for _ in 0..<FrameSenders.cap { senders.append(1, from: nil) }
+        senders.append(4, from: nil)
+        senders.append(4, from: nil)
+        #expect(senders.notedRuns == FrameSenders.cap)
+        // A noted run of one byte is one sender's; the last noted run and the first unnoted byte are two.
+        let noted = senders.take(1)
+        #expect(!noted)
+        for _ in 2..<FrameSenders.cap { _ = senders.take(1) }
+        let across = senders.take(2), unnoted = senders.take(7)
+        #expect(across)
+        #expect(unnoted)
+        #expect(senders.notedRuns == 0)
     }
 }
 
@@ -378,7 +425,14 @@ enum LeadConnectionHelper {
                 throw Failure(what: "the FIFOs didn't open: errno \(code)")
             }
             let program = ([binary] + ProcessInfo.processInfo.arguments.dropFirst()).map(RecentProjects.shellQuote).joined(separator: " ")
-            let line = "\(program) < \(RecentProjects.shellQuote(input)) > \(RecentProjects.shellQuote(output)) 2> \(RecentProjects.shellQuote(folder + "/errors"))"
+            // Where the bundle finds XCTest and Testing on the Mac, as `swift test` told this process (see
+            // HomeIsolationTests): set on the command line, not only in the session's environment, because the session's
+            // shell is /bin/sh, which System Integrity Protection keeps DYLD_ variables from, and from all it starts.
+            // Neither is set on Linux.
+            let loader = ["DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH"].compactMap { key in
+                ProcessInfo.processInfo.environment[key].map { "\(key)=\(RecentProjects.shellQuote($0)) " }
+            }.joined()
+            let line = "\(loader)\(program) <\(RecentProjects.shellQuote(input)) > \(RecentProjects.shellQuote(output)) 2> \(RecentProjects.shellQuote(folder + "/errors"))"
             var environment = ProcessInfo.processInfo.environment
             environment[variable] = host.socket
             let seq = app.send(.spawn(SpawnRequest(cwd: folder, command: line, env: environment, cols: 80, rows: 24, keepShell: false,
