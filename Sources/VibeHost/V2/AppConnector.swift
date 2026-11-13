@@ -63,13 +63,10 @@ final class AppConnector {
         clients.forEach { $0.close() }
     }
 
-    /// Whether the other end has gone (closed by every process that held it): a hang-up, without waiting.
-    var peerHasGone: Bool {
-        var waiting = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-        var ready: Int32
-        repeat { ready = poll(&waiting, 1, 0) } while ready < 0 && errno == EINTR
-        return ready < 0 || (ready > 0 && waiting.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0)
-    }
+    /// Whether no request can come again: the other end closed by every process that held it, or shut for writing by
+    /// one of them (which reports no hang-up, and reads as an empty message for good: the read source would fire on it
+    /// without end). Without waiting.
+    var peerHasGone: Bool { Platform.Sockets.peerHasGone(fd) }
 }
 
 extension HostServer {
@@ -130,7 +127,8 @@ extension HostServer {
             return closeConnector(connector, number, why: "its read failed (errno \(errno))")
         }
         if count == 0 {
-            // A message of no bytes reads as the end does: told apart by the hang-up.
+            // A message of no bytes reads as the end does: told apart by the socket being shut for reading, as it is
+            // once the other end has closed or been shut for writing.
             guard connector.peerHasGone else { return refuse(connector, number, "an empty request") }
             return closeConnector(connector, number, why: "its other end has closed")
         }

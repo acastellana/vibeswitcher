@@ -21,5 +21,14 @@ extension Platform.Sockets {
         let fd = vibe_receive_descriptor(socket)
         return fd >= 0 ? fd : nil
     }
+
+    /// Whether `socket`'s peer can send nothing more: it has closed its end (every process that held it) or shut it
+    /// for writing (`shutdown(SHUT_WR)`), so the socket is shut for reading (`POLLRDHUP`), or it reports a hang-up or an
+    /// error. A poll that doesn't wait; a failed poll says gone. On a `SOCK_SEQPACKET` socket a message of no bytes
+    /// reads as 0, as the end does: this tells the two apart, and a socket shut for writing at the far end, which
+    /// reports no hang-up and reads as 0 for good, is gone too.
+    public static func peerHasGone(_ socket: Int32) -> Bool {
+        vibe_peer_has_gone(socket) != 0
+    }
 }
 #endif

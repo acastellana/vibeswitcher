@@ -12,6 +12,8 @@ import Testing
 /// - `child-ask`: a child of its own (a shell, the connector its stdout) writes the byte on it and ends: "sent <wait
 ///   status>".
 /// - `pending`: whether a message waits on the connector, without reading it: "message" or "none".
+/// - `empty`: a message of no bytes sent on the connector: "sent", or "unsent <errno>".
+/// - `shut`: the connector shut for writing (`shutdown(SHUT_WR)`), kept open: "shut", or "unshut <errno>".
 /// - `send <base64>`: a control frame with that payload (an encoded `HostRequestEnvelope`) written on its connection:
 ///   "sent", or "unsent <errno>".
 /// - `event`: the next control frame on its connection: "event <base64 payload>", or "ended".
@@ -73,6 +75,10 @@ enum AppConnectorHelper {
                 }
             case "pending":
                 say(ready(connector, for: POLLIN, within: 0) ? "message" : "none")
+            case "empty":
+                say(Platform.Sockets.send(connector, nil, 0) == 0 ? "sent" : "unsent \(errno)")
+            case "shut":
+                say(shutdown(connector, Int32(SHUT_WR)) == 0 ? "shut" : "unshut \(errno)")
             case "send":
                 guard words.count == 2, let payload = Data(base64Encoded: words[1]), connection >= 0 else {
                     say("unsent \(EINVAL)")

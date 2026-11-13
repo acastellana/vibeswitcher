@@ -285,6 +285,37 @@ import Testing
         #expect(await eventually { Self.said(log).contains("app connection made through connector \(connector) for pid \(helper.pid)") })
     }
 
+    /// An empty message from the helper the host expects is refused and the connector goes on; once the helper shuts
+    /// its end for writing (it still holds it: no hang-up, and every read is empty), the host closes the connector,
+    /// said once in its log, rather than refuse an empty request without end.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
+    func aConnectorShutForWritingIsClosed() async throws {
+        let (host, log, dir) = try connectorHost()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
+        defer {
+            host.server.closeAppConnector(connector)
+            Sys.close(connector)
+        }
+        let helper = try AppConnectorHelper.Running.start(connector: connector)
+        defer { helper.end() }
+        let token = try #require(Platform.Processes.token(helper.pid))
+        host.server.setAppConnectorSender(token, for: connector)
+
+        let empty = "refused an app connection through connector \(connector): an empty request"
+        #expect(try helper.ask("empty") == "sent")
+        #expect(await eventually { Self.said(log).contains(empty) }, "\(Self.said(log))")
+        #expect(try helper.ask("ask") == "connected")
+
+        #expect(try helper.ask("shut") == "shut")
+        let closed = "app connector \(connector) closed: its other end has closed"
+        #expect(await eventually { Self.said(log).contains(closed) }, "\(Self.said(log))")
+        // The closing is the read after the shut: the empty request of before was refused once only, and nothing reads
+        // the connector after it closed.
+        #expect(Self.said(log).components(separatedBy: empty).count == 2, "\(Self.said(log))")
+        #expect(Self.said(log).components(separatedBy: closed).count == 2, "\(Self.said(log))")
+    }
+
     /// Where the host asks for a non-dumpable sender, a dumpable one (this test binary, as the helper) is refused, said
     /// in the log, and handed to `onDumpable` (the server child's end, Task 8a): no connection is made.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))

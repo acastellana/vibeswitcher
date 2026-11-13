@@ -21,6 +21,12 @@ int vibe_send_descriptor(int socket, int fd);
 // end right after it is EPIPE, as the next read would be. Credentials that came along (SO_PASSCRED) are passed over.
 int vibe_receive_descriptor(int socket);
 
+// Whether the Unix socket `socket` is shut for reading: its peer has closed its end (every process that held it) or
+// shut it for writing (shutdown(2) SHUT_WR), so no message can come on it again (POLLRDHUP, or POLLHUP, POLLERR,
+// POLLNVAL). A poll that doesn't wait; 1 when shut or when the poll failed, else 0. On a SOCK_SEQPACKET socket a message
+// of no bytes reads as 0, as the end does: this tells them apart.
+int vibe_peer_has_gone(int socket);
+
 // Tests only. vibe_receive_descriptor with only `room` bytes for the kernel to fill with control data (at most what
 // vibe_receive_descriptor gives it): room for one descriptor, against a message of two, is how a test sees a message
 // the kernel cut short (MSG_CTRUNC) refused, which the full room never brings about on 64-bit Linux.

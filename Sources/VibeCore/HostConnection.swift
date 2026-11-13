@@ -68,7 +68,9 @@ public final class HostConnection: @unchecked Sendable {
     /// `patience`: how long to retry a refused connect (see `UnixSocket.connect`); the app's own connection, made on
     /// the main thread, doesn't wait. `viaConnector`: a path with a connector registered for it (see `HostConnector`)
     /// is reached only through that connector, never by the path; false connects by the path all the same (a test's
-    /// other process on the same socket).
+    /// other process on the same socket). Through a connector, `patience` bounds the wait for the host's answer as it
+    /// bounds a connect by path (`HostCall`'s is at most half its timeout), and none given (0) waits
+    /// `HostConnector.patience`: a connection can't be had there without the host's answer.
     public convenience init(path: String, queue: DispatchQueue, appKey: SymmetricKey? = HostConnection.appKey, patience: TimeInterval = 0,
                             viaConnector: Bool = true) throws {
         try self.init(path: path, queue: queue, appKey: appKey, patience: patience, viaConnector: viaConnector,
@@ -78,7 +80,7 @@ public final class HostConnection: @unchecked Sendable {
     init(path: String, queue: DispatchQueue, appKey: SymmetricKey?, patience: TimeInterval = 0, viaConnector: Bool = true, write: @escaping Write,
          backlog: Backlog = .bound, tap: ((ReaderTap) -> Void)? = nil) throws {
         let connector = viaConnector ? Self.connector(for: path) : nil
-        fd = try connector.map { try HostConnector.connect(over: $0, timeout: max(patience, HostConnector.patience)) }
+        fd = try connector.map { try HostConnector.connect(over: $0, timeout: patience > 0 ? patience : HostConnector.patience) }
             ?? UnixSocket.connect(path: path, patience: patience)
         self.queue = queue
         backlogBound = backlog

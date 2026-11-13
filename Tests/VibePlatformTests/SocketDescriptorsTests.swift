@@ -242,6 +242,30 @@ extension SocketsTests {
         #expect(code == EPIPE)
     }
 
+    /// `peerHasGone`: a peer still there, an empty message waiting or not, hasn't gone; one that shut its end for
+    /// writing has, though the socket reports no hang-up and reads as an empty message for good (the host's connector
+    /// would read it without end), and so has one that closed its end.
+    @Test func aPeerThatShutItsWritingHasGone() throws {
+        let pair = try Self.seqpacketPair()
+        defer { [pair.test, pair.helper].forEach { Sys.close($0) } }
+        #expect(!Platform.Sockets.peerHasGone(pair.test))
+        try #require(send(pair.helper, nil, 0, Int32(MSG_NOSIGNAL)) == 0, "no empty message sent: \(errno)")
+        #expect(!Platform.Sockets.peerHasGone(pair.test))
+        var byte: UInt8 = 0
+        #expect(recv(pair.test, &byte, 1, 0) == 0)
+        #expect(!Platform.Sockets.peerHasGone(pair.test))
+
+        try #require(shutdown(pair.helper, Int32(SHUT_WR)) == 0, "not shut: \(errno)")
+        var waiting = pollfd(fd: pair.test, events: Int16(POLLIN), revents: 0)
+        #expect(poll(&waiting, 1, 0) == 1 && waiting.revents & Int16(POLLHUP) == 0, "revents \(waiting.revents)")
+        #expect(Platform.Sockets.peerHasGone(pair.test))
+
+        let closed = try Self.seqpacketPair()
+        defer { Sys.close(closed.test) }
+        Sys.close(closed.helper)
+        #expect(Platform.Sockets.peerHasGone(closed.test))
+    }
+
     /// The control for the host's refusals of a sender that names another process: a process naming itself, in
     /// credentials it sends (`vibe_send_claiming`), arrives as itself.
     @Test func aSenderClaimingItsOwnPidIsBelieved() throws {

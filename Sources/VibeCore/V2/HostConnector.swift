@@ -30,8 +30,9 @@ public enum HostConnector {
         }
     }
 
-    /// How long `HostConnection` waits for the host's reply at least: the host answers on its one queue, which a
-    /// burst of work can hold for a while.
+    /// How long `HostConnection` waits for the host's reply when its caller gives no patience (0, the app's own
+    /// connection): the host answers on its one queue, which a burst of work can hold for a while. A caller's own
+    /// patience (`HostCall`'s, at most half its timeout) is kept to as given, so its call stays within its timeout.
     public static let patience: TimeInterval = 30
 
     /// A new connection to the host, asked for over `connector`: one byte sent, the descriptor the host sends back

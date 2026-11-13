@@ -54,6 +54,29 @@ struct HostConnectorTests {
         #expect(connections(at: listening) == 0)
     }
 
+    /// Through a connector whose host never answers, a call keeps to its timeout: `HostCall`'s connect waits its own
+    /// patience (at most half its timeout), not the connector's longer wait for a caller that gives none.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
+    func aCallThroughAConnectorKeepsToItsTimeout() throws {
+        let (path, listening) = try listener()
+        defer { Sys.close(listening) }
+        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        defer {
+            Sys.close(host)
+            Sys.close(connector)
+        }
+        HostConnection.register(connector: connector, for: path)
+        defer { HostConnection.unregister(path: path) }
+
+        let started = Date()
+        #expect(throws: HostConnector.Failure.timedOut) {
+            _ = try HostCall.request(.hello(protocolVersion: HostProtocol.version, app: "test"), socket: path, appKey: nil, timeout: 1)
+        }
+        let took = Date().timeIntervalSince(started)
+        #expect(took < 5, "took \(took) s with a timeout of 1 s")
+        #expect(connections(at: listening) == 0)
+    }
+
     /// With no connector registered, a connection is made by the path, as always; and with one, a connection asked
     /// not to use it (`viaConnector: false`: a test's other process) is made by the path too.
     @Test func anUnregisteredPathConnectsAsToday() throws {
