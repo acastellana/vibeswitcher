@@ -4,7 +4,7 @@ import Foundation
 /// named part of the task's one contract, worked by its own worker in its own worktree on its own branch. Member 1 is
 /// the integrator: it works in the task's usual worktree on `agent/<slug>` and takes the others' parts into it.
 public struct LeadTeamMember: Codable, Equatable, Sendable {
-    /// Its name in the team, as posts address it (`@name`) and its branch and folder carry it (`LeadTeam.validName`).
+    /// Its name in the team, as posts address it (`@name`) and its branch and folder carry it (`LeadTeam.nameProblem`).
     public var name: String
     /// Its part of the task: what it owns (its files, its piece of the contract), in the lead's words.
     public var part: String
