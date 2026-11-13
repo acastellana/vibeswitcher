@@ -57,7 +57,7 @@ extension LeadFindingsToolTests {
         #expect(Array(deny.prefix(base.count)) == base)
         for member in team {
             let folder = LeadLaunch.claudeProjectFolder(member.worktree, home: "~")
-            #expect(folder.hasPrefix("~/.claude/projects/-") && folder.hasSuffix(member.worktree == team[0].worktree ? "-add-b" : "-add-b--\(member.name)"))
+            #expect(folder.hasPrefix("~/.claude/projects/-"))
             #expect(deny.contains("Read(\(folder)/**)"), "\(member.name): \(deny.suffix(8))")
             #expect(deny.contains("Read(\(folder))"))
         }
@@ -108,8 +108,8 @@ struct TeamVerifierLaunchTests {
         }
         let today = LeadLaunch.deny(.verifier, records: "docs/lead")
         let folders = team.map { LeadLaunch.claudeProjectFolder($0.worktree, home: "~") }
-        #expect(folders.map { ($0 as NSString).lastPathComponent }
-                == team.map { "-" + String($0.worktree.dropFirst()).map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined() })
+        // One folder per member, each as Claude Code names it (`claudeProjectFolder`; a long path's is hashed).
+        #expect(Set(folders).count == team.count && folders.allSatisfy { $0.hasPrefix("~/.claude/projects/-") })
 
         let verifier = try deny(try prepare(.verifier, root: root, task: "journeys"))
         #expect(Array(verifier.prefix(today.count)) == today)
