@@ -1,6 +1,8 @@
 extension Platform.Sockets {
     /// `SOCK_SEQPACKET` as the number `socket` and `socketpair` take (as `stream`): a connected socket that keeps each
-    /// send one message, read whole and alone, as the server child's connector needs.
+    /// send one message, read whole and alone, as the server child's connector needs. Linux's only: the Mac's Unix
+    /// domain has stream and datagram sockets alone, so there `makeSocket` and `pair` of this type fail
+    /// (EPROTONOSUPPORT); the Mac has no such connector.
     public static var seqpacket: Int32 {
         #if canImport(Glibc)
         Int32(SOCK_SEQPACKET.rawValue)

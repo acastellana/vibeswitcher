@@ -47,10 +47,50 @@ private let actAsALauncher: @convention(c) () -> Void = { actAsALauncherIfAsked(
 private let actAsALauncher: @convention(c) () -> Void = { actAsALauncherIfAsked() }
 #endif
 
+/// The test binary's helper mode for a terminal opened by a session leader that has none, as the Linux host is (a
+/// systemd service leads a session of its own with no controlling terminal): started again with
+/// `TerminalsTests.openerVariable` set, in a session of its own, it opens a terminal (`Platform.Terminals.open`)
+/// before any test of its own and says on its stdout, in one line, whose controlling terminal the new one is and
+/// whether it has one now: "master SESSION slave SESSION own ANSWER" (`session(ofMaster:)`'s and
+/// `controllingSession(slave)`'s answers, "none" for nil; "none" when /dev/tty opens nothing, ENXIO, else "some" or
+/// "errno N"). Opening the slave without O_NOCTTY would make it this process's controlling terminal.
+private func openATerminalIfAsked() {
+    guard getenv(TerminalsTests.openerVariable) != nil else { return }
+    func say(_ text: String) {
+        let line = text + "\n"
+        _ = write(STDOUT_FILENO, line, line.utf8.count)
+    }
+    guard case .success(let terminal) = Platform.Terminals.open(rows: 24, cols: 80) else {
+        say("no terminal: errno \(errno)")
+        _exit(1)
+    }
+    let master = Platform.Terminals.session(ofMaster: terminal.master).map { String($0) } ?? "none"
+    let slave = Platform.Terminals.controllingSession(terminal.slave).map { String($0) } ?? "none"
+    let own: String
+    let tty = Sys.open("/dev/tty", O_RDWR | O_NOCTTY | O_CLOEXEC)
+    if tty >= 0 {
+        own = "some"
+        Sys.close(tty)
+    } else {
+        own = errno == ENXIO ? "none" : "errno \(errno)"
+    }
+    say("master \(master) slave \(slave) own \(own)")
+    _exit(0)
+}
+
+#if os(Linux)
+@_used @_section(".init_array")
+private let openATerminal: @convention(c) () -> Void = { openATerminalIfAsked() }
+#else
+@_used @_section("__DATA,__mod_init_func")
+private let openATerminal: @convention(c) () -> Void = { openATerminalIfAsked() }
+#endif
+
 /// A terminal's name, from its path and from its device number: one word with no slash, the same from both. And a
 /// new terminal: both its ends close-on-exec from the start, its size, and whose controlling terminal it is.
 struct TerminalsTests {
     static let launcherVariable = "VIBE_TERMINALS_TEST_LAUNCHER"
+    static let openerVariable = "VIBE_TERMINALS_TEST_OPENER"
 
     struct Failure: Error { var what: String }
 
@@ -243,6 +283,23 @@ struct TerminalsTests {
     }
     #endif
 
+    /// A terminal this process opens is never its controlling terminal, even when it leads a session that has none,
+    /// as the Linux host does (a systemd service): opened so, the launcher's `makeControlling` would fail (EPERM, the
+    /// terminal another session's), and closing the master would hang the host up. In a helper (`openATerminalIfAsked`)
+    /// started in a session of its own with /dev/null as its stdin.
+    @Test func aTerminalOpenedByASessionLeaderIsNotItsControllingTerminal() throws {
+        // The helper never gets as far as a test; one that did would not start another.
+        try #require(getenv(Self.openerVariable) == nil)
+        let binary = try #require(Bundle.main.executablePath)
+        var spawn = Platform.Spawn(executable: binary, arguments: ProcessInfo.processInfo.arguments)
+        spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" } + ["\(Self.openerVariable)=1"]
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.group = .ownSession
+        let ended = try SpawnTests.output(of: spawn)
+        #expect(ended.output == "master none slave none own none\n", "\(ended)")
+        #expect(ended.signal == nil && ended.exit == 0, "\(ended)")
+    }
+
     /// Neither end reaches a program this process starts: each is close-on-exec from the call that made it (the Mac:
     /// right after it), and the two are one terminal, the one its path names.
     @Test func bothEndsAreClosedOnExecFromTheStart() throws {
@@ -277,7 +334,13 @@ struct TerminalsTests {
         let file = Sys.open("/dev/null", O_RDONLY | O_CLOEXEC)
         try #require(file >= 0)
         defer { Sys.close(file) }
-        #expect(Platform.Terminals.makeControlling(file) == ENOTTY)
+        // Linux: ENOTTY. The Mac's /dev/null (its memory device's driver) answers ENODEV to any ioctl of a terminal's.
+        let taken = Platform.Terminals.makeControlling(file)
+        #if os(Linux)
+        #expect(taken == ENOTTY)
+        #else
+        #expect(taken == ENOTTY || taken == ENODEV, "errno \(taken)")
+        #endif
         #expect(Platform.Terminals.controllingSession(file) == nil)
         // A new terminal is no process's controlling terminal, and this process's own (if it has one) isn't it.
         let terminal = try Self.opened()

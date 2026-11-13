@@ -6,7 +6,9 @@ extension Platform.Terminals {
     /// A new pseudo-terminal of `rows` × `cols`: `posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC)`, `grantpt`,
     /// `unlockpt`, its slave opened `O_RDWR | O_NOCTTY | O_CLOEXEC` by the path `ptsname_r` names, then its size
     /// (`TIOCSWINSZ`). Both ends are close-on-exec from their making, so no program another thread starts meanwhile
-    /// holds either, and neither is this process's controlling terminal. On failure nothing is left open.
+    /// holds either, and neither is this process's controlling terminal, even when it leads a session that has none
+    /// (the host, a systemd service). The slave's O_NOCTTY is the one that counts: Linux never makes a master a
+    /// controlling terminal, so the master's states the intent only. On failure nothing is left open.
     public static func open(rows: UInt16, cols: UInt16) -> Result<PseudoTerminal, Platform.Errno> {
         let master = vibe_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC)
         guard master >= 0 else { return .failure(Platform.Errno(code: errno)) }

@@ -427,9 +427,19 @@ struct SocketsTests {
         return getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &size) == 0 ? type : nil
     }
 
+    /// The types a Unix-domain socket comes in on this system: the Mac has no seqpacket one (XNU's Unix domain has
+    /// only stream and datagram sockets).
+    static var socketTypes: [Int32] {
+        #if os(Linux)
+        [Platform.Sockets.stream, Platform.Sockets.seqpacket]
+        #else
+        [Platform.Sockets.stream]
+        #endif
+    }
+
     /// Both ends of a pair are close-on-exec from the call that made them (the Mac: right after it), and are of the
     /// type asked.
-    @Test(arguments: [Platform.Sockets.stream, Platform.Sockets.seqpacket])
+    @Test(arguments: SocketsTests.socketTypes)
     func aPairIsClosedOnExecFromItsMaking(type: Int32) throws {
         let (one, other) = try #require(Platform.Sockets.pair(type: type))
         defer { [one, other].forEach { Sys.close($0) } }
@@ -441,7 +451,8 @@ struct SocketsTests {
         #expect(Sys.read(other, &byte, 1) == 1 && byte == UInt8(ascii: "x"))
     }
 
-    /// What the server child's connector relies on: each send is one message, read whole and alone.
+    #if os(Linux)
+    /// What the server child's connector (Linux's) relies on: each send is one message, read whole and alone.
     @Test func aSeqpacketPairKeepsMessageBoundaries() throws {
         let (one, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
         defer { [one, other].forEach { Sys.close($0) } }
@@ -451,8 +462,17 @@ struct SocketsTests {
         #expect(Sys.read(other, &buffer, buffer.count) == 1 && buffer[0] == UInt8(ascii: "a"))
         #expect(Sys.read(other, &buffer, buffer.count) == 1 && buffer[0] == UInt8(ascii: "b"))
     }
+    #else
+    /// The Mac makes no seqpacket socket, alone or in a pair.
+    @Test func theMacHasNoSeqpacketSocket() {
+        #expect(Platform.Sockets.pair(type: Platform.Sockets.seqpacket) == nil)
+        let fd = Platform.Sockets.makeSocket(type: Platform.Sockets.seqpacket)
+        if fd >= 0 { Sys.close(fd) }
+        #expect(fd == -1)
+    }
+    #endif
 
-    @Test(arguments: [Platform.Sockets.stream, Platform.Sockets.seqpacket])
+    @Test(arguments: SocketsTests.socketTypes)
     func aSocketIsClosedOnExecFromItsMaking(type: Int32) throws {
         let fd = Platform.Sockets.makeSocket(type: type)
         try #require(fd >= 0, "errno \(errno)")
