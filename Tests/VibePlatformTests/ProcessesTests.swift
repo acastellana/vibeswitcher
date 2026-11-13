@@ -734,9 +734,15 @@ struct ProcessesTests {
 
         let first = try connected()
         let token = try #require(first.token)
-        #expect(token == first.peer)
+        let firstPeer = try #require(first.peer)
+        // What both systems' tokens have, so that this compiles on the Mac too (an `audit_token_t` has no `==` and
+        // no `uid`); the whole token in the Linux block.
+        #expect(token.sameImage(as: firstPeer))
         #expect(token.pid == first.pid)
+        #if os(Linux)
+        #expect(token == firstPeer)
         #expect(token.uid == geteuid())
+        #endif
         #expect(token.sameImage(as: try #require(Processes.token(first.pid))))
         // Its connection's end closed, the helper ends; reaped, its pid has no token, or (given again meanwhile)
         // another process's.
@@ -750,7 +756,11 @@ struct ProcessesTests {
             _ = SpawnTests.ended(second.pid)
         }
         let next = try #require(second.token)
-        #expect(next == second.peer)
+        let secondPeer = try #require(second.peer)
+        #expect(next.sameImage(as: secondPeer))
+        #if os(Linux)
+        #expect(next == secondPeer)
+        #endif
         #expect(!token.sameImage(as: next))
         #expect(!next.sameImage(as: token))
 
@@ -759,7 +769,11 @@ struct ProcessesTests {
         #expect(own.pid == getpid())
         let pair = try SocketsTests.Pair()
         defer { pair.close() }
-        #expect(Platform.Sockets.peerToken(pair.served) == own)
+        let ownPeer = try #require(Platform.Sockets.peerToken(pair.served))
+        #expect(ownPeer.sameImage(as: own))
+        #if os(Linux)
+        #expect(ownPeer == own)
+        #endif
         // No number of a process: none.
         #expect(Processes.token(0) == nil)
         #expect(Processes.token(-1) == nil)

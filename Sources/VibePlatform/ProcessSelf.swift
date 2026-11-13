@@ -4,11 +4,12 @@ extension Platform {
     /// On Linux a process of the user is open to every other process of the same user while it is dumpable: with no
     /// Yama (WSL's kernel has none), any of them may ptrace it, read its memory (`process_vm_readv`,
     /// `/proc/<pid>/mem`) and take its descriptors (`pidfd_getfd`). Non-dumpable closes all of that to anyone without
-    /// `CAP_SYS_PTRACE`, and keeps it out of a core dump; its `/proc/<pid>` entries become root's, but for `stat`,
-    /// `status` and `cmdline`, which anyone still reads. It is the one lock the session host, its parsers and its
-    /// server have against another program of the user (the security architecture document's S6). An exec of a file
-    /// the process can read makes it dumpable again: what a new image keeps is the business of the sealed copies it
-    /// is started from (S9), not of this.
+    /// `CAP_SYS_PTRACE`, and keeps it out of a core dump. The entries of its /proc/<pid> become root's, all but the
+    /// folder itself (mode 0555, which stays its effective user's): those of mode 0444 (`stat`, `status`, `limits`)
+    /// stay readable to anyone, the others (`fd`, `mem`, `environ`) to root alone. It is the one lock the session
+    /// host, its parsers and its server have against another program of the user (the security architecture
+    /// document's S6). An exec of a file the process can read makes it dumpable again: what a new image keeps is the
+    /// business of the sealed copies it is started from (S9), not of this.
     ///
     /// The Mac's forms do nothing and say nothing (`harden()` false, the reads nil): its processes are kept from each
     /// other by the system's own rules (no `task_for_pid` without an entitlement), and the Mac's path keeps today's
@@ -37,8 +38,8 @@ extension Platform {
         }
 
         /// The effective user of a /proc/<pid>/status text: the second of its `Uid` line's four (real, effective,
-        /// saved, file system); nil without one. The user `SO_PEERCRED` names, and the owner of the process's /proc
-        /// entries while it is dumpable (root's while it isn't).
+        /// saved, file system); nil without one. The user `SO_PEERCRED` names, the owner of the process's /proc/<pid>
+        /// folder, and of its other entries while it is dumpable and has its memory (root's otherwise).
         static func effectiveUser(fromStatus status: String) -> uid_t? {
             guard let fields = statusFields("Uid", in: status), fields.count == 4 else { return nil }
             return number(fields[1])

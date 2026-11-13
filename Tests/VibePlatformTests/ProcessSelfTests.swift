@@ -152,14 +152,19 @@ struct ProcessSelfTests {
             }
         }
 
-        /// Closes its stdin, which ends it, and reaps it: how it ended.
-        @discardableResult
-        func end() -> SpawnTests.Ended {
-            if let ended { return ended }
+        /// Closes its stdin, which ends it, without reaping it: it stays a zombie until `end()`.
+        func release() {
             if commands >= 0 {
                 close(commands)
                 commands = -1
             }
+        }
+
+        /// Closes its stdin, which ends it, and reaps it: how it ended.
+        @discardableResult
+        func end() -> SpawnTests.Ended {
+            if let ended { return ended }
+            release()
             let result = SpawnTests.ended(pid)
             close(answers)
             ended = result
@@ -188,6 +193,30 @@ struct ProcessSelfTests {
         #expect(Self.openMemory(of: helper.pid) == 0)
         #expect(try helper.ask("harden") == "hardened true")
         #expect(Self.openMemory(of: helper.pid) == EACCES)
+        #expect(helper.end().exit == 0)
+    }
+
+    /// The core file size limit of the process `pid`, soft and hard, as its /proc/<pid>/limits writes them (a
+    /// number, or "unlimited"); nil without that line. The file stays readable to anyone once the process hardens.
+    static func coreLimits(of pid: pid_t) -> (soft: String, hard: String)? {
+        guard let text = SpawnTests.contents("/proc/\(pid)/limits") else { return nil }
+        let name = "Max core file size"
+        for line in text.split(separator: "\n") where line.hasPrefix(name) {
+            let fields = line.dropFirst(name.count).split(separator: " ")
+            return fields.count >= 2 ? (String(fields[0]), String(fields[1])) : nil
+        }
+        return nil
+    }
+
+    /// Hardened, it may write no core file: its core file size limit is 0, soft and hard, so that nothing it runs
+    /// may raise it again. Before, the hard one is the test process's (unlimited here).
+    @Test(.enabled(if: onLinux, "Linux's /proc; the Mac's harden() does nothing")) func aHardenedProcessHasNoCoreFile() throws {
+        let helper = try Helper.start()
+        defer { helper.end() }
+        let before = try #require(Self.coreLimits(of: helper.pid))
+        #expect(try helper.ask("harden") == "hardened true")
+        let after = try #require(Self.coreLimits(of: helper.pid), "limits before: \(before)")
+        #expect(after.soft == "0" && after.hard == "0", "limits before \(before), after \(after)")
         #expect(helper.end().exit == 0)
     }
 
@@ -242,7 +271,7 @@ struct ProcessSelfTests {
     }
 
     /// A hardened process's token is still its peer token: its owner is read from its status, which stays open to
-    /// anyone, not from its /proc folder, which is root's once it is non-dumpable.
+    /// anyone (mode 0444) though it is root's once the process is non-dumpable.
     @Test(.enabled(if: onLinux, "Linux's tokens; the Mac has none for a pid")) func aHardenedProcesssTokenIsItsPeerToken() throws {
         let folder = try SocketsTests.socketFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -257,10 +286,70 @@ struct ProcessSelfTests {
         defer { Sys.close(served) }
         let peer = try #require(Platform.Sockets.peerToken(served))
         let token = try #require(Platform.Processes.token(helper.pid))
+        // What both systems' tokens have, so that this compiles on the Mac too (an `audit_token_t` has no `==` and
+        // no `uid`); the whole token below.
+        #expect(token.sameImage(as: peer))
+        #expect(token.pid == peer.pid)
+        #if os(Linux)
         #expect(token == peer)
         #expect(token.uid == geteuid())
+        #endif
         #expect(Platform.Processes.isDumpable(helper.pid) == false)
     }
+
+    #if os(Linux)
+    /// A zombie (ended, not reaped yet) reads as neither dumpable nor not: its /proc/<pid>/fd is root's whether or
+    /// not it hardened, its memory being gone. Never hardened, it would read false without the zombie check.
+    @Test func aZombieReadsAsNeitherDumpableNorNot() throws {
+        let helper = try Helper.start()
+        defer { helper.end() }
+        #expect(Platform.Processes.isDumpable(helper.pid) == true)
+        helper.release()
+        // Waits for its end, and leaves it unreaped (WNOWAIT): a zombie until `end()` reaps it.
+        var info = siginfo_t()
+        var waited: Int32 = -1
+        repeat { waited = waitid(P_PID, id_t(helper.pid), &info, WEXITED | WNOWAIT) } while waited < 0 && errno == EINTR
+        try #require(waited == 0, "waitid: errno \(errno)")
+        guard case .line(let line) = Platform.Processes.System.statLine(helper.pid) else {
+            Issue.record("no stat line for the zombie \(helper.pid)")
+            return
+        }
+        #expect(line.isZombie)
+        #expect(Platform.Processes.isDumpable(helper.pid) == nil)
+        #expect(helper.end().exit == 0)
+    }
+
+    /// A process that ends never reads as hardened. From when its memory goes (before it is a zombie) its /proc
+    /// entries are root's, as a non-dumpable process's are: read then, it must read as neither, or a connector that
+    /// asks whether a child is hardened before it hands it a descriptor (Task 4) could be told yes of one that never
+    /// did. Children that end at once (`cat` on a stdin closed), each read again and again until it is a zombie.
+    @Test func anEndingProcessNeverReadsAsHardened() throws {
+        var answers: [Bool?: Int] = [:]
+        for _ in 0..<300 {
+            let child = try SpawnTests.held(.inherit)
+            close(child.release)
+            while true {
+                answers[Platform.Processes.isDumpable(child.pid), default: 0] += 1
+                guard case .line(let line) = Platform.Processes.System.statLine(child.pid), !line.isZombie else { break }
+            }
+            #expect(SpawnTests.ended(child.pid).exit == 0)
+        }
+        #expect(answers[false] == nil, "answers: \(answers)")
+        #expect(answers[true] != nil, "answers: \(answers)")
+    }
+
+    /// Whether a process is dumpable, from its /proc/<pid>/fd's owner and its effective user: its own user's, it is;
+    /// root's, it isn't; anyone else's, it can't be told. A process of root's can't be told either: its entries are
+    /// root's whether or not it is dumpable.
+    @Test func dumpableIsToldFromTheOwnerOfItsDescriptors() {
+        typealias System = Platform.Processes.System
+        #expect(System.dumpable(descriptorsOwner: 1000, effectiveUser: 1000) == true)
+        #expect(System.dumpable(descriptorsOwner: 0, effectiveUser: 1000) == false)
+        #expect(System.dumpable(descriptorsOwner: 1001, effectiveUser: 1000) == nil)
+        #expect(System.dumpable(descriptorsOwner: 0, effectiveUser: 0) == nil)
+        #expect(System.dumpable(descriptorsOwner: 1000, effectiveUser: 0) == nil)
+    }
+    #endif
 
     /// The Mac's hardening is nothing, and says so; it reads no tracer and no dumpable state. Asked of a helper, so
     /// that a Mac form that did harden wouldn't harden the test process.

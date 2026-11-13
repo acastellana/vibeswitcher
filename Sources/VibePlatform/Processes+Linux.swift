@@ -432,13 +432,26 @@ extension Platform.Processes.System {
         return Platform.PeerToken(pid: pid, uid: uid, startTicks: line.startTicks)
     }
 
+    /// The owner of its /proc/<pid>/fd, between two reads of its stat that find it neither ending nor a zombie. The
+    /// kernel (`task_dump_owner`) gives fd to root while the process is non-dumpable, and also once it has no memory:
+    /// a process that ends drops its memory (`exit_mm`) before it is a zombie, so a dumpable one, read then, would
+    /// read as hardened. It is marked as ending (PF_EXITING) before it drops its memory, so a second read after the
+    /// owner's that finds it not ending tells that the owner was had while it still had its memory.
     static func isDumpable(_ pid: pid_t) -> Bool? {
-        guard let process = Folder(pid), let line = process.statLine(), !line.isThread, !line.isZombie,
-              let uid = process.effectiveUser() else { return nil }
+        guard let process = Folder(pid), let before = process.statLine(), !before.isThread, !before.isZombie,
+              !before.exiting, let uid = process.effectiveUser() else { return nil }
         var node = stat()
-        guard fstatat(process.descriptor, "fd", &node, 0) == 0 else { return nil }
-        if node.st_uid == uid { return true }
-        return node.st_uid == 0 ? false : nil
+        guard fstatat(process.descriptor, "fd", &node, 0) == 0,
+              let after = process.statLine(), !after.isZombie, !after.exiting else { return nil }
+        return dumpable(descriptorsOwner: node.st_uid, effectiveUser: uid)
+    }
+
+    /// Its own user's, it is dumpable; root's, it isn't; anyone else's, it can't be told (its user changed between
+    /// the reads). A process whose effective user is root can't be told either: its entries are root's either way.
+    static func dumpable(descriptorsOwner owner: uid_t, effectiveUser user: uid_t) -> Bool? {
+        guard user != 0 else { return nil }
+        if owner == user { return true }
+        return owner == 0 ? false : nil
     }
 
     /// A descriptor on /proc/<pid>, closed when this goes.
