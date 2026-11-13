@@ -2818,3 +2818,10 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-13 19:40 Automatically (auto_advance): Started the audit of every-worker-is-told at a6e28237 (Its review is audit).
 - 2026-11-13 19:40 Released every-worker-is-told's worker (idle since its done report on a6e28237) while its audit runs
 - 2026-11-13 19:40 Automatically (auto_advance): Released every-worker-is-told's worker, idle since its done report on a6e28237, while its audit runs (ended pid 75646 (Worker: Every worker is told once when main is red)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-13 19:41 Automatically (auto_advance): Started the audit of agents-md-and-the at 96e90a64 (It touches sensitive_paths (AGENTS.md, Sources/VibeCore/LeadWorkflow.swift), so it's treated as audit whatever its review says).
+- 2026-11-13 19:41 Released agents-md-and-the's worker (idle since its done report on 96e90a64) while its audit runs
+- 2026-11-13 19:41 Automatically (auto_advance): Released agents-md-and-the's worker, idle since its done report on 96e90a64, while its audit runs (ended pid 75490 (Worker: AGENTS.md and the worker brief say what workers kept rediscovering)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-13 19:42 Audit of every-worker-is-told: incomplete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-11-13 19:43 Started a worker on every-worker-is-told
+- 2026-11-13 19:43 Automatically (auto_advance): Sent every-worker-is-told's worker the open Important findings every-worker-is-told:F1 from its audit at a6e28237 (in a new worker: its last one was released during the audit).
+- 2026-11-13 19:44 Audit of agents-md-and-the: complete, clean, round 1: 2 Nit open
