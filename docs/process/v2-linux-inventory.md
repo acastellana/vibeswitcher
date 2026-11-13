@@ -106,8 +106,9 @@ hosted runner. What it asks of the code:
   ([its plan](../superpowers/plans/2026-11-13-v2-stage-2-session-host.md)). `scripts/ci/linux-core-errors.sh` counts
   its errors (142 in 8 files at `dbbeecbe`).
 - **What remains of stage 1** ([its plan](../superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md#remaining-work-revised-2026-11-13)):
-  R3's confirmation that every `v2 linux` and `v2 macos` job is green on one commit. R10, a real Claude Code session
-  from working to needs-you to done, passed here on 2026-11-13 (below).
+  nothing. R3 was met at `4485b65a`, the first commit with every `v2 linux` and `v2 macos` job green
+  ([the plan's done-when](../superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md#done-when-revised-2026-11-13)),
+  and R10, a real Claude Code session from working to needs-you to done, passed here on 2026-11-13 (below).
 
 ## A real Claude Code session on Linux (2026-11-13)
 
