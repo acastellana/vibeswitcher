@@ -106,8 +106,59 @@ hosted runner. What it asks of the code:
   ([its plan](../superpowers/plans/2026-11-13-v2-stage-2-session-host.md)). `scripts/ci/linux-core-errors.sh` counts
   its errors (142 in 8 files at `dbbeecbe`).
 - **What remains of stage 1** ([its plan](../superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md#remaining-work-revised-2026-11-13)):
-  R10, a real Claude Code session from working to needs-you to done, which waits for the user's Claude Code config
-  folder; and R3's confirmation that every `v2 linux` and `v2 macos` job is green on one commit.
+  R3's confirmation that every `v2 linux` and `v2 macos` job is green on one commit. R10, a real Claude Code session
+  from working to needs-you to done, passed here on 2026-11-13 (below).
+
+## A real Claude Code session on Linux (2026-11-13)
+
+Stage 1's R10, on this machine (Ubuntu 24.04 under WSL2): `RealClaudeStatusTests.aRealSessionGoesFromWorkingToNeedsYouToDone`
+in `Tests/VibeNodeTests/RealClaudeStatusTests.swift`, run by
+`VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<config> bash scripts/test.sh --filter RealClaudeStatusTests`, `<config>` being
+a throwaway Claude Code config folder the user logged in once. Claude Code **2.1.323** (the native build, run as
+`~/.local/bin/claude`, a link to `~/.local/share/claude/versions/2.1.323`), model sonnet (Sonnet 5.5 on the screen).
+Without the variable the test is skipped, saying why.
+
+The test installs the hooks into `<config>` (`vibeswitcher hooks install --agent claude`, a scratch
+`VIBESWITCHER_HOME`), writes the scratch project's trust entry into `<config>/.claude.json`, and starts
+`claude --model sonnet --permission-mode manual '<prompt>'` on a pty of its own (util-linux `script`), the prompt
+asking it to run `touch made-by-claude` with Bash. It polls `vibeswitcher status --json` every 0.5 s, presses Enter
+on the permission question, and quits with Ctrl-C twice.
+
+**What `status` said, in order**, the same in each of the three passing runs:
+`unknown -> working -> needs-you -> working -> done`. Unknown is the first poll, before the first hook wrote. The
+session was found on its terminal (`ttypts4`) although the native `claude`'s process name is `2.1.323`: argv[0]
+tells it apart, in the hook's lineage and in the status scan. The whole turn took about 2.3 s from the prompt to
+Stop; the test, about 4 s.
+
+**The state files** (`state/ttypts4.json`) a poll saw, without the prompt, transcript, folder and session id that
+each also carried:
+
+| `lastEvent` | Also there | `status` |
+| --- | --- | --- |
+| `UserPromptSubmit` | `agentPid` | working |
+| `PermissionRequest` | `toolName` Bash, `request` "Run: touch made-by-claude", `notice` "Wants permission to use Bash", `toolDetail` "Create empty file" | needs-you |
+| `PostToolUse` | the same tool, its notice kept | working |
+| `Stop` | `lastMessage` "finished" | done |
+
+After Ctrl-C twice the session ended and its `SessionEnd` hook removed the state file. In the second run the quit,
+as first written, looked for "again to exit" on a screen whose spaces are cursor moves, waited its 2 s out and sent
+the second Ctrl-C after Claude Code's window: the session was still running 15 s later and was killed (that run took
+31 s, the others 4), and the file stayed, saying Stop. No hook runs on SIGKILL; `status`'s sweep of state files with
+no agent on their terminal, 15 s after their last write, is what clears it then.
+
+**Found on the way:**
+
+- **2.1.323's default permission mode is auto mode** ("auto mode on" on the screen): the first run's Bash command ran
+  unasked and the session went from working to done with no needs-you. The test starts it with
+  `--permission-mode manual` (2.1.323's choices: `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`,
+  `plan`; there is no `default` any more).
+- **No product change was needed on Linux**: the hook, the status scan and `ProcessTable` worked as they were.
+
+**What each run leaves in `<config>`:** the hooks are taken out again (`hooks remove`; `settings.json` keeps its own
+settings, and `HookInstaller` leaves `settings.json.vibeswitcher-backup` beside it), and the project's trust entry is
+taken out of `.claude.json` again after Claude Code has ended. Claude Code's own files for the session stay, as for
+any session: its transcript under `projects/<the scratch project's name>/`, a folder in `session-env/` and in
+`shell-snapshots/`, and the prompt in `history.jsonl`.
 
 ## Sealed copies: the measurement (2026-11-13)
 

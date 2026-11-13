@@ -479,7 +479,7 @@ core-test fixes (2026-11-13): `b3df5134`, `6c894e43`, `11b5c945`, `51bba39e`, `1
 
 ### Task 13: The hook, the tool server, `vibeswitcher status`
 
-**Commits:** `dbbeecbe` (the hook and the tool server build on Linux); then R5, R8a, R8b and R9.
+**Commits:** `dbbeecbe` (the hook and the tool server build on Linux); then R5, R8a, R8b, R9 and R10.
 
 **Files:** (corrected 2026-11-13 from what was built)
 - Create: `Sources/vibeswitcher-cli/main.swift`, `Status.swift`, `Hooks.swift` (installed as `vibeswitcher`; see
@@ -500,9 +500,10 @@ core-test fixes (2026-11-13): `b3df5134`, `6c894e43`, `11b5c945`, `51bba39e`, `1
   `sigaction` line in `vibeswitcher-host` through `Platform.Signals`). `vibeswitcher-host` itself only has to compile
   here; it runs in stage 2.
 - [x] **Step 3: Implement `status`.**
-- [ ] **Step 4: A real session.** In a scratch home (`VIBESWITCHER_HOME`), install the hook for a throwaway Claude
-  Code config folder (`CLAUDE_CONFIG_DIR`), start `claude --model sonnet -p "say hi"` there, and watch `vibeswitcher
-  status` go from working to done. Never against the user's own `~/.claude`. Record what the hook wrote.
+- [x] **Step 4: A real session** (done as R10, 2026-11-13, from working to needs-you to done). In a scratch home
+  (`VIBESWITCHER_HOME`), install the hook for a throwaway Claude Code config folder (`CLAUDE_CONFIG_DIR`), start
+  `claude --model sonnet -p "say hi"` there, and watch `vibeswitcher status` go from working to done. Never against the
+  user's own `~/.claude`. Record what the hook wrote.
 - [ ] **Step 5: Measure for Decision 6.** Time to run the hook once (`vibeswitcher-hook` given one event on stdin),
   median of 200 runs: the glibc build, the static build, and a static build that is one multi-call binary. Record
   the three numbers and sizes in `docs/process/v2-linux-inventory.md`.
@@ -857,16 +858,16 @@ The full check, the lead's tools listed and one call served, is stage 2's
 
 ### R10: A real Claude Code session goes from working to needs-you to done
 
-**Commits:** none yet (waits for the user's Claude Code config folder).
+**Commits:** the R10 commit (2026-11-13).
 
 **Files:** `Tests/VibeNodeTests/RealClaudeStatusTests.swift`, `docs/process/v2-linux-inventory.md`.
 
-- [ ] **Step 1: The user prepares a config folder.** A throwaway Claude Code config folder, logged in once by the user
+- [x] **Step 1: The user prepares a config folder.** A throwaway Claude Code config folder, logged in once by the user
   (`CLAUDE_CONFIG_DIR=<folder> claude`, then `/login`). An agent never logs in or copies credentials (`AGENTS.md`).
   The test runs only when `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` names that folder, as `CodexRealRunTests` is gated by
   `VIBESWITCHER_REAL_CODEX_HOME`. This is asked of the user at the start, with the other questions (the bootstrap path),
   and doesn't hold up other work: until the folder exists the test is skipped, saying why, and the item stays open.
-- [ ] **Step 2: The test.** `aRealSessionGoesFromWorkingToNeedsYouToDone`, in a scratch `VIBESWITCHER_HOME` and a
+- [x] **Step 2: The test.** `aRealSessionGoesFromWorkingToNeedsYouToDone`, in a scratch `VIBESWITCHER_HOME` and a
   scratch project folder:
   1. `vibeswitcher hooks install` against that config folder.
   2. The project's trust entry written into `$CLAUDE_CONFIG_DIR/.claude.json` (`projects[<path>]` with
@@ -887,7 +888,12 @@ The full check, the lead's tools listed and one call served, is stage 2's
   This also checks that the hook finds its session from the agent's terminal on Linux (`vibeswitcher-hook/main.swift`
   35-60), where the native `claude`'s process name is its version number and argv[0] tells it apart
   (`ProcessTable.swift:262`).
-- [ ] **Step 3:** write the observed states, the state files and the Claude Code version (2.1.322 here) into
+  Corrected from the draft, after the first run: Claude Code 2.1.323's default permission mode is auto mode, which ran
+  the `touch` unasked (working, then done, never needs-you), so it starts with `--permission-mode manual` (2.1.323 has
+  no `default` mode). The prompt is `claude`'s first argument rather than typed; the test types only Enter, and
+  Ctrl-C twice to quit. The trust entry is taken out of `.claude.json` again once Claude Code has ended, so runs don't
+  add up there.
+- [x] **Step 3:** write the observed states, the state files and the Claude Code version (2.1.323 by then) into
   `v2-linux-inventory.md`.
 
 **Done when:** the gated test passed once here with the user's folder, and the record is committed. Without the
@@ -951,9 +957,11 @@ Not tasks here; they go to the lead's backlog, or to `v2-mac-tasks.md` where onl
 
 ## Done when (revised 2026-11-13)
 
-**Reached 2026-11-13, except R10:** `4485b65a` is the first commit with every job green on both systems
+**Reached 2026-11-13:** `4485b65a` is the first commit with every job green on both systems
 (`v2 linux` 43308185013: platform, core; `v2 macos` 43308184833: platform, core, host, app, with the 10 listed skips).
-R10 waits for the user's Claude Code config folder.
+R10 passed here the same day with the user's config folder, on Claude Code 2.1.323: `status` went
+`unknown -> working -> needs-you -> working -> done` in each of three runs (recorded in
+[the Linux inventory](../../process/v2-linux-inventory.md#a-real-claude-code-session-on-linux-2026-11-13)).
 
 On Ubuntu, `bash scripts/test.sh` is green for `VibePlatformTests`, `VibeCoreTests` and `VibeNodeTests`, with the
 Mac-only tests listed under a tenth of each target. `vibeswitcher status` showed a real Claude Code session go from
