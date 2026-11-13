@@ -73,7 +73,9 @@ struct HostConnectorTests {
             _ = try HostCall.request(.hello(protocolVersion: HostProtocol.version, app: "test"), socket: path, appKey: nil, timeout: 1)
         }
         let took = Date().timeIntervalSince(started)
-        #expect(took < 5, "took \(took) s with a timeout of 1 s")
+        // Judged against the connector's own patience, which a call that ignored its timeout would wait out: a bound
+        // that a loaded runner can't reach by being slow (ElapsedTimeLint).
+        #expect(took < HostConnector.patience, "took \(took) s with a timeout of 1 s")
         #expect(connections(at: listening) == 0)
     }
 
