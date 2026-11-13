@@ -51,6 +51,8 @@ enum KernelCalls {
 ///   truncate ERRNO", its own write and truncation of the copy. Ends when its stdin ends.
 /// - `rewritten:PATH:MARK`: makes a copy of PATH (the test binary, copied); "copied FD"; waits for a line on its stdin
 ///   (the test rewrites PATH meanwhile), then starts the copy as a child in the mode below; "child exit N".
+/// - `taken`: takes the copy it was started with, as an image that adopts its copy does; "taken FD closed-on-exec
+///   adopted" (or "inheritable", "refused").
 /// - `mark:MARK`: the child the last one starts, run from the copy: closes its inherited image first, as every image a
 ///   sealed copy starts does; "mark MARK closed FD shut" (or "open", if the descriptor stayed).
 private func actAsSealedCopyHelperIfAsked() {
@@ -141,6 +143,14 @@ private func actAsSealedCopyHelperIfAsked() {
         var status: Int32 = 0
         while waitpid(child, &status, 0) < 0, errno == EINTR {}
         say("child exit \(status & 0x7f == 0 ? (status >> 8) & 0xff : -(status & 0x7f))")
+        _exit(0)
+    case ("taken", 1):
+        // Arrived as a kept descriptor does, not close-on-exec: taking it marks it so, and adopting it keeps it so.
+        let taken = Platform.ProcessSelf.takeInheritedImage()
+        let marked = taken.map { fcntl($0, F_GETFD) & FD_CLOEXEC != 0 } ?? false
+        let adopted = taken.flatMap { Platform.ProcessSelf.adopt($0) } != nil
+        say("taken \(taken.map(String.init) ?? "none") \(marked ? "closed-on-exec" : "inheritable")"
+            + " \(adopted ? "adopted" : "refused")")
         _exit(0)
     case ("mark", 2):
         let closed = Platform.ProcessSelf.closeInheritedImage()
@@ -475,6 +485,11 @@ struct SealedCopyTests {
         let control = try memfd(seals: all, mode: 0o111)
         defer { close(control) }
         #expect(Platform.ProcessSelf.adopt(control) != nil, "the control: one made as a copy is taken")
+        // As a kept descriptor arrives after an exec, not close-on-exec: adopted, it is close-on-exec again, so the
+        // children the adopter starts don't inherit it.
+        try #require(fcntl(control, F_SETFD, 0) == 0)
+        #expect(Platform.ProcessSelf.adopt(control) != nil)
+        #expect(fcntl(control, F_GETFD) & FD_CLOEXEC != 0, "an adopted copy is close-on-exec")
 
         let script = try TestScriptLinuxTests.scratch("sealed").appendingPathComponent("script")
         defer { try? FileManager.default.removeItem(at: script.deletingLastPathComponent()) }
@@ -486,6 +501,57 @@ struct SealedCopyTests {
         defer { close(onDisk) }
         #expect(Platform.ProcessSelf.adopt(onDisk) == nil)
         #expect(Platform.ProcessSelf.adopt(-1) == nil)
+    }
+
+    /// An image started from a copy takes it from the environment close-on-exec, as it arrives otherwise not, so a
+    /// copy it then refuses to adopt doesn't leak to its children either; and it adopts it.
+    @Test func anInheritedImageIsTakenCloseOnExec() throws {
+        let copy = try Platform.ProcessSelf.sealedCopy(of: "/bin/true", name: "true").get()
+        defer { close(copy.fd) }
+        let binary = try #require(Bundle.main.executablePath)
+        var spawn = Platform.Spawn(executable: binary, arguments: [binary])
+        spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
+            + ["\(Self.helperVariable)=taken", "\(Platform.ProcessSelf.imageVariable)=\(copy.fd)"]
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.keep = [copy.fd]
+        let ended = try SpawnTests.output(of: spawn)
+        #expect(ended.exit == 0 && ended.output == "taken \(copy.fd) closed-on-exec adopted\n", "\(ended)")
+    }
+
+    /// A FIFO gives no copy, at once: opening it for reading would otherwise wait for a writer, and a worker that
+    /// puts one where an image is to be copied from would hold the host's start or its handover. If the copy waits,
+    /// the guard opens the FIFO for writing after `fifoGuard`, which lets it go on, and the test fails.
+    @Test func aFIFOGivesNoCopyAndDoesntWait() throws {
+        let folder = try TestScriptLinuxTests.scratch("sealed")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let fifo = folder.appendingPathComponent("fifo").path
+        try #require(mkfifo(fifo, 0o600) == 0, "mkfifo: \(errno)")
+        let waited = Flag()
+        let guardian = DispatchWorkItem {
+            // Never blocking: once the copy is refused there is no reader, and this open fails with ENXIO.
+            let writer = open(fifo, O_WRONLY | O_NONBLOCK | O_CLOEXEC)
+            if writer >= 0 {
+                waited.set()
+                close(writer)
+            }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.fifoGuard, execute: guardian)
+        let made = Platform.ProcessSelf.sealedCopy(of: fifo, name: "fifo")
+        guardian.cancel()
+        #expect(made == .failure(Platform.Errno(code: EINVAL)))
+        #expect(!waited.isSet, "the copy waited for a writer")
+    }
+
+    /// How long a FIFO's copy may wait before `aFIFOGivesNoCopyAndDoesntWait` lets it go on: refused at once with
+    /// the fix, it otherwise waits forever.
+    static let fifoGuard: TimeInterval = 10
+
+    /// A flag one thread sets and another reads.
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set() { lock.withLock { value = true } }
+        var isSet: Bool { lock.withLock { value } }
     }
 
     /// A script's copy is `0555` and `isScript`, and runs as a child, printing its mark. Made `0111` it can't run:
