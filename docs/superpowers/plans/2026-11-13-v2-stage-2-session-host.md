@@ -1572,6 +1572,14 @@ is green.
 
 **Awaits:** decision 11 in part (`gh` is denied to roles; the token itself is the user's).
 
+**Measured since (stage 1's R10, 2026-11-13):** Claude Code 2.1.323 starts in auto mode unless told otherwise, and
+has no mode called `default` any more (`manual` asks before each unapproved tool). Today's role launches name no
+`--permission-mode`, so on this version a role runs whatever its rules don't deny without asking, whichever mode the
+lead's code assumed. This task first reads what mode each role's launch means on the Mac today (the lead's
+`LeadLaunch` and the roles' settings), then names it on the command line (`--permission-mode <mode>`) on both
+systems' launches, with a test per role. That edit to `prepare` is a fourth kind-4 hook, and its port-map line says
+why: the Mac's launches change too, because the CLI's default changed under them.
+
 **Files:**
 - Modify: `Sources/VibePlatform/Tools.swift` (`roleDenyRules: [String]`: empty on the Mac; on Linux, as Claude Code
   rules: `strace`, `ltrace`, `gdbserver`, `perf`; `systemctl --user`, `systemd-run`, `loginctl`, `crontab`, `at`;
