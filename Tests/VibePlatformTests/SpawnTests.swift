@@ -208,7 +208,8 @@ struct SpawnTests {
         spawn.keep = nil
         let all = try Self.output(of: spawn)
         #expect(all.exit == 0)
-        #expect(all.descriptors.filter { extras.contains($0) } == Array(extras[0..<4]), "\(all.descriptors)")
+        // Sorted: the listing is in order, and the extras were numbered as other tests' descriptors left room.
+        #expect(all.descriptors.filter { extras.contains($0) } == Array(extras[0..<4]).sorted(), "\(all.descriptors)")
         #expect(all.descriptors.prefix(3) == [0, 1, 2], "\(all.descriptors)")
     }
 
@@ -227,7 +228,8 @@ struct SpawnTests {
             let ended = try Self.output(of: spawn) { $0.start(closingByListing: true) }
             #expect(ended.exit == 0, "\(ended)")
             #expect(ended.descriptors.prefix(3) == [0, 1, 2], "\(ended.descriptors)")
-            #expect(ended.descriptors.filter { $0 >= Self.firstExtra } == kept.sorted(), "\(ended.descriptors)")
+            // The test's own only: another test's descriptor opened between the listing and the spawn may be there.
+            #expect(ended.descriptors.filter { extras.contains($0) } == kept.sorted(), "\(ended.descriptors)")
         }
         var missing = Platform.Spawn(executable: "/no/such/program", arguments: ["program"])
         missing.stdin = .path("/dev/null", flags: O_RDONLY)
