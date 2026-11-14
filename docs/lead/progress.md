@@ -3125,3 +3125,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 16:08 Automatically (auto_advance): Merged cleanup-removes-a (Cleanup removes a leftover folder that isn't a worktree) into main at f5eb7e69, on its passing audit and the full test run.
 - 2026-11-14 16:08 Automatically (auto_advance): Cleaned up cleanup-removes-a (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-14 18:06 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 18:06.
+- 2026-11-14 18:12 Automatically (auto_advance): Released: on AC power, after 5 min.
