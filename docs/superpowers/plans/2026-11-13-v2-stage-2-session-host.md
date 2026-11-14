@@ -1993,7 +1993,7 @@ S10 and S11 (each result, one line, with the inventory's date)
   `runPrefix` with Task 10c's `setsid`, runs `sleep 600` with a short timeout and, separately, is interrupted; both end
   the command (no process of it left), and the times are recorded.
 - [ ] commit ("v2: Claude Code's shell snapshot and a verifier's command in its own session, measured").
-- *As made (2026-11-14), for the lead to approve:*
+- *As made (2026-11-14), approved by the lead 2026-11-14:*
   - Both sessions run `claude --permission-mode manual` with an inline `--settings` that allows only the command the
     prompt names (no question was shown), not a role's `auto`; the verifier's is its environment
     (`LeadLaunch.verifierEnvironment`, in the same inline settings), not a whole `LeadLaunch.prepare`.
