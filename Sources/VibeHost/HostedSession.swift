@@ -495,6 +495,7 @@ public final class HostedSession {
     private func stopParser() {
         parser?.stop()
         parser = nil
+        parserReplies.flushDropped(log: onParserTrouble)
         watchdog?.cancel()
         watchdog = nil
         historyReads.forEach { $0.cancel() }

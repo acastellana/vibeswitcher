@@ -196,8 +196,20 @@ that 9e's table didn't answer:**
 - **The kitty graphics probe** (`APC G i=31,…,a=q;… ST`), which the headless terminal answers `APC G i=31;OK ST`.
   9e leaves kitty graphics out on purpose, so the reply is dropped and logged ("it is no reply"), once per session
   start: Claude Code then takes the terminal for one without kitty graphics, which a headless parser is in effect.
-  The test allows that drop and no other (nor one hidden behind the log's once-a-second line). Whether to answer the
-  probe (a query only, its `OK` reply only) is the lead's call.
+  The test allows that drop and no other. Whether to answer the probe (a query only, its `OK` reply only) is the
+  lead's call.
+
+**The 12a review (2026-11-14): a drop was hiding behind the log's once-a-second line.** The host logged a dropped
+reply a line a second at most; a drop within that second was only counted, and the count reached the log only with
+the next logged drop, so a drop held back when the parser stopped was never logged (the passing run above could not
+see one). `ParserReplies.flushDropped` now logs what was held back when a session's parser stops (the session ending,
+a handover's exec, the host quitting), and step 6 waits for the parser to stop and allows a line only if every drop it
+counts is named and is a kitty graphics reply. The run after that fix (16:25, Claude Code 2.1.323, steps 1 to 5 in
+1.5, 0.1, 0.2, 0.1 and 0.4 s) **failed step 6**: the first host image logged, as its parser stopped for the handover,
+"1 more dropped since the last line", 1.2 s after the kitty probe's drop. That build counted without naming, so which
+reply it was is not known; the flush line now names it, and the next gated run will say. Claude Code's binary holds a
+second kitty graphics probe (`s=1,v=1,a=q,t=f,f=32`) beside the `t=d,f=24` one whose reply was logged: a likely
+candidate, not confirmed. The slice's four gated runs are spent.
 
 ## Sealed copies: the measurement (2026-11-13)
 

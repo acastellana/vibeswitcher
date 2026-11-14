@@ -1934,6 +1934,28 @@ After the bootstrap it is built with the sandbox (install folder read-only there
      recorded;
   6. through it all, the host's log shows no parser reply dropped (Task 9e).
 - [ ] **Step 2:** the run, the Claude Code version and each step's time go into the inventory.
+- *As made (2026-11-14), for the lead to approve:*
+  - Step 6 found that Claude Code turns focus events on as it starts (`CSI ? 1004 h`), which SwiftTerm answers at once
+    with `CSI I`; 9e's table had that responder as a view's only (its As-made list "left out … the focus report"), so
+    Linux dropped it. `Sources/VibeHost/V2/ParserReplies.swift` (outside this task's Files) now takes DECSET 1004 as a
+    query answered by `CSI I` or `CSI O`, one per 1004 the setting names
+    (`ParserReplyTests.aProgramTurningFocusEventsOnIsToldItHasFocus`); S6's grammar and `Held by:` and S11 item 11
+    say so. This supersedes 9e's "the focus report" among the replies left out.
+  - **Step 6 deviates from "no parser reply dropped":** the test allows drops of kitty graphics replies (`APC G`),
+    which 9e leaves out on purpose; Claude Code probes kitty graphics as it starts and the headless terminal answers
+    `APC G i=31;OK ST`. The lead's call: keep the allowance, or answer the kitty graphics query (its `OK` reply only)
+    so step 6 can assert no drop at all.
+  - The 12a review: a drop within a second of the last logged line was only counted, and the count reached the log
+    only on the next logged drop, so one held back when the parser stopped (the session ending, a handover's exec, the
+    host quitting) was never logged. `ParserReplies.flushDropped` logs what was held back, naming the first four, from
+    `HostedSession.stopParser` (a seventh hook, kind 4, in the port map); step 6 waits for the session's parser to
+    stop and accepts a line only if every drop it counts is named and is a kitty graphics reply
+    (`aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds`, `RealClaudeHostTests.onlyKittyGraphicsDropsPass`).
+  - **The gated test does not pass with that fix.** Its run on 2026-11-14 16:25 (the slice's fourth, its last) failed
+    step 6 only: one more drop, held back within a second of the kitty probe's, logged when the first host image's
+    parser stopped for the handover, by a build that counted it without naming it. Unidentified; the next gated run
+    names it. A likely candidate, not confirmed: Claude Code's binary holds a second kitty graphics probe
+    (`s=1,v=1,a=q,t=f,f=32`) beside the `t=d,f=24` one whose reply was logged.
 
 **Done when:** the gated test passed once here with the user's folder, and the record is committed. Until the folder
 exists the test is skipped, saying why, and later work goes on.

@@ -748,8 +748,10 @@ the server names `keep` explicitly. A lint refuses a bare `socket(`, `accept(` a
 **(call, new) A parser's reply is typed only as a reply.** The host writes a parser's `.reply` bytes into the session
 while no client is attached (`HostedSession.swift:226-229`), and they don't change who typed last. On Linux the host
 passes a reply only when it answers a query the host saw in that session's output since the last reply, and only in
-the reply grammar (cursor position, device attributes, the colour and mode reports the headless terminal makes); any
-other byte from a parser is dropped and logged. With sealed copies a parser can't be seized; this keeps a parser bug
+the reply grammar (cursor position, device attributes, the colour and mode reports the headless terminal makes, and
+the focus report, `CSI I` or `CSI O`, it makes at once when the program turns focus events on with DECSET 1004, one
+per 1004 named: Task 12a); any other byte from a parser is dropped and logged, every drop (a line a second at most,
+those held back counted on the next line or, when the parser stops first, in a line of their own). With sealed copies a parser can't be seized; this keeps a parser bug
 from typing into the lead.
 
 **Who reads `/proc` entries of other processes** must treat "unreadable" carefully: any process can make itself
@@ -797,6 +799,9 @@ parser's reply grammar in Task 9; the server's own first statements in the engin
 `ParserReplyTests.everyQueryIsAnsweredInItsGrammar`, `ParserReplyTests.theMacsParserRepliesAreTodays`,
 `ParserReplyTests.aStatusQueryTheProgramDidntPrintIsNotAnswered`, `ParserReplyTests.theVersionReplyIsThisBuildsOnly`,
 `ParserReplyTests.aQueryBegunInTheReplayIsSeenWhenItEnds` (Task 9e);
+`ParserReplyTests.aProgramTurningFocusEventsOnIsToldItHasFocus`,
+`ParserReplyTests.aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds`,
+`ParserReplyTests.droppedRepliesAreLoggedOnceASecond` (Task 12a and its review);
 planned: stage 2 plan task 9 (9c, 9d).
 
 **Tests to write:** Task 9: `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`,
@@ -1324,7 +1329,8 @@ against it. Each line says what reduces it now, if anything.
     (decision 12), not for tests.
 11. Writing a terminal query to a session's `/dev/pts/N` makes the host type the headless terminal's reply into that
     session (an escape sequence, ESC included): it can interrupt the lead's turn. The reply grammar keeps it to
-    replies. S6.
+    replies. Turning focus events on there (`CSI ? 1004 h`) also types the 3-byte focus report `CSI I` (Task 12a),
+    still a reply only. S6.
 12. A worker turns the lead or a verifier with text it writes, with no OS access (S1, item 3). The floor, the user's
     approvals for sensitive paths, and `audit_finders` of 2 or more on another model hold; decision 13 sets them for
     the bootstrap.

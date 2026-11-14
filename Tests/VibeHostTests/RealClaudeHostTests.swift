@@ -98,14 +98,17 @@ import Testing
         var screen: String?
         let prompted = await eventually(timeout: 90) { screen = first.screen(id); return Self.promptShows(screen) }
         try #require(prompted, "no prompt: \(screen ?? "no screen")\n\(host.log)")
-        // Its screen settled: two reads a second apart the same.
+        // Its screen settled: its prompt still shown, and every read for a second the same (no event says a program is
+        // done drawing: the screen is read as often as `eventually` looks, and the second counts from its last change).
         var settled = Self.rows(screen)
-        _ = await eventuallyAsync(timeout: 20) {
-            await pause(1)
-            let again = Self.rows(first.screen(id))
-            defer { settled = again }
-            return again == settled
+        var changed = MacTime.real.awake()
+        let quiet = await eventually(timeout: 20) {
+            let now = first.screen(id)
+            let again = Self.rows(now)
+            if again != settled { settled = again; changed = MacTime.real.awake() }
+            return MacTime.real.awake() - changed >= 1 && Self.promptShows(now)
         }
+        try #require(quiet, "the screen never settled with its prompt shown: \(settled.joined(separator: "\n"))\n\(host.log)")
         first.close()
         print("R12a: the screen:\n" + settled.filter { !$0.isEmpty }.joined(separator: "\n"))
         step("1, the prompt shown, the first client gone")
@@ -164,13 +167,43 @@ import Testing
 
         // 6. No parser reply dropped (the stage 2 plan's Task 9e), in either log, but the one 9e leaves out on purpose:
         // the answer to Claude Code's kitty graphics probe as it starts (`APC G i=31,…,a=q;… ST`), which the headless
-        // terminal answers `APC G i=31;OK ST` (`ParserReplies.swiftTermResponders`: kitty graphics, left out). No other
-        // drop hides behind it: the log's once-a-second line would say "and N more".
-        let dropped = (sessionLog() + host.log).components(separatedBy: "\n").filter { $0.contains("reply dropped") }
-        let unexpected = dropped.filter { !$0.contains("reply dropped, it is no reply: ") || !$0.contains("ESC_Gi=") || $0.contains("more dropped") }
-        #expect(unexpected.isEmpty, "\(sessionLog())\n\(host.log)")
+        // terminal answers `APC G i=31;OK ST` (`ParserReplies.swiftTermResponders`: kitty graphics, left out). Each
+        // drop is in the log: a line a second at most; those the once-a-second limit held back are counted as "and N
+        // more" on the next line, or, when the parser stops first (before the handover's exec, as the session ends),
+        // in a line of their own naming the first four (`ParserReplies.flushDropped`). So the session's parser is
+        // waited out first; a line counting drops it doesn't name fails, and each drop named must be a kitty graphics
+        // reply.
+        #expect(await eventually(timeout: 10) { OrphanSweepTests.parsers(of: host.pid).isEmpty },
+                "parsers: \(OrphanSweepTests.parsers(of: host.pid))")
+        let dropped = (sessionLog() + host.log).components(separatedBy: "\n").filter { $0.contains("reply dropped") || $0.contains("more dropped") }
+        #expect(dropped.allSatisfy(Self.onlyKittyGraphicsDropped), "\(sessionLog())\n\(host.log)")
         print("R12a: replies dropped: \(dropped.isEmpty ? "none" : dropped.joined(separator: "; "))")
         print("R12a: the session log's watchdog lines: \(sessionLog().components(separatedBy: "\n").filter { $0.contains("watchdog:") })")
+    }
+
+    /// Whether a log line about dropped parser replies names kitty graphics replies (`APC G …`, which Task 9e leaves
+    /// out) and nothing else: one drop's line, or `flushDropped`'s naming every drop it counts. A line with
+    /// "(and N more …)", or a flush with drops it doesn't name ("…"), is not.
+    static func onlyKittyGraphicsDropped(_ line: String) -> Bool {
+        let kitty = { (drop: Substring) in drop.contains("reply dropped, it is no reply: ") && drop.contains("ESC_Gi=") }
+        let flush = "more dropped since the last line, as its parser stopped: "
+        guard let named = line.range(of: flush) else { return !line.contains("more dropped") && kitty(Substring(line)) }
+        let drops = line[named.upperBound...].components(separatedBy: "; ").map { Substring($0) }
+        guard let count = line.range(of: #"parser replies: \d+ "#, options: .regularExpression)
+            .flatMap({ Int(line[$0].dropFirst("parser replies: ".count).dropLast()) }) else { return false }
+        return drops.count == count && drops.allSatisfy(kitty)
+    }
+
+    @Test func onlyKittyGraphicsDropsPass() {
+        let kitty = "parser (pid 9) reply dropped, it is no reply: 12 bytes, ESC_Gi=31;OKESC\\"
+        #expect(Self.onlyKittyGraphicsDropped("12:00 watchdog: session X's " + kitty))
+        #expect(!Self.onlyKittyGraphicsDropped("12:00 watchdog: session X's " + kitty + " (and 1 more dropped since the last line)"))
+        #expect(!Self.onlyKittyGraphicsDropped("12:00 watchdog: session X's parser (pid 9) reply dropped, no cursor position query is pending: 6 bytes, ESC[1;1R"))
+        let flush = "12:00 watchdog: session X's parser replies: 2 more dropped since the last line, as its parser stopped: "
+        #expect(Self.onlyKittyGraphicsDropped(flush + kitty + "; " + kitty))
+        #expect(!Self.onlyKittyGraphicsDropped(flush + kitty + "; parser (pid 9) reply dropped, it is no reply: 3 bytes, ESC[I"))
+        #expect(!Self.onlyKittyGraphicsDropped(flush + kitty))
+        #expect(!Self.onlyKittyGraphicsDropped(flush.replacingOccurrences(of: ": 2 ", with: ": 5 ") + [kitty, kitty, kitty, kitty, "…"].joined(separator: "; ")))
     }
 
     /// `claude --version`, in the scratch home with the config folder: what it prints, or why it printed nothing.

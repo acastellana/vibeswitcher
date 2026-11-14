@@ -198,9 +198,14 @@ struct ParserReplies {
     /// The queries seen and not yet answered, by kind.
     private(set) var pending: [Kind: Int] = [:]
     private var scanner = QueryScanner()
-    /// The host's log gets a line a second at most about dropped replies: when the last went, and how many since.
+    /// The host's log gets a line a second at most about dropped replies: when the last went, and how many since (said
+    /// on the next line, or by `flushDropped` when the parser stops first).
     private var lastLogged = Date.distantPast
     private var unlogged = 0
+    /// The lines of the first drops held back since the last line (at most `namedHeldBack`), made only if the parser
+    /// stops before another line is logged (`flushDropped`).
+    private var heldBack: [() -> String] = []
+    static let namedHeldBack = 4
 
     init(checks: Bool = !Platform.CodeIdentity.isAvailable) {
         self.checks = checks
@@ -263,16 +268,31 @@ struct ParserReplies {
         pending[kind] = left > 0 ? left : nil
     }
 
-    /// `line` goes to the log only once a second at most: it is made only then.
-    private mutating func dropped(log: ((String) -> Void)?, now: Date = Date(), _ line: () -> String) {
+    /// `line` goes to the log only once a second at most: it is made only then (or by `flushDropped`, for the first
+    /// `namedHeldBack` held back).
+    private mutating func dropped(log: ((String) -> Void)?, now: Date = Date(), _ line: @escaping () -> String) {
         guard now.timeIntervalSince(lastLogged) >= 1 else {
             unlogged += 1
+            if heldBack.count < Self.namedHeldBack { heldBack.append(line) }
             return
         }
         let more = unlogged > 0 ? " (and \(unlogged) more dropped since the last line)" : ""
         lastLogged = now
         unlogged = 0
+        heldBack = []
         log?(line() + more)
+    }
+
+    /// The parser stopped (the session ended, a handover, the host quitting), so no later line will carry the drops
+    /// `dropped` held back: they go to the log now, in one line naming the first `namedHeldBack` of them (none held
+    /// back: nothing logged). A drop within a second of the last line, the last before the parser stopped, would
+    /// otherwise never be logged (the 12a review).
+    mutating func flushDropped(log: ((String) -> Void)?) {
+        guard unlogged > 0 else { return }
+        let named = heldBack.map { $0() }.joined(separator: "; ") + (unlogged > heldBack.count ? "; …" : "")
+        log?("parser replies: \(unlogged) more dropped since the last line, as its parser stopped: \(named)")
+        unlogged = 0
+        heldBack = []
     }
 
     /// A reply for the log: printable ASCII as it is, ESC as `ESC`, any other byte in hex; at most 64 bytes.

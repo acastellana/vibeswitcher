@@ -103,6 +103,22 @@ import Testing
         #expect(lines.all.first?.contains("reply dropped, it is no reply: 1 bytes, \\x0d") == true, "\(lines.all)")
     }
 
+    /// Two replies dropped within a second, and then the program ends: the second, which the log's once-a-second line
+    /// held back, is in the log once the session's parser stopped, not lost with it (the 12a review: a drop after
+    /// Claude Code's kitty graphics probe's was never logged).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's reply check; the Mac passes every reply"))
+    func aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds() async throws {
+        let probe = SessionProbe(), lines = Lines()
+        let session = try start("printf '\\033]7599;reply:0d\\007\\033]7599;reply:68656c6c6f\\007'; echo sent", probe: probe, lines: lines)
+        defer { probe.end(session) }
+        #expect(await eventually(timeout: 30) { lines.all.count >= 2 }, "\(probe.diagnosis(session)); \(lines.all)")
+        #expect(lines.all.first?.contains("reply dropped, it is no reply: 1 bytes, \\x0d") == true, "\(lines.all)")
+        #expect(lines.all.dropFirst().first?.contains("parser replies: 1 more dropped since the last line, as its parser stopped: "
+            + "parser (pid ") == true, "\(lines.all)")
+        #expect(lines.all.dropFirst().first?.hasSuffix(" reply dropped, it is no reply: 5 bytes, hello") == true, "\(lines.all)")
+        #expect(lines.all.count == 2, "\(lines.all)")
+    }
+
     /// Another process writes a cursor query to the session's terminal (`/dev/pts/N`), with text after it: the
     /// program receives a cursor report and nothing else (S11 item 11's limit: a reply is still typed).
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's reply check; the Mac passes every reply"))
@@ -324,6 +340,30 @@ import Testing
         var lines: [String] = []
         for _ in 0..<3 { _ = replies.admit(Data("x".utf8), from: 7, clientsAttached: false, log: { lines.append($0) }) }
         #expect(lines == ["parser (pid 7) reply dropped, it is no reply: 1 bytes, x"])
+        // The parser stopped: the two held back are said now, once.
+        replies.flushDropped { lines.append($0) }
+        replies.flushDropped { lines.append($0) }
+        #expect(lines.dropFirst() == ["parser replies: 2 more dropped since the last line, as its parser stopped: "
+            + "parser (pid 7) reply dropped, it is no reply: 1 bytes, x; parser (pid 7) reply dropped, it is no reply: 1 bytes, x"])
+        // More held back than it names: the rest is "…".
+        var many = ParserReplies(checks: true)
+        lines = []
+        for byte in 0..<7 { _ = many.admit(Data([0x61 + UInt8(byte)]), from: 7, clientsAttached: false, log: { lines.append($0) }) }
+        many.flushDropped { lines.append($0) }
+        #expect(lines.last == "parser replies: 6 more dropped since the last line, as its parser stopped: "
+            + (1...ParserReplies.namedHeldBack).map { "parser (pid 7) reply dropped, it is no reply: 1 bytes, \(UnicodeScalar(0x61 + UInt8($0)))" }
+                .joined(separator: "; ") + "; …", "\(lines)")
+    }
+
+    /// With no drop held back, a stopping parser logs nothing (and the Mac never holds one: it drops none).
+    @Test func aStoppingParserWithNoDropHeldBackLogsNothing() {
+        for checks in [true, false] {
+            var replies = ParserReplies(checks: checks)
+            var lines: [String] = []
+            _ = replies.admit(Data("x".utf8), from: 7, clientsAttached: false, log: { lines.append($0) })
+            replies.flushDropped { lines.append($0) }
+            #expect(lines.count == (checks ? 1 : 0), "\(lines)")
+        }
     }
 
     /// Every responder in SwiftTerm (each `sendResponse` call and direct `tdel?.send(source:…)` in its
