@@ -88,7 +88,8 @@ errors in 8 of 13 files), `docs/process/v2-stage1-recon.md` §1.2, §1.7, §1.9 
   3. a whole file or a named block moved with `git mv`, or a block's body moved into `VibePlatform` with the old name
      left as a forward;
   4. a hook of one or two lines into a new file under `Sources/VibeHost/V2/` (or `Sources/VibeCore/V2/`);
-  5. a `Config` field, or a member of `HostServer` or `HostConnection`, whose default keeps the Mac's behaviour;
+  5. a `Config` field, or a member of `HostServer`, `HostConnection` or `HostedSession`, whose default keeps the
+     Mac's behaviour (`HostedSession` added 2026-11-14 for Task 9e's `parserReplies`);
   6. a field added to a `Codable` record as an optional, so the format number stays and older builds still read it;
   7. a `HostRequest` kind with its `HostProtocol.Capability`, sent only to a host whose welcome lists it (Task 8b's
      `hostNotes`, the only one this plan expects).
@@ -120,7 +121,7 @@ errors in 8 of 13 files), `docs/process/v2-stage1-recon.md` §1.2, §1.7, §1.9 
   `--launcher-test-hold` (the 9b review fixes: a scratch host's launchers wait after making themselves dumpable until
   a file exists), Task 9a's
   `--test-stays-dumpable`, which makes a scratch host dumpable again so a test can count its descriptors from outside,
-  and Task 9d's, awaiting the lead's approval: `--handover-test-fail-next` (the image handed over to is given
+  and Task 9d's (approved by the lead, 2026-11-14): `--handover-test-fail-next` (the image handed over to is given
   `--handover-fail-restore`, as a script can't stand in for an installed build), `--handover-test-hold PATH` (a
   handover waits after its check, before its probe, until PATH exists), and from the 9d review
   `--handover-test-hold-check PATH` (a handover waits once its target's copy is loaded, before its check, the host's
@@ -1331,7 +1332,7 @@ on both, and S5's `Held by:` names them.
     refuses `--test-app-pid`). It hands over its real vault, takes no install root from the flag, reports no tracer
     and opens no test connector; its log names each refused flag, and none is in the arguments it hands over with.
   - `theMacsUsersHostKeepsTodaysTestSecret` (Mac): the same host, by today's `TestHosts.authorize`, still hands the
-    test secret over, as at `47636aaf`. (As built, awaiting the lead's approval: a unit test of the Mac's forms of
+    test secret over, as at `47636aaf`. (As built, approved by the lead 2026-11-14: a unit test of the Mac's forms of
     `HostHardening`'s decisions, starting no host. A user's host on the Mac reads its vault's key from the real
     Keychain, which `KeychainLintTests` forbids a test, and `ServerChildHost(usersHost:)` throws there; a scratch
     host's carried test secret on the Mac stays `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`'s.
@@ -1390,7 +1391,7 @@ on both, and S5's `Held by:` names them.
   from Task 9c) adopts that copy as its own (`/proc/self/exe` is then unreadable to it). `--node-root` stays in
   `config.arguments` until Task 9d appends the target's, as `--server` does; on Linux the fallback is the image's path
   until Task 9c. `--node` also takes only the account's own lock (`HostImages.mayStart`). A start refused by these
-  checks sends a handover's new image back rather than ending it. **Awaiting the lead's approval** (the 9b review,
+  checks sends a handover's new image back rather than ending it. **Approved by the lead** (the 9b review,
   2026-11-14): no `Config.launcherImage`, as above; the review fixes make the case stronger, since sessions' launchers
   and parsers now start from two different copies, which one field couldn't name.
 - *As made, the 9b review fixes (2026-11-14):* sessions' launchers start from a second sealed copy of the host's image,
@@ -1459,8 +1460,8 @@ on both, and S5's `Held by:` names them.
   `secretsGoThroughAChannelAndNowhereElse` listed Mac-only by name, with the reason "Linux hands over through sealed
   memory; HandoverLinuxTests hold it".
 - Test: `Tests/VibeHostTests/HandoverLinuxTests.swift`, `HostHardeningTests.swift`
-- *As made (2026-11-14), awaiting the lead's approval where marked:*
-  - **A traced new image leaves the secrets unread and open, not closed** (awaiting approval): this task's own test
+- *As made (2026-11-14), approved by the lead 2026-11-14:*
+  - **A traced new image leaves the secrets unread and open, not closed** (approved): this task's own test
     `aTracedNewImageGoesBackWithoutTheVault` wants the previous build to serve on with its vault, which it can't if
     the traced image closes the only descriptor of it (the fallback is the same process). The traced image never
     reads them; the fallback, traced too, ends, which closes them. A real tracer could not have attached to the
@@ -1538,7 +1539,7 @@ is green.
   in `config.arguments`: otherwise the exec has two `--server`s, and `value(after:)` takes the first, the old
   build's). Non-seam edit.
 - Test: `Tests/VibeHostTests/HandoverLinuxTests.swift`, `ServerChildTests.swift`
-- *As made (2026-11-14), awaiting the lead's approval:*
+- *As made (2026-11-14), approved by the lead 2026-11-14:*
   - `check(_:path:installRoot:sessionFolders:)` returns `Result<HandoverTarget.Build, HandoverTarget.Refused>` (the
     record and the build's folder, which the exec's `--node-root` needs; a `String` isn't an `Error`), and takes the
     sessions' working folders. A `.git` is looked for from the target's folder up to the install folder for a target
@@ -1551,7 +1552,7 @@ is green.
     connection of its own), or 30 s (`ServerChild.idleLimit`) after the first look, whichever comes first; looked at
     every 0.2 s; the child's connector closed and SIGTERM (SIGKILL 10 s later), started again at once from the carried
     copy. The carried copy is taken only by the image it was carried for (its own copy is `images.own`); a fallback
-    closes it. *The 9d review (2026-11-14), awaiting the lead's ruling:* the bound is there because the server keeps a
+    closes it. *The 9d review (2026-11-14), ruled by the lead: the 30 s bound stands for the bootstrap, where no switch is made while a worker or verifier runs (decision 6); the count of unanswered requests in `HostServer.handle` is after the bootstrap:* the bound is there because the server keeps a
     `HostConnection` open for the host's events (S2), so "no connection open" may never come; after it a request in
     flight is cut (the server is started again at once). "No request in flight" proper needs a count of unanswered
     requests in `HostServer.handle`, a Non-seam edit this plan doesn't list.
@@ -1610,14 +1611,14 @@ is green.
 - Modify: `Sources/VibeHost/HostedSession.swift` (`startParser`, `link.onReply`, 226-229): one hook on Linux; the
   output path notes queries (one hook in `deliver`). The Mac unchanged. Non-seam edits.
 - Test: `Tests/VibeHostTests/ParserReplyTests.swift`
-- *As made (2026-11-14), awaiting the lead's approval:*
+- *As made (2026-11-14), approved by the lead 2026-11-14:*
   - The output hook is in `HostedSession.drain`, beside `focus.feed`, not in `deliver` (that is `HostServer`'s, and
     holds no session's state); the pending queries are a stored `HostedSession.parserReplies` (a `ParserReplies`),
     used on the session's queue. A third hook, one line in `SessionParser.run`'s test hook (`--parser-test-hooks`
     only): `OSC 7599 ; reply:HEX` makes the parser send HEX as a reply, which is how the tests' parser "sends a
     `.reply` the session never asked for". The hooks are kind 4, in the port map; **the stored
     `HostedSession.parserReplies` is outside the plan's eight kinds (kind 5 names `HostServer` and `HostConnection`
-    members only): a deviation awaiting the lead's approval**, the smallest place for a session's pending queries.
+    members only): approved by the lead 2026-11-14, kind 5 now naming `HostedSession` too**, the smallest place for a session's pending queries.
   - The output is read for queries by a scanner that mirrors SwiftTerm's own state table (`QueryScanner`: its ground
     state, ESC, CAN and SUB, the C1 controls, a CSI's parameters and collected bytes, where an OSC or a DCS ends), so
     a query split between two reads counts, and a query SwiftTerm wouldn't answer doesn't.
@@ -2020,3 +2021,5 @@ Added by this revision, and in the document's S12 as items 14 to 16 (decision 20
 16. The design's deferred requirements that neither list carried: reply rights type only into confined sessions;
     view rights get masked screens; the wallet's signing page on an origin of its own (the design's Security,
     "Also required"; stages 3 and 4, where rights and the wallet's page exist).
+- **A switch replaces the server child when no request is in flight**, by a count of unanswered requests in
+  `HostServer.handle`, in place of Task 9d's 30 s bound (`ServerChild.idleLimit`).

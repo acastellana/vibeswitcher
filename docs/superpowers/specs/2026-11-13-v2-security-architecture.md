@@ -864,7 +864,7 @@ memory and writes no file.
   and, when that fails too, unlinks it and exits, hanging up every session (`main.swift:92-102`); with sealed memory
   the fallback reads exactly what the old build wrote, so only a fault in the old build itself ends the host.
 - **A traced new image** closes the secrets unread and goes back; the fallback, traced, ends (S6). (As made in Task
-  9c, awaiting the lead's approval: the traced image leaves them unread and open, so that the fallback, which is the
+  9c, approved by the lead 2026-11-14: the traced image leaves them unread and open, so that the fallback, which is the
   same process, still has the vault; a traced fallback ends, which closes them. A tracer can't attach to the
   non-dumpable image before it, so one there now was there all along.)
 - **The server child's record is checked again on restore:** its parent is this process, its start ticks match, it is
