@@ -874,7 +874,9 @@ before starting the lead again.
 `ConfigSealFirstLookTests.aFreshVaultSeedsNoFloorFromWorkflow`,
 `ConfigSealFirstLookTests.aVaultHandedOverBeforeItsFirstLookStillHoldsIt`,
 `ConfigSealFirstLookTests.aRootsAcceptLetsItsFloorBeRecordedAndHoldsTheNext`,
-`VaultFirstLookTests.onlyAFreshNodeVaultOrAScratchHostAskedHoldsItsFirstLook` (Task 10e: the extended first look).
+`ConfigSealFirstLookTests.aHomeFileUnreadAtTheAcceptIsStillHeldWhenItFirstReads`,
+`VaultFirstLookTests.onlyAFreshNodeVaultOrAScratchHostAskedHoldsItsFirstLook`,
+`VaultFirstLookHostTests.aScratchHostAskedHoldsItsVaultsFirstLook` (Task 10e: the extended first look).
 
 **Tests to write:** E4: `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E8:
 `aHostRestartSaysTheTeamIsGone`, `aHostRestartHoldsWorkersUntilTheConfigIsAccepted`,

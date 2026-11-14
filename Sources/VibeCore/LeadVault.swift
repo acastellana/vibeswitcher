@@ -620,7 +620,7 @@ extension LeadVault {
             var config: MacSeal?
             /// `Book.holdsFirstLook`, kept so a handover before the first look keeps it (optional: nil is false).
             var holdsFirstLook: Bool?
-            /// The roots (`LeadVault.key`) whose first look the app's accept ended (`Book.firstLookHeld`).
+            /// The roots (`LeadVault.key`) the app's accept let record their floor and rails (`Book.holdsFirstLook`).
             var firstLookAccepted: Set<String>?
         }
 
@@ -646,12 +646,13 @@ extension LeadVault {
         private var heldNotes: [String] = []
 
         /// A fresh vault that takes nothing as its baseline that a worker could have written (security document S7):
-        /// on Linux the vault lives in memory only, and a worker can cause a restart at will. While a root's first
-        /// look is held (`firstLookHeld`), your home's seal and its main checkout's hold what they see instead of
-        /// sealing it, a guard rail with nothing recorded isn't recorded from anyone but the app, and no floor is
-        /// recorded `onlyIfUnset`. The app's accept for the root (`checkConfig(root:shown:)`, sealing with nothing
-        /// held again) ends its hold; your home's ends with the first one. Kept in the vault's state. False by
-        /// default: the Mac's vault, and every scratch host's, seal their first look as before.
+        /// on Linux the vault lives in memory only, and a worker can cause a restart at will. Your home's seal and
+        /// each main checkout's hold every watched thing they have nothing recorded for, at the first look and at any
+        /// later one that first reads it (`~/.claude.json` unreadable at the accept), instead of sealing it as it
+        /// is: only the app's accept that showed it (`checkConfig(root:shown:)`) seals it. Until that accept for a
+        /// root (sealing with nothing held again), a guard rail with nothing recorded isn't recorded from anyone but
+        /// the app, and no floor is recorded `onlyIfUnset`. Kept in the vault's state. False by default: the Mac's
+        /// vault, and every scratch host's, seal their first look as before.
         public var holdsFirstLook: Bool {
             get {
                 lock.lock()
@@ -668,19 +669,10 @@ extension LeadVault {
             }
         }
 
-        /// Whether `root`'s first look is held (`holdsFirstLook`): no accept of the app's ended it yet.
-        public func firstLookHeld(root: String) -> Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            return isHeld(root: root)
-        }
-
+        /// Whether `root`'s floor and rails wait for the app's accept (`holdsFirstLook`): none ended it yet.
         private func isHeld(root: String) -> Bool {
             state.holdsFirstLook == true && state.firstLookAccepted?.contains(LeadVault.key(root)) != true
         }
-
-        /// Your home's first look is held until the app's first accept of any root.
-        private var homeHeld: Bool { state.holdsFirstLook == true && (state.firstLookAccepted ?? []).isEmpty }
 
         /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
         /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read.
@@ -1368,16 +1360,19 @@ extension LeadVault {
             var mac = state.config ?? MacSeal()
             var team = state.teams[own] ?? Team(root: LeadVault.canonical(root))
             var guarded = team.guarded ?? [:]
+            // A vault that holds its first look holds whatever has nothing recorded, whenever it's first read: a thing
+            // the accept couldn't read is no more the baseline than one a worker wrote before it.
+            let firstLook = state.holdsFirstLook == true
             let home = Self.judge(watchedNow.filter { ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &mac.hashes, held: &mac.held,
                                   quiet: quiet(since: mac.sealedAt), caller: caller, home: true, shown: shown,
-                                  sessions: sessions, sessionsKnown: ids != nil, firstLook: homeHeld)
+                                  sessions: sessions, sessionsKnown: ids != nil, firstLook: firstLook)
             var projectHeld = guarded[ConfigSeal.heldKey]
             let project = Self.judge(watchedNow.filter { !ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &guarded, held: &projectHeld,
                                      quiet: quiet(since: team.configSealedAt), caller: caller, home: false, shown: shown,
-                                     sessions: sessions, sessionsKnown: ids != nil, firstLook: isHeld(root: root))
+                                     sessions: sessions, sessionsKnown: ids != nil, firstLook: firstLook)
             guarded[ConfigSeal.heldKey] = projectHeld
             // The user's accept of a held first look (the card's hashes), sealed with nothing held again: the root's
-            // hold ends, and your home's with the first.
+            // floor and rails are recorded from then on.
             if shown != nil, home, project, isHeld(root: root) {
                 state.firstLookAccepted = (state.firstLookAccepted ?? []).union([own])
             }
@@ -1400,9 +1395,9 @@ extension LeadVault {
 
         /// One seal's look (`sealConfig`): `now` its watched things' hashes as they are, `hashes` with their per-key
         /// hashes, `recorded` and `held` (`heldKey`'s value) as sealed, updated here; `home`: the Mac-wide seal's. True
-        /// when nothing is held: all of it sealed or found as sealed. `firstLook`: the seal's first look is held
-        /// (`holdsFirstLook`): what it has nothing recorded for is held, not recorded as it is, and only the app's
-        /// accept that showed it (`shown`) seals it.
+        /// when nothing is held: all of it sealed or found as sealed. `firstLook`: the vault holds its first look
+        /// (`holdsFirstLook`): what the seal has nothing recorded for is held whenever it's first read (at the first
+        /// look or after), not recorded as it is, and only the app's accept that showed it (`shown`) seals it.
         private static func judge(_ now: [String: String], hashes: [String: String], recorded: inout [String: String], held: inout String?,
                                   quiet: Bool, caller: Caller, home: Bool, shown: [String: String]? = nil,
                                   sessions: [ConfigSeal.TeamSession] = [], sessionsKnown: Bool = false, firstLook: Bool = false) -> Bool {
@@ -1437,7 +1432,8 @@ extension LeadVault {
             let firstSeen = Set(now.keys.filter { key in
                 recorded[key] == nil && ConfigSeal.comesAndGoes(key: key) && !(hashes[ConfigSeal.keysKey(of: key)].map(ConfigSeal.decode)?.isEmpty ?? false)
             })
-            // A held first look: everything else with nothing recorded is held too, for the user's accept.
+            // A held first look: everything else with nothing recorded is held too, for the user's accept (also one
+            // first read after it).
             let firstLooked = firstLook ? Set(now.keys.filter { recorded[$0] == nil && !ConfigSeal.comesAndGoes(key: $0) }) : []
             let differ = now.filter { firstSeen.contains($0.key) || firstLooked.contains($0.key) || (recorded[$0.key] != nil && recorded[$0.key] != $0.value) }
             // Your click seals only what its card showed you: each held thing as it was when held. One that moved
