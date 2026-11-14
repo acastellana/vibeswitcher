@@ -196,8 +196,8 @@ that 9e's table didn't answer:**
 - **The kitty graphics probe** (`APC G i=31,…,a=q;… ST`), which the headless terminal answers `APC G i=31;OK ST`.
   9e leaves kitty graphics out on purpose, so the reply is dropped and logged ("it is no reply"), once per session
   start: Claude Code then takes the terminal for one without kitty graphics, which a headless parser is in effect.
-  The test allows that drop and no other. Whether to answer the probe (a query only, its `OK` reply only) is the
-  lead's call.
+  The test allows that drop and no other. The probe stays unanswered (the lead's call, 2026-11-14: the allowance
+  kept, as made).
 
 **The 12a review (2026-11-14): a drop was hiding behind the log's once-a-second line.** The host logged a dropped
 reply a line a second at most; a drop within that second was only counted, and the count reached the log only with

@@ -754,9 +754,9 @@ while no client is attached (`HostedSession.swift:226-229`), and they don't chan
 passes a reply only when it answers a query the host saw in that session's output since the last reply, and only in
 the reply grammar (cursor position, device attributes, the colour and mode reports the headless terminal makes, and
 the focus report, `CSI I` or `CSI O`, it makes at once when the program turns focus events on with DECSET 1004, one
-per 1004 named: Task 12a); any other byte from a parser is dropped and logged, every drop (a line a second at most,
-those held back counted on the next line or, when the parser stops first, in a line of their own). With sealed copies a parser can't be seized; this keeps a parser bug
-from typing into the lead.
+per 1004 named: Task 12a, approved by the lead 2026-11-14); any other byte from a parser is dropped and logged,
+every drop (a line a second at most, those held back counted on the next line or, when the parser stops first, in a
+line of their own). With sealed copies a parser can't be seized; this keeps a parser bug from typing into the lead.
 
 **Who reads `/proc` entries of other processes** must treat "unreadable" carefully: any process can make itself
 non-dumpable (`PR_SET_DUMPABLE 0` needs no privilege). An unreadable process is **the host** only if its pid and

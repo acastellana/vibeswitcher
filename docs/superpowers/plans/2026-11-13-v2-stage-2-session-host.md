@@ -1952,8 +1952,8 @@ After the bootstrap it is built with the sandbox (install folder read-only there
      recorded;
   6. through it all, the host's log shows no parser reply dropped (Task 9e).
 - [ ] **Step 2:** the run, the Claude Code version and each step's time go into the inventory.
-- *As made (2026-11-14), for the lead to approve:*
-  - Step 6 found that Claude Code turns focus events on as it starts (`CSI ? 1004 h`), which SwiftTerm answers at once
+- *As made (2026-11-14), approved by the lead 2026-11-14:*
+  - **The DECSET 1004 change to 9e's reply table** (approved): Step 6 found that Claude Code turns focus events on as it starts (`CSI ? 1004 h`), which SwiftTerm answers at once
     with `CSI I`; 9e's table had that responder as a view's only (its As-made list "left out … the focus report"), so
     Linux dropped it. `Sources/VibeHost/V2/ParserReplies.swift` (outside this task's Files) now takes DECSET 1004 as a
     query answered by `CSI I` or `CSI O`, one per 1004 the setting names
@@ -1961,8 +1961,8 @@ After the bootstrap it is built with the sandbox (install folder read-only there
     say so. This supersedes 9e's "the focus report" among the replies left out.
   - **Step 6 deviates from "no parser reply dropped":** the test allows drops of kitty graphics replies (`APC G`),
     which 9e leaves out on purpose; Claude Code probes kitty graphics as it starts and the headless terminal answers
-    `APC G i=31;OK ST`. The lead's call: keep the allowance, or answer the kitty graphics query (its `OK` reply only)
-    so step 6 can assert no drop at all.
+    `APC G i=31;OK ST`. Approved as made: the allowance is kept, and the kitty graphics query is not answered (the
+    other way, answering it with its `OK` reply only so step 6 could assert no drop at all, was not taken).
   - The 12a review: a drop within a second of the last logged line was only counted, and the count reached the log
     only on the next logged drop, so one held back when the parser stopped (the session ending, a handover's exec, the
     host quitting) was never logged. `ParserReplies.flushDropped` logs what was held back, naming the first four, from
