@@ -1751,6 +1751,11 @@ why: the Mac's launches change too, because the CLI's default changed under them
   `deny(_:base:records:)` (`LeadLaunch.swift:118-124`) appends `LinuxLaunch.denyRules` (empty on the Mac), and
   `prepare` (311-) returns its result through `LinuxLaunch.inline` (the identity on the Mac). `prepare`'s body is not
   rewritten.
+  *As made, approved by the lead 2026-11-14 (kind 4):* five one-line hooks, not two. `deny` keeps its body and
+  signature, and each of its three cases (lead, verifier, worker) appends `LinuxLaunch.denyRules(for:)` to the list it
+  returns (the first version's wrapper and new `deny(both:base:records:)`, outside kind 4, the 10b review put back as
+  these three); `prepare` adds `LinuxLaunch.permissionMode(command:)` before `--name` (the fourth hook, "Measured
+  since" above) and returns through `LinuxLaunch.inline`. The port map's line names each, with its real lines.
 - Test: `Tests/VibeCoreTests/LeadLaunchTests.swift`
 
 - [ ] **Step 1: Failing tests.**
