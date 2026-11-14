@@ -125,6 +125,92 @@ struct ClaudeStoresTests {
         }
     }
 
+    static let roles: [(LeadLaunch.Role, String)] = [(.worker, "worker-fix-login"), (.verifier, "verify-fix-login"), (.verifier, "finder2-fix-login")]
+
+    /// Fake entries directly in `~/.claude` beside the stores: a store no rule names (invented here), the daemon's
+    /// `daemon.json`, Claude Code's own files and folders, and the keep list's (a skill's reference file, a plugin's).
+    static let unnamed = ["zz-store-from-a-later-release/records.jsonl", "daemon.json", "a-new-file.json", "CLAUDE.md", "settings.json",
+                          "settings.local.json", "agents/a.md", "commands/c.md", "rules/r.md", "ide/1.lock", ".credentials.json"]
+    static let kept = ["skills/tdd/references/notes.md", "plugins/cache/acme/1.0/skills/s/SKILL.md"]
+
+    func withUnnamed(_ h: Home) throws {
+        for file in Self.unnamed + Self.kept {
+            let path = h.real + "/" + file
+            try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try Data("FAKE".utf8).write(to: URL(fileURLWithPath: path))
+        }
+        try FileManager.default.createDirectory(atPath: h.real + "/projects/\(h.main)/memory", withIntermediateDirectories: true)
+        try Data("FAKE".utf8).write(to: URL(fileURLWithPath: h.real + "/projects/\(h.main)/memory/MEMORY.md"))
+    }
+
+    /// Everything directly in `~/.claude` but the keep list is denied to every worker, verifier and finder, as written
+    /// and as resolved, a store no rule names among them: listed at launch, not named. The keep list (skills, plugins)
+    /// and the project's own memory stay readable; the lead is denied none of it.
+    @Test func everyEntryButTheKeepListIsDenied() throws {
+        let h = try home(in: "listed")
+        try withUnnamed(h)
+        for (role, name) in Self.roles {
+            let rules = try deny(role, h, name: name)
+            for file in Self.unnamed {
+                let top = String(file.split(separator: "/")[0])
+                for path in ["~/.claude/\(top)", "~/.claude/\(file)", h.real + "/\(top)", h.real + "/\(file)"] {
+                    #expect(denied(path, by: rules), "\(name): \(path)")
+                }
+            }
+            for file in Self.kept + ["projects/\(h.main)/memory/MEMORY.md", "projects/\(h.own)/s.jsonl"] {
+                #expect(!denied("~/.claude/\(file)", by: rules) && !denied(h.real + "/\(file)", by: rules), "\(name): \(file)")
+            }
+            // The named stores aren't added twice by the listing.
+            #expect(rules.filter { $0 == "Read(~/.claude/daemon)" }.count == 1, "\(name)")
+        }
+        let lead = try deny(.lead, h, name: "lead-acme")
+        #expect(lead == LeadLaunch.deny(.lead))
+        for file in Self.unnamed { #expect(!denied("~/.claude/\(file)", by: lead) && !denied(h.real + "/\(file)", by: lead), "lead: \(file)") }
+    }
+
+    /// `daemon.json` is denied by name, there or not when the role starts: the known stores never depend on the listing.
+    @Test func daemonJSONIsDeniedByName() throws {
+        let h = try home(in: "no-daemon-json")
+        #expect(!FileManager.default.fileExists(atPath: h.real + "/daemon.json"))
+        for (role, name) in Self.roles {
+            let rules = try deny(role, h, name: name)
+            #expect(rules.contains("Read(~/.claude/daemon.json)") && rules.contains("Read(/\(h.real)/daemon.json)"), "\(name)")
+        }
+        #expect(LeadLaunch.deny(.worker).contains("Read(~/.claude/daemon.json)") && LeadLaunch.deny(.verifier).contains("Read(~/.claude/daemon.json)"))
+    }
+
+    /// A `~/.claude` that's there but can't be listed starts no worker or verifier: what's in it couldn't be denied.
+    /// None at all still starts them; the lead starts either way.
+    @Test func anUnlistableClaudeFolderStartsNoWorkerOrVerifier() throws {
+        let h = try home(in: "unlistable-claude")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: h.real)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: h.real) }
+        #expect(throws: (any Error).self) { _ = try FileManager.default.contentsOfDirectory(atPath: h.real) }
+        for (role, name) in Self.roles {
+            #expect(throws: BoardError.self, "\(name)") { _ = try deny(role, h, name: name) }
+        }
+        _ = try deny(.lead, h, name: "lead-acme")
+
+        let missing = try home(in: "no-claude")
+        try FileManager.default.removeItem(atPath: missing.home + "/.claude")
+        for (role, name) in Self.roles {
+            let rules = try deny(role, missing, name: name)
+            #expect(denied("~/.claude/daemon.json", by: rules) && denied("~/.claude/history.jsonl", by: rules), "\(name)")
+        }
+    }
+
+    /// An entry whose name a rule can't hold as it is would go undenied: no worker or verifier starts instead.
+    @Test func anEntryNoRuleCanNameStartsNoWorkerOrVerifier() throws {
+        for (index, entry) in ["store*", "store (old)", "store[1]"].enumerated() {
+            let h = try home(in: "unnameable\(index)")
+            try FileManager.default.createDirectory(atPath: h.real + "/" + entry, withIntermediateDirectories: true)
+            for (role, name) in Self.roles {
+                #expect(throws: BoardError.self, "\(entry): \(name)") { _ = try deny(role, h, name: name) }
+            }
+            _ = try deny(.lead, h, name: "lead-acme")
+        }
+    }
+
     /// A `projects` folder that's there but can't be listed starts no worker or verifier (as an unreadable board starts
     /// no team verifier): the other projects' transcripts in it couldn't be denied (audit workers-and-verifiers-4:F3).
     /// None at all still starts them, and the lead starts either way.

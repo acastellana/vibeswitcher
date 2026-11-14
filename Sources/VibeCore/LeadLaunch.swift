@@ -127,20 +127,41 @@ public enum LeadLaunch {
     /// own path check of a shell read (`cat`, `head`, `tail`, `grep`, `sed`, `wc`, an input redirection: "was blocked by
     /// a deny rule"); the hook allows none outside the worktree (`ReadOnlyCommand.reachesOutside`). Its path as
     /// resolved, and the other projects' transcript folders, are added at launch (`otherSessions`). The lead keeps them.
+    /// `daemon.json`, a file beside the daemon's folder, is named too (audit workers-and-verifiers-5). Everything else
+    /// directly in `~/.claude` but `claudeKeep` is denied by listing it at launch (`otherSessions`); these stay named so
+    /// the known ones never depend on that listing.
     static let sessionStores = ["paste-cache", "shell-snapshots", "file-history", "plans", "tasks", "todos", "sessions", "debug", "feedback",
-                                "jobs", "daemon", "telemetry", "session-env", "backups"]
+                                "jobs", "daemon", "daemon.json", "telemetry", "session-env", "backups"]
     static let claudeStores = [promptHistory] + sessionStores.flatMap { ["Read(~/.claude/\($0))", "Read(~/.claude/\($0)/**)"] }
+
+    /// What directly in `~/.claude` a worker or verifier may still Read with its tools; every other entry there is
+    /// denied at launch (`otherSessions`), so a store Claude Code adds later is denied without anyone naming it. Only
+    /// what a session reads with the Read tool to work: what Claude Code loads itself (CLAUDE.md, `rules`, settings,
+    /// `agents`, `commands`, hooks' scripts) it reads by `readFile`, which no Read rule binds (2.1.325, as `session-env`
+    /// showed in workers-and-verifiers-5), so those are denied with the rest. When in doubt, denied.
+    static let claudeKeep: [String: String] = [
+        // A skill's text ends "Base directory for this skill: <path>" (2.1.325's bundle): its references and scripts
+        // there are read with the Read tool.
+        "skills": "user skills: a skill's reference files are read from its folder",
+        // Plugins' skills, agents and scripts live in `plugins/cache/…` (`CLAUDE_PLUGIN_ROOT`), read the same way.
+        "plugins": "plugin skills: their reference files and scripts are read from the plugin's folder",
+        // Each project's transcripts and auto-memory: the other projects' folders are denied one by one below, the
+        // project's own (its memory among them) stay readable.
+        "projects": "the project's own memory and transcripts; other projects' folders are denied by listing them",
+    ]
 
     /// What a worker or verifier started in `cwd` for the project at `root` is also denied, read from `home` at its
     /// launch: `claudeStores` by their paths as resolved, where `~/.claude` (or one of them) is a link elsewhere and the
-    /// `~` rule doesn't see the target; and the Claude Code project folders (`~/.claude/projects/<folder>`: transcripts,
+    /// `~` rule doesn't see the target; every other entry directly in `~/.claude` but `claudeKeep` (as written and as
+    /// resolved), listed now, so a store a later Claude Code adds is denied unnamed; and the Claude Code project folders (`~/.claude/projects/<folder>`: transcripts,
     /// tool results, auto-memory) of every other repository there now. The project's own stay readable: the main
     /// checkout's (its auto-memory, shared with its worktrees') and each of its worktrees' (`<root>/.vibeswitcher/
     /// worktrees/…`), the role's own session among them; a team verifier's members are `memberTranscripts`'.
     /// A folder made after the launch (a project first opened later) isn't denied: a deny rule can't say "all but".
     /// Throws when a path as resolved is one a rule can't name as it is (`isRuleSafe`): the role isn't started rather
-    /// than started without its rule, as a team verifier's unreadable board (`team`); so does a `projects` folder that's
-    /// there but can't be listed (none at all is no other project's sessions).
+    /// than started without its rule, as a team verifier's unreadable board (`team`); so does a `~/.claude` or `projects`
+    /// folder that's there but can't be listed (none at all is no other project's sessions), and an entry of `~/.claude`
+    /// whose name a rule can't hold.
     public static func otherSessions(root: String, cwd: String, home: String = VibePaths.home) throws -> [String] {
         let claude = (home as NSString).appendingPathComponent(".claude")
         func real(_ path: String) -> String? {
@@ -149,12 +170,34 @@ public enum LeadLaunch {
             return String(cString: found)
         }
         var rules: [String] = []
-        for store in ["history.jsonl"] + sessionStores {
-            let path = (claude as NSString).appendingPathComponent(store)
-            guard let resolved = real(path) ?? real(claude).map({ ($0 as NSString).appendingPathComponent(store) }),
-                  resolved != path else { continue }
+        // `entry` of `~/.claude` as resolved, where that isn't its `~` path.
+        func resolvedRules(_ entry: String) throws -> [String] {
+            let path = (claude as NSString).appendingPathComponent(entry)
+            guard let resolved = real(path) ?? real(claude).map({ ($0 as NSString).appendingPathComponent(entry) }),
+                  resolved != path else { return [] }
             try holdable(resolved, for: path)
-            rules += store == "history.jsonl" ? ["Read(/\(resolved))"] : ["Read(/\(resolved))", "Read(/\(resolved)/**)"]
+            return entry == "history.jsonl" ? ["Read(/\(resolved))"] : ["Read(/\(resolved))", "Read(/\(resolved)/**)"]
+        }
+        for store in ["history.jsonl"] + sessionStores { rules += try resolvedRules(store) }
+        // Everything else directly in `~/.claude` but `claudeKeep`, as it is now: one made after the launch isn't
+        // denied (a deny rule can't say "all but"). A `~/.claude` that's there but can't be listed starts no worker or
+        // verifier; none at all holds nothing to deny.
+        let top: [String]
+        do { top = try FileManager.default.contentsOfDirectory(atPath: claude) } catch {
+            var info = stat()
+            guard stat(claude, &info) == 0 || errno != ENOENT else { return rules }
+            throw BoardError(text: "\(claude) couldn't be listed (\((error as NSError).localizedDescription)), so no worker or verifier "
+                + "was started: what's in it couldn't be denied.")
+        }
+        let named = Set(["history.jsonl"] + sessionStores)
+        for entry in top.sorted() where claudeKeep[entry] == nil && !named.contains(entry) {
+            let path = (claude as NSString).appendingPathComponent(entry)
+            // A name a rule can't hold as it is (a glob's `*`, a parenthesis) would go undenied: none is started instead.
+            guard isRuleSafe(entry) else {
+                throw BoardError(text: "\(path) has a name a permission rule can't hold as it is, so no worker or verifier was started: "
+                    + "rename it to one of letters, digits, spaces, . _ and -.")
+            }
+            rules += ["Read(~/.claude/\(entry))", "Read(~/.claude/\(entry)/**)"] + (try resolvedRules(entry))
         }
         let projects = (claude as NSString).appendingPathComponent("projects")
         let entries: [String]
