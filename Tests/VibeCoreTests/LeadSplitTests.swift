@@ -218,6 +218,35 @@ struct LeadSplitTests: LeadTeamFixture {
         #expect(runtime.spawned.count == 2)
     }
 
+    /// A split team whose integrator ended: start_worker starts its integrator again, alone, told it's split; no member
+    /// starts by the lead's tools or auto_advance until it runs.
+    @Test func anEndedIntegratorStartsAgainAloneBeforeAnyMember() throws {
+        let (root, runtime, lead) = try started()
+        #expect(!(try split(root, runtime)).isError)
+        runtime.calls.withLock { runtime.killed.append(runtime.spawned[0].id) }
+        #expect(throws: LeadAdvance.NotDue.self) { try lead.advanceMembers("build-it") }
+        #expect(runtime.spawned.count == 1)
+        let again = lead.call("start_worker", ["task": "build-it"])
+        #expect(!again.isError, "\(again.text)")
+        #expect(runtime.spawned.count == 2 && runtime.spawned[1].cwd == Worktrees.path(root: root, slug: "build-it"))
+        #expect(task(root)?.worker == runtime.spawned[1].id && task(root)?.team?.first?.worker == runtime.spawned[1].id)
+        #expect(task(root)?.team?.dropFirst().allSatisfy { $0.worker == nil } == true)
+        #expect(try prompt(root, "worker-build-it").contains("The team is split already"))
+    }
+
+    /// Members run on Claude, whatever the task's agent: their brief has no Codex part.
+    @Test func membersRunOnClaude() throws {
+        let (root, runtime, lead) = try started()
+        let codex = lead.call("update_task", ["task": "build-it", "agent": "codex"])
+        #expect(!codex.isError, "\(codex.text)")
+        #expect(!(try split(root, runtime)).isError)
+        let members = lead.call("start_worker", ["task": "build-it"])
+        #expect(!members.isError, "\(members.text)")
+        let ui = try #require(task(root)?.teamMember("ui")?.worker)
+        #expect(runtime.agents[ui] == "claude")
+        #expect(!(try prompt(root, "worker-build-it--ui")).contains("You run in the Codex CLI"))
+    }
+
     /// add_task's and update_task's team: checked as LeadTeam.make checks it, and only before a split.
     @Test func theLeadSetsAndClearsATeamBeforeItsSplitOnly() throws {
         let root = try repo()
