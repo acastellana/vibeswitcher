@@ -75,21 +75,25 @@ struct TeamMemberLines: View {
     let lines: [TeamMemberLine]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             ForEach(lines) { line in
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    // One run of text, two lines at most: the Team tab is narrow, and on one line each the part
-                    // left no room for the progress.
-                    (Text(verbatim: line.name).font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(line.integrator ? AnyShapeStyle(.primary) : AnyShapeStyle(TeammateMark.color))
-                        + Text(verbatim: "  " + line.part).font(.system(size: 11)).foregroundStyle(.secondary)
-                        + Text(verbatim: " — " + (line.progress ?? "no progress yet")).font(.system(size: 11)).foregroundStyle(.tertiary))
-                        .lineLimit(2).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 4)
-                    if let waiting = line.waitingText {
-                        Text(waiting).font(.system(size: 10.5, weight: .medium)).foregroundStyle(.orange).lineLimit(1).fixedSize()
+                // The progress on a line of its own: the Team tab is narrow, and sharing a run with the part let a
+                // long part push the progress out of view.
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        (Text(verbatim: line.name).font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(line.integrator ? AnyShapeStyle(.primary) : AnyShapeStyle(TeammateMark.color))
+                            + Text(verbatim: "  " + line.part).font(.system(size: 11)).foregroundStyle(.secondary))
+                            .lineLimit(1).truncationMode(.tail)
+                        Spacer(minLength: 4)
+                        if let waiting = line.waitingText {
+                            Text(waiting).font(.system(size: 10.5, weight: .medium)).foregroundStyle(.orange).lineLimit(1).fixedSize()
+                        }
                     }
+                    Text(verbatim: line.progress ?? "no progress yet").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .lineLimit(2).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
                 }
+                .help(line.spoken)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(line.spoken)
             }
