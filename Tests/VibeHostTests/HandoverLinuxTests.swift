@@ -291,7 +291,9 @@ extension HandoverLinuxTests {
         #expect(await host.handOver(to: host.newBinary, through: client) == .ok, "\(host.log)")
         #expect(await eventually { host.log.contains("took over") }, "\(host.log)")
         #expect(host.log.contains("and \(1 << 20) bytes of secrets"), "\(host.log)")
-        #expect(host.lines(after: "handover memory taken: ").first?.contains("sha256 \(BuildInfo.sha256(of: secret))") == true, "\(host.log)")
+        // Said by `HandoverMemory.finish`, after "took over".
+        #expect(await eventually { host.log.contains("handover memory taken: ") }, "\(host.log)")
+        #expect(host.lines(after:"handover memory taken: ").first?.contains("sha256 \(BuildInfo.sha256(of: secret))") == true, "\(host.log)")
     }
 
     /// A state of a newer format than this build's is refused, by its read and by the probe (rule 11): the probe's
@@ -565,8 +567,8 @@ extension HandoverLinuxTests {
 
     /// A target inside a git worktree (a folder holding `.git`, a folder or a worktree's file) is refused by name,
     /// outside the install folder and inside it, whatever its build-info says; so is one inside a session's working
-    /// folder. A `.git` above the install folder (a home kept in git) refuses nothing, nor does a session whose folder
-    /// holds the install folder (a shell in the home).
+    /// folder, the install folder itself among them. A `.git` above the install folder (a home kept in git) refuses
+    /// nothing, nor does a session whose folder strictly holds the install folder (a shell in the home).
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's handover target check; the Mac hands over by path"))
     func aHandoverToAPathInsideAWorktreeIsRefused() throws {
         let dir = "\(shortScratchRoot)/vsht-\(UUID().uuidString.prefix(8))"
@@ -593,6 +595,9 @@ extension HandoverLinuxTests {
         // A session working inside an installed build's folder: refused too.
         #expect(try Self.refusal(Self.check(installed.host, installRoot: root, sessionFolders: [installed.folder]))
                 == "\(installed.host) is inside a session's working folder (\(installed.folder))")
+        // A session working in the install folder itself, which could have staged any build there: refused too.
+        #expect(try Self.refusal(Self.check(installed.host, installRoot: root, sessionFolders: [root]))
+                == "\(installed.host) is inside a session's working folder (\(root))")
     }
 
     /// A build outside the install folder is refused though its build-info records it; so is a link inside the install
@@ -701,6 +706,36 @@ extension HandoverLinuxTests {
         #expect(!host.log.contains("couldn't take over"), "\(host.log)")
         let (_, _, _, _, _, servedBy, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
         #expect(servedBy == host.pid)
+    }
+
+    /// A build the record doesn't name, loaded as the target, then the recorded build renamed over its path once the
+    /// copy is loaded and before its check (a scratch host's `--handover-test-hold-check`): the check is of the copy
+    /// loaded, not of the file at the path, so the handover is refused on its hash, and the host serves on.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies; the Mac hands over by path"))
+    func aTargetRenamedOverBeforeItsCheckIsCheckedAsLoaded() async throws {
+        let root = "\(shortScratchRoot)/vshr-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let installed = try InstalledBuild(in: root, "b", appending: "\n")
+        // The recorded image set aside, and the test's own image unchanged (which the record doesn't name) in its place.
+        let recorded = root + "/recorded"
+        #expect(rename(installed.host, recorded) == 0, "errno \(errno)")
+        try FileManager.default.copyItem(atPath: hostLauncher, toPath: installed.host)
+        let loaded = try Self.sha256(of: installed.host)
+        let hold = root + "/hold"
+        let host = try await ScratchHostProcess(arguments: ["--install-root", root, HandoverMemory.holdCheckTestFlag, hold])
+        defer { host.stop() }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let seq = client.send(.handover(executable: installed.host))
+        #expect(await eventually { host.log.contains("handover to \(installed.host) loaded; held before its check") }, "\(host.log)")
+        #expect(rename(recorded, installed.host) == 0, "errno \(errno)")
+        #expect(try Self.sha256(of: installed.host) == installed.hostHash)
+        FileManager.default.createFile(atPath: hold, contents: nil)
+        #expect(await eventually { client.reply(to: seq) != nil })
+        #expect(client.reply(to: seq) == .error("Couldn't hand over: vibeswitcher-host: its sha256 \(loaded) isn't the one build-info records (\(installed.hostHash))."),
+                "\(String(describing: client.reply(to: seq)))\n\(host.log)")
+        #expect(!host.log.contains("handing over to"), "\(host.log)")
+        let (_, _, build, _, _, pid, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        #expect(build == host.oldBuild && pid == host.pid)
     }
 
     /// With an install root, a target whose first bytes are `#!` is refused by name, before any probe: it never runs.

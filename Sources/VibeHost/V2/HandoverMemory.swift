@@ -62,6 +62,9 @@ public enum HandoverMemory {
     /// with an install root, checked) and "handing over to" is said, before the probe: it waits (at most a minute) for
     /// `PATH` to exist, so a test can change the target's file then.
     public static let holdTestFlag = "--handover-test-hold"
+    /// A scratch host's test flag: a handover waits, once the target's copy is loaded and before its check, until PATH
+    /// exists (the host's queue held meanwhile). Not carried across a handover.
+    public static let holdCheckTestFlag = "--handover-test-hold-check"
     /// The handing-over image's own `--node-root` and `--server`, given to the new image for its fallback (Task 9d,
     /// S2-D7): `goBack` gives them back as `--node-root` and `--server`, so the old build serves again with its own.
     public static let fallbackNodeRootFlag = "--handover-fallback-node-root"
@@ -295,6 +298,21 @@ public enum HandoverMemory {
         for _ in 0..<6_000 where access(hold, F_OK) != 0 { usleep(10_000) }
     }
 
+    /// Where a scratch host's handovers are held once the target's copy is loaded, before its check (`holdCheckTestFlag`,
+    /// set by `HostHardening.afterConfig`); nil: none, the user's host's always.
+    static var holdBeforeCheck: String? {
+        get { reportLock.withLock { holdCheckPath } }
+        set { reportLock.withLock { holdCheckPath = newValue } }
+    }
+    nonisolated(unsafe) private static var holdCheckPath: String?
+
+    /// The hold `holdBeforeCheck` names, if any, said first: on the host's queue, which it holds (a scratch host's test).
+    static func holdBeforeCheckIfAsked(_ server: HostServer, target: String) {
+        guard let hold = holdBeforeCheck else { return }
+        say(server, "handover to \(target) loaded; held before its check")
+        for _ in 0..<6_000 where access(hold, F_OK) != 0 { usleep(10_000) }
+    }
+
     /// Whether this host says what its handovers wrote and took (`finish`, `HostServer.handOverThroughMemory`): a scratch
     /// host on Linux (set by `HostHardening.afterConfig`), for its tests; never the user's host.
     static var reports: Bool {
@@ -376,6 +394,7 @@ extension HostServer {
         }
         // With an install root (the user's host), only an installed build this host checked, on the copy that runs,
         // and its server, checked against the same record (V2/HandoverTarget.swift). Before any probe.
+        HandoverMemory.holdBeforeCheckIfAsked(self, target: executable)
         let build: HandoverTarget.Build?
         let serverCopy: Platform.ProcessSelf.SealedCopy?
         switch installedTarget(target, path: executable) {

@@ -294,15 +294,18 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
     func theTestFlagsAreAScratchHostsAndNotCarried() {
         let arguments = ["--log", "l", "--handover-test-secret", "x", "--handover-test-secret-file", "f", "--handover-test-traced",
                          "--install-root", "r", "--parser-test-hooks", "--server-arg", "a", "--hold-first-look",
-                         "--test-user-seal-life", "9", HostHardening.staysDumpableFlag, "--idle-exit", "600"]
+                         "--test-user-seal-life", "9", HostHardening.staysDumpableFlag, HandoverMemory.holdCheckTestFlag, "c",
+                         ServerChild.replaceHoldTestFlag, "h", "--idle-exit", "600"]
         #expect(!HostHardening.takesTestFlags(ownsLaunchers: true))
         #expect(HostHardening.takesTestFlags(ownsLaunchers: false))
         #expect(HostHardening.refused(in: arguments, ownsLaunchers: false).isEmpty)
         #expect(HostHardening.refused(in: arguments + ["--handover-test-traced"], ownsLaunchers: true)
                 == ["--handover-test-secret", "--handover-test-secret-file", "--handover-test-traced", "--install-root", "--parser-test-hooks",
-                    "--server-arg", "--hold-first-look", "--test-user-seal-life", HostHardening.staysDumpableFlag])
+                    "--server-arg", "--hold-first-look", "--test-user-seal-life", HostHardening.staysDumpableFlag,
+                    HandoverMemory.holdCheckTestFlag, ServerChild.replaceHoldTestFlag])
         #expect(HostHardening.withoutTestFlags(arguments)
-                == ["--log", "l", "--server-arg", "a", "--hold-first-look", "--test-user-seal-life", "9", "--idle-exit", "600"])
+                == ["--log", "l", "--server-arg", "a", "--hold-first-look", "--test-user-seal-life", "9", ServerChild.replaceHoldTestFlag, "h",
+                    "--idle-exit", "600"])
     }
 
     // MARK: Hardened at start

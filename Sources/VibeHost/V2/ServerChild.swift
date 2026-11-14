@@ -24,8 +24,10 @@ import VibeCore
 /// - A handover to an installed build (Task 9d, S2-D8) carries that build's server too, a sealed copy checked against
 ///   its `build-info` (`State.images.server`): the new image takes it as the copy of every start from then on
 ///   (`carriedServer`), and when its bytes differ from the running child's, ends that child once idle (no connection
-///   through its connector open: no request in flight) and starts it again from the new copy at once
-///   (`replaceWhenIdle`), so the host and the server are the same build. A fallback closes the copy unused.
+///   through its connector open, or `idleLimit` after it first looked) and starts it again from the new copy at once
+///   (`replaceWhenIdle`), so the host and the server are the same build. A fallback closes the copy unused. Until then
+///   the record a handover carries says what the running child runs (`runningImageSHA256`), so a second switch, or a
+///   fallback to the build that was to replace it, still replaces a child of another build's bytes.
 ///
 /// The Mac has none: no sealed copies there, no connector (its app proves itself by its code, `AppProof`), and
 /// `start` gives nil.
@@ -70,6 +72,10 @@ public final class ServerChild {
     /// The child being ended so that it starts again from a new build's server (`replaceWhenIdle`): started again at
     /// once when it ends, not after the wait.
     private var replacing: pid_t?
+    /// The running child when it runs other bytes than `copy`'s (a switch carried another build's server, Task 9d): its
+    /// pid and the SHA-256 of what it was started from (empty when not known), which a handover's record carries until
+    /// it is started again from `copy`.
+    private var due: (pid: pid_t, sha256: String)?
     private var stopped = false
     private var delay = ServerChild.firstDelay
     private var restartCount = 0
@@ -173,9 +179,11 @@ public final class ServerChild {
         }
         let carriedCopy = isInherited(record.image) && !otherDescriptors.contains(record.image) && record.image != record.connector
         if let carried {
-            // The running child's image, by its own copy's bytes: another build's when they differ (or can't be read).
-            let running = carriedCopy ? Platform.ProcessSelf.adopt(record.image) : nil
-            let differs = running.map { BuildInfo.sha256(of: $0) != BuildInfo.sha256(of: carried) } ?? true
+            // What the running child runs: what the record says when a switch before left it to be replaced, else its
+            // own copy's bytes (empty when they can't be read). Another build's when it differs from the carried copy.
+            let running = record.runningImageSHA256
+                ?? (carriedCopy ? Platform.ProcessSelf.adopt(record.image).map { BuildInfo.sha256(of: $0) } : nil) ?? ""
+            let differs = running != BuildInfo.sha256(of: carried)
             if carriedCopy { Sys.close(record.image) }
             if let loaded { Sys.close(loaded.fd) }
             say(server, "server child pid \(record.pid) runs on; its next start is from the new build's server \(launch.image), carried"
@@ -183,8 +191,7 @@ public final class ServerChild {
             let child = ServerChild(server: server, copy: carried, launch: launch)
             server.queue.async {
                 server.serverChild = child
-                child.resume(record)
-                if differs { child.replaceWhenIdle() }
+                child.resume(record, due: differs ? running : nil)
             }
             return child
         }
@@ -206,10 +213,16 @@ public final class ServerChild {
                 return start(launch, server: server)
             }
         }
+        // A switch before left the child to be started again from its build's server (a fallback to that build, or a
+        // handover without an install root since): still due when this image's copy is other bytes than it runs.
+        let due = record.runningImageSHA256.flatMap { $0 != BuildInfo.sha256(of: copy) ? $0 : nil }
+        if due != nil {
+            say(server, "server child pid \(record.pid) still runs another build's server: it starts again from \(launch.image) once idle")
+        }
         let child = ServerChild(server: server, copy: copy, launch: launch)
         server.queue.async {
             server.serverChild = child
-            child.resume(record)
+            child.resume(record, due: due)
         }
         return child
     }
@@ -316,8 +329,9 @@ public final class ServerChild {
     var record: HostHandover.ServerChildRecord? {
         guard let server, let running = lock.withLock({ child }), let end = server.appConnectorEnd(running.connector),
               let link = Platform.Processes.link(running.pid) else { return nil }
+        let due = lock.withLock { self.due }.flatMap { $0.pid == running.pid ? $0.sha256 : nil }
         return HostHandover.ServerChildRecord(pid: running.pid, startTicks: link.startTicks, connector: end, image: copy.fd,
-                                              path: launch.image)
+                                              path: launch.image, runningImageSHA256: due)
     }
 
     /// No more starts: the child running is ended (SIGKILL) and reaped, its connector closed, and the copy closed.
@@ -381,8 +395,9 @@ public final class ServerChild {
     }
 
     /// The child a handover carried (`restore` checked it), taken again: its connector's end the app's, its sender its
-    /// token, its end watched. On `queue`.
-    private func resume(_ record: HostHandover.ServerChildRecord) {
+    /// token, its end watched. `due`: the SHA-256 of what it runs when that isn't `copy`'s bytes (empty when not known):
+    /// it is then started again from `copy` once idle (`replaceWhenIdle`). On `queue`.
+    private func resume(_ record: HostHandover.ServerChildRecord, due: String? = nil) {
         guard let server, !lock.withLock({ stopped }) else { return }
         let pid = record.pid
         let token = Platform.Processes.token(pid)
@@ -396,8 +411,12 @@ public final class ServerChild {
             return scheduleRestart()
         }
         let watch = Platform.ProcessExit.watch(pid, queue: queue) { [weak self] in self?.ended(pid) }
-        lock.withLock { child = (pid, token, record.connector, Date(), watch) }
+        lock.withLock {
+            child = (pid, token, record.connector, Date(), watch)
+            self.due = due.map { (pid, $0) }
+        }
         Self.say(server, "server child pid \(pid) carried over from the build before, connector \(record.connector)")
+        if due != nil { replaceWhenIdle(pid) }
     }
 
     /// The child `pid` ended: its connector closed (its connections with it), it reaped, and started again. On `queue`.
@@ -410,6 +429,7 @@ public final class ServerChild {
         let ran = Date().timeIntervalSince(running.startedAt)
         let replaced = lock.withLock { () -> Bool in
             child = nil
+            if due?.pid == pid { due = nil }
             if ran >= Self.steadyRun { delay = Self.firstDelay }
             defer { if replacing == pid { replacing = nil } }
             return replacing == pid
@@ -422,18 +442,26 @@ public final class ServerChild {
         scheduleRestart()
     }
 
-    /// The child running now, which a handover carried from the build before (`restore`), ended once no connection
-    /// through its connector is open (no request of it in flight, each being a connection of its own), looked at every
-    /// `idleLook`: its connector closed and SIGTERM, SIGKILL if it still runs `replaceLimit` later. `ended` then starts
-    /// it again at once from this child's copy, the new build's server. On `queue`.
-    func replaceWhenIdle() {
-        guard let server, !lock.withLock({ stopped }), let running = lock.withLock({ child }) else { return }
-        guard server.appConnectionsOpen(through: running.connector) == 0 else {
-            queue.asyncAfter(deadline: .now() + Self.idleLook) { [weak self] in self?.replaceWhenIdle() }
-            return
+    /// The child `pid`, which a handover carried from the build before (`restore`) and which runs another build's
+    /// server, ended once no connection through its connector is open (each `HostCall` is a connection of its own), or
+    /// once `idleLimit` has gone by since the first look (a server keeps a connection open for the host's events, so
+    /// "no connection open" may never come), looked at every `idleLook`: its connector closed and SIGTERM, SIGKILL if
+    /// it still runs `replaceLimit` later. `ended` then starts it again at once from this child's copy, the new build's
+    /// server. Nothing once `pid` isn't the child running (it ended meanwhile, and its start again was from `copy`).
+    /// A scratch host's `replaceHoldTestFlag` holds the first look until its file exists. On `queue`.
+    func replaceWhenIdle(_ pid: pid_t, firstLook: Date? = nil) {
+        guard let server, !lock.withLock({ stopped }), let running = lock.withLock({ child }), running.pid == pid else { return }
+        let again = { (since: Date?) in
+            self.queue.asyncAfter(deadline: .now() + Self.idleLook) { [weak self] in self?.replaceWhenIdle(pid, firstLook: since) }
         }
+        if let hold = Self.replaceHold, access(hold, F_OK) != 0 { return again(nil) }
+        let since = firstLook ?? Date()
+        let open = server.appConnectionsOpen(through: running.connector)
+        guard open == 0 || Date().timeIntervalSince(since) >= Self.idleLimit else { return again(since) }
         lock.withLock { replacing = running.pid }
-        Self.say(server, "server child pid \(running.pid) idle: ended, to start again from the new build's server")
+        Self.say(server, open == 0
+                 ? "server child pid \(running.pid) idle: ended, to start again from the new build's server"
+                 : "server child pid \(running.pid) still had \(open) connections open \(Int(Self.idleLimit)) s after the switch: ended, to start again from the new build's server")
         server.closeAppConnector(running.connector)
         kill(running.pid, SIGTERM)
         queue.asyncAfter(deadline: .now() + Self.replaceLimit) { [weak self] in
@@ -442,9 +470,24 @@ public final class ServerChild {
         }
     }
 
-    /// How often `replaceWhenIdle` looks again, and how long a child it ended may take to go before SIGKILL.
+    /// How often `replaceWhenIdle` looks again, how long it waits for no connection open before it ends the child
+    /// anyway, and how long a child it ended may take to go before SIGKILL.
     static let idleLook: TimeInterval = 0.2
+    static let idleLimit: TimeInterval = 30
     static let replaceLimit: TimeInterval = 10
+
+    /// A scratch host's test flag: `replaceWhenIdle` doesn't look until PATH exists (a test's switch left pending).
+    /// Carried across a scratch host's handovers, so the image a switch went to holds too.
+    public static let replaceHoldTestFlag = "--server-test-replace-hold"
+
+    /// `replaceHoldTestFlag`'s path, set by `HostHardening.afterConfig` for a scratch host on Linux; nil: none, the user's
+    /// host's always.
+    static var replaceHold: String? {
+        get { holdLock.withLock { holdPath } }
+        set { holdLock.withLock { holdPath = newValue } }
+    }
+    private static let holdLock = NSLock()
+    nonisolated(unsafe) private static var holdPath: String?
 
     /// A start again after the wait, which then doubles (to `longestDelay`). On `queue`.
     private func scheduleRestart() {

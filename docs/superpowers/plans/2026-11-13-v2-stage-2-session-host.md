@@ -118,12 +118,18 @@ errors in 8 of 13 files), `docs/process/v2-stage1-recon.md` §1.2, §1.7, §1.9 
   `--handover-test-secret-file`, `--handover-test-traced`, `--install-root`, `--parser-test-hooks`, `--server-arg`,
   `--hold-first-look`, the engine's `--test-user-seal-life`, the launcher's test delay, Task 9b's
   `--launcher-test-hold` (the 9b review fixes: a scratch host's launchers wait after making themselves dumpable until
-  a file exists), and Task 9a's
-  `--test-stays-dumpable`, which makes a scratch host dumpable again so a test can count its descriptors from outside)
+  a file exists), Task 9a's
+  `--test-stays-dumpable`, which makes a scratch host dumpable again so a test can count its descriptors from outside,
+  and Task 9d's, awaiting the lead's approval: `--handover-test-fail-next` (the image handed over to is given
+  `--handover-fail-restore`, as a script can't stand in for an installed build), `--handover-test-hold PATH` (a
+  handover waits after its check, before its probe, until PATH exists), and from the 9d review
+  `--handover-test-hold-check PATH` (a handover waits once its target's copy is loaded, before its check, the host's
+  queue held) and `--server-test-replace-hold PATH` (a switch's start again of the server child waits until PATH
+  exists, so a test can act while it is due))
   are honoured only by a
-  scratch host (on a lock of its own) and, but for `--server-arg`, `--hold-first-look` and `--test-user-seal-life`
-  (which a scratch host carries across its handovers, so a test's settings survive one), are stripped from
-  `config.arguments`. On the Mac, `--handover-test-secret` keeps today's behaviour (Task 9a).
+  scratch host (on a lock of its own) and, but for `--server-arg`, `--hold-first-look`, `--test-user-seal-life` and
+  `--server-test-replace-hold` (which a scratch host carries across its handovers, so a test's settings survive one),
+  are stripped from `config.arguments`. On the Mac, `--handover-test-secret` keeps today's behaviour (Task 9a).
 - **Which host is the user's.** `ownsLaunchers` (the host holds the user's lock) carries the security rules (test
   flags refused, `spawnNeedsLead`, `watchesItsPath`); `--node` carries the install's (`build-info`, `installRoot`,
   the allow-list, `HOME` from `getpwuid`). So the two can't come apart on the real home, on Linux a host on the user's
@@ -1541,15 +1547,28 @@ is green.
     `<install folder>/<build>/bin/vibeswitcher-host`, both resolved.
   - The build's server is loaded and checked, and `--server` appended, only when the host runs with `--server` (the
     node's host always does); a scratch host with an install root and no server hands over with `--node-root` alone.
-  - "Once idle" is: no connection made through the running child's connector is open (each request is a connection
-    of its own); looked at every 0.2 s; the child's connector closed and SIGTERM (SIGKILL 10 s later), started again
-    at once from the carried copy. The carried copy is taken only by the image it was carried for (its own copy is
-    `images.own`); a fallback closes it.
+  - "Once idle" is: no connection made through the running child's connector is open (each `HostCall` is a
+    connection of its own), or 30 s (`ServerChild.idleLimit`) after the first look, whichever comes first; looked at
+    every 0.2 s; the child's connector closed and SIGTERM (SIGKILL 10 s later), started again at once from the carried
+    copy. The carried copy is taken only by the image it was carried for (its own copy is `images.own`); a fallback
+    closes it. *The 9d review (2026-11-14), awaiting the lead's ruling:* the bound is there because the server keeps a
+    `HostConnection` open for the host's events (S2), so "no connection open" may never come; after it a request in
+    flight is cut (the server is started again at once). "No request in flight" proper needs a count of unanswered
+    requests in `HostServer.handle`, a Non-seam edit this plan doesn't list.
+  - Until the child is started again, the record a handover carries says what it runs
+    (`ServerChildRecord.runningImageSHA256`, an optional field, kind 6), and the replacement is tied to that pid: a
+    second switch compares the carried server with what the child runs, not with the copy of its next start, and a
+    fallback to the build that was to replace it, or a handover with no server carried, still starts it again (the
+    9d review).
+  - A session working in the install folder itself refuses every build there (the 9d review); only one whose folder
+    strictly holds it (a shell in the home) refuses none.
   - The old build's own `--node-root` and `--server` travel as `--handover-fallback-node-root` and
     `--handover-fallback-server` (handover flags), which `goBack` gives back as its own. Two scratch-only test flags:
     `--handover-test-fail-next` (the image handed over to is given `--handover-fail-restore`: a script can't stand in
     for an installed build) and `--handover-test-hold PATH` (a handover waits, after its check, before its probe, until
-    PATH exists). `--install-root` is not carried across a scratch host's handover. The server helper says its image's
+    PATH exists); the 9d review added `--handover-test-hold-check PATH` (before the check) and
+    `--server-test-replace-hold PATH` (carried). `--install-root` is not carried across a scratch host's handover, so a
+    scratch host's second switch isn't checked as an installed build's (the node's `--node` is carried). The server helper says its image's
     hash when given `--server-arg report-image-hash`.
 
 - [ ] **Step 1: Failing tests** (Linux unless marked), with a scratch `--install-root` holding build folders and

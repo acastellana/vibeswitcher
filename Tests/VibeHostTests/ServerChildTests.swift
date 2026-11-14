@@ -1077,3 +1077,111 @@ extension ServerChildTests {
         #expect(second.line.contains(" image-sha256=\(builds.serverHash) ") && second.line.contains(" node-root=\(builds.a) "), "\(second.line)")
     }
 }
+
+// MARK: The 9d review: a switch's start again of the server, kept until done
+
+extension ServerChildTests {
+    /// The first helper's own actions file (the one it opened), with the path given a new one first, so that a helper
+    /// started after a handover asks nothing: each `send` appends lines the first helper then does.
+    struct FirstHelperActions {
+        let handle: FileHandle
+
+        init(_ host: ServerChildHost) throws {
+            handle = try FileHandle(forWritingTo: URL(fileURLWithPath: host.dir + "/" + ServerChildHelper.actionsName))
+            try handle.seekToEnd()
+            try host.replaceActions(["sleep"])
+        }
+
+        func send(_ lines: String...) throws { try handle.write(contentsOf: Data(lines.map { $0 + "\n" }.joined().utf8)) }
+        func close() { try? handle.close() }
+    }
+
+    /// The host on build A switched to B, its server child (A's) left to be started again from B's server once idle,
+    /// and held there (a scratch host's `--server-test-replace-hold`, carried): the host, its first helper, that
+    /// helper's own actions and the hold's path.
+    func switchLeftPending(_ builds: Switch) async throws -> (host: ServerChildHost, helper: pid_t, actions: FirstHelperActions, hold: String) {
+        let hold = builds.dir + "/replace-hold"
+        let host = try await builds.host([ServerChild.replaceHoldTestFlag, hold])
+        let helper = try #require(await host.firstHelper(), "\(host.said)")
+        let actions = try FirstHelperActions(host)
+        try actions.send("handover \(builds.b.host)")
+        #expect(await eventually { host.lines(of: helper).contains("handover ok") }, "\(host.results)\n\(host.said)")
+        #expect(await eventually { host.said.contains("server child pid \(helper) carried over from the build before") }, "\(host.said)")
+        #expect(host.said.contains("server child pid \(helper) runs on; its next start is from the new build's server \(builds.b.server), carried, and it starts again"),
+                "\(host.said)")
+        return (host, helper, actions, hold)
+    }
+
+    /// Once the hold is let go, the child running (`helper`, A's) is started again from B's server.
+    func expectReplacedByBsServer(_ host: ServerChildHost, helper: pid_t, hold: String, _ builds: Switch) async throws {
+        #expect(host.started.count == 1 && kill(helper, 0) == 0, "\(host.results)")
+        FileManager.default.createFile(atPath: hold, contents: nil)
+        #expect(await eventually(timeout: 60) { host.started.count >= 2 }, "\(host.results)\n\(host.said)")
+        let second = try #require(host.started.dropFirst().first)
+        #expect(second.line.contains(" image-sha256=\(try #require(builds.b.serverHash)) ") && second.line.contains(" node-root=\(builds.b.folder) "),
+                "\(second.line)")
+        #expect(host.said.contains("server child pid \(helper) idle: ended, to start again from the new build's server"), "\(host.said)")
+    }
+
+    /// A switch to B leaves A's server child to be started again from B's server; before that happens B hands over to
+    /// C, which can't take over (a scratch host's handover doesn't carry `--install-root`, so C is checked against B's
+    /// `build-info`), and goes back to B. The record B handed over says what the child runs (A's bytes), not only the
+    /// copy of its next start (B's), so B, taking it back, still starts it again from B's server.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child and installed builds"))
+    func aFallbackToTheSwitchedBuildStillReplacesTheOldServer() async throws {
+        let builds = try Switch()
+        defer { builds.remove() }
+        let c = try InstalledBuild(in: builds.root, "C", appending: "\n\n", server: builds.binary, serverAppending: "\n")
+        let (host, helper, actions, hold) = try await switchLeftPending(builds)
+        defer { host.stop(); actions.close() }
+        try actions.send("handover \(c.host)")
+        #expect(await eventually { host.said.contains("going back to") }, "\(host.said)")
+        #expect(await eventually { host.said.components(separatedBy: "carried over from the build before").count == 3 }, "\(host.said)")
+        #expect(host.said.contains("server child pid \(helper) still runs another build's server: it starts again from \(builds.b.server) once idle"),
+                "\(host.said)")
+        try await expectReplacedByBsServer(host, helper: helper, hold: hold, builds)
+    }
+
+    /// The same, B handing over to itself again before the child was started again: the new image still starts it
+    /// again from B's server, though the copy the record names for its next start is B's already.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child and installed builds"))
+    func aSecondHandoverStillReplacesTheOldServer() async throws {
+        let builds = try Switch()
+        defer { builds.remove() }
+        let (host, helper, actions, hold) = try await switchLeftPending(builds)
+        defer { host.stop(); actions.close() }
+        try actions.send("handover \(builds.b.host)")
+        #expect(await eventually { host.said.components(separatedBy: "carried over from the build before").count == 3 }, "\(host.said)")
+        #expect(!host.said.contains("couldn't take over"), "\(host.said)")
+        #expect(host.said.contains("server child pid \(helper) still runs another build's server: it starts again from \(builds.b.server) once idle"),
+                "\(host.said)")
+        try await expectReplacedByBsServer(host, helper: helper, hold: hold, builds)
+    }
+
+    /// A server keeps a connection open (the host's events): a switch to B whose child holds one still starts it again
+    /// from B's server, `ServerChild.idleLimit` after it first looked, saying so.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child and installed builds"))
+    func aSwitchReplacesAServerThatHoldsAConnection() async throws {
+        let builds = try Switch()
+        defer { builds.remove() }
+        let hold = builds.dir + "/replace-hold"
+        let host = try await builds.host([ServerChild.replaceHoldTestFlag, hold])
+        defer { host.stop() }
+        let helper = try #require(await host.firstHelper(), "\(host.said)")
+        let actions = try FirstHelperActions(host)
+        defer { actions.close() }
+        // The handover, then a connection to the new image, kept.
+        try actions.send("handover \(builds.b.host)", "hold")
+        #expect(await eventually { host.lines(of: helper).contains("held") }, "\(host.results)\n\(host.said)")
+        #expect(host.lines(of: helper).contains("handover ok"), "\(host.results)")
+        #expect(host.said.contains("server child pid \(helper) carried over from the build before"), "\(host.said)")
+        let looked = Date()
+        FileManager.default.createFile(atPath: hold, contents: nil)
+        #expect(await eventually(timeout: ServerChild.idleLimit + 60) { host.started.count >= 2 }, "\(host.results)\n\(host.said)")
+        #expect(Date().timeIntervalSince(looked) >= ServerChild.idleLimit - 1)
+        let second = try #require(host.started.dropFirst().first)
+        #expect(second.line.contains(" image-sha256=\(try #require(builds.b.serverHash)) "), "\(second.line)")
+        #expect(host.said.contains("server child pid \(helper) still had 1 connections open \(Int(ServerChild.idleLimit)) s after the switch"),
+                "\(host.said)")
+    }
+}

@@ -911,10 +911,11 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `HandoverLinuxTests.aHandoverImageIsNotDumpableFromItsExec`, `HandoverLinuxTests.aFailedTakeOverGoesBackThroughTheSealedCopy`,
 `HandoverLinuxTests.aFallbackImageRewrittenInPlaceIsNotWhatRuns`, `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`
 (Task 9c); `ServerChildTests.aSwitchBringsTheNewBuildsServer`, `ServerChildTests.aFallbackGetsTheOldBuildsFolders`,
-`HandoverLinuxTests.aHandoverGivesTheNewImageItsBuildsFoldersAndTheFallbackItsOwn` (Task 9d).
+`HandoverLinuxTests.aHandoverGivesTheNewImageItsBuildsFoldersAndTheFallbackItsOwn` (Task 9d);
+`ServerChildTests.aFallbackToTheSwitchedBuildStillReplacesTheOldServer`, `aSecondHandoverStillReplacesTheOldServer`,
+`aSwitchReplacesAServerThatHoldsAConnection` (the 9d review).
 
-**Tests to write:** Task 9d: `ServerChildTests.aSwitchBringsTheNewBuildsServer`. Step 8:
-`aSwitchWhileAWorkerRunsIsRefused`.
+**Tests to write:** Step 8: `aSwitchWhileAWorkerRunsIsRefused`.
 
 ## S9. What the host executes
 
@@ -1024,16 +1025,13 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `aHandoverWhoseHashDiffersFromTheRecordIsRefused`, `aHandoverToAnInstalledBuildIsAllowed`,
 `aTargetRenamedOverAfterItsCheckIsNotWhatRuns`, `aScriptTargetIsRefusedByTheUsersHost`,
 `aScratchHostWithNoInstallRootHandsOverAsToday`, `theInstallRootIsTheNodesOrAScratchHostsFlag`,
-`ServerChildTests.aSwitchBringsTheNewBuildsServer` (Task 9d); planned: stage 2 plan task 3, task 8, task 9 (9c).
+`ServerChildTests.aSwitchBringsTheNewBuildsServer` (Task 9d); `HandoverLinuxTests.aTargetRenamedOverBeforeItsCheckIsCheckedAsLoaded`
+(the 9d review); planned: stage 2 plan task 3, task 8, task 9 (9c).
 
 **Tests to write:** Task 3: `ProcessSelfTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`,
 `aSealedCopysHashIsOfTheBytesItRuns`, `aPidsTokenIsItsPeerToken`. Task 8:
 `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`. Task 9:
-`HostHardeningTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`;
-`HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`,
-`aHandoverToABuildOutsideTheInstallFolderIsRefused`, `aHandoverWhoseHashDiffersFromTheRecordIsRefused`,
-`aTargetRenamedOverAfterItsCheckIsNotWhatRuns`, `aHandoverToAnInstalledBuildIsAllowed`,
-`aScratchHostWithNoInstallRootHandsOverAsToday`. Task 10: `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`.
+`HostHardeningTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`. Task 10: `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`.
 E4: `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`. Step 8: `StartCommandTests` (the unit written,
 `Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, the commit's folder), `noNameIsBothUnsetAndAssigned`, a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,

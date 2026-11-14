@@ -96,13 +96,18 @@ public enum HostHandover {
         public var image: Int32
         /// The `--server` path the copy was loaded from: never run, only said.
         public var path: String
+        /// The SHA-256 of the image the running child was started from, when that isn't `image`'s bytes (Task 9d: a
+        /// switch carried another build's server, and the child is still to be started again from it; empty when not
+        /// known). Nil otherwise, on the Mac, and from builds before it.
+        public var runningImageSHA256: String?
 
-        public init(pid: Int32, startTicks: UInt64, connector: Int32, image: Int32, path: String) {
+        public init(pid: Int32, startTicks: UInt64, connector: Int32, image: Int32, path: String, runningImageSHA256: String? = nil) {
             self.pid = pid
             self.startTicks = startTicks
             self.connector = connector
             self.image = image
             self.path = path
+            self.runningImageSHA256 = runningImageSHA256
         }
     }
 

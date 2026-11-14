@@ -12,7 +12,8 @@ import VibeCore
 /// - **Not inside a git worktree**, nor a **session's working folder**: refused by name, the folder named. A worktree is
 ///   a folder holding `.git` (a folder, or a worktree's file), looked for from the target's folder up to the install
 ///   folder (included) for a target inside it, and up to `/` for one outside; a session's folder only when it doesn't
-///   hold the install folder itself (a shell in the home holds every installed build).
+///   strictly hold the install folder (a shell in the home holds every installed build). A session working in the
+///   install folder itself refuses every build there: it could have staged any of them.
 /// - **Inside the install folder**, as `<install folder>/<build>/bin/vibeswitcher-host`, both resolved (`realpath`), so
 ///   a link inside the install folder to a build elsewhere is refused as elsewhere.
 /// - **Recorded**: that build's `build-info` (`BuildInfo`, a newer format refused) records the SHA-256 of the copy's
@@ -70,7 +71,7 @@ public enum HandoverTarget {
         }
         for given in sessionFolders {
             let folder = realPath(given) ?? (given as NSString).standardizingPath
-            guard folder != "/", folder != root, !isInside(root, folder), isInside(resolved, folder) else { continue }
+            guard folder != "/", !isInside(root, folder), isInside(resolved, folder) else { continue }
             return .failure(Refused("\(path) is inside a session's working folder (\(folder))"))
         }
         guard inside else { return .failure(Refused("\(path) isn't inside the install folder (\(root))")) }
