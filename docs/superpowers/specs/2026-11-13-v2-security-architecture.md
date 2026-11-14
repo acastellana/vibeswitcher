@@ -626,11 +626,11 @@ with the sandbox.
 `HostedSessionTerminalTests.aReapedSessionIsNotLive` (Task 6; on Linux only: the four from
 `aProcessThatTookASessionsTerminalFirstIsNotThatSession` to `anAncestorYoungerThanItsChildBreaksTheChain`, and
 `aReapedSessionIsNotLive`, which `TIOCGSID` holds, as a session leader that exits leaves its terminal with no session;
-`aChildReparentedWhileItsChainIsReadBreaksIt` runs on both systems); planned: stage 2 plan task 10.
-
-**Tests to write:** Task 10:
+`aChildReparentedWhileItsChainIsReadBreaksIt` runs on both systems);
 `VerifierBranchCodeHostTests.anEscapedVerifierCommandWithoutSetsidIsNobodys`,
-`BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup`. With the connector:
+`BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup` (Task 10c; on Linux only).
+
+**Tests to write:** With the connector:
 `aConnectorConnectionIsItsSession`, `branchCodeHasNoConnector`, `theConnectorSurvivesAHandover`, and the measurement
 `claudePassesTheConnectorToItsToolServerAndHooks`.
 
@@ -1118,12 +1118,14 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `aTargetRenamedOverAfterItsCheckIsNotWhatRuns`, `aScriptTargetIsRefusedByTheUsersHost`,
 `aScratchHostWithNoInstallRootHandsOverAsToday`, `theInstallRootIsTheNodesOrAScratchHostsFlag`,
 `ServerChildTests.aSwitchBringsTheNewBuildsServer` (Task 9d); `HandoverLinuxTests.aTargetRenamedOverBeforeItsCheckIsCheckedAsLoaded`
-(the 9d review); planned: stage 2 plan task 3, task 8, task 9 (9c).
+(the 9d review); `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`,
+`HandoverLinuxTests.aHostWithNoGitOnlyRootCanWriteDoesNotStart` (Task 10c; on Linux only), `ToolsTests.theMacsGitIsStillUsrBinGit`
+(Task 10c; on the Mac only); planned: stage 2 plan task 3, task 8, task 9 (9c).
 
 **Tests to write:** Task 3: `ProcessSelfTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`,
 `aSealedCopysHashIsOfTheBytesItRuns`, `aPidsTokenIsItsPeerToken`. Task 8:
 `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`. Task 9:
-`HostHardeningTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`. Task 10: `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`.
+`HostHardeningTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`.
 E4: `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`. Step 8: `StartCommandTests` (the unit written,
 `Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, the commit's folder), `noNameIsBothUnsetAndAssigned`, a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,
@@ -1225,7 +1227,9 @@ bootstrap (S12 item 15).
 `LeadLaunchTests.eachRoleIsLaunchedInAutoModeByName`, `LeadLaunchTests.aProjectsOwnPermissionModeIsKept`,
 `LeadLaunchTests.aSessionsNameIsItsOwnWhateverItsPromptQuotes`,
 `LeadLaunchTests.theRecordedCommandLeavesOutARolesInlineValues`,
-`InlineLaunchHostTests.aDayOfInlineRoleSessionsStillGetsAWelcome`; planned: stage 2 plan task 10.
+`InlineLaunchHostTests.aDayOfInlineRoleSessionsStillGetsAWelcome`; `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`,
+`BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup` (Task 10c: git from root's folders, and a verifier's
+command in a session of its own).
 
 **Tests to write:** The engine's
 E4: `LeadStartTests.theLeadGetsNoCodexWorkers`, `aLeadIsLaunchedByClaudesResolvedPath`,

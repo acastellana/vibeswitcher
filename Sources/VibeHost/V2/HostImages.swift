@@ -190,11 +190,22 @@ public enum HostImages {
     /// account's own home (`usersLock` the account's lock) it needs `--node`, and with `--node` its lock is the
     /// account's. A new image whose carried state says the user's host while its probe of its own `--lock` says scratch
     /// is refused without `--node` there, as a fresh host on the account's lock is. A scratch home's user's host (the
-    /// tests') needs none, as before.
+    /// tests') needs none, as before. Any host, first: refused without a git only root can change on its PATH, or
+    /// without the branch shell (`toolsRefusal`).
     public static func mayStart(lockPath: String, usersLock: String, accountRoot: String, node: Bool, ownsLaunchers: Bool) -> String? {
+        if let why = toolsRefusal(missing: Platform.Tools.missing()) { return why }
         if let why = mayStart(lockPath: lockPath, accountRoot: accountRoot, node: node) { return why }
         guard ownsLaunchers, let why = mayStart(lockPath: usersLock, accountRoot: accountRoot, node: node) else { return nil }
         return "the user's host: " + why
+    }
+
+    /// Why a host may not start for what this machine lacks (`Platform.Tools.missing()`), or nil (Linux; the Mac: nil,
+    /// as before): no `git` on PATH in a folder only root can change (`Platform.Tools.git`; one the user's account
+    /// could write is never run), or no branch shell (the security architecture document's S9).
+    static func toolsRefusal(missing: [String]) -> String? {
+        guard !Platform.CodeIdentity.isAvailable, !missing.isEmpty else { return nil }
+        let named = missing.map { $0 == "git" ? "git (none on PATH in a folder owned by root that only root can write)" : $0 }
+        return "this machine lacks " + named.joined(separator: " and ")
     }
 
     // MARK: The build's folders

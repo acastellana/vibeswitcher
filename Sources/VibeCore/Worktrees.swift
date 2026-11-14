@@ -189,6 +189,8 @@ public enum BranchCode {
         let argv = prefix(arguments[1], executable: executable, shell: prefixShell(environment))
         var passed = isRunner(argv) ? Platform.Tools.branchEnvironment(environment) : environment
         passed[prefixVariable] = nil
+        // Linux: the branch's code as a child in a session of its own, waited for (V2/BranchCodeSession.swift).
+        if Platform.Tools.branchCodeGetsOwnSession && isRunner(argv) { return BranchCodeSession.run(argv, environment: passed) }
         let cArgs = argv.map { strdup($0) } + [nil]
         let cEnv = passed.map { strdup("\($0.key)=\($0.value)") } + [nil]
         execve(argv[0], cArgs, cEnv)

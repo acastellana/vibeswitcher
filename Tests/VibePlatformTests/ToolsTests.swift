@@ -22,8 +22,9 @@ struct ToolsTests {
         #expect(FileManager.default.isExecutableFile(atPath: git))
         #expect(Platform.Tools.git == git)
         #if os(Linux)
-        // The first on PATH, as a shell would find it.
-        #expect(git == Platform.Tools.find("git", path: nil))
+        // The first on PATH in a folder only root can write.
+        #expect(git == Platform.Tools.trustedGit(path: ProcessInfo.processInfo.environment["PATH"] ?? Platform.Tools.pathWhenUnset,
+                                                 status: Platform.Tools.fileStatus))
         #else
         #expect(git == "/usr/bin/git")
         #endif
@@ -48,6 +49,75 @@ struct ToolsTests {
         #expect(Platform.Spawn(executable: nowhere, arguments: ["git", "--version"]).start() == .failure(Platform.Errno(code: ENOENT)))
         // What `git` is while none is found: an absolute path, so a spawn fails rather than looks around.
         #expect(Platform.Tools.absentGit.hasPrefix("/"))
+    }
+
+    /// The node's git is never one the user's account could have written (the security architecture document's S9):
+    /// `trustedGit` passes over a folder of the user's, a root's folder anyone may write (a sticky one, as the system's
+    /// temporary folder is), a root's folder below one of the user's, a folder that is a link, a `git` of the user's in
+    /// a root's folder, a `git` that is a link or that nobody may run, and PATH's entries that aren't absolute or that
+    /// name `..`, and resolves to the first `git` only root can change. Given only
+    /// the user's folders, there is none. A table stands in for `lstat`: the real `git` is cached, read once with this
+    /// process's PATH, so changing PATH here would prove nothing.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's rule; the Mac's git is /usr/bin/git"))
+    func theNodesGitIsNeverFromAFolderTheUserCanWrite() {
+        let user: uid_t = 1000
+        let folder = S_IFDIR, file = S_IFREG, link = S_IFLNK
+        let table: [String: Platform.Tools.FileStatus] = [
+            "/": (0, folder | 0o755, false),
+            "/home": (0, folder | 0o755, false),
+            "/home/u": (user, folder | 0o750, false),
+            "/home/u/bin": (user, folder | 0o755, false),
+            "/home/u/bin/git": (user, file | 0o755, true),
+            "/home/u/root-owned": (0, folder | 0o755, false),
+            "/home/u/root-owned/git": (0, file | 0o755, true),
+            "/everyones": (0, folder | 0o1777, false),
+            "/everyones/git": (0, file | 0o755, true),
+            "/opt": (0, folder | 0o755, false),
+            "/opt/shared": (0, folder | 0o775, false),
+            "/opt/shared/git": (0, file | 0o755, true),
+            "/opt/users-git": (0, folder | 0o755, false),
+            "/opt/users-git/git": (user, file | 0o755, true),
+            "/opt/writable-git": (0, folder | 0o755, false),
+            "/opt/writable-git/git": (0, file | 0o777, true),
+            "/opt/linked-git": (0, folder | 0o755, false),
+            "/opt/linked-git/git": (0, link | 0o777, false),
+            "/opt/plain": (0, folder | 0o755, false),
+            "/opt/plain/git": (0, file | 0o644, true),
+            "/bin": (0, link | 0o777, false),
+            "/bin/git": (0, file | 0o755, true),
+            "/usr": (0, folder | 0o755, false),
+            "/usr/bin": (0, folder | 0o755, false),
+            "/usr/bin/git": (0, file | 0o755, true),
+            "/usr/local": (0, folder | 0o755, false),
+            "/usr/local/bin": (0, folder | 0o755, false),
+            "/usr/local/bin/git": (0, file | 0o755, true),
+        ]
+        var asked: [String] = []
+        func status(_ path: String) -> Platform.Tools.FileStatus? {
+            asked.append(path)
+            return table[path]
+        }
+        let usersFirst = ["/home/u/bin", "/home/u/root-owned", "/everyones", "/opt/shared", "/opt/users-git", "/opt/writable-git",
+                          "/opt/linked-git", "/opt/plain", "/bin", "bin", "", ".", "/usr/bin/../../home/u/bin", "/usr/bin/", "/usr/local/bin"]
+        #expect(Platform.Tools.trustedGit(path: usersFirst.joined(separator: ":"), status: status) == "/usr/bin/git")
+        // Each folder from the root down was read, without following links.
+        #expect(asked.contains("/home/u") && asked.contains("/"))
+        #expect(Platform.Tools.trustedGit(path: "/home/u/bin", status: status) == nil)
+        #expect(Platform.Tools.trustedGit(path: "/home/u/bin:/home/u/root-owned:/everyones:/opt/shared:/bin", status: status) == nil)
+        #expect(Platform.Tools.trustedGit(path: "", status: status) == nil)
+        #expect(Platform.Tools.trustedGit(path: "/usr/local/bin:/usr/bin", status: status) == "/usr/local/bin/git")
+        // Nothing to read is nothing trusted.
+        #expect(Platform.Tools.trustedGit(path: "/usr/bin", status: { _ in nil }) == nil)
+        // The real one, on this machine, is in such a folder too, and `missing()` would list it otherwise.
+        #expect(Platform.Tools.trustedGit(path: "/usr/bin:/bin", status: Platform.Tools.fileStatus) == "/usr/bin/git")
+        #expect(!Platform.Tools.isExecutableFile(Platform.Tools.absentGit))
+    }
+
+    /// The Mac's git is today's.
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's form"))
+    func theMacsGitIsStillUsrBinGit() {
+        #expect(Platform.Tools.git == "/usr/bin/git")
+        #expect(!Platform.Tools.branchCodeGetsOwnSession)
     }
 
     /// A path is looked for until it is found, and never again after.

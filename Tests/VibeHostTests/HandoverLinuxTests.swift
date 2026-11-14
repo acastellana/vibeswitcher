@@ -31,8 +31,8 @@ import Testing
     }
 
     /// A scratch host started on its own home, socket and lock with `extra` after them, which isn't expected to start:
-    /// once it has ended, its exit status and what it said.
-    static func refusedHost(in dir: String, _ extra: [String]) async throws -> (status: Int32, said: String) {
+    /// once it has ended, its exit status and what it said. `path`: its PATH.
+    static func refusedHost(in dir: String, _ extra: [String], path: String = "/usr/bin:/bin") async throws -> (status: Int32, said: String) {
         let home = dir + "/home-\(UUID().uuidString.prefix(6))"
         try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
         let output = home + "/out"
@@ -40,7 +40,7 @@ import Testing
         let process = Process()
         process.executableURL = URL(fileURLWithPath: hostLauncher)
         process.arguments = ["--socket", home + "/h.sock", "--lock", home + "/h.lock", "--idle-exit", "600", "--log", home + "/session.log"] + extra
-        process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin", "TMPDIR": dir + "/"]
+        process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": path, "TMPDIR": dir + "/"]
         let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: output))
         process.standardOutput = handle
         process.standardError = handle
@@ -50,6 +50,25 @@ import Testing
         #expect(await eventually { !process.isRunning })
         let said = (try? String(contentsOfFile: output, encoding: .utf8)) ?? ""
         return (process.isRunning ? -1 : process.terminationStatus, said)
+    }
+
+    /// A host whose PATH holds no `git` in a folder only root can write doesn't start, saying so, and never runs the
+    /// `git` it was given in a folder of the user's (the stage 2 plan's Task 10c; the security architecture document's
+    /// S9): every git the vault, the seals and the base moves run would otherwise be that one.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's git from root's folders; the Mac's is /usr/bin/git"))
+    func aHostWithNoGitOnlyRootCanWriteDoesNotStart() async throws {
+        let dir = "\(shortScratchRoot)/vshg-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let bin = dir + "/bin", ran = dir + "/git-ran"
+        try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
+        try "#!/bin/sh\ntouch \(ran)\nexec /usr/bin/git \"$@\"\n".write(toFile: bin + "/git", atomically: true, encoding: .utf8)
+        #expect(chmod(bin + "/git", 0o755) == 0)
+        let (status, said) = try await Self.refusedHost(in: dir, [], path: bin)
+        #expect(status == 1, "\(said)")
+        #expect(said.contains("not started: this machine lacks git (none on PATH in a folder owned by root that only root can write)"), "\(said)")
+        #expect(!said.contains("vibeswitcher-host: started"), "\(said)")
+        #expect(!FileManager.default.fileExists(atPath: ran))
+        #expect(HostImages.toolsRefusal(missing: []) == nil)
     }
 
     /// A scratch `--node-root` whose `build-info` records another hash for the host's own image, or for its server, or

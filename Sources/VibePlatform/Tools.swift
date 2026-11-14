@@ -4,14 +4,56 @@ extension Platform {
     /// The programs the shared code runs by a path of its own choosing, where the systems keep them: the Mac has its
     /// git and its zsh at fixed paths; a Linux machine has git wherever its PATH says, and bash for zsh.
     public enum Tools {
-        /// The git VibeSwitcher runs. The Mac: `/usr/bin/git`. Linux: the first `git` on this process's PATH (`find`),
-        /// looked for until it is found and the same from then on, whatever PATH becomes; while there is none,
-        /// `/usr/bin/git`, where it usually is: run, that fails with ENOENT, and `missing()` lists it.
+        /// The git VibeSwitcher runs. The Mac: `/usr/bin/git`. Linux: the first `git` on this process's PATH in a folder
+        /// only root can write (`trustedGit`, with `lstat`), looked for until it is found and the same from then on,
+        /// whatever PATH becomes; while there is none, `absentGit`, a path with nothing at it: run, that fails with
+        /// ENOENT, and `missing()` lists it, so the host doesn't start (the security architecture document's S9). A
+        /// `git` the user's account could write (`~/.local/bin`, a worktree's folder put first on PATH) is never run.
         public static var git: String {
             #if canImport(Darwin)
             return "/usr/bin/git"
             #else
-            return foundGit.path { find("git", path: nil) } ?? absentGit
+            return foundGit.path { trustedGit(path: getenv("PATH").map { String(cString: $0) } ?? pathWhenUnset, status: fileStatus) }
+                ?? absentGit
+            #endif
+        }
+
+        /// What `trustedGit` reads of a path: its owner, its mode (its type's bits too) and whether it is a regular file.
+        public typealias FileStatus = (owner: uid_t, mode: mode_t, isFile: Bool)
+
+        /// The first `git` in `path` (folders with ":" between them, as PATH has them) that only root can change: a
+        /// regular file, not a link, that someone may run, owned by root and writable by neither its group nor others,
+        /// in a folder that is the same, as is every folder above it up to `/`. A folder that fails is passed over, and
+        /// so is one that isn't an absolute path or that names `.` or `..`. nil when none is. `status` reads a path
+        /// without following a link (`lstat`; tests give a table): a folder that is a link is passed over (Ubuntu's
+        /// `/bin`, a link to `usr/bin`, is reached as `/usr/bin`), and so is a `git` that is one.
+        public static func trustedGit(path: String, status: (String) -> FileStatus?) -> String? {
+            func onlyRoots(_ found: FileStatus?, isFolder: Bool) -> Bool {
+                guard let found, found.owner == 0, found.mode & (S_IWGRP | S_IWOTH) == 0 else { return false }
+                return isFolder ? found.mode & S_IFMT == S_IFDIR : found.isFile && found.mode & S_IFMT == S_IFREG && found.mode & 0o111 != 0
+            }
+            for entry in path.split(separator: ":").map(String.init) where entry.hasPrefix("/") {
+                let names = entry.split(separator: "/").map(String.init)
+                guard !names.contains(".") && !names.contains("..") else { continue }
+                // `/` first, then each folder below it down to the entry's own.
+                var folder = ""
+                let folders = ["/"] + names.map { name -> String in folder += "/" + name; return folder }
+                guard folders.allSatisfy({ onlyRoots(status($0), isFolder: true) }) else { continue }
+                let candidate = (folders.last == "/" ? "" : folders.last!) + "/git"
+                if onlyRoots(status(candidate), isFolder: false) { return candidate }
+            }
+            return nil
+        }
+
+        /// Whether a branch's code run through a verifier's shell prefix (`BranchCode.runPrefix`) is started as a child
+        /// in a POSIX session of its own, which the prefix waits for, rather than run in the prefix's place. The Mac:
+        /// no, in place as always. Linux: yes, so that what the branch's code starts has no controlling terminal, and
+        /// isn't taken for the verifier's session by its terminal once it has left the wrapper's tree.
+        public static var branchCodeGetsOwnSession: Bool {
+            #if canImport(Darwin)
+            return false
+            #else
+            return true
             #endif
         }
 
@@ -273,8 +315,8 @@ extension Platform {
         }
 
         /// What a node can't work without and this machine doesn't have, checked as it starts: `git` when none is
-        /// on PATH (the Mac: at /usr/bin/git), and the branch shell, by its path, when it isn't there. Empty: both
-        /// are there.
+        /// on PATH in a folder only root can write (`git`; the Mac: at /usr/bin/git), and the branch shell, by its
+        /// path, when it isn't there. Empty: both are there.
         public static func missing() -> [String] {
             missing(git: git, shell: branchShell[0])
         }
@@ -304,8 +346,8 @@ extension Platform {
 
         // MARK: Internals
 
-        /// What `git` is while none is found.
-        static let absentGit = "/usr/bin/git"
+        /// What `git` is while none is found: a path with nothing at it (`/nonexistent` is, by convention, never made).
+        static let absentGit = "/nonexistent/vibeswitcher/git"
         /// The folders looked in when the process has no PATH at all.
         static let pathWhenUnset = "/usr/local/bin:/usr/bin:/bin"
 
@@ -313,6 +355,13 @@ extension Platform {
         static func isExecutableFile(_ path: String) -> Bool {
             var info = stat()
             return stat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG && access(path, X_OK) == 0
+        }
+
+        /// `lstat`'s answer for `path`, as `trustedGit` reads it; nil when there's nothing there.
+        static func fileStatus(_ path: String) -> FileStatus? {
+            var info = stat()
+            guard lstat(path, &info) == 0 else { return nil }
+            return (info.st_uid, info.st_mode, info.st_mode & S_IFMT == S_IFREG)
         }
 
         static func missing(git: String, shell: String) -> [String] {
