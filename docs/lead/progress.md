@@ -3108,3 +3108,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 15:03 Audit of peer-wait-deadline-no: complete, clean, round 4: 2 Important closed, 3 Nit open, 1 Pre-existing open
 - 2026-11-14 15:20 Pipeline held: main-red-green-and ready to merge with none landing; cause: a merge in progress
 - 2026-11-14 15:20 Merged main-red-green-and: Main-red, green and catch-up notices reach every team member (build c385b7943fb8)
+- 2026-11-14 15:20 Automatically (auto_advance): Merged main-red-green-and (Main-red, green and catch-up notices reach every team member) into main at 971cf876, on its passing audit and the full test run.
+- 2026-11-14 15:20 Started a worker on cleanup-removes-a
+- 2026-11-14 15:20 Automatically (auto_advance): Started a worker on cleanup-removes-a (Cleanup removes a leftover folder that isn't a worktree), its after tasks done (main-red-green-and).
+- 2026-11-14 15:20 Automatically (auto_advance): Overlap for cleanup-removes-a's start (a warning only: nothing was refused or reordered). Sources/VibeCore/LeadToolset.swift: merge-dry-run-and (blocked: its branch changes it), peer-wait-deadline-no (review: its branch changes it).
+- 2026-11-14 15:20 Automatically (auto_advance): Cleaned up main-red-green-and (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-14 15:41 Pipeline held: peer-wait-deadline-no ready to merge with none landing; cause: a merge in progress
+- 2026-11-14 15:42 Merged peer-wait-deadline-no: Peer-wait deadline: no member waits on a teammate without a limit (build c385b7943fb8)
