@@ -24,6 +24,9 @@ public enum HostProtocol {
         public static let inputUnits = "inputUnits"
         /// Answers `HostRequest.census`: every project's live team sessions, counted.
         public static let census = "census"
+        /// Answers `HostRequest.hostNotes`, the app's alone: what the host saw that its server child should know
+        /// (`HostNotes`). Listed only on Linux, where the app is the server child.
+        public static let hostNotes = "hostNotes"
     }
 
     /// The error a spawn gets once the host agreed to shut down.
@@ -289,6 +292,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// a lead starts its team under: the welcome lists a lead its own team only. Answered `census` to the app and to
     /// any live session; a host older than this answers with an error.
     case census
+    /// What the host saw that the app should know (see `HostNotes`): answered `hostNotes` to the app alone. Sent only to
+    /// a host whose welcome lists `HostProtocol.Capability.hostNotes`.
+    case hostNotes
 }
 
 public enum HostEvent: Codable, Equatable, Sendable {
@@ -316,6 +322,29 @@ public enum HostEvent: Codable, Equatable, Sendable {
     case challenge(Data, keyless: Bool)
     /// The answer to `HostRequest.census`.
     case census([HostCensus])
+    /// The answer to `HostRequest.hostNotes`.
+    case hostNotes(HostNotes)
+}
+
+/// What the host saw that its server child should know and show (the security architecture document's S2): the
+/// host's own start, how often it started its server again, the paths it found replaced and bound again, and the app
+/// connections it refused. Ids and counts only; the journal (the host's stderr) has each as a line too.
+public struct HostNotes: Codable, Equatable, Sendable {
+    /// When the host (this process, across handovers) first started.
+    public var startedAt: Date
+    /// How many times it started its server child again after one ended.
+    public var serverRestarts: Int
+    /// Each path it found naming something else (its socket's or its lock's) and took back, in order.
+    public var replacedPaths: [String]
+    /// How many requests for an app connection it refused (a sender not its server child's, or a dumpable one).
+    public var refusedAppConnections: Int
+
+    public init(startedAt: Date, serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int) {
+        self.startedAt = startedAt
+        self.serverRestarts = serverRestarts
+        self.replacedPaths = replacedPaths
+        self.refusedAppConnections = refusedAppConnections
+    }
 }
 
 /// How many live sessions one repository's team holds in one role, as the host counts them for every caller

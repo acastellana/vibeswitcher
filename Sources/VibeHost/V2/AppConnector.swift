@@ -109,11 +109,21 @@ extension HostServer {
     /// (`testAppConnectorForHandover`). False, and `fd` left alone, on the Mac (no connector there) and when `fd`
     /// isn't open.
     func adoptTestAppConnector(_ fd: Int32, pid: pid_t) -> Bool {
+        adoptAppConnector(fd, sender: Platform.Processes.token(pid), requireNonDumpable: false, onDumpable: nil, testPid: pid)
+    }
+
+    /// Takes `fd`, the host's end of an app connector this process inherited across a handover, as `openAppConnector`'s
+    /// own end: answered for `sender` alone, refused while it is dumpable where `requireNonDumpable` (`onDumpable` then
+    /// called), registered under `fd` itself, which `setAppConnectorSender` and `closeAppConnector` then name. Made
+    /// close-on-exec and nonblocking, its senders passed. False, and `fd` left alone, on the Mac (no connector there)
+    /// and when `fd` isn't open.
+    func adoptAppConnector(_ fd: Int32, sender: Platform.PeerToken?, requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?,
+                           testPid: pid_t? = nil) -> Bool {
         guard !Platform.CodeIdentity.isAvailable, fcntl(fd, F_SETFD, FD_CLOEXEC) == 0 else { return false }
         Platform.Sockets.enableCredentials(fd)
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
-        let connector = AppConnector(fd: fd, sender: Platform.Processes.token(pid), requireNonDumpable: false, onDumpable: nil)
-        connector.testPid = pid
+        let connector = AppConnector(fd: fd, sender: sender, requireNonDumpable: requireNonDumpable, onDumpable: onDumpable)
+        connector.testPid = testPid
         onQueue {
             appConnectors.removeValue(forKey: fd)?.close()
             appConnectors[fd] = connector
@@ -123,6 +133,12 @@ extension HostServer {
             }
         }
         return true
+    }
+
+    /// The host's end of the connector `number` names (the number `openAppConnector` gave out), for a handover's
+    /// state; nil when there is none, or it has closed. On `queue`.
+    func appConnectorEnd(_ number: Int32) -> Int32? {
+        appConnectors[number].flatMap { $0.closed ? nil : $0.fd }
     }
 
     /// The test stand-in's connector, for a handover's state (see `HostHandover.State.testAppConnector`): nil when
@@ -195,6 +211,7 @@ extension HostServer {
     }
 
     private func refuse(_ connector: AppConnector, _ number: Int32, _ why: String) {
+        tally.refusedAppConnection()
         let line = "refused an app connection through connector \(number): \(why)"
         note("host: " + line)
         FileHandle.standardError.write(Data("vibeswitcher-host: \(line)\n".utf8))

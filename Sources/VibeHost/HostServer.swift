@@ -63,6 +63,9 @@ public final class HostServer {
         /// How long each session's launcher waits before it takes its terminal (see `SessionIdentityChecks`), so a test
         /// can take the terminal first. A scratch host's tests only; nil: none, as for every other host.
         public var launcherTestDelay: TimeInterval?
+        /// Whether the host watches its socket's and lock's paths and takes them back when something else is put there
+        /// (see V2/HostPathWatch.swift): the user's host on Linux. False: it doesn't, as always.
+        public var watchesItsPath = false
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -120,8 +123,8 @@ public final class HostServer {
     /// Per session, the client whose terminal answers queries and sets the size: the last to attach or type.
     private var primary: [UUID: ObjectIdentifier] = [:]
     private var lockFD: Int32 = -1
-    private var listenFD: Int32 = -1
-    private var acceptSource: DispatchSourceRead?
+    var listenFD: Int32 = -1
+    var acceptSource: DispatchSourceRead?
     private var housekeeping: DispatchSourceTimer?
     /// The watch on `Config.owner`.
     private var ownerWatch: (any Platform.Cancellable)?
@@ -134,6 +137,7 @@ public final class HostServer {
     public static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover,
                                       HostProtocol.Capability.leadVault, HostProtocol.Capability.appProof, HostProtocol.Capability.inputUnits,
                                       HostProtocol.Capability.census]
+        + (Platform.CodeIdentity.isAvailable ? [] : [HostProtocol.Capability.hostNotes])
     /// Per session, its input from every client in order (see `InputOrder`).
     private var inputOrders: [UUID: InputOrder] = [:]
     private var handingOver = false
@@ -142,6 +146,10 @@ public final class HostServer {
     var appConnectors: [Int32: AppConnector] = [:]
     /// The server child, the app on Linux (see V2/ServerChild.swift): none on the Mac, nor without `--server`.
     var serverChild: ServerChild?
+    /// The watch on the host's own paths (see V2/HostPathWatch.swift): only with `Config.watchesItsPath`.
+    var pathWatch: HostPathWatch?
+    /// What `hostNotes` answers that no other part keeps (see V2/HostNotesAnswer.swift).
+    let tally = HostTally()
 
     public init(config: Config) {
         self.config = config
@@ -201,6 +209,7 @@ public final class HostServer {
         timer.setEventHandler { [weak self] in self?.tidy() }
         timer.resume()
         housekeeping = timer
+        if config.watchesItsPath { pathWatch = HostPathWatch.start(for: self, config: config, lockFD: lockFD) }
         log.note("host: started, build \(config.hostBuild), socket \(config.socketPath)")
         if let owner = config.owner { watch(owner: owner) }
     }
@@ -248,6 +257,7 @@ public final class HostServer {
             self.housekeeping?.cancel()
             self.ownerWatch?.cancel()
             self.serverChild?.stop()
+            self.pathWatch?.stop()
             self.closeAppConnectors()
             self.clients.values.forEach { $0.close() }
             self.clients = [:]
@@ -266,7 +276,7 @@ public final class HostServer {
 
     static let queueKey = DispatchSpecificKey<Bool>()
 
-    private func acceptAll() {
+    func acceptAll() {
         while true {
             let fd = Platform.Sockets.accept(listenFD)
             guard fd >= 0 else { return }
@@ -413,7 +423,7 @@ public final class HostServer {
             // Where only leads may: the session the vault binds to a team's lead role (`leads` of itself).
             if case .spawn = request, config.spawnNeedsLead { return config.vault?.leads(id.uuidString, caller: caller) == true }
             return true
-        case .shutdown, .handover:
+        case .shutdown, .handover, .hostNotes:
             return caller == .app
         case .attach(let id, _, _), .detach(let id), .input(let id, _, _), .inputUnit(let id, _, _),
              .resize(let id, _, _), .screen(let id), .styledScreen(let id), .history(let id, _),
@@ -455,6 +465,8 @@ public final class HostServer {
                            capabilities: config.capabilities, pid: getpid(), startedAt: startedAt))
         case .census:
             reply(.census(HostCensus.count(allInfo.map { ($0.label, $0.cwd, $0.isLive) })))
+        case .hostNotes:
+            reply(.hostNotes(hostNotes(startedAt: startedAt)))
         case .spawn(let request):
             // Started now, it would be torn down with the host a moment later.
             guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }
@@ -807,7 +819,7 @@ public final class HostServer {
                                    saved.openedByApp = openedByApp.contains(id) && !Self.another(lastInput[id])
                                    return saved
                                }
-                           }, testAppConnector: testAppConnectorForHandover)
+                           }, testAppConnector: testAppConnectorForHandover, serverChild: serverChild?.record)
     }
 
     func log(_ text: String) {

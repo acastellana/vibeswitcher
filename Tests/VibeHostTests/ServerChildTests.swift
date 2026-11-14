@@ -431,6 +431,257 @@ final class ServerChildHost {
         #expect(line.hasSuffix(" rest=--test-flag=1,two"), "\(line)")
     }
 
+    // MARK: Task 8b: across a handover, the host's path, and the journal
+
+    /// After a handover to the same build, the helper started before is still the app: the same pid, through the
+    /// connector it was started with (the new image took the host's end from the state, once it had checked it), its
+    /// census answered; no helper was started again. Killed then, it is started again from the copy the handover
+    /// carried, non-dumpable from its exec.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func theServerChildSurvivesAHandover() async throws {
+        let host = try await ServerChildHost(actions: ["call census", "handover \(hostLauncher)", "call census"])
+        defer { host.stop() }
+        let helper = try #require(await host.firstHelper(), "\(host.said)")
+        #expect(await eventually { host.lines(of: helper).count >= 4 }, "\(host.results)\n\(host.said)")
+        #expect(Array(host.lines(of: helper).dropFirst()) == ["census ok", "handover ok", "census ok"], "\(host.results)\n\(host.said)")
+        #expect(host.said.contains("took over"), "\(host.said)")
+        #expect(host.said.contains("server child pid \(helper) carried over from the build before"), "\(host.said)")
+        #expect(!host.said.contains("server child record refused"), "\(host.said)")
+        #expect(host.started.count == 1, "\(host.results)")
+        #expect(host.process.isRunning)
+        let made = host.noted.components(separatedBy: "app connection made through connector").count - 1
+        #expect(made == 3, "\(host.noted)")
+
+        try host.replaceActions(["call census"])
+        kill(helper, SIGKILL)
+        #expect(await eventually { host.started.count >= 2 }, "\(host.results)\n\(host.said)")
+        let second = try #require(host.started.dropFirst().first)
+        #expect(second.line.contains("mark=\(ServerChildHelper.mark)") && second.line.contains("dumpable-at-start=false"), "\(second.line)")
+        #expect(await eventually { host.lines(of: second.pid).contains("census ok") }, "\(host.results)\n\(host.said)")
+        #expect(host.said.contains("server child pid \(helper) ended"), "\(host.said)")
+    }
+
+    /// The restore's own check (`ServerChild.restore`), given a record that names a session's program (a child of
+    /// the host, as a server child is, but not the server) and a connector of the test's making: the record is
+    /// refused, saying why; its connector is taken by no one and the program is left running and is no app; a new
+    /// server child is started, from a fresh copy of `--server`.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aForgedServerChildInTheStateIsNotTheApp() async throws {
+        let dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        FileManager.default.createFile(atPath: dir + "/" + ServerChildHelper.actionsName, contents: Data("sleep\n".utf8))
+        let host = try TestHost(log: dir + "/host.log", socket: dir + "/h.sock")
+        let app = try TestClient(host)
+        let session = try await app.spawn(keepRunning)
+        let program = session.childPID
+        let link = try #require(Platform.Processes.link(program))
+        #expect(link.parent == getpid(), "a session's program is the host's child, as its server is")
+        let (forged, othersEnd) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        defer {
+            Sys.close(forged)
+            Sys.close(othersEnd)
+        }
+        let binary = try #require(Bundle.main.executablePath)
+        let record = HostHandover.ServerChildRecord(pid: program, startTicks: link.startTicks, connector: forged, image: -1, path: binary)
+        #expect(ServerChild.check(record, image: binary, sessionPrograms: [program], otherDescriptors: [])
+                == "pid \(program) is a session's program")
+        let child = try #require(ServerChild.restore(record, launch: .init(image: binary, socketPath: host.socket, arguments: [],
+                                                                           environment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()]),
+                                                     sessionPrograms: [program], otherDescriptors: [], server: host.server))
+        defer { child.stop() }
+        #expect(await eventually { child.pid != nil })
+        let helper = try #require(child.pid)
+        #expect(helper != program)
+        func results() -> [String] {
+            ((try? String(contentsOfFile: dir + "/" + ServerChildHelper.resultsName, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        }
+        #expect(await eventually { results().contains { $0.hasPrefix("\(helper) started ") } }, "\(results())")
+        #expect(host.server.queue.sync { host.server.appConnectors[forged] == nil })
+        #expect(host.server.queue.sync { host.server.appConnectors.values.allSatisfy { $0.sender?.pid != program } })
+        #expect(host.server.identify(Platform.Processes.token(program)) == .session(session.id.uuidString))
+        #expect(kill(program, 0) == 0, "a session's program named in a record is left alone")
+        // Nothing reads the forged connector: a byte on its other end is never answered with a connection.
+        var byte: UInt8 = 1
+        #expect(send(othersEnd, &byte, 1, 0) == 1)
+        #expect(await eventually { child.pid != nil && child.token != nil })
+        var waiting = pollfd(fd: othersEnd, events: Int16(POLLIN), revents: 0)
+        #expect(poll(&waiting, 1, 500) == 0, "the forged connector was answered")
+        #expect(host.server.queue.sync { host.server.appConnectors.count } == 2, "the test's connector and the new child's")
+    }
+
+    /// The other half of the check: a record of the host's own child, started when it says, no session's program nor
+    /// parser, is still refused when its connector isn't one handed over (one this image made, close-on-exec; another
+    /// descriptor of the state; no socket), when it names another `--server`, and when its start ticks or parent
+    /// differ.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func theRestoresCheckNamesWhatIsWrong() throws {
+        var child: pid_t = 0
+        var spawn = Platform.Spawn(executable: "/bin/sleep", arguments: ["sleep", "60"])
+        spawn.keep = []
+        if case .success(let pid) = spawn.start() { child = pid }
+        #expect(child > 0)
+        defer {
+            kill(child, SIGKILL)
+            var status: Int32 = 0
+            _ = waitpid(child, &status, 0)
+        }
+        let link = try #require(Platform.Processes.link(child))
+        let (made, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        defer {
+            Sys.close(made)
+            Sys.close(other)
+        }
+        // As a handover's exec leaves a kept descriptor: open, not close-on-exec.
+        let inherited = fcntl(made, F_DUPFD, 3)
+        defer { Sys.close(inherited) }
+        let record = HostHandover.ServerChildRecord(pid: child, startTicks: link.startTicks, connector: inherited, image: -1, path: "/srv/server")
+        func check(_ record: HostHandover.ServerChildRecord, others: Set<Int32> = [], links: @escaping (pid_t) -> Platform.Processes.Link? = Platform.Processes.link) -> String? {
+            ServerChild.check(record, image: "/srv/server", sessionPrograms: [], otherDescriptors: others, links: links, isParser: { _ in false })
+        }
+        #expect(check(record) == nil)
+        var closedOnExec = record
+        closedOnExec.connector = made
+        #expect(check(closedOnExec) == "its connector \(made) isn't a connector handed over")
+        #expect(check(record, others: [inherited]) == "its connector \(inherited) isn't a connector handed over")
+        let file = open("/dev/null", O_RDONLY)
+        defer { Sys.close(file) }
+        var notASocket = record
+        notASocket.connector = file
+        #expect(check(notASocket)?.hasPrefix("its connector") == true)
+        var elsewhere = record
+        elsewhere.path = "/opt/server"
+        #expect(check(elsewhere) == "it names /opt/server, not this host's --server /srv/server")
+        var later = record
+        later.startTicks += 1
+        #expect(check(later) == "pid \(child) isn't the process recorded (it started at another time)")
+        #expect(check(record, links: { pid in Platform.Processes.link(pid).map { var other = $0; other.parent = 1; return other } })
+                == "pid \(child) isn't this host's child")
+        #expect(check(record, links: { _ in nil }) == "pid \(child) is gone")
+        #expect(ServerChild.check(record, image: "/srv/server", sessionPrograms: [], otherDescriptors: [], isParser: { $0 == child })
+                == "pid \(child) is a session's parser")
+    }
+
+    /// A host that watches its path: a process renames its own listening socket over the host's; the host binds its
+    /// path again at once (its folder watch), a client by the path then reaches the host (its challenge), and the
+    /// app's `hostNotes` lists the path; by the path, `hostNotes` is refused.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aSquattedHostPathIsBoundAgain() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let host = try TestHost(watchesItsPath: true, socket: dir + "/h.sock")
+        let bound = try #require(HostPathWatch.identity(atPath: host.socket))
+        let squat = dir + "/squat.sock"
+        let squatter = try UnixSocket.listen(path: squat)
+        defer { Sys.close(squatter) }
+        let squatted = try #require(HostPathWatch.identity(atPath: squat))
+        #expect(rename(squat, host.socket) == 0)
+        #expect(await eventually {
+            let now = HostPathWatch.identity(atPath: host.socket)
+            return now != nil && now != squatted && now != bound
+        })
+        let byPath = try TestClient(socket: host.socket, appKey: nil, viaConnector: false)
+        #expect(await eventually { byPath.hasEvent { if case .challenge = $0 { return true } else { return false } } })
+
+        let app = try TestClient(host)
+        let seq = app.send(.hostNotes)
+        #expect(await eventually { app.reply(to: seq) != nil })
+        guard case .hostNotes(let notes)? = app.reply(to: seq) else { Issue.record("\(String(describing: app.reply(to: seq)))"); return }
+        #expect(notes.replacedPaths == [host.socket])
+        #expect(notes.startedAt <= Date() && notes.startedAt >= host.startedAt.addingTimeInterval(-1))
+        let refused = byPath.send(.hostNotes)
+        #expect(await eventually { byPath.reply(to: refused) != nil })
+        #expect(byPath.reply(to: refused) == .error(HostProtocol.unauthorized))
+    }
+
+    /// A host that watches its path: another file renamed over its lock is locked again, so a second host can't take
+    /// it; the app's `hostNotes` lists the path.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aReplacedLockPathIsLockedAgain() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let host = try TestHost(watchesItsPath: true, socket: dir + "/h.sock")
+        let other = dir + "/other.lock"
+        #expect(FileManager.default.createFile(atPath: other, contents: nil))
+        #expect(rename(other, host.lock) == 0)
+        #expect(await eventually {
+            let fd = open(host.lock, O_RDWR | O_CLOEXEC)
+            defer { if fd >= 0 { Sys.close(fd) } }
+            return fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0 && errno == EWOULDBLOCK
+        })
+        let app = try TestClient(host)
+        let seq = app.send(.hostNotes)
+        #expect(await eventually { app.reply(to: seq) != nil })
+        guard case .hostNotes(let notes)? = app.reply(to: seq) else { Issue.record("\(String(describing: app.reply(to: seq)))"); return }
+        #expect(notes.replacedPaths == [host.lock])
+    }
+
+    /// A host that isn't told to watch its path (every scratch host, and the Mac's) leaves a squatter there.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aHostNotToldToWatchLeavesItsPath() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let host = try TestHost(housekeeping: 0.2, socket: dir + "/h.sock")
+        let squat = dir + "/squat.sock"
+        let squatter = try UnixSocket.listen(path: squat)
+        defer { Sys.close(squatter) }
+        let squatted = try #require(HostPathWatch.identity(atPath: squat))
+        #expect(rename(squat, host.socket) == 0)
+        // Two housekeepings and more.
+        await pause(1)
+        #expect(HostPathWatch.identity(atPath: host.socket) == squatted)
+        #expect(host.server.queue.sync { host.server.pathWatch == nil })
+    }
+
+    /// The counts `hostNotes` gives the app alone: a request on an app connector before its process is named
+    /// is refused and counted; no restart, no path replaced; the welcome lists the capability on Linux.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "hostNotes is Linux's"))
+    func hostNotesCountWhatTheHostRefused() async throws {
+        let host = try TestHost()
+        // A connector whose process isn't named yet: every request on it is refused.
+        let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
+        defer {
+            host.server.closeAppConnector(connector)
+            Sys.close(connector)
+        }
+        var byte: UInt8 = 1
+        #expect(send(connector, &byte, 1, 0) == 1)
+        #expect(await eventually { host.server.queue.sync { host.server.tally.refusedAppConnections } == 1 })
+        let app = try TestClient(host)
+        let seq = app.send(.hostNotes)
+        #expect(await eventually { app.reply(to: seq) != nil })
+        guard case .hostNotes(let notes)? = app.reply(to: seq) else { Issue.record("\(String(describing: app.reply(to: seq)))"); return }
+        #expect(notes.serverRestarts == 0 && notes.replacedPaths.isEmpty && notes.refusedAppConnections == 1)
+        let hello = app.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
+        #expect(await eventually { app.reply(to: hello) != nil })
+        guard case .welcome(_, _, _, let capabilities, _, _)? = app.reply(to: hello) else { Issue.record("no welcome"); return }
+        #expect(capabilities?.contains(HostProtocol.Capability.hostNotes) == true)
+    }
+
+    /// The journal: the host's stderr says its start, the server child's end with its status, its start again, and an
+    /// app connection refused, each one line of its own, ids and counts only.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func theHostWritesStartsAndServerRestartsToStderr() async throws {
+        let host = try await ServerChildHost(actions: ["dumpable", "call census"])
+        defer { host.stop() }
+        let first = try #require(await host.firstHelper(), "\(host.said)")
+        #expect(await eventually { host.started.count >= 2 }, "\(host.results)\n\(host.said)")
+        let second = try #require(host.started.dropFirst().first?.pid)
+        #expect(await eventually { host.said.contains("server child pid \(second) started") }, "\(host.said)")
+        let lines = host.said.split(separator: "\n").map(String.init)
+        func line(_ part: String) -> String? { lines.first { $0.contains(part) } }
+        #expect(lines.contains { $0.hasPrefix("vibeswitcher-host: started ") }, "\(host.said)")
+        let ended = try #require(line("server child pid \(first) ended after"), "\(host.said)")
+        #expect(ended.hasPrefix("vibeswitcher-host: ") && ended.contains("signal 9 (SIGKILL)"), "\(ended)")
+        let restarted = try #require(line("server child pid \(second) started from"), "\(host.said)")
+        #expect(restarted.hasPrefix("vibeswitcher-host: "), "\(restarted)")
+        let refused = try #require(line("refused an app connection through connector"), "\(host.said)")
+        #expect(refused.hasPrefix("vibeswitcher-host: ") && refused.contains("pid \(first) is dumpable"), "\(refused)")
+    }
+
     /// The Mac: no server child, and no connector opened for one.
     @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac has no server child; Linux's tests are above"))
     func theMacStartsNoServerChild() throws {

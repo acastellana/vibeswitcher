@@ -129,7 +129,7 @@ try {
     for (const request of [
       { census: {} }, { replaceAppKey: { key: Buffer.alloc(32, 7).toString('base64') } },
       { spawn: { _0: { cwd: usersHome, command: 'true', env: {}, cols: 80, rows: 24, keepShell: false, label: 'Audit', agent: null } } },
-      { handover: { executable: binary } }, { shutdown: {} },
+      { handover: { executable: binary } }, { shutdown: {} }, { hostNotes: {} },
     ]) {
       const answer = await byPath(request);
       assert.ok(answer.error, `The user's host must refuse ${Object.keys(request)[0]} by its path`);
@@ -148,6 +148,7 @@ try {
       { handover: { executable: binary } },
       { vault: { _0: { issue: { role: 'lead', root: path.join(serverFolder, 'repo') } } } },
       { spawn: { _0: { cwd: serverFolder, command: 'true', env: {}, cols: 80, rows: 24, keepShell: false, label: 'Audit', agent: null } } },
+      { hostNotes: {} },
     ];
     const frames = appOnly.map((request, index) => {
       const payload = Buffer.from(JSON.stringify({ seq: index + 1, request }));

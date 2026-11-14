@@ -72,6 +72,9 @@ config.parser.testHooks = !ownsLaunchers && arguments.contains("--parser-test-ho
 // On Linux the user's host starts a session only for the app and for a session the vault binds to the lead role
 // (`HostServer.Config.spawnNeedsLead`); on the Mac, and in a scratch host, any client may, as before.
 config.spawnNeedsLead = ownsLaunchers && !Platform.CodeIdentity.isAvailable
+// On Linux the user's host takes its socket's and lock's paths back when something else is put there (see
+// `HostPathWatch`); on the Mac, and in a scratch host, it doesn't, as before.
+config.watchesItsPath = ownsLaunchers && !Platform.CodeIdentity.isAvailable
 if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), limit > 0 { config.parser.stallLimit = limit }
 // The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
 config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
@@ -192,8 +195,9 @@ if let handoverPath, let state = restoring {
 }
 // A scratch host's test stand-in for the app on Linux: refused by the user's host (see `TestAppPrincipal`).
 TestAppPrincipal.adopt(arguments: arguments, restored: restoring?.testAppConnector, ownsLaunchers: ownsLaunchers, server: server)
-// The app on Linux: the server child, from a sealed copy of `--server PATH`, through its connector (see `ServerChild`).
-ServerChild.adopt(arguments: arguments, ownsLaunchers: ownsLaunchers, executable: executable, config: config, server: server)
+// The app on Linux: the server child, from a sealed copy of `--server PATH`, through its connector (see `ServerChild`);
+// after a handover, the one the build before ran, once checked.
+ServerChild.adopt(arguments: arguments, ownsLaunchers: ownsLaunchers, executable: executable, config: config, server: server, restored: restoring)
 // Holding the user's lock now: no other host runs, so other builds' launchers can go (not for a scratch host on
 // its own lock, which runs beside the real one).
 for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path)) ?? [] where ownsLaunchers && name != "launcher-\(build)" {

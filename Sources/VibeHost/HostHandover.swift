@@ -66,10 +66,36 @@ public enum HostHandover {
         /// A scratch host's test stand-in for the app on Linux (see `TestAppPrincipal`), carried so the new image
         /// takes it again. Nil: none (every other host, the Mac's always), and from builds before it.
         public var testAppConnector: TestAppConnector?
+        /// The server child, the app on Linux (see `ServerChild`), carried so the new image takes it again once it
+        /// has checked it. Nil: none (the Mac's always, a host without `--server`), and from builds before it.
+        public var serverChild: ServerChildRecord?
 
         /// Every descriptor the new image must inherit.
         var descriptors: [Int32] {
-            [lockFD, listenFD] + [secretFD, testAppConnector?.fd].compactMap { $0 } + sessions.compactMap(\.masterFD)
+            [lockFD, listenFD] + [secretFD, testAppConnector?.fd, serverChild?.connector, serverChild?.image].compactMap { $0 }
+                + sessions.compactMap(\.masterFD)
+        }
+    }
+
+    /// The server child as a handover carries it (see `ServerChild`): which process it is, the host's end of its
+    /// connector and the sealed copy it was started from, both kept across the exec.
+    public struct ServerChildRecord: Codable, Equatable {
+        public var pid: Int32
+        /// Its start time in clock ticks since boot (`Platform.Processes.link`): with the pid, the process itself.
+        public var startTicks: UInt64
+        /// The host's end of its connector.
+        public var connector: Int32
+        /// The sealed copy of its image, which a start again runs.
+        public var image: Int32
+        /// The `--server` path the copy was loaded from: never run, only said.
+        public var path: String
+
+        public init(pid: Int32, startTicks: UInt64, connector: Int32, image: Int32, path: String) {
+            self.pid = pid
+            self.startTicks = startTicks
+            self.connector = connector
+            self.image = image
+            self.path = path
         }
     }
 

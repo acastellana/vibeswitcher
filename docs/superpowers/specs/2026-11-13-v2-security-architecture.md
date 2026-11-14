@@ -365,13 +365,15 @@ own shell and Claude Code) are acceptable while the only project on the node is 
 `ServerChildTests.aServerChildThatIsDumpableIsNotTheApp`, `ServerChildTests.appConnectionsDontCountTowardMaxClients`,
 `ServerChildTests.aHostWithAServerChildDoesNotExitIdle`, `ServerChildTests.theServerHelperIsNotDumpable`,
 `ServerChildTests.theServerChildIsToldItsSocketAndFolder`, `ServerChildTests.theMacStartsNoServerChild`,
-`ServerLintTests.theServerNeverExecs`, and the audit's Linux case in host-access.test.mjs (stage 2 Task 8a); planned:
-stage 2 plan task 4b, task 8b.
+`ServerLintTests.theServerNeverExecs`, and the audit's Linux case in host-access.test.mjs (stage 2 Task 8a);
+`ServerChildTests.theServerChildSurvivesAHandover`, `ServerChildTests.aSquattedHostPathIsBoundAgain`,
+`ServerChildTests.aReplacedLockPathIsLockedAgain`, `ServerChildTests.aHostNotToldToWatchLeavesItsPath`,
+`ServerChildTests.hostNotesCountWhatTheHostRefused`, `ServerChildTests.theHostWritesStartsAndServerRestartsToStderr`
+(stage 2 Task 8b); planned: stage 2 plan task 4b.
 
 **Tests to write:** Task 4b: `HostIdentitySeamTests.theMacsAppIsStillTheCdhashCheck`,
-`aConnectorConnectionIsTheAppWithNoChallenge`, `noConnectionByPathIsTheAppOnLinux`. Task 8b:
-`ServerChildTests.theServerChildSurvivesAHandover`, `aSquattedHostPathIsBoundAgain`,
-`theHostWritesStartsAndServerRestartsToStderr` (Task 8a's are under Held by).
+`aConnectorConnectionIsTheAppWithNoChallenge`, `noConnectionByPathIsTheAppOnLinux` (Tasks 8a's and 8b's are under
+Held by).
 
 ## S3. The user's voice before signed approvals
 
@@ -872,10 +874,11 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 **Held by:** `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`,
 `HostHandoverTests.aBuildThatCantRestoreGoesBackToTheOldOne`, `HostHandoverStateTests.theStateFileIsPrivateAndReadBack`,
 `HostHandoverStateTests.aStateOfAnotherFormatIsRefused`, `HostHandoverStateTests.secretsGoThroughAChannelAndNowhereElse`
-(on the Mac now; on Linux from Task 5b, where the Linux forms replace the file and channel cases); planned: stage 2 plan
-task 8, task 9.
+(on the Mac now; on Linux from Task 5b, where the Linux forms replace the file and channel cases);
+`ServerChildTests.theServerChildSurvivesAHandover`, `ServerChildTests.aForgedServerChildInTheStateIsNotTheApp`,
+`ServerChildTests.theRestoresCheckNamesWhatIsWrong` (stage 2 Task 8b); planned: stage 2 plan task 9.
 
-**Tests to write:** Task 8: `aForgedServerChildInTheStateIsNotTheApp`, `aSwitchBringsTheNewBuildsServer`. Task 9:
+**Tests to write:** Task 9: `ServerChildTests.aSwitchBringsTheNewBuildsServer` (9d),
 `HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`,
 `aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`, `aDowngradeIsRefused`,
 `aFreshHostRemovesAStaleStateFile`; `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`. Step 8:

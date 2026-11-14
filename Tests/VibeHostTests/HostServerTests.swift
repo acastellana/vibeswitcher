@@ -5,7 +5,7 @@ import Testing
 
 /// A host on a scratch socket, running `/bin/sh` sessions only.
 final class TestHost {
-    let socket = scratchSocketPath()
+    let socket: String
     let lock: String
     let server: HostServer
     /// Just before and just after the server was made and started.
@@ -25,14 +25,15 @@ final class TestHost {
     /// challenge too; on Linux they go through `appConnector`). Another (`/usr/bin/nc`): this process isn't the app.
     /// `appConnector: false`: no connector even so (a test of the connector opens its own).
     /// `holdsKey: false`: a host that holds no app key yet (one handed over from a build before keys).
-    /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`, `spawnNeedsLead`, `launcherTestDelay`: the config's (see
-    /// `HostServer.Config`). `removing`: a folder removed after the host stops (a test's `defer` runs before it does,
+    /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`, `spawnNeedsLead`, `launcherTestDelay`, `watchesItsPath`: the
+    /// config's (see `HostServer.Config`). `socket`: its path (the lock beside it). `removing`: a folder removed after the host stops (a test's `defer` runs before it does,
     /// and the host's last log line would make its log's folder again).
     init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = HostServer.executable(of: getpid()), log: String? = nil,
          holdsKey: Bool = true, submittedGrace: TimeInterval = HostServer.submittedGrace, housekeeping: TimeInterval? = nil,
          capabilities: [String] = HostServer.capabilities, inputUnitHold: TimeInterval = InputOrder.holdLimit,
          maxSessions: Int = 256, spawnNeedsLead: Bool = false, appConnector: Bool = true, removing: String? = nil,
-         launcherTestDelay: TimeInterval? = nil) throws {
+         launcherTestDelay: TimeInterval? = nil, watchesItsPath: Bool = false, socket: String = scratchSocketPath()) throws {
+        self.socket = socket
         lock = socket + ".lock"
         self.removing = removing
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
@@ -53,6 +54,7 @@ final class TestHost {
         config.inputUnitHold = inputUnitHold
         config.spawnNeedsLead = spawnNeedsLead
         config.launcherTestDelay = launcherTestDelay
+        config.watchesItsPath = watchesItsPath
         server = HostServer(config: config)
         try server.start()
         // The Mac opens none (`openAppConnector` is nil there): its app proves itself by its code and key, as always.

@@ -18,6 +18,9 @@ import VibeCore
 ///   left open is no one's), then the child is reaped, then started again from the same copy with a fresh connector
 ///   after 1 s, doubling to 30 s, back to 1 s once a child had run 10 minutes. Each start and end is a line on stderr.
 /// - While one runs, or is about to be started again, the host doesn't exit idle (`isRunning`, read by `tidy`).
+/// - Across a handover (Task 8b, the document's S8) the child runs on: the state carries its record (`record`: its
+///   pid and start ticks, the host's end of its connector, its sealed copy), and the new image takes it again only
+///   once it has checked it (`restore`); otherwise it starts the server again.
 ///
 /// The Mac has none: no sealed copies there, no connector (its app proves itself by its code, `AppProof`), and
 /// `start` gives nil.
@@ -75,19 +78,127 @@ public final class ServerChild {
     /// refuses `--server-arg`, saying so; the Mac ignores `--server`, saying so (no server child there: the app proves
     /// itself by its code). `--server` stays in what a build this one hands over to is started with: without an
     /// install root (Task 9d) the new image's server is the same file.
+    /// `restored`: the state a handover carried, if this image took over: its server child is taken again when
+    /// `restore` finds it sound, and started again otherwise.
     @discardableResult
     public static func adopt(arguments: [String], ownsLaunchers: Bool, executable: String, config: HostServer.Config,
-                             server: HostServer) -> ServerChild? {
+                             server: HostServer, restored: HostHandover.State? = nil) -> ServerChild? {
         guard let (launch, refused) = Self.launch(arguments: arguments, ownsLaunchers: ownsLaunchers, socketPath: config.socketPath,
                                                   root: VibePaths.root.path,
                                                   nodeRoot: URL(fileURLWithPath: executable).deletingLastPathComponent().path,
-                                                  environment: config.baseEnvironment) else { return nil }
+                                                  environment: config.baseEnvironment) else {
+            if let restored, let record = restored.serverChild {
+                say(server, "server child record dropped: this image was started without --server")
+                release(record, sessionPrograms: Self.programs(of: restored), otherDescriptors: Self.otherDescriptors(of: restored))
+            }
+            return nil
+        }
         guard !Platform.CodeIdentity.isAvailable else {
             say(server, "ignored --server: this system has no server child (the app proves itself by its code)")
             return nil
         }
         if !refused.isEmpty { say(server, "refused --server-arg: the user's host passes its server no test arguments") }
+        if let restored, let record = restored.serverChild {
+            return restore(record, launch: launch, sessionPrograms: Self.programs(of: restored),
+                           otherDescriptors: Self.otherDescriptors(of: restored), server: server)
+        }
         return start(launch, server: server)
+    }
+
+    /// The restored sessions' programs.
+    private static func programs(of state: HostHandover.State) -> [pid_t] { state.sessions.map(\.info.childPID) }
+
+    /// The descriptors `state` names besides the server child's own.
+    private static func otherDescriptors(of state: HostHandover.State) -> Set<Int32> {
+        var others = state
+        others.serverChild = nil
+        return Set(others.descriptors)
+    }
+
+    /// The server child a handover carried, taken again (on the host's queue) once `check` finds it sound: its
+    /// connector's end adopted as the app's (`HostServer.adoptAppConnector`, its sender the child's token, still
+    /// required non-dumpable), its sealed copy adopted for its next start (or, a copy this build wouldn't have made, a
+    /// script's, loaded again from `launch.image`), its end watched. Otherwise the record is let go (`release`) and the
+    /// server started again from a fresh sealed copy (`start`), saying why. Nil on the Mac, and where `start` is.
+    static func restore(_ record: HostHandover.ServerChildRecord, launch: Launch, sessionPrograms: [pid_t], otherDescriptors: Set<Int32>,
+                        server: HostServer) -> ServerChild? {
+        guard !Platform.CodeIdentity.isAvailable else { return nil }
+        if let refusal = check(record, image: launch.image, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors) {
+            say(server, "server child record refused: \(refusal); starting the server again")
+            release(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors)
+            return start(launch, server: server)
+        }
+        let copy: Platform.ProcessSelf.SealedCopy
+        if isInherited(record.image), !otherDescriptors.contains(record.image), record.image != record.connector,
+           let adopted = Platform.ProcessSelf.adopt(record.image) {
+            copy = adopted
+        } else {
+            switch Platform.ProcessSelf.sealedCopy(of: launch.image, name: "vibeswitcher-server") {
+            case .success(let fresh):
+                say(server, "server child pid \(record.pid)'s sealed copy wasn't one to take again: \(launch.image) loaded again for its next start")
+                copy = fresh
+            case .failure(let error):
+                say(server, "server child record refused: no sealed copy to start it again from (errno \(error.code)); starting the server again")
+                release(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors)
+                return start(launch, server: server)
+            }
+        }
+        let child = ServerChild(server: server, copy: copy, launch: launch)
+        server.queue.async {
+            server.serverChild = child
+            child.resume(record)
+        }
+        return child
+    }
+
+    /// Why `record` is not the server child this image may take again, or nil when it is: `pid` is this process's
+    /// child, started at `startTicks` (so it is the process the build before recorded, and its pid can't have been given
+    /// again: this process hasn't reaped it), no restored session's program and no parser; it names the `--server` this
+    /// image was started with; and its connector is a `SOCK_SEQPACKET` socket this image inherited across the exec (not
+    /// close-on-exec, which every descriptor this image makes is from its making) and no other descriptor of the state.
+    /// `links` and `isParser`: how a process is read (tests give a table).
+    static func check(_ record: HostHandover.ServerChildRecord, image: String, sessionPrograms: [pid_t], otherDescriptors: Set<Int32>,
+                      links: (pid_t) -> Platform.Processes.Link? = Platform.Processes.link,
+                      isParser: (pid_t) -> Bool = HostProcesses.isParser) -> String? {
+        let pid = record.pid
+        guard record.path == image else { return "it names \(record.path), not this host's --server \(image)" }
+        guard pid > 1, let link = links(pid) else { return "pid \(pid) is gone" }
+        guard link.parent == getpid() else { return "pid \(pid) isn't this host's child" }
+        guard link.startTicks == record.startTicks else { return "pid \(pid) isn't the process recorded (it started at another time)" }
+        guard !sessionPrograms.contains(pid) else { return "pid \(pid) is a session's program" }
+        guard !isParser(pid) else { return "pid \(pid) is a session's parser" }
+        guard !otherDescriptors.contains(record.connector), isInherited(record.connector), isConnector(record.connector) else {
+            return "its connector \(record.connector) isn't a connector handed over"
+        }
+        return nil
+    }
+
+    /// Whether `fd` is open, above 2, and not close-on-exec: a descriptor this image inherited across the exec
+    /// (`keep:` unmarks what it keeps), as nothing this image made is.
+    private static func isInherited(_ fd: Int32) -> Bool {
+        guard fd > STDERR_FILENO else { return false }
+        let flags = fcntl(fd, F_GETFD)
+        return flags >= 0 && flags & FD_CLOEXEC == 0
+    }
+
+    /// Whether `fd` is a `SOCK_SEQPACKET` socket, as a connector is.
+    private static func isConnector(_ fd: Int32) -> Bool {
+        var type: Int32 = 0
+        var length = socklen_t(MemoryLayout<Int32>.size)
+        return getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &length) == 0 && type == Platform.Sockets.seqpacket
+    }
+
+    /// A record not taken: each of its descriptors this image inherited and the state names nothing else by, closed
+    /// (never one this image made since, nor another part of the state's); its process ended and reaped only when it
+    /// is what the record says, this host's child started then, and neither a session's program nor a parser (the
+    /// old server, which can't be reached again without its connector). Anything else it names is left alone.
+    private static func release(_ record: HostHandover.ServerChildRecord, sessionPrograms: [pid_t], otherDescriptors: Set<Int32>) {
+        for fd in Set([record.connector, record.image]) where isInherited(fd) && !otherDescriptors.contains(fd) { Sys.close(fd) }
+        guard let link = Platform.Processes.link(record.pid), link.parent == getpid(), link.startTicks == record.startTicks,
+              !sessionPrograms.contains(record.pid), !HostProcesses.isParser(record.pid) else { return }
+        kill(record.pid, SIGKILL)
+        var status: Int32 = 0
+        while waitpid(record.pid, &status, 0) < 0, errno == EINTR {}
     }
 
     /// What `--server PATH` in `arguments` starts (nil without it): `--root ROOT --node-root NODE-ROOT` (S2-D1; until
@@ -133,6 +244,15 @@ public final class ServerChild {
 
     /// How many times a child was started again after one ended.
     public var restarts: Int { lock.withLock { restartCount } }
+
+    /// The child running now as a handover carries it (`HostHandover.State.serverChild`): nil when none runs, or its
+    /// connector has closed. On the host's queue.
+    var record: HostHandover.ServerChildRecord? {
+        guard let server, let running = lock.withLock({ child }), let end = server.appConnectorEnd(running.connector),
+              let link = Platform.Processes.link(running.pid) else { return nil }
+        return HostHandover.ServerChildRecord(pid: running.pid, startTicks: link.startTicks, connector: end, image: copy.fd,
+                                              path: launch.image)
+    }
 
     /// No more starts: the child running is ended (SIGKILL) and reaped, its connector closed, and the copy closed.
     /// `HostServer.stop` calls it first, so a host that stops and then waits to exit (`--exit-with`'s, for its
@@ -192,6 +312,26 @@ public final class ServerChild {
             lock.withLock { child = (pid, token, connector, Date(), watch) }
             Self.say(server, "server child pid \(pid) started from \(launch.image)'s sealed copy, connector \(connector)")
         }
+    }
+
+    /// The child a handover carried (`restore` checked it), taken again: its connector's end the app's, its sender its
+    /// token, its end watched. On `queue`.
+    private func resume(_ record: HostHandover.ServerChildRecord) {
+        guard let server, !lock.withLock({ stopped }) else { return }
+        let pid = record.pid
+        let token = Platform.Processes.token(pid)
+        guard server.adoptAppConnector(record.connector, sender: token, requireNonDumpable: true, onDumpable: { [weak self] pid in
+            self?.endDumpable(pid)
+        }) else {
+            Self.say(server, "server child pid \(pid) not taken again: its connector \(record.connector) couldn't be adopted; starting the server again")
+            kill(pid, SIGKILL)
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+            return scheduleRestart()
+        }
+        let watch = Platform.ProcessExit.watch(pid, queue: queue) { [weak self] in self?.ended(pid) }
+        lock.withLock { child = (pid, token, record.connector, Date(), watch) }
+        Self.say(server, "server child pid \(pid) carried over from the build before, connector \(record.connector)")
     }
 
     /// The child `pid` ended: its connector closed (its connections with it), it reaped, and started again. On `queue`.

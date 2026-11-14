@@ -79,6 +79,7 @@ struct HostMessageTests {
             .screen(id: id), .styledScreen(id: id), .history(id: id, lines: 500), .kill(id: id), .remove(id: id), .shutdown,
             .handover(executable: "/Applications/VibeSwitcher.app/Contents/MacOS/vibeswitcher-host"),
             .proveApp(answer: Data(repeating: 1, count: 32)), .enrollApp(key: Data(repeating: 2, count: 32)), .replaceAppKey(key: Data(repeating: 6, count: 32)),
+            .census, .hostNotes,
         ]
         for request in requests {
             let data = try HostCoding.encode(HostRequestEnvelope(seq: 7, request: request))
@@ -97,6 +98,8 @@ struct HostMessageTests {
             .historyText(id: id, history: "a\nb", screen: "c"),
             .sessionChanged(session), .sessionRemoved(id: id), .resync(id: id), .bell(id: id), .error("nope"), .ok,
             .challenge(Data(repeating: 3, count: 32), keyless: true), .vault(.startedOver(1_234)),
+            .hostNotes(HostNotes(startedAt: Date(timeIntervalSince1970: 1_500), serverRestarts: 2, replacedPaths: ["/h/host.sock"],
+                                 refusedAppConnections: 1)),
         ]
         // A unit's bytes go as base64, not an array of numbers.
         let unit = try HostCoding.encode(HostRequest.inputUnit(id: id, writes: [HostInput.Write(bytes: Array("hi".utf8), delay: 0)], more: false))
