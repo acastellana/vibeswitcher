@@ -97,6 +97,12 @@ that two pushes haven't explained comes here too, with the experiment that will 
   (`ServerChildHost(usersHost:)` throws there). A scratch host's test secret across a handover on the Mac stays
   `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`'s. A process test of the Mac's user's host needs a
   Keychain stand-in first.
+- **A listener's file mode through its path (stage 2, the host's socket)**: `UnixSocket.listen` on the Mac still binds
+  and then chmods the path to 0600 (`Platform.Sockets.bindOwnerOnly`'s Darwin form, the old body), so a link a
+  same-user process renames over the path between the two is followed, and the file the link names becomes 0600 (no
+  more than that process could do itself), while the socket's file keeps the umask's mode. Linux sets the socket's
+  mode before the bind (`fchmod`), which the Mac's `bind` may not honour: check on a real Mac, and
+  `fchmodat(…, AT_SYMLINK_NOFOLLOW)` there otherwise.
 - **The two replaced oracles**: the raw Darwin reads `IndexLockTests` and `ProcessTableTests` checked against, now
   platform calls; restore them under `#if canImport(Darwin)`.
 

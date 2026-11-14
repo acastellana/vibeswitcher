@@ -147,7 +147,11 @@ attack checks it.
 At **accept** (`HostServer.acceptAll`, `HostServer.swift:257-291`):
 
 1. `SO_PEERCRED`'s uid must be the host's, or the connection is closed (`peerUID`, line 261). The socket file is 0600
-   (`UnixSocket.listen`) in a 0700 folder (`VibePaths.ensurePrivateDirectories`).
+   (`UnixSocket.listen`) in a 0700 folder (`VibePaths.ensurePrivateDirectories`). On Linux it is 0600 (less the
+   umask) from its bind, the socket's mode set before it (`Platform.Sockets.bindOwnerOnly`), and nothing goes through
+   the path after, so a link renamed over the path then is never followed; on the Mac the path is chmodded after the
+   bind, as before, and a link renamed over it in between is followed (the file it names becomes 0600; the Mac's
+   list).
 2. `SO_PEERCRED`'s pid, with its start ticks read from `/proc/<pid>/stat` at that moment, is the connection's token
    (`Platform.Sockets.peerToken`, `Platform.PeerToken`: pid, uid, start ticks).
 3. Otherwise `identify` (`HostServer.swift:663-668`): a process inside a live session, by its ancestry (the parent
@@ -390,7 +394,8 @@ own shell and Claude Code) are acceptable while the only project on the node is 
 `ServerChildTests.aHandoverCarriesTheLockThePathNamesAndTheCounts`, `ServerChildTests.theCountsRunOnAcrossAHandover`
 (Task 8b's review); `SocketsTests.boundFileIsTheFileTheSocketIsBoundTo`, `SocketsTests.theMacKnowsNoBoundFile`,
 `ServerChildTests.aSocketRenamedOverThePathIsNotTheHostsAtOnce`,
-`ServerChildTests.aRebindThatLosesEveryAttemptIsTriedAgainAtTheHousekeeping` (the socket's file from the kernel); planned: stage 2 plan task 4b.
+`ServerChildTests.aRebindThatLosesEveryAttemptIsTriedAgainAtTheHousekeeping` (the socket's file from the kernel);
+`SocketsTests.aListenersFileIsOwnerOnlyFromItsBindAndNoLinkIsFollowed` (its mode, before the bind); planned: stage 2 plan task 4b.
 
 **Tests to write:** Task 4b: `HostIdentitySeamTests.theMacsAppIsStillTheCdhashCheck`,
 `aConnectorConnectionIsTheAppWithNoChallenge`, `noConnectionByPathIsTheAppOnLinux` (Tasks 8a's and 8b's are under

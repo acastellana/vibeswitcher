@@ -893,3 +893,38 @@ extension SocketsTests {
         #expect(Platform.Sockets.boundFile(of: listener) == nil)
     }
 }
+
+extension SocketsTests {
+    // MARK: A listener's file, its owner's alone
+
+    /// Linux: the file `bindOwnerOnly` binds is 0600 the moment the bind returns (the socket's own mode, set before
+    /// it), and nothing goes through the path after: a link to a file of the test's (0644) renamed over the path just
+    /// after the bind (the call's test hook) is not followed, and that file keeps its mode. The Mac's form chmods the
+    /// path after the bind, as the Mac always did.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux sets the mode before the bind; the Mac chmods after it"))
+    func aListenersFileIsOwnerOnlyFromItsBindAndNoLinkIsFollowed() throws {
+        let folder = try Self.socketFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let target = folder.appendingPathComponent("t").path
+        #expect(FileManager.default.createFile(atPath: target, contents: nil))
+        #expect(chmod(target, 0o644) == 0)
+        func mode(_ path: String) -> mode_t? {
+            var info = stat()
+            return lstat(path, &info) == 0 ? info.st_mode & 0o777 : nil
+        }
+        let path = folder.appendingPathComponent("s").path
+        let link = folder.appendingPathComponent("l").path
+        let address = try #require(Platform.Sockets.unixAddress(path))
+        let fd = try Self.streamSocket()
+        defer { Sys.close(fd) }
+        var atBind: mode_t?
+        let failed = Platform.Sockets.bindOwnerOnly(fd, to: address, path: path, mode: 0o600) {
+            atBind = mode(path)
+            #expect(symlink(target, link) == 0)
+            #expect(rename(link, path) == 0)
+        }
+        #expect(failed == nil, "\(String(describing: failed))")
+        #expect(atBind == 0o600, "the file was \(atBind.map { String($0, radix: 8) } ?? "not there") as the bind returned")
+        #expect(mode(target) == 0o644, "the link renamed over the path was followed")
+    }
+}

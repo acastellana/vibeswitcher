@@ -71,6 +71,22 @@ extension Platform.Sockets {
         return (count, count > 0 ? peerToken(fd) : nil)
     }
 
+    /// Binds the Unix socket `fd` to `address` (`path`'s, `unixAddress`), then sets the file's mode to `mode` through
+    /// `path` (`chmod`), as UnixSocket always did on the Mac: a link renamed over the path between the two is followed
+    /// (docs/process/v2-mac-tasks.md). Nil when bound; else the call that failed and its errno. `afterBind`: tests only,
+    /// run just after a bind that succeeded, before the chmod.
+    public static func bindOwnerOnly(_ fd: Int32, to address: sockaddr_un, path: String, mode: mode_t,
+                                     afterBind: () -> Void = {}) -> (call: String, code: Int32)? {
+        var address = address
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard bound == 0 else { return ("bind", errno) }
+        afterBind()
+        guard chmod(path, mode) == 0 else { return ("chmod", errno) }
+        return nil
+    }
+
     /// Nil on the Mac, which has no way to ask the kernel what file a socket is bound to (no unix_diag): a caller
     /// keeps its own check through the path. Nothing on the Mac asks today (the host watches its path on Linux only).
     public static func boundFile(of listener: Int32) -> (device: UInt64, inode: UInt64)? { nil }

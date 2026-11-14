@@ -115,6 +115,25 @@ extension Platform.Sockets {
     }
 }
 
+extension Platform.Sockets {
+    /// Binds the Unix socket `fd` to `address` (`path`'s, `unixAddress`) with the file `bind` makes no wider than
+    /// `mode`: the socket's own mode is set first (`fchmod`), and `bind` makes the file with it, less the umask (Linux
+    /// gives a socket file its socket's mode; measured here, docs/process/v2-linux-inventory.md). Nothing goes through
+    /// `path` after the bind, so a link renamed over it then is never followed. Nil when bound; else the call that
+    /// failed and its errno. `afterBind`: tests only, run just after a bind that succeeded.
+    public static func bindOwnerOnly(_ fd: Int32, to address: sockaddr_un, path: String, mode: mode_t,
+                                     afterBind: () -> Void = {}) -> (call: String, code: Int32)? {
+        guard fchmod(fd, mode) == 0 else { return ("fchmod", errno) }
+        var address = address
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard bound == 0 else { return ("bind", errno) }
+        afterBind()
+        return nil
+    }
+}
+
 // The C library's send(2), under a name `Platform.Sockets` doesn't have: inside it a bare `send` is its own.
 @inline(__always) private func socketSend(_ fd: Int32, _ bytes: UnsafeRawPointer?, _ count: Int) -> Int {
     send(fd, bytes, count, Int32(MSG_NOSIGNAL))

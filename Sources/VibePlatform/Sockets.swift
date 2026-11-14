@@ -17,6 +17,9 @@ extension Platform {
     /// - `peerToken(_:) -> PeerToken?`: the process at the other end, in a form that tells it from a later one of the
     ///   same pid (`Platform.PeerToken`, each system's own).
     /// - `enableCredentials(_:)` and `receive(_:into:)`: bytes read with the process that sent them.
+    /// - `bindOwnerOnly(_:to:path:mode:afterBind:) -> (call: String, code: Int32)?`: a bind whose file is no wider
+    ///   than `mode`. Linux sets the socket's mode before the bind and touches the path no more; the Mac chmods the
+    ///   path after it, as it always did.
     /// - `boundFile(of:) -> (device: UInt64, inode: UInt64)?`: the file a listener is bound to, as the kernel knows it
     ///   (Linux's unix_diag); nil on the Mac, which can't say.
     public enum Sockets {

@@ -231,3 +231,7 @@ host took from the Mac:
   file system here, 8:32, is 0x800020 to unix_diag and 0x820 in `st_dev`. The shim converts with `makedev`.
 - **Its inode is 32 bits** (`udiag_vfs_ino` is a `__u32`): compared with the low 32 bits of `st_ino`. ext4 here (`/`,
   which holds the home and `/tmp`), whose inode numbers fit them.
+- **`fchmod` of a Unix socket before its `bind` sets the mode of the file `bind` makes** (the kernel takes the socket
+  inode's mode, less the umask): `fchmod(fd, 0600)` then `bind` gave a 0600 file under umask 0, 022 and 077; without
+  it, 0777 under umask 0. `glibc`'s `fchmodat(…, AT_SYMLINK_NOFOLLOW)` refuses a link (`EOPNOTSUPP`; this kernel has no
+  `fchmodat2`, ENOSYS, so glibc 2.39 goes through `O_PATH`).

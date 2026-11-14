@@ -69,14 +69,10 @@ public enum UnixSocket {
         let fd = Platform.Sockets.makeSocket(type: Platform.Sockets.stream)
         guard fd >= 0 else { throw Failure.system("socket", errno) }
         do {
-            var address = try address(path)
-            let bound = withUnsafePointer(to: &address) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-                }
+            let address = try address(path)
+            if let failed = Platform.Sockets.bindOwnerOnly(fd, to: address, path: path, mode: 0o600) {
+                throw Failure.system(failed.call, failed.code)
             }
-            guard bound == 0 else { throw Failure.system("bind", errno) }
-            guard chmod(path, 0o600) == 0 else { throw Failure.system("chmod", errno) }
             guard Sys.listen(fd, SOMAXCONN) == 0 else { throw Failure.system("listen", errno) }
         } catch {
             Sys.close(fd)
