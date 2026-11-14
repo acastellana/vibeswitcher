@@ -1635,3 +1635,64 @@ struct LeadAdvanceTests: LeadTeamFixture {
         func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult { MCPToolResult(text: "none", isError: true) }
     }
 }
+
+/// auto_advance and a team task's parts (T7): a member's part_done moves nothing but its notice to the integrator, and
+/// the starts count the live members as start_worker does.
+extension LeadAdvanceTests {
+    /// A team task `build-it` of core (the integrator), ui and docs, auto_advance on for it, split and its three workers
+    /// running, before the loop starts.
+    func splitTeam(_ root: String, _ runtime: FakeRuntime, _ lead: LeadToolset) throws {
+        let parts: [[String: Any]] = [["name": "core", "part": "the types"], ["name": "ui", "part": "the views"], ["name": "docs", "part": "the guide"]]
+        #expect(!lead.call("add_task", ["title": "Build it", "goal": "g", "acceptance": ["a"], "team": parts, "auto_advance": false]).isError)
+        #expect(!lead.call("start_worker", ["task": "build-it"]).isError)
+        #expect(!lead.call("update_task", ["task": "build-it", "auto_advance": true]).isError)
+        try commit("api.swift", "protocol API {}\n", in: Worktrees.path(root: root, slug: "build-it"))
+        let split = try seat("worker-build-it", runtime).call("split", [:])
+        #expect(!split.isError, "\(split.text)")
+        let members = lead.call("start_worker", ["task": "build-it"])
+        #expect(!members.isError, "\(members.text)")
+        #expect(runtime.spawned.count == 3)
+    }
+
+    @Test func aMembersPartDoneMovesNothingButItsNoticeToTheIntegrator() async throws {
+        let (root, runtime, lead) = try team(test: nil, ["max_workers": 6])
+        try splitTeam(root, runtime, lead)
+        let integrator = try #require(task("build-it", root)?.worker)
+        let main = head("refs/heads/main", root)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        try commit("ui.swift", "struct UI {}\n", in: Worktrees.path(root: root, slug: "build-it--ui"))
+        let ui = try seat("worker-build-it--ui", runtime)
+        let reported = ui.call("report", ["status": "part_done", "changed": "ui.swift", "caveats": "none", "verify": "swift test --filter UITests"])
+        #expect(!reported.isError, "\(reported.text)")
+        let notices = { runtime.calls.withLock { runtime.steered.filter { $0.target == integrator && $0.text.contains("reports its part done") }.count } }
+        #expect(await advancing.until { notices() == 1 })
+        await advancing.settle()
+        await advancing.settle()
+        #expect(notices() == 1)
+        // Nothing else moved: no audit, no merge, no session started, nothing recorded as done.
+        #expect(task("build-it", root)?.status == .running && task("build-it", root)?.verifier == nil && task("build-it", root)?.report == nil)
+        #expect(runtime.calls.withLock { runtime.spawned.count } == 3)
+        #expect((try? vault.unaudited(root: root, task: "build-it"))?.reported == nil)
+        #expect(!reports(runtime).contains { $0.contains("build-it") })
+        #expect(head("refs/heads/main", root) == main)
+    }
+
+    @Test func theStartsCountLiveTeamMembersAsStartWorkerDoes() async throws {
+        let (root, runtime, lead) = try team(test: nil, ["max_workers": 3])
+        try splitTeam(root, runtime, lead)
+        // Three workers run (the integrator and two members): max_workers is reached, so a planned task waits, quietly.
+        #expect(!lead.call("add_task", ["title": "Other", "goal": "g", "acceptance": ["a"]]).isError)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        await advancing.settle()
+        await advancing.settle()
+        #expect(task("other", root)?.status == .planned)
+        #expect(!reports(runtime).contains { $0.contains("Didn't start other") }, "\(reports(runtime))")
+        #expect(!progress(root).contains("Didn't start other"))
+        // A member's worker ends: there's room, and it starts.
+        runtime.calls.withLock { runtime.killed.append(runtime.spawned[2].id) }
+        await advancing.settle()
+        #expect(await advancing.until { task("other", root)?.status == .running })
+    }
+}

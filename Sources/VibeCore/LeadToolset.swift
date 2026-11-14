@@ -5830,13 +5830,14 @@ public final class LeadToolset: MCPToolset {
         if let seat = memberSeat() { return try memberReport(seat, arguments) }
         let reportedAt = Date().timeIntervalSince1970
         let slug = try taskSlug(arguments)
+        try refusePartDone(slug, arguments)
         let summary = try text(arguments, "summary", missing: "Say what changed and how you checked it, or what blocks you.")
         let kind = (arguments["status"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased()
         let overBudget = kind == Self.overBudgetStatus
         if overBudget { return try reportOverBudget(slug, summary) }
         let done = kind != "blocked"
         // A team task's integrator: its done counts once every part is taken (`checkPartsTaken`).
-        if done { try checkPartsTaken(slug, status: kind) }
+        if done { try checkPartsTaken(slug) }
         // Before anything is recorded: a done that doesn't show how each check was checked doesn't count as one.
         var evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
         if done { try checkLoadProof(slug, arguments) }

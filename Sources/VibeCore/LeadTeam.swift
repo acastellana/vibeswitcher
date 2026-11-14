@@ -891,7 +891,7 @@ extension LeadToolset {
             return MCPToolResult(text: "Reported to the lead, naming you. \(slug)'s status doesn't change: \(integrator) works on. The lead will get back to you."
                                  + (told ? "" : " (There's no lead running right now; it's on the board, and the next lead picks it up.)"))
         default:
-            throw Problem(text: "Not reported: only \(slug)'s integrator, \(integrator), reports done for the team task; you're \(name), a member. "
+            throw Problem(text: "Not reported. Only \(slug)'s integrator, \(integrator), reports done for the team task; you're \(name), a member. "
                           + "Once your part passes its own tests and everything's committed, report(status: part_done, changed, caveats, verify) with its handoff, "
                           + "so \(integrator) takes it in (blocked and over_budget you report as any worker).")
         }
@@ -961,16 +961,19 @@ extension LeadToolset {
         }
     }
 
-    /// Why the report with `status` on `slug` is refused for a team task, or nothing: part_done is a member's report;
-    /// an integrator's done counts once every part is taken (`partsNotTaken`). A plain task's worker reports as ever.
-    func checkPartsTaken(_ slug: String, status: String?) throws {
-        let task = store.load().task(slug)
-        if status == Self.partDoneStatus {
-            throw Problem(text: task?.isTeam == true
-                ? "Not reported: part_done is a member's report. You're \(slug)'s integrator: take_part each member's done part, then report done. Nothing was recorded."
-                : "Not reported: part_done is a team member's report, and \(slug) is a plain task: report done, blocked or over_budget. Nothing was recorded.")
-        }
-        guard let task, task.isTeam else { return }
+    /// part_done is a member's report: from the integrator or a plain task's worker (who reach `report` itself) it's
+    /// refused, before anything else is read or recorded.
+    func refusePartDone(_ slug: String, _ arguments: [String: Any]) throws {
+        guard (arguments["status"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased() == Self.partDoneStatus else { return }
+        throw Problem(text: store.load().task(slug)?.isTeam == true
+            ? "Not reported: part_done is a member's report. You're \(slug)'s integrator: take_part each member's done part, then report done. Nothing was recorded."
+            : "Not reported: part_done is a team member's report, and \(slug) is a plain task: report done, blocked or over_budget. Nothing was recorded.")
+    }
+
+    /// An integrator's done on team task `slug` counts once every part is taken (`partsNotTaken`): refused, naming
+    /// those that aren't, before anything is recorded. A plain task's worker reports as ever.
+    func checkPartsTaken(_ slug: String) throws {
+        guard let task = store.load().task(slug), task.isTeam else { return }
         let left = partsNotTaken(task)
         guard !left.isEmpty else { return }
         throw Problem(text: "Not reported: \(slug) is a team task, and your done counts once every member's part is taken into agent/\(slug). Not taken yet: "
