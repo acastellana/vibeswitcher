@@ -3120,3 +3120,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 15:49 Automatically (auto_advance): Started the audit of cleanup-removes-a at 0ffcc9dd (It touches sensitive_paths (Sources/VibeCore/LeadAdvance.swift, Sources/VibeCore/LeadBoard.swift, Sources/VibeCore/LeadToolset.swift, Sources/VibeCore/Worktrees.swift), so it's treated as audit whatever its review says).
 - 2026-11-14 15:49 Released cleanup-removes-a's worker (idle since its done report on 0ffcc9dd) while its audit runs
 - 2026-11-14 15:49 Automatically (auto_advance): Released cleanup-removes-a's worker, idle since its done report on 0ffcc9dd, while its audit runs (ended pid 60492 (Worker: Cleanup removes a leftover folder that isn't a worktree)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-14 15:53 Audit of cleanup-removes-a: complete, clean, round 1: 1 Nit open
+- 2026-11-14 16:08 Merged cleanup-removes-a: Cleanup removes a leftover folder that isn't a worktree (build c385b7943fb8)
