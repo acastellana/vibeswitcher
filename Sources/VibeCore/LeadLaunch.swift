@@ -138,13 +138,16 @@ public enum LeadLaunch {
     /// denied at launch (`otherSessions`), so a store Claude Code adds later is denied without anyone naming it. Only
     /// what a session reads with the Read tool to work: what Claude Code loads itself (CLAUDE.md, `rules`, settings,
     /// `agents`, `commands`, hooks' scripts) it reads by `readFile`, which no Read rule binds (2.1.325, as `session-env`
-    /// showed in workers-and-verifiers-5), so those are denied with the rest. When in doubt, denied.
+    /// showed in workers-and-verifiers-5), so those are denied with the rest. When in doubt, denied. A key with a `/`
+    /// keeps that entry of a folder: the folder (`plugins`) is listed in turn and the rest of it denied.
     static let claudeKeep: [String: String] = [
         // A skill's text ends "Base directory for this skill: <path>" (2.1.325's bundle): its references and scripts
         // there are read with the Read tool.
         "skills": "user skills: a skill's reference files are read from its folder",
-        // Plugins' skills, agents and scripts live in `plugins/cache/…` (`CLAUDE_PLUGIN_ROOT`), read the same way.
-        "plugins": "plugin skills: their reference files and scripts are read from the plugin's folder",
+        // Installed plugins' skills and scripts (`CLAUDE_PLUGIN_ROOT`), read the same way. Not the rest of `plugins`:
+        // `data` (`CLAUDE_PLUGIN_DATA`, a plugin's own store, read by its scripts) and its config may hold a credential.
+        "plugins/cache": "plugin skills: their reference files and scripts are read from the installed plugin's folder",
+        "plugins/marketplaces": "a marketplace's plugins: their skills' files are read from its clone",
         // Each project's transcripts and auto-memory: the other projects' folders are denied one by one below, the
         // project's own (its memory among them) stay readable.
         "projects": "the project's own memory and transcripts; other projects' folders are denied by listing them",
@@ -182,23 +185,35 @@ public enum LeadLaunch {
         // Everything else directly in `~/.claude` but `claudeKeep`, as it is now: one made after the launch isn't
         // denied (a deny rule can't say "all but"). A `~/.claude` that's there but can't be listed starts no worker or
         // verifier; none at all holds nothing to deny.
-        let top: [String]
-        do { top = try FileManager.default.contentsOfDirectory(atPath: claude) } catch {
-            var info = stat()
-            guard stat(claude, &info) == 0 || errno != ENOENT else { return rules }
-            throw BoardError(text: "\(claude) couldn't be listed (\((error as NSError).localizedDescription)), so no worker or verifier "
-                + "was started: what's in it couldn't be denied.")
-        }
         let named = Set(["history.jsonl"] + sessionStores)
-        for entry in top.sorted() where claudeKeep[entry] == nil && !named.contains(entry) {
-            let path = (claude as NSString).appendingPathComponent(entry)
-            // A name a rule can't hold as it is (a glob's `*`, a parenthesis) would go undenied: none is started instead.
-            guard isRuleSafe(entry) else {
-                throw BoardError(text: "\(path) has a name a permission rule can't hold as it is, so no worker or verifier was started: "
-                    + "rename it to one of letters, digits, spaces, . _ and -.")
+        // Denies each entry of `folder` (relative to `~/.claude`, "" for itself) neither kept nor named; a folder holding
+        // a kept entry (`plugins`) is listed in turn. Returns false when `folder` isn't there.
+        func denyUnkept(in folder: String) throws -> Bool {
+            let listed = folder.isEmpty ? claude : (claude as NSString).appendingPathComponent(folder)
+            let entries: [String]
+            do { entries = try FileManager.default.contentsOfDirectory(atPath: listed) } catch {
+                var info = stat()
+                guard stat(listed, &info) == 0 || errno != ENOENT else { return false }
+                throw BoardError(text: "\(listed) couldn't be listed (\((error as NSError).localizedDescription)), so no worker or verifier "
+                    + "was started: what's in it couldn't be denied.")
             }
-            rules += ["Read(~/.claude/\(entry))", "Read(~/.claude/\(entry)/**)"] + (try resolvedRules(entry))
+            for entry in entries.sorted() {
+                let relative = folder.isEmpty ? entry : folder + "/" + entry
+                guard claudeKeep[relative] == nil, !named.contains(relative) else { continue }
+                if claudeKeep.keys.contains(where: { $0.hasPrefix(relative + "/") }) {
+                    _ = try denyUnkept(in: relative)
+                    continue
+                }
+                // A name a rule can't hold as it is (a glob's `*`, a parenthesis) would go undenied: none is started instead.
+                guard isRuleSafe(entry) else {
+                    throw BoardError(text: "\(listed)/\(entry) has a name a permission rule can't hold as it is, so no worker or verifier "
+                        + "was started: rename it to one of letters, digits, spaces, . _ and -.")
+                }
+                rules += ["Read(~/.claude/\(relative))", "Read(~/.claude/\(relative)/**)"] + (try resolvedRules(relative))
+            }
+            return true
         }
+        guard try denyUnkept(in: "") else { return rules }
         let projects = (claude as NSString).appendingPathComponent("projects")
         let entries: [String]
         do { entries = try FileManager.default.contentsOfDirectory(atPath: projects) } catch {

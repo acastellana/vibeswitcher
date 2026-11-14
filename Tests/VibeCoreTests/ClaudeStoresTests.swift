@@ -130,8 +130,10 @@ struct ClaudeStoresTests {
     /// Fake entries directly in `~/.claude` beside the stores: a store no rule names (invented here), the daemon's
     /// `daemon.json`, Claude Code's own files and folders, and the keep list's (a skill's reference file, a plugin's).
     static let unnamed = ["zz-store-from-a-later-release/records.jsonl", "daemon.json", "a-new-file.json", "CLAUDE.md", "settings.json",
-                          "settings.local.json", "agents/a.md", "commands/c.md", "rules/r.md", "ide/1.lock", ".credentials.json"]
-    static let kept = ["skills/tdd/references/notes.md", "plugins/cache/acme/1.0/skills/s/SKILL.md"]
+                          "settings.local.json", "agents/a.md", "commands/c.md", "rules/r.md", "ide/1.lock", ".credentials.json",
+                          "plugins/data/acme-inline/token.json", "plugins/config.json", "plugins/zz-later/x.json"]
+    static let kept = ["skills/tdd/references/notes.md", "plugins/cache/acme/acme/1.0/skills/s/references/r.md",
+                       "plugins/marketplaces/acme/plugins/p/skills/s/SKILL.md"]
 
     func withUnnamed(_ h: Home) throws {
         for file in Self.unnamed + Self.kept {
@@ -145,14 +147,17 @@ struct ClaudeStoresTests {
 
     /// Everything directly in `~/.claude` but the keep list is denied to every worker, verifier and finder, as written
     /// and as resolved, a store no rule names among them: listed at launch, not named. The keep list (skills, plugins)
-    /// and the project's own memory stay readable; the lead is denied none of it.
+    /// and the project's own memory stay readable, `plugins` itself listed (only its `cache` and `marketplaces` kept);
+    /// the lead is denied none of it.
     @Test func everyEntryButTheKeepListIsDenied() throws {
         let h = try home(in: "listed")
         try withUnnamed(h)
         for (role, name) in Self.roles {
             let rules = try deny(role, h, name: name)
             for file in Self.unnamed {
-                let top = String(file.split(separator: "/")[0])
+                // The entry denied whole: one of `~/.claude`, or of `plugins`, which holds kept ones.
+                let parts = file.split(separator: "/")
+                let top = parts.prefix(parts.first == "plugins" ? 2 : 1).joined(separator: "/")
                 for path in ["~/.claude/\(top)", "~/.claude/\(file)", h.real + "/\(top)", h.real + "/\(file)"] {
                     #expect(denied(path, by: rules), "\(name): \(path)")
                 }
