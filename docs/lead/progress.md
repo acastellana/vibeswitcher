@@ -3029,3 +3029,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 11:54 Flaky in the batch workers-and-verifiers-5, remove-the-floating-dots: passageIsFoundAsPassageCommandResolvesIt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
 - 2026-11-14 11:54 Started a worker on deny-claude-by-listing
 - 2026-11-14 11:54 Automatically (auto_advance): Started a worker on deny-claude-by-listing (Deny ~/.claude by listing it at launch, with a short keep list), its after tasks done (workers-and-verifiers-5).
+- 2026-11-14 11:54 Automatically (auto_advance): Merged workers-and-verifiers-5 at 614b59e4 (its passing audit), remove-the-floating-dots at 0da7f902 (review none: its worker's done report on 1f4aba40) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-14 11:54 Automatically (auto_advance): Cleaned up workers-and-verifiers-5 (freed 1.6 GB of build output and temporary folders). It stays done.
+- 2026-11-14 11:54 Automatically (auto_advance): Cleaned up remove-the-floating-dots (freed 2.4 GB of build output and temporary folders). It stays done.
