@@ -348,6 +348,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `startlead` — starts a real project lead (LeadController.startLead, as Project Lead does: the host first if none runs, its… — `Sources/VibeSwitcher/Sandbox.swift`
 - `lead [FILE]` — shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board… — `Sources/VibeSwitcher/Sandbox.swift`
 - `team` — starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and… — `Sources/VibeSwitcher/Sandbox.swift`
+- `team wall` — puts a running team task on the fake lead's board (start the lead first): 3 members with their parts and… — `Sources/VibeSwitcher/Sandbox.swift`
 - `team named` — starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>… — `Sources/VibeSwitcher/Sandbox.swift`
 - `ask [TEXT]` — puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unfold` — shows the selected lead's team under its row in the sidebar — `Sources/VibeSwitcher/Sandbox.swift`
