@@ -129,7 +129,7 @@ config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerat
     if result.skip { result.skip = false; return }
     if let takesValue = handoverFlags[item.element] { result.skip = takesValue; return }
     result.kept.append(item.element)
-}.kept)
+}.kept, ownsLaunchers: ownsLaunchers)
 // This build's own copy, there for as long as it runs: if a build it hands over to can't restore, it comes back to it.
 // On Linux what runs is its own sealed copy (`HostImages.ownCopy`, carried across the exec: V2/HandoverMemory.swift);
 // this path only names it, as `--handover-fallback-image` (its build and folders). The Mac: its launcher copy, by path.

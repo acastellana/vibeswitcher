@@ -22,8 +22,9 @@ import VibeCore
 /// **The test-only flags** (`testFlags`) are taken on Linux only by a scratch host (on a lock of its own): the user's
 /// host refuses each, saying so in its log (`refused(in:ownsLaunchers:)`), and takes nothing from it. Every one but those
 /// a scratch host carries across its handovers (`carriedTestFlags`) is left out of what a build it hands over to is
-/// started with (`withoutTestFlags(_:)`). The Mac keeps today's behaviour: any host takes `--handover-test-secret` and
-/// carries it across a handover.
+/// started with, and the user's host leaves out those too (`withoutTestFlags(_:ownsLaunchers:)`): a flag it refused
+/// never travels in its handover. The Mac keeps today's behaviour: any host takes `--handover-test-secret` and carries
+/// it across a handover.
 ///
 /// **Who an unreadable process is** (`isOurs(_:)`, S2-D5's "unreadable is the host only by token"). Any process can make
 /// itself non-dumpable, so the host names an unreadable process as itself, a parser of its or its server child only by
@@ -210,15 +211,16 @@ public enum HostHardening {
         return found
     }
 
-    /// `arguments` (what a build this host hands over to is started with) without the test-only flags and their values,
-    /// but those a scratch host carries (`carriedTestFlags`). The Mac: as given.
-    public static func withoutTestFlags(_ arguments: [String]) -> [String] {
+    /// `arguments` (what a build this host hands over to is started with) without the test-only flags and their values:
+    /// a scratch host keeps those it carries (`carriedTestFlags`), the user's host (`ownsLaunchers`), which refused
+    /// them, none. The Mac: as given.
+    public static func withoutTestFlags(_ arguments: [String], ownsLaunchers: Bool) -> [String] {
         guard !Platform.CodeIdentity.isAvailable else { return arguments }
         var kept: [String] = []
         var index = arguments.startIndex
         while index < arguments.endIndex {
             let argument = arguments[index]
-            if let takesValue = testFlags[argument], !carriedTestFlags.contains(argument) {
+            if let takesValue = testFlags[argument], ownsLaunchers || !carriedTestFlags.contains(argument) {
                 index += takesValue ? 2 : 1
                 continue
             }

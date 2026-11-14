@@ -326,13 +326,15 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         #expect(HostHardening.heldLockIsAllowed(ownsLaunchers: false, usersLock: "/a/b/host.lock") == nil)
         #expect(HostHardening.takesTestFlags(ownsLaunchers: true))
         let arguments = ["--log", "l", "--handover-test-secret", "x", "--parser-test-hooks"]
-        #expect(HostHardening.withoutTestFlags(arguments) == arguments)
+        #expect(HostHardening.withoutTestFlags(arguments, ownsLaunchers: true) == arguments)
+        #expect(HostHardening.withoutTestFlags(arguments, ownsLaunchers: false) == arguments)
         #expect(HostHardening.refused(in: arguments, ownsLaunchers: true).isEmpty)
         #expect(HostHardening.atStart(mode: .parser) == .nothing)
     }
 
-    /// On Linux the user's host refuses every test-only flag, a scratch host takes them; what a build either hands over
-    /// to is started with keeps only those a scratch host carries.
+    /// On Linux the user's host refuses every test-only flag, a scratch host takes them; what a scratch host hands over
+    /// to is started with keeps only those it carries, and what the user's host hands over to keeps none: the flags it
+    /// refused never travel in its handover.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's rules; the Mac's are today's"))
     func theTestFlagsAreAScratchHostsAndNotCarried() {
         let arguments = ["--log", "l", "--handover-test-secret", "x", "--handover-test-secret-file", "f", "--handover-test-traced",
@@ -346,9 +348,10 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
                 == ["--handover-test-secret", "--handover-test-secret-file", "--handover-test-traced", "--install-root", "--parser-test-hooks",
                     "--server-arg", "--hold-first-look", "--test-user-seal-life", HostHardening.staysDumpableFlag,
                     HandoverMemory.holdCheckTestFlag, ServerChild.replaceHoldTestFlag])
-        #expect(HostHardening.withoutTestFlags(arguments)
+        #expect(HostHardening.withoutTestFlags(arguments, ownsLaunchers: false)
                 == ["--log", "l", "--server-arg", "a", "--hold-first-look", "--test-user-seal-life", "9", ServerChild.replaceHoldTestFlag, "h",
                     "--idle-exit", "600"])
+        #expect(HostHardening.withoutTestFlags(arguments, ownsLaunchers: true) == ["--log", "l", "--idle-exit", "600"])
     }
 
     // MARK: Hardened at start
@@ -495,16 +498,19 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
     /// A host in a scratch home with no `--lock` is that home's user's host: given every test-only flag that touches a
     /// secret or the app, it hands over its real vault (not the test secret's bytes), takes no install root, reports no
     /// tracer and opens no test connector; its log names each flag refused, and none is in the arguments it hands over
-    /// with. Its app is the server helper, which asks for the handover (nothing in the test can be the app: the host
-    /// refuses `--test-app-pid`).
+    /// with, those a scratch host carries across its handovers included. Its app is the server helper, which asks for
+    /// the handover (nothing in the test can be the app: the host refuses `--test-app-pid`).
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's rules; the Mac's user's host keeps today's"))
     func theUsersHostIgnoresTestSecretFlags() async throws {
         let secret = String(repeating: "s", count: 1000)
-        let flags = ["--handover-test-secret", "--handover-test-secret-file", "--install-root", "--handover-test-traced", TestAppPrincipal.pidFlag]
+        let flags = ["--handover-test-secret", "--handover-test-secret-file", "--install-root", "--handover-test-traced", TestAppPrincipal.pidFlag,
+                     "--server-arg", "--hold-first-look", "--test-user-seal-life", ServerChild.replaceHoldTestFlag]
         let host = try await ServerChildHost(actions: ["call census", "handover \(hostLauncher)"],
                                              extra: ["--handover-test-secret", secret, "--handover-test-secret-file", "/nonexistent/secret",
                                                      "--install-root", "/nonexistent/root", "--handover-test-traced",
-                                                     TestAppPrincipal.pidFlag, String(getpid())],
+                                                     TestAppPrincipal.pidFlag, String(getpid()),
+                                                     "--server-arg", "carried-arg", "--hold-first-look", "--test-user-seal-life", "9",
+                                                     ServerChild.replaceHoldTestFlag, "/nonexistent/hold"],
                                              usersHost: true)
         defer { host.stop() }
         let helper = try #require(await host.firstHelper(), "\(host.said)")
@@ -522,7 +528,7 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         let after = Platform.Processes.arguments(host.pid)
         #expect(!after.isEmpty)
         for flag in flags { #expect(!after.contains(flag), "\(flag) in \(after)") }
-        #expect(!after.contains(secret))
+        #expect(!after.contains(secret) && !after.contains("carried-arg") && !after.contains("/nonexistent/hold"), "\(after)")
     }
 
     /// The user's host (a scratch home's, no `--lock`) hands over to a new image whose own probe of its lock path finds a

@@ -928,7 +928,9 @@ memory and writes no file.
 - **The test-only flags** (`--handover-test-secret`, `--handover-test-secret-file`, `--handover-test-traced`,
   `--install-root`, `--test-app-pid`, and `--test-stays-dumpable`, which makes a scratch host dumpable again so a test
   can count its descriptors) are honoured only by a scratch host and stripped from `config.arguments`; the user's host
-  stays non-dumpable from its start (S6).
+  stays non-dumpable from its start (S6). The four a scratch host carries across its handovers (`--server-arg`,
+  `--hold-first-look`, `--test-user-seal-life`, `--server-test-replace-hold`) are stripped too by the user's host,
+  which refused them: no test-only flag travels in its handover (`HostHardening.withoutTestFlags`).
   Today `--handover-test-secret` is honoured by any host and kept across handovers (`main.swift:142-143`); Task 9 ends
   that.
 - **A fresh host removes stale files**: after taking the lock, a host that isn't restoring removes any
