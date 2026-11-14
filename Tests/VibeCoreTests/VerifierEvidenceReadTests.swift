@@ -83,7 +83,8 @@ struct VerifierEvidenceReadTests {
     func rules(_ role: LeadLaunch.Role, _ project: Project, task: String? = "audit-me") throws -> Rules {
         let launch = try LeadLaunch.prepare(role: role, root: project.root, task: role == .lead ? nil : task, base: "claude", prompt: "p",
                                             start: "Go.", server: "/App/vibeswitcher-mcp", name: "\(role.rawValue)-audit-me",
-                                            folder: temp.url("run-\(role.rawValue)-\(UUID().uuidString)"), temporary: temp.url("session-tmp"))
+                                            folder: temp.url("run-\(role.rawValue)-\(UUID().uuidString)"), temporary: temp.url("session-tmp"),
+                                            home: temp.url("claude-home").path)
         let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
         let permissions = try #require(settings["permissions"] as? [String: Any])
         return Rules(allow: permissions["allow"] as? [String] ?? [], deny: permissions["deny"] as? [String] ?? [], home: project.home)

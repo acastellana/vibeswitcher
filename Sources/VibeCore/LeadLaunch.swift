@@ -113,6 +113,86 @@ public enum LeadLaunch {
     /// verifier loads no auto-memory (`verifierEnvironment`); settings, CLAUDE.md and skills a shell writes stay open.
     static let claudeHome = ["Edit(~/.claude/**)", "Write(~/.claude/**)"]
 
+    /// What Claude Code keeps in `~/.claude` of every session on this Mac, other projects' included: the prompt
+    /// history (`promptHistory`), pasted text (`paste-cache`), the shell's state at each session's start
+    /// (`shell-snapshots`), the files its edits replaced (`file-history`), plans, task and todo lists, session records,
+    /// debug logs, feedback drafts and background jobs' timelines (`jobs`). Refused to workers and verifiers (an audit's finders among them), whose reports
+    /// and commits go into a public repository: with the user's `defaultMode: auto`, Claude Code (2.1.325, read in its
+    /// bundle) runs Read, Grep and Glob outside the working folder without asking, the safe-allowlist path, so before
+    /// these rules a worker's Read of another project's prompts was allowed unasked. A Read rule also binds Claude Code's
+    /// own path check of a shell read (`cat`, `head`, `tail`, `grep`, `sed`, `wc`, an input redirection: "was blocked by
+    /// a deny rule"); the hook allows none outside the worktree (`ReadOnlyCommand.reachesOutside`). Its path as
+    /// resolved, and the other projects' transcript folders, are added at launch (`otherSessions`). The lead keeps them.
+    static let sessionStores = ["paste-cache", "shell-snapshots", "file-history", "plans", "tasks", "todos", "sessions", "debug", "feedback",
+                                "jobs"]
+    static let claudeStores = [promptHistory] + sessionStores.flatMap { ["Read(~/.claude/\($0))", "Read(~/.claude/\($0)/**)"] }
+
+    /// What a worker or verifier started in `cwd` for the project at `root` is also denied, read from `home` at its
+    /// launch: `claudeStores` by their paths as resolved, where `~/.claude` (or one of them) is a link elsewhere and the
+    /// `~` rule doesn't see the target; and the Claude Code project folders (`~/.claude/projects/<folder>`: transcripts,
+    /// tool results, auto-memory) of every other repository there now. The project's own stay readable: the main
+    /// checkout's (its auto-memory, shared with its worktrees') and each of its worktrees' (`<root>/.vibeswitcher/
+    /// worktrees/…`), the role's own session among them; a team verifier's members are `memberTranscripts`'.
+    /// A folder made after the launch (a project first opened later) isn't denied: a deny rule can't say "all but".
+    /// Throws when a path as resolved is one a rule can't name as it is (`isRuleSafe`): the role isn't started rather
+    /// than started without its rule, as a team verifier's unreadable board (`team`).
+    public static func otherSessions(root: String, cwd: String, home: String = VibePaths.home) throws -> [String] {
+        let claude = (home as NSString).appendingPathComponent(".claude")
+        func real(_ path: String) -> String? {
+            guard let found = realpath(path, nil) else { return nil }
+            defer { free(found) }
+            return String(cString: found)
+        }
+        var rules: [String] = []
+        for store in ["history.jsonl"] + sessionStores {
+            let path = (claude as NSString).appendingPathComponent(store)
+            guard let resolved = real(path) ?? real(claude).map({ ($0 as NSString).appendingPathComponent(store) }),
+                  resolved != path else { continue }
+            try holdable(resolved, for: path)
+            rules += store == "history.jsonl" ? ["Read(/\(resolved))"] : ["Read(/\(resolved))", "Read(/\(resolved)/**)"]
+        }
+        let projects = (claude as NSString).appendingPathComponent("projects")
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects) else { return rules }
+        func name(_ path: String) -> String { (claudeProjectFolder(path, home: home) as NSString).lastPathComponent }
+        let roots = spellings(root)
+        let own = Set((roots + spellings(cwd)).map(name))
+        // Every worktree's folder starts so; past 200 characters Claude Code cuts the name there and adds a hash.
+        let worktrees = roots.map { String(projectName(($0 as NSString).appendingPathComponent(".vibeswitcher/worktrees") + "/").prefix(200)) }
+        let resolvedProjects = real(projects).flatMap { $0 != projects ? $0 : nil }
+        if let resolvedProjects { try holdable(resolvedProjects, for: projects) }
+        for entry in entries.sorted() where !own.contains(entry) && !worktrees.contains(where: { entry.hasPrefix($0) }) {
+            // Claude Code names its folders with letters, digits and "-": anything else isn't one, and a rule may not
+            // hold its name as it is.
+            guard entry.unicodeScalars.allSatisfy(ruleSafe.contains) else { continue }
+            rules += ["Read(~/.claude/projects/\(entry))", "Read(~/.claude/projects/\(entry)/**)"]
+            if let resolvedProjects { rules += ["Read(/\(resolvedProjects)/\(entry))", "Read(/\(resolvedProjects)/\(entry)/**)"] }
+        }
+        return rules
+    }
+
+    /// The characters a name in a rule holds as they are: none a glob reads (`*`, `?`, `[`, `{`, `!`), nor `(` or `)`.
+    static let ruleSafe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    /// A path a rule holds as it is: `ruleSafe`'s characters, `/`, and a space inside a name (an iCloud Drive folder's
+    /// "Mobile Documents"), which a gitignore pattern reads as itself; not one that ends a name, which it drops.
+    static func isRuleSafe(_ path: String) -> Bool {
+        path.unicodeScalars.allSatisfy { $0 == "/" || $0 == " " || ruleSafe.contains($0) } && !path.hasSuffix(" ") && !path.contains(" /")
+    }
+
+    /// Throws unless `resolved`, where `path` leads, is one a rule can name (`isRuleSafe`).
+    static func holdable(_ resolved: String, for path: String) throws {
+        guard !isRuleSafe(resolved) else { return }
+        throw BoardError(text: "\(path) leads to \(resolved), which a permission rule can't name as it is, so no worker or verifier "
+            + "was started: rename that folder, or point the link at one whose path holds only letters, digits, spaces, . _ and -.")
+    }
+
+    /// `path` as given, as Foundation resolves it, and as the kernel does (`/private` kept: Claude Code names a project
+    /// folder after that).
+    static func spellings(_ path: String) -> [String] {
+        var found = [path, URL(fileURLWithPath: path).resolvingSymlinksInPath().path]
+        if let real = realpath(path, nil) { found.append(String(cString: real)); free(real) }
+        return found
+    }
+
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
     /// (and commits to the base branch): a worker editing it would conflict with those commits.
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
@@ -122,7 +202,7 @@ public enum LeadLaunch {
                 + crossSession
         case .verifier:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
-                + crossSession + claudeHome
+                + crossSession + claudeHome + claudeStores
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -147,6 +227,7 @@ public enum LeadLaunch {
                           "Bash(git rm * \(records)*)"]
             }
             return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession + claudeHome
+                + claudeStores
         }
     }
 
@@ -244,17 +325,22 @@ public enum LeadLaunch {
     /// names it: a JavaScript string hash of the UTF-16 path, its absolute value in base 36).
     public static func claudeProjectFolder(_ path: String, home: String = VibePaths.home) -> String {
         let units = Array(path.utf16)
-        var name = String(units.map { unit -> Character in
-            let scalar = UnicodeScalar(unit).map(Character.init)
-            guard let scalar, scalar.isASCII, scalar.isLetter || scalar.isNumber else { return "-" }
-            return scalar
-        })
+        var name = projectName(path)
         if name.count > 200 {
             var hash: Int32 = 0
             for unit in units { hash = (hash &<< 5) &- hash &+ Int32(unit) }
             name = String(name.prefix(200)) + "-" + String(abs(Int64(hash)), radix: 36)
         }
         return (home as NSString).appendingPathComponent(".claude/projects/\(name)")
+    }
+
+    /// `path` with every character but an ASCII letter or digit made a "-", before any cut (`claudeProjectFolder`).
+    static func projectName(_ path: String) -> String {
+        String(path.utf16.map { unit -> Character in
+            let scalar = UnicodeScalar(unit).map(Character.init)
+            guard let scalar, scalar.isASCII, scalar.isLetter || scalar.isNumber else { return "-" }
+            return scalar
+        })
     }
 
     /// What a team task's verifier may not read on top of `deny(.verifier)`: the Claude Code project folders of the
@@ -280,11 +366,11 @@ public enum LeadLaunch {
     /// verifier's own is one, its session id isn't known before it starts, and a deny rule can't make an exception
     /// (deny wins over allow; a rule has no "all but"). So a large tool result of a session started after the verifier
     /// stays readable to it. The prompt history (`promptHistory`), where every post typed into a member is kept, is
-    /// denied too.
+    /// denied to every verifier already (`claudeStores`).
     public static func memberTranscripts(root: String, slug: String, team: [LeadTeamMember]?, cwd: String? = nil,
                                          home: String = VibePaths.home) -> [String] {
         guard let team, !team.isEmpty else { return [] }
-        return memberFolders(root: root, slug: slug, team: team, cwd: cwd, home: home) + [promptHistory]
+        return memberFolders(root: root, slug: slug, team: team, cwd: cwd, home: home)
     }
 
     /// Claude Code's prompt history: each prompt typed into a session on this Mac, a post delivered into a member's
@@ -298,17 +384,10 @@ public enum LeadLaunch {
     }
 
     static func memberFolders(root: String, slug: String, team: [LeadTeamMember], cwd: String?, home: String) -> [String] {
-        func spellings(_ path: String) -> [String] {
-            var found = [path, URL(fileURLWithPath: path).resolvingSymlinksInPath().path]
-            // As the kernel resolves it, `/private` kept (Foundation drops it): Claude Code names the folder after that.
-            if let real = realpath(path, nil) { found.append(String(cString: real)); free(real) }
-            return found
-        }
         func name(_ path: String) -> String { (claudeProjectFolder(path, home: home) as NSString).lastPathComponent }
         let own = Set((cwd.map(spellings) ?? []).map(name))
         let worktrees = [Worktrees.path(root: root, slug: slug)] + team.map(\.worktree)
         let names = Set(worktrees.flatMap(spellings).map(name)).sorted()
-        let safe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
         return names.flatMap { folder -> [String] in
             let rule = "~/.claude/projects/\(folder)"
             let whole = ["Read(\(rule))", "Read(\(rule)/**)"]
@@ -321,7 +400,7 @@ public enum LeadLaunch {
                 guard lstat(listed, &info) != 0, errno == ENOENT else { return whole }
                 entries = []
             }
-            guard entries.allSatisfy({ $0.unicodeScalars.allSatisfy(safe.contains) }) else { return whole }
+            guard entries.allSatisfy({ $0.unicodeScalars.allSatisfy(ruleSafe.contains) }) else { return whole }
             // `memory*` too: `setAsideMemory`, after this, renames one.
             return ["Read(\(rule)/*.jsonl)"] + laterSessions(rule) + ["Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)"] + entries.flatMap { ["Read(\(rule)/\($0))", "Read(\(rule)/\($0)/**)"] }
         }
@@ -404,7 +483,7 @@ public enum LeadLaunch {
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
                                server: String, name: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
                                branch: String? = nil, records: String? = nil, folder: URL? = nil, cwd: String? = nil,
-                               temporary: URL = SessionTemp.root) throws -> Prepared {
+                               temporary: URL = SessionTemp.root, home: String = VibePaths.home) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -425,7 +504,11 @@ public enum LeadLaunch {
         // A team task's verifier is also denied its members' transcripts, its team as the board has it: a board that
         // can't be read starts no verifier, rather than one without those rules (none yet is an empty board).
         var rules = deny(role, base: branch, records: records)
-        if role == .verifier, let task { rules += memberTranscripts(root: root, slug: task, team: try team(root: root, task: task), cwd: cwd) }
+        // Another project's sessions, as this Mac's `~/.claude` has them now (`otherSessions`); not the lead's.
+        if role != .lead { rules += try otherSessions(root: root, cwd: cwd, home: home) }
+        if role == .verifier, let task {
+            rules += memberTranscripts(root: root, slug: task, team: try team(root: root, task: task), cwd: cwd, home: home)
+        }
         var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
                                                        "deny": rules]]
         var env = environment(role)
@@ -513,6 +596,8 @@ public enum LeadLaunch {
          "merge takes the base's copy of the lead's records whatever the branch did to them (`Worktrees.takeBaseRecords`), and the Claude audit's integrity check reads the rest of the diff"),
         ("no reads of VibeSwitcher's private files (~/.vibeswitcher/lead, ~/.vibeswitcher/steer)",
          "its brief, and the session host's checks: it tells callers apart by their process, never by what they've read"),
+        ("no reads of Claude Code's prompt history and other sessions' stores (~/.claude/history.jsonl, paste-cache, file-history, other projects' transcripts)",
+         "its brief only: its sandbox limits writes, not reads; the Claude audit reads its branch and report for anything of another project's"),
         ("your own Codex rules (~/.codex/rules) stay in force: a command prefix you approved there runs outside the sandbox",
          "Codex's TUI loads them whatever a session says (only `codex exec --ignore-rules` skips them); keep them narrow, and the Claude audit reads what the branch did"),
         ("pkill, killall and debuggers refused by rule",

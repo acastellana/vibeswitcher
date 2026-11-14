@@ -122,6 +122,7 @@ checks it instead:
 | The refused git commands that stay on its own branch or another `agent/` one (amend, reset --hard, checkout or branch -D of another task's branch) | The sandbox holds the ones that write elsewhere (`main`, tags, config, the remote); the Claude audit's integrity check reads the branch's history |
 | No edits to the records folder (`docs/lead`) | Merge takes the base's copy of the lead's records whatever the branch did to them; the audit reads the rest of the diff |
 | No reads of `~/.vibeswitcher/lead` and `~/.vibeswitcher/steer` | Its brief; the session host tells callers apart by their process, never by what they've read |
+| No reads of Claude Code's prompt history and other sessions' stores (`~/.claude/history.jsonl`, `paste-cache`, `file-history`, other projects' transcripts) | Its brief only: the sandbox limits writes, not reads; the Claude audit reads its branch and report |
 | (none: Codex's own) | Your Codex rules (`~/.codex/rules`) stay in force: a command prefix you approved there runs outside the sandbox. The TUI loads them whatever a session says (only `codex exec --ignore-rules` skips them), so keep them narrow; the audit reads what the branch did |
 | pkill, killall and debuggers refused by rule | Its brief; a sandboxed command signals only its own processes |
 

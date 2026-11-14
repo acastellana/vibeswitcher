@@ -73,6 +73,8 @@ extension LeadFindingsToolTests {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         try started(lead, runtime, root: root)
+        // A home of its own: other tests' `.claude/projects` folders in the run's would be denied (`otherSessions`).
+        lead.claudeHome = temp.url("claude-home").path
         #expect(!call(lead, "audit", ["task": "add-b"]).isError)
         let deny = try #require((try settings(of: "verify-add-b", runtime)["permissions"] as? [String: Any])?["deny"] as? [String])
         let workflow = LeadWorkflow.load(from: (root as NSString).appendingPathComponent(".vibeswitcher/workflow.md"))
@@ -98,7 +100,7 @@ struct TeamVerifierLaunchTests {
     func prepare(_ role: LeadLaunch.Role, root: String, task: String) throws -> LeadLaunch.Prepared {
         try LeadLaunch.prepare(role: role, root: root, task: task, base: "claude", prompt: "p", start: "Check.", server: "/App/vibeswitcher-mcp",
                                name: "\(role.rawValue)-\(task)", records: "docs/lead", folder: temp.url("run-\(role.rawValue)-\(task)"),
-                               temporary: temp.url("tmp"))
+                               temporary: temp.url("tmp"), home: temp.url("claude-home").path)
     }
 
     @Test func onlyATeamTasksVerifierIsDeniedItsMembersTranscriptFolders() throws {
@@ -122,7 +124,7 @@ struct TeamVerifierLaunchTests {
         #expect(Set(verifier.dropFirst(today.count))
                 == Set(folders.dropFirst().flatMap { ["Read(\($0))", "Read(\($0)/**)"] }
                        + ["Read(\(own)/*.jsonl)", "Read(\(own)/memory*)", "Read(\(own)/memory*/**)"]
-                       + LeadLaunch.laterSessions(own) + [LeadLaunch.promptHistory]))
+                       + LeadLaunch.laterSessions(own)))
 
         // A plain task's verifier, and a team task's worker, keep today's rules exactly.
         #expect(try deny(try prepare(.verifier, root: root, task: "plain")) == today)
@@ -206,7 +208,7 @@ struct TeamVerifierLaunchTests {
     }
 
     /// Claude Code's prompt history (`~/.claude/history.jsonl`) records each post typed into a member: a team task's
-    /// verifier is denied it; a plain task's keeps today's rules.
+    /// verifier is denied it, once, as every verifier is (`LeadLaunch.claudeStores`).
     @Test func aTeamTasksVerifierIsDeniedThePromptHistory() throws {
         let root = try root()
         let team = try LeadTeam.make(slug: "journeys", root: root, parts: [("lead", "glue"), ("ui", "views")])
@@ -221,7 +223,8 @@ struct TeamVerifierLaunchTests {
         #expect(denied("~/.claude/history.jsonl", by: verifier))
         let plain = try deny(try prepare(.verifier, root: root, task: "plain"))
         #expect(plain == LeadLaunch.deny(.verifier, records: "docs/lead"))
-        #expect(!denied("~/.claude/history.jsonl", by: plain))
+        #expect(denied("~/.claude/history.jsonl", by: plain))
+        #expect(verifier.filter { $0 == LeadLaunch.promptHistory }.count == 1 && plain.filter { $0 == LeadLaunch.promptHistory }.count == 1)
     }
 
     /// In its own folder, what another session makes after the verifier's launch (a new session's folder, an earlier

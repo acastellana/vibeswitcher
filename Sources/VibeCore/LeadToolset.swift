@@ -2791,7 +2791,7 @@ public final class LeadToolset: MCPToolset {
                 : try LeadLaunch.prepare(role: role, root: root, task: slug, base: command, prompt: prompt,
                                          start: start, server: runtime.server, name: name, model: model, advisor: advisor, effort: effort, branch: branch,
                                          records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
-                                         cwd: folder, temporary: sessionTempRoot)
+                                         cwd: folder, temporary: sessionTempRoot, home: claudeHome)
             // The project's heavy_slots for its sessions' vs-heavy too.
             var environment = launch.environment
             if let slots = workflow.heavySlots { environment[TestLock.slotsVariable] = String(slots) }
