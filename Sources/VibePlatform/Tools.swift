@@ -210,20 +210,22 @@ extension Platform {
         /// Those of `names` that a spawn from a caller other than the app may not set in a session's environment
         /// (`SpawnRequest.env`), in `names`' order: the loader's (`LD_*`, `GCONV_PATH`, `GLIBC_TUNABLES`), those
         /// through which a bash runs something before or around its command (`branchShellStartupVariables`,
-        /// `PROMPT_COMMAND`, exported functions, and the prompts `PS0`, `PS1` and `PS2`, whose `$(…)` an interactive
-        /// bash runs, `--norc` or not: a session with no command, or a kept shell, is one), `sessionEnvironmentNever`,
-        /// and `sessionEnvironmentFixed`'s names (the request's `env` goes on top of the host's). The Mac: none, as
-        /// always.
+        /// `PROMPT_COMMAND`, exported functions, and the prompts `PS0`, `PS1`, `PS2` and `PS3`, whose `$(…)` an
+        /// interactive bash runs, `--norc` or not: a session with no command, or a kept shell, is one), `XDG_RUNTIME_DIR`
+        /// (which a session never gets from the host: set, it points a program at another agent's and bus's sockets),
+        /// `sessionEnvironmentNever`, and `sessionEnvironmentFixed`'s names (the request's `env` goes on top of the
+        /// host's). The Mac: none, as always.
         ///
         /// A guard against a slip in `env` only: the same caller's `command` is a bash line, which can set any of
         /// these itself (`LD_PRELOAD=… claude`, `export …`), so this is no limit on what a session can have the host
-        /// start.
+        /// start. A list of refused names: an allow-list comes with the sandbox (the plan's "After the bootstrap").
         public static func spawnEnvironmentRefused(_ names: [String]) -> [String] {
             #if canImport(Darwin)
             return []
             #else
             let refused = Set(branchShellStartupVariables + sessionEnvironmentNever + Array(sessionEnvironmentFixed.keys)
-                              + ["GCONV_PATH", "GLIBC_TUNABLES", "PROMPT_COMMAND", "PS0", "PS1", "PS2"])
+                              + ["GCONV_PATH", "GLIBC_TUNABLES", "PROMPT_COMMAND", "PS0", "PS1", "PS2", "PS3",
+                                 "XDG_RUNTIME_DIR"])
             return names.filter { name in
                 refused.contains(name) || name.hasPrefix("LD_") || branchShellFunctionPrefix.map { name.hasPrefix($0) } == true
             }

@@ -393,13 +393,15 @@ struct ToolsTests {
     }
 
     /// What a spawn other than the app's may not add, on Linux: the loader's variables, a bash's startup ones, its
-    /// prompts and exported functions, the names never passed, and the fixed part's. Anything else may be added.
+    /// prompts and exported functions, the runtime folder, the names never passed, and the fixed part's. Anything
+    /// else may be added.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's form"))
     func aSpawnMayNotAddLoaderStartupOrNeverPassedVariables() {
         let refused = ["LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "GCONV_PATH", "GLIBC_TUNABLES", "BASH_ENV", "ENV", "SHELLOPTS",
-                       "BASHOPTS", "PS4", "BASH_XTRACEFD", "PROMPT_COMMAND", "PS0", "PS1", "PS2", "BASH_FUNC_git%%", "SWIFT_BACKTRACE"]
+                       "BASHOPTS", "PS4", "BASH_XTRACEFD", "PROMPT_COMMAND", "PS0", "PS1", "PS2", "PS3", "BASH_FUNC_git%%",
+                       "SWIFT_BACKTRACE", "XDG_RUNTIME_DIR"]
             + Platform.Tools.sessionEnvironmentNever
-        let allowed = ["PATH", "VIBESWITCHER_ROLE", "CLAUDE_CONFIG_DIR", "LANG", "TERM", "OLD_PWD", "XLD_PRELOAD", "PS3"]
+        let allowed = ["PATH", "VIBESWITCHER_ROLE", "CLAUDE_CONFIG_DIR", "LANG", "TERM", "OLD_PWD", "XLD_PRELOAD", "XDG_CONFIG_HOME"]
         #expect(Platform.Tools.spawnEnvironmentRefused(allowed + refused) == refused)
         #expect(Platform.Tools.spawnEnvironmentRefused(allowed) == [])
     }
