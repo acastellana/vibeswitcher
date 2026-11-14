@@ -1975,6 +1975,18 @@ S10 and S11 (each result, one line, with the inventory's date)
   `runPrefix` with Task 10c's `setsid`, runs `sleep 600` with a short timeout and, separately, is interrupted; both end
   the command (no process of it left), and the times are recorded.
 - [ ] commit ("v2: Claude Code's shell snapshot and a verifier's command in its own session, measured").
+- *As made (2026-11-14), for the lead to approve:*
+  - Both sessions run `claude --permission-mode manual` with an inline `--settings` that allows only the command the
+    prompt names (no question was shown), not a role's `auto`; the verifier's is its environment
+    (`LeadLaunch.verifierEnvironment`, in the same inline settings), not a whole `LeadLaunch.prepare`.
+  - The command is `./hold.sh N`, a script that sleeps: 2.1.323's Bash tool refuses a standalone `sleep 600`.
+  - **The timeout doesn't end the command on 2.1.323**: Claude Code moves it, prefix and all, to the background. The
+    test asserts instead that the tree stays whole at the timeout (the prefix still runs), that the interrupt ends
+    every process of it, and that `/exit` (its "Exit and stop tasks", answered with Enter) ends what the timeout
+    left. Its "Move to background and exit", and a SIGKILL to Claude Code with a command running, aren't measured.
+  - The snapshot run: every Bash command's shell reads `~/.bashrc` itself (stdin a socket, `SHLVL` 1: Ubuntu's bash
+    takes it for an ssh shell), and the snapshot's login shell reads `~/.bash_profile` and `~/.bashrc`. The record is
+    in `docs/process/v2-linux-inventory.md`.
 
 **Done when:** both ran once here with the user's folder and their results are recorded; until then they are skipped,
 saying why.

@@ -211,6 +211,66 @@ reply it was is not known; the flush line now names it, and the next gated run w
 second kitty graphics probe (`s=1,v=1,a=q,t=f,f=32`) beside the `t=d,f=24` one whose reply was logged: a likely
 candidate, not confirmed. The slice's four gated runs are spent.
 
+## Claude Code's shell snapshot and a verifier's command, measured (2026-11-14, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+Stage 2's Task 12b, on this machine (Ubuntu 24.04 under WSL2, 24 cores): `RealClaudeTests` in
+`Tests/VibeHostTests/RealClaudeTests.swift`, run by
+`VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<config> bash scripts/test.sh --filter RealClaudeTests`, `<config>` the
+throwaway config folder of R10. Claude Code **2.1.323**, model sonnet. Each test's scratch host (`ScratchHostProcess`,
+its `SHELL` set to `/bin/bash` as the node's unit has it from the account) spawns `exec claude --model sonnet
+--permission-mode manual --settings '<json>' '<prompt>'` in a scratch repository trusted in `<config>`, the settings
+allowing only the command the prompt names (no permission question was shown in any run). Four gated runs: the first
+two ran both tests (the snapshot's passed both times, the same; the verifier's failed at once, below), the last two
+the verifier's only (the third failed on the timeout assertion as first written, the fourth passed).
+
+**What Claude Code's Bash tool sources** (`whatClaudesBashToolSourcesIsMeasured`). The session starts as Task 10a
+starts one (`/bin/bash --noprofile --norc -c "exec claude …"`, no startup file read there), in a scratch `HOME` whose
+`.bashrc`, `.bash_profile`, `.profile` and `.zshrc` each export a variable, define a function and an alias, and log the
+shell that read them. Claude Code's Bash tool is asked to run a script that prints the variables it sees. Read, in
+order, within 30 ms of the start:
+
+| Who | Its command line | What it read |
+| --- | --- | --- |
+| Claude Code at its start, reading the shell's environment | `/bin/bash -c env`, stdin a socket, `SHLVL` 1 | `~/.bashrc` |
+| The snapshot's shell | `/bin/bash -c -l <script>` (a login shell), stdin a socket | `~/.bash_profile`, then `~/.bashrc`, which the script sources itself |
+| Each Bash tool command's shell | `/bin/bash -c "source <snapshot> … && eval '<command>' …"`, stdin a socket, `SHLVL` 1 | `~/.bashrc` |
+
+- The snapshot (`<config>/shell-snapshots/snapshot-bash-<ms>-<id>.sh`, 6 KB) holds the functions and aliases of
+  `.bashrc` and `.bash_profile`, `shopt` and `set -o` settings, Claude Code's own `rg`, `find`, `grep` and `pkill`
+  wrappers and `export PATH=…`; no variable either file exported.
+- The command saw `VS_MARK_BASHRC=1` and no other marker (`SHLVL` 2, `BASH_ENV` unset): its shell reads `~/.bashrc`
+  itself, not through the snapshot. `BASH_ENV` was unset in every reader; each non-interactive bash that read
+  `~/.bashrc` unasked had a socket for its stdin and `SHLVL` under 2, which is Ubuntu's bash's rule for a shell it
+  takes for one started by ssh (Claude Code's children get socket pairs for their standard streams).
+- `.profile` was read by nobody: a login bash reads the first of `.bash_profile`, `.bash_login` and `.profile`, and
+  `.bash_profile` was there (a home without one wasn't measured). `.zshrc` by nobody (no zsh here; the snapshot is
+  bash's because `SHELL` is bash).
+- So the plain bash a team session starts in (Task 10a) keeps the startup files out of the session's shell only: every
+  command an agent's Bash tool runs reads `~/.bashrc`, and its start reads `~/.bash_profile` too (S10, S11 item 8).
+
+**A verifier's command in a session of its own** (`aVerifierCommandInItsOwnSessionStillTimesOut`). The session gets a
+verifier's environment through its inline settings (`LeadLaunch.verifierEnvironment` with the built
+`vibeswitcher-mcp`), so each Bash command runs as `vibeswitcher-mcp '<line>'` and `BranchCode.runPrefix` starts the
+branch-code wrapper as a child in a POSIX session of its own (Task 10c).
+
+- 2.1.323's Bash tool refuses a standalone `sleep 611` ("rejected sleep 611 as a standalone sleep", runs 1 and 2), so
+  the command is a script that sleeps, `./hold.sh 611`.
+- Its processes, as it ran: the prefix in a session of its own (Claude Code starts each command's shell as a session
+  leader: `setsid()` in place would fail there, Task 10c's reason), the wrapper in a new session, and under it the
+  shell, the script and `sleep` in the wrapper's session.
+- **The timeout (5000 ms) ended nothing**, in runs 3 and 4: Claude Code moved the command to the background ("The
+  command hit the 5-second timeout and is now running in the background") and every process of it, the prefix
+  included, still ran 30 s later. So a SIGKILL to the prefix that couldn't be passed on never happens at a timeout:
+  the tree stays whole, Claude Code's.
+- **The interrupt (Escape, 2.0 s after the `sleep` started) ended every process of it** (prefix, wrapper, shell,
+  script, `sleep`) within 0.1 s, runs 3 and 4.
+- **`/exit` with that command still in the background** asked first ("Background work is running … 1. Exit and stop
+  tasks 2. Move to background and exit 3. Stay"); Enter (1) ended the session 5.2 s after `/exit`, and every process
+  of the command was gone at the same look.
+- Not measured: "Move to background and exit", which leaves the command running past its session by design (in its
+  own POSIX session, with no terminal: no session's to the host, as an escape is); and Claude Code ended by a SIGKILL
+  with a command running, which can't be passed on to the wrapper's session.
+
 ## Sealed copies: the measurement (2026-11-13)
 
 Stage 2's Task 3b, on this machine: kernel 5.15.167.4-microsoft-standard-WSL2, Ubuntu 24.04 under WSL2, 24 cores,

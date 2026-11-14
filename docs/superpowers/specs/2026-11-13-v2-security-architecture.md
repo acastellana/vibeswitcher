@@ -554,7 +554,11 @@ E8: `anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`. Step 8: `aSession
   `.ownSession`), waits for it, exits with its status and passes SIGTERM, SIGINT and SIGHUP on to its process group
   (stage 2's Task 10c: `setsid()` in place would fail with `EPERM` in a caller that already leads its process group).
   A SIGKILL to the waiting process can't be passed on; whether Claude Code's timeout and interrupt still end the
-  command is measured in Task 12. The Mac is unchanged and gets a line in `docs/process/v2-mac-tasks.md`.
+  command is measured in Task 12b (2026-11-14, Claude Code 2.1.323, `docs/process/v2-linux-inventory.md`): an
+  interrupt ends every process of it within 0.1 s; a timeout ends nothing but moves the command, prefix and all, to
+  the background, and `/exit`'s "stop tasks" ends it; its "move to background and exit" leaves it running, no session's
+  (unmeasured, as is Claude Code killed with a command running). The Mac is unchanged and gets a line in
+  `docs/process/v2-mac-tasks.md`.
 - **(call, new; Task 6)** **A session's terminal is its own from the start.** On Linux the launcher exits 127 when
   `TIOCSCTTY` fails or `tcgetsid(0)` isn't its pid (today `PTYSpawn.swift:16` ignores the result), and the host counts
   a session live only once `TIOCGSID` on the master names the launcher's pid. Otherwise an escaped worker that ran
@@ -1212,7 +1216,9 @@ Most of these are guard rails; the inline launch settings close a route that nee
 - Keeping credentials away: whatever the user keeps in files (`gh`'s token, git's credential store, cloud tools' keys,
   `~/.gnupg`, the agents' own logins in `~/.claude` and `~/.codex`) is a worker's to read and use (S11).
 - What Claude Code itself does with the user's shell: its Bash tool takes a snapshot of the user's shell
-  configuration, so the startup files still run inside a session's agent. Task 12 measures it.
+  configuration, so the startup files still run inside a session's agent. Measured (Task 12b, 2026-11-14, Claude Code
+  2.1.323, `docs/process/v2-linux-inventory.md`): every Bash command's shell reads `~/.bashrc` itself, and its start
+  reads `~/.bash_profile` and `~/.bashrc` into its snapshot, though the session's own bash reads neither.
 - Codex's sandbox (Landlock and seccomp) on this WSL kernel: unmeasured, so Codex workers are off (decision 15).
 - What a spawn's caller puts in the new session through its `command`: a lead can start a session with any of the
   variables `env` may not name, by setting them in the command line. The sandbox (S12) is what holds that.
@@ -1240,13 +1246,14 @@ bootstrap (S12 item 15).
 `LeadLaunchTests.theRecordedCommandLeavesOutARolesInlineValues`,
 `InlineLaunchHostTests.aDayOfInlineRoleSessionsStillGetsAWelcome`; `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`,
 `BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup` (Task 10c: git from root's folders, and a verifier's
-command in a session of its own).
+command in a session of its own); `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`,
+`RealClaudeTests.aVerifierCommandInItsOwnSessionStillTimesOut` (Task 12b: gated measurements, run 2026-11-14).
 
 **Tests to write:** The engine's
 E4: `LeadStartTests.theLeadGetsNoCodexWorkers`, `aLeadIsLaunchedByClaudesResolvedPath`,
 `aClaudeFoundOnlyThroughALoginShellIsRefused`, `RoleProgramTests.aWorkersProgramIsTheLeadsResolvedClaudeNotTheSettings`.
 After the bootstrap:
-`GitGuardTests.aChangedHooksCopyIsRefused`. Task 12: `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`, `aVerifierCommandInItsOwnSessionStillTimesOut`.
+`GitGuardTests.aChangedHooksCopyIsRefused`.
 
 ## S11. What plain mode doesn't promise on Linux
 
@@ -1316,7 +1323,8 @@ against it. Each line says what reduces it now, if anything.
    `board.json` naming a worker's session as the lead, which would receive the user's answers but for the engine
    delivering only to the session the vault binds to the lead role (EN-D14).
 8. A worker can replace what every agent runs (the hook, the agents' settings and hooks, `claude`'s versions, the shell
-   startup files Claude Code's Bash tool sources, folders on the PATH). The seal detects it at its next look and holds
+   startup files Claude Code's Bash tool sources, folders on the PATH; measured 2026-11-14: `~/.bashrc` in every Bash
+   command's shell, `~/.bash_profile` and `~/.bashrc` in its snapshot). The seal detects it at its next look and holds
    workers and merges; a change swapped in and restored between two looks is missed; a host restart resets the seal to
    "held until accepted". The Linux list (`~/.local/share/claude/versions` and the rest) arrives with the bootstrap
    path's step 8. S7, S9.
