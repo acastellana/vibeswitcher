@@ -613,7 +613,10 @@ extension LeadToolset {
         }
         let named = Self.recipientsText(stored.to)
         if role == .lead {
-            let sent = deliverWall(task.slug)
+            // Its own post, vouched for from memory (never from the file, which a worker's shell can write), with what
+            // waits for the members it's for riding along.
+            let named = Set(team.map(\.name).filter { stored.to.includes($0) })
+            let sent = deliverWall(task.slug, riding: named, vouched: [stored.id])
             return MCPToolResult(text: "Posted #\(stored.id) on \(task.slug)'s wall to \(named), marked as yours. "
                                  + (sent.isEmpty ? "No member it names got it yet (none live, or idle and it doesn't wake them): each gets it once, at its next step or turn."
                                     : "Delivered to \(sent.joined(separator: ", ")); the rest get it once, at their next step or turn."))
@@ -655,7 +658,7 @@ extension LeadToolset {
     /// Each post: "#3 from b to @all (needs an answer):" then its words, quoted line by line.
     static func wallLines(_ posts: [LeadWall.Post]) -> String {
         posts.map { post in
-            let author = post.author == LeadWall.leadAuthor ? "the lead (the lead's post)" : post.author
+            let author = post.author == LeadWall.leadAuthor ? "the lead (marked as the lead's post)" : post.author
             let marks = (post.replyTo.map { ", replying to #\($0)" } ?? "") + (post.needsAnswer ? ", needs an answer" : "")
             return "#\(post.id) from \(author) to \(recipientsText(post.to))\(marks):\n" + SteerReply.quote(post.text)
         }.joined(separator: "\n")
@@ -682,8 +685,12 @@ extension LeadToolset {
     /// member is woken only by a post that `LeadWall.wakes` it; until then its posts wait, unless it's in `riding`
     /// (they ride along with the message just sent it). The lead's tool server only: it alone may reach the members'
     /// sessions, and the vault seals a teammate's post only for it. Returns the members something went to.
+    ///
+    /// The wall's file is the lead's private folder's, but a worker's shell can write it: so each post is checked again
+    /// as it's sent (`deliverable`), and a post marked as the lead's goes only from the lead's own `post` (`vouched`,
+    /// the ids it just stored), never from what the file says.
     @discardableResult
-    func deliverWall(_ slug: String, riding: Set<String> = []) -> [String] {
+    func deliverWall(_ slug: String, riding: Set<String> = [], vouched: Set<Int> = []) -> [String] {
         guard role == .lead, let wall = try? wallStore(slug) else { return [] }
         var reached: [String] = []
         _ = try? exclusively("wall-\(slug)") {
@@ -693,7 +700,7 @@ extension LeadToolset {
             let live = Dictionary(sessions.filter(\.live).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             for (index, member) in team.enumerated() {
                 guard let worker = index == 0 ? task.worker : member.worker, worker != task.stopped, let info = live[worker] else { continue }
-                let due = LeadWall.posts(posts, for: member.name, after: member.wallSeen ?? 0)
+                let due = LeadWall.posts(posts, for: member.name, after: member.wallSeen ?? 0).filter { Self.deliverable($0, team: team, vouched: vouched) }
                 guard !due.isEmpty else { continue }
                 if Self.isIdle(info), !riding.contains(member.name), !due.contains(where: { LeadWall.wakes($0, for: member.name, in: posts) }) { continue }
                 for post in due {
@@ -709,6 +716,17 @@ extension LeadToolset {
             }
         }
         return reached
+    }
+
+    /// Whether `post`, as the wall's file holds it, may be sent: one the lead's `post` just stored (`vouched`), or a
+    /// member's of this team that passes the wall's checks (its name, its recipients members, its text's caps and
+    /// lints). A line written into the file by hand that fails them is never sent; one marked as the lead's never is.
+    static func deliverable(_ post: LeadWall.Post, team: [LeadTeamMember], vouched: Set<Int>) -> Bool {
+        if post.author == LeadWall.leadAuthor { return vouched.contains(post.id) }
+        guard team.contains(where: { $0.name == post.author }), LeadWall.textRefusal(post.text) == nil,
+              LeadWall.plainLines(post.text) == post.text else { return false }
+        if case .members(let names) = post.to { return names.allSatisfy { name in name != post.author && team.contains { $0.name == name } } }
+        return true
     }
 
     /// Claims `post` for `member` (run by `worker`) under the board's lock: its cursor moved to it. The cursor before,

@@ -1309,7 +1309,7 @@ extension LeadVault {
             let recipient = seat.hasPrefix(prefix) ? String(seat.dropFirst(prefix.count)) : nil
             guard let wall = try? LeadWall(root: team.root, slug: task, folder: wallFolder ?? VibePaths.root.appendingPathComponent("lead", isDirectory: true)),
                   wall.posts().contains(where: { post in
-                      post.author == member && LeadWall.delivery(post) == text
+                      post.author == member && LeadWall.delivery(post) == text && LeadWall.textRefusal(post.text) == nil
                           && recipient.map { post.author != $0 && post.to.includes($0) } ?? true
                   }) else { return refusal }
             return nil
