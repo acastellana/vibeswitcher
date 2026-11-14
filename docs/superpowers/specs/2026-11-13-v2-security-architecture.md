@@ -750,11 +750,15 @@ parser's reply grammar in Task 9; the server's own first statements in the engin
 `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`, `HostHardeningTests.aSessionsProgramHoldsNoImageDescriptor`,
 `HostHardeningTests.aSessionsProgramIsTheOOMKillersFirstPick`,
 `HostHardeningTests.aLaunchersImageChangedFromOutsideNeverReachesTheParsers`,
-`SealedCopyTests.aCopyOfACopyIsAnotherSealedCopyOfTheSameBytes`; planned: stage 2 plan task 9 (9c to 9e).
+`SealedCopyTests.aCopyOfACopyIsAnotherSealedCopyOfTheSameBytes`; `ParserReplyTests.aCursorQueryIsAnswered`,
+`ParserReplyTests.aReplyWithNoQueryIsNotTyped`, `ParserReplyTests.aReplyOutsideTheGrammarIsDropped`,
+`ParserReplyTests.aQueryWrittenToTheSessionsTerminalFromOutsideIsAnsweredOnlyAsAReply`,
+`ParserReplyTests.aQueryAnsweredByAClientIsNoLongerPending`, `ParserReplyTests.everyResponderInSwiftTermIsListed`,
+`ParserReplyTests.everyQueryIsAnsweredInItsGrammar`, `ParserReplyTests.theMacsParserRepliesAreTodays` (Task 9e);
+planned: stage 2 plan task 9 (9c, 9d).
 
 **Tests to write:** Task 9: `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`,
-`aHandoverImageIsNotDumpableFromItsExec`; `ParserReplyTests.aReplyWithNoQueryIsNotTyped`,
-`aReplyOutsideTheGrammarIsDropped`.
+`aHandoverImageIsNotDumpableFromItsExec`.
 
 ## S7. The vault's key per mode
 

@@ -1610,6 +1610,25 @@ is green.
 - Modify: `Sources/VibeHost/HostedSession.swift` (`startParser`, `link.onReply`, 226-229): one hook on Linux; the
   output path notes queries (one hook in `deliver`). The Mac unchanged. Non-seam edits.
 - Test: `Tests/VibeHostTests/ParserReplyTests.swift`
+- *As made (2026-11-14), awaiting the lead's approval:*
+  - The output hook is in `HostedSession.drain`, beside `focus.feed`, not in `deliver` (that is `HostServer`'s, and
+    holds no session's state); the pending queries are a stored `HostedSession.parserReplies` (a `ParserReplies`),
+    used on the session's queue. A third hook, one line in `SessionParser.run`'s test hook (`--parser-test-hooks`
+    only): `OSC 7599 ; reply:HEX` makes the parser send HEX as a reply, which is how the tests' parser "sends a
+    `.reply` the session never asked for". Each kind 4, in the port map.
+  - The output is read for queries by a scanner that mirrors SwiftTerm's own state table (`QueryScanner`: its ground
+    state, ESC, CAN and SUB, the C1 controls, a CSI's parameters and collected bytes, where an OSC or a DCS ends), so
+    a query split between two reads counts, and a query SwiftTerm wouldn't answer doesn't.
+  - `CSI = c` isn't in the table: SwiftTerm 1.19.0 doesn't answer it. Left out besides the plan's list: the kitty
+    graphics replies (`KittyGraphics.swift`, `APC G`), the focus report, a user's input and the semantic prompt's
+    click (the direct `tdel?.send` sites), and the linux console's unreachable DA2 echo; `everyResponderInSwiftTermIsListed`
+    reads every `Sources/SwiftTerm/*.swift`, not `Terminal.swift` alone, and the direct `tdel?.send` sites too.
+  - A dropped reply goes to the host's log through the session's `onParserTrouble` (so the line reads
+    `watchdog: session X's parser (pid N) reply dropped, …`), a line a second at most, saying how many went unsaid.
+    A reply skipped while a view is attached still answers its query; one with no query pending is logged then too.
+  - Two pure tests more, on both systems: `everyQueryIsAnsweredInItsGrammar` (each query fed to a SwiftTerm terminal
+    and to the scanner: as many seen as answered, each reply in its query's grammar, passing once) and
+    `aQuerySplitBetweenReadsIsSeen`; and `droppedRepliesAreLoggedOnceASecond`.
 
 - [ ] **Step 1: Failing tests** (Linux; the Mac's form passes every reply, as today, `theMacsParserRepliesAreTodays`).
   - `aCursorQueryIsAnswered`: a session's program writes `ESC[6n` and reads `ESC[r;cR` on its stdin.

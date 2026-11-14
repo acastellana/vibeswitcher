@@ -84,7 +84,7 @@ public enum SessionParser {
                 switch String(decoding: payload, as: UTF8.self) {
                 case "stall": while true { sleep(3600) }
                 case "trap": fatalError("test hook: a trap while parsing")
-                default: break
+                default: if !quiet, let reply = ParserReplies.testReply(payload) { send(.reply, reply) }
                 }
             }
         }

@@ -54,6 +54,8 @@ public final class HostedSession {
     /// Whether its program asked for focus events (see `FocusEvents`), read off its output as it's read. On `queue`.
     private var focus = FocusEvents()
     public var focusEvents: Bool { focus.on }
+    /// The queries its program asked and what of its parser's replies goes in, on Linux (see V2/ParserReplies.swift).
+    var parserReplies = ParserReplies()
     /// When its parser failed lately (see `replaceParser`).
     private var parserFailures: [Date] = []
     static let maxParserFailures = 5
@@ -232,8 +234,8 @@ public final class HostedSession {
             onParserTrouble?("couldn't start a parser: its screen is the last one shown")
             return
         }
-        link.onReply = { [weak self] data in
-            guard let self, !self.clientsAttached else { return }
+        link.onReply = { [weak self, pid = link.pid] data in
+            guard let self, let data = self.parserReplies.admit(data, from: pid, clientsAttached: self.clientsAttached, log: self.onParserTrouble) else { return }
             self.write(data)
         }
         link.onTitle = { [weak self] title in
@@ -378,6 +380,7 @@ public final class HostedSession {
                 let chunk = Data(buffer[0..<count])
                 ring?.append(chunk)
                 focus.feed(chunk)
+                parserReplies.noteQueries(in: chunk)
                 parser?.feed(chunk)
                 onOutput?(chunk)
                 if pausing, !exiting, let parser, parser.unparsed > Self.maxUnparsed { return pauseReading() }
