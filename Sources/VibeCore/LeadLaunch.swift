@@ -119,10 +119,10 @@ public enum LeadLaunch {
         switch role {
         case .lead:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName
-                + crossSession
+                + crossSession + LinuxLaunch.denyRules(for: .lead)  // Linux's own (S10): none on the Mac.
         case .verifier:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
-                + crossSession + claudeHome
+                + crossSession + claudeHome + LinuxLaunch.denyRules(for: .verifier)  // Linux's own (S10): none on the Mac.
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -147,6 +147,7 @@ public enum LeadLaunch {
                           "Bash(git rm * \(records)*)"]
             }
             return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession + claudeHome
+                + LinuxLaunch.denyRules(for: .worker)  // Linux's own (S10): none on the Mac.
         }
     }
 
@@ -358,6 +359,7 @@ public enum LeadLaunch {
         // A verifier checks a branch a worker wrote: that branch's project settings, hooks and MCP servers don't run
         // in it (its rules come from --settings, VibeSwitcher's hooks from your user settings).
         if role == .verifier { parts.append("--setting-sources user --strict-mcp-config") }
+        parts += LinuxLaunch.permissionMode(command: parts[0])  // Named, auto, unless the project's command names one.
         parts.append("--name \(quote(name))")
         if let model { parts.append("--model \(quote(model))") }
         parts.append("-- \(quote(start))")
@@ -368,7 +370,7 @@ public enum LeadLaunch {
         if role == .verifier { prepared.environment.merge(verifierEnvironment(server: server)) { $1 } }
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
-        return prepared
+        return try LinuxLaunch.inline(prepared, prompt: prompt, mcp: mcp, settings: settings, start: start)  // Files on the Mac (S10).
     }
 
     /// A verifier isn't started when its tool server's path can't be its shell prefix (`BranchCode.prefixable`).

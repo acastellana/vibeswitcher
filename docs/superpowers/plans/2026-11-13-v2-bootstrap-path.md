@@ -349,7 +349,10 @@ Each ends in something that runs.
      `aSessionsProcessCannotInstallHooks`.
    - **The config seal's Linux list.** `ConfigSeal.homeFiles` (`ConfigSeal.swift:306-315`) has the Mac's files only
      (the shell startup files `.bashrc`, `.bash_profile`, `.profile` among them). A platform answer, empty on the
-     Mac, adds `~/.config/systemd/user`, `~/.config/environment.d`, `~/.config/autostart`,
+     Mac, adds what Claude Code's Bash tool reads here (Task 12b's additions, approved by the lead 2026-11-14):
+     `~/.bash_login` beside the Mac's three, all four watched whether they exist or not, what they source (here
+     `~/.local/share/swiftly/env.sh`), `~/bin` (absent here; `.profile` puts it first on the PATH of the shells that read it) and the agents'
+     `shell-snapshots` folders; and `~/.config/systemd/user`, `~/.config/environment.d`, `~/.config/autostart`,
      `~/.vibeswitcher/v2/projects`, `~/.vibeswitcher/v2/builds`, `~/.vibeswitcher/lead/run` (the roles' launch
      folders, a detector now that their settings are inline), `~/.vibeswitcher/lead/git-hooks` (the lead's accepted
      hooks copy and its `accepted.json`: with GitGuard's check after the bootstrap, decision 19, the only check on

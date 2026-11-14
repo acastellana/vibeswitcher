@@ -91,7 +91,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         _ = lead.call("add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"]])
         let started = lead.call("start_worker", ["task": "add-b"])
         #expect(!started.isError, "\(started.text)")
-        let settings = read(vault.runFolder(root: root, name: "worker-add-b").appendingPathComponent("settings.json").path)
+        let settings = String(decoding: try LaunchArguments.data("--settings", in: LaunchArguments.command("worker-add-b", runtime)), as: UTF8.self)
         #expect(settings.contains("Edit(docs\\/lead\\/**)") || settings.contains("Edit(docs/lead/**)"))
     }
 

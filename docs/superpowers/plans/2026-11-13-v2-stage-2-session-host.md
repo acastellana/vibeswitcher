@@ -222,11 +222,16 @@ document holds the reasoning in full (the section is named); this list is what t
    - `LeadVault.Book.holdsFirstLook` (false by default: the Mac's vault is unchanged; kind 5) covers **every record**
      on a fresh vault: the home seal and the main checkout's seal (`ConfigSeal.checkoutFiles`, `.git/config`,
      `.git/hooks`) hold what they first see instead of sealing it; a guarded setting with nothing recorded is held,
-     not recorded; no floor is seeded from `workflow.md`. **Each root's first look is held until the app's accept
-     for that root**: the app's `.setGuarded` carrying `ConfigSeal.checkKey` with shown hashes (what
-     `checkConfig(root:shown:)` sends for the user's `config accept`) records the root in
-     `Book.firstLookAccepted: Set<String>`; the home seal's first look is held until the first such accept. A second
-     project's first look is held on its own. Both holds are in the `Book`'s own handlers, where the flag lives
+     not recorded; no floor is seeded from `workflow.md`. **A watched key never recorded is held for the user's
+     accept whenever it is first read, for as long as the vault holds its first look** (as built in Task 10e's
+     review, approved by the lead 2026-11-14: strictly more than "until the first accept"): the home seal and each
+     main checkout's seal hold what they have nothing recorded for at the first look and at any later look that first
+     reads it (`~/.claude.json` unreadable at the accept is no baseline at the next look), and only the app's accept
+     that showed it seals it. **Each root's floor and rails are held until the app's accept for that root**: the
+     app's `.setGuarded` carrying `ConfigSeal.checkKey` with shown hashes (what `checkConfig(root:shown:)` sends for
+     the user's `config accept`), sealing with nothing held again, records the root in
+     `Book.firstLookAccepted: Set<String>`. A second project's first look is held on its own. Both holds are in the
+     `Book`'s own handlers, where the flag lives
      (`.setGuarded`, `LeadVault.swift:1033-1043`; `.setReviewFloor` with `onlyIfUnset`, 1045-1048), not in the
      client-side callers (`LeadVaultGuarded.changedSettings`, `LeadVault.startLead`), which run in the tool server or
      the engine and can't see it; each answers with a reply its caller already handles. Whether a root is still held
@@ -361,7 +366,10 @@ document holds the reasoning in full (the section is named); this list is what t
     `.git` file alone is refused). The list's place is `HostServer.Config.projectAllowList: URL?`, nil by default (the
     Mac's and every scratch host's behaviour; kind 5). It goes when the user marks stage 6 passed. A guard rail,
     written down as one: the file is the user's to edit; a worker can write both halves of the worktree check (and the
-    pair passes); a session can run a scratch host with no list.
+    pair passes); a repository cloned inside an allowed one is inside it; a folder swapped for a link between the
+    check (which resolves it) and the session's start (in the folder as asked) is followed; a session can run a
+    scratch host with no list. (The clone and the link are the two limits Task 10d found and named in
+    `ProjectAllowList`'s doc comment; added here as approved by the lead 2026-11-14.)
 12. **S2-D12: The sessions' environment is a platform answer** (S10; corrected by the document).
     - **Passed on Linux:** `HOME USER LOGNAME SHELL TMPDIR PATH LANG LC_ALL LC_CTYPE`, plus `SWIFT_BACKTRACE=enable=no`
       (which the parsers' fixed environment, `PATH=/usr/bin:/bin` in `ParserLink.start`, gains too).
@@ -493,7 +501,7 @@ Written, attacked and revised before Task 2 starts.
   | S9 | What the host executes | S2-D7: sealed copies, the static build, the unit, git from root's folders, the tool server's switch, the clean install; the keeper after the bootstrap (decision 18) | yes | 3b, 8a, 9b, 9d, 10c; bootstrap step 8 |
   | S10 | The sessions' environment | S2-D12, corrected | yes | 10a, 10b, 10c, 12b |
   | S11 | What plain mode doesn't promise | the list of 31, and the allow-list (S2-D11) | yes | 10d; engine E1 |
-  | S12 | After the bootstrap | sixteen items, in order | no | [After the bootstrap](#after-the-bootstrap-from-this-stage) |
+  | S12 | After the bootstrap | seventeen items, in order | no | [After the bootstrap](#after-the-bootstrap-from-this-stage) |
 
 - [ ] **Step 3: The review record.** `docs/process/reviews/v2-security-review-2026-11-13.md` carries the four
   reviewers' findings as they gave them, each with its answer: the section of the document that took it (the
@@ -1746,6 +1754,11 @@ why: the Mac's launches change too, because the CLI's default changed under them
   `deny(_:base:records:)` (`LeadLaunch.swift:118-124`) appends `LinuxLaunch.denyRules` (empty on the Mac), and
   `prepare` (311-) returns its result through `LinuxLaunch.inline` (the identity on the Mac). `prepare`'s body is not
   rewritten.
+  *As made, approved by the lead 2026-11-14 (kind 4):* five one-line hooks, not two. `deny` keeps its body and
+  signature, and each of its three cases (lead, verifier, worker) appends `LinuxLaunch.denyRules(for:)` to the list it
+  returns (the first version's wrapper and new `deny(both:base:records:)`, outside kind 4, the 10b review put back as
+  these three); `prepare` adds `LinuxLaunch.permissionMode(command:)` before `--name` (the fourth hook, "Measured
+  since" above) and returns through `LinuxLaunch.inline`. The port map's line names each, with its real lines.
 - Test: `Tests/VibeCoreTests/LeadLaunchTests.swift`
 
 - [ ] **Step 1: Failing tests.**
@@ -1846,9 +1859,14 @@ why: the Mac's launches change too, because the CLI's default changed under them
   `checkConfig(root:shown:)` sends for the user's `config accept CARD`), once it sealed with nothing held again; it adds
   the root to `Book.firstLookAccepted: Set<String>` (kept in the serialized state, optional, kind 6). After it, the
   app's `setReviewFloor(onlyIfUnset: true)` for that root records (the engine's EN-D7 calls the two in that order), and
-  another root stays held until its own accept. The home seal's first look is held until the first accept.
-  `ConfigSeal.swift` (the home seal's and the main checkout's first look hold what they see instead of sealing it). Non-seam edits, one port-map line each; the port-map row names the handlers'
-  lines, not the client's.
+  another root stays held until its own accept. The seals' first look (the home seal's and each main checkout's)
+  follows `holdsFirstLook` itself, not the accept: a watched key never recorded is held for the user's accept
+  whenever it is first read, for as long as the vault holds its first look, so a key the accept couldn't read (an
+  unreadable `~/.claude.json`) is held when it is first read after it, never sealed as it is (as built in the 10e
+  review, `ConfigSealFirstLookTests.aHomeFileUnreadAtTheAcceptIsStillHeldWhenItFirstReads`; approved by the lead
+  2026-11-14, strictly more than the "until the first accept" this task first named). `ConfigSeal.swift` needed no
+  edit: the first look is the `Book`'s `judge` in `sealConfig`. Non-seam edits, one port-map line each; the
+  port-map row names the handlers' lines, not the client's.
 - Modify: `Sources/vibeswitcher-host/main.swift`: `holdsFirstLook` is true for a `--node` host whose vault holds no
   restored secrets, and for a scratch host only with `--hold-first-look` (so `VaultHandoverTests` and every other
   scratch host seal as today). Non-seam edit.
@@ -1934,6 +1952,35 @@ After the bootstrap it is built with the sandbox (install folder read-only there
      recorded;
   6. through it all, the host's log shows no parser reply dropped (Task 9e).
 - [ ] **Step 2:** the run, the Claude Code version and each step's time go into the inventory.
+- *As made (2026-11-14), approved by the lead 2026-11-14:*
+  - **The DECSET 1004 change to 9e's reply table** (approved): Step 6 found that Claude Code turns focus events on as it starts (`CSI ? 1004 h`), which SwiftTerm answers at once
+    with `CSI I`; 9e's table had that responder as a view's only (its As-made list "left out … the focus report"), so
+    Linux dropped it. `Sources/VibeHost/V2/ParserReplies.swift` (outside this task's Files) now takes DECSET 1004 as a
+    query answered by `CSI I` or `CSI O`, one per 1004 the setting names
+    (`ParserReplyTests.aProgramTurningFocusEventsOnIsToldItHasFocus`); S6's grammar and `Held by:` and S11 item 11
+    say so. This supersedes 9e's "the focus report" among the replies left out.
+  - **Step 6 deviates from "no parser reply dropped":** the test allows drops of kitty graphics replies (`APC G`),
+    which 9e leaves out on purpose; Claude Code probes kitty graphics as it starts and the headless terminal answers
+    `APC G i=31;OK ST`. Approved as made: the allowance is kept, and the kitty graphics query is not answered (the
+    other way, answering it with its `OK` reply only so step 6 could assert no drop at all, was not taken).
+  - The 12a review: a drop within a second of the last logged line was only counted, and the count reached the log
+    only on the next logged drop, so one held back when the parser stopped (the session ending, a handover's exec, the
+    host quitting) was never logged. `ParserReplies.flushDropped` logs what was held back, naming the first four, from
+    `HostedSession.stopParser` (a seventh hook, kind 4, in the port map); step 6 waits for the session's parser to
+    stop and accepts a line only if every drop it counts is named and is a kitty graphics reply
+    (`aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds`, `RealClaudeHostTests.onlyKittyGraphicsDropsPass`).
+  - **The gated test does not pass with that fix.** Its run on 2026-11-14 16:25 (the slice's fourth, its last) failed
+    step 6 only: one more drop, held back within a second of the kitty probe's, logged when the first host image's
+    parser stopped for the handover, by a build that counted it without naming it. Unidentified; the next gated run
+    names it. A likely candidate, not confirmed: Claude Code's binary holds a second kitty graphics probe
+    (`s=1,v=1,a=q,t=f,f=32`) beside the `t=d,f=24` one whose reply was logged.
+  - *As made after that, for the lead's approval (2026-11-14):* a dropped reply's log line names its kind too, a
+    left-out responder's included ("a kitty graphics reply, left out", `ParserReplies.leftOutKind`, in the drop
+    line's text only: no hook added). The next gated run named the held-back drop: the answer to Claude Code
+    2.1.323's second kitty graphics probe (the `t=f,f=32` one), `APC G i=31;OK ST` as the first. Claude Code queues
+    each probe behind a DA1 sentinel and takes one unanswered as unsupported, so both stay dropped; step 6 now
+    requires exactly two drops in each log, each that answer, every one named (`RealClaudeHostTests.kittyGraphicsDrops`),
+    and the run after passed. The inventory has both runs.
 
 **Done when:** the gated test passed once here with the user's folder, and the record is committed. Until the folder
 exists the test is skipped, saying why, and later work goes on.
@@ -1953,6 +2000,29 @@ S10 and S11 (each result, one line, with the inventory's date)
   `runPrefix` with Task 10c's `setsid`, runs `sleep 600` with a short timeout and, separately, is interrupted; both end
   the command (no process of it left), and the times are recorded.
 - [ ] commit ("v2: Claude Code's shell snapshot and a verifier's command in its own session, measured").
+- *As made (2026-11-14), approved by the lead 2026-11-14:*
+  - Both sessions run `claude --permission-mode manual` with an inline `--settings` that allows only the command the
+    prompt names (no question was shown), not a role's `auto`; the verifier's is its environment
+    (`LeadLaunch.verifierEnvironment`, in the same inline settings), not a whole `LeadLaunch.prepare`.
+  - The command is `./hold.sh N`, a script that sleeps: 2.1.323's Bash tool refuses a standalone `sleep 600`.
+  - **The timeout doesn't end the command on 2.1.323**: Claude Code moves it, prefix and all, to the background. The
+    test asserts instead that the tree stays whole at the timeout (the prefix still runs), that the interrupt ends
+    every process of it, and that `/exit` (its "Exit and stop tasks", answered with Enter) ends what the timeout
+    left. Its "Move to background and exit", and a SIGKILL to Claude Code with a command running, aren't measured.
+  - The snapshot run: every Bash command's shell reads `~/.bashrc` itself (stdin a socket, `SHLVL` 1: bash's own rule
+    for a stdin that is a socket, bash(1)'s INVOCATION, upstream's and not Ubuntu's; Debian's `SSH_SOURCE_BASHRC` only adds the
+    `SSH_CLIENT` check), and the snapshot's login shell reads the first of `~/.bash_profile`, `~/.bash_login` and
+    `~/.profile` there is (the first runs' home had a `.bash_profile`; this node's has only `.profile`, and in a home
+    shaped like it the gated run, 2026-11-14 17:38, saw `.profile` read, as bash alone shows:
+    `theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`, ungated), and its script `~/.bashrc`; the snapshot
+    keeps those files' functions and aliases, not their variables. Measured in that run, and not as the review fixes
+    read the binary: every command runs with the PATH Claude Code started with, the unit's on the node (line 382's "the
+    PATH the unit holds" holds for agents' Bash commands too). The snapshot writes `export PATH=` with Claude Code's
+    own PATH (a settings `env.PATH` if one is given, plus missing plugin `bin` folders); the "as this shell has it"
+    branch the review read is Windows' only. Each startup file put a folder of its own first on PATH, and the command
+    saw `PATH=/usr/bin:/bin`, the scratch host's, in both homes: its own `~/.bashrc`'s change is overwritten when it
+    sources the snapshot. The verifier's test passed again in the same run, with the same times. The record is in
+    `docs/process/v2-linux-inventory.md`.
 
 **Done when:** both ran once here with the user's folder and their results are recorded; until then they are skipped,
 saying why.
@@ -2023,3 +2093,5 @@ Added by this revision, and in the document's S12 as items 14 to 16 (decision 20
     "Also required"; stages 3 and 4, where rights and the wallet's page exist).
 - **A switch replaces the server child when no request is in flight**, by a count of unanswered requests in
   `HostServer.handle`, in place of Task 9d's 30 s bound (`ServerChild.idleLimit`).
+- **What a spawn other than the app's may add to a session's environment becomes an allow-list with the sandbox**
+  (today a list of refused names, Task 10a); the document's S12 item 17.

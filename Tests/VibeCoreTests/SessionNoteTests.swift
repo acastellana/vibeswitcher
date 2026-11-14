@@ -74,7 +74,8 @@ struct SessionNoteTests {
         }
     }
 
-    /// A lead reads its prompt from the file `--append-system-prompt-file` names: the rule has to be in that file.
+    /// A lead reads its prompt from the file `--append-system-prompt-file` names (on Linux, from its command line while
+    /// it fits there: `LaunchArguments`): the rule has to be in it.
     @Test func theShellRuleIsInWhatALeadStartsFrom() throws {
         let root = temp.url("lead-start")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -82,9 +83,8 @@ struct SessionNoteTests {
         let launch = try LeadLaunch.prepare(role: .lead, root: root.path, task: nil, base: "claude", prompt: prompt, start: "Go.",
                                             server: "/s", name: "lead-x", folder: root.appendingPathComponent("run"), cwd: root.path,
                                             temporary: root.appendingPathComponent("tmp"))
-        #expect(launch.command.contains("--append-system-prompt-file"))
-        #expect(launch.command.contains(launch.promptFile))
-        Self.saysToUseAShellCard(try String(contentsOfFile: launch.promptFile, encoding: .utf8), "lead's prompt file")
+        #expect(launch.command.contains("--append-system-prompt"))
+        Self.saysToUseAShellCard(try LaunchArguments.prompt(in: launch.command), "lead's prompt")
     }
 
     @Test func noNoteOutsideASessionsStart() {

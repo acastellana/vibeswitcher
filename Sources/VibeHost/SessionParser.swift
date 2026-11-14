@@ -261,7 +261,9 @@ final class ParserLink {
         spawn.stderr = .inherit
         spawn.group = .ownGroup
         // On Linux the launcher is the host's sealed copy: kept, and named to it (see V2/HostImages.swift).
-        let image = HostImages.launching(launcher, environment: ["PATH=/usr/bin:/bin"])
+        // A fixed environment, and what every session gets too (on Linux no Swift backtracer: `Platform.Tools`).
+        let image = HostImages.launching(launcher, environment: ["PATH=/usr/bin:/bin"]
+                                             + Platform.Tools.sessionEnvironmentFixed.map { "\($0.key)=\($0.value)" }.sorted())
         spawn.environment = image.environment
         spawn.keep = image.keep
         let spawned = spawn.start()

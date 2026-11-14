@@ -554,7 +554,11 @@ E8: `anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`. Step 8: `aSession
   `.ownSession`), waits for it, exits with its status and passes SIGTERM, SIGINT and SIGHUP on to its process group
   (stage 2's Task 10c: `setsid()` in place would fail with `EPERM` in a caller that already leads its process group).
   A SIGKILL to the waiting process can't be passed on; whether Claude Code's timeout and interrupt still end the
-  command is measured in Task 12. The Mac is unchanged and gets a line in `docs/process/v2-mac-tasks.md`.
+  command is measured in Task 12b (2026-11-14, Claude Code 2.1.323, `docs/process/v2-linux-inventory.md`): an
+  interrupt ends every process of it within 0.1 s; a timeout ends nothing but moves the command, prefix and all, to
+  the background, and `/exit`'s "stop tasks" ends it; its "move to background and exit" leaves it running, no session's
+  (unmeasured, as is Claude Code killed with a command running). The Mac is unchanged and gets a line in
+  `docs/process/v2-mac-tasks.md`.
 - **(call, new; Task 6)** **A session's terminal is its own from the start.** On Linux the launcher exits 127 when
   `TIOCSCTTY` fails or `tcgetsid(0)` isn't its pid (today `PTYSpawn.swift:16` ignores the result), and the host counts
   a session live only once `TIOCGSID` on the master names the launcher's pid. Otherwise an escaped worker that ran
@@ -626,11 +630,11 @@ with the sandbox.
 `HostedSessionTerminalTests.aReapedSessionIsNotLive` (Task 6; on Linux only: the four from
 `aProcessThatTookASessionsTerminalFirstIsNotThatSession` to `anAncestorYoungerThanItsChildBreaksTheChain`, and
 `aReapedSessionIsNotLive`, which `TIOCGSID` holds, as a session leader that exits leaves its terminal with no session;
-`aChildReparentedWhileItsChainIsReadBreaksIt` runs on both systems); planned: stage 2 plan task 10.
-
-**Tests to write:** Task 10:
+`aChildReparentedWhileItsChainIsReadBreaksIt` runs on both systems);
 `VerifierBranchCodeHostTests.anEscapedVerifierCommandWithoutSetsidIsNobodys`,
-`BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup`. With the connector:
+`BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup` (Task 10c; on Linux only).
+
+**Tests to write:** With the connector:
 `aConnectorConnectionIsItsSession`, `branchCodeHasNoConnector`, `theConnectorSurvivesAHandover`, and the measurement
 `claudePassesTheConnectorToItsToolServerAndHooks`.
 
@@ -748,9 +752,11 @@ the server names `keep` explicitly. A lint refuses a bare `socket(`, `accept(` a
 **(call, new) A parser's reply is typed only as a reply.** The host writes a parser's `.reply` bytes into the session
 while no client is attached (`HostedSession.swift:226-229`), and they don't change who typed last. On Linux the host
 passes a reply only when it answers a query the host saw in that session's output since the last reply, and only in
-the reply grammar (cursor position, device attributes, the colour and mode reports the headless terminal makes); any
-other byte from a parser is dropped and logged. With sealed copies a parser can't be seized; this keeps a parser bug
-from typing into the lead.
+the reply grammar (cursor position, device attributes, the colour and mode reports the headless terminal makes, and
+the focus report, `CSI I` or `CSI O`, it makes at once when the program turns focus events on with DECSET 1004, one
+per 1004 named: Task 12a, approved by the lead 2026-11-14); any other byte from a parser is dropped and logged,
+every drop (a line a second at most, those held back counted on the next line or, when the parser stops first, in a
+line of their own). With sealed copies a parser can't be seized; this keeps a parser bug from typing into the lead.
 
 **Who reads `/proc` entries of other processes** must treat "unreadable" carefully: any process can make itself
 non-dumpable (`PR_SET_DUMPABLE 0` needs no privilege). An unreadable process is **the host** only if its pid and
@@ -797,6 +803,9 @@ parser's reply grammar in Task 9; the server's own first statements in the engin
 `ParserReplyTests.everyQueryIsAnsweredInItsGrammar`, `ParserReplyTests.theMacsParserRepliesAreTodays`,
 `ParserReplyTests.aStatusQueryTheProgramDidntPrintIsNotAnswered`, `ParserReplyTests.theVersionReplyIsThisBuildsOnly`,
 `ParserReplyTests.aQueryBegunInTheReplayIsSeenWhenItEnds` (Task 9e);
+`ParserReplyTests.aProgramTurningFocusEventsOnIsToldItHasFocus`,
+`ParserReplyTests.aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds`,
+`ParserReplyTests.droppedRepliesAreLoggedOnceASecond` (Task 12a and its review);
 planned: stage 2 plan task 9 (9c, 9d).
 
 **Tests to write:** Task 9: `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`,
@@ -825,9 +834,12 @@ the branch is at. So on Linux, **(call, extended)**:
 
 - `LeadVault.Book.holdsFirstLook` covers every record: the home seal, the main checkout's seal, the guarded settings
   (an unrecorded key is held, not recorded) and the floor (none is recorded, from `workflow.md` or anyone, while
-  its root is held). **Each root is held until the user's accept for that root** (the app's `checkConfig(root:shown:)`
-  with the card's hashes), so a second project's first look is never sealed by the first one's accept; the home seal
-  is held until the first accept. It is kept in the vault's state, so a handover before the first look keeps it; it
+  its root is held). **Each root's floor and rails are held until the user's accept for that root** (the app's
+  `checkConfig(root:shown:)` with the card's hashes), so a second project's first look is never sealed by the first
+  one's accept. The seals hold more: a watched key never recorded, at home or in a checkout, is held for the user's
+  accept whenever it is first read, for as long as the vault holds its first look, so one the accept couldn't read
+  (an unreadable `~/.claude.json`) is no baseline at a later look (Task 10e's review, approved by the lead
+  2026-11-14). It is kept in the vault's state, so a handover before the first look keeps it; it
   is true when the vault holds no restored secrets (`main.swift` on Linux), false by default (the Mac is unchanged).
 - **The user accepts in two steps.** `vibeswitcher config held` lists everything held, each with its change time
   (ctime, which `touch` can't set back), size, hash prefix and, where a previous accept is known, what changed
@@ -867,12 +879,18 @@ runs `config held`, `config accept CARD`, `base show FOLDER [--from COMMIT]` and
 before starting the lead again.
 
 **Held by:** `VaultHandoverTests.grantsVerdictsAndSealsSurviveAHandoverAndAWorkerIsStillRefused`,
-`KeychainLintTests.onlyTheKeyStoresCallTheKeychain`; planned: stage 2 plan task 10.
+`KeychainLintTests.onlyTheKeyStoresCallTheKeychain`, `ConfigSealFirstLookTests.aVaultThatHoldsItsFirstLookHoldsEveryHomeFile`,
+`ConfigSealFirstLookTests.aVaultThatDoesntSealsItsFirstLookAsToday`,
+`ConfigSealFirstLookTests.aFreshVaultHoldsChangedGuardedSettings`,
+`ConfigSealFirstLookTests.aFreshVaultHoldsTheCheckoutsGitHooks`,
+`ConfigSealFirstLookTests.aFreshVaultSeedsNoFloorFromWorkflow`,
+`ConfigSealFirstLookTests.aVaultHandedOverBeforeItsFirstLookStillHoldsIt`,
+`ConfigSealFirstLookTests.aRootsAcceptLetsItsFloorBeRecordedAndHoldsTheNext`,
+`ConfigSealFirstLookTests.aHomeFileUnreadAtTheAcceptIsStillHeldWhenItFirstReads`,
+`VaultFirstLookTests.onlyAFreshNodeVaultOrAScratchHostAskedHoldsItsFirstLook`,
+`VaultFirstLookHostTests.aScratchHostAskedHoldsItsVaultsFirstLook` (Task 10e: the extended first look).
 
-**Tests to write:** Task 10: `ConfigSealFirstLookTests.aVaultThatHoldsItsFirstLookHoldsEveryHomeFile`,
-`aVaultThatDoesntSealsItsFirstLookAsToday`, `aFreshVaultHoldsChangedGuardedSettings`,
-`aFreshVaultHoldsTheCheckoutsGitHooks`, `aFreshVaultSeedsNoFloorFromWorkflow`,
-`aVaultHandedOverBeforeItsFirstLookStillHoldsIt`, `aRootsAcceptLetsItsFloorBeRecordedAndHoldsTheNext`. E4: `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E8:
+**Tests to write:** E4: `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E8:
 `aHostRestartSaysTheTeamIsGone`, `aHostRestartHoldsWorkersUntilTheConfigIsAccepted`,
 `aStartTheUserDidntMakeIsShownUntilAcknowledged`, `configAcceptSealsOnlyWhatItShowed`,
 `configHeldShowsChangeTimesSizesAndHashes`, `baseAcceptAfterARestartShowsWhatMoved`,
@@ -1051,8 +1069,11 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
     and a name there removes the unit's own assignment too (`systemd.exec(5)`); a test refuses a name in both. `start`
     and `status` compare `systemctl --user show-environment` with the expected set and name anything extra;
   - `Environment=HOME=…` and `Environment="PATH=/usr/local/bin:/usr/bin:/bin:<swiftly's bin>:<node's bin>"`, quoted,
-    with no `/mnt/` folder: team sessions run with this PATH and no startup file (S10), so it holds what workers build
-    and test with. The two last folders are the user's, so every worker can write them: they are named in the unit,
+    with no `/mnt/` folder: a team session's shell and its program run with this PATH and no startup file (S10), and
+    so does what the program starts itself (its tool servers, and so merges' and audits' runs). So do an agent's Bash
+    commands: Claude Code's shell snapshot records the PATH Claude Code started with, not the one the user's startup
+    files make, and every command sources it (S10, measured in Task 12b; the startup files reach the commands
+    otherwise). The two last folders are the user's, so every worker can write them: they are named in the unit,
     on the seal's list and in S11 item 10 (decisions 12 and 17). `claude` is not on it: every lead and role runs the absolute
     path `~/.local/bin/claude` resolves to at its start (the engine's EN-D13), since that folder holds files named by
     version only;
@@ -1089,7 +1110,11 @@ what it needs.
   vouches for.
 - The files every agent runs, the lead's included: `~/.vibeswitcher/bin/vibeswitcher-hook`, the agents' settings and
   hooks, `~/.local/share/claude/versions/*`, the shell startup files Claude Code's Bash tool sources. The config seal
-  watches them (the bootstrap path's step 8 adds the Linux list: `~/.config/systemd/user`, `~/.config/environment.d`,
+  watches them (the bootstrap path's step 8 adds the Linux list: `~/.bash_profile`, `~/.bash_login`, `~/.profile` and
+  `~/.bashrc`, each watched whether it exists or not, what they source (here `~/.local/share/swiftly/env.sh`), `~/bin`
+  (absent here; `.profile` puts it first on the PATH of the shells that read it, the snapshot's login shell among
+  them), the agents' `shell-snapshots` folders (these, Task 12b's
+  additions, approved by the lead 2026-11-14), `~/.config/systemd/user`, `~/.config/environment.d`,
   `~/.config/autostart`, `~/.vibeswitcher/v2/projects`, `~/.vibeswitcher/v2/builds`, `~/.vibeswitcher/lead/run`,
   `~/.vibeswitcher/lead/git-hooks`, `~/.local/bin`, `~/.local/share/claude/versions`, the toolchain's `usr/bin`, every
   other user-writable folder on the unit's PATH, and, while `/mnt/c` is mounted, `.wslconfig` and the Windows Startup
@@ -1118,12 +1143,14 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `aTargetRenamedOverAfterItsCheckIsNotWhatRuns`, `aScriptTargetIsRefusedByTheUsersHost`,
 `aScratchHostWithNoInstallRootHandsOverAsToday`, `theInstallRootIsTheNodesOrAScratchHostsFlag`,
 `ServerChildTests.aSwitchBringsTheNewBuildsServer` (Task 9d); `HandoverLinuxTests.aTargetRenamedOverBeforeItsCheckIsCheckedAsLoaded`
-(the 9d review); planned: stage 2 plan task 3, task 8, task 9 (9c).
+(the 9d review); `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`,
+`HandoverLinuxTests.aHostWithNoGitOnlyRootCanWriteDoesNotStart` (Task 10c; on Linux only), `ToolsTests.theMacsGitIsStillUsrBinGit`
+(Task 10c; on the Mac only); planned: stage 2 plan task 3, task 8, task 9 (9c).
 
 **Tests to write:** Task 3: `ProcessSelfTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`,
 `aSealedCopysHashIsOfTheBytesItRuns`, `aPidsTokenIsItsPeerToken`. Task 8:
 `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`. Task 9:
-`HostHardeningTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`. Task 10: `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`.
+`HostHardeningTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`.
 E4: `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`. Step 8: `StartCommandTests` (the unit written,
 `Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, the commit's folder), `noNameIsBothUnsetAndAssigned`, a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,
@@ -1141,22 +1168,32 @@ the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts
   `DBUS_SESSION_BUS_ADDRESS`, `DISPLAY`, `WAYLAND_DISPLAY`, `PULSE_SERVER`, `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`. A
   session's default `LANG` is `C.UTF-8`. A session's program starts with SIGPIPE at its default, though the host
   ignores it. The lead's session gets `VIBESWITCHER_CODEX_WORKERS=0` (decision 15) until Codex's sandbox is measured
-  here.
+  here: the engine's E4 sets it where it starts a lead, not stage 2.
 - **A plain shell, not a login shell.** `HostedSession.arguments` starts every session as `$SHELL -l -i -c command`
   (`HostedSession.swift:117-120`); a login, interactive bash runs `.profile` and `.bashrc` and whatever they source
   (here, among others, a file in another repository and `mise activate`, which reads per-folder config from the
-  worktree). On Linux team sessions start with `bash --noprofile --norc -c command`, with the PATH the unit holds;
-  the Mac's reason for `-l -i` (Terminal's PATH) is met by that PATH.
+  worktree). On Linux team sessions start with `bash --noprofile --norc -c command`, with the PATH the unit holds:
+  the session's shell, its program and an agent's Bash commands get that PATH (the commands through the snapshot,
+  which records it; the startup files still reach them, below, "Doesn't promise"); the Mac's reason for `-l -i` (Terminal's PATH) is met by that PATH. `claude` isn't on it (its folder is the user's
+  `~/.local/bin`): until the engine's E4 runs the lead's and the roles' `claude` by the absolute path it resolves
+  (EN-D13), a role launched as the bare `claude` passes the tool server's preflight, which still looks through a login
+  shell (`LaunchPreflight`, `LoginShellCommand`), and then fails in its session with `command not found`. The
+  engine's E4 makes that probe run as sessions now start (`bash --noprofile --norc`), never through a login shell.
 - **What a spawn may add.** `SpawnRequest.env` from a caller that isn't the app may not set loader or shell-startup
-  variables or any name in the "never" list above (`LD_*`, `BASH_ENV`, `ENV`, `SSH_AUTH_SOCK`, …); such a request is
-  refused, saying which. On Linux only the app and a lead may spawn at all (S2).
+  variables, bash's prompts (`PS0`, `PS1`, `PS2`: an interactive bash runs their `$(…)`, `--norc` or not), the fixed
+  `SWIFT_BACKTRACE`, or any name in the "never" list above (`LD_*`, `BASH_ENV`, `ENV`, `SSH_AUTH_SOCK`, …); such a
+  request is refused, saying which. On Linux only the app and a lead may spawn at all (S2). This catches a slip in
+  `env` only: the same caller's `command` is a bash line, which can set every one of these names itself.
 - **A role's launch settings are given inline.** Today `LeadLaunch.prepare` writes a role's `mcp.json`,
   `settings.json` and `prompt.md` into `~/.vibeswitcher/lead/run/<key>/<name>/` (`LeadLaunch.swift:317-320`,
   `LeadVault.runFolder`), which a worker can rewrite between the write and `claude`'s read (the `Edit` deny rule
   doesn't bind Bash, and nothing watches the folder), making a verifier's `vibeswitcher` server its own script. On
   Linux the settings and the MCP config go to `claude` as JSON strings on its command line (`--settings`,
   `--mcp-config`; nothing secret in them); the prompt too, when it fits, else its file is named in S11. The folder goes
-  on the seal's list as a detector.
+  on the seal's list as a detector. Every role's launch also names its permission mode, on both systems
+  (`--permission-mode auto`, the mode a launch that named none ran in: Claude Code's default since 2.1.284, still
+  2.1.323's), so the mode no longer follows Claude Code's default or a `defaultMode` in the user's settings, which a
+  worker's shell can write; a project whose Claude command names a mode keeps it (stage 2's Task 10b).
 - **The lead's accepted git hooks.** GitGuard runs the lead's git with `core.hooksPath` set to its accepted copy under
   `~/.vibeswitcher/lead/git-hooks/<key>/copy` (`Git.swift:77, 341-353`), which any worker can write; a hook placed
   there runs under the lead's tool server and is the lead's to the host. Its accepted record (`accepted.json`) sits
@@ -1191,25 +1228,54 @@ Most of these are guard rails; the inline launch settings close a route that nee
 - Keeping credentials away: whatever the user keeps in files (`gh`'s token, git's credential store, cloud tools' keys,
   `~/.gnupg`, the agents' own logins in `~/.claude` and `~/.codex`) is a worker's to read and use (S11).
 - What Claude Code itself does with the user's shell: its Bash tool takes a snapshot of the user's shell
-  configuration, so the startup files still run inside a session's agent. Task 12 measures it.
+  configuration, so the startup files still run inside a session's agent. Measured (Task 12b, 2026-11-14, Claude Code
+  2.1.323, `docs/process/v2-linux-inventory.md`), though the session's own bash reads none of them: every Bash
+  command's shell reads `~/.bashrc` itself (bash's rule for a stdin that is a socket); the snapshot's login shell
+  reads the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` there is (on this node `~/.profile`, which
+  has no interactive guard and sources swiftly's `env.sh`; measured in a home shaped like it), and the snapshot's
+  script sources `~/.bashrc`; the snapshot keeps the functions and aliases those files define (no variable), which
+  every command sources. The PATH doesn't come from them: the snapshot records the PATH Claude Code started with (the
+  unit's, here), plus any plugin `bin` folder it lacks, and its `export PATH=` overrides what `~/.bashrc` set in the
+  command's shell, so a startup file's PATH change reaches no command. A startup file reaches them otherwise: what
+  `~/.bashrc` runs in each command's shell, and a function or alias the snapshot carries (a function named `git`
+  runs ahead of any PATH).
 - Codex's sandbox (Landlock and seccomp) on this WSL kernel: unmeasured, so Codex workers are off (decision 15).
+- What a spawn's caller puts in the new session through its `command`: a lead can start a session with any of the
+  variables `env` may not name, by setting them in the command line. The sandbox (S12) is what holds that.
 
 **Before the bootstrap:** yes.
 
 **Built in:** stage 2, Task 10 (names, plain shell, spawn's env, deny rules, inline launch settings); the bootstrap
-path's step 8 (the seal's list, the hooks folder on it); Task 12 (the measurements). GitGuard's check: after the
+path's step 8 (the seal's list, the hooks folder on it); Task 12 (the measurements); the engine's E4 (the lead's
+`VIBESWITCHER_CODEX_WORKERS=0`, `claude` by its resolved path). GitGuard's check: after the
 bootstrap (S12 item 15).
 
 **The user confirms:** decision 9 (the gpg-agent's ssh support off or no key cached, WSLg off, during the bootstrap).
 
-**Held by:** planned: stage 2 plan task 10.
+**Held by:** `SessionEnvironmentTests.aLinuxSessionGetsNoAgentSocketNoInteropNoBus`,
+`SessionEnvironmentTests.aLinuxSessionGetsNoRuntimeDir`, `SessionEnvironmentTests.aTeamSessionRunsNoShellStartupFile`,
+`SessionEnvironmentTests.aSessionRunsBashWhateverTheHostsShell`, `SessionEnvironmentTests.aParserGetsNoBacktracer`,
+`SessionEnvironmentTests.aSpawnAddingALoaderVariableIsRefused`,
+`SessionEnvironmentTests.aSessionsProgramStartsWithSIGPIPEAtItsDefault`, `ToolsTests.theLocaleASessionGetsIsInstalled`,
+`ToolsTests.theMacsListIsTodays`, `ToolsTests.linuxSessionsGetNoAgentsAndAPlainBash`,
+`ToolsTests.aSpawnMayNotAddLoaderStartupOrNeverPassedVariables`,
+`LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`, `LeadLaunchTests.theLeadOnLinuxGetsTheTracerRules`,
+`LeadLaunchTests.theMacsDenyRulesAreTodays`, `LeadLaunchTests.aRolesLaunchSettingsAreInlineOnLinux`,
+`LeadLaunchTests.eachRoleIsLaunchedInAutoModeByName`, `LeadLaunchTests.aProjectsOwnPermissionModeIsKept`,
+`LeadLaunchTests.aSessionsNameIsItsOwnWhateverItsPromptQuotes`,
+`LeadLaunchTests.theRecordedCommandLeavesOutARolesInlineValues`,
+`InlineLaunchHostTests.aDayOfInlineRoleSessionsStillGetsAWelcome`; `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`,
+`BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup` (Task 10c: git from root's folders, and a verifier's
+command in a session of its own); `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`,
+`RealClaudeTests.aVerifierCommandInItsOwnSessionStillTimesOut` (Task 12b: gated measurements, run 2026-11-14, the
+snapshot's in a home shaped like the node's too), `RealClaudeTests.theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`
+(bash's own rules in Claude Code's shapes, ungated).
 
-**Tests to write:** Task 10: `SessionEnvironmentTests.aLinuxSessionGetsNoAgentSocketNoInteropNoBus`,
-`aLinuxSessionGetsNoRuntimeDir`, `aTeamSessionRunsNoShellStartupFile`, `aSpawnAddingALoaderVariableIsRefused`,
-`aSessionsProgramStartsWithSIGPIPEAtItsDefault`, `ToolsTests.theLocaleASessionGetsIsInstalled`, `theMacsListIsTodays`,
-`LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`, `theLeadOnLinuxGetsTheTracerRules`,
-`theMacsDenyRulesAreTodays`, `aRolesLaunchSettingsAreInlineOnLinux`. After the bootstrap:
-`GitGuardTests.aChangedHooksCopyIsRefused`. Task 12: `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`, `aVerifierCommandInItsOwnSessionStillTimesOut`.
+**Tests to write:** The engine's
+E4: `LeadStartTests.theLeadGetsNoCodexWorkers`, `aLeadIsLaunchedByClaudesResolvedPath`,
+`aClaudeFoundOnlyThroughALoginShellIsRefused`, `RoleProgramTests.aWorkersProgramIsTheLeadsResolvedClaudeNotTheSettings`.
+After the bootstrap:
+`GitGuardTests.aChangedHooksCopyIsRefused`.
 
 ## S11. What plain mode doesn't promise on Linux
 
@@ -1279,7 +1345,13 @@ against it. Each line says what reduces it now, if anything.
    `board.json` naming a worker's session as the lead, which would receive the user's answers but for the engine
    delivering only to the session the vault binds to the lead role (EN-D14).
 8. A worker can replace what every agent runs (the hook, the agents' settings and hooks, `claude`'s versions, the shell
-   startup files Claude Code's Bash tool sources, folders on the PATH). The seal detects it at its next look and holds
+   startup files Claude Code's Bash tool sources, folders on the PATH; measured 2026-11-14: `~/.bashrc` in every Bash
+   command's shell, and in its snapshot the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` there is,
+   and `~/.bashrc`, so all four, what they source (here swiftly's `env.sh`) and the snapshots in
+   `<config>/shell-snapshots` that each command sources, whose functions and aliases run ahead of any PATH; and the
+   folders on the commands' PATH, which is the unit's (the snapshot records the PATH Claude Code started with, and no
+   startup file's PATH change reaches a command), the user's two, swiftly's `bin` and the node's, after `/usr/bin`,
+   S10). The seal detects it at its next look and holds
    workers and merges; a change swapped in and restored between two looks is missed; a host restart resets the seal to
    "held until accepted". The Linux list (`~/.local/share/claude/versions` and the rest) arrives with the bootstrap
    path's step 8. S7, S9.
@@ -1287,12 +1359,18 @@ against it. Each line says what reduces it now, if anything.
    S2-D10's clones). The vault's head record and `judge` catch it; after a host restart `base accept` shows the
    commits since the last accepted head. S7.
 10. Branch code (merge's tests, an audit's run, `init_command`) runs as the user, unconfined, with the user's
-    toolchain: a worker that replaces `swift-test` or patches a cached dependency makes every audit and merge pass. It
+    toolchain: a worker that replaces `swift-test` or patches a cached dependency makes every audit and merge pass.
+    A verifier's or a worker's Bash command, branch code under `runPrefix` included, runs with the unit's PATH, which
+    the snapshot records (S10, measured): its two folders any worker can write, swiftly's `bin` and the node's, come
+    after `/usr/bin`, so a `git` put there doesn't shadow `/usr/bin/git`, but a `swift`, which only swiftly's `bin`
+    holds, is what every agent's commands run; and a function a worker adds to a startup file (item 8) runs ahead of
+    any PATH. It
     is no session's to the host, and can do everything in this list. Reduced for installs by a root-owned toolchain
     (decision 12), not for tests.
 11. Writing a terminal query to a session's `/dev/pts/N` makes the host type the headless terminal's reply into that
     session (an escape sequence, ESC included): it can interrupt the lead's turn. The reply grammar keeps it to
-    replies. S6.
+    replies. Turning focus events on there (`CSI ? 1004 h`) also types the 3-byte focus report `CSI I` (Task 12a),
+    still a reply only. S6.
 12. A worker turns the lead or a verifier with text it writes, with no OS access (S1, item 3). The floor, the user's
     approvals for sensitive paths, and `audit_finders` of 2 or more on another model hold; decision 13 sets them for
     the bootstrap.
@@ -1381,8 +1459,11 @@ its `.git` file's `gitdir:`, that folder's `commondir`, and the allowed reposito
 pointing back at the folder. `HostServer.Config.projectAllowList` is nil by default (the Mac's and every scratch host's
 behaviour). The list goes when the user marks stage 6 passed. It is a guard rail: the file is the user's to edit, so a
 worker can add a line; a worker can also write both halves of the worktree check (an entry in the allowed repository's
-shared `.git/worktrees` and a `.git` file in any folder), and the pair passes; and a session can run a scratch host
-with no list (item 24).
+shared `.git/worktrees` and a `.git` file in any folder), and the pair passes; a repository cloned inside an allowed
+one is inside it; a folder swapped for a link between the check (which resolves it) and the session's start (in the
+folder as asked) is followed; and a session can run a scratch host with no list (item 24). (The clone and the link,
+the two limits Task 10d found, are in S2-D11 too, approved by the lead 2026-11-14.) The list itself is read
+following a link, but never as the host's controlling terminal (`O_NOCTTY`).
 
 **What still holds against a worker that tries, before the sandbox**, only while nothing is one step from root
 (item 1: interop off, no docker socket, no `sudo` used here while a team runs): another user is refused at both
@@ -1407,11 +1488,12 @@ plan's E1; `doctor`'s summary after the bootstrap.
 **The user confirms:** the allow-list's place, and that the user (not an agent) writes its one line for the bootstrap
 clone.
 
-**Held by:** planned: stage 2 plan task 10.
-
-**Tests to write:** Task 10: `ProjectAllowListTests.aSpawnOutsideTheListIsRefusedWithItsReason`,
-`aWorktreeOfAnAllowedRepositoryIsAllowed`, `aForgedGitFileIsRefused`, `aForgedWorktreePairPassesAsKnown`,
-`aScratchHostHasNoList`, `aMissingListRefusesEverySpawnAndSaysWhereTheListGoes`, `noGitRunsInTheHost`.
+**Held by:** `ProjectAllowListTests.aSpawnOutsideTheListIsRefusedWithItsReason`,
+`ProjectAllowListTests.aWorktreeOfAnAllowedRepositoryIsAllowed`, `ProjectAllowListTests.aForgedGitFileIsRefused`,
+`ProjectAllowListTests.aForgedWorktreePairPassesAsKnown`, `ProjectAllowListTests.aScratchHostHasNoList`,
+`ProjectAllowListTests.aMissingListRefusesEverySpawnAndSaysWhereTheListGoes`,
+`ProjectAllowListTests.noGitRunsInTheHost`, `ProjectAllowListTests.aListLinkedToATerminalDoesntBecomeTheHostsTerminal`
+(Task 10d: the allow-list).
 
 ## S12. After the bootstrap
 
@@ -1455,6 +1537,9 @@ the unreadable images and the static build, which the plan had here, are before 
 16. **The design's requirements no list carried** (decision 20): reply rights type only into confined sessions; view
     rights get masked screens; the wallet's signing page on an origin of its own (stages 3 and 4, where rights and
     the wallet's page exist).
+17. **What a spawn other than the app's may add to a session's environment becomes an allow-list**, with the sandbox:
+    today it is a list of refused names (`Platform.Tools.spawnEnvironmentRefused`, stage 2 Task 10a), which lets
+    through any name it doesn't list (S10).
 
 **Why.** Confinement is what turns S11 from a list of what a worker can do into a list of what a confined worker
 can't, and it needs the bootstrap's lead to build it.
@@ -1505,7 +1590,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T22 | worker | run Windows programs; `wsl.exe -u root` | works while interop is on; refused with it off | decision 2; deny rules for `wsl.exe`, `cmd.exe`, `powershell.exe` (Claude Code, slips). Leaving `WSL_INTEROP` out limits nothing | interop off; sandbox |
 | T23 | worker | persist: crontab, user units and timers, autostart, shell startup files, `set-environment`, `.wslconfig`'s kernel, the Windows Startup folder | works | seal watches the files (not the crontab); `start` and `status` compare the manager's environment; automount off | sandbox |
 | T24 | worker | move the lead's base branch through the shared `.git` | caught; after a host restart, shown by `base accept` | vault's head record and `judge`; `base accept`'s log since the last accepted head | clones |
-| T25 | worker | spawn a session in another repository | refused (guard rail) | allow-list; a forged worktree pair passes; a scratch host has no list | stage 6; sandbox |
+| T25 | worker | spawn a session in another repository | refused (guard rail) | allow-list; a forged worktree pair passes; a clone inside an allowed repository is inside it; a folder swapped for a link after the check is followed; a scratch host has no list | stage 6; sandbox |
 | T26 | branch code | merge's tests or an audit's run do any of the above; a patched toolchain passes every test | works | no session's to the host; root-owned toolchain for installs | sandbox for test runs |
 | T27 | worker | `LD_PRELOAD` and its kin into the host | refused for the unit's start | `UnsetEnvironment=`; static build | holds for the host; works for anything else the manager starts |
 | T28 | worker | fill the host's client slots; `SIGSTOP` the host | works (DoS) for sessions | app's connector connections uncounted | — |
@@ -1667,7 +1752,8 @@ file; every change keeps the Mac's code paths as they are (a platform answer or 
   from a pushed commit with a root-owned toolchain, `build-info`'s `swift` and `resolved`, the seal's Linux list as in
   S9 (and `.wslconfig` and the Startup folder while `/mnt/c` is mounted), the rule on switches until measured, the
   server image on a switch. The questions: now the one list in the bootstrap path; `~/.local/bin` is not first on
-  this PATH, so the seal's list doesn't call it so.
+  this PATH, so the seal's list doesn't call it so (nor is it on the PATH an agent's Bash commands get: the
+  snapshot records the PATH Claude Code started with, the unit's, S10, Task 12b).
 
 ## Answers to the attack review
 

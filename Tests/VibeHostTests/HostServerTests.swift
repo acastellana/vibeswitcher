@@ -25,14 +25,16 @@ final class TestHost {
     /// challenge too; on Linux they go through `appConnector`). Another (`/usr/bin/nc`): this process isn't the app.
     /// `appConnector: false`: no connector even so (a test of the connector opens its own).
     /// `holdsKey: false`: a host that holds no app key yet (one handed over from a build before keys).
-    /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`, `spawnNeedsLead`, `launcherTestDelay`, `watchesItsPath`: the
+    /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`, `spawnNeedsLead`, `launcherTestDelay`, `watchesItsPath`,
+    /// `projectAllowList`: the
     /// config's (see `HostServer.Config`). `socket`: its path (the lock beside it). `removing`: a folder removed after the host stops (a test's `defer` runs before it does,
     /// and the host's last log line would make its log's folder again).
     init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = HostServer.executable(of: getpid()), log: String? = nil,
          holdsKey: Bool = true, submittedGrace: TimeInterval = HostServer.submittedGrace, housekeeping: TimeInterval? = nil,
          capabilities: [String] = HostServer.capabilities, inputUnitHold: TimeInterval = InputOrder.holdLimit,
          maxSessions: Int = 256, spawnNeedsLead: Bool = false, appConnector: Bool = true, removing: String? = nil,
-         launcherTestDelay: TimeInterval? = nil, watchesItsPath: Bool = false, socket: String = scratchSocketPath()) throws {
+         launcherTestDelay: TimeInterval? = nil, watchesItsPath: Bool = false, projectAllowList: URL? = nil,
+         socket: String = scratchSocketPath()) throws {
         self.socket = socket
         lock = socket + ".lock"
         self.removing = removing
@@ -55,6 +57,7 @@ final class TestHost {
         config.spawnNeedsLead = spawnNeedsLead
         config.launcherTestDelay = launcherTestDelay
         config.watchesItsPath = watchesItsPath
+        config.projectAllowList = projectAllowList
         server = HostServer(config: config)
         try server.start()
         // The Mac opens none (`openAppConnector` is nil there): its app proves itself by its code and key, as always.

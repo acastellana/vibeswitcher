@@ -4,14 +4,56 @@ extension Platform {
     /// The programs the shared code runs by a path of its own choosing, where the systems keep them: the Mac has its
     /// git and its zsh at fixed paths; a Linux machine has git wherever its PATH says, and bash for zsh.
     public enum Tools {
-        /// The git VibeSwitcher runs. The Mac: `/usr/bin/git`. Linux: the first `git` on this process's PATH (`find`),
-        /// looked for until it is found and the same from then on, whatever PATH becomes; while there is none,
-        /// `/usr/bin/git`, where it usually is: run, that fails with ENOENT, and `missing()` lists it.
+        /// The git VibeSwitcher runs. The Mac: `/usr/bin/git`. Linux: the first `git` on this process's PATH in a folder
+        /// only root can write (`trustedGit`, with `lstat`), looked for until it is found and the same from then on,
+        /// whatever PATH becomes; while there is none, `absentGit`, a path with nothing at it: run, that fails with
+        /// ENOENT, and `missing()` lists it, so the host doesn't start (the security architecture document's S9). A
+        /// `git` the user's account could write (`~/.local/bin`, a worktree's folder put first on PATH) is never run.
         public static var git: String {
             #if canImport(Darwin)
             return "/usr/bin/git"
             #else
-            return foundGit.path { find("git", path: nil) } ?? absentGit
+            return foundGit.path { trustedGit(path: getenv("PATH").map { String(cString: $0) } ?? pathWhenUnset, status: fileStatus) }
+                ?? absentGit
+            #endif
+        }
+
+        /// What `trustedGit` reads of a path: its owner, its mode (its type's bits too) and whether it is a regular file.
+        public typealias FileStatus = (owner: uid_t, mode: mode_t, isFile: Bool)
+
+        /// The first `git` in `path` (folders with ":" between them, as PATH has them) that only root can change: a
+        /// regular file, not a link, that someone may run, owned by root and writable by neither its group nor others,
+        /// in a folder that is the same, as is every folder above it up to `/`. A folder that fails is passed over, and
+        /// so is one that isn't an absolute path or that names `.` or `..`. nil when none is. `status` reads a path
+        /// without following a link (`lstat`; tests give a table): a folder that is a link is passed over (Ubuntu's
+        /// `/bin`, a link to `usr/bin`, is reached as `/usr/bin`), and so is a `git` that is one.
+        public static func trustedGit(path: String, status: (String) -> FileStatus?) -> String? {
+            func onlyRoots(_ found: FileStatus?, isFolder: Bool) -> Bool {
+                guard let found, found.owner == 0, found.mode & (S_IWGRP | S_IWOTH) == 0 else { return false }
+                return isFolder ? found.mode & S_IFMT == S_IFDIR : found.isFile && found.mode & S_IFMT == S_IFREG && found.mode & 0o111 != 0
+            }
+            for entry in path.split(separator: ":").map(String.init) where entry.hasPrefix("/") {
+                let names = entry.split(separator: "/").map(String.init)
+                guard !names.contains(".") && !names.contains("..") else { continue }
+                // `/` first, then each folder below it down to the entry's own.
+                var folder = ""
+                let folders = ["/"] + names.map { name -> String in folder += "/" + name; return folder }
+                guard folders.allSatisfy({ onlyRoots(status($0), isFolder: true) }) else { continue }
+                let candidate = (folders.last == "/" ? "" : folders.last!) + "/git"
+                if onlyRoots(status(candidate), isFolder: false) { return candidate }
+            }
+            return nil
+        }
+
+        /// Whether a branch's code run through a verifier's shell prefix (`BranchCode.runPrefix`) is started as a child
+        /// in a POSIX session of its own, which the prefix waits for, rather than run in the prefix's place. The Mac:
+        /// no, in place as always. Linux: yes, so that what the branch's code starts has no controlling terminal, and
+        /// isn't taken for the verifier's session by its terminal once it has left the wrapper's tree.
+        public static var branchCodeGetsOwnSession: Bool {
+            #if canImport(Darwin)
+            return false
+            #else
+            return true
             #endif
         }
 
@@ -88,6 +130,163 @@ extension Platform {
             #endif
         }
 
+        // MARK: Sessions
+
+        /// The variables of the host's own environment a session's program is started with (the security
+        /// architecture document's S10). The Mac: what a fresh Terminal session would inherit from launchd, the login
+        /// shell adding the rest, as always (`SSH_AUTH_SOCK` among them). Linux: what an agent and the user's tools
+        /// need, and not the user's keys to other systems: no `SSH_AUTH_SOCK` (the gpg-agent's ssh socket),
+        /// `WSL_INTEROP`, `DBUS_SESSION_BUS_ADDRESS`, `DISPLAY`, `WAYLAND_DISPLAY`, `PULSE_SERVER` or
+        /// `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` (`sessionEnvironmentNever`), and no `XDG_RUNTIME_DIR` either, which
+        /// points at the gpg-agent, the bus and WSLg's sockets and which no agent needs. Leaving them out stops a slip
+        /// only: each of those sockets is found by a fixed path too.
+        public static var sessionEnvironmentNames: [String] {
+            #if canImport(Darwin)
+            return ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE", "SSH_AUTH_SOCK",
+                    "__CF_USER_TEXT_ENCODING"]
+            #else
+            return ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE"]
+            #endif
+        }
+
+        /// The names a session never gets from the host, and that a spawn other than the app's may not add
+        /// (`spawnEnvironmentRefused`). The Mac: none.
+        public static var sessionEnvironmentNever: [String] {
+            #if canImport(Darwin)
+            return []
+            #else
+            return ["SSH_AUTH_SOCK", "WSL_INTEROP", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "PULSE_SERVER",
+                    "VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR"]
+            #endif
+        }
+
+        /// Variables every session's program, and every parser, is started with whatever the host's environment
+        /// says; a spawn other than the app's may not set them (`spawnEnvironmentRefused`). The Mac: none. Linux:
+        /// `SWIFT_BACKTRACE=enable=no`, so a Swift program that crashes there doesn't start the backtracer, which
+        /// reads the crashed process's memory.
+        public static var sessionEnvironmentFixed: [String: String] {
+            #if canImport(Darwin)
+            return [:]
+            #else
+            return ["SWIFT_BACKTRACE": "enable=no"]
+            #endif
+        }
+
+        /// A session's `LANG` when the host's environment has none. The Mac: `en_US.UTF-8`, as always. Linux:
+        /// `C.UTF-8`, which glibc always has (`en_US.UTF-8` is often not installed: `locale -a` here lists C, C.utf8
+        /// and POSIX).
+        public static var defaultLocale: String {
+            #if canImport(Darwin)
+            return "en_US.UTF-8"
+            #else
+            return "C.UTF-8"
+            #endif
+        }
+
+        /// The program a session runs and its arguments, its first word the program: `command` given to a shell, then
+        /// that shell kept, interactive, where `keepShell`; with no command, the shell alone.
+        ///
+        /// The Mac: `$SHELL -l -i [-c command]`, as always: an interactive login shell reads both `.zprofile` and
+        /// `.zshrc`, so the agent gets the PATH it has in Terminal (nvm, Homebrew…); kept, `exec '$SHELL' -l -i`.
+        ///
+        /// Linux: `/bin/bash --noprofile --norc [-c command]`, whatever `shell` names: a plain shell, which runs none of
+        /// the user's startup files (a login, interactive bash runs `.profile` and `.bashrc` and whatever they source:
+        /// tools that read per-folder config from the worktree among them). The PATH is the host's, which holds what
+        /// workers build with (the security architecture document's S10). Kept, `exec /bin/bash --noprofile --norc
+        /// -i`; with no command, `/bin/bash --noprofile --norc -i`.
+        public static func sessionShellArguments(shell: String, command: String?, keepShell: Bool) -> [String] {
+            #if canImport(Darwin)
+            guard let command else { return [shell, "-l", "-i"] }
+            let line = keepShell ? "\(command); exec \(quoted(shell)) -l -i" : command
+            return [shell, "-l", "-i", "-c", line]
+            #else
+            let plain = ["/bin/bash", "--noprofile", "--norc"]
+            guard let command else { return plain + ["-i"] }
+            let line = keepShell ? "\(command); exec \(plain.joined(separator: " ")) -i" : command
+            return plain + ["-c", line]
+            #endif
+        }
+
+        /// Those of `names` that a spawn from a caller other than the app may not set in a session's environment
+        /// (`SpawnRequest.env`), in `names`' order: the loader's (`LD_*`, `GCONV_PATH`, `GLIBC_TUNABLES`), those
+        /// through which a bash runs something before or around its command (`branchShellStartupVariables`,
+        /// `PROMPT_COMMAND`, exported functions, and the prompts `PS0`, `PS1`, `PS2` and `PS3`, whose `$(…)` an
+        /// interactive bash runs, `--norc` or not: a session with no command, or a kept shell, is one), `XDG_RUNTIME_DIR`
+        /// (which a session never gets from the host: set, it points a program at another agent's and bus's sockets),
+        /// `sessionEnvironmentNever`, and `sessionEnvironmentFixed`'s names (the request's `env` goes on top of the
+        /// host's). The Mac: none, as always.
+        ///
+        /// A guard against a slip in `env` only: the same caller's `command` is a bash line, which can set any of
+        /// these itself (`LD_PRELOAD=… claude`, `export …`), so this is no limit on what a session can have the host
+        /// start. A list of refused names: an allow-list comes with the sandbox (the plan's "After the bootstrap").
+        public static func spawnEnvironmentRefused(_ names: [String]) -> [String] {
+            #if canImport(Darwin)
+            return []
+            #else
+            let refused = Set(branchShellStartupVariables + sessionEnvironmentNever + Array(sessionEnvironmentFixed.keys)
+                              + ["GCONV_PATH", "GLIBC_TUNABLES", "PROMPT_COMMAND", "PS0", "PS1", "PS2", "PS3",
+                                 "XDG_RUNTIME_DIR"])
+            return names.filter { name in
+                refused.contains(name) || name.hasPrefix("LD_") || branchShellFunctionPrefix.map { name.hasPrefix($0) } == true
+            }
+            #endif
+        }
+
+        // MARK: Roles' launch
+
+        /// Claude Code permission rules every role's session is refused on this system, the lead's included, on top
+        /// of the rules `LeadLaunch.deny` gives on both (the security architecture document's S10). The Mac: none.
+        /// Linux: the tracers (`strace`, `ltrace`, `gdbserver`, `perf`); the user's manager and timers (`systemctl
+        /// --user`, `systemd-run`, `loginctl`, `crontab`, `at`): an agent "restarting the node to test it" would end
+        /// every session and the vault; Windows' programs (`wsl.exe`, `cmd.exe`, `powershell.exe`); `gh` and git's
+        /// credential helpers; edits under the user's units and the manager's environment, and under the node's own
+        /// folders (`~/.vibeswitcher/v2`, `~/.vibeswitcher/lead`); and reads and edits under `/mnt/c` (as `//mnt/c`:
+        /// a rule's path that starts with one `/` is taken from the settings file's folder, `//` from the root).
+        ///
+        /// They stop a slip, not a worker that tries: a rule binds the tool it names, and a shell reaches each of these
+        /// in other spellings.
+        public static var roleDenyRules: [String] {
+            #if canImport(Darwin)
+            return []
+            #else
+            let commands = ["strace", "ltrace", "gdbserver", "perf", "systemctl --user", "systemd-run", "loginctl", "crontab", "at",
+                            "wsl.exe", "cmd.exe", "powershell.exe", "gh", "git credential"]
+            var rules = commands.map { "Bash(\($0):*)" } + ["Bash(git -c credential*)"]
+            for folder in ["~/.config/systemd", "~/.config/environment.d", "~/.vibeswitcher/v2", "~/.vibeswitcher/lead"] {
+                rules += ["Edit(\(folder)/**)", "Write(\(folder)/**)"]
+            }
+            return rules + ["Read(//mnt/c/**)", "Edit(//mnt/c/**)", "Write(//mnt/c/**)"]
+            #endif
+        }
+
+        /// Whether the lead's session is refused the debuggers too (`LeadLaunch.debuggers`, which workers and
+        /// verifiers always are). The Mac: no, as always (its debuggers ask for the user's password in a dialog, which
+        /// a lead's own runs don't reach). Linux: yes, with no Yama any process of the user may trace another.
+        public static var leadGetsTracerRules: Bool {
+            #if canImport(Darwin)
+            return false
+            #else
+            return true
+            #endif
+        }
+
+        /// Whether a role's launch settings (its `--settings` and `--mcp-config`) go to `claude` as JSON on its command
+        /// line, and its prompt too while the command fits one argument, rather than as files in its run folder,
+        /// which a worker could rewrite between their writing and `claude`'s read. The Mac: no, files as always.
+        /// Linux: yes (the security architecture document's S10).
+        public static var roleSettingsInline: Bool {
+            #if canImport(Darwin)
+            return false
+            #else
+            return true
+            #endif
+        }
+
+        /// `text` as one word for a POSIX shell, in single quotes.
+        static func quoted(_ text: String) -> String {
+            "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
+
         /// What a shell command runs right after `command -v "$1"` so that its exit status says a name the shell
         /// doesn't know as 1. POSIX lets that lookup exit with any status but 0: zsh and bash say 1, and dash
         /// (Ubuntu's /bin/sh) 127, the status a shell with no `command` at all ends with too. The Mac: nothing (its
@@ -118,8 +317,8 @@ extension Platform {
         }
 
         /// What a node can't work without and this machine doesn't have, checked as it starts: `git` when none is
-        /// on PATH (the Mac: at /usr/bin/git), and the branch shell, by its path, when it isn't there. Empty: both
-        /// are there.
+        /// on PATH in a folder only root can write (`git`; the Mac: at /usr/bin/git), and the branch shell, by its
+        /// path, when it isn't there. Empty: both are there.
         public static func missing() -> [String] {
             missing(git: git, shell: branchShell[0])
         }
@@ -149,8 +348,9 @@ extension Platform {
 
         // MARK: Internals
 
-        /// What `git` is while none is found.
-        static let absentGit = "/usr/bin/git"
+        /// What `git` is while none is found: a path with nothing at it (`/nonexistent` is, by convention, never made).
+        /// Public so a module that refuses to start without git (the engine plan's E1 and E4) can name it.
+        public static let absentGit = "/nonexistent/vibeswitcher/git"
         /// The folders looked in when the process has no PATH at all.
         static let pathWhenUnset = "/usr/local/bin:/usr/bin:/bin"
 
@@ -158,6 +358,13 @@ extension Platform {
         static func isExecutableFile(_ path: String) -> Bool {
             var info = stat()
             return stat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG && access(path, X_OK) == 0
+        }
+
+        /// `lstat`'s answer for `path`, as `trustedGit` reads it; nil when there's nothing there.
+        static func fileStatus(_ path: String) -> FileStatus? {
+            var info = stat()
+            guard lstat(path, &info) == 0 else { return nil }
+            return (info.st_uid, info.st_mode, info.st_mode & S_IFMT == S_IFREG)
         }
 
         static func missing(git: String, shell: String) -> [String] {

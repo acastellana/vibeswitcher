@@ -268,8 +268,7 @@ struct LeadRiskMergeTests: LeadTeamFixture {
     /// The verifier's prompt as it was launched.
     func verifierPrompt(_ runtime: FakeRuntime) throws -> String {
         let spawn = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-change'") })
-        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
-        return try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+        return try LaunchArguments.prompt(in: spawn.command)
     }
 
     /// A model helper that answers `answer` and counts the prompts it got.
@@ -467,8 +466,7 @@ struct LeadRiskMergeTests: LeadTeamFixture {
         #expect(!audit.isError, "\(audit.text)")
         return try ["verify-change", "finder2-change"].compactMap { name in
             guard let spawn = runtime.spawned.last(where: { $0.command.contains("--name '\(name)'") }) else { return nil }
-            let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
-            return try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+            return try LaunchArguments.prompt(in: spawn.command)
         }
     }
 

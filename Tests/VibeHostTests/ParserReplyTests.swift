@@ -50,6 +50,21 @@ import Testing
         #expect(lines.all.isEmpty, "\(lines.all)")
     }
 
+    /// A program turns focus events on (DECSET 1004, as Claude Code does as it starts) with no view attached: the
+    /// headless terminal says at once that it has focus (`CSI I`, xterm's way), and that report reaches the program as
+    /// the answer to the setting, the host's log saying nothing dropped (found by the stage 2 plan's Task 12a).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's reply check; the Mac passes every reply"))
+    func aProgramTurningFocusEventsOnIsToldItHasFocus() async throws {
+        let probe = SessionProbe(), lines = Lines()
+        let session = try start("stty raw -echo; printf '\\033[?1004h'; dd bs=1 count=3 2>/dev/null | od -An -c; echo done; "
+            + "printf '\\033[?1004l'; stty sane; \(keepRunning)", probe: probe, lines: lines)
+        defer { probe.end(session) }
+        // Not answered, the program would wait on: a minute is the test's patience.
+        #expect(await eventually(timeout: 60) { probe.text.contains("done") }, "\(probe.diagnosis(session)); \(lines.all)")
+        #expect(Self.odBytes(probe.text).contains("033[I"), "\(probe.diagnosis(session))")
+        #expect(lines.all.isEmpty, "\(lines.all)")
+    }
+
     /// A parser sends a reply its session never asked for (a test hook, as a parser bug would): nothing reaches the
     /// program, and the host's log says it was dropped. A scratch host's, so the line is the host's own log's.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's reply check; the Mac passes every reply"))
@@ -86,6 +101,22 @@ import Testing
         #expect(Self.hasCursorReport(probe.text), "\(probe.diagnosis(session))")
         #expect(!probe.text.contains("h   e   l   l   o") && !probe.text.contains("\\r"), "\(probe.diagnosis(session))")
         #expect(lines.all.first?.contains("reply dropped, it is no reply: 1 bytes, \\x0d") == true, "\(lines.all)")
+    }
+
+    /// Two replies dropped within a second, and then the program ends: the second, which the log's once-a-second line
+    /// held back, is in the log once the session's parser stopped, not lost with it (the 12a review: a drop after
+    /// Claude Code's kitty graphics probe's was never logged).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's reply check; the Mac passes every reply"))
+    func aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds() async throws {
+        let probe = SessionProbe(), lines = Lines()
+        let session = try start("printf '\\033]7599;reply:0d\\007\\033]7599;reply:68656c6c6f\\007'; echo sent", probe: probe, lines: lines)
+        defer { probe.end(session) }
+        #expect(await eventually(timeout: 30) { lines.all.count >= 2 }, "\(probe.diagnosis(session)); \(lines.all)")
+        #expect(lines.all.first?.contains("reply dropped, it is no reply: 1 bytes, \\x0d") == true, "\(lines.all)")
+        #expect(lines.all.dropFirst().first?.contains("parser replies: 1 more dropped since the last line, as its parser stopped: "
+            + "parser (pid ") == true, "\(lines.all)")
+        #expect(lines.all.dropFirst().first?.hasSuffix(" reply dropped, it is no reply: 5 bytes, hello") == true, "\(lines.all)")
+        #expect(lines.all.count == 2, "\(lines.all)")
     }
 
     /// Another process writes a cursor query to the session's terminal (`/dev/pts/N`), with text after it: the
@@ -259,10 +290,13 @@ import Testing
             "\u{1b}]4;1;?;2;?\u{07}", "\u{1b}]10;?\u{07}", "\u{1b}]11;?\u{1b}\\", "\u{1b}]12;?\u{07}", "\u{1b}]10;?;?\u{07}",
             // 8-bit controls: the replies' CSI is one byte.
             "\u{1b} G\u{1b}[6n\u{1b} F",
+            // Focus events turned on: the terminal says at once that it has focus (xterm's way), once per 1004 named.
+            "\u{1b}[?1004h", "\u{1b}[?1000;1004h", "\u{1b}[?1004;1004h", "\u{1b} G\u{1b}[?1004h\u{1b} F",
         ]
         let notCounted = [
             "\u{1b}[1c", "\u{1b}[=c", "\u{1b}[>1q", "\u{1b}[?53n", "\u{1b}[7n", "\u{1b}[20t", "\u{1b}[21t", "\u{1b}]52;c;?\u{07}",
             "\u{1b}[1;1;1;1;1;1*y", "\u{1b}[6;1H", "\u{1b}]0;title\u{07}", "plain text, \u{1b}[1mbold\u{1b}[0m",
+            "\u{1b}[?1004l", "\u{1b}[1004h", "\u{1b}[?1000h",
         ]
         for (queries, counted) in [(answered, true), (notCounted, false)] {
             for query in queries {
@@ -306,6 +340,51 @@ import Testing
         var lines: [String] = []
         for _ in 0..<3 { _ = replies.admit(Data("x".utf8), from: 7, clientsAttached: false, log: { lines.append($0) }) }
         #expect(lines == ["parser (pid 7) reply dropped, it is no reply: 1 bytes, x"])
+        // The parser stopped: the two held back are said now, once.
+        replies.flushDropped { lines.append($0) }
+        replies.flushDropped { lines.append($0) }
+        #expect(lines.dropFirst() == ["parser replies: 2 more dropped since the last line, as its parser stopped: "
+            + "parser (pid 7) reply dropped, it is no reply: 1 bytes, x; parser (pid 7) reply dropped, it is no reply: 1 bytes, x"])
+        // More held back than it names: the rest is "…".
+        var many = ParserReplies(checks: true)
+        lines = []
+        for byte in 0..<7 { _ = many.admit(Data([0x61 + UInt8(byte)]), from: 7, clientsAttached: false, log: { lines.append($0) }) }
+        many.flushDropped { lines.append($0) }
+        #expect(lines.last == "parser replies: 6 more dropped since the last line, as its parser stopped: "
+            + (1...ParserReplies.namedHeldBack).map { "parser (pid 7) reply dropped, it is no reply: 1 bytes, \(UnicodeScalar(0x61 + UInt8($0)))" }
+                .joined(separator: "; ") + "; …", "\(lines)")
+    }
+
+    /// A dropped reply's line names its kind and its bytes: a kind with no query pending, a reply a left-out responder
+    /// makes (Claude Code's kitty graphics probe's answer, found by the stage 2 plan's Task 12a), or no reply at all.
+    @Test func aDroppedRepliesLineNamesItsKind() {
+        let cases: [(reply: String, line: String)] = [
+            ("\u{1b}_Gi=31;OK\u{1b}\\", "it is a kitty graphics reply, left out: 12 bytes, ESC_Gi=31;OKESC\\"),
+            ("\u{1b}]52;c;aGk=\u{1b}\\", "it is a clipboard (OSC 52) reply, left out: 13 bytes, ESC]52;c;aGk=ESC\\"),
+            ("\u{1b}]lname\u{1b}\\", "it is a title report reply, left out: 9 bytes, ESC]lnameESC\\"),
+            ("\u{1b}P1!~ABCD\u{1b}\\", "it is a DECRQCRA reply, left out: 11 bytes, ESCP1!~ABCDESC\\"),
+            ("\u{1b}[<0;1;1M", "it is a mouse report reply, left out: 9 bytes, ESC[<0;1;1M"),
+            ("\u{1b}[1;1R", "no cursor position query is pending: 6 bytes, ESC[1;1R"),
+            ("\u{1b}_Gx", "it is a kitty graphics reply, left out: 4 bytes, ESC_Gx"),
+            ("\u{1b}[?u", "it is no reply: 4 bytes, ESC[?u"),
+        ]
+        for (reply, line) in cases {
+            var replies = ParserReplies(checks: true)
+            var lines: [String] = []
+            _ = replies.admit(Data(reply.utf8), from: 4, clientsAttached: false, log: { lines.append($0) })
+            #expect(lines == ["parser (pid 4) reply dropped, " + line], "\(lines)")
+        }
+    }
+
+    /// With no drop held back, a stopping parser logs nothing (and the Mac never holds one: it drops none).
+    @Test func aStoppingParserWithNoDropHeldBackLogsNothing() {
+        for checks in [true, false] {
+            var replies = ParserReplies(checks: checks)
+            var lines: [String] = []
+            _ = replies.admit(Data("x".utf8), from: 7, clientsAttached: false, log: { lines.append($0) })
+            replies.flushDropped { lines.append($0) }
+            #expect(lines.count == (checks ? 1 : 0), "\(lines)")
+        }
     }
 
     /// Every responder in SwiftTerm (each `sendResponse` call and direct `tdel?.send(source:…)` in its

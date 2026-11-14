@@ -198,8 +198,7 @@ struct StaleBranchTests: LeadTeamFixture {
     /// The verifier's prompt.
     func verifierPrompt(_ runtime: FakeRuntime) throws -> String {
         let spawn = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-add-b'") })
-        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
-        return try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+        return try LaunchArguments.prompt(in: spawn.command)
     }
 
     /// A branch and the base both changed a.txt, in lines apart: the trial merge is clean.

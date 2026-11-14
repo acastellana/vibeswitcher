@@ -152,12 +152,16 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let grant = try #require(vault.current(.worker, root: root, task: "add-b")?.id)
         let folder = vault.runFolder(root: root, name: "worker-add-b")
         #expect(!folder.path.hasPrefix(root))
+        // On Linux none is a file: each is on the worker's command line (LeadLaunchTests.aRolesLaunchSettingsAreInlineOnLinux).
         for name in ["mcp.json", "settings.json", "prompt.md"] {
             let file = folder.appendingPathComponent(name).path
+            if Platform.Tools.roleSettingsInline { #expect(!FileManager.default.fileExists(atPath: file), "\(name)"); continue }
             #expect((try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? Int) == 0o600, "\(name)")
             #expect(!(try String(contentsOfFile: file, encoding: .utf8)).contains(grant), "\(name)")
         }
-        let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("mcp.json"))) as? [String: Any]
+        let command = try LaunchArguments.command("worker-add-b", runtime)
+        #expect(!command.contains(grant))
+        let mcp = try LaunchArguments.json("--mcp-config", in: command) as [String: Any]?
         #expect(((mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])?["env"] == nil)
         // A grant is no key: only whoever asked for it binds it, so a worker that learns one can't take the role.
         let worker = FakeSeat(runtime, agent: LeadAgent(pid: 7003, tty: "ttys073", session: try launched("worker-add-b", runtime).session))
@@ -579,11 +583,12 @@ struct LeadGuardRailsTests: LeadTeamFixture {
 
     // MARK: A worker brings its own branch up to date
 
-    /// A file a session was started with (`--settings`, `--append-system-prompt-file`).
+    /// What a session was started with (`--settings`, `--append-system-prompt-file`): the file, or on Linux the JSON or
+    /// text its command line carries in its place (`LaunchArguments`).
     func launchFile(_ flag: String, _ name: String, _ runtime: FakeRuntime) throws -> Data {
         let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
-        let range = try #require(spawn.command.range(of: "\(flag) '([^']+)'", options: .regularExpression))
-        return try Data(contentsOf: URL(fileURLWithPath: String(spawn.command[range].dropFirst("\(flag) '".count).dropLast())))
+        if flag == "--append-system-prompt-file" { return Data(try LaunchArguments.prompt(in: spawn.command).utf8) }
+        return try LaunchArguments.data(flag, in: spawn.command)
     }
 
     func settings(_ name: String, _ runtime: FakeRuntime) throws -> [String: Any] {
@@ -795,7 +800,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
                                                 server: "/s", name: "\(role.rawValue)-fix", branch: "project-lead",
                                                 folder: temp.url("run-\(role.rawValue)"), cwd: root, temporary: tmp)
             let scratch = try #require(launch.environment["TMPDIR"])
-            let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+            let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
             let permissions = try #require(settings?["permissions"] as? [String: [String]])
             let rules = (allow: permissions["allow"] ?? [], deny: permissions["deny"] ?? [])
             let hook = try #require(Self.hook(settings: settings, cwd: root))

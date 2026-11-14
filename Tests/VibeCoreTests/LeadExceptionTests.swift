@@ -45,8 +45,8 @@ struct LeadExceptionTests: LeadTeamFixture {
 
     func task(_ root: String) -> LeadTask? { BoardStore(root: root).load().task("fix") }
 
-    func prompt(_ root: String) throws -> String {
-        try String(contentsOf: vault.runFolder(root: root, name: "verify-fix").appendingPathComponent("prompt.md"), encoding: .utf8)
+    func prompt(_ root: String, _ runtime: FakeRuntime) throws -> String {
+        try LaunchArguments.prompt(of: "verify-fix", runtime)
     }
 
     func notes(_ prompt: String) throws -> Substring {
@@ -123,7 +123,7 @@ struct LeadExceptionTests: LeadTeamFixture {
         #expect(!recorded.isError && recorded.text.contains("Its next audit's verifier sees it"), "\(recorded.text)")
         #expect(task(root)?.contractRevision == version)
         #expect(!lead.call("audit", ["task": "fix"]).isError)
-        let section = try notes(try prompt(root))
+        let section = try notes(try prompt(root, runtime))
         #expect(section.contains("appended to the task: Exception to the boundaries, accepted by the lead. It accepts edits to a.txt and nothing else."), "\(section)")
         #expect(section.contains("Reason: one line of wiring the goal needs") && section.contains("Evidence: a.txt:1 is the only change there"))
     }
@@ -136,11 +136,11 @@ struct LeadExceptionTests: LeadTeamFixture {
         #expect(!lead.call("audit", ["task": "fix"]).isError)
         let late = lead.call("update_task", ["task": "fix", "exception": Self.scoped])
         #expect(!late.isError && late.text.contains("isn't presented as covering the audit of fix"), "\(late.text)")
-        #expect(!(try notes(try prompt(root))).contains("Exception to the boundaries"))
+        #expect(!(try notes(try prompt(root, runtime))).contains("Exception to the boundaries"))
         // A verdict that doesn't pass comes back; the next audit has it.
         _ = try seat("verify-fix", runtime).call("submit_audit", ["completion": "complete", "integrity": "suspect", "summary": "s", "tests": "passed"])
         #expect(!lead.call("audit", ["task": "fix"]).isError)
-        #expect((try notes(try prompt(root))).contains("Exception to the boundaries"))
+        #expect((try notes(try prompt(root, runtime))).contains("Exception to the boundaries"))
     }
 
     // MARK: Holding
@@ -157,7 +157,7 @@ struct LeadExceptionTests: LeadTeamFixture {
         #expect(!lead.call("update_task", ["task": "fix", "exception": Self.scoped]).isError)
         #expect(!lead.call("board", ["task": "fix"]).text.contains("Audit held by the lead"))
         #expect(!lead.call("audit", ["task": "fix"]).isError)
-        #expect((try notes(try prompt(root))).contains("Exception to the boundaries"))
+        #expect((try notes(try prompt(root, runtime))).contains("Exception to the boundaries"))
     }
 
     @Test func holdAuditFalseLetsGo() throws {
@@ -282,7 +282,7 @@ struct LeadExceptionTests: LeadTeamFixture {
         // Nor does the next audit's verifier read it as accepting more than a.txt.
         #expect(!(try seat("worker-fix", runtime)).call("report", doneReport("added c.txt")).isError)
         #expect(!lead.call("audit", ["task": "fix"]).isError)
-        let section = try notes(try prompt(root))
+        let section = try notes(try prompt(root, runtime))
         #expect(section.contains("It accepts edits to a.txt and nothing else.") && !section.contains("*.txt"), "\(section)")
     }
 
@@ -305,7 +305,7 @@ struct LeadExceptionTests: LeadTeamFixture {
         let head = Git.run(["rev-parse", "agent/fix"], in: root).output
         #expect(lead.advanceReviewNeeded("fix", commit: head) != nil, "the exception doesn't lower the floor")
         try verdict(lead, runtime)
-        #expect((try notes(try prompt(root))).contains("Exception to the boundaries"))
+        #expect((try notes(try prompt(root, runtime))).contains("Exception to the boundaries"))
         let told = BoardStore(root: root).load().reports?.last?.text ?? ""
         #expect(told.contains("is on a sensitive path"), "\(told)")
         let refused = accept(lead)
@@ -410,7 +410,7 @@ extension LeadAdvanceTests {
         #expect(!runtime.spawned.contains { $0.label.hasPrefix("Verifier: ") })
         #expect(!lead.call("update_task", ["task": "add-b", "exception": ["scope": "a.txt", "reason": "wiring", "evidence": "a.txt:1"]]).isError)
         #expect(await advancing.until { reports(runtime).contains { $0.contains("Started the audit of add-b") } }, "\(reports(runtime))")
-        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "verify-add-b").appendingPathComponent("prompt.md"), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(of: "verify-add-b", runtime)
         #expect(prompt.contains("Exception to the boundaries, accepted by the lead. It accepts edits to a.txt and nothing else."))
     }
 
@@ -446,7 +446,7 @@ extension LeadAdvanceTests {
         let given: [String: Any] = ["scope": "a.txt", "reason": "wiring", "evidence": "a.txt:1"]
         let late = lead.call("update_task", ["task": "add-b", "exception": given])
         #expect(late.text.contains("isn't presented as covering the audit of add-b"), "\(late.text)")
-        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "verify-add-b").appendingPathComponent("prompt.md"), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(of: "verify-add-b", runtime)
         #expect(!prompt.contains("Exception to the boundaries"))
 
         let before = toWorker("add-b", root, runtime).count

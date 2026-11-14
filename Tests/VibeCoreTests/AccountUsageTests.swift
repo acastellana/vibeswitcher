@@ -243,14 +243,14 @@ struct AccountUsageTests: LeadTeamFixture {
         let prepared = try LeadLaunch.prepare(role: .worker, root: root, task: "t", base: "claude", prompt: "p", start: "s",
                                               server: "/App/vibeswitcher-mcp", name: "worker-t", folder: temp.url("run"), cwd: root,
                                               temporary: temp.url("tmp"))
-        let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: prepared.settingsFile))) as? [String: Any])
+        let settings = try LaunchArguments.json("--settings", in: prepared.command)
         let line = try #require(settings["statusLine"] as? [String: Any])
         #expect(line["command"] as? String == "'/App/vibeswitcher-mcp' --status-line")
         // A verifier's runs only your user settings' status line (it's started with --setting-sources user).
         let verifier = try LeadLaunch.prepare(role: .verifier, root: root, task: "t", base: "claude", prompt: "p", start: "s",
                                               server: "/App/vibeswitcher-mcp", name: "verifier-t", folder: temp.url("run-v"), cwd: root,
                                               temporary: temp.url("tmp"))
-        let verifierSettings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: verifier.settingsFile))) as? [String: Any])
+        let verifierSettings = try LaunchArguments.json("--settings", in: verifier.command)
         #expect((verifierSettings["statusLine"] as? [String: Any])?["command"] as? String == "'/App/vibeswitcher-mcp' --status-line --user-settings-only")
     }
 
@@ -268,8 +268,12 @@ struct AccountUsageTests: LeadTeamFixture {
         }
         // Other options stay, --fallback-model too; no model given: the command as it is.
         let kept = try command("claude --fallback-model opus --verbose --model opus", model: "sonnet")
-        #expect(kept.hasPrefix("claude --fallback-model opus --verbose --append-system-prompt-file"), "\(kept)")
-        #expect(try command("claude --model opus", model: nil).hasPrefix("claude --model opus --append-system-prompt-file"))
+        // Followed by the launch's own flags: its prompt file's first (the Mac), its permission mode (Linux, its inline values last).
+        #expect(kept.hasPrefix("claude --fallback-model opus --verbose --append-system-prompt-file ")
+                || kept.hasPrefix("claude --fallback-model opus --verbose --permission-mode auto "), "\(kept)")
+        let unchanged = try command("claude --model opus", model: nil)
+        #expect(unchanged.hasPrefix("claude --model opus --append-system-prompt-file ") || unchanged.hasPrefix("claude --model opus --permission-mode auto "))
+        #expect(LaunchArguments.words(unchanged).filter { $0 == "--model" }.count == 1)
     }
 
     @Test func aLeadOnAScratchVaultNeverReadsTheMacsUsage() throws {

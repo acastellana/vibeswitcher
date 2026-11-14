@@ -285,9 +285,7 @@ struct LeadFindingsToolTests: LeadTeamFixture {
     /// The last verifier started's prompt.
     func verifierPrompt(_ runtime: FakeRuntime) throws -> String {
         let spawn = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-") })
-        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
-        let path = String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast())
-        return try String(contentsOfFile: path, encoding: .utf8)
+        return try LaunchArguments.prompt(in: spawn.command)
     }
 
     func audit(_ lead: LeadToolset, _ runtime: FakeRuntime, _ verdict: [String: Any], slug: String = "add-b") throws -> MCPToolResult {

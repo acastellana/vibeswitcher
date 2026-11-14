@@ -75,6 +75,10 @@ public final class HostServer {
         /// handover goes only to an installed build checked on its sealed copy (see V2/HandoverTarget.swift). Nil: any
         /// target, as always (the Mac's and every scratch host's).
         public var installRoot: URL?
+        /// The project allow-list (`~/.vibeswitcher/v2/projects` for the node's host on Linux): a spawn whose working
+        /// folder isn't inside a repository it names is refused, saying why (see V2/ProjectAllowList.swift). Nil: any
+        /// folder, as always (the Mac's and every scratch host's).
+        public var projectAllowList: URL?
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -482,6 +486,10 @@ public final class HostServer {
         case .spawn(let request):
             // Started now, it would be torn down with the host a moment later.
             guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }
+            // Linux: not the app, no loader, startup or never-passed variable (see V2/SpawnEnvironment.swift).
+            if let why = SpawnEnvironment.refusal(request, from: caller(of: client)) { log.note("spawn refused: \(why) \(HostLog.peer(client.peerPID))"); return reply(.error(why)) }
+            // Linux, the node's host: only inside a repository on the project allow-list (see V2/ProjectAllowList.swift).
+            if let why = ProjectAllowList.refusal(request.cwd, list: config.projectAllowList) { log.note("spawn refused: \(why) \(HostLog.peer(client.peerPID))"); return reply(.error(why)) }
             guard let room = roomForSpawn() else {
                 return reply(.error("The session host runs \(max(1, config.maxSessions)) sessions, its limit: end one first."))
             }

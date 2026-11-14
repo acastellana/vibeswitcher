@@ -8,9 +8,7 @@ extension LeadFindingsToolTests {
     /// The last session started as `name`'s system prompt.
     func prompt(of name: String, _ runtime: FakeRuntime) throws -> String {
         let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
-        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
-        let path = String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast())
-        return try String(contentsOfFile: path, encoding: .utf8)
+        return try LaunchArguments.prompt(in: spawn.command)
     }
 
     static let crash: [String: Any] = ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "b.txt says bee, the contract wants b",

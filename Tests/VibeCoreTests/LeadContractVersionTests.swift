@@ -95,8 +95,7 @@ struct LeadContractVersionTests: LeadTeamFixture {
         let verifier = try #require(try task(root).verifier)
         #expect(try task(root).auditBrief?.version == 1)
         let spawn = try #require(runtime.spawned.last { $0.id == verifier })
-        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
-        let prompt = try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(in: spawn.command)
         #expect(prompt.contains("This is contract v1.") && prompt.contains("contract_version"), "\(prompt)")
 
         let updated = lead.call("update_task", ["task": "add-b", "append_context": "Editing scripts/x.sh is accepted (sensitive path)."])
@@ -495,8 +494,7 @@ struct LeadContractVersionTests: LeadTeamFixture {
         #expect(!started.isError && !started.text.contains("judges only what changed"), "\(started.text)")
         let verifier = try #require(try task(root).verifier)
         let spawn = try #require(runtime.spawned.last { $0.id == verifier })
-        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
-        let prompt = try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(in: spawn.command)
         #expect(!prompt.contains("## What this audit judges") && prompt.contains("This is contract v2."), "\(prompt)")
     }
 }

@@ -119,12 +119,10 @@ public final class HostedSession {
         ring = OutputRing(capacity: ringCapacity)
     }
 
-    /// `$SHELL -l -i [-c command]`: an interactive login shell reads both `.zprofile` and `.zshrc`, so the
-    /// agent gets the PATH it has in Terminal (nvm, Homebrew…).
+    /// The Mac: `$SHELL -l -i [-c command]`, an interactive login shell; Linux: a plain bash (see
+    /// `Platform.Tools.sessionShellArguments`).
     public static func arguments(shell: String, command: String?, keepShell: Bool) -> [String] {
-        guard let command else { return [shell, "-l", "-i"] }
-        let line = keepShell ? "\(command); exec \(RecentProjects.shellQuote(shell)) -l -i" : command
-        return [shell, "-l", "-i", "-c", line]
+        Platform.Tools.sessionShellArguments(shell: shell, command: command, keepShell: keepShell)
     }
 
     public static func environment(base: [String: String], extra: [String: String], id: UUID) -> [String] {
@@ -133,7 +131,7 @@ public final class HostedSession {
         env["COLORTERM"] = "truecolor"
         env["TERM_PROGRAM"] = "VibeSwitcher"
         env["VIBESWITCHER_SESSION"] = id.uuidString
-        if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
+        if env["LANG"] == nil { env["LANG"] = Platform.Tools.defaultLocale }
         for (name, value) in extra where LaunchPlan.validEnvName(name) { env[name] = value }
         return env.map { "\($0.key)=\($0.value)" }.sorted()
     }
@@ -162,7 +160,7 @@ public final class HostedSession {
         let args = arguments(shell: shell, command: request.command, keepShell: request.keepShell)
         let env = environment(base: baseEnvironment, extra: request.env, id: id)
         var code: Int32 = 0
-        guard let child = PTYSpawn.spawn(launcher: launcher, executable: shell, args: args, env: env, directory: request.cwd, size: &size,
+        guard let child = PTYSpawn.spawn(launcher: launcher, executable: args[0], args: args, env: env, directory: request.cwd, size: &size,
                                          failure: &code, launcherFlags: SessionIdentityChecks.launcherFlags(testDelay: launcherTestDelay)) else {
             throw code == 0 ? Failure.spawnFailed : Failure.couldntStart(LaunchPreflight.couldntStart(launcher, in: request.cwd, code: code))
         }
@@ -172,7 +170,8 @@ public final class HostedSession {
         _ = fcntl(child.masterFD, F_SETFL, fcntl(child.masterFD, F_GETFL) | O_NONBLOCK)
         // Not inherited by sessions started later: another session holding this PTY open would keep it alive.
         _ = fcntl(child.masterFD, F_SETFD, FD_CLOEXEC)
-        let info = HostSession(id: id, tty: tty, childPID: child.pid, cwd: request.cwd, command: request.command,
+        // Recorded without a role's inline launch values on Linux, which every welcome would carry (S10).
+        let info = HostSession(id: id, tty: tty, childPID: child.pid, cwd: request.cwd, command: LinuxLaunch.recorded(request.command),
                                label: request.label, agent: request.agent, title: "", startedAt: Date(),
                                cols: cols, rows: rows, exit: nil)
         let session = HostedSession(info: info, masterFD: child.masterFD, queue: queue, ringCapacity: ringCapacity, launcher: launcher,
@@ -496,6 +495,7 @@ public final class HostedSession {
     private func stopParser() {
         parser?.stop()
         parser = nil
+        parserReplies.flushDropped(log: onParserTrouble)
         watchdog?.cancel()
         watchdog = nil
         historyReads.forEach { $0.cancel() }

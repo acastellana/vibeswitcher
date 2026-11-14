@@ -618,6 +618,10 @@ extension LeadVault {
             /// Your home's agents' config as VibeSwitcher last sealed it (`ConfigSeal`): the Mac's, one for every team
             /// (optional: older vaults have none, and kept it in each team's `guarded`).
             var config: MacSeal?
+            /// `Book.holdsFirstLook`, kept so a handover before the first look keeps it (optional: nil is false).
+            var holdsFirstLook: Bool?
+            /// The roots (`LeadVault.key`) the app's accept let record their floor and rails (`Book.holdsFirstLook`).
+            var firstLookAccepted: Set<String>?
         }
 
         /// The Mac-wide seal of your home's agents' config (`ConfigSeal.isHome`): its hashes (with their per-key
@@ -637,6 +641,38 @@ extension LeadVault {
         public var onChange: ((Data) -> Void)?
         /// The home whose agents' config this vault seals (`ConfigSeal`): its own process's (a test's scratch one).
         public var configHome = VibePaths.home
+        /// What a held first look kept from being recorded (`holdsFirstLook`), said for the host's log.
+        public var onHeld: ((String) -> Void)?
+        private var heldNotes: [String] = []
+
+        /// A fresh vault that takes nothing as its baseline that a worker could have written (security document S7):
+        /// on Linux the vault lives in memory only, and a worker can cause a restart at will. Your home's seal and
+        /// each main checkout's hold every watched thing they have nothing recorded for, at the first look and at any
+        /// later one that first reads it (`~/.claude.json` unreadable at the accept), instead of sealing it as it
+        /// is: only the app's accept that showed it (`checkConfig(root:shown:)`) seals it. Until that accept for a
+        /// root (sealing with nothing held again), a guard rail with nothing recorded isn't recorded from anyone but
+        /// the app, and no floor is recorded `onlyIfUnset`. Kept in the vault's state. False by default: the Mac's
+        /// vault, and every scratch host's, seal their first look as before.
+        public var holdsFirstLook: Bool {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return state.holdsFirstLook == true
+            }
+            set {
+                lock.lock()
+                let changed = (state.holdsFirstLook == true) != newValue
+                state.holdsFirstLook = newValue ? true : nil
+                let data = changed ? try? JSONEncoder().encode(state) : nil
+                lock.unlock()
+                if let data { onChange?(data) }
+            }
+        }
+
+        /// Whether `root`'s floor and rails wait for the app's accept (`holdsFirstLook`): none ended it yet.
+        private func isHeld(root: String) -> Bool {
+            state.holdsFirstLook == true && state.firstLookAccepted?.contains(LeadVault.key(root)) != true
+        }
 
         /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
         /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read.
@@ -731,6 +767,7 @@ extension LeadVault {
                     config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome))
                 }
             }
+            var held: [String] = []
             let (reply, skills): (Reply, (hash: String, entries: String)?) = {
                 lock.lock()
                 defer { lock.unlock() }
@@ -738,12 +775,14 @@ extension LeadVault {
                 let reply = answer(request, from: caller, userOpened: userOpened, agentSession: agentSession, liveSessions: liveSessions,
                                    config: config, changed: &changed)
                 if changed, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
+                swap(&held, &heldNotes)
                 let key = ConfigSeal.keyPrefix + ConfigSeal.copiedFolder
                 guard config != nil, let hash = state.config?.hashes[key], let entries = state.config?.hashes[ConfigSeal.keysKey(of: key)] else {
                     return (reply, nil)
                 }
                 return (reply, (hash, entries))
             }()
+            if let onHeld { held.forEach(onHeld) }
             // It reads files: outside the lock.
             if let skills { retainSkills(skills.hash, entries: skills.entries) }
             return reply
@@ -1037,7 +1076,18 @@ extension LeadVault {
                 if let refusal = sealConfig(root: root, asked: hashes, now: config, caller: caller, live: liveSessions, changed: &changed) {
                     return .refused(refusal)
                 }
-                let rails = hashes.filter { !ConfigSeal.isVaultKey($0.key) }
+                var rails = hashes.filter { !ConfigSeal.isVaultKey($0.key) }
+                // A held first look (`holdsFirstLook`): what has nothing recorded is the user's to accept, not the
+                // lead's to take as it is. Not recorded, said; the caller asks again next time.
+                if caller != .app, isHeld(root: root) {
+                    let recorded = team(root)?.guarded ?? [:]
+                    let unrecorded = rails.filter { recorded[$0.key] == nil }
+                    if !unrecorded.isEmpty {
+                        rails = rails.filter { recorded[$0.key] != nil }
+                        let said = unrecorded.keys.sorted().map { "\($0) \(unrecorded[$0]?.prefix(12) ?? "")" }.joined(separator: ", ")
+                        heldNotes.append("vault: \(LeadMail.project(of: root))'s first look is held: workflow.md's \(said) not recorded until the user's accept")
+                    }
+                }
                 if !rails.isEmpty { change(root, &changed) { $0.guarded = ($0.guarded ?? [:]).merging(rails) { $1 } } }
                 return .ok
             case .reviewFloor(let root):
@@ -1046,6 +1096,11 @@ extension LeadVault {
                 // Yours alone: the lead and its team are who the floor holds (the host tells the app from the process).
                 guard caller == .app else { return .refused("Only VibeSwitcher sets the review rules' floor, from Settings: it's the user's.") }
                 if onlyIfUnset, team(root)?.floor != nil { return .reviewFloor(team(root)?.floor) }
+                // A held first look (`holdsFirstLook`): workflow.md's values wait for the user's accept of the root.
+                if onlyIfUnset, isHeld(root: root) {
+                    heldNotes.append("vault: \(LeadMail.project(of: root))'s first look is held: no review floor recorded from workflow.md until the user's accept")
+                    return .reviewFloor(nil)
+                }
                 change(root, &changed) { $0.floor = floor }
                 return .reviewFloor(floor)
             case .approve(let root, let task, let commit):
@@ -1305,14 +1360,22 @@ extension LeadVault {
             var mac = state.config ?? MacSeal()
             var team = state.teams[own] ?? Team(root: LeadVault.canonical(root))
             var guarded = team.guarded ?? [:]
+            // A vault that holds its first look holds whatever has nothing recorded, whenever it's first read: a thing
+            // the accept couldn't read is no more the baseline than one a worker wrote before it.
+            let firstLook = state.holdsFirstLook == true
             let home = Self.judge(watchedNow.filter { ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &mac.hashes, held: &mac.held,
                                   quiet: quiet(since: mac.sealedAt), caller: caller, home: true, shown: shown,
-                                  sessions: sessions, sessionsKnown: ids != nil)
+                                  sessions: sessions, sessionsKnown: ids != nil, firstLook: firstLook)
             var projectHeld = guarded[ConfigSeal.heldKey]
             let project = Self.judge(watchedNow.filter { !ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &guarded, held: &projectHeld,
                                      quiet: quiet(since: team.configSealedAt), caller: caller, home: false, shown: shown,
-                                     sessions: sessions, sessionsKnown: ids != nil)
+                                     sessions: sessions, sessionsKnown: ids != nil, firstLook: firstLook)
             guarded[ConfigSeal.heldKey] = projectHeld
+            // The user's accept of a held first look (the card's hashes), sealed with nothing held again: the root's
+            // floor and rails are recorded from then on.
+            if shown != nil, home, project, isHeld(root: root) {
+                state.firstLookAccepted = (state.firstLookAccepted ?? []).union([own])
+            }
             // Sealed, or found as sealed, now: what ran before is seen. A session still running is as new (not quiet).
             if home { mac.sealedAt = now }
             if project { team.configSealedAt = now }
@@ -1332,10 +1395,12 @@ extension LeadVault {
 
         /// One seal's look (`sealConfig`): `now` its watched things' hashes as they are, `hashes` with their per-key
         /// hashes, `recorded` and `held` (`heldKey`'s value) as sealed, updated here; `home`: the Mac-wide seal's. True
-        /// when nothing is held: all of it sealed or found as sealed.
+        /// when nothing is held: all of it sealed or found as sealed. `firstLook`: the vault holds its first look
+        /// (`holdsFirstLook`): what the seal has nothing recorded for is held whenever it's first read (at the first
+        /// look or after), not recorded as it is, and only the app's accept that showed it (`shown`) seals it.
         private static func judge(_ now: [String: String], hashes: [String: String], recorded: inout [String: String], held: inout String?,
                                   quiet: Bool, caller: Caller, home: Bool, shown: [String: String]? = nil,
-                                  sessions: [ConfigSeal.TeamSession] = [], sessionsKnown: Bool = false) -> Bool {
+                                  sessions: [ConfigSeal.TeamSession] = [], sessionsKnown: Bool = false, firstLook: Bool = false) -> Bool {
             // A seal made while the sync bookkeeping still counted, of a folder as it is now: the same folder, carried
             // over to the hash that leaves it out, so that alone holds nothing. Whatever else moved doesn't match, and
             // is judged as ever.
@@ -1359,26 +1424,33 @@ extension LeadVault {
             // A plugin or scripts first seen: at this seal's first look that watches them, recorded as they are; after
             // it, a change whose time isn't known (enabled now, its cache written while nothing watched it).
             if recorded[ConfigSeal.comesAndGoesSince] == nil {
-                seal(now.keys.filter { recorded[$0] == nil && ConfigSeal.comesAndGoes(key: $0) }, from: hashes, into: &recorded)
+                // A held first look records none of them: each is first seen, below.
+                if !firstLook { seal(now.keys.filter { recorded[$0] == nil && ConfigSeal.comesAndGoes(key: $0) }, from: hashes, into: &recorded) }
                 recorded[ConfigSeal.comesAndGoesSince] = "1"
             }
             // One with nothing in it (scripts of a settings file that names none) holds nothing: recorded as it is.
             let firstSeen = Set(now.keys.filter { key in
                 recorded[key] == nil && ConfigSeal.comesAndGoes(key: key) && !(hashes[ConfigSeal.keysKey(of: key)].map(ConfigSeal.decode)?.isEmpty ?? false)
             })
-            let differ = now.filter { firstSeen.contains($0.key) || (recorded[$0.key] != nil && recorded[$0.key] != $0.value) }
+            // A held first look: everything else with nothing recorded is held too, for the user's accept (also one
+            // first read after it).
+            let firstLooked = firstLook ? Set(now.keys.filter { recorded[$0] == nil && !ConfigSeal.comesAndGoes(key: $0) }) : []
+            let differ = now.filter { firstSeen.contains($0.key) || firstLooked.contains($0.key) || (recorded[$0.key] != nil && recorded[$0.key] != $0.value) }
             // Your click seals only what its card showed you: each held thing as it was when held. One that moved
             // since (or changed and was never shown) is held anew, for the card to show. For the lead: a change while
             // the seal was quiet is yours and sealed, unless it executes: that waits for your click whoever made it.
             // Back changed after a look that didn't see it: changed when, isn't known.
-            let returned = Set(differ.keys.filter { recorded[ConfigSeal.goneKey(of: $0)] != nil }).union(firstSeen)
+            let returned = Set(differ.keys.filter { recorded[ConfigSeal.goneKey(of: $0)] != nil }).union(firstSeen).union(firstLooked)
             // A plugin whose version folder moved (`ConfigSeal.isUpdate`: Claude Code's update, or a shell's forged one,
             // alike on disk) is new code: it waits for your click like other code, whoever made it, quiet or not.
             let updates = Set(differ.keys.filter { ConfigSeal.isUpdate(key: $0, recorded: recorded, now: hashes) })
             // Something already held is never the lead's look's to seal, quiet or not: only your click clears it. Your
             // click seals what its card showed (`shown`), held anew by a look since or not; a click that says nothing
             // of that (an older app) what's held.
-            let unseen = caller == .app ? differ.filter { key, value in (shown != nil ? shown?[key] : before[key]?.hash) != value }
+            // A held first look's: only a click that showed it (`shown`).
+            let unseen = caller == .app ? differ.filter { key, value in
+                (shown != nil || (firstLook && recorded[key] == nil) ? shown?[key] : before[key]?.hash) != value
+            }
                 : differ.filter { key, _ in
                     !quiet || !ConfigSeal.sealsWhenQuiet(key: key) || before[key] != nil || returned.contains(key) || updates.contains(key)
                 }

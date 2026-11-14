@@ -15,19 +15,20 @@ struct LeadLaunchTests {
         let launch = try LeadLaunch.prepare(role: .lead, root: root, task: nil, base: "claude --dangerously-skip-permissions",
                                             prompt: "You are the lead.", start: "Say hello.", server: "/App/vibeswitcher-mcp", name: "lead-acme")
         #expect(launch.command.hasPrefix("claude --dangerously-skip-permissions "))
-        #expect(launch.command.contains("--append-system-prompt-file '\(launch.promptFile)'"))
+        // The prompt from its file (on Linux, on the command line while it fits there: aRolesLaunchSettingsAreInlineOnLinux).
+        #expect(launch.command.contains(Platform.Tools.roleSettingsInline ? "--append-system-prompt 'You are the lead.'"
+                                            : "--append-system-prompt-file '\(launch.promptFile)'"))
         #expect(launch.command.contains("--mcp-config "))
         #expect(launch.command.contains("--settings "))
         #expect(launch.command.contains("--name 'lead-acme'"))
         #expect(launch.command.hasSuffix(" -- 'Say hello.'"))
-        let prompt = try String(contentsOfFile: launch.promptFile, encoding: .utf8)
-        #expect(prompt == "You are the lead.")
-        let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
+        #expect(try LaunchArguments.prompt(in: launch.command) == "You are the lead.")
+        let mcp = try LaunchArguments.json("--mcp-config", in: launch.command) as [String: Any]?
         let server = (mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any]
         #expect(server?["command"] as? String == "/App/vibeswitcher-mcp")
         // Through its keeper, which starts it again if it stops (MCPKeeperTests).
         #expect(server?["args"] as? [String] == ["--keeper", "--role", "lead", "--root", root])
-        let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+        let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
         let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
         #expect(deny.contains("Edit") && deny.contains("Write") && deny.contains("Bash(git commit:*)"))
     }
@@ -36,7 +37,7 @@ struct LeadLaunchTests {
         let root = try root()
         let launch = try LeadLaunch.prepare(role: .worker, root: root, task: "add-login", base: "claude", prompt: "p", start: "Go.",
                                             server: "/s", name: "worker-add-login", branch: "project-lead")
-        let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+        let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
         let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
         let allow = (settings?["permissions"] as? [String: Any])?["allow"] as? [String] ?? []
         #expect(!deny.contains("Edit"))
@@ -52,7 +53,7 @@ struct LeadLaunchTests {
         // Its git never opens an editor, so the `git commit` that ends a merge needs nothing in front; its `git status`
         // (its status line's too) never takes index.lock (IndexLockTests).
         #expect(settings?["env"] as? [String: String] == ["GIT_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0"])
-        let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
+        let mcp = try LaunchArguments.json("--mcp-config", in: launch.command) as [String: Any]?
         let args = ((mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])?["args"] as? [String]
         #expect(args == ["--keeper", "--role", "worker", "--root", root, "--task", "add-login"])
         #expect(launch.promptFile.contains("/.vibeswitcher/run/worker-add-login/"))
@@ -64,16 +65,18 @@ struct LeadLaunchTests {
         let launch = try LeadLaunch.prepare(role: .verifier, root: root, task: "x", base: "claude", prompt: "p", start: "Check.",
                                             server: "/s", name: "verify-x", folder: folder)
         #expect(launch.mcpFile.hasPrefix(folder.path))
-        let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
+        let mcp = try LaunchArguments.json("--mcp-config", in: launch.command) as [String: Any]?
         let entry = (mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any]
         // The session host knows which session holds the role: the tool server gets nothing that would make one.
         #expect(entry?["env"] == nil)
         #expect(Set(entry?.keys.map { $0 } ?? []) == ["command", "args"])
         // Its session's git takes no optional index.lock either; its commands run as branch code, with no auto-memory
         // (`LeadLaunch.verifierEnvironment`).
-        let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+        let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
         #expect(settings?["env"] as? [String: String] == ["GIT_OPTIONAL_LOCKS": "0"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 })
+        // On Linux none is left: each is on the command line (aRolesLaunchSettingsAreInlineOnLinux).
         for file in [launch.mcpFile, launch.promptFile, launch.settingsFile] {
+            if Platform.Tools.roleSettingsInline { #expect(!FileManager.default.fileExists(atPath: file), "\(file)"); continue }
             #expect((try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? Int) == 0o600, "\(file)")
         }
         #expect((try FileManager.default.attributesOfItem(atPath: folder.path)[.posixPermissions] as? Int) == 0o700)
@@ -86,7 +89,7 @@ struct LeadLaunchTests {
     @Test func theVerifierIsReadOnlyAndMayUseAnotherModel() throws {
         let launch = try LeadLaunch.prepare(role: .verifier, root: try root(), task: "x", base: "claude", prompt: "p", start: "Check.",
                                             server: "/s", name: "verify-x", model: "sonnet")
-        let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+        let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
         let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
         for rule in ["Edit", "Write", "NotebookEdit", "Bash(git commit:*)", "Bash(git add:*)", "Bash(git stash:*)"] {
             #expect(deny.contains(rule), "missing \(rule)")
@@ -108,7 +111,7 @@ struct LeadLaunchTests {
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "fix", base: "claude",
                                                 prompt: "p", start: "s", server: "/App/vibeswitcher-mcp", name: "\(role.rawValue)-fix")
-            let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+            let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
             let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
             for rule in rules { #expect(deny.contains(rule), "\(role): \(rule)") }
             #expect(!((settings?["permissions"] as? [String: Any])?["allow"] as? [String] ?? []).contains { $0.contains("mac-limits") || $0.contains("boost.json") || $0.contains("policy.md") })
@@ -131,7 +134,7 @@ struct LeadLaunchTests {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "fix", base: "claude",
                                                 prompt: "p", start: "s", server: "/App/vibeswitcher-mcp", name: "\(role.rawValue)-fix",
                                                 branch: "project-lead", records: "docs/lead")
-            let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+            let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
             let permissions = settings?["permissions"] as? [String: Any]
             let deny = permissions?["deny"] as? [String] ?? [], allow = permissions?["allow"] as? [String] ?? []
             for tool in ["SendMessage", "ListAgents"] {
@@ -151,7 +154,7 @@ struct LeadLaunchTests {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "fix", base: "claude",
                                                 prompt: "p", start: "s", server: "/App/vibeswitcher-mcp", name: "\(role.rawValue)-fix",
                                                 branch: "project-lead", records: "docs/lead")
-            let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+            let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
             let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
             for sub in writes {
                 for option in ["", "-v ", "--verbose "] {
@@ -175,13 +178,13 @@ struct LeadLaunchTests {
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: try root(), task: "x", base: "claude", prompt: "p", start: "Go.",
                                                 server: "/s", name: "\(role.rawValue)-x", branch: "project-lead")
-            let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
+            let mcp = try LaunchArguments.json("--mcp-config", in: launch.command) as [String: Any]?
             #expect((mcp?["mcpServers"] as? [String: Any])?.keys.sorted() == ["vibeswitcher"])
-            let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
+            let settings = try LaunchArguments.json("--settings", in: launch.command)
             let permissions = try #require(settings["permissions"] as? [String: Any])
-            // The permission mode stays the user's (auto, by default): the rules don't pick one.
+            // The rules don't pick the permission mode: the command line names it (eachRoleIsLaunchedInAutoModeByName).
             #expect(permissions.keys.sorted() == ["allow", "deny"])
-            #expect(!launch.command.contains("--permission-mode"))
+            #expect(launch.command.contains("--permission-mode auto"))
             let allow = permissions["allow"] as? [String] ?? [], deny = permissions["deny"] as? [String] ?? []
             // 2.1.299+: `mcp__<server>__*` with the whole name; a bare `mcp__vibeswitcher` or a prefix no longer reads the same.
             #expect(allow.filter { $0.hasPrefix("mcp__") } == ["mcp__vibeswitcher__*"])
@@ -189,6 +192,252 @@ struct LeadLaunchTests {
             // git reads go to the role's hook (LeadLaunchOutsideReadsTests), not to a rule.
             #expect(!allow.contains("Bash(git log:*)") && settings["hooks"] != nil)
         }
+    }
+
+    // MARK: The roles' launch on Linux, and the permission mode (stage 2 Task 10b, the security document's S10)
+
+    /// Each role names its permission mode, auto mode, the one it ran in when no launch named one (Claude Code's
+    /// default since 2.1.284, still 2.1.323's: `LinuxLaunch.permissionMode`), on both systems: no longer whatever
+    /// Claude Code's default or the user's `defaultMode` becomes. Once, after the project's command, before `--name`
+    /// and the start; after the launch's settings file (the Mac), before its inline settings (Linux, which go last,
+    /// after `--name`: `aSessionsNameIsItsOwnWhateverItsPromptQuotes`).
+    @Test(arguments: [LeadLaunch.Role.lead, .worker, .verifier])
+    func eachRoleIsLaunchedInAutoModeByName(role: LeadLaunch.Role) throws {
+        let launch = try LeadLaunch.prepare(role: role, root: try root(), task: role == .lead ? nil : "x", base: "claude", prompt: "p",
+                                            start: "Go.", server: "/s", name: "\(role.rawValue)-x", branch: "project-lead")
+        let words = LaunchArguments.words(launch.command)
+        #expect(words.filter { $0 == "--permission-mode" }.count == 1, "\(role): \(launch.command)")
+        #expect(LaunchArguments.value("--permission-mode", in: launch.command) == "auto")
+        let mode = try #require(words.firstIndex(of: "--permission-mode")), name = try #require(words.firstIndex(of: "--name"))
+        let settings = try #require(words.firstIndex(of: "--settings"))
+        #expect(mode < name && (Platform.Tools.roleSettingsInline ? name < settings : settings < mode), "\(role): \(words.prefix(12))")
+    }
+
+    /// A project whose Claude command names a permission mode keeps it, as it did, and `claude` isn't given two.
+    @Test func aProjectsOwnPermissionModeIsKept() throws {
+        let root = try root()
+        for base in ["claude --permission-mode manual", "claude --permission-mode=plan", "claude --dangerously-skip-permissions",
+                     "claude --verbose --permission-mode bypassPermissions --model opus"] {
+            for role in [LeadLaunch.Role.lead, .worker, .verifier] {
+                let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "x", base: base, prompt: "p",
+                                                    start: "Go.", server: "/s", name: "\(role.rawValue)-x")
+                #expect(!launch.command.contains("--permission-mode auto") && launch.command.hasPrefix(base + " "), "\(role): \(launch.command)")
+                #expect(launch.command.components(separatedBy: "--permission-mode").count <= 2, "\(launch.command)")
+            }
+        }
+        #expect(!LinuxLaunch.namesPermissionMode("claude --permission-modes x --allow-dangerously-skip-permissions"))
+    }
+
+    /// The rules Linux adds (`Platform.Tools.roleDenyRules`), as Claude Code permission rules, for every role.
+    static let linuxRules = ["Bash(strace:*)", "Bash(ltrace:*)", "Bash(gdbserver:*)", "Bash(perf:*)", "Bash(systemctl --user:*)",
+                             "Bash(systemd-run:*)", "Bash(loginctl:*)", "Bash(crontab:*)", "Bash(at:*)", "Bash(wsl.exe:*)", "Bash(cmd.exe:*)",
+                             "Bash(powershell.exe:*)", "Bash(gh:*)", "Bash(git credential:*)", "Bash(git -c credential*)",
+                             "Edit(~/.config/systemd/**)", "Write(~/.config/systemd/**)", "Edit(~/.config/environment.d/**)",
+                             "Write(~/.config/environment.d/**)", "Edit(~/.vibeswitcher/v2/**)", "Write(~/.vibeswitcher/v2/**)",
+                             "Edit(~/.vibeswitcher/lead/**)", "Write(~/.vibeswitcher/lead/**)",
+                             "Read(//mnt/c/**)", "Edit(//mnt/c/**)", "Write(//mnt/c/**)"]
+
+    /// Each role's rules as its session gets them, for the four shapes `prepare` is called with.
+    func rulesOfEachRole() throws -> [(role: LeadLaunch.Role, deny: [String])] {
+        let root = try root()
+        let shapes: [(LeadLaunch.Role, String?, String?)] = [(.lead, nil, nil), (.worker, "project-lead", "docs/lead"), (.worker, nil, nil),
+                                                              (.verifier, "project-lead", "docs/lead")]
+        return try shapes.enumerated().map { index, shape in
+            let launch = try LeadLaunch.prepare(role: shape.0, root: root, task: shape.0 == .lead ? nil : "x", base: "claude", prompt: "p",
+                                                start: "Go.", server: "/s", name: "\(shape.0.rawValue)-\(index)", branch: shape.1, records: shape.2)
+            let permissions = try #require(try LaunchArguments.json("--settings", in: launch.command)["permissions"] as? [String: Any])
+            return (shape.0, permissions["deny"] as? [String] ?? [])
+        }
+    }
+
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's rules; the Mac's are theMacsDenyRulesAreTodays"))
+    func aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh() throws {
+        for (role, deny) in try rulesOfEachRole() {
+            for rule in Self.linuxRules { #expect(deny.contains(rule), "\(role): \(rule)") }
+            for rule in Self.linuxRules { #expect(deny.filter { $0 == rule }.count == 1, "\(role): \(rule) twice") }
+            for command in ["strace -p 1", "perf record -p 1", "systemctl --user restart vibeswitcher", "systemd-run --user sh",
+                            "crontab -e", "at now", "wsl.exe -u root", "cmd.exe /c dir", "powershell.exe -c x", "gh pr list",
+                            "gh auth token", "git credential fill", "git -c credential.helper=x push"] {
+                #expect(LeadGuardRailsTests.denied(command, by: deny), "\(role): \(command)")
+            }
+            // Read by name: the node's own folders, and the Windows side's, which no rule lets through.
+            #expect(!deny.contains { $0.hasPrefix("Read(/mnt") }, "\(role): /mnt/c is //mnt/c, from the root")
+        }
+    }
+
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's rules; the Mac's lead has no debugger rules"))
+    func theLeadOnLinuxGetsTheTracerRules() throws {
+        let lead = try #require(try rulesOfEachRole().first { $0.role == .lead })
+        for rule in LeadLaunch.debuggers + ["Bash(strace:*)", "Bash(ltrace:*)", "Bash(gdbserver:*)", "Bash(perf:*)"] {
+            #expect(lead.deny.contains(rule), "\(rule)")
+        }
+        // Added after the rules both systems give, none twice (`Edit(~/.vibeswitcher/lead/**)` is one of those already).
+        let all = LeadLaunch.deny(.lead), both = Self.withoutLinuxRules(all, .lead)
+        #expect(all == both + (LeadLaunch.debuggers + Self.linuxRules).filter { !both.contains($0) })
+    }
+
+    /// `rules` (a role's) without the ones this system adds at their end (`LinuxLaunch.denyRules`): all of them.
+    static func withoutLinuxRules(_ rules: [String], _ role: LeadLaunch.Role) -> [String] {
+        let added = Set(Platform.Tools.roleDenyRules + (role == .lead && Platform.Tools.leadGetsTracerRules ? LeadLaunch.debuggers : []))
+        var rules = rules
+        while let last = rules.last, added.contains(last) { rules.removeLast() }
+        return rules
+    }
+
+    /// The Mac's rules are the ones at 47636aaf, the commit stage 2's plan starts from, for each role (each list's
+    /// SHA-256, its rules one a line): Linux's are added only where `Platform.Tools.roleDenyRules` has them, at the
+    /// end. The rules both systems give are checked on both.
+    @Test func theMacsDenyRulesAreTodays() throws {
+        let recorded: [String: String] = [
+            "lead": "f9a8bf505bc2a335acb239622cf0575f47bb40cfbf032c2f22585acd8dee016d",
+            "worker-project-lead-docs/lead": "03a8e95f7c38fb3af67648cfab7bad491c015e4394cb861d46a8b0aedcbe6de7",
+            "worker": "59c6eea671ff14ce0e2791c28cc9dd447fdddeb84ba7576572f6df80e8ba64e1",
+            "verifier-project-lead-docs/lead": "8f05b04170bc7cfbd8e435b7546bb18860ab1b0eccf337e5d76dc3fa2e2d51ee",
+        ]
+        let shapes: [(LeadLaunch.Role, String?, String?)] = [(.lead, nil, nil), (.worker, "project-lead", "docs/lead"), (.worker, nil, nil),
+                                                              (.verifier, "project-lead", "docs/lead")]
+        for (role, base, records) in shapes {
+            let key = ([role.rawValue] + [base, records].compactMap { $0 }).joined(separator: "-")
+            let all = LeadLaunch.deny(role, base: base, records: records), both = Self.withoutLinuxRules(all, role)
+            #expect(LeadVault.hash(both.joined(separator: "\n")) == recorded[key], "\(key): \(LeadVault.hash(both.joined(separator: "\n")))")
+            if Platform.CodeIdentity.isAvailable { #expect(all == both, "\(key)") }
+        }
+        #expect(Platform.Tools.roleDenyRules.isEmpty == Platform.CodeIdentity.isAvailable)
+        #expect(Platform.Tools.leadGetsTracerRules != Platform.CodeIdentity.isAvailable)
+        #expect(Platform.Tools.roleSettingsInline != Platform.CodeIdentity.isAvailable)
+    }
+
+    /// The words `command` gives a program, as bash itself splits it: `claude` (its first word) replaced by a function
+    /// that prints each argument it gets.
+    static func argumentsAsBashGivesThem(_ command: String) throws -> [String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        let line = "f() { printf '%s\\0' \"$@\"; }; f" + command.dropFirst("claude".count)
+        process.arguments = ["--noprofile", "--norc", "-c", line]
+        let out = Pipe()
+        process.standardOutput = out
+        try process.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        #expect(waitForEnd(process) && process.terminationStatus == 0)
+        return String(decoding: data, as: UTF8.self).split(separator: "\0", omittingEmptySubsequences: false).dropLast().map(String.init)
+    }
+
+    /// On Linux a role's settings and MCP configuration are `claude`'s arguments, as JSON, and so is its prompt while the
+    /// command fits one argument (128 KiB here): no file is left in its run folder for a worker to rewrite before
+    /// `claude` reads it. A prompt too long for that stays its file (the security document's S11, item 7).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's inline launch; the Mac's are files"))
+    func aRolesLaunchSettingsAreInlineOnLinux() throws {
+        let root = try root()
+        let prompt = "You're the worker: don't stop.\nIt's \"quoted\", $HOME and `id` stay as they are; \\ too. ✓"
+        for role in [LeadLaunch.Role.lead, .worker, .verifier] {
+            let folder = temp.url("inline-\(role.rawValue)")
+            let task: String? = role == .lead ? nil : "x"
+            let launch = try LeadLaunch.prepare(role: role, root: root, task: task, base: "claude", prompt: prompt, start: "Go.",
+                                                server: "/opt/vibe switcher/vibeswitcher-mcp", name: "\(role.rawValue)-x",
+                                                branch: "project-lead", records: "docs/lead", folder: folder)
+            // Nothing in the run folder: the files `prepare` wrote are gone.
+            #expect((try FileManager.default.contentsOfDirectory(atPath: folder.path)).isEmpty, "\(role)")
+            for file in [launch.settingsFile, launch.mcpFile, launch.promptFile] { #expect(!FileManager.default.fileExists(atPath: file)) }
+            // As bash hands them to claude: the prompt as it was, and both JSON objects as they were written.
+            let words = try Self.argumentsAsBashGivesThem(launch.command)
+            func after(_ flag: String) -> String? { words.firstIndex(of: flag).flatMap { $0 + 1 < words.count ? words[$0 + 1] : nil } }
+            #expect(after("--append-system-prompt") == prompt, "\(role)")
+            #expect(!words.contains("--append-system-prompt-file") && after("--mcp-config")?.hasPrefix("{") == true)
+            let mcp = try #require(try JSONSerialization.jsonObject(with: Data((after("--mcp-config") ?? "").utf8)) as? [String: Any])
+            let entry = try #require((mcp["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])
+            #expect(entry["command"] as? String == "/opt/vibe switcher/vibeswitcher-mcp")
+            #expect(entry["args"] as? [String] == [MCPKeeper.flag, "--role", role.rawValue, "--root", root] + (task.map { ["--task", $0] } ?? []))
+            let settings = try #require(try JSONSerialization.jsonObject(with: Data((after("--settings") ?? "").utf8)) as? [String: Any])
+            let permissions = try #require(settings["permissions"] as? [String: Any])
+            #expect(permissions["deny"] as? [String] == LeadLaunch.deny(role, base: "project-lead", records: "docs/lead"), "\(role)")
+            #expect(permissions["allow"] as? [String] == LeadLaunch.allow(role, base: "project-lead") + LeadLaunch.evidenceReads(role, root: root, task: task),
+                    "\(role)")
+            let hooks = LeadLaunch.hooks(role, server: "/opt/vibe switcher/vibeswitcher-mcp", root: task.map { Worktrees.path(root: root, slug: $0) } ?? root)
+            #expect(try LinuxLaunch.json(settings["hooks"] as? [String: Any] ?? [:]) == LinuxLaunch.json(hooks), "\(role)")
+            #expect(settings["statusLine"] != nil && (settings["env"] as? [String: String])?["GIT_OPTIONAL_LOCKS"] == "0")
+            #expect(words.last == "Go." && words[words.count - 2] == "--")
+        }
+
+        // A prompt too long for one argument stays its file, which `claude` is given; the settings are still inline.
+        let long = String(repeating: "Check every line. ", count: 8 * 1024)
+        #expect(long.utf8.count > LinuxLaunch.argumentLimit)
+        let folder = temp.url("inline-long")
+        let launch = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: long, start: "Go.", server: "/s",
+                                            name: "worker-long", folder: folder)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == ["prompt.md"])
+        #expect(try String(contentsOfFile: launch.promptFile, encoding: .utf8) == long)
+        #expect(LaunchArguments.value("--append-system-prompt-file", in: launch.command) == launch.promptFile)
+        #expect(LaunchArguments.value("--settings", in: launch.command)?.hasPrefix("{") == true)
+        #expect(LaunchArguments.value("--mcp-config", in: launch.command)?.hasPrefix("{") == true)
+        #expect(launch.command.utf8.count < LinuxLaunch.argumentLimit - LinuxLaunch.argumentRoom)
+        // Just under: inline, the whole command within the limit.
+        let fits = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: "", start: "Go.", server: "/s",
+                                          name: "worker-fits", folder: temp.url("inline-fits"))
+        let room = LinuxLaunch.argumentLimit - LinuxLaunch.argumentRoom - fits.command.utf8.count
+        let most = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: String(repeating: "a", count: room),
+                                          start: "Go.", server: "/s", name: "worker-fits", folder: temp.url("inline-most"))
+        #expect(most.command.utf8.count == LinuxLaunch.argumentLimit - LinuxLaunch.argumentRoom)
+        #expect(!FileManager.default.fileExists(atPath: most.promptFile) && LaunchArguments.value("--append-system-prompt", in: most.command)?.count == room)
+        let over = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: String(repeating: "a", count: room + 1),
+                                          start: "Go.", server: "/s", name: "worker-fits", folder: temp.url("inline-over"))
+        #expect(FileManager.default.fileExists(atPath: over.promptFile) && over.command.contains("--append-system-prompt-file"))
+    }
+
+    /// A session's `--name` is the one `prepare` gave it, whatever its prompt and its start say: on Linux the prompt
+    /// is on the command line, and a lead's contract or task text may quote a launch line (`--name 'x'`). The disk
+    /// sweep keeps a live session's TMPDIR by that name (`DiskSpace.removable`), and its transcript is found by it.
+    @Test func aSessionsNameIsItsOwnWhateverItsPromptQuotes() throws {
+        let root = try root()
+        let quoted = "Sessions start as `claude --name 'worker-x' -- 'Go.'`; keep that. --name 'y'"
+        let start = "Read --name 'z' first."
+        let inline = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: quoted, start: start,
+                                            server: "/s", name: "worker-add-login", folder: temp.url("name-inline"))
+        #expect(LeadLaunch.name(inCommand: inline.command) == "worker-add-login")
+        #expect(try LaunchArguments.prompt(in: inline.command) == quoted)
+        // The prompt's own file, too long for one argument (Linux), or as always (the Mac).
+        let long = quoted + String(repeating: " Check every line.", count: 8 * 1024)
+        let file = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: long, start: start,
+                                          server: "/s", name: "worker-long", folder: temp.url("name-file"))
+        #expect(LeadLaunch.name(inCommand: file.command) == "worker-long")
+        #expect(try LaunchArguments.prompt(in: file.command) == long)
+        // And as the host records it (`LinuxLaunch.recorded`), which the sweep and the transcript's search read.
+        #expect(LinuxLaunch.recorded(inline.command).flatMap(LeadLaunch.name(inCommand:)) == "worker-add-login")
+    }
+
+    /// The command the host records and sends of a session (`HostSession.command`, in every welcome, ended sessions
+    /// included for a day) leaves out a role's inline launch values on Linux: 15 to 30 KiB each, a day of a team's
+    /// sessions would pass a frame's 1 MiB and no client would be welcomed. Short values, the project's own words and
+    /// the role's name stay; the Mac records the command as it is.
+    @Test func theRecordedCommandLeavesOutARolesInlineValues() throws {
+        let root = try root()
+        let prompt = String(repeating: "Don't stop: it's \"quoted\" and 'single'. ", count: 600)
+        var made: [String] = []
+        for role in [LeadLaunch.Role.lead, .worker, .verifier] {
+            let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "x", base: "claude --verbose", prompt: prompt,
+                                                start: "Go.", server: "/s", name: "\(role.rawValue)-rec", folder: temp.url("rec-\(role.rawValue)"))
+            let inline = try LinuxLaunch.inline(launch, prompt: prompt, mcp: ["mcpServers": ["vibeswitcher": ["command": "/s"]]],
+                                                settings: ["permissions": ["deny": LeadLaunch.deny(role)]], start: "Go.", enabled: true)
+            made.append(inline.command)
+            #expect(LinuxLaunch.recorded(inline.command, enabled: false) == inline.command)
+            let recorded = try #require(LinuxLaunch.recorded(inline.command, enabled: true))
+            #expect(inline.command.utf8.count > 25_000 && recorded.utf8.count < 2_000, "\(role): \(recorded.utf8.count) bytes")
+            #expect(LaunchArguments.value("--settings", in: recorded) == "…" && LaunchArguments.value("--append-system-prompt", in: recorded) == "…",
+                    "\(role): \(recorded)")
+            // A short MCP config stays as it is, and so does every other word.
+            #expect(LaunchArguments.value("--mcp-config", in: recorded)?.hasPrefix("{\"mcpServers\"") == true)
+            let kept = LaunchArguments.words(recorded).filter { $0 != "…" }
+            #expect(kept == LaunchArguments.words(inline.command).filter { $0.utf8.count <= LinuxLaunch.recordedValueLimit }, "\(role)")
+            #expect(recorded.hasPrefix("claude --verbose ") && recorded.hasSuffix(" -- 'Go.'") && LeadLaunch.name(inCommand: recorded) == "\(role.rawValue)-rec")
+            if role == .verifier { #expect(recorded.contains("--setting-sources user --strict-mcp-config")) }
+        }
+        // Files named, and commands that aren't a role's, stay as they are.
+        let files = "claude --settings '/run/x/settings.json' --mcp-config '/run/x/mcp.json' --append-system-prompt-file '/run/x/prompt.md'"
+        #expect(LinuxLaunch.recorded(files, enabled: true) == files)
+        let shell = "echo " + String(repeating: "x", count: 4_000)
+        #expect(LinuxLaunch.recorded(shell, enabled: true) == shell)
+        #expect(LinuxLaunch.recorded(nil, enabled: true) == nil)
+        // What the host records is what it is given, where nothing is inline (the Mac).
+        #expect(LinuxLaunch.recorded(made[0]) == (Platform.Tools.roleSettingsInline ? LinuxLaunch.recorded(made[0], enabled: true) : made[0]))
     }
 }
 
@@ -236,7 +485,7 @@ struct LeadLaunchOutsideReadsTests {
                                                 start: "Go.", server: "/opt/vibe switcher/vibeswitcher-mcp", name: "\(role)-outside",
                                                 branch: "main", records: "docs/lead", folder: temp.url("run-\(role)"), cwd: root,
                                                 temporary: temp.url("session-tmp"))
-            let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
+            let settings = try LaunchArguments.json("--settings", in: launch.command)
             let permissions = try #require(settings["permissions"] as? [String: Any])
             self.role = role
             allow = permissions["allow"] as? [String] ?? []

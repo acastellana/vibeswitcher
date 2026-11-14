@@ -10,7 +10,7 @@ struct VerifierIsolationTests {
     let temp = Scratch()
 
     func settings(_ launch: LeadLaunch.Prepared) throws -> [String: Any] {
-        try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
+        try LaunchArguments.json("--settings", in: launch.command)
     }
 
     func prepare(_ role: LeadLaunch.Role, cwd: String, server: String = "/App/vibeswitcher-mcp") throws -> LeadLaunch.Prepared {
