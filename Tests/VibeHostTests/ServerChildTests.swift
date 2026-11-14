@@ -220,6 +220,85 @@ final class ServerChildHost {
         #expect(host.said.contains("server child pid \(second) started"), "\(host.said)")
     }
 
+    /// Killed while a shell of its keeps its connector as well as its kept connection (so the host's end of the
+    /// connector never sees the other end go), the helper's connection is still ended: on the child's end the host
+    /// closes its connector itself, and with it every connection made through it, which is then no one's. Not only
+    /// when the next start opens a connector under the same number, which would end the old one too, a second later:
+    /// the old one is gone from the host's connectors by then, so nothing is replaced.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aConnectionTheOldServerLeftIsEndedThoughItsConnectorLives() async throws {
+        let host = try await ServerChildHost(actions: ["hold", "keep-held connector"])
+        defer { host.stop() }
+        let first = try #require(await host.firstHelper(), "\(host.said)")
+        #expect(await eventually { host.lines(of: first).contains { $0.hasPrefix("keeping ") } }, "\(host.results)\n\(host.said)")
+        #expect(host.lines(of: first).contains("held"), "\(host.results)")
+        try host.replaceActions(["sleep"])
+        kill(first, SIGKILL)
+
+        #expect(await eventually { host.said.contains("server child pid \(first) ended") }, "\(host.said)")
+        #expect(await eventually { host.lines(of: first).contains("held-closed") }, "\(host.results)\n\(host.said)")
+        #expect(await eventually { host.started.count >= 2 }, "\(host.results)\n\(host.said)")
+        let second = try #require(host.started.dropFirst().first?.pid)
+        #expect(await eventually { host.said.contains("server child pid \(second) started") }, "\(host.said)")
+        #expect(!host.noted.contains("replaced by a new one under its number"), "\(host.noted)")
+    }
+
+    /// A host that stops (as one told `--exit-with` does when its owner goes, and then waits for its sessions' end)
+    /// ends its server child and starts none again: none running, none about to start. The child's token, recorded
+    /// at its start, named it while it ran.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aStoppedHostStartsNoServerChildAgain() async throws {
+        let dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let socket = dir + "/h.sock"
+        FileManager.default.createFile(atPath: dir + "/" + ServerChildHelper.actionsName, contents: Data("sleep\n".utf8))
+        var config = HostServer.Config(socketPath: socket, lockPath: dir + "/h.lock", shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 42)
+        config.idleExit = nil
+        config.logPath = dir + "/host.log"
+        let server = HostServer(config: config)
+        try server.start()
+        defer { server.stop(terminateSessions: true) }
+        let binary = try #require(Bundle.main.executablePath)
+        let child = try #require(ServerChild.start(.init(image: binary, socketPath: socket, arguments: [], environment: config.baseEnvironment),
+                                                   server: server))
+        defer { child.stop() }
+        #expect(await eventually { child.pid != nil })
+        let helper = try #require(child.pid)
+        let token = try #require(child.token)
+        #expect(Platform.Processes.link(helper)?.isProcess(of: token) == true)
+
+        server.stop(terminateSessions: true)
+        // The helper's end, however it came, handled on the host's queue to the end of that turn.
+        #expect(await eventually { child.pid == nil && kill(helper, 0) != 0 && errno == ESRCH })
+        server.queue.sync {}
+        #expect(!child.isRunning)
+        #expect(child.token == nil)
+        #expect(child.restarts == 0)
+    }
+
+    /// `--server-arg` reaches a scratch host's server only: the user's host gives its server none of them (and says
+    /// so, `ServerChild.adopt`), only its root and node root; without `--server`, nothing is started.
+    @Test func theUsersHostGivesItsServerNoTestArguments() throws {
+        let arguments = ["vibeswitcher-host", "--server", "/srv/server", "--server-arg", "--test-flag=1", "--idle-exit", "5",
+                         "--server-arg", "two"]
+        func launch(_ arguments: [String], usersHost: Bool) -> (launch: ServerChild.Launch, refused: [String])? {
+            ServerChild.launch(arguments: arguments, ownsLaunchers: usersHost, socketPath: "/s", root: "/r", nodeRoot: "/n",
+                               environment: ["A": "1"])
+        }
+        let users = try #require(launch(arguments, usersHost: true))
+        #expect(users.launch.image == "/srv/server")
+        #expect(users.launch.socketPath == "/s")
+        #expect(users.launch.environment == ["A": "1"])
+        #expect(users.launch.arguments == ["--root", "/r", "--node-root", "/n"])
+        #expect(users.refused == ["--test-flag=1", "two"])
+        let scratch = try #require(launch(arguments, usersHost: false))
+        #expect(scratch.launch.arguments == ["--root", "/r", "--node-root", "/n", "--test-flag=1", "two"])
+        #expect(scratch.refused.isEmpty)
+        #expect(launch(["vibeswitcher-host", "--server-arg", "x"], usersHost: false) == nil)
+    }
+
     /// The `--server` file rewritten in place (a script now) while the helper runs from its copy: what is started
     /// after the helper is killed is the helper again, from the copy, never the script.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))

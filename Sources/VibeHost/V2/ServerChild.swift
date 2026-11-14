@@ -53,8 +53,11 @@ public final class ServerChild {
     private let launch: Launch
 
     private let lock = NSLock()
-    /// The child that runs now, its connector, when it started and the watch on its end; on `queue`.
-    private var child: (pid: pid_t, connector: Int32, startedAt: Date, watch: any Platform.Cancellable)?
+    /// The child that runs now: its pid, its token (taken in the spawn's turn; the pid can't be given again while
+    /// this stands, as only `ended` and `stop` reap it, in the turn that clears this), its connector, when it started
+    /// and the watch on its end; on `queue`.
+    private var child: Running?
+    private typealias Running = (pid: pid_t, token: Platform.PeerToken?, connector: Int32, startedAt: Date, watch: any Platform.Cancellable)
     private var restartPending = false
     private var stopped = false
     private var delay = ServerChild.firstDelay
@@ -65,6 +68,39 @@ public final class ServerChild {
         queue = server.queue
         self.copy = copy
         self.launch = launch
+    }
+
+    /// `main`'s hook, after the host has started: with `--server PATH` in `arguments`, the server child from it, as
+    /// `launch(arguments:ownsLaunchers:socketPath:root:nodeRoot:environment:)` says. The user's host (`ownsLaunchers`)
+    /// refuses `--server-arg`, saying so; the Mac ignores `--server`, saying so (no server child there: the app proves
+    /// itself by its code). `--server` stays in what a build this one hands over to is started with: without an
+    /// install root (Task 9d) the new image's server is the same file.
+    @discardableResult
+    public static func adopt(arguments: [String], ownsLaunchers: Bool, executable: String, config: HostServer.Config,
+                             server: HostServer) -> ServerChild? {
+        guard let (launch, refused) = Self.launch(arguments: arguments, ownsLaunchers: ownsLaunchers, socketPath: config.socketPath,
+                                                  root: VibePaths.root.path,
+                                                  nodeRoot: URL(fileURLWithPath: executable).deletingLastPathComponent().path,
+                                                  environment: config.baseEnvironment) else { return nil }
+        guard !Platform.CodeIdentity.isAvailable else {
+            say(server, "ignored --server: this system has no server child (the app proves itself by its code)")
+            return nil
+        }
+        if !refused.isEmpty { say(server, "refused --server-arg: the user's host passes its server no test arguments") }
+        return start(launch, server: server)
+    }
+
+    /// What `--server PATH` in `arguments` starts (nil without it): `--root ROOT --node-root NODE-ROOT` (S2-D1; until
+    /// Task 9b the node root is the host's executable's folder), then each `--server-arg X` as X, for a scratch host
+    /// only. `refused`: the `--server-arg` values the user's host (`ownsLaunchers`) left out.
+    static func launch(arguments: [String], ownsLaunchers: Bool, socketPath: String, root: String, nodeRoot: String,
+                       environment: [String: String]) -> (launch: Launch, refused: [String])? {
+        guard let at = arguments.firstIndex(of: "--server"), arguments.indices.contains(at + 1) else { return nil }
+        let serverArguments = arguments.indices.dropLast().filter { arguments[$0] == "--server-arg" }.map { arguments[$0 + 1] }
+        let launch = Launch(image: arguments[at + 1], socketPath: socketPath,
+                            arguments: ["--root", root, "--node-root", nodeRoot] + (ownsLaunchers ? [] : serverArguments),
+                            environment: environment)
+        return (launch, ownsLaunchers ? serverArguments : [])
     }
 
     /// Loads `launch.image` into a sealed copy and starts the child from it on the host's queue (the host started
@@ -91,15 +127,20 @@ public final class ServerChild {
     /// The child running now; nil between a child's end and its start again.
     public var pid: pid_t? { lock.withLock { child?.pid } }
 
+    /// The token of the child running now (`Platform.Processes.token`: pid, uid, start ticks), recorded in the spawn's
+    /// turn and named as its connector's sender; nil between a child's end and its start again.
+    public var token: Platform.PeerToken? { lock.withLock { child?.token } }
+
     /// How many times a child was started again after one ended.
     public var restarts: Int { lock.withLock { restartCount } }
 
     /// No more starts: the child running is ended (SIGKILL) and reaped, its connector closed, and the copy closed.
-    /// For a host that stops in a process that goes on (the tests'); the host's own process just exits, and the child
-    /// sees its connector close.
+    /// `HostServer.stop` calls it first, so a host that stops and then waits to exit (`--exit-with`'s, for its
+    /// sessions' end) starts no child again meanwhile; a host whose process just exits leaves the child to see its
+    /// connector close.
     public func stop() {
         let work = {
-            let (first, running) = self.lock.withLock { () -> (Bool, (pid: pid_t, connector: Int32, startedAt: Date, watch: any Platform.Cancellable)?) in
+            let (first, running) = self.lock.withLock { () -> (Bool, Running?) in
                 guard !self.stopped else { return (false, nil) }
                 self.stopped = true
                 defer { self.child = nil }
@@ -144,10 +185,11 @@ public final class ServerChild {
             scheduleRestart()
         case .success(let pid):
             // In this turn: the connector's requests are read on this queue, so none is answered before its sender is.
-            server.setAppConnectorSender(Platform.Processes.token(pid), for: connector)
+            let token = Platform.Processes.token(pid)
+            server.setAppConnectorSender(token, for: connector)
             Sys.close(connector)
             let watch = Platform.ProcessExit.watch(pid, queue: queue) { [weak self] in self?.ended(pid) }
-            lock.withLock { child = (pid, connector, Date(), watch) }
+            lock.withLock { child = (pid, token, connector, Date(), watch) }
             Self.say(server, "server child pid \(pid) started from \(launch.image)'s sealed copy, connector \(connector)")
         }
     }

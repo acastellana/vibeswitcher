@@ -5,10 +5,10 @@ import Testing
 /// by the host from a sealed copy, non-dumpable from its exec, and holds the app's connector. An exec of anything
 /// else would leave that process dumpable (a readable image) with whatever it hadn't closed, and an exec of its own
 /// file would run what is on disk now, not the copy the host checked. So `Sources/vibeswitcher-server` and
-/// `Sources/VibeNode` call no `execve` or `execv` (nor their `p`/`e` forms), no `Platform.Spawn(…).replaceProcess()`,
-/// no `HostHandover.exec`, no `BinaryWatch` (which restarts a process in place when its file changes), and never ask
-/// the host for a connection by its path (`viaConnector: false`): its connections are its connector's. Comments and
-/// string literals don't count. It passes on nothing until the engine's E1 creates the server.
+/// `Sources/VibeNode` call no `execve` or `execv` (nor their `p`/`e` forms, nor `fexecve`), no
+/// `Platform.Spawn(…).replaceProcess()`, no `HostHandover.exec`, no `BinaryWatch` (which restarts a process in place
+/// when its file changes), and never ask the host for a connection by its path (`viaConnector: false`): its
+/// connections are its connector's. Comments and string literals don't count. It passes on nothing until the engine's E1 creates the server.
 struct ServerLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
@@ -17,8 +17,8 @@ struct ServerLintTests {
 
     /// What the rule refuses, each with what it says.
     static let refused: [(pattern: String, what: String)] = [
-        (#"\bexecv[pe]*\s*\("#, "an exec"),
-        (#"\bexecve?\b"#, "an exec"),
+        (#"\bf?execv[pe]*\s*\("#, "an exec"),
+        (#"\bf?execve?\b"#, "an exec"),
         (#"\.replaceProcess\s*\("#, "a spawn that replaces the process"),
         (#"\bHostHandover\s*\.\s*exec\b"#, "a handover's exec"),
         (#"\bBinaryWatch\b"#, "a watch that restarts the process in place"),
@@ -65,7 +65,9 @@ struct ServerLintTests {
         let code = code(text)
         var found: [String] = []
         for (number, line) in code.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
-            for (pattern, what) in refused where line.contains(try! Regex(pattern)) {
+            // Simple word boundaries: Unicode's (the default) don't break a word at a dot between letters, so
+            // `\b` would miss `Glibc.execve`.
+            for (pattern, what) in refused where line.contains(try! Regex(pattern).wordBoundaryKind(.simple)) {
                 found.append("\(number + 1): \(what)")
                 break
             }
@@ -98,8 +100,13 @@ struct ServerLintTests {
             // execve( in a comment, BinaryWatch too
             log("never execve(, never viaConnector: false")
             let fine = HostConnection(path: socket)
+            _ = fexecve(fd, argv, envp)
+            _ = Glibc.fexecve(fd, a, e)
+            let exec = Glibc.fexecve
+            _ = Glibc.execve(path, argv, envp)
             """
         #expect(Self.findings(in: fixture) == ["1: an exec", "2: an exec", "3: a spawn that replaces the process", "4: a handover's exec",
-                                               "5: a watch that restarts the process in place", "6: a connection by the host's path"])
+                                               "5: a watch that restarts the process in place", "6: a connection by the host's path",
+                                               "10: an exec", "11: an exec", "12: an exec", "13: an exec"])
     }
 }

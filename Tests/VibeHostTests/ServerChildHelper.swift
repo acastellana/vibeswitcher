@@ -24,7 +24,8 @@ import Testing
 /// - `fork-write census`: a child of its own (a shell) writes a census request on the kept connection, and ends:
 ///   "fork-wrote PID STATUS".
 /// - `keep-held`: a child of its own (a shell) keeps the kept connection until the host ends it, then appends
-///   "<this helper's pid> held-closed" to the results: "keeping PID".
+///   "<this helper's pid> held-closed" to the results: "keeping PID". `keep-held connector`: the shell keeps the
+///   helper's connector too, so the host's end of it doesn't see its other end go when the helper does.
 /// - `child-call census BINARY`: BINARY (this test binary) started as its child, keeping every descriptor that isn't
 ///   close-on-exec, asks for a census as `childVariable` below says: "child-called STATUS".
 /// - `dumpable`: makes itself dumpable again (`PR_SET_DUMPABLE 1`): "dumpable 0".
@@ -129,12 +130,15 @@ enum ServerChildHelper {
                 var status: Int32 = 0
                 while waitpid(pid, &status, 0) < 0, errno == EINTR {}
                 report("fork-wrote \(pid) \(status)")
-            case ("keep-held", 1):
+            case ("keep-held", 1), ("keep-held", 2) where words[1] == "connector":
+                // Blocking, for the shell's `cat` (the descriptor's flags are its file's, shared with the shell's copy):
+                // nonblocking, it reads EAGAIN at once and goes, before anything has ended the connection.
+                _ = fcntl(held.fd, F_SETFL, fcntl(held.fd, F_GETFL) & ~O_NONBLOCK)
                 var spawn = Platform.Spawn(executable: "/bin/sh", arguments: ["/bin/sh", "-c", "cat >/dev/null; echo \"$0 held-closed\" >>\"$1\"",
                                                                              String(getpid()), results])
                 spawn.stdin = .descriptor(held.fd)
                 spawn.stdout = .path("/dev/null", flags: O_WRONLY)
-                spawn.keep = []
+                spawn.keep = words.count == 2 ? [connector] : []
                 guard case .success(let pid) = spawn.start() else { return report("keeping none") }
                 report("keeping \(pid)")
             case ("child-call", 3) where words[1] == "census":

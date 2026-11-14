@@ -247,6 +247,7 @@ public final class HostServer {
             self.acceptSource?.cancel()
             self.housekeeping?.cancel()
             self.ownerWatch?.cancel()
+            self.serverChild?.stop()
             self.closeAppConnectors()
             self.clients.values.forEach { $0.close() }
             self.clients = [:]

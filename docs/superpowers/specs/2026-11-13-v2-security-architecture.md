@@ -359,7 +359,9 @@ own shell and Claude Code) are acceptable while the only project on the node is 
 **Held by:** `LeadVaultHostTests.aConnectionWhoseProcessExecsTheAppIsntTheApp` (the Mac's rule, unchanged);
 `ServerChildTests.theServerChildsConnectorConnectionsAreTheApp`, `ServerChildTests.aConnectionFromAnotherProcessIsNotTheApp`,
 `ServerChildTests.aChildOfTheServerIsNotTheApp`, `ServerChildTests.anotherProcessWritingOnTheServersConnectionMakesItNobodys`,
-`ServerChildTests.theServerIsStartedAgainAfterItDies`, `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`,
+`ServerChildTests.theServerIsStartedAgainAfterItDies`, `ServerChildTests.aConnectionTheOldServerLeftIsEndedThoughItsConnectorLives`,
+`ServerChildTests.aStoppedHostStartsNoServerChildAgain`, `ServerChildTests.theUsersHostGivesItsServerNoTestArguments`,
+`ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`,
 `ServerChildTests.aServerChildThatIsDumpableIsNotTheApp`, `ServerChildTests.appConnectionsDontCountTowardMaxClients`,
 `ServerChildTests.aHostWithAServerChildDoesNotExitIdle`, `ServerChildTests.theServerHelperIsNotDumpable`,
 `ServerChildTests.theServerChildIsToldItsSocketAndFolder`, `ServerChildTests.theMacStartsNoServerChild`,

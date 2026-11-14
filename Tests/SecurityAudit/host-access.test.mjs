@@ -89,13 +89,26 @@ try {
   // Linux: the tests' stand-in for the app (a connector named by --test-app-connector, for the process named by
   // --test-app-pid) is a scratch host's only. The user's host (here the scratch home's: no --lock, so it holds that
   // home's own) refuses both flags, saying so, and what reaches it by its path is still nobody: every request only the
-  // app may make is refused. The Mac has no connector (and its user's host would read the login Keychain).
+  // app may make is refused. It refuses --server-arg too, saying so: its server child (a script that writes down its
+  // arguments) gets none. The Mac has no connector (and its user's host would read the login Keychain).
   if (process.platform === 'linux') {
     const usersSocket = path.join(folder, 'users.sock');
     const usersHome = path.join(folder, 'users-home');
     await mkdir(usersHome);
+    // Its arguments: --host-connector N --host-socket PATH, then its root's. It ends, its group with it, once the host
+    // has gone.
+    const usersServer = path.join(folder, 'users-server.sh');
+    const usersServerArgs = path.join(folder, 'users-server-args');
+    await writeFile(usersServer, [
+      '#!/bin/sh',
+      `printf '%s\\n' "$@" >'${usersServerArgs}.partial' && mv '${usersServerArgs}.partial' '${usersServerArgs}'`,
+      'while kill -0 $PPID 2>/dev/null; do sleep 1; done',
+      'kill 0',
+      '',
+    ].join('\n'), { mode: 0o755 });
     const users = spawn(binary, ['--socket', usersSocket, '--exit-with', String(process.pid), '--idle-exit', '600',
-      '--housekeeping', '3600', '--test-app-pid', String(process.pid), '--test-app-connector', '3'], {
+      '--housekeeping', '3600', '--test-app-pid', String(process.pid), '--test-app-connector', '3',
+      '--server', usersServer, '--server-arg', 'AUDIT-SERVER-ARG'], {
       env: { PATH: '/usr/bin:/bin', HOME: usersHome, VIBESWITCHER_HOME: path.join(usersHome, '.vibeswitcher'),
         TMPDIR: folder, SHELL: '/bin/sh' },
       stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
@@ -105,6 +118,13 @@ try {
     users.stderr.on('data', bytes => { said += bytes; });
     await eventually(async () => said.includes('started'));
     assert.match(said, /refused --test-app-pid and --test-app-connector/, 'The user\'s host must refuse the test stand-in');
+    const usersArgs = (await eventually(async () => {
+      try { return await readFile(usersServerArgs, 'utf8'); } catch { return null; }
+    })).split('\n');
+    await eventually(async () => said.includes('refused --server-arg'));
+    assert.match(said, /refused --server-arg/, 'The user\'s host must refuse --server-arg, saying so');
+    assert.ok(usersArgs.includes('--root') && !usersArgs.includes('AUDIT-SERVER-ARG'),
+      `The user's host must give its server no --server-arg: ${JSON.stringify(usersArgs)}`);
     const byPath = await connect(usersSocket);
     for (const request of [
       { census: {} }, { replaceAppKey: { key: Buffer.alloc(32, 7).toString('base64') } },
@@ -114,7 +134,7 @@ try {
       const answer = await byPath(request);
       assert.ok(answer.error, `The user's host must refuse ${Object.keys(request)[0]} by its path`);
     }
-    console.log('PASS: the user\'s host refuses the test stand-in for the app, and nothing by its path is the app.');
+    console.log('PASS: the user\'s host refuses the test stand-in for the app and its server\'s test arguments, and nothing by its path is the app.');
 
     // Linux: the app is the host's server child, through its connector (S2). A scratch host whose --server is a script
     // that never asks for a connection: neither this audit's client by the path nor a client the script itself starts
@@ -149,7 +169,7 @@ try {
       '',
     ].join('\n'), { mode: 0o755 });
     const served = spawn(binary, ['--socket', serverSocket, '--lock', path.join(serverFolder, 'h.lock'), '--exit-with', String(process.pid),
-      '--idle-exit', '600', '--housekeeping', '3600', '--server', script], {
+      '--idle-exit', '600', '--housekeeping', '3600', '--log', path.join(serverFolder, 'host.log'), '--server', script], {
       env: { PATH: '/usr/bin:/bin', HOME: home, VIBESWITCHER_HOME: path.join(home, '.vibeswitcher'), TMPDIR: folder, SHELL: '/bin/sh' },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
@@ -183,7 +203,10 @@ try {
       assert.ok(answer && (answer.error || answer.vault?._0?.refused),
         `A client the server child starts must be refused ${Object.keys(request)[0]}: ${JSON.stringify(answer)}`);
     });
-    assert.doesNotMatch(serverSaid, /app connection made/);
+    // The host's log names each app connection it makes: none here, though it noted its server child's start.
+    const serverNoted = await readFile(path.join(serverFolder, 'host.log'), 'utf8');
+    assert.match(serverNoted, /server child pid \d+ started/, `The scratch host must log: ${serverNoted}`);
+    assert.doesNotMatch(serverNoted, /app connection made/, 'No connection may be made as the app');
     console.log('PASS: with a server child, neither a client by the path nor a client the server starts is the app.');
   }
 } finally {

@@ -1171,7 +1171,8 @@ on both, and S5's `Held by:` names them.
 - Modify: `Sources/vibeswitcher-host/main.swift`: `--server PATH` in `handoverFlags` (dropped from
   `config.arguments`; `handOver(to:)` and `goBack` append the value S2-D7 says, so a switch brings the target's
   server); `--server-arg X`, scratch only, kept in `config.arguments`; the Mac takes no `--server` (no server child
-  there). Non-seam edit.
+  there). Non-seam edit. *As made:* `--server` stays in `config.arguments` until Task 9d (before an install root the
+  value S2-D7 says is the same path), which moves it into `handoverFlags`; the port map says why.
 - Test: `Tests/VibeHostTests/ServerChildTests.swift`; `Tests/VibeNodeTests/ServerLintTests.swift` (name it in
   `docs/guide/development.md`); `Tests/SecurityAudit/host-access.test.mjs` (the Linux case). The child is a helper
   mode of the test binary, chosen by its argv (`--host-connector`) in the test binary's load-time initializer, not
@@ -1472,7 +1473,9 @@ is green.
   same `build-info`, and passed in `State.images`; the new image restarts the server from it once idle (no session
   request in flight), and only when its hash differs from the running server's (S2-D8). The exec's arguments carry the target's `--node-root` and `--server` (S2-D7). Non-seam edits.
 - Modify: `Sources/vibeswitcher-host/main.swift`: `config.installRoot` is `~/.vibeswitcher/v2/builds` for a `--node`
-  host, or a scratch host's `--install-root`. Non-seam edit.
+  host, or a scratch host's `--install-root`; `--server` joins `handoverFlags` (deferred from Task 8a, which left it
+  in `config.arguments`: otherwise the exec has two `--server`s, and `value(after:)` takes the first, the old
+  build's). Non-seam edit.
 - Test: `Tests/VibeHostTests/HandoverLinuxTests.swift`, `ServerChildTests.swift`
 
 - [ ] **Step 1: Failing tests** (Linux unless marked), with a scratch `--install-root` holding build folders and
