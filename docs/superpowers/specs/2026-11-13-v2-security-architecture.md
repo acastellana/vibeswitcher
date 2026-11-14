@@ -1176,7 +1176,8 @@ the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts
   promise"); the Mac's reason for `-l -i` (Terminal's PATH) is met by that PATH. `claude` isn't on it (its folder is the user's
   `~/.local/bin`): until the engine's E4 runs the lead's and the roles' `claude` by the absolute path it resolves
   (EN-D13), a role launched as the bare `claude` passes the tool server's preflight, which still looks through a login
-  shell (`LaunchPreflight`, `LoginShellCommand`), and then fails in its session with `command not found`.
+  shell (`LaunchPreflight`, `LoginShellCommand`), and then fails in its session with `command not found`. The
+  engine's E4 makes that probe run as sessions now start (`bash --noprofile --norc`), never through a login shell.
 - **What a spawn may add.** `SpawnRequest.env` from a caller that isn't the app may not set loader or shell-startup
   variables, bash's prompts (`PS0`, `PS1`, `PS2`: an interactive bash runs their `$(…)`, `--norc` or not), the fixed
   `SWIFT_BACKTRACE`, or any name in the "never" list above (`LD_*`, `BASH_ENV`, `ENV`, `SSH_AUTH_SOCK`, …); such a
