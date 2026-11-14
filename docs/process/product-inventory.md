@@ -168,7 +168,6 @@ Settings (⌘,), category by category: each option, under its section, with the 
 ### Sessions & Sidebar
 - Settings › Sessions & Sidebar — `Sources/VibeSwitcher/SettingsCatalog.swift`
 - Menu bar: Order sessions — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Menu bar: Floating dots panel — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Sidebar: Sidebar mode — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Sidebar: Auto-hide the sidebar (show it at the right edge) — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Sidebar: Show briefly after switching desktops — `Sources/VibeSwitcher/SettingsWindow.swift`
@@ -312,7 +311,6 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - A lead's Team tab: tasks, decisions, scorecard, messages between leads — `Sources/VibeSwitcher/MainWindow/Lead/TeamViews.swift`
 - Brief Me (⇧⌘B): a spoken briefing across led projects, or one project's — `Sources/VibeSwitcher/Briefing/BriefingViews.swift`
 - Statistics window — `Sources/VibeSwitcher/Statistics/StatisticsView.swift`
-- Floating dots panel — `Sources/VibeSwitcher/FloatingPanel.swift`
 - Menu bar popover: every session, switch, pause, rename — `Sources/VibeSwitcher/PopoverView.swift`
 - Global hot key — `Sources/VibeSwitcher/HotKey.swift`
 - Phone access: a web app for the phone over Tailscale — `Sources/VibeSwitcher/PhoneAccess.swift`

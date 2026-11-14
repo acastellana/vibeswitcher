@@ -5,9 +5,9 @@ import VibeCore
 @testable import VibeSwitcher
 
 /// A lead's workers and verifiers apart from your own sessions (UI audit 2026-10-22 #1): 14 sessions, 10 of them two
-/// projects' teams, leave the menu bar in dots (your 4), the pill at 4 dots, and the popover lists your 4 numbered
+/// projects' teams, leave the menu bar in dots (your 4) and the popover lists your 4 numbered
 /// first, then each team under its header. The checks always run; with `TEAM_SNAPSHOT_DIR=/some/folder` it also draws
-/// the menu bar, the pill and the popover (team-sessions-light.png, team-sessions-dark.png).
+/// the menu bar and the popover (team-sessions-light.png, team-sessions-dark.png).
 @MainActor
 struct TeamSessionsSnapshots {
     static let folder = ProcessInfo.processInfo.environment["TEAM_SNAPSHOT_DIR"]
@@ -104,11 +104,10 @@ private struct TeamPicture: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            caption("Menu bar and pill: your 4 sessions of 14")
+            caption("Menu bar: your 4 sessions of 14")
             HStack(spacing: 24) {
                 Image(nsImage: bar).resizable().interpolation(.high)
                     .frame(width: bar.size.width * 2, height: bar.size.height * 2)
-                FloatingDots(sessions: own, onOpen: { _ in }, onShowList: {})
                 Spacer()
             }
             .padding(.horizontal, 12).frame(height: 48)

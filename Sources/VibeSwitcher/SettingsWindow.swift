@@ -249,11 +249,6 @@ struct SessionsSettings: View {
                         ForEach(SessionOrder.allCases, id: \.self) { Text($0.label).tag($0) }
                     } label: { label }
                 }
-                SettingRow("floating-panel") { label in
-                    Picker(selection: $preferences.floatingPanel) {
-                        ForEach(FloatingPanelMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                    } label: { label }
-                }
             }
             Section("Sidebar") {
                 SettingRow("sidebar-mode") { label in Toggle(isOn: $preferences.sidebarMode) { label } }

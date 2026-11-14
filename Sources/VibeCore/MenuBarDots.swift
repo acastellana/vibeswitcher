@@ -111,7 +111,7 @@ public enum SidebarAnimation {
     }
 }
 
-/// The shape a status is drawn with, so it reads without colour (WCAG 1.4.1): the menu bar, the list rows, the pill
+/// The shape a status is drawn with, so it reads without colour (WCAG 1.4.1): the menu bar, the list rows
 /// and the window's agent marks all use these. Paths are in `rect`'s coordinates, y up (AppKit) unless `yDown`.
 public enum StatusMark: Equatable, Sendable {
     /// Needs you: a disc with "!".
@@ -209,7 +209,7 @@ public enum StatusMark: Equatable, Sendable {
 /// inside a filled badge at least 4.5:1 on the fill, in light and in dark. Light mode needs darker inks than the
 /// system colours (systemOrange text on a light popover is 1.9:1); dark mode keeps them bright, with near-black inside.
 /// With Increase Contrast on (`highContrast`), every one of them is at least 7:1 (AAA) on the solid backgrounds the
-/// popover, sidebar and pill draw then, and on their selected-row and banner tints.
+/// popover and sidebar draw then, and on their selected-row and banner tints.
 public enum StatusPalette {
     public struct RGB: Equatable, Sendable {
         public let red: Double, green: Double, blue: Double
@@ -269,7 +269,7 @@ public enum StatusPalette {
         highContrast ? RGB(hex: dark ? 0xEEA994 : 0x77361F) : RGB(hex: dark ? 0xE8876A : 0xA34A2A)
     }
 
-    /// Secondary text (captions, durations, the footer): the quietest text the popover, sidebar and pill draw. There
+    /// Secondary text (captions, durations, the footer): the quietest text the popover and sidebar draw. There
     /// is no tertiary: everything in those views is text the user must read.
     public static func secondaryText(dark: Bool, highContrast: Bool = false) -> RGB {
         highContrast ? RGB(hex: dark ? 0xB9B9BC : 0x49494C) : RGB(hex: dark ? 0xB8B8BC : 0x5E5E62)
@@ -280,7 +280,7 @@ public enum StatusPalette {
         highContrast ? RGB(hex: dark ? 0x000000 : 0xFFFFFF) : RGB(hex: dark ? 0x1F1F1F : 0xFFFFFF)
     }
 
-    /// With Increase Contrast on, the popover, sidebar and pill are drawn on this instead of a material.
+    /// With Increase Contrast on, the popover and sidebar are drawn on this instead of a material.
     public static func solidBackground(dark: Bool) -> RGB { RGB(hex: dark ? 0x121212 : 0xFFFFFF) }
 
     /// Backgrounds status text is drawn on: popover, sidebar and window (light ≈ #ECECEC, dark ≈ #323232), and white

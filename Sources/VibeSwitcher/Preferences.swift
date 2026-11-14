@@ -60,9 +60,6 @@ final class Preferences: ObservableObject {
     @Published private(set) var launchAtLogin: Bool
     /// Mirrors the system permission, for the popover banner.
     @Published var notificationsAllowed = true
-    @Published var floatingPanel: FloatingPanelMode {
-        didSet { defaults.set(floatingPanel.rawValue, forKey: "floatingPanel") }
-    }
     /// Launch presets, in ~/.vibeswitcher/presets.json (the first load migrates the two launch commands).
     @Published var presets: LaunchPresets {
         didSet { if presetsCanSave { try? presets.save(to: presetsFile) } }
@@ -143,6 +140,7 @@ final class Preferences: ObservableObject {
         self.defaults = defaults
         self.presetsFile = presetsFile
         Self.carryOverWalletKeys(defaults)
+        for key in Self.retiredKeys { defaults.removeObject(forKey: key) }
         // Decided once, at first launch, and kept: turning Reduce Motion on later doesn't flip it behind your back.
         if defaults.object(forKey: "sidebarFlashOnSwitch") == nil {
             defaults.set(Self.flashOnSwitchByDefault(reduceMotion: reduceMotion), forKey: "sidebarFlashOnSwitch")
@@ -162,7 +160,6 @@ final class Preferences: ObservableObject {
         sessionOrder = SessionOrder(rawValue: defaults.string(forKey: "sessionOrder") ?? "") ?? .screen
         codexCommand = defaults.string(forKey: "codexCommand") ?? "codex"
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
         // Locals, not the @Published properties: those can't be read before init finishes.
         let loaded = LaunchPresets.loadChecked(from: presetsFile,
                                                claudeCommand: defaults.string(forKey: "claudeCommand") ?? "claude",
@@ -187,6 +184,10 @@ final class Preferences: ObservableObject {
         boostOnBattery = defaults.bool(forKey: "boostOnBattery")
         boostLimits = defaults.data(forKey: "boostLimits").flatMap { try? JSONDecoder().decode(BoostLimits.self, from: $0) } ?? BoostLimits()
     }
+
+    /// Keys of features that are gone, dropped at launch so nothing reads a stale value: the floating panel of session
+    /// dots (setting and saved frame; removed 2026-11-14, the main window's header switches sessions).
+    static let retiredKeys = ["floatingPanel", "NSWindow Frame VibeSwitcherFloatingPanel"]
 
     /// The keys `walletPeerID` and `walletPassagePath` had while the feature was called vault requests (until
     /// 2026-10-31): their values carried over once, unless the new key is already set, and the old keys removed.
@@ -229,21 +230,6 @@ final class Preferences: ObservableObject {
             NSLog("VibeSwitcher: login item change failed: \(error)")
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
-    }
-}
-
-enum FloatingPanelMode: String, CaseIterable {
-    /// Only when the menu bar icon is hidden (crowded menu bar / notch).
-    case automatic
-    case always
-    case never
-
-    var label: String {
-        switch self {
-        case .automatic: return "When the menu bar icon is hidden"
-        case .always: return "Always"
-        case .never: return "Never"
-        }
     }
 }
 

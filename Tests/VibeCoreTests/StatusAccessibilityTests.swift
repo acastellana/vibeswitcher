@@ -115,7 +115,7 @@ struct StatusAccessibilityTests {
     /// measured secondary (`.secondaryInk`), never `.tertiary` or the system's `.secondary` (3.8:1 on the popover).
     /// The material gives way to a solid background with Increase Contrast on.
     @Test func whatYouMustReadIsNeverTertiary() throws {
-        for file in ["PopoverView.swift", "FloatingPanel.swift", "Sidebar.swift"] {
+        for file in ["PopoverView.swift", "Sidebar.swift"] {
             let text = try String(contentsOf: Self.views.appendingPathComponent(file), encoding: .utf8)
             for (index, line) in text.components(separatedBy: "\n").enumerated() {
                 let code = line.components(separatedBy: "//").first ?? line
@@ -127,10 +127,8 @@ struct StatusAccessibilityTests {
             }
         }
         let popover = try String(contentsOf: Self.views.appendingPathComponent("PopoverView.swift"), encoding: .utf8)
-        let pill = try String(contentsOf: Self.views.appendingPathComponent("FloatingPanel.swift"), encoding: .utf8)
         let style = try String(contentsOf: Self.views.appendingPathComponent("StatusStyle.swift"), encoding: .utf8)
         #expect(popover.contains(".contrastBackground(") && popover.contains(".fill(.solidBackground)"))
-        #expect(pill.contains(".contrastBackground("))
         // AppKit reads the setting when a colour resolves; SwiftUI from the environment.
         #expect(style.contains("accessibilityDisplayShouldIncreaseContrast") && style.contains("colorSchemeContrast"))
     }

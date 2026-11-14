@@ -141,7 +141,6 @@ enum SettingsCatalog {
 
     private static let sessions = entries(.sessions, "Menu bar", [
         Entry("session-order", "Order sessions", "The order sessions appear in the menu bar list.", keywords: ["sort", "arrange"]),
-        Entry("floating-panel", "Floating dots panel", "A small floating panel of session dots, for when the menu bar is crowded or under the notch.", keywords: ["pill", "notch"]),
     ]) + entries(.sessions, "Sidebar", [
         Entry("sidebar-mode", "Sidebar mode", "Docks the session list at the right of the screen; picking a session shows only its window.", keywords: ["docked", "dock"]),
         Entry("sidebar-auto-hide", "Auto-hide the sidebar (show it at the right edge)", "Hides the sidebar until you move the pointer to the right edge of the screen.", keywords: ["slide", "hidden"]),

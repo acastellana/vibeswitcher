@@ -28,8 +28,8 @@ rows of smaller dots, 12 at most.
 - At the bottom of the list, **Today** shows how long agents were working today and how long sessions waited on you.
   Waiting counts only while you're at the Mac, and a finished turn counts for its first 30 minutes at most.
 
-On a notched MacBook, macOS hides status icons that don't fit. If VibeSwitcher's is hidden, a floating pill with the
-same dots appears; Settings › Sessions & Sidebar › **Floating dots panel** sets it to Always or Never.
+On a notched MacBook, macOS hides status icons that don't fit. If VibeSwitcher's is hidden, the main window still
+switches sessions, and ⌃⌥V opens the list.
 
 **Sidebar mode** (Settings › Sessions & Sidebar, or the list's ⚙︎ menu) puts the list on the right edge of the screen, on every
 desktop. It slides in when the mouse touches the middle of that edge and slides away when it leaves.
