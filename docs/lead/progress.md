@@ -3002,3 +3002,30 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 10:52 Released workers-and-verifiers-5's worker (idle since its done report on b3944b1b) while its audit runs
 - 2026-11-14 10:52 Automatically (auto_advance): Started the audit of workers-and-verifiers-5 at b3944b1b (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-14 10:53 Merged wall-tools-members-post: Wall tools: members post and read, each post delivered once (build 40766073a6b2)
+- 2026-11-14 10:53 Automatically (auto_advance): Merged wall-tools-members-post (Wall tools: members post and read, each post delivered once) into main at c72e2d5e, on its passing audit and the full test run.
+- 2026-11-14 10:53 Started a worker on take-part-the-integrator
+- 2026-11-14 10:53 Automatically (auto_advance): Started a worker on take-part-the-integrator (take_part: the integrator takes a member's finished part), its after tasks done (wall-tools-members-post).
+- 2026-11-14 10:53 Automatically (auto_advance): Overlap for take-part-the-integrator's start (a warning only: nothing was refused or reordered). LeadTeam.swift: main-red-green-and (planned, set to start after this one: its boundaries name it), peer-wait-deadline-no (planned: its boundaries name it).
+- 2026-11-14 10:53 Started a worker on peer-wait-deadline-no
+- 2026-11-14 10:53 Automatically (auto_advance): Started a worker on peer-wait-deadline-no (Peer-wait deadline: no member waits on a teammate without a limit), its after tasks done (wall-tools-members-post).
+- 2026-11-14 10:53 Automatically (auto_advance): Overlap for peer-wait-deadline-no's start (a warning only: nothing was refused or reordered). LeadTeam.swift: main-red-green-and (planned: its boundaries name it), take-part-the-integrator (running: its boundaries name it).
+- 2026-11-14 10:53 Started a worker on team-view-member-lines
+- 2026-11-14 10:53 Automatically (auto_advance): Started a worker on team-view-member-lines (Team view: member lines and the wall, in the app), its after tasks done (wall-tools-members-post).
+- 2026-11-14 10:53 Started a worker on merge-dry-run-and
+- 2026-11-14 10:53 Automatically (auto_advance): Started a worker on merge-dry-run-and (Merge dry run and a receipt for a kept experiment arm), its after tasks done (wall-tools-members-post).
+- 2026-11-14 10:54 Automatically (auto_advance): Cleaned up wall-tools-members-post (freed 4.0 GB of build output and temporary folders). It stays done.
+- 2026-11-14 10:54 Automatically (auto_advance): Didn't cleanup|an-animated-explainer: fatal: '/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/an-animated-explainer' is not a working tree
+- 2026-11-14 10:54 Planned cleanup-removes-a: Cleanup removes a leftover folder that isn't a worktree
+- 2026-11-14 10:55 Audit of workers-and-verifiers-5: complete, clean, round 1: 1 Nit open
+- 2026-11-14 11:15 Pipeline held: workers-and-verifiers-5 ready to merge with none landing; cause: every test slot held
+- 2026-11-14 11:46 Pipeline held: workers-and-verifiers-5, remove-the-floating-dots ready to merge with none landing; cause: every test slot held
+- 2026-11-14 11:52 Released team-view-member-lines's worker (idle since its done report on 0997e2f3) while its audit runs
+- 2026-11-14 11:52 Automatically (auto_advance): Started the audit of team-view-member-lines at 0997e2f3 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-14 11:54 Automatically (auto_advance): Started the audit of peer-wait-deadline-no at 10efe465 (Its review is audit).
+- 2026-11-14 11:54 Released peer-wait-deadline-no's worker (idle since its done report on 10efe465) while its audit runs
+- 2026-11-14 11:54 Automatically (auto_advance): Released peer-wait-deadline-no's worker, idle since its done report on 10efe465, while its audit runs (ended pid 8698 (Worker: Peer-wait deadline: no member waits on a teammate without a limit)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-14 11:54 Merged workers-and-verifiers-5: Workers and verifiers can't read Claude Code's daemon key and leftover stores (in a batch: workers-and-verifiers-5, remove-the-floating-dots landed on one test run) (build c385b7943fb8)
+- 2026-11-14 11:54 Merged remove-the-floating-dots: Remove the floating dots panel (no audit: review none) (in a batch: workers-and-verifiers-5, remove-the-floating-dots landed on one test run) (build c385b7943fb8)
+- 2026-11-14 11:54 Flaky in the batch workers-and-verifiers-5, remove-the-floating-dots: passageIsFoundAsPassageCommandResolvesIt(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-14 11:54 Started a worker on deny-claude-by-listing
+- 2026-11-14 11:54 Automatically (auto_advance): Started a worker on deny-claude-by-listing (Deny ~/.claude by listing it at launch, with a short keep list), its after tasks done (workers-and-verifiers-5).
