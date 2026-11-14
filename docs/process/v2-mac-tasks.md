@@ -90,6 +90,13 @@ that two pushes haven't explained comes here too, with the experiment that will 
   user's included, takes `--handover-test-secret` and carries it across a handover (`config.arguments`), the secret
   becoming the next image's vault. On Linux both are decided by `HostHardening` (the lock by its device and inode, a
   link refused; the flags a scratch host's only, and not carried). Check on a real Mac whether to port both to main.
+  The plan's Mac test `HostHardeningTests.theMacsUsersHostKeepsTodaysTestSecret` was to start the user's host by
+  `TestHosts.authorize`; as built it checks only the Mac's forms of `HostHardening`'s decisions (strings compared, every
+  flag taken and carried, nothing hardened, no lock checked), because a user's host on the Mac reads its vault's key
+  from the real Keychain (`VaultStorage.keychainKey()`), which `KeychainLintTests` forbids a test
+  (`ServerChildHost(usersHost:)` throws there). A scratch host's test secret across a handover on the Mac stays
+  `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`'s. A process test of the Mac's user's host needs a
+  Keychain stand-in first.
 - **The two replaced oracles**: the raw Darwin reads `IndexLockTests` and `ProcessTableTests` checked against, now
   platform calls; restore them under `#if canImport(Darwin)`.
 

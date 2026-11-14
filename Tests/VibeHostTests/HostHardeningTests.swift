@@ -162,6 +162,115 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         try #require(held >= 0)
         defer { Sys.close(held) }
         #expect(HostHardening.heldLockIsAllowed(ownsLaunchers: false, usersLock: usersLock)?(held) == true)
+        // The user's host holding a scratch lock (its path changed after it decided): not allowed.
+        FileManager.default.createFile(atPath: usersLock, contents: nil)
+        #expect(HostHardening.heldLockIsAllowed(ownsLaunchers: true, usersLock: usersLock)?(held) == false)
+    }
+
+    /// A lock that can't be opened (no right to it) fails closed: the user's lock, by its entry or its spelling, is
+    /// still the user's (the more restricted host); another is a scratch lock.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable && geteuid() != 0, "Linux's lock by identity; root opens any file"))
+    func aLockThatCantBeOpenedIsStillTheUsers() throws {
+        let (dir, root, usersLock) = try Self.home()
+        defer {
+            chmod(usersLock, 0o600)
+            try? FileManager.default.removeItem(atPath: dir)
+        }
+        FileManager.default.createFile(atPath: usersLock, contents: nil)
+        let scratch = dir + "/h.lock"
+        FileManager.default.createFile(atPath: scratch, contents: nil)
+        try #require(chmod(usersLock, 0) == 0 && chmod(scratch, 0) == 0)
+        try #require(open(usersLock, O_RDWR | O_CLOEXEC) < 0 && errno == EACCES)
+        #expect(HostHardening.lock(usersLock, usersLock: usersLock) == .users)
+        #expect(HostHardening.lock(root + "//host.lock", usersLock: usersLock) == .users)
+        #expect(HostHardening.lock(root + "/sub/../host.lock", usersLock: usersLock) == .users)
+        #expect(HostHardening.lock(scratch, usersLock: usersLock) == .scratch)
+        chmod(scratch, 0o600)
+    }
+
+    /// A host's held lock decides, both ways, through `HostServer.Config.heldLockIsAllowed`: a host that took itself for
+    /// the user's but holds another lock, and one that took itself for a scratch host but holds the user's, don't
+    /// start (the lock released, no socket bound); the two that match do.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's lock by identity; the Mac asks nothing"))
+    func aHostStartsOnlyOnTheLockItTookItselfFor() throws {
+        let (dir, _, usersLock) = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        FileManager.default.createFile(atPath: usersLock, contents: nil)
+        let scratch = dir + "/h.lock"
+        for (lock, ownsLaunchers, starts) in [(scratch, true, false), (usersLock, false, false), (usersLock, true, true), (scratch, false, true)] {
+            let socket = scratchSocketPath()
+            defer { unlink(socket) }
+            let server = HostServer(config: Self.config(socket: socket, lock: lock,
+                                                        heldLockIsAllowed: HostHardening.heldLockIsAllowed(ownsLaunchers: ownsLaunchers, usersLock: usersLock)))
+            if starts {
+                #expect(throws: Never.self, "\(lock) \(ownsLaunchers)") { try server.start() }
+                server.stop(terminateSessions: true)
+            } else {
+                #expect(throws: HostServer.Failure.lock(EPERM), "\(lock) \(ownsLaunchers)") { try server.start() }
+                Self.expectNotHeld(lock, socket: socket, server: server)
+            }
+        }
+    }
+
+    /// A host whose held lock isn't allowed doesn't start: `start()` throws, the lock released and no socket bound;
+    /// `start(restoring:)` throws, having taken neither inherited descriptor. Either platform: the Mac's host sets no
+    /// check, but the server asks one it is given.
+    @Test func aHeldLockNotAllowedRefusesTheStart() throws {
+        let socket = scratchSocketPath()
+        let lock = socket + ".lock"
+        defer { unlink(socket); unlink(lock) }
+        let config = Self.config(socket: socket, lock: lock, heldLockIsAllowed: { _ in false })
+        let server = HostServer(config: config)
+        #expect(throws: HostServer.Failure.lock(EPERM)) { try server.start() }
+        Self.expectNotHeld(lock, socket: socket, server: server)
+
+        let lockFD = open(lock, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        try #require(lockFD >= 0 && flock(lockFD, LOCK_EX | LOCK_NB) == 0)
+        defer { Sys.close(lockFD) }
+        let listenFD = try UnixSocket.listen(path: socket)
+        defer { Sys.close(listenFD) }
+        let restored = HostServer(config: config)
+        #expect(throws: (any Error).self) {
+            _ = try restored.start(restoring: HostHandover.State(fromBuild: 41, startedAt: Date(), lockFD: lockFD, listenFD: listenFD,
+                                                                 secretFD: nil, sessions: []))
+        }
+        #expect(restored.listenFD == -1 && restored.acceptSource == nil)
+        #expect(HostHandover.isOpen(lockFD) && HostHandover.isOpen(listenFD))
+    }
+
+    /// A scratch host's config on `socket` and `lock`, its held lock asked of `heldLockIsAllowed`.
+    static func config(socket: String, lock: String, heldLockIsAllowed: ((Int32) -> Bool)?) -> HostServer.Config {
+        var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 42)
+        config.idleExit = nil
+        config.heldLockIsAllowed = heldLockIsAllowed
+        return config
+    }
+
+    /// After a refused `start()`: `lock` free for another to take at once, nothing listening at `socket`.
+    static func expectNotHeld(_ lock: String, socket: String, server: HostServer, sourceLocation: SourceLocation = #_sourceLocation) {
+        let other = open(lock, O_RDWR | O_CLOEXEC)
+        #expect(other >= 0, sourceLocation: sourceLocation)
+        #expect(flock(other, LOCK_EX | LOCK_NB) == 0, "the lock is still held", sourceLocation: sourceLocation)
+        Sys.close(other)
+        #expect(server.listenFD == -1 && server.acceptSource == nil, sourceLocation: sourceLocation)
+        #expect(!FileManager.default.fileExists(atPath: socket), "a socket was bound", sourceLocation: sourceLocation)
+    }
+
+    /// A host refused at its start doesn't start unless it is a new image of a handover given its state (which goes
+    /// back instead): a `--handover` with nothing after it is no handover. Nothing refused, it goes on.
+    @Test func aRefusedHostStartsOnlyAsAHandoverWithItsState() {
+        let refused = HostHardening.Start.refused("traced by pid 9")
+        #expect(HostHardening.refusal(refused, arguments: ["host"]) == "traced by pid 9")
+        #expect(HostHardening.refusal(refused, arguments: ["host", "--lock", "l", "--handover"]) == "traced by pid 9")
+        #expect(HostHardening.refusal(refused, arguments: ["host", "--handover-fallback", "f"]) == "traced by pid 9")
+        #expect(HostHardening.refusal(refused, arguments: ["host", "--handover", "/s/host.lock.handover"]) == nil)
+        #expect(HostHardening.handover(in: ["host", "--handover", "/s/host.lock.handover"]) == "/s/host.lock.handover")
+        #expect(HostHardening.handover(in: ["host", "--handover"]) == nil)
+        for start in [HostHardening.Start.hardened, .nothing] {
+            #expect(HostHardening.refusal(start, arguments: ["host"]) == nil)
+            #expect(HostHardening.refusal(start, arguments: ["host", "--handover"]) == nil)
+        }
     }
 
     /// The Mac keeps today's rules: the lock's path compared as a string, every test-only flag taken by any host and

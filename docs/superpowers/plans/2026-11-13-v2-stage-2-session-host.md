@@ -116,7 +116,9 @@ errors in 8 of 13 files), `docs/process/v2-stage1-recon.md` §1.2, §1.7, §1.9 
   world-readable here. A descriptor's number is not a secret.
 - **Test-only flags** (`--test-app-pid`, `--test-app-connector`, `--handover-test-secret`,
   `--handover-test-secret-file`, `--handover-test-traced`, `--install-root`, `--parser-test-hooks`, `--server-arg`,
-  `--hold-first-look`, the engine's `--test-user-seal-life`, the launcher's test delay) are honoured only by a
+  `--hold-first-look`, the engine's `--test-user-seal-life`, the launcher's test delay, and Task 9a's
+  `--test-stays-dumpable`, which makes a scratch host dumpable again so a test can count its descriptors from outside)
+  are honoured only by a
   scratch host (on a lock of its own) and, but for `--server-arg`, `--hold-first-look` and `--test-user-seal-life`
   (which a scratch host carries across its handovers, so a test's settings survive one), are stripped from
   `config.arguments`. On the Mac, `--handover-test-secret` keeps today's behaviour (Task 9a).
@@ -1317,7 +1319,11 @@ on both, and S5's `Held by:` names them.
     refuses `--test-app-pid`). It hands over its real vault, takes no install root from the flag, reports no tracer
     and opens no test connector; its log names each refused flag, and none is in the arguments it hands over with.
   - `theMacsUsersHostKeepsTodaysTestSecret` (Mac): the same host, by today's `TestHosts.authorize`, still hands the
-    test secret over, as at `47636aaf`.
+    test secret over, as at `47636aaf`. (As built, awaiting the lead's approval: a unit test of the Mac's forms of
+    `HostHardening`'s decisions, starting no host. A user's host on the Mac reads its vault's key from the real
+    Keychain, which `KeychainLintTests` forbids a test, and `ServerChildHost(usersHost:)` throws there; a scratch
+    host's carried test secret on the Mac stays `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`'s.
+    `docs/process/v2-mac-tasks.md` records it.)
 - [ ] **Step 2: Implement.**
 - [ ] **Step 3:** push; both green; commit ("v2: the host hardened from its first statement; unreadable is the host only
   by token").

@@ -7,6 +7,9 @@ import Testing
 /// `ServerChildHelper` stands in for the server), on its own home, socket and lock. The helper's actions file and its
 /// results sit beside the socket; the host's stderr and stdout go to `output`, its session log to `sessionLog`.
 final class ServerChildHost {
+    /// `usersHost` asked on the Mac, where that host would read the real Keychain.
+    struct UsersHostOnTheMac: Error {}
+
     let dir: String
     let home: String
     let socket: String
@@ -20,8 +23,11 @@ final class ServerChildHost {
     /// `copyImage`: the server is a copy of the test binary in the host's folder (a test rewrites it), not the binary.
     /// `idleExit`: the host's `--idle-exit`. `extra`: more of the host's arguments. `usersHost`: no `--lock`, so the host
     /// takes its home's own lock (`<home>/.vibeswitcher/host.lock`) and is that home's user's host (`ownsLaunchers`).
+    /// Linux only: on the Mac the user's host reads its vault's key from the real Keychain (`VaultStorage.keychainKey()`),
+    /// which no test may (`KeychainLintTests`), so there it throws before anything starts.
     init(actions: [String] = [], copyImage: Bool = false, idleExit: String = "600", extra: [String] = [],
          usersHost: Bool = false) async throws {
+        guard !usersHost || !Platform.CodeIdentity.isAvailable else { throw UsersHostOnTheMac() }
         // Short: a socket's path has a 104-byte limit.
         dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
         home = dir + "/home"

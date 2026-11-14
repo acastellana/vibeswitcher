@@ -13,10 +13,11 @@ import VibeCore
 /// **Which host is the user's** (`lock(_:usersLock:)`). On Linux the host holding the user's lock (`ownsLaunchers`,
 /// which refuses the test-only flags, and on Linux spawns only for a lead and watches its path) is told by the lock
 /// file's identity, its device and inode, never by the spelling of its path: `--lock ~/.vibeswitcher//host.lock`, a `..`
-/// or `/./` names the user's lock, and a symbolic link as the lock is refused outright. Once the host holds a lock,
-/// `heldLockIsAllowed` checks it again (`HostServer.Config.heldLockIsAllowed`): a host that took itself for a scratch
-/// host never holds the user's lock, should its path have been changed in between. The Mac compares the strings, as
-/// always (`docs/process/v2-mac-tasks.md`).
+/// or `/./` names the user's lock, and a symbolic link as the lock is refused outright. The descriptor the host then
+/// holds is the authority: `heldLockIsAllowed` asks it again once it is locked or inherited
+/// (`HostServer.Config.heldLockIsAllowed`), and the start is refused unless the host is the user's exactly when what it
+/// holds is the user's lock, should the path have been changed in between (a link put there included: what it opened
+/// through the link is compared). The Mac compares the strings, as always (`docs/process/v2-mac-tasks.md`).
 ///
 /// **The test-only flags** (`testFlags`) are taken on Linux only by a scratch host (on a lock of its own): the user's
 /// host refuses each, saying so in its log (`refused(in:ownsLaunchers:)`), and takes nothing from it. Every one but those
@@ -41,9 +42,12 @@ import VibeCore
 ///   files: unreadable is inside nothing), `SessionStrays.isRunning` and `descendants` (stat: still running).
 /// - The hook and the command line: `ProcessTable` (stat and cmdline; cwd for Codex's terminals: unknown).
 /// - The app (`ShellTidy`, through `SessionStrays.of(session:started:)`): as the host's kill, with no `ours`.
-/// - The engine's and the app's readers (`DiskSpace`, `ProcessUsage`, `LoadRecorder`, `StallWatch`, `TestLock`,
-///   `WalletCourier`, `WalletLocalLink`, `HeavyJobs`): records from `stat` (readable); a cwd, program or open files
-///   unreadable is "unknown", left out of what they count, never "gone".
+/// - The app and the node (`SessionScanner`, the node's through `LocalSessions`): an agent's cwd
+///   (`ProcessTable.cwd(pid:)`) unreadable is unknown: the session is still listed, its folder the hook's or none.
+/// - The engine's and the app's readers (`DiskSpace`, `ProcessUsage` (and `ProcessTable.cwd(of:)` beside it), `LoadRecorder`,
+///   `StallWatch`, `TestLock`, `WalletCourier`, `WalletLocalLink`, `HeavyJobs`, and the app's `LeadController`, which
+///   gives `HeavyJobs` `ProcessTable.cwd(of:)` and `commandName(of:)`): records from `stat` (readable); a cwd, program
+///   or open files unreadable is "unknown", left out of what they count, never "gone".
 public enum HostHardening {
     public enum Mode: Sendable {
         /// The session host, a fresh start or a new image after a handover.
@@ -84,6 +88,21 @@ public enum HostHardening {
         return .hardened
     }
 
+    /// Why the host may not start at all, said and ended on: `atStart` refused it (`start`) and it is no new image of a
+    /// handover, which goes back to the build before instead (`handover(in:)` gives the state it was handed). Nil: it
+    /// goes on. A `--handover` with no state after it is no handover: refused.
+    public static func refusal(_ start: Start, arguments: [String]) -> String? {
+        guard case .refused(let why) = start else { return nil }
+        return handover(in: arguments) == nil ? why : nil
+    }
+
+    /// The state file a new image after a handover is given (`--handover PATH`), as `main` takes it: nil without a
+    /// value after the flag.
+    public static func handover(in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: "--handover"), arguments.indices.contains(index + 1) else { return nil }
+        return arguments[index + 1]
+    }
+
     /// A parser's first statement (`SessionParser.runIfAsked`, once it knows it is one): hardened, and ended (exit 1,
     /// said on stderr) when refused.
     static func hardenAsParser() {
@@ -107,12 +126,20 @@ public enum HostHardening {
 
     /// Linux: `lockPath` opened (made when missing, a link not followed, as `HostServer.start` makes it) and compared
     /// with `usersLock` by device and inode (`Platform.Files.sameFile`): `users` when they are the same file, `link` when
-    /// `lockPath` is a symbolic link, else `scratch` (also when it can't be opened: the host's own start then fails on
-    /// it, or `heldLockIsAllowed` checks what it took). The Mac: the strings compared, as always.
+    /// `lockPath` is a symbolic link, else `scratch`. When it can't be opened for another reason (no right to it, say),
+    /// it fails closed: `users` when it is the user's lock by its entry's device and inode (`lstat`) or by its very
+    /// spelling, `scratch` otherwise (the host's own start then fails on it, or `heldLockIsAllowed` checks what it
+    /// took). The Mac: the strings compared, as always.
     public static func lock(_ lockPath: String, usersLock: String) -> Lock {
         guard !Platform.CodeIdentity.isAvailable else { return lockPath == usersLock ? .users : .scratch }
         let fd = open(lockPath, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard fd >= 0 else { return errno == ELOOP ? .link : .scratch }
+        guard fd >= 0 else {
+            if errno == ELOOP { return .link }
+            var named = stat(), users = stat()
+            let sameEntry = lstat(lockPath, &named) == 0 && lstat(usersLock, &users) == 0
+                && named.st_dev == users.st_dev && named.st_ino == users.st_ino
+            return sameEntry || lockPath == usersLock ? .users : .scratch
+        }
         defer { Sys.close(fd) }
         return Platform.Files.sameFile(fd, usersLock) ? .users : .scratch
     }
@@ -129,11 +156,12 @@ public enum HostHardening {
         }
     }
 
-    /// `HostServer.Config.heldLockIsAllowed` for a host that is (`ownsLaunchers`) or isn't the user's: on Linux a
-    /// scratch host may hold any lock but the user's (`usersLock`, by identity); the user's host any. The Mac: nil.
+    /// `HostServer.Config.heldLockIsAllowed` for a host that is (`ownsLaunchers`) or isn't the user's: on Linux the
+    /// held descriptor decides, both ways: the user's host must hold the user's lock (`usersLock`, by identity), and a
+    /// scratch host any lock but it. The Mac: nil.
     public static func heldLockIsAllowed(ownsLaunchers: Bool, usersLock: String) -> ((Int32) -> Bool)? {
         guard !Platform.CodeIdentity.isAvailable else { return nil }
-        return { fd in ownsLaunchers || !Platform.Files.sameFile(fd, usersLock) }
+        return { fd in ownsLaunchers == Platform.Files.sameFile(fd, usersLock) }
     }
 
     // MARK: The test-only flags

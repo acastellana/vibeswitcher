@@ -17,7 +17,7 @@ signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)
 // The host, hardened before it reads or takes anything (see `HostHardening`); refused, it doesn't start (or goes back).
 let hardening = HostHardening.atStart(mode: .host)
-if case .refused(let why) = hardening, !CommandLine.arguments.contains("--handover") {
+if let why = HostHardening.refusal(hardening, arguments: CommandLine.arguments) {
     FileHandle.standardError.write(Data("vibeswitcher-host: not started: \(why)\n".utf8))
     exit(1)
 }
@@ -119,7 +119,7 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
 
 // The build before handed its sessions over, by executing this one in its place (same process). Read before the
 // server is made: what it kept in memory (`HostServer.secretsForHandover`) can go into this one's config.
-let handoverPath = value(after: "--handover")
+let handoverPath = HostHardening.handover(in: arguments)
 var restoring: HostHandover.State?
 var restoredSecrets: Data?
 if let handoverPath {

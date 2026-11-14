@@ -853,7 +853,9 @@ memory and writes no file.
   cleared and the server started again.
 - **A newer format is refused** (`HostHandover.format`, rule 11) and the host goes back.
 - **The test-only flags** (`--handover-test-secret`, `--handover-test-secret-file`, `--handover-test-traced`,
-  `--install-root`, `--test-app-pid`) are honoured only by a scratch host and stripped from `config.arguments`.
+  `--install-root`, `--test-app-pid`, and `--test-stays-dumpable`, which makes a scratch host dumpable again so a test
+  can count its descriptors) are honoured only by a scratch host and stripped from `config.arguments`; the user's host
+  stays non-dumpable from its start (S6).
   Today `--handover-test-secret` is honoured by any host and kept across handovers (`main.swift:142-143`); Task 9 ends
   that.
 - **A fresh host removes stale files**: after taking the lock, a host that isn't restoring removes any
