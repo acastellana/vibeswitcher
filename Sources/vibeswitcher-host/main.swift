@@ -119,6 +119,9 @@ config.heldLockIsAllowed = HostHardening.heldLockIsAllowed(ownsLaunchers: ownsLa
 // On Linux the node's host hands over only to a build installed under ~/.vibeswitcher/v2/builds that it checked; a
 // scratch host to one under its --install-root; any other to any build, as before (see V2/HandoverTarget.swift).
 config.installRoot = HandoverTarget.installRoot(arguments: arguments, ownsLaunchers: ownsLaunchers, accountHome: HostImages.accountHome)
+// On Linux the node's host starts sessions only inside the repositories ~/.vibeswitcher/v2/projects names; every other
+// host, and the Mac, anywhere, as before (see V2/ProjectAllowList.swift).
+config.projectAllowList = ProjectAllowList.place(arguments: arguments, accountHome: HostImages.accountHome)
 if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), limit > 0 { config.parser.stallLimit = limit }
 // The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
 config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)

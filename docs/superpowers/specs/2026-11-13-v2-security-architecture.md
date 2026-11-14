@@ -1433,11 +1433,11 @@ plan's E1; `doctor`'s summary after the bootstrap.
 **The user confirms:** the allow-list's place, and that the user (not an agent) writes its one line for the bootstrap
 clone.
 
-**Held by:** planned: stage 2 plan task 10.
-
-**Tests to write:** Task 10: `ProjectAllowListTests.aSpawnOutsideTheListIsRefusedWithItsReason`,
-`aWorktreeOfAnAllowedRepositoryIsAllowed`, `aForgedGitFileIsRefused`, `aForgedWorktreePairPassesAsKnown`,
-`aScratchHostHasNoList`, `aMissingListRefusesEverySpawnAndSaysWhereTheListGoes`, `noGitRunsInTheHost`.
+**Held by:** `ProjectAllowListTests.aSpawnOutsideTheListIsRefusedWithItsReason`,
+`ProjectAllowListTests.aWorktreeOfAnAllowedRepositoryIsAllowed`, `ProjectAllowListTests.aForgedGitFileIsRefused`,
+`ProjectAllowListTests.aForgedWorktreePairPassesAsKnown`, `ProjectAllowListTests.aScratchHostHasNoList`,
+`ProjectAllowListTests.aMissingListRefusesEverySpawnAndSaysWhereTheListGoes`,
+`ProjectAllowListTests.noGitRunsInTheHost` (Task 10d: the allow-list).
 
 ## S12. After the bootstrap
 
