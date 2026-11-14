@@ -835,11 +835,13 @@ struct SocketsTests {
 extension SocketsTests {
     // MARK: The file a socket is bound to
 
-    /// `boundFile`: the device and inode `lstat` gives the socket's path, the device in `stat`'s own encoding (the
-    /// kernel reports its own, which differs for every device but 0:n with n under 256: 8:32 is 0x800020 to the kernel
-    /// and 0x820 to `stat`). Renamed, the socket's file is still what the kernel names, at its new path; another socket
-    /// renamed over that path is not it, and is its own listener's. A socket bound to no file, and a descriptor that is
-    /// no socket, have none.
+    /// `boundFile`: the inode `lstat` gives the socket's path, and the device of the file system it is on, in `stat`'s
+    /// own encoding (the kernel reports its own, which differs for every device but 0:n with n under 256: 8:32 is
+    /// 0x800020 to the kernel and 0x820 to `stat`); on the file systems here (ext4, tmpfs) that is also its `st_dev`.
+    /// `boundFile(of:at:)` says the path names that file, with what `lstat` gives. Renamed, the socket's file is still
+    /// what the kernel names, at its new path; another socket renamed over that path is not it, and is its own
+    /// listener's. A path naming nothing, a link to the socket's file, a socket bound to no file, and a descriptor that
+    /// is no socket, have none. (A file system whose `st_dev` isn't its own: `HostPathDeviceTests`.)
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "unix_diag is Linux's"))
     func boundFileIsTheFileTheSocketIsBoundTo() throws {
         let folder = try Self.socketFolder()
@@ -849,6 +851,13 @@ extension SocketsTests {
             guard lstat(path, &info) == 0 else { throw Failure(what: "no lstat of \(path): \(errno)") }
             return info
         }
+        func isBound(_ answer: Platform.Sockets.BoundFileAtPath, _ info: stat) -> Bool {
+            guard case .bound(let device, let inode) = answer else { return false }
+            return device == UInt64(truncatingIfNeeded: info.st_dev) && inode == UInt64(info.st_ino)
+        }
+        func isAnother(_ answer: Platform.Sockets.BoundFileAtPath) -> Bool {
+            if case .another = answer { return true } else { return false }
+        }
         let path = folder.appendingPathComponent("s").path
         let listener = try Self.listener(at: path)
         defer { Sys.close(listener) }
@@ -856,27 +865,31 @@ extension SocketsTests {
         let bound = try #require(Platform.Sockets.boundFile(of: listener))
         #expect(bound.device == UInt64(truncatingIfNeeded: info.st_dev), "kernel said \(bound.device), lstat \(info.st_dev)")
         #expect(bound.inode == UInt64(UInt32(truncatingIfNeeded: info.st_ino)))
-        #expect(Platform.Sockets.boundFile(bound, is: info))
+        #expect(isBound(Platform.Sockets.boundFile(of: listener, at: path), info))
 
         let moved = folder.appendingPathComponent("m").path
         #expect(rename(path, moved) == 0)
         let movedBound = try #require(Platform.Sockets.boundFile(of: listener))
         #expect(movedBound == bound)
-        #expect(Platform.Sockets.boundFile(movedBound, is: try look(moved)))
+        #expect(isBound(Platform.Sockets.boundFile(of: listener, at: moved), try look(moved)))
+        #expect(isAnother(Platform.Sockets.boundFile(of: listener, at: path)))
+        let link = folder.appendingPathComponent("l").path
+        #expect(symlink(moved, link) == 0)
+        #expect(isAnother(Platform.Sockets.boundFile(of: listener, at: link)))
 
         let otherPath = folder.appendingPathComponent("o").path
         let other = try Self.listener(at: otherPath)
         defer { Sys.close(other) }
         #expect(rename(otherPath, moved) == 0)
         let renamedOver = try look(moved)
-        #expect(!Platform.Sockets.boundFile(bound, is: renamedOver))
+        #expect(isAnother(Platform.Sockets.boundFile(of: listener, at: moved)))
         #expect(Platform.Sockets.boundFile(of: listener)! == bound)
-        let otherBound = try #require(Platform.Sockets.boundFile(of: other))
-        #expect(Platform.Sockets.boundFile(otherBound, is: renamedOver))
+        #expect(isBound(Platform.Sockets.boundFile(of: other, at: moved), renamedOver))
 
         let unbound = try Self.streamSocket()
         defer { Sys.close(unbound) }
         #expect(Platform.Sockets.boundFile(of: unbound) == nil)
+        if case .cantSay = Platform.Sockets.boundFile(of: unbound, at: moved) {} else { Issue.record("an unbound socket's file") }
         var ends: [Int32] = [-1, -1]
         #expect(Sys.pipeClosedOnExec(&ends) == 0)
         defer { ends.forEach { Sys.close($0) } }
@@ -891,6 +904,9 @@ extension SocketsTests {
         let listener = try Self.listener(at: folder.appendingPathComponent("s").path)
         defer { Sys.close(listener) }
         #expect(Platform.Sockets.boundFile(of: listener) == nil)
+        if case .cantSay = Platform.Sockets.boundFile(of: listener, at: folder.appendingPathComponent("s").path) {} else {
+            Issue.record("the Mac said what file a socket is bound to")
+        }
     }
 }
 

@@ -103,15 +103,41 @@ extension Platform.Sockets {
 
     /// The file the Unix socket `listener` is bound to, asked of the kernel (`NETLINK_SOCK_DIAG`'s unix_diag,
     /// `UDIAG_SHOW_VFS`): the file `bind` made, wherever it has been renamed since. Nothing goes through a path, so a
-    /// file renamed over the socket's path can't answer in its place, at any moment. `device` is as `stat` gives
-    /// `st_dev`; `inode` is the low 32 bits of the file's inode number, all the kernel reports, so it is compared with
-    /// the low 32 bits of a `stat`'s (`boundFile(_:is:)`). nil when the kernel can't say: `listener` isn't bound to a
-    /// file (not bound, an abstract name), or the kernel has no unix_diag (`CONFIG_UNIX_DIAG`).
+    /// file renamed over the socket's path can't answer in its place, at any moment. `device` is the device of the
+    /// file system the file is on, its superblock's, in `stat`'s encoding: what `stat` gives as `st_dev` on most file
+    /// systems, but not on btrfs (a subvolume's own device) or on an overlay over several file systems (a layer's), so
+    /// a path is compared with it through `boundFile(of:at:)`, not through `lstat`. `inode` is the low 32 bits of the
+    /// file's inode number, all the kernel reports. nil when the kernel can't say: `listener` isn't bound to a file
+    /// (not bound, an abstract name), or the kernel has no unix_diag (`CONFIG_UNIX_DIAG`).
     public static func boundFile(of listener: Int32) -> (device: UInt64, inode: UInt64)? {
         var device: UInt64 = 0
         var inode: UInt64 = 0
         guard vibe_socket_bound_file(listener, &device, &inode) == 0 else { return nil }
         return (device, inode)
+    }
+
+    /// Whether `path` names (no link followed) the file the Unix socket `listener` is bound to (`boundFile(of:)`),
+    /// compared as the kernel knows both: the device of the file system the path's file is on (its superblock's, from
+    /// /proc's view of the mount, not `st_dev`, which differs on btrfs and on an overlay over several file systems)
+    /// and the low 32 bits of its inode number (the kernel's own, /proc/self/fdinfo's from Linux 5.14; `st_ino`
+    /// before), each read from one descriptor opened on the path (`O_PATH`: nothing goes through the path after, and
+    /// no rename meanwhile mixes two files). A file on a file system whose inode numbers pass 32 bits can share those
+    /// bits with the listener's. `.cantSay` when unix_diag (`boundFile(of:)`) or /proc can't say.
+    public static func boundFile(of listener: Int32, at path: String) -> BoundFileAtPath {
+        guard let bound = boundFile(of: listener) else { return .cantSay }
+        var statDevice: UInt64 = 0
+        var statInode: UInt64 = 0
+        var mode: UInt32 = 0
+        var device: UInt64 = 0
+        var inode: UInt64 = 0
+        switch vibe_path_file(path, &statDevice, &statInode, &mode, &device, &inode) {
+        case 0: break
+        case -1: return .another
+        default: return .cantSay
+        }
+        guard mode & UInt32(S_IFMT) == UInt32(S_IFSOCK), device == bound.device,
+              UInt32(truncatingIfNeeded: inode) == UInt32(truncatingIfNeeded: bound.inode) else { return .another }
+        return .bound(device: statDevice, inode: statInode)
     }
 }
 

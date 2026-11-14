@@ -8,16 +8,18 @@ import VibeCore
 /// there, at each housekeeping interval and once as it begins, checks that each path still names what it bound and
 /// what it locked.
 ///
-/// - The socket path: what it names (`lstat`, no link followed) is recorded only when it is the file the host's
-///   listener is bound to, as the kernel says (`Platform.Sockets.boundFile`, Linux's unix_diag): nothing goes through
-///   the path, so no rename, before, during or after the check, makes another file pass for the host's, and each
-///   check after (at each change in the folder) compares what the path names with that file (`verifiedIdentity`). As
-///   the watch begins (a fresh start or a handover) the same is asked of what the path names then. Where the kernel
-///   can't say (no unix_diag), the check falls back to a connection made through the path that reaches a listener of
-///   this process (`SO_PEERCRED` on the connecting end, `leadsHere`), with the same socket file named before and
-///   after. A process renaming files over the path around that connect can beat it, and the file it passed off is
-///   then recorded: the folder's changes don't look again, each housekeeping does, the same way, a race that process
-///   must win again each time (the security architecture document's S2).
+/// - The socket path: what it names (no link followed) is recorded only when it is the file the host's listener is
+///   bound to, as the kernel says (`Platform.Sockets.boundFile(of:at:)`: Linux's unix_diag, compared with the device
+///   of the file system the path's file is on, its superblock's, not `st_dev`, which differs on btrfs and on an
+///   overlay): no connection goes through the path, so no rename, before, during or after the check, makes another
+///   file pass for the host's, and each check after (at each change in the folder) compares what the path names with
+///   that file (`verifiedIdentity`). As the watch begins (a fresh start or a handover) the same is asked of what the
+///   path names then. Where the kernel can't say (no unix_diag, no /proc), the check falls back to a connection made
+///   through the path that reaches a listener of this process (`SO_PEERCRED` on the connecting end, `leadsHere`),
+///   with the same socket file named before and after. A process renaming files over the path around that connect
+///   can beat it, and the file it passed off is then recorded: the folder's changes don't look again, each
+///   housekeeping does, the same way, a race that process must win again each time (the security architecture
+///   document's S2).
 /// - The socket path naming something else, nothing, or a listener not the host's: what is there is removed, a fresh
 ///   listener bound there (`UnixSocket.listen`, its senders passed before its first accept), checked as above (up to
 ///   `bindAttempts` times, each losing listener closed), swapped in for the accept source, and the old listener
@@ -41,6 +43,11 @@ final class HostPathWatch {
         init(_ info: stat) {
             device = UInt64(truncatingIfNeeded: info.st_dev)
             inode = Platform.Files.inode(info)
+        }
+
+        init(device: UInt64, inode: UInt64) {
+            self.device = device
+            self.inode = inode
         }
     }
 
@@ -231,18 +238,21 @@ final class HostPathWatch {
     }
 
     /// What `path` names, when it is a socket file (not a link) and `listener`'s: the file the kernel says `listener`
-    /// is bound to (`Platform.Sockets.boundFile`), exactly, whatever is renamed where meanwhile. Where the kernel can't
-    /// say (the Mac, a Linux without unix_diag), a socket file that led to a listener of this process (`leadsHere`,
-    /// not `listener` in particular) and named the same file before and after: renames around the connect (the path
-    /// naming another file at both looks and the host's socket during the connect) can pass that file off as
-    /// `listener`'s. Nil otherwise.
+    /// is bound to (`Platform.Sockets.boundFile(of:at:)`), compared as the kernel knows both (the file system's own
+    /// device, not `st_dev`, which differs on btrfs and on an overlay), whatever is renamed where meanwhile. Where the
+    /// kernel can't say (the Mac, a Linux without unix_diag or /proc), a socket file that led to a listener of this
+    /// process (`leadsHere`, not `listener` in particular) and named the same file before and after: renames around
+    /// the connect (the path naming another file at both looks and the host's socket during the connect) can pass
+    /// that file off as `listener`'s. Nil otherwise.
     static func verifiedIdentity(of path: String, listener: Int32) -> FileIdentity? {
+        switch Platform.Sockets.boundFile(of: listener, at: path) {
+        case .bound(let device, let inode): return FileIdentity(device: device, inode: inode)
+        case .another: return nil
+        case .cantSay: break
+        }
         var info = stat()
         guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK else { return nil }
         let before = FileIdentity(info)
-        if let bound = Platform.Sockets.boundFile(of: listener) {
-            return Platform.Sockets.boundFile(bound, is: info) ? before : nil
-        }
         guard leadsHere(path) else { return nil }
         return identity(atPath: path) == before ? before : nil
     }

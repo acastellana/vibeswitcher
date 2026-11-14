@@ -90,5 +90,8 @@ extension Platform.Sockets {
     /// Nil on the Mac, which has no way to ask the kernel what file a socket is bound to (no unix_diag): a caller
     /// keeps its own check through the path. Nothing on the Mac asks today (the host watches its path on Linux only).
     public static func boundFile(of listener: Int32) -> (device: UInt64, inode: UInt64)? { nil }
+
+    /// `.cantSay` on the Mac, as `boundFile(of:)`: a caller keeps its own check through the path.
+    public static func boundFile(of listener: Int32, at path: String) -> BoundFileAtPath { .cantSay }
 }
 #endif

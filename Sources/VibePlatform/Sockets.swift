@@ -22,6 +22,8 @@ extension Platform {
     ///   path after it, as it always did.
     /// - `boundFile(of:) -> (device: UInt64, inode: UInt64)?`: the file a listener is bound to, as the kernel knows it
     ///   (Linux's unix_diag); nil on the Mac, which can't say.
+    /// - `boundFile(of:at:) -> BoundFileAtPath`: whether a path names that file, compared as the kernel knows both;
+    ///   `.cantSay` on the Mac.
     public enum Sockets {
         /// The address of the socket at `path`; nil when the path is too long for one: with the 0 that ends it, it
         /// must fit `sun_path`, 104 bytes on the Mac and 108 on Linux. The Mac's address also holds its own length.
@@ -40,12 +42,15 @@ extension Platform {
             return address
         }
 
-        /// Whether `info`, a `stat` of a path, is of the file `bound` (`boundFile(of:)`): the same device, and the
-        /// same low 32 bits of the inode number, all the kernel reports of it. On a file system whose inode numbers
-        /// go past 32 bits, two files on it can share those bits.
-        public static func boundFile(_ bound: (device: UInt64, inode: UInt64), is info: stat) -> Bool {
-            UInt64(truncatingIfNeeded: info.st_dev) == bound.device
-                && UInt32(truncatingIfNeeded: info.st_ino) == UInt32(truncatingIfNeeded: bound.inode)
+        /// Whether a path names the file a listener is bound to (`boundFile(of:at:)`).
+        public enum BoundFileAtPath {
+            /// The kernel can't say (the Mac; a Linux without unix_diag or without /proc): the caller checks otherwise.
+            case cantSay
+            /// The path names nothing, or another file.
+            case another
+            /// The path names the listener's file, whose device and inode are these, as `stat` gives them (`st_dev`,
+            /// `st_ino`), so a later `lstat` of the path can be compared with them.
+            case bound(device: UInt64, inode: UInt64)
         }
 
         /// `SOCK_STREAM` as the number `socket` and `socketpair` take: glibc's is an enum to Swift, the Mac's and

@@ -7,7 +7,10 @@
 #include "CVibePlatform.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -207,5 +210,74 @@ int vibe_socket_bound_file(int fd, uint64_t *device, uint64_t *inode) {
     }
     errno = EIO;
     return -1;
+}
+
+// The mount id and, from Linux 5.14, the inode number /proc/self/fdinfo shows for `fd`: 0, or -1 and errno.
+static int vibe_fdinfo(int fd, int *mount, uint64_t *inode, int *hasInode) {
+    char name[64];
+    snprintf(name, sizeof(name), "/proc/self/fdinfo/%d", fd);
+    FILE *file = fopen(name, "re");
+    if (!file) return -1;
+    char line[256];
+    int hasMount = 0;
+    *hasInode = 0;
+    while (fgets(line, sizeof(line), file)) {
+        unsigned long long number;
+        if (sscanf(line, "mnt_id: %d", mount) == 1) hasMount = 1;
+        else if (sscanf(line, "ino: %llu", &number) == 1) { *inode = number; *hasInode = 1; }
+    }
+    fclose(file);
+    if (!hasMount) { errno = ENOENT; return -1; }
+    return 0;
+}
+
+// The device of the mount `mount` (its file system's superblock's, the third field of its /proc/self/mountinfo line,
+// "MAJOR:MINOR") in stat's encoding: 0, or -1 and errno.
+static int vibe_mount_device(int mount, uint64_t *device) {
+    FILE *file = fopen("/proc/self/mountinfo", "re");
+    if (!file) return -1;
+    char *line = NULL;
+    size_t room = 0;
+    int found = 0;
+    while (!found && getline(&line, &room, file) >= 0) {
+        int id;
+        unsigned int major, minor;
+        if (sscanf(line, "%d %*d %u:%u", &id, &major, &minor) == 3 && id == mount) {
+            *device = (uint64_t)makedev(major, minor);
+            found = 1;
+        }
+    }
+    free(line);
+    fclose(file);
+    if (!found) { errno = ENOENT; return -1; }
+    return 0;
+}
+
+int vibe_path_file(const char *path, uint64_t *stat_device, uint64_t *stat_inode, uint32_t *mode, uint64_t *fs_device,
+                   uint64_t *kernel_inode) {
+    int fd = open(path, O_PATH | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return -1;
+    struct stat info;
+    if (fstat(fd, &info) != 0) {
+        int code = errno;
+        close(fd);
+        errno = code;
+        return -1;
+    }
+    // The mount looked up while the descriptor holds it, so its id can't have been given to another meanwhile.
+    int mount = 0, hasInode = 0;
+    uint64_t inode = 0;
+    int answered = vibe_fdinfo(fd, &mount, &inode, &hasInode) == 0 && vibe_mount_device(mount, fs_device) == 0;
+    int code = errno;
+    close(fd);
+    if (!answered) {
+        errno = code;
+        return -2;
+    }
+    *stat_device = (uint64_t)info.st_dev;
+    *stat_inode = (uint64_t)info.st_ino;
+    *mode = (uint32_t)info.st_mode;
+    *kernel_inode = hasInode ? inode : (uint64_t)info.st_ino;
+    return 0;
 }
 #endif

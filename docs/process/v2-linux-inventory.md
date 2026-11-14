@@ -229,8 +229,17 @@ host took from the Mac:
   the file is renamed. `Platform.Sockets.boundFile` (`SocketsTests.boundFileIsTheFileTheSocketIsBoundTo`).
 - **Its device is the kernel's own `dev_t`** (the file system's `s_dev`: major from bit 20), not `stat`'s: the root
   file system here, 8:32, is 0x800020 to unix_diag and 0x820 in `st_dev`. The shim converts with `makedev`.
-- **Its inode is 32 bits** (`udiag_vfs_ino` is a `__u32`): compared with the low 32 bits of `st_ino`. ext4 here (`/`,
-  which holds the home and `/tmp`), whose inode numbers fit them.
+- **Its device is the superblock's, which `stat` doesn't always give**: on ext4 and tmpfs here `st_dev` is the same
+  device, but on an overlay whose lower and upper layers are two tmpfs mounts (made in an unprivileged user and mount
+  namespace) unix_diag gave 0:110 (the overlay's) and `st_dev` 0:111 (the upper layer's); btrfs gives a subvolume's
+  own device in `st_dev` (`btrfs_getattr`, not measured here). `/proc/self/mountinfo` gives the superblock's device
+  for each mount, and `/proc/self/fdinfo/N` the mount (`mnt_id`) and, from Linux 5.14, the inode number (`ino`) of an
+  `O_PATH` descriptor on a socket file (opening it otherwise is `ENXIO`): `Platform.Sockets.boundFile(of:at:)`
+  compares those (`HostPathDeviceTests.aSocketOnAFileSystemWhoseStatDeviceIsNotItsOwnIsTheHosts`).
+- **Its inode is 32 bits** (`udiag_vfs_ino` is a `__u32`): compared with the low 32 bits of the kernel's (`fdinfo`'s
+  `ino`; `st_ino` before 5.14). ext4 here (`/`, which holds the home and `/tmp`), whose inode numbers fit them.
+- **The listener is found by its sockfs inode number** (32 bits) **and its cookie** (`SO_COOKIE`, Linux 4.12): a
+  kernel before 4.12 is asked by the number alone, which comes round after 2^32 sockets.
 - **`fchmod` of a Unix socket before its `bind` sets the mode of the file `bind` makes** (the kernel takes the socket
   inode's mode, less the umask): `fchmod(fd, 0600)` then `bind` gave a 0600 file under umask 0, 022 and 077; without
   it, 0777 under umask 0. `glibc`'s `fchmodat(…, AT_SYMLINK_NOFOLLOW)` refuses a link (`EOPNOTSUPP`; this kernel has no
