@@ -2965,3 +2965,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 08:36 Automatically (auto_advance): Sent workers-and-verifiers-4's worker the open Important findings workers-and-verifiers-4:F1, workers-and-verifiers-4:F2 from its audit at c766a3cc (in a new worker: its last one was released during the audit).
 - 2026-11-14 08:38 Pipeline held: split-the-integrator ready to merge with none landing; cause: a merge in progress
 - 2026-11-14 08:40 Merged split-the-integrator: Split: the integrator starts its team's members (build 40766073a6b2)
+- 2026-11-14 08:40 Automatically (auto_advance): Merged split-the-integrator (Split: the integrator starts its team's members) into main at 7fbe3f76, on its passing audit and the full test run.
+- 2026-11-14 08:40 Started a worker on wall-tools-members-post
+- 2026-11-14 08:40 Automatically (auto_advance): Started a worker on wall-tools-members-post (Wall tools: members post and read, each post delivered once), its after tasks done (team-wall-store-append, teammate-sender-a-frame, split-the-integrator).
+- 2026-11-14 08:40 Automatically (auto_advance): Overlap for wall-tools-members-post's start (a warning only: nothing was refused or reordered). LeadTeam.swift: main-red-green-and (planned: its boundaries name it), peer-wait-deadline-no (planned, set to start after this one: its boundaries name it), take-part-the-integrator (planned, set to start after this one: its boundaries name it); LeadWall.swift: peer-wait-deadline-no (planned, set to start after this one: its boundaries name it).
+- 2026-11-14 08:40 Automatically (auto_advance): Cleaned up split-the-integrator (freed 3.2 GB of build output and temporary folders). It stays done.
