@@ -925,7 +925,13 @@ memory and writes no file.
   says. Sealed memory doesn't prove who wrote it: a process of the user can seal a state of its own and start the
   host's image with it. A state forged that way by a process that wasn't the user's host can only give the new image
   the user's host's rules, and the new image then refuses to restore unless the lock it inherits is the file at the
-  user's lock path (`heldLockIsAllowed`). A fresh start's probe is still open to the race (S11 item 5).
+  user's lock path (`heldLockIsAllowed`). Whatever makes a host the user's, its probe or a carried state, it passes the
+  user's host's start checks (`HostImages.mayStart(lockPath:usersLock:accountRoot:node:ownsLaunchers:)`, for its own
+  lock and for the user's): on the account's own home it needs `--node`, and with `--node` its lock is the account's
+  (by identity); otherwise it doesn't start, or as a new image goes back, as a refused start does. So a carried word
+  never makes a host the user's on the account's home without the install's checks that `--node` brings; it gives no
+  more than a start with `--node` on the account's lock, which a process of the user can make (S11 item 3). A fresh
+  start's probe is still open to the race (S11 item 5).
 - **A traced new image** closes the secrets unread and goes back; the fallback, traced, ends (S6). (As made in Task
   9c, approved by the lead 2026-11-14: the traced image leaves them unread and open, so that the fallback, which is the
   same process, still has the vault; a traced fallback ends, which closes them. A tracer can't attach to the
@@ -979,7 +985,7 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `HostHardeningTests.theUsersHostIgnoresTestSecretFlags` (Task 9a);
 `HostHardeningTests.aHandoverNeverMakesTheUsersHostAScratchHost`, `theCarriedOwnershipIsReadOnlyByAnImageThatReadsTheState`,
 `aNewImageWhoseProbeSaysScratchIsStillTheUsersHost` (which host it is, carried), `aStateFileSayingTheUsersHostIsIgnored`
-(carried only in sealed memory);
+(carried only in sealed memory), `theUsersHostCarriedOrProbedNeedsNodeOnTheAccountsHome` (the user's host's start checks);
 `HandoverLinuxTests.aHandoverWritesNoFile`, `HandoverLinuxTests.theStateAndSecretsAreSealed`,
 `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsTheVault`, `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsEverySession`,
 `HandoverLinuxTests.aMegabyteOfSecretsIsHandedOver`, `HandoverLinuxTests.aDowngradeIsRefused`,
@@ -1231,7 +1237,10 @@ against it. Each line says what reduces it now, if anything.
    builds with (the toolchain and package caches, if the user's). The restarted host and its server are then the
    worker's. Reduced by `UnsetEnvironment=` (the manager's environment no longer reaches the host), the commit-folder
    `ExecStart`, the start check (a slip caught), the seal (a detector) and the journal's record of starts no
-   `vibeswitcher start` explains, which the command line reads itself. S2, S9.
+   `vibeswitcher start` explains, which the command line reads itself. Starting the host's image itself with a
+   handover's state of its own gives no more on the account's home: a state file gives no word on which host it is,
+   and a state in sealed memory that says the user's host still needs `--node` there, as a fresh start does (S8). S2,
+   S9.
 4. The host's own start by systemd runs the installed, readable file: dumpable until its first statement, so a worker
    that waits for a start (one it caused, or the user's) can ptrace it and own it. S6.
 5. A worker can put its own socket at the host's path: sessions' tool servers and hooks reach it until the host binds

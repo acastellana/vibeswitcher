@@ -55,10 +55,12 @@ let ownsLaunchers = HandoverMemory.ownsLaunchers(probed: HostHardening.ownsLaunc
                                                  arguments: arguments, hardening: hardening, refused: startRefusal != nil)
 // A scratch host's test of a traced new image (Linux): refused as if traced, so it goes back (V2/HandoverMemory.swift).
 if let traced = HandoverMemory.testTracer(arguments: arguments, ownsLaunchers: ownsLaunchers) { hardening = traced }
-// On Linux the account's own lock is the node's host's alone; its own image and, with --node-root, its server read
-// into sealed copies, checked against build-info (see V2/HostImages.swift).
-startRefusal = startRefusal ?? HostImages.mayStart(lockPath: lockPath, accountRoot: (HostImages.accountHome ?? "/nonexistent") + "/.vibeswitcher",
-                                                   node: arguments.contains(HostImages.nodeFlag))
+// On Linux the account's own lock is the node's host's alone, and the user's host (probed or carried) passes the same
+// checks for the user's lock; its own image and, with --node-root, its server read into sealed copies, checked
+// against build-info (see V2/HostImages.swift).
+startRefusal = startRefusal ?? HostImages.mayStart(lockPath: lockPath, usersLock: VibePaths.hostLock.path,
+                                                   accountRoot: (HostImages.accountHome ?? "/nonexistent") + "/.vibeswitcher",
+                                                   node: arguments.contains(HostImages.nodeFlag), ownsLaunchers: ownsLaunchers)
 var images = HostImages.Loaded(own: nil, server: nil)
 if startRefusal == nil {
     switch HostImages.load(arguments: arguments) {

@@ -184,6 +184,19 @@ public enum HostImages {
         }
     }
 
+    /// `main`'s start check (Linux; the Mac: nil): `mayStart` for the lock it takes (`lockPath`) and, for the user's host
+    /// (`ownsLaunchers`, by its probe or by the state a handover carried), for the user's lock (`usersLock`, its
+    /// `VibePaths.hostLock`) too, so that whatever made it the user's host it passes the user's host's checks: on the
+    /// account's own home (`usersLock` the account's lock) it needs `--node`, and with `--node` its lock is the
+    /// account's. A new image whose carried state says the user's host while its probe of its own `--lock` says scratch
+    /// is refused without `--node` there, as a fresh host on the account's lock is. A scratch home's user's host (the
+    /// tests') needs none, as before.
+    public static func mayStart(lockPath: String, usersLock: String, accountRoot: String, node: Bool, ownsLaunchers: Bool) -> String? {
+        if let why = mayStart(lockPath: lockPath, accountRoot: accountRoot, node: node) { return why }
+        guard ownsLaunchers, let why = mayStart(lockPath: usersLock, accountRoot: accountRoot, node: node) else { return nil }
+        return "the user's host: " + why
+    }
+
     // MARK: The build's folders
 
     /// Where a host's build's files are.

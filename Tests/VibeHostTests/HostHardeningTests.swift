@@ -803,6 +803,41 @@ extension HostHardeningTests {
         #expect(HostImages.mayStart(lockPath: dir + "/link.lock", accountRoot: root, node: true)?.contains("symbolic link") == true)
     }
 
+    /// The user's host passes the user's host's start checks however it came to be the user's: a new image whose sealed
+    /// state says the user's host (its probe of its own `--lock` saying scratch) on the account's own home (its user's
+    /// lock the account's) is refused without `--node`, as a host on the account's lock is, and so goes back (`main`'s
+    /// `goBack` for a refused start); with `--node` the lock must be the account's. A scratch home's user's host (the
+    /// tests') needs no `--node`, and a scratch host on a lock of its own is as before.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's --node and carried ownership; the Mac has neither"))
+    func theUsersHostCarriedOrProbedNeedsNodeOnTheAccountsHome() throws {
+        let (dir, root, accountLock) = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let scratchLock = dir + "/elsewhere.lock"
+        var state = HostHandover.State(fromBuild: 41, startedAt: Date(), lockFD: 3, listenFD: 4, secretFD: nil, sessions: [])
+        state.ownsLaunchers = true
+        let fd = try HandoverMemory.seal(HandoverMemory.encoded(state), name: "test-handover-state")
+        defer { Sys.close(fd) }
+        let carried = ["host", "--lock", scratchLock, "--handover", HandoverMemory.path(of: fd)]
+        let owns = HandoverMemory.ownsLaunchers(probed: false, arguments: carried, hardening: .hardened, refused: false)
+        #expect(owns)
+        let refused = HostImages.mayStart(lockPath: scratchLock, usersLock: accountLock, accountRoot: root, node: false, ownsLaunchers: owns)
+        #expect(refused?.contains("is the account's own") == true, "\(refused ?? "nil")")
+        // Probed: the account's lock itself, without --node, as before.
+        #expect(HostImages.mayStart(lockPath: accountLock, usersLock: accountLock, accountRoot: root, node: false, ownsLaunchers: true) != nil)
+        // With --node: the account's lock, and no other.
+        #expect(HostImages.mayStart(lockPath: accountLock, usersLock: accountLock, accountRoot: root, node: true, ownsLaunchers: true) == nil)
+        #expect(HostImages.mayStart(lockPath: scratchLock, usersLock: accountLock, accountRoot: root, node: true, ownsLaunchers: true)?
+                    .contains("takes only the account's own lock") == true)
+        // A scratch home's user's host, its lock probed or carried: no --node needed.
+        let scratchHome = dir + "/scratch-home/.vibeswitcher"
+        try FileManager.default.createDirectory(atPath: scratchHome, withIntermediateDirectories: true)
+        for lock in [scratchHome + "/host.lock", scratchLock] {
+            #expect(HostImages.mayStart(lockPath: lock, usersLock: scratchHome + "/host.lock", accountRoot: root, node: false, ownsLaunchers: true) == nil)
+        }
+        // Not the user's host: a scratch host on its own lock starts, whatever the user's lock is.
+        #expect(HostImages.mayStart(lockPath: scratchLock, usersLock: accountLock, accountRoot: root, node: false, ownsLaunchers: false) == nil)
+    }
+
     /// The node's environment: `HOME` the account's, and neither `VIBESWITCHER_HOME` nor `CFFIXED_USER_HOME`, whatever
     /// it was given; the rest as given. No `--node` host is started in a test: it would be the user's, on their own
     /// `~/.vibeswitcher`.
