@@ -1070,10 +1070,10 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
     and `status` compare `systemctl --user show-environment` with the expected set and name anything extra;
   - `Environment=HOME=…` and `Environment="PATH=/usr/local/bin:/usr/bin:/bin:<swiftly's bin>:<node's bin>"`, quoted,
     with no `/mnt/` folder: a team session's shell and its program run with this PATH and no startup file (S10), and
-    so does what the program starts itself (its tool servers, and so merges' and audits' runs). An agent's Bash
-    commands don't: they run with the PATH of Claude Code's shell snapshot, taken in a login shell after the user's
-    startup files, which on this node puts `~/.local/share/swiftly/bin` and `~/.local/bin` ahead of `/usr/bin`
-    (S10, measured in Task 12b). The two last folders are the user's, so every worker can write them: they are named in the unit,
+    so does what the program starts itself (its tool servers, and so merges' and audits' runs). So do an agent's Bash
+    commands: Claude Code's shell snapshot records the PATH Claude Code started with, not the one the user's startup
+    files make, and every command sources it (S10, measured in Task 12b; the startup files reach the commands
+    otherwise). The two last folders are the user's, so every worker can write them: they are named in the unit,
     on the seal's list and in S11 item 10 (decisions 12 and 17). `claude` is not on it: every lead and role runs the absolute
     path `~/.local/bin/claude` resolves to at its start (the engine's EN-D13), since that folder holds files named by
     version only;
@@ -1112,7 +1112,8 @@ what it needs.
   hooks, `~/.local/share/claude/versions/*`, the shell startup files Claude Code's Bash tool sources. The config seal
   watches them (the bootstrap path's step 8 adds the Linux list: `~/.bash_profile`, `~/.bash_login`, `~/.profile` and
   `~/.bashrc`, each watched whether it exists or not, what they source (here `~/.local/share/swiftly/env.sh`), `~/bin`
-  (absent here, first on the snapshot's PATH once made), the agents' `shell-snapshots` folders (these, Task 12b's
+  (absent here; `.profile` puts it first on the PATH of the shells that read it, the snapshot's login shell among
+  them), the agents' `shell-snapshots` folders (these, Task 12b's
   additions, approved by the lead 2026-11-14), `~/.config/systemd/user`, `~/.config/environment.d`,
   `~/.config/autostart`, `~/.vibeswitcher/v2/projects`, `~/.vibeswitcher/v2/builds`, `~/.vibeswitcher/lead/run`,
   `~/.vibeswitcher/lead/git-hooks`, `~/.local/bin`, `~/.local/share/claude/versions`, the toolchain's `usr/bin`, every
@@ -1172,8 +1173,8 @@ the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts
   (`HostedSession.swift:117-120`); a login, interactive bash runs `.profile` and `.bashrc` and whatever they source
   (here, among others, a file in another repository and `mise activate`, which reads per-folder config from the
   worktree). On Linux team sessions start with `bash --noprofile --norc -c command`, with the PATH the unit holds:
-  the session's shell and its program get that PATH, an agent's Bash commands the snapshot's (below, "Doesn't
-  promise"); the Mac's reason for `-l -i` (Terminal's PATH) is met by that PATH. `claude` isn't on it (its folder is the user's
+  the session's shell, its program and an agent's Bash commands get that PATH (the commands through the snapshot,
+  which records it; the startup files still reach them, below, "Doesn't promise"); the Mac's reason for `-l -i` (Terminal's PATH) is met by that PATH. `claude` isn't on it (its folder is the user's
   `~/.local/bin`): until the engine's E4 runs the lead's and the roles' `claude` by the absolute path it resolves
   (EN-D13), a role launched as the bare `claude` passes the tool server's preflight, which still looks through a login
   shell (`LaunchPreflight`, `LoginShellCommand`), and then fails in its session with `command not found`. The
@@ -1231,9 +1232,13 @@ Most of these are guard rails; the inline launch settings close a route that nee
   2.1.323, `docs/process/v2-linux-inventory.md`), though the session's own bash reads none of them: every Bash
   command's shell reads `~/.bashrc` itself (bash's rule for a stdin that is a socket); the snapshot's login shell
   reads the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` there is (on this node `~/.profile`, which
-  has no interactive guard and sources swiftly's `env.sh`), and the snapshot's script sources `~/.bashrc`; and every
-  command runs with the PATH the snapshot recorded from that login shell, not the unit's: on this node
-  `~/.local/share/swiftly/bin` and `~/.local/bin` first, and `~/bin` first of all once a worker creates it.
+  has no interactive guard and sources swiftly's `env.sh`; measured in a home shaped like it), and the snapshot's
+  script sources `~/.bashrc`; the snapshot keeps the functions and aliases those files define (no variable), which
+  every command sources. The PATH doesn't come from them: the snapshot records the PATH Claude Code started with (the
+  unit's, here), plus any plugin `bin` folder it lacks, and its `export PATH=` overrides what `~/.bashrc` set in the
+  command's shell, so a startup file's PATH change reaches no command. A startup file reaches them otherwise: what
+  `~/.bashrc` runs in each command's shell, and a function or alias the snapshot carries (a function named `git`
+  runs ahead of any PATH).
 - Codex's sandbox (Landlock and seccomp) on this WSL kernel: unmeasured, so Codex workers are off (decision 15).
 - What a spawn's caller puts in the new session through its `command`: a lead can start a session with any of the
   variables `env` may not name, by setting them in the command line. The sandbox (S12) is what holds that.
@@ -1262,8 +1267,8 @@ bootstrap (S12 item 15).
 `InlineLaunchHostTests.aDayOfInlineRoleSessionsStillGetsAWelcome`; `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`,
 `BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup` (Task 10c: git from root's folders, and a verifier's
 command in a session of its own); `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`,
-`RealClaudeTests.aVerifierCommandInItsOwnSessionStillTimesOut` (Task 12b: gated measurements, run 2026-11-14; the
-snapshot's second home, shaped like the node's, not yet run), `RealClaudeTests.theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`
+`RealClaudeTests.aVerifierCommandInItsOwnSessionStillTimesOut` (Task 12b: gated measurements, run 2026-11-14, the
+snapshot's in a home shaped like the node's too), `RealClaudeTests.theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`
 (bash's own rules in Claude Code's shapes, ungated).
 
 **Tests to write:** The engine's
@@ -1343,8 +1348,10 @@ against it. Each line says what reduces it now, if anything.
    startup files Claude Code's Bash tool sources, folders on the PATH; measured 2026-11-14: `~/.bashrc` in every Bash
    command's shell, and in its snapshot the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` there is,
    and `~/.bashrc`, so all four, what they source (here swiftly's `env.sh`) and the snapshots in
-   `<config>/shell-snapshots` that each command sources; and the snapshot's PATH, with `~/.local/share/swiftly/bin`,
-   `~/.local/bin` and, once it exists, `~/bin` ahead of `/usr/bin`, S10). The seal detects it at its next look and holds
+   `<config>/shell-snapshots` that each command sources, whose functions and aliases run ahead of any PATH; and the
+   folders on the commands' PATH, which is the unit's (the snapshot records the PATH Claude Code started with, and no
+   startup file's PATH change reaches a command), the user's two, swiftly's `bin` and the node's, after `/usr/bin`,
+   S10). The seal detects it at its next look and holds
    workers and merges; a change swapped in and restored between two looks is missed; a host restart resets the seal to
    "held until accepted". The Linux list (`~/.local/share/claude/versions` and the rest) arrives with the bootstrap
    path's step 8. S7, S9.
@@ -1353,9 +1360,11 @@ against it. Each line says what reduces it now, if anything.
    commits since the last accepted head. S7.
 10. Branch code (merge's tests, an audit's run, `init_command`) runs as the user, unconfined, with the user's
     toolchain: a worker that replaces `swift-test` or patches a cached dependency makes every audit and merge pass.
-    A verifier's or a worker's Bash command, branch code under `runPrefix` included, runs with the snapshot's PATH
-    (S10), whose first folders, `~/.local/share/swiftly/bin`, `~/.local/bin` and `~/bin` once it exists, any worker
-    can write: a `git` or `swift` put there is what every agent's commands run. It
+    A verifier's or a worker's Bash command, branch code under `runPrefix` included, runs with the unit's PATH, which
+    the snapshot records (S10, measured): its two folders any worker can write, swiftly's `bin` and the node's, come
+    after `/usr/bin`, so a `git` put there doesn't shadow `/usr/bin/git`, but a `swift`, which only swiftly's `bin`
+    holds, is what every agent's commands run; and a function a worker adds to a startup file (item 8) runs ahead of
+    any PATH. It
     is no session's to the host, and can do everything in this list. Reduced for installs by a root-owned toolchain
     (decision 12), not for tests.
 11. Writing a terminal query to a session's `/dev/pts/N` makes the host type the headless terminal's reply into that
@@ -1743,8 +1752,8 @@ file; every change keeps the Mac's code paths as they are (a platform answer or 
   from a pushed commit with a root-owned toolchain, `build-info`'s `swift` and `resolved`, the seal's Linux list as in
   S9 (and `.wslconfig` and the Startup folder while `/mnt/c` is mounted), the rule on switches until measured, the
   server image on a switch. The questions: now the one list in the bootstrap path; `~/.local/bin` is not first on
-  this PATH, so the seal's list doesn't call it so (it is near the front of the snapshot's PATH an agent's Bash
-  commands get, S10, Task 12b).
+  this PATH, so the seal's list doesn't call it so (nor is it on the PATH an agent's Bash commands get: the
+  snapshot records the PATH Claude Code started with, the unit's, S10, Task 12b).
 
 ## Answers to the attack review
 

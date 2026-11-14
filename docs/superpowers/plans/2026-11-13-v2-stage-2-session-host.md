@@ -2012,12 +2012,17 @@ S10 and S11 (each result, one line, with the inventory's date)
   - The snapshot run: every Bash command's shell reads `~/.bashrc` itself (stdin a socket, `SHLVL` 1: bash's own rule
     for a stdin that is a socket, bash(1)'s INVOCATION, upstream's and not Ubuntu's; Debian's `SSH_SOURCE_BASHRC` only adds the
     `SSH_CLIENT` check), and the snapshot's login shell reads the first of `~/.bash_profile`, `~/.bash_login` and
-    `~/.profile` there is (the run's home had a `.bash_profile`; this node's has only `.profile`, which bash alone
-    shows is then read: `theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`, ungated), and its script
-    `~/.bashrc`. Every command runs with the PATH the snapshot took from that login shell, not the unit's (line 374's
-    "the PATH the unit holds" is the session's shell's only): on this node swiftly's `bin` and `~/.local/bin` ahead of
-    `/usr/bin`. The gated test's second home, shaped like the node's, with each startup file changing PATH, is written
-    and not yet run (the slice's four gated runs are spent). The record is in `docs/process/v2-linux-inventory.md`.
+    `~/.profile` there is (the first runs' home had a `.bash_profile`; this node's has only `.profile`, and in a home
+    shaped like it the gated run, 2026-11-14 17:38, saw `.profile` read, as bash alone shows:
+    `theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`, ungated), and its script `~/.bashrc`; the snapshot
+    keeps those files' functions and aliases, not their variables. Measured in that run, and not as the review fixes
+    read the binary: every command runs with the PATH Claude Code started with, the unit's on the node (line 382's "the
+    PATH the unit holds" holds for agents' Bash commands too). The snapshot writes `export PATH=` with Claude Code's
+    own PATH (a settings `env.PATH` if one is given, plus missing plugin `bin` folders); the "as this shell has it"
+    branch the review read is Windows' only. Each startup file put a folder of its own first on PATH, and the command
+    saw `PATH=/usr/bin:/bin`, the scratch host's, in both homes: its own `~/.bashrc`'s change is overwritten when it
+    sources the snapshot. The verifier's test passed again in the same run, with the same times. The record is in
+    `docs/process/v2-linux-inventory.md`.
 
 **Done when:** both ran once here with the user's folder and their results are recorded; until then they are skipped,
 saying why.

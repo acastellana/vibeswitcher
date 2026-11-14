@@ -351,7 +351,7 @@ Each ends in something that runs.
      (the shell startup files `.bashrc`, `.bash_profile`, `.profile` among them). A platform answer, empty on the
      Mac, adds what Claude Code's Bash tool reads here (Task 12b's additions, approved by the lead 2026-11-14):
      `~/.bash_login` beside the Mac's three, all four watched whether they exist or not, what they source (here
-     `~/.local/share/swiftly/env.sh`), `~/bin` (absent here, first on the snapshot's PATH once made) and the agents'
+     `~/.local/share/swiftly/env.sh`), `~/bin` (absent here; `.profile` puts it first on the PATH of the shells that read it) and the agents'
      `shell-snapshots` folders; and `~/.config/systemd/user`, `~/.config/environment.d`, `~/.config/autostart`,
      `~/.vibeswitcher/v2/projects`, `~/.vibeswitcher/v2/builds`, `~/.vibeswitcher/lead/run` (the roles' launch
      folders, a detector now that their settings are inline), `~/.vibeswitcher/lead/git-hooks` (the lead's accepted

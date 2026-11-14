@@ -238,19 +238,31 @@ its `SHELL` set to `/bin/bash` as the node's unit has it from the account) spawn
 --permission-mode manual --settings '<json>' '<prompt>'` in a scratch repository trusted in `<config>`, the settings
 allowing only the command the prompt names (no permission question was shown in any run). Four gated runs: the first
 two ran both tests (the snapshot's passed both times, the same; the verifier's failed at once, below), the last two
-the verifier's only (the third failed on the timeout assertion as first written, the fourth passed).
+the verifier's only (the third failed on the timeout assertion as first written, the fourth passed). A fifth, after
+the 12b review's fixes (17:38, Claude Code 2.1.323, sonnet), ran all three tests and **passed**: the snapshot's in
+both homes (4.8 s for the two), the verifier's in 40.9 s, bash's own in 0.1 s; its results are below, marked "run 5".
 
 **What Claude Code's Bash tool sources** (`whatClaudesBashToolSourcesIsMeasured`). The session starts as Task 10a
 starts one (`/bin/bash --noprofile --norc -c "exec claude …"`, no startup file read there), in a scratch `HOME` whose
 `.bashrc`, `.bash_profile`, `.profile` and `.zshrc` each export a variable, define a function and an alias, and log the
-shell that read them. Claude Code's Bash tool is asked to run a script that prints the variables it sees. Read, in
-order, within 30 ms of the start:
+shell that read them (since the review's fixes each also puts a folder of its own, `$HOME/vs-<name>-bin`, first on
+`PATH`). Claude Code's Bash tool is asked to run a script that prints the variables and the `PATH` it sees. Read, in
+order, within 30 ms of the start (runs 1, 2 and 5):
 
 | Who | Its command line | What it read |
 | --- | --- | --- |
 | Claude Code at its start, reading the shell's environment | `/bin/bash -c env`, stdin a socket, `SHLVL` 1 | `~/.bashrc` |
 | The snapshot's shell | `/bin/bash -c -l <script>` (a login shell), stdin a socket | `~/.bash_profile` (the first of `.bash_profile`, `.bash_login`, `.profile` there is), then `~/.bashrc`, which the script sources itself |
 | Each Bash tool command's shell | `/bin/bash -c "source <snapshot> … && eval '<command>' …"`, stdin a socket, `SHLVL` 1 | `~/.bashrc` |
+
+**In a home shaped like this node's, `.profile` and `.bashrc` only (run 5):** the same three readers, within 24 ms:
+`~/.bashrc` for `bash -c env`; `~/.profile` for the snapshot's login shell (stdin a socket), then `~/.bashrc` in the
+same shell (its script's `source ~/.bashrc < /dev/null`: stdin `/dev/null` in the log); `~/.bashrc` for the command's
+shell. The snapshot (5,997 bytes) held the functions and aliases of `.profile` and `.bashrc`, no variable, and
+`export PATH=/usr/bin:/bin`. The command saw `SHELL=/bin/bash`, `PATH=/usr/bin:/bin`, `SHLVL=2`, `BASH_ENV` unset and
+`VS_MARK_BASHRC=1` only. In the home with every file (run 5, within 30 ms) the readers were as in the table above,
+the snapshot (6,007 bytes) held the functions and aliases of `.bashrc` and `.bash_profile` and the same
+`export PATH=/usr/bin:/bin`, and the command saw the same.
 
 - The snapshot (`<config>/shell-snapshots/snapshot-bash-<ms>-<id>.sh`, 6 KB) holds the functions and aliases of
   `.bashrc` and `.bash_profile`, `shopt` and `set -o` settings, Claude Code's own `rg`, `find`, `grep` and `pkill`
@@ -271,21 +283,25 @@ order, within 30 ms of the start:
   (`theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`, a scratch home, stdin a socket, no `SSH_CLIENT`): the
   login bash in a home with `.profile` and `.bashrc` only reads `.profile` and keeps the PATH it sets; with a
   `.bash_login` added it reads only that, with a `.bash_profile` added only that; the non-login `bash -c` reads
-  `.bashrc` with stdin a socket and nothing with stdin `/dev/null`. So on this node the snapshot's shell reads
-  `~/.profile`, and a worker that creates `~/.bash_profile` or `~/.bash_login` replaces it. The gated test now runs
-  in that home too (its second case, and `markers.sh` prints the command's `PATH`), not yet run: the slice's four
-  gated runs were spent.
-- **The command's PATH is the snapshot's.** The snapshot's script (2.1.323's, in the binary: "Add PATH to the file,
-  as this shell has it, plus missing plugin dirs", `builtin printf 'export PATH=%q\n'`) writes the PATH its login
-  shell has after the startup files and its own `source ~/.bashrc`, and every command sources the snapshot. The runs'
-  snapshots held `export PATH=/usr/bin:/bin`, the scratch host's: their startup files didn't change PATH, so the runs
-  couldn't show it (each file now puts a folder of its own first on PATH). A login bash here, started with
-  `PATH=/usr/local/bin:/usr/bin:/bin` in this home, ends with
-  `~/.local/share/swiftly/bin:~/.local/bin:/usr/local/bin:/usr/bin:/bin:/snap/bin:~/.local/bin`: two folders the user
-  (and every worker) can write ahead of `/usr/bin`.
-- So the plain bash a team session starts in (Task 10a) keeps the startup files out of the session's shell only: every
-  command an agent's Bash tool runs reads `~/.bashrc` and runs with the snapshot's PATH, and the snapshot reads the
-  first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` there is, and `~/.bashrc` (S9, S10, S11 items 8 and 10).
+  `.bashrc` with stdin a socket and nothing with stdin `/dev/null`. Run 5 confirmed it with Claude Code in a home
+  shaped like the node's (above): the snapshot's shell reads `~/.profile`, and a worker that creates
+  `~/.bash_profile` or `~/.bash_login` replaces it.
+- **The command's PATH is the one Claude Code started with, not the startup files'** (run 5, correcting the review's
+  reading of the binary, which said the snapshot took its login shell's). Every startup file put a folder of its own
+  first on `PATH`, the login shell read `.profile` (or `.bash_profile`) and `.bashrc`, and the command's own shell
+  read `.bashrc`; yet both snapshots held `export PATH=/usr/bin:/bin` and the command saw `PATH=/usr/bin:/bin`, the
+  scratch host's, which the session's bash and Claude Code had. The binary says why: on Linux the snapshot's script
+  writes `export PATH=<Claude Code's PATH>` (a settings `env.PATH` if one is given, else its own `process.env.PATH`,
+  plus any plugin `bin` folder not on it, `bns` in 2.1.323); the branch commented "Add PATH to the file, as this shell
+  has it, plus missing plugin dirs" (`__cc_path=$PATH`) runs only on Windows, when Claude Code couldn't read the
+  shell's PATH. Each command sources the snapshot after its shell has read `~/.bashrc`, so `~/.bashrc`'s PATH change
+  is overwritten too. On this node Claude Code starts with the unit's PATH
+  (`/usr/local/bin:/usr/bin:/bin:<swiftly's bin>:<node's bin>`), so that is what every agent's Bash command runs
+  with; `~/.local/bin` and `~/bin`, which `.profile` puts first, aren't on it.
+- So the plain bash a team session starts in (Task 10a) keeps the startup files out of the session's shell, and out
+  of the commands' PATH, but not out of the commands: each command's shell runs `~/.bashrc`, and sources the
+  snapshot, which keeps the functions and aliases of the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile`
+  there is and of `~/.bashrc` (a function named `git` runs ahead of any PATH) (S9, S10, S11 items 8 and 10).
 
 **A verifier's command in a session of its own** (`aVerifierCommandInItsOwnSessionStillTimesOut`). The session gets a
 verifier's environment through its inline settings (`LeadLaunch.verifierEnvironment` with the built
@@ -300,12 +316,16 @@ branch-code wrapper as a child in a POSIX session of its own (Task 10c).
 - **The timeout (5000 ms) ended nothing**, in runs 3 and 4: Claude Code moved the command to the background ("The
   command hit the 5-second timeout and is now running in the background") and every process of it, the prefix
   included, still ran 30 s later. So a SIGKILL to the prefix that couldn't be passed on never happens at a timeout:
-  the tree stays whole, Claude Code's.
+  the tree stays whole, Claude Code's. Run 5 the same: all five (prefix, wrapper, shell, script, `sleep`) still ran
+  30.0 s later, the screen saying the command "didn't finish within the 5-second timeout, so the harness moved it to
+  the background".
 - **The interrupt (Escape, 2.0 s after the `sleep` started) ended every process of it** (prefix, wrapper, shell,
-  script, `sleep`) within 0.1 s, runs 3 and 4.
+  script, `sleep`) within 0.1 s, runs 3 and 4; in run 5 all five ended at 2.1 s from the start.
 - **`/exit` with that command still in the background** asked first ("Background work is running … 1. Exit and stop
   tasks 2. Move to background and exit 3. Stay"); Enter (1) ended the session 5.2 s after `/exit`, and every process
-  of the command was gone at the same look.
+  of the command was gone at the same look (run 5: 5.2 s, all five ended at 38.5 s from the command's start).
+- In run 5 the prefix was again in a session of its own (its pid's), the wrapper in a new one, and the shell, the
+  script and `sleep` in the wrapper's, for both commands.
 - Not measured: "Move to background and exit", which leaves the command running past its session by design (in its
   own POSIX session, with no terminal: no session's to the host, as an escape is); and Claude Code ended by a SIGKILL
   with a command running, which can't be passed on to the wrapper's session.
