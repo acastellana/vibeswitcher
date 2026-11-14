@@ -907,6 +907,16 @@ memory and writes no file.
   over the lock path after that last check, during the exec, still makes the new image and its fallback refuse it,
   and the host ends, hanging up every session: not promised (a process that can rename there can kill the host too).
   Held by a refusal before the probe; the check just before the exec is the same function, untested on its own.
+- **Which host it is travels with the state** (Linux). The state says whether the image that wrote it was the user's
+  host (`State.ownsLaunchers`), and a new image whose state says so is the user's host whatever its own probe of the
+  lock path says. That probe is two lookups of a path (the lock opened, then compared with the user's lock path), so a
+  same-user process renaming files there at the probe could make it say "scratch" while the image inherits the user's
+  lock and the vault: it would then take test-only flags, spawn for any client and watch no path. A handover can make a
+  host more the user's, never less. The value is read early only by an image that reads the state anyway (hardened,
+  traced by no one, its start not refused already). A state forged by a process that wasn't the user's host (it can
+  start the host's image with one) can only give the new image the user's host's rules, and the new image then refuses
+  to restore unless the lock it inherits is the file at the user's lock path (`heldLockIsAllowed`). A fresh start's
+  probe is still open to the race (S11 item 5).
 - **A traced new image** closes the secrets unread and goes back; the fallback, traced, ends (S6). (As made in Task
   9c, approved by the lead 2026-11-14: the traced image leaves them unread and open, so that the fallback, which is the
   same process, still has the vault; a traced fallback ends, which closes them. A tracer can't attach to the
@@ -956,6 +966,8 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 (Task 8b's review); `ServerChildTests.aHandoverWhoseLockIsNoLongerAtThePathIsRefused`,
 `ServerChildTests.theNewImageRecordsTheCarriedLockAsTheOneAtThePath` (the carried lock and the lock path);
 `HostHardeningTests.theUsersHostIgnoresTestSecretFlags` (Task 9a);
+`HostHardeningTests.aHandoverNeverMakesTheUsersHostAScratchHost`, `theCarriedOwnershipIsReadOnlyByAnImageThatReadsTheState`,
+`aNewImageWhoseProbeSaysScratchIsStillTheUsersHost` (which host it is, carried);
 `HandoverLinuxTests.aHandoverWritesNoFile`, `HandoverLinuxTests.theStateAndSecretsAreSealed`,
 `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsTheVault`, `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsEverySession`,
 `HandoverLinuxTests.aMegabyteOfSecretsIsHandedOver`, `HandoverLinuxTests.aDowngradeIsRefused`,
@@ -1210,7 +1222,15 @@ against it. Each line says what reduces it now, if anything.
    holds locked at the host's lock path (renamed over it), or lock a fresh file there before the host does: the host
    can't take that lock, and a second host can start on the path; the host only says so (the journal, and `hostNotes`
    until it clears, which `status` shows), and refuses a handover meanwhile. A rename there during a handover's exec
-   makes the new image and its fallback refuse the lock they inherit, and the host ends (S8). S2.
+   makes the new image and its fallback refuse the lock they inherit, and the host ends (S8). At a fresh start (no
+   handover) the host decides whether it is the user's by opening its lock path and comparing that file with the
+   user's lock path, two lookups of a path: a worker renaming files over the path between them, and again at the
+   start's check of the lock it took, makes the user's host (the node's included) take itself for a scratch host on
+   whatever file it then holds. It then runs without the user's host's rules (spawns only for the app and a lead,
+   its paths watched, test-only flags refused, the orphan sweep, its log) until a handover whose new image finds the
+   user's lock, and nothing says so. A fresh start holds no secret yet (the vault starts empty), and a worker that can
+   do this can restart the host into its own files anyway (item 3). A handover's state carries which host it is, so
+   no rename at a new image's probe does this (S8). S2, S6.
 
 **Acting as a session**
 

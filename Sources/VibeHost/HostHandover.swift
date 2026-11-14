@@ -75,6 +75,10 @@ public enum HostHandover {
         /// The sealed images the exec carries (see V2/HandoverMemory.swift): the new image's own copy and the old one's
         /// for a fallback. Nil: none (the Mac's always), and from builds before it.
         public var images: HandoverImages?
+        /// Whether the image that wrote this state was the user's host (`ownsLaunchers`, see V2/HostHardening.swift):
+        /// the new image is then the user's host whatever its own probe of the lock path says. Nil: not said (the
+        /// Mac's always), and from builds before it.
+        public var ownsLaunchers: Bool?
 
         /// Every descriptor the new image must inherit.
         var descriptors: [Int32] {

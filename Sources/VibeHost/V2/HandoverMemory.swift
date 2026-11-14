@@ -30,6 +30,8 @@ public struct HandoverImages: Codable, Equatable {
 ///   new image as `/proc/self/fd/<n>`, `n` kept across the exec: `HostHandover.read(from:)` reads that path unchanged,
 ///   and each reopen starts at the beginning, so the probe, the new image and a fallback read the same bytes. The probe
 ///   gets a state of its own, written before it runs; the exec's is written after it, with the secrets' descriptor.
+/// - **Which host it is** travels in the state (`State.ownsLaunchers`): a new image whose state says the user's host is
+///   the user's host whatever its own probe of the lock path says (`ownsLaunchers(probed:arguments:hardening:refused:)`).
 /// - **The secrets** (the vault) go into a second sealed memfd, named by `State.secretFD`, read from offset 0 (`pread`,
 ///   `secrets(from:)`) and closed only once the restore succeeded (`finish`), so a fallback after a failed restore
 ///   still has them. No size limit short of memory; no hash: nobody can change sealed memory, and only non-dumpable
@@ -313,6 +315,40 @@ public enum HandoverMemory {
         for _ in 0..<6_000 where access(hold, F_OK) != 0 { usleep(10_000) }
     }
 
+    /// Whether this host is the user's (`ownsLaunchers`, set by `HostHardening.afterConfig` on Linux), written into the
+    /// state each handover hands over (`HostHandover.State.ownsLaunchers`). Nil: not set (the Mac, a server in a test
+    /// process), and the state says nothing.
+    static var ownsLaunchers: Bool? {
+        get { reportLock.withLock { ownsLaunchersValue } }
+        set { reportLock.withLock { ownsLaunchersValue = newValue } }
+    }
+    nonisolated(unsafe) private static var ownsLaunchersValue: Bool?
+
+    /// What the image before said it was in the state it wrote (`HostHandover.State.ownsLaunchers`), for
+    /// `HostHardening.ownsLaunchers(probed:carried:)`: read, before anything decides which host this is, by a new image
+    /// after a handover (`arguments` name its state) on Linux that will read that state anyway: hardened and traced by
+    /// no one (`hardening`), its start not refused already (`refused`), and no scratch host's test of a traced image
+    /// (`tracedTestFlag`), which goes back with the state unread. The same sealed bytes `main` reads again to restore.
+    /// Nil otherwise, when the state can't be read (the restore then fails on it and goes back), and on the Mac.
+    public static func carriedOwnsLaunchers(arguments: [String], hardening: HostHardening.Start, refused: Bool) -> Bool? {
+        guard !Platform.CodeIdentity.isAvailable, hardening == .hardened, !refused, !arguments.contains(tracedTestFlag),
+              let path = HostHardening.handover(in: arguments) else { return nil }
+        return (try? HostHandover.read(from: path))?.ownsLaunchers
+    }
+
+    /// Whether this host is the user's (`HostHardening.ownsLaunchers(probed:carried:)`), given its lock path's probe
+    /// (`probed`) and, after a handover, the state's word (`carriedOwnsLaunchers`). When the state makes it the user's
+    /// host against its probe, said on stderr (the journal): something changed the lock path under it.
+    public static func ownsLaunchers(probed: Bool, arguments: [String], hardening: HostHardening.Start, refused: Bool) -> Bool {
+        let carried = carriedOwnsLaunchers(arguments: arguments, hardening: hardening, refused: refused)
+        let owns = HostHardening.ownsLaunchers(probed: probed, carried: carried)
+        if owns, !probed {
+            FileHandle.standardError.write(Data(("vibeswitcher-host: its lock path's probe found a lock of its own, but the state the image "
+                + "before wrote says this is the user's host: it is the user's host\n").utf8))
+        }
+        return owns
+    }
+
     /// Whether this host says what its handovers wrote and took (`finish`, `HostServer.handOverThroughMemory`): a scratch
     /// host on Linux (set by `HostHardening.afterConfig`), for its tests; never the user's host.
     static var reports: Bool {
@@ -475,6 +511,7 @@ extension HostServer {
                     let fallback = HostImages.ownCopy
                     var state = self.handoverState(secretFD: secretFD)
                     state.images = HandoverImages(own: target.fd, fallback: fallback?.fd, server: serverCopy?.fd)
+                    state.ownsLaunchers = HandoverMemory.ownsLaunchers
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
                     if let why = self.carriedLockRefusal(state.lockFD) { throw self.refusedForItsLock(why, executable) }
                     let bytes = try HandoverMemory.encoded(state)

@@ -167,6 +167,49 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         #expect(HostHardening.heldLockIsAllowed(ownsLaunchers: true, usersLock: usersLock)?(held) == false)
     }
 
+    /// A new image after a handover is the user's host when the state the image before wrote says so, whatever its own
+    /// probe of the lock path says (a same-user process renaming that path at the probe makes it say "scratch"): it
+    /// may only become more the user's, never less. Without a carried value (the Mac's state, a build before it) the
+    /// probe decides, as it does on the Mac whatever the state says.
+    @Test func aHandoverNeverMakesTheUsersHostAScratchHost() {
+        if Platform.CodeIdentity.isAvailable {
+            for carried in [true, false, nil] as [Bool?] {
+                #expect(HostHardening.ownsLaunchers(probed: true, carried: carried))
+                #expect(!HostHardening.ownsLaunchers(probed: false, carried: carried))
+            }
+            return
+        }
+        #expect(HostHardening.ownsLaunchers(probed: false, carried: true))
+        #expect(HostHardening.ownsLaunchers(probed: true, carried: true))
+        #expect(HostHardening.ownsLaunchers(probed: true, carried: false))
+        #expect(HostHardening.ownsLaunchers(probed: true, carried: nil))
+        #expect(!HostHardening.ownsLaunchers(probed: false, carried: false))
+        #expect(!HostHardening.ownsLaunchers(probed: false, carried: nil))
+    }
+
+    /// The carried value is read from the state's sealed memory only by a new image that will read that state anyway:
+    /// hardened and untraced, its start not refused already, and no scratch host's test of a traced image (which goes
+    /// back with the state unread). Nil on the Mac, and when the state can't be read.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed memory; the Mac carries no value"))
+    func theCarriedOwnershipIsReadOnlyByAnImageThatReadsTheState() throws {
+        var state = HostHandover.State(fromBuild: 41, startedAt: Date(), lockFD: 3, listenFD: 4, secretFD: nil, sessions: [])
+        state.ownsLaunchers = true
+        let fd = try HandoverMemory.seal(HandoverMemory.encoded(state), name: "test-handover-state")
+        defer { Sys.close(fd) }
+        let arguments = ["host", "--handover", HandoverMemory.path(of: fd)]
+        #expect(HandoverMemory.carriedOwnsLaunchers(arguments: arguments, hardening: .hardened, refused: false) == true)
+        #expect(HandoverMemory.carriedOwnsLaunchers(arguments: arguments, hardening: .refused("traced by pid 9"), refused: false) == nil)
+        #expect(HandoverMemory.carriedOwnsLaunchers(arguments: arguments, hardening: .hardened, refused: true) == nil)
+        #expect(HandoverMemory.carriedOwnsLaunchers(arguments: arguments + [HandoverMemory.tracedTestFlag], hardening: .hardened, refused: false) == nil)
+        #expect(HandoverMemory.carriedOwnsLaunchers(arguments: ["host"], hardening: .hardened, refused: false) == nil)
+        #expect(HandoverMemory.carriedOwnsLaunchers(arguments: ["host", "--handover", "/nonexistent/state"], hardening: .hardened, refused: false) == nil)
+        state.ownsLaunchers = false
+        let scratch = try HandoverMemory.seal(HandoverMemory.encoded(state), name: "test-handover-state")
+        defer { Sys.close(scratch) }
+        #expect(HandoverMemory.carriedOwnsLaunchers(arguments: ["host", "--handover", HandoverMemory.path(of: scratch)],
+                                                    hardening: .hardened, refused: false) == false)
+    }
+
     /// A lock that can't be opened (no right to it) fails closed: the user's lock, by its entry or its spelling, is
     /// still the user's (the more restricted host); another is a scratch lock.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable && geteuid() != 0, "Linux's lock by identity; root opens any file"))
@@ -480,6 +523,36 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         #expect(!after.isEmpty)
         for flag in flags { #expect(!after.contains(flag), "\(flag) in \(after)") }
         #expect(!after.contains(secret))
+    }
+
+    /// The user's host (a scratch home's, no `--lock`) hands over to a new image whose own probe of its lock path finds a
+    /// lock of its own, as a same-user process renaming the path at the probe would make it find (here the new image
+    /// is told another `--lock`), while it inherits the user's lock. The state the image before wrote says it is the
+    /// user's host, so it is: it takes over on the user's lock and refuses a test-only flag. Taken for a scratch host it
+    /// would refuse the user's lock it inherited and go back, and its fallback, given the same path, would end.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's carried ownership; the Mac's probe compares the paths"))
+    func aNewImageWhoseProbeSaysScratchIsStillTheUsersHost() async throws {
+        let dir = "\(shortScratchRoot)/vsho-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let target = dir + "/elsewhere-host"
+        FileManager.default.createFile(atPath: target, contents: Data("""
+            #!/bin/sh
+            case " $* " in *" --handover-probe "*) exec '\(hostLauncher)' "$@";; esac
+            exec '\(hostLauncher)' "$@" --lock '\(dir)/elsewhere.lock' --parser-test-hooks
+
+            """.utf8), attributes: [.posixPermissions: 0o755])
+        let host = try await ServerChildHost(actions: ["call census", "handover \(target)"], usersHost: true)
+        defer { host.stop() }
+        let helper = try #require(await host.firstHelper(), "\(host.said)")
+        #expect(await eventually { host.lines(of: helper).count >= 3 }, "\(host.results)\n\(host.said)")
+        #expect(Array(host.lines(of: helper).dropFirst()) == ["census ok", "handover ok"], "\(host.results)\n\(host.said)")
+        #expect(await eventually { host.said.contains("took over") || host.said.contains("couldn't take over") }, "\(host.said)")
+        #expect(!host.said.contains("couldn't take over"), "\(host.said)")
+        #expect(host.said.contains("took over"), "\(host.said)")
+        #expect(host.said.contains("the state the image before wrote says this is the user's host"), "\(host.said)")
+        #expect(host.said.contains("refused test-only flags (the user's host takes none): --parser-test-hooks"), "\(host.said)")
+        #expect(Platform.Processes.arguments(host.pid).contains(dir + "/elsewhere.lock"))
     }
 }
 

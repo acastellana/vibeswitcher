@@ -49,8 +49,10 @@ let folders = HostImages.folders(arguments: arguments, executable: executable)
 let build = HostBuild.id(ofExecutableAt: folders.image)
 let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
 // The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone). On Linux by
-// the lock file's identity, a link refused (see `HostHardening.lock`); on the Mac by its path, as always.
-let ownsLaunchers = HostHardening.ownsLaunchers(lockPath: lockPath, usersLock: VibePaths.hostLock.path)
+// the lock file's identity, a link refused (see `HostHardening.lock`); on the Mac by its path, as always. On Linux a
+// new image after a handover is the user's host too when the state the image before wrote says so (V2/HandoverMemory.swift).
+let ownsLaunchers = HandoverMemory.ownsLaunchers(probed: HostHardening.ownsLaunchers(lockPath: lockPath, usersLock: VibePaths.hostLock.path),
+                                                 arguments: arguments, hardening: hardening, refused: startRefusal != nil)
 // A scratch host's test of a traced new image (Linux): refused as if traced, so it goes back (V2/HandoverMemory.swift).
 if let traced = HandoverMemory.testTracer(arguments: arguments, ownsLaunchers: ownsLaunchers) { hardening = traced }
 // On Linux the account's own lock is the node's host's alone; its own image and, with --node-root, its server read

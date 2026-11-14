@@ -156,6 +156,19 @@ public enum HostHardening {
         }
     }
 
+    /// Whether this host is the user's, from the probe of its lock path (`probed`: `ownsLaunchers(lockPath:usersLock:)`)
+    /// and, in a new image after a handover, from what the image before it wrote in the state (`carried`:
+    /// `HostHandover.State.ownsLaunchers`, read by `HandoverMemory.carriedOwnsLaunchers`). On Linux the user's host
+    /// when either says so: the probe is a path's, which a same-user process renaming files there can make say
+    /// "scratch" while the image inherits the user's lock and its secrets, so a handover may make a host more the
+    /// user's, never less. The state is sealed memory written by the image before, non-dumpable; a state forged by a
+    /// process that wasn't the user's host can only make the new image refuse more, and refuse to hold a lock that
+    /// isn't the user's (`heldLockIsAllowed`). Without a carried value, and on the Mac, the probe decides, as always.
+    public static func ownsLaunchers(probed: Bool, carried: Bool?) -> Bool {
+        guard !Platform.CodeIdentity.isAvailable else { return probed }
+        return probed || carried == true
+    }
+
     /// `HostServer.Config.heldLockIsAllowed` for a host that is (`ownsLaunchers`) or isn't the user's: on Linux the
     /// held descriptor decides, both ways: the user's host must hold the user's lock (`usersLock`, by identity), and a
     /// scratch host any lock but it. The Mac: nil.
@@ -222,8 +235,10 @@ public enum HostHardening {
     /// `HandoverMemory.holdTestFlag` holding its handovers before their probe, and one given
     /// `HandoverMemory.holdCheckTestFlag` holding them before their check, and one given
     /// `ServerChild.replaceHoldTestFlag` holding a switch's start again of its server child. A scratch
-    /// host on Linux says what its handovers write and take (`HandoverMemory.reports`), for its tests.
+    /// host on Linux says what its handovers write and take (`HandoverMemory.reports`), for its tests. On Linux every
+    /// host's handovers carry which host it is (`HandoverMemory.ownsLaunchers`).
     public static func afterConfig(arguments: [String], ownsLaunchers: Bool, server: HostServer) {
+        HandoverMemory.ownsLaunchers = !Platform.CodeIdentity.isAvailable ? ownsLaunchers : nil
         HandoverMemory.reports = !Platform.CodeIdentity.isAvailable && !ownsLaunchers
         HandoverMemory.failsNext = !Platform.CodeIdentity.isAvailable && !ownsLaunchers && arguments.contains(HandoverMemory.failNextTestFlag)
         HandoverMemory.holdBeforeProbe = !Platform.CodeIdentity.isAvailable && !ownsLaunchers
