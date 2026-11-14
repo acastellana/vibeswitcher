@@ -198,8 +198,9 @@ struct LeadLaunchTests {
 
     /// Each role names its permission mode, auto mode, the one it ran in when no launch named one (Claude Code's
     /// default since 2.1.284, still 2.1.323's: `LinuxLaunch.permissionMode`), on both systems: no longer whatever
-    /// Claude Code's default or the user's `defaultMode` becomes. Once, after the project's command and the
-    /// launch's settings, before `--name` and the start.
+    /// Claude Code's default or the user's `defaultMode` becomes. Once, after the project's command, before `--name`
+    /// and the start; after the launch's settings file (the Mac), before its inline settings (Linux, which go last,
+    /// after `--name`: `aSessionsNameIsItsOwnWhateverItsPromptQuotes`).
     @Test(arguments: [LeadLaunch.Role.lead, .worker, .verifier])
     func eachRoleIsLaunchedInAutoModeByName(role: LeadLaunch.Role) throws {
         let launch = try LeadLaunch.prepare(role: role, root: try root(), task: role == .lead ? nil : "x", base: "claude", prompt: "p",
@@ -208,7 +209,8 @@ struct LeadLaunchTests {
         #expect(words.filter { $0 == "--permission-mode" }.count == 1, "\(role): \(launch.command)")
         #expect(LaunchArguments.value("--permission-mode", in: launch.command) == "auto")
         let mode = try #require(words.firstIndex(of: "--permission-mode")), name = try #require(words.firstIndex(of: "--name"))
-        #expect(mode < name && words.firstIndex(of: "--settings").map { $0 < mode } == true, "\(role): \(words.prefix(12))")
+        let settings = try #require(words.firstIndex(of: "--settings"))
+        #expect(mode < name && (Platform.Tools.roleSettingsInline ? name < settings : settings < mode), "\(role): \(words.prefix(12))")
     }
 
     /// A project whose Claude command names a permission mode keeps it, as it did, and `claude` isn't given two.
@@ -379,6 +381,63 @@ struct LeadLaunchTests {
         let over = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: String(repeating: "a", count: room + 1),
                                           start: "Go.", server: "/s", name: "worker-fits", folder: temp.url("inline-over"))
         #expect(FileManager.default.fileExists(atPath: over.promptFile) && over.command.contains("--append-system-prompt-file"))
+    }
+
+    /// A session's `--name` is the one `prepare` gave it, whatever its prompt and its start say: on Linux the prompt
+    /// is on the command line, and a lead's contract or task text may quote a launch line (`--name 'x'`). The disk
+    /// sweep keeps a live session's TMPDIR by that name (`DiskSpace.removable`), and its transcript is found by it.
+    @Test func aSessionsNameIsItsOwnWhateverItsPromptQuotes() throws {
+        let root = try root()
+        let quoted = "Sessions start as `claude --name 'worker-x' -- 'Go.'`; keep that. --name 'y'"
+        let start = "Read --name 'z' first."
+        let inline = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: quoted, start: start,
+                                            server: "/s", name: "worker-add-login", folder: temp.url("name-inline"))
+        #expect(LeadLaunch.name(inCommand: inline.command) == "worker-add-login")
+        #expect(try LaunchArguments.prompt(in: inline.command) == quoted)
+        // The prompt's own file, too long for one argument (Linux), or as always (the Mac).
+        let long = quoted + String(repeating: " Check every line.", count: 8 * 1024)
+        let file = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: long, start: start,
+                                          server: "/s", name: "worker-long", folder: temp.url("name-file"))
+        #expect(LeadLaunch.name(inCommand: file.command) == "worker-long")
+        #expect(try LaunchArguments.prompt(in: file.command) == long)
+        // And as the host records it (`LinuxLaunch.recorded`), which the sweep and the transcript's search read.
+        #expect(LinuxLaunch.recorded(inline.command).flatMap(LeadLaunch.name(inCommand:)) == "worker-add-login")
+    }
+
+    /// The command the host records and sends of a session (`HostSession.command`, in every welcome, ended sessions
+    /// included for a day) leaves out a role's inline launch values on Linux: 15 to 30 KiB each, a day of a team's
+    /// sessions would pass a frame's 1 MiB and no client would be welcomed. Short values, the project's own words and
+    /// the role's name stay; the Mac records the command as it is.
+    @Test func theRecordedCommandLeavesOutARolesInlineValues() throws {
+        let root = try root()
+        let prompt = String(repeating: "Don't stop: it's \"quoted\" and 'single'. ", count: 600)
+        var made: [String] = []
+        for role in [LeadLaunch.Role.lead, .worker, .verifier] {
+            let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "x", base: "claude --verbose", prompt: prompt,
+                                                start: "Go.", server: "/s", name: "\(role.rawValue)-rec", folder: temp.url("rec-\(role.rawValue)"))
+            let inline = try LinuxLaunch.inline(launch, prompt: prompt, mcp: ["mcpServers": ["vibeswitcher": ["command": "/s"]]],
+                                                settings: ["permissions": ["deny": LeadLaunch.deny(role)]], start: "Go.", enabled: true)
+            made.append(inline.command)
+            #expect(LinuxLaunch.recorded(inline.command, enabled: false) == inline.command)
+            let recorded = try #require(LinuxLaunch.recorded(inline.command, enabled: true))
+            #expect(inline.command.utf8.count > 25_000 && recorded.utf8.count < 2_000, "\(role): \(recorded.utf8.count) bytes")
+            #expect(LaunchArguments.value("--settings", in: recorded) == "…" && LaunchArguments.value("--append-system-prompt", in: recorded) == "…",
+                    "\(role): \(recorded)")
+            // A short MCP config stays as it is, and so does every other word.
+            #expect(LaunchArguments.value("--mcp-config", in: recorded)?.hasPrefix("{\"mcpServers\"") == true)
+            let kept = LaunchArguments.words(recorded).filter { $0 != "…" }
+            #expect(kept == LaunchArguments.words(inline.command).filter { $0.utf8.count <= LinuxLaunch.recordedValueLimit }, "\(role)")
+            #expect(recorded.hasPrefix("claude --verbose ") && recorded.hasSuffix(" -- 'Go.'") && LeadLaunch.name(inCommand: recorded) == "\(role.rawValue)-rec")
+            if role == .verifier { #expect(recorded.contains("--setting-sources user --strict-mcp-config")) }
+        }
+        // Files named, and commands that aren't a role's, stay as they are.
+        let files = "claude --settings '/run/x/settings.json' --mcp-config '/run/x/mcp.json' --append-system-prompt-file '/run/x/prompt.md'"
+        #expect(LinuxLaunch.recorded(files, enabled: true) == files)
+        let shell = "echo " + String(repeating: "x", count: 4_000)
+        #expect(LinuxLaunch.recorded(shell, enabled: true) == shell)
+        #expect(LinuxLaunch.recorded(nil, enabled: true) == nil)
+        // What the host records is what it is given, where nothing is inline (the Mac).
+        #expect(LinuxLaunch.recorded(made[0]) == (Platform.Tools.roleSettingsInline ? LinuxLaunch.recorded(made[0], enabled: true) : made[0]))
     }
 }
 

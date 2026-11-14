@@ -1222,8 +1222,10 @@ bootstrap (S12 item 15).
 `ToolsTests.aSpawnMayNotAddLoaderStartupOrNeverPassedVariables`,
 `LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`, `LeadLaunchTests.theLeadOnLinuxGetsTheTracerRules`,
 `LeadLaunchTests.theMacsDenyRulesAreTodays`, `LeadLaunchTests.aRolesLaunchSettingsAreInlineOnLinux`,
-`LeadLaunchTests.eachRoleIsLaunchedInAutoModeByName`, `LeadLaunchTests.aProjectsOwnPermissionModeIsKept`; planned: stage 2
-plan task 10.
+`LeadLaunchTests.eachRoleIsLaunchedInAutoModeByName`, `LeadLaunchTests.aProjectsOwnPermissionModeIsKept`,
+`LeadLaunchTests.aSessionsNameIsItsOwnWhateverItsPromptQuotes`,
+`LeadLaunchTests.theRecordedCommandLeavesOutARolesInlineValues`,
+`InlineLaunchHostTests.aDayOfInlineRoleSessionsStillGetsAWelcome`; planned: stage 2 plan task 10.
 
 **Tests to write:** The engine's
 E4: `LeadStartTests.theLeadGetsNoCodexWorkers`, `aLeadIsLaunchedByClaudesResolvedPath`,

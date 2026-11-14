@@ -268,8 +268,12 @@ struct AccountUsageTests: LeadTeamFixture {
         }
         // Other options stay, --fallback-model too; no model given: the command as it is.
         let kept = try command("claude --fallback-model opus --verbose --model opus", model: "sonnet")
-        #expect(kept.hasPrefix("claude --fallback-model opus --verbose --append-system-prompt"), "\(kept)")
-        #expect(try command("claude --model opus", model: nil).hasPrefix("claude --model opus --append-system-prompt"))
+        // Followed by the launch's own flags: its prompt file's first (the Mac), its permission mode (Linux, its inline values last).
+        #expect(kept.hasPrefix("claude --fallback-model opus --verbose --append-system-prompt-file ")
+                || kept.hasPrefix("claude --fallback-model opus --verbose --permission-mode auto "), "\(kept)")
+        let unchanged = try command("claude --model opus", model: nil)
+        #expect(unchanged.hasPrefix("claude --model opus --append-system-prompt-file ") || unchanged.hasPrefix("claude --model opus --permission-mode auto "))
+        #expect(LaunchArguments.words(unchanged).filter { $0 == "--model" }.count == 1)
     }
 
     @Test func aLeadOnAScratchVaultNeverReadsTheMacsUsage() throws {

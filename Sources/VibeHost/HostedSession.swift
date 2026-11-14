@@ -170,7 +170,8 @@ public final class HostedSession {
         _ = fcntl(child.masterFD, F_SETFL, fcntl(child.masterFD, F_GETFL) | O_NONBLOCK)
         // Not inherited by sessions started later: another session holding this PTY open would keep it alive.
         _ = fcntl(child.masterFD, F_SETFD, FD_CLOEXEC)
-        let info = HostSession(id: id, tty: tty, childPID: child.pid, cwd: request.cwd, command: request.command,
+        // Recorded without a role's inline launch values on Linux, which every welcome would carry (S10).
+        let info = HostSession(id: id, tty: tty, childPID: child.pid, cwd: request.cwd, command: LinuxLaunch.recorded(request.command),
                                label: request.label, agent: request.agent, title: "", startedAt: Date(),
                                cols: cols, rows: rows, exit: nil)
         let session = HostedSession(info: info, masterFD: child.masterFD, queue: queue, ringCapacity: ringCapacity, launcher: launcher,

@@ -41,11 +41,18 @@ import Testing
             #!/bin/sh
             config=""
             while [ $# -gt 0 ]; do [ "$1" = "--mcp-config" ] && config="$2"; shift; done
-            # The Mac's plutil reads the config; where there's none (Linux), python3 reads it the same way.
+            # The Mac's plutil reads the config; where there's none (Linux), python3 reads it the same way. The config
+            # is a file (the Mac) or the JSON itself (Linux, `Platform.Tools.roleSettingsInline`), as Claude Code takes either.
             at() {
-                if command -v plutil > /dev/null; then plutil -extract "$1" raw -o - "$config"; return; fi
+                if command -v plutil > /dev/null; then
+                    case "$config" in
+                        "{"*) printf '%s' "$config" | plutil -extract "$1" raw -o - - ;;
+                        *) plutil -extract "$1" raw -o - "$config" ;;
+                    esac
+                    return
+                fi
                 python3 -c 'import json, sys
-            value = json.load(open(sys.argv[2]))
+            value = json.loads(sys.argv[2]) if sys.argv[2].startswith("{") else json.load(open(sys.argv[2]))
             for key in sys.argv[1].split("."):
                 try: value = value[int(key)] if isinstance(value, list) else value[key]
                 except (IndexError, KeyError, ValueError): sys.exit(1)

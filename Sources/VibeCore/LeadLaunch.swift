@@ -116,18 +116,13 @@ public enum LeadLaunch {
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
     /// (and commits to the base branch): a worker editing it would conflict with those commits.
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
-        let rules = deny(both: role, base: base, records: records)
-        return rules + LinuxLaunch.denyRules(for: role, base: rules)  // Linux's own rules (S10): none on the Mac.
-    }
-
-    static func deny(both role: Role, base: String?, records: String?) -> [String] {
         switch role {
         case .lead:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName
-                + crossSession
+                + crossSession + LinuxLaunch.denyRules(for: .lead)  // Linux's own (S10): none on the Mac.
         case .verifier:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
-                + crossSession + claudeHome
+                + crossSession + claudeHome + LinuxLaunch.denyRules(for: .verifier)  // Linux's own (S10): none on the Mac.
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -152,6 +147,7 @@ public enum LeadLaunch {
                           "Bash(git rm * \(records)*)"]
             }
             return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession + claudeHome
+                + LinuxLaunch.denyRules(for: .worker)  // Linux's own (S10): none on the Mac.
         }
     }
 
@@ -374,7 +370,7 @@ public enum LeadLaunch {
         if role == .verifier { prepared.environment.merge(verifierEnvironment(server: server)) { $1 } }
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
-        return try LinuxLaunch.inline(prepared, prompt: prompt, mcp: mcp, settings: settings)  // Files on the Mac (S10).
+        return try LinuxLaunch.inline(prepared, prompt: prompt, mcp: mcp, settings: settings, start: start)  // Files on the Mac (S10).
     }
 
     /// A verifier isn't started when its tool server's path can't be its shell prefix (`BranchCode.prefixable`).

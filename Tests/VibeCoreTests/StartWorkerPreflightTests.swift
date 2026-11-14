@@ -58,7 +58,10 @@ struct StartWorkerPreflightTests: LeadTeamFixture {
         #expect(runtime.preflighted == [runtime.claude])
         #expect(runtime.spawned.count == 1)
         #expect(runtime.spawned.first?.cwd == Worktrees.path(root: root, slug: "add-b"))
-        #expect(runtime.spawned.first?.command.hasPrefix(runtime.claude + " --append-system-prompt") == true)
+        // The resolved claude, then the launch's flags: its prompt file first (the Mac); on Linux its inline values come
+        // last (`LinuxLaunch.inline`).
+        let command = runtime.spawned.first?.command ?? ""
+        #expect(command.hasPrefix(runtime.claude + " ") && command.contains(" --append-system-prompt"), "\(command.prefix(200))")
         #expect(BoardStore(root: root).load().task("add-b")?.status == .running)
     }
 }
