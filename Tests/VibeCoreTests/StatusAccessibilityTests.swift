@@ -77,7 +77,7 @@ struct StatusAccessibilityTests {
         #expect(abs(StatusPalette.contrast(.init(hex: 0xFF9500), .init(hex: 0xFFFFFF)) - 2.20) < 0.01)
     }
 
-    /// With Increase Contrast on, every text/background pair in the popover, sidebar, pill and menu bar dots is at
+    /// With Increase Contrast on, every text/background pair in the popover, sidebar and menu bar dots is at
     /// least 7:1 (AAA) on their solid backgrounds and tints; without it, the same text stays AA.
     @Test func increaseContrastGivesSevenToOneAndAAWithout() {
         for highContrast in [false, true] {

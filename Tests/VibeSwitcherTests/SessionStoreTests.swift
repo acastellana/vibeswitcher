@@ -358,9 +358,9 @@ struct SessionStoreTests {
     }
 
     /// A lead's workers and verifiers are the lead's team, not your sessions (UI audit 2026-10-22 #1): with a lead,
-    /// three workers, a verifier and two sessions of your own, three are yours (the menu bar's dots, the pill and the
-    /// counts), the four others its team. A worker turning done tells nobody (its lead reads its report); one needing
-    /// you still does, as your own session turning done does.
+    /// three workers, a verifier and two sessions of your own, three are yours (the menu bar's dots and the counts),
+    /// the four others its team. A worker turning done tells nobody (its lead reads its report); one needing you still
+    /// does, as your own session turning done does.
     @Test func workersAndVerifiersArentCountedAsYourSessions() async throws {
         AppStatus.enabled = false
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
