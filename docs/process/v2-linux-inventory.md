@@ -237,7 +237,9 @@ host took from the Mac:
   `O_PATH` descriptor on a socket file (opening it otherwise is `ENXIO`): `Platform.Sockets.boundFile(of:at:)`
   compares those (`HostPathDeviceTests.aSocketOnAFileSystemWhoseStatDeviceIsNotItsOwnIsTheHosts`).
 - **Its inode is 32 bits** (`udiag_vfs_ino` is a `__u32`): compared with the low 32 bits of the kernel's (`fdinfo`'s
-  `ino`; `st_ino` before 5.14). ext4 here (`/`, which holds the home and `/tmp`), whose inode numbers fit them.
+  `ino`; `st_ino` before 5.14). ext4 here (`/`, which holds the home and `/tmp`), whose inode numbers fit them. A
+  path's file whose number passes 32 bits matches on the low bits only, and the host's watch then checks by a
+  connection too (`Platform.Sockets.kernelMatch`, `SocketsTests.aKernelMatchOnTheLowBitsOfAnInodePast32BitsIsNotConclusive`).
 - **The listener is found by its sockfs inode number** (32 bits) **and its cookie** (`SO_COOKIE`, Linux 4.12): a
   kernel before 4.12 is asked by the number alone, which comes round after 2^32 sockets.
 - **`fchmod` of a Unix socket before its `bind` sets the mode of the file `bind` makes** (the kernel takes the socket

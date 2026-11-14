@@ -317,9 +317,15 @@ socket's path is ever the app.
   connection goes through the path, so no rename before, during or after a check makes another file pass for the
   host's, and a socket renamed over the path is found at the check its rename causes. unix_diag reports the low 32
   bits of the file's inode number: on the file system that holds `~/.vibeswitcher` here (ext4) inode numbers fit 32
-  bits and the match is exact; on one whose numbers go past them (btrfs, XFS's `inode64`, tmpfs's `inode64`) a
-  worker that made files on it until one shared those bits with the host's socket file could pass that one off as
-  the host's. unix_diag finds the listener by its sockfs inode number, also 32 bits, and its cookie (`SO_COOKIE`,
+  bits and the match is exact. On one whose numbers go past them (btrfs, XFS's `inode64`, tmpfs's `inode64`) a
+  worker could make files until one shared those bits with the host's socket file, so a match whose path's file has a
+  number past 32 bits is not taken on the kernel's word (`Platform.Sockets.kernelMatch`): the check also makes the
+  fallback's connection below (it must reach this host, the path naming the file the kernel matched before and after
+  it), and makes it again at each housekeeping. Such a file then passes only by also winning that connection's race.
+  Not caught: on a file system that hands out numbers both under and past 32 bits (XFS's `inode64` places an inode by
+  where it lies), a host socket file past 32 bits and a worker's file under them sharing its low bits still match
+  exactly as the check sees them, the path's file's number fitting 32 bits. unix_diag finds the listener by its sockfs
+  inode number, also 32 bits, and its cookie (`SO_COOKIE`,
   Linux 4.12); before 4.12 there is no cookie and the number alone names it, so after 2^32 sockets made the kernel
   could answer for another socket of that number. **Where the kernel can't say** (`CONFIG_UNIX_DIAG` off, or no
   `/proc`; and on the Mac, which doesn't watch its path) the check falls back to a connection made
@@ -1228,9 +1234,12 @@ against it. Each line says what reduces it now, if anything.
    the path again (seconds). The server is unaffected (its connector). No more than ptrace of those sessions gives.
    Where the kernel has no unix_diag (or no `/proc`) the host's check of its path is by a connection through it,
    which a worker renaming files around it can beat, each time it wins until a housekeeping it loses (30 s each); on
-   a file system whose inode numbers pass 32 bits, a file sharing the low 32 bits of the host's socket file's passes;
-   and on a kernel before 4.12 (no `SO_COOKIE`) unix_diag names the host's listener by its 32-bit sockfs inode number
-   alone, so once those numbers come round it could answer for another socket. A worker can likewise put a file it
+   a file system whose inode numbers pass 32 bits, a file sharing the low 32 bits of the host's socket file's passes
+   the kernel's check and is then checked by that connection too, which it must beat in the same way (and on one that
+   hands out numbers under 32 bits as well, XFS's `inode64`, a file under them sharing the low bits of a host socket
+   file past them passes on the kernel's word); and on a kernel before 4.12 (no `SO_COOKIE`) unix_diag names the
+   host's listener by its 32-bit sockfs inode number alone, so once those numbers come round it could answer for
+   another socket. A worker can likewise put a file it
    holds locked at the host's lock path (renamed over it), or lock a fresh file there before the host does: the host
    can't take that lock, and a second host can start on the path; the host only says so (the journal, and `hostNotes`
    until it clears, which `status` shows), and refuses a handover meanwhile. A rename there during a handover's exec

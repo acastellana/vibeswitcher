@@ -16,7 +16,8 @@
 //
 // `device` is in the encoding stat(2) gives `st_dev` (the kernel's own, which unix_diag reports, converted).
 // `inode` is the low 32 bits of the file's inode number: unix_diag reports no more (its `udiag_vfs_ino` is a __u32),
-// so a caller compares it with the low 32 bits of a stat's `st_ino`.
+// so a caller compares it with the low 32 bits of a stat's `st_ino`, and takes a match as the same file only when that
+// number fits 32 bits (`Platform.Sockets.kernelMatch`).
 int vibe_socket_bound_file(int fd, uint64_t *device, uint64_t *inode);
 
 // What `path` names (no link followed: a link there is the link) as the kernel knows the file, every answer read from

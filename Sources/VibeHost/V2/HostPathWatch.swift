@@ -19,7 +19,10 @@ import VibeCore
 ///   with the same socket file named before and after. A process renaming files over the path around that connect
 ///   can beat it, and the file it passed off is then recorded: the folder's changes don't look again, each
 ///   housekeeping does, the same way, a race that process must win again each time (the security architecture
-///   document's S2).
+///   document's S2). unix_diag reports only the low 32 bits of the listener's file's inode number, so where the
+///   path's file's number passes 32 bits (btrfs, XFS's `inode64`, tmpfs's `inode64`) the kernel's match is not
+///   enough: the connection is asked for as well, with the kernel's file named before and after it, and at each
+///   housekeeping again.
 /// - The socket path naming something else, nothing, or a listener not the host's: what is there is removed, a fresh
 ///   listener bound there (`UnixSocket.listen`, its senders passed before its first accept), checked as above (up to
 ///   `bindAttempts` times, each losing listener closed), swapped in for the accept source, and the old listener
@@ -256,16 +259,28 @@ final class HostPathWatch {
     /// kernel can't say (the Mac, a Linux without unix_diag or /proc), a socket file that led to a listener of this
     /// process (`leadsHere`, not `listener` in particular) and named the same file before and after: renames around
     /// the connect (the path naming another file at both looks and the host's socket during the connect) can pass
-    /// that file off as `listener`'s. Nil otherwise.
+    /// that file off as `listener`'s. Where the kernel matched only the low 32 bits of an inode number past them
+    /// (`.sharesLowBits`: another file can share them), both: the file the kernel matched, named before and after a
+    /// connection that led to this process. Each housekeeping's check asks again, so that connection is made again
+    /// there. Nil otherwise.
     static func verifiedIdentity(of path: String, listener: Int32) -> FileIdentity? {
-        switch Platform.Sockets.boundFile(of: listener, at: path) {
+        verifiedIdentity(of: path, kernel: Platform.Sockets.boundFile(of: listener, at: path))
+    }
+
+    /// `verifiedIdentity(of:listener:)` given the kernel's answer for the path (`Platform.Sockets.boundFile(of:at:)`),
+    /// so a test can give any.
+    static func verifiedIdentity(of path: String, kernel: Platform.Sockets.BoundFileAtPath) -> FileIdentity? {
+        var matched: FileIdentity?
+        switch kernel {
         case .bound(let device, let inode): return FileIdentity(device: device, inode: inode)
         case .another: return nil
+        case .sharesLowBits(let device, let inode): matched = FileIdentity(device: device, inode: inode)
         case .cantSay: break
         }
         var info = stat()
         guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK else { return nil }
         let before = FileIdentity(info)
+        if let matched, matched != before { return nil }
         guard leadsHere(path) else { return nil }
         return identity(atPath: path) == before ? before : nil
     }

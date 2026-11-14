@@ -896,6 +896,28 @@ extension SocketsTests {
         #expect(Platform.Sockets.boundFile(of: ends[0]) == nil)
     }
 
+    /// unix_diag reports the low 32 bits of a listener's file's inode number. A path's file whose own number passes 32
+    /// bits and shares those low bits (on btrfs, XFS's `inode64` or tmpfs's `inode64`, a worker can make files until
+    /// one does) is not taken as the listener's on the kernel's word (`.sameLowBits`: the caller checks otherwise as
+    /// well); one whose number fits 32 bits is compared whole (`.sameFile`), up to `UInt32.max` itself. Another device,
+    /// other low bits, or a file that is no socket is another file. Pure: on both systems.
+    @Test func aKernelMatchOnTheLowBitsOfAnInodePast32BitsIsNotConclusive() {
+        func match(socket: Bool = true, device: UInt64 = 0x820, inode: UInt64, bound: UInt64) -> Platform.Sockets.KernelMatch {
+            Platform.Sockets.kernelMatch(pathIsSocket: socket, pathDevice: device, pathInode: inode, boundDevice: 0x820, boundInode: bound)
+        }
+        let low: UInt64 = 0x2a
+        #expect(match(inode: 0x1_0000_0000 | low, bound: low) == .sameLowBits)
+        #expect(match(inode: 0xffff_0000_0000_002a, bound: low) == .sameLowBits)
+        #expect(match(inode: UInt64(UInt32.max) + 1, bound: 0) == .sameLowBits)
+        #expect(match(inode: low, bound: low) == .sameFile)
+        #expect(match(inode: UInt64(UInt32.max), bound: UInt64(UInt32.max)) == .sameFile)
+        #expect(match(inode: 0x1_0000_002b, bound: low) == .another)
+        #expect(match(inode: low + 1, bound: low) == .another)
+        #expect(match(device: 0x821, inode: low, bound: low) == .another)
+        #expect(match(socket: false, inode: low, bound: low) == .another)
+        #expect(match(socket: false, inode: 0x1_0000_0000 | low, bound: low) == .another)
+    }
+
     /// The Mac can't ask the kernel what file a socket is bound to: nil, and callers keep their check through the path.
     @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's form"))
     func theMacKnowsNoBoundFile() throws {

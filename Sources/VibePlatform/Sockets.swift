@@ -22,8 +22,8 @@ extension Platform {
     ///   path after it, as it always did.
     /// - `boundFile(of:) -> (device: UInt64, inode: UInt64)?`: the file a listener is bound to, as the kernel knows it
     ///   (Linux's unix_diag); nil on the Mac, which can't say.
-    /// - `boundFile(of:at:) -> BoundFileAtPath`: whether a path names that file, compared as the kernel knows both;
-    ///   `.cantSay` on the Mac.
+    /// - `boundFile(of:at:) -> BoundFileAtPath`: whether a path names that file, compared as the kernel knows both
+    ///   (`kernelMatch`, the same on both); `.cantSay` on the Mac.
     public enum Sockets {
         /// The address of the socket at `path`; nil when the path is too long for one: with the 0 that ends it, it
         /// must fit `sun_path`, 104 bytes on the Mac and 108 on Linux. The Mac's address also holds its own length.
@@ -51,6 +51,37 @@ extension Platform {
             /// The path names the listener's file, whose device and inode are these, as `stat` gives them (`st_dev`,
             /// `st_ino`), so a later `lstat` of the path can be compared with them.
             case bound(device: UInt64, inode: UInt64)
+            /// The path names a socket file on the listener's file system whose inode number passes 32 bits and whose
+            /// low 32 bits are the ones unix_diag reports for the listener's file (`kernelMatch`'s `.sameLowBits`): it
+            /// may be that file, or another one a process made until it shared those bits. Not conclusive: the caller
+            /// checks otherwise as well, and compares what it finds there with this device and inode (`stat`'s, as
+            /// `.bound`'s).
+            case sharesLowBits(device: UInt64, inode: UInt64)
+        }
+
+        /// How a path's file compares with the file a listener is bound to as unix_diag reports it (`boundFile(of:at:)`'s
+        /// decision, a function of its own so it can be tested with any inode number).
+        public enum KernelMatch: Equatable {
+            /// Not a socket file, on another file system, or another inode number.
+            case another
+            /// The listener's file: same file system, and an inode number that fits 32 bits and is the listener's.
+            case sameFile
+            /// Same file system and the same low 32 bits, but the path's file's inode number passes 32 bits: unix_diag
+            /// reports no more of the listener's, so this may be another file sharing those bits.
+            case sameLowBits
+        }
+
+        /// `boundFile(of:at:)`'s decision. `pathDevice` and `pathInode` are the path's file's as the kernel knows them
+        /// (its file system's superblock device, its full inode number); `boundDevice` and `boundInode` the listener's
+        /// file's, as unix_diag reports them (`boundFile(of:)`: the inode number's low 32 bits). Only a path's file
+        /// whose inode number fits 32 bits is compared whole. Not caught: on a file system that hands out both kinds
+        /// (XFS's `inode64` places an inode by where it lies), a listener's file past 32 bits and a path's file under
+        /// them that shares its low bits are `.sameFile` (the security architecture document's S11).
+        public static func kernelMatch(pathIsSocket: Bool, pathDevice: UInt64, pathInode: UInt64,
+                                       boundDevice: UInt64, boundInode: UInt64) -> KernelMatch {
+            guard pathIsSocket, pathDevice == boundDevice,
+                  UInt32(truncatingIfNeeded: pathInode) == UInt32(truncatingIfNeeded: boundInode) else { return .another }
+            return pathInode > UInt64(UInt32.max) ? .sameLowBits : .sameFile
         }
 
         /// `SOCK_STREAM` as the number `socket` and `socketpair` take: glibc's is an enum to Swift, the Mac's and

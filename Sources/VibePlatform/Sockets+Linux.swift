@@ -122,7 +122,8 @@ extension Platform.Sockets {
     /// and the low 32 bits of its inode number (the kernel's own, /proc/self/fdinfo's from Linux 5.14; `st_ino`
     /// before), each read from one descriptor opened on the path (`O_PATH`: nothing goes through the path after, and
     /// no rename meanwhile mixes two files). A file on a file system whose inode numbers pass 32 bits can share those
-    /// bits with the listener's. `.cantSay` when unix_diag (`boundFile(of:)`) or /proc can't say.
+    /// bits with the listener's: a match whose path's file's number passes them is `.sharesLowBits`, for the caller to
+    /// check otherwise as well (`kernelMatch`). `.cantSay` when unix_diag (`boundFile(of:)`) or /proc can't say.
     public static func boundFile(of listener: Int32, at path: String) -> BoundFileAtPath {
         guard let bound = boundFile(of: listener) else { return .cantSay }
         var statDevice: UInt64 = 0
@@ -135,9 +136,12 @@ extension Platform.Sockets {
         case -1: return .another
         default: return .cantSay
         }
-        guard mode & UInt32(S_IFMT) == UInt32(S_IFSOCK), device == bound.device,
-              UInt32(truncatingIfNeeded: inode) == UInt32(truncatingIfNeeded: bound.inode) else { return .another }
-        return .bound(device: statDevice, inode: statInode)
+        switch kernelMatch(pathIsSocket: mode & UInt32(S_IFMT) == UInt32(S_IFSOCK), pathDevice: device, pathInode: inode,
+                           boundDevice: bound.device, boundInode: bound.inode) {
+        case .another: return .another
+        case .sameFile: return .bound(device: statDevice, inode: statInode)
+        case .sameLowBits: return .sharesLowBits(device: statDevice, inode: statInode)
+        }
     }
 }
 
