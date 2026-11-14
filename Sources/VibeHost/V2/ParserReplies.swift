@@ -15,8 +15,11 @@ import VibeCore
 ///   `sendResponse` in `Terminal.swift`; `swiftTermResponders` lists every one with what it answers or why it's left
 ///   out, and `ParserReplyTests.everyResponderInSwiftTermIsListed` reads the checkout, so a SwiftTerm bump that adds
 ///   one fails there first). Left out, their replies dropped: OSC 52 (the clipboard), the title reports (`OSC l`,
-///   `OSC L`), DECRQCRA, the kitty graphics replies, and the reports of what a user does (the mouse, focus, clicks,
-///   typing), which a headless terminal never has.
+///   `OSC L`), DECRQCRA, the kitty graphics replies, and the reports of what a user does (the mouse, clicks, typing),
+///   which a headless terminal never has. The focus report is answered only as the terminal makes it unasked: when
+///   the program turns focus events on (DECSET 1004, which Claude Code does as it starts), SwiftTerm, as xterm does,
+///   says at once that it has focus (`CSI I`), one report per 1004 the setting names (found by the stage 2 plan's
+///   Task 12a, with a real Claude Code).
 /// - **The output** is read for queries as SwiftTerm's parser reads it (`QueryScanner`, its state table cut to what
 ///   finds a query), on the session's queue before the parser is fed, so a query is pending before its reply can come.
 /// - **A view attached** answers the program's queries itself and the parser's replies are skipped, as before; a
@@ -63,6 +66,9 @@ struct ParserReplies {
         /// The program status feature query (`OSC 7501 ; ? …`), which the host answers itself (`ProgramStatus.queryReply`)
         /// when the parser forwards it: no parser's `.reply` is one.
         case programStatusQuery
+        /// Focus events turned on (DECSET 1004, `CSI ? … 1004 … h`), which the terminal answers with the focus it has
+        /// (`sendFocusReport`): `CSI I` (or `CSI O`).
+        case focus
 
         var description: String {
             switch self {
@@ -81,6 +87,7 @@ struct ParserReplies {
             case .paletteColor: "palette colour"
             case .dynamicColor(let code): "colour \(code)"
             case .programStatusQuery: "program status"
+            case .focus: "focus events (DECSET 1004)"
             }
         }
     }
@@ -115,6 +122,7 @@ struct ParserReplies {
         case .paletteColor: return #"\x1b\]4;\d{1,3};"# + rgb + #"\x1b\\"#
         case .dynamicColor(let code): return #"\x1b\]"# + String(code) + ";" + rgb + #"\x1b\\"#
         case .programStatusQuery: return NSRegularExpression.escapedPattern(for: String(decoding: ProgramStatus.queryReply, as: UTF8.self))
+        case .focus: return #"\x1b\[[IO]"#
         }
     }
 
@@ -133,7 +141,7 @@ struct ParserReplies {
     private static let patterns: [Kind: NSRegularExpression] = {
         let kinds: [Kind] = [.status, .cursor, .decCursor, .primaryAttributes, .secondaryAttributes, .decMode, .ansiMode,
                              .kittyKeyboard, .statusString, .version, .paletteColor, .dynamicColor(10), .dynamicColor(11),
-                             .dynamicColor(12)]
+                             .dynamicColor(12), .focus]
             + decReports.keys.map(Kind.decReport) + Set(windowReports.values).map(Kind.window)
         var patterns: [Kind: NSRegularExpression] = [:]
         for kind in kinds {
@@ -175,7 +183,7 @@ struct ParserReplies {
         guard bytes.count >= 3, bytes[0] == 0x1b else { return [] }
         switch bytes[1] {
         case 0x5b:
-            return [.status, .cursor, .decCursor, .primaryAttributes, .secondaryAttributes, .decMode, .ansiMode, .kittyKeyboard]
+            return [.status, .cursor, .decCursor, .primaryAttributes, .secondaryAttributes, .decMode, .ansiMode, .kittyKeyboard, .focus]
                 + decReports.keys.sorted().map(Kind.decReport) + Set(windowReports.values).sorted().map(Kind.window)
         case 0x50: return [.statusString, .version, .decReport(63)]
         case 0x5d: return [.paletteColor, .dynamicColor(10), .dynamicColor(11), .dynamicColor(12)]
@@ -368,7 +376,8 @@ struct ParserReplies {
         (#"sendResponse(cc.CSI,buffer)"#, 1, .leftOut("a mouse report")),
         (#"sendResponse("\u{1b}[<0;\(x);\(y)M")"#, 1, .leftOut("a semantic prompt's click: a user's")),
         (#"tdel?.send(source:self,data:data[...])"#, 1, .leftOut("a semantic prompt's click: a user's")),
-        (#"tdel?.send(source:self,data:data[0...])"#, 1, .leftOut("a focus report: a view's")),
+        // `sendFocusReport`: a view's focus changing (never in a headless terminal), and DECSET 1004's report at once.
+        (#"tdel?.send(source:self,data:data[0...])"#, 1, .answers([.focus])),
         (#"tdel?.send(source:self,data:data)"#, 1, .leftOut("a user's input (`sendUserInput`)")),
         (#"tdel?.send(source:self,data:([UInt8](text.utf8))[...])"#, 1, .leftOut("`sendResponse`'s own body")),
         (#"tdel?.send(source:self,data:buffer[...])"#, 1, .leftOut("`sendResponse`'s own body")),
@@ -496,7 +505,7 @@ struct QueryScanner {
             case 0x3c...0x3f: if state == .csiEntry { collect.append(byte); state = .csiParam } else { state = .csiIgnore }
             case 0x20...0x2f: collect.append(byte); state = .csiIntermediate
             case 0x40...0x7e:
-                if !tooManyParameters, let kind = Self.query(final: byte, collect: collect, pars: pars) { found(kind) }
+                if !tooManyParameters { Self.queries(final: byte, collect: collect, pars: pars).forEach(found) }
                 state = .ground
             case 0xa0...: state = .ground
             default: return
@@ -506,7 +515,7 @@ struct QueryScanner {
             case 0x20...0x2f: collect.append(byte)
             case 0x30...0x3f: state = .csiIgnore
             case 0x40...0x7e:
-                if !tooManyParameters, let kind = Self.query(final: byte, collect: collect, pars: pars) { found(kind) }
+                if !tooManyParameters { Self.queries(final: byte, collect: collect, pars: pars).forEach(found) }
                 state = .ground
             case 0xa0...: state = .ground
             default: return
@@ -544,6 +553,12 @@ struct QueryScanner {
             return
         }
         if pars.count >= Self.maximumParameters { tooManyParameters = true } else if !tooManyParameters { pars.append(0) }
+    }
+
+    /// The queries a CSI is: `query`'s, or DECSET's focus events (`cmdSetMode`, one report for each 1004 it names).
+    static func queries(final: UInt8, collect: [UInt8], pars: [Int]) -> [ParserReplies.Kind] {
+        if final == 0x68, collect == [0x3f] { return pars.filter { $0 == 1004 }.map { _ in .focus } }
+        return query(final: final, collect: collect, pars: pars).map { [$0] } ?? []
     }
 
     /// The query a CSI is, as SwiftTerm's handlers answer it: `cmdDeviceStatus`, `cmdSendDeviceAttributes`,

@@ -50,6 +50,21 @@ import Testing
         #expect(lines.all.isEmpty, "\(lines.all)")
     }
 
+    /// A program turns focus events on (DECSET 1004, as Claude Code does as it starts) with no view attached: the
+    /// headless terminal says at once that it has focus (`CSI I`, xterm's way), and that report reaches the program as
+    /// the answer to the setting, the host's log saying nothing dropped (found by the stage 2 plan's Task 12a).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's reply check; the Mac passes every reply"))
+    func aProgramTurningFocusEventsOnIsToldItHasFocus() async throws {
+        let probe = SessionProbe(), lines = Lines()
+        let session = try start("stty raw -echo; printf '\\033[?1004h'; dd bs=1 count=3 2>/dev/null | od -An -c; echo done; "
+            + "printf '\\033[?1004l'; stty sane; \(keepRunning)", probe: probe, lines: lines)
+        defer { probe.end(session) }
+        // Not answered, the program would wait on: a minute is the test's patience.
+        #expect(await eventually(timeout: 60) { probe.text.contains("done") }, "\(probe.diagnosis(session)); \(lines.all)")
+        #expect(Self.odBytes(probe.text).contains("033[I"), "\(probe.diagnosis(session))")
+        #expect(lines.all.isEmpty, "\(lines.all)")
+    }
+
     /// A parser sends a reply its session never asked for (a test hook, as a parser bug would): nothing reaches the
     /// program, and the host's log says it was dropped. A scratch host's, so the line is the host's own log's.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's reply check; the Mac passes every reply"))
@@ -259,10 +274,13 @@ import Testing
             "\u{1b}]4;1;?;2;?\u{07}", "\u{1b}]10;?\u{07}", "\u{1b}]11;?\u{1b}\\", "\u{1b}]12;?\u{07}", "\u{1b}]10;?;?\u{07}",
             // 8-bit controls: the replies' CSI is one byte.
             "\u{1b} G\u{1b}[6n\u{1b} F",
+            // Focus events turned on: the terminal says at once that it has focus (xterm's way), once per 1004 named.
+            "\u{1b}[?1004h", "\u{1b}[?1000;1004h", "\u{1b}[?1004;1004h", "\u{1b} G\u{1b}[?1004h\u{1b} F",
         ]
         let notCounted = [
             "\u{1b}[1c", "\u{1b}[=c", "\u{1b}[>1q", "\u{1b}[?53n", "\u{1b}[7n", "\u{1b}[20t", "\u{1b}[21t", "\u{1b}]52;c;?\u{07}",
             "\u{1b}[1;1;1;1;1;1*y", "\u{1b}[6;1H", "\u{1b}]0;title\u{07}", "plain text, \u{1b}[1mbold\u{1b}[0m",
+            "\u{1b}[?1004l", "\u{1b}[1004h", "\u{1b}[?1000h",
         ]
         for (queries, counted) in [(answered, true), (notCounted, false)] {
             for query in queries {

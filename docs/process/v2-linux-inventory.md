@@ -161,6 +161,44 @@ taken out of `.claude.json` again after Claude Code has ended. Claude Code's own
 any session: its transcript under `projects/<the scratch project's name>/`, a folder in `session-env/` and in
 `shell-snapshots/`, and the prompt in `history.jsonl`.
 
+## A real Claude Code under a scratch host (2026-11-14, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+Stage 2's Task 12a, on this machine (Ubuntu 24.04 under WSL2, 24 cores):
+`RealClaudeHostTests.aClaudeSessionSurvivesItsClientAHandoverAndAKilledParser` in
+`Tests/VibeHostTests/RealClaudeHostTests.swift`, run by
+`VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<config> bash scripts/test.sh --filter RealClaudeHostTests`, `<config>` the
+throwaway Claude Code config folder of R10. Claude Code **2.1.323** (`~/.local/bin/claude`, the native build), model
+sonnet (Sonnet 5.5 on the screen). Without the variable the test is skipped, saying why.
+
+A scratch host (`ScratchHostProcess`: its own home, socket and lock, the test its app through the connector stand-in)
+spawns `exec claude --model sonnet --permission-mode manual` in a scratch repository whose trust entry the run writes
+into `<config>/.claude.json` (and takes out at its end), `CLAUDE_CONFIG_DIR` coming through the spawn request's
+`env`. No prompt is sent. Each step's time, from the step before, in the passing run (the same within 0.1 s in the
+two runs before it, which failed only at step 6):
+
+| Step | Time | From the spawn |
+| --- | --- | --- |
+| 1. A client reads the screen until the prompt shows (Claude Code's box, `⏸ manual mode on · ? for shortcuts`), its screen the same a second later; it disconnects | 1.4 s | 1.4 s |
+| 2. A new client attaches: the same screen | 0.1 s | 1.5 s |
+| 3. A handover to the same code's build (`newBinary`, through sealed memory): listed with the same id and terminal (`ttypts4`), still running, the same screen | 0.2 s | 1.8 s |
+| 4. The parser killed (`SIGKILL`): the watchdog starts another from the replay, and its screen is the same | 0.1 s | 1.9 s |
+| 5. `/exit` sent as an `inputUnit` (the text, Enter 0.06 s later): the session's exit recorded, "exited 0" | 0.4 s | 2.3 s |
+
+**Step 6, no parser reply dropped (Task 9e), found two replies Claude Code's start draws from the headless terminal
+that 9e's table didn't answer:**
+
+- **The focus report.** Claude Code turns focus events on as it starts (`CSI ? 1004 h`), and SwiftTerm 1.19.0, as
+  xterm does, says at once that it has focus (`CSI I`, `sendFocusReport`). 9e's table took that responder for a
+  view's only, so on Linux the report was dropped and logged, and Claude Code never heard it had focus while no view
+  was attached (the Mac types it). Fixed in `ParserReplies`: DECSET 1004 is a query whose reply is `CSI I` or
+  `CSI O`, one per 1004 the setting names (`ParserReplyTests.aProgramTurningFocusEventsOnIsToldItHasFocus`, and
+  `everyQueryIsAnsweredInItsGrammar`'s cases).
+- **The kitty graphics probe** (`APC G i=31,…,a=q;… ST`), which the headless terminal answers `APC G i=31;OK ST`.
+  9e leaves kitty graphics out on purpose, so the reply is dropped and logged ("it is no reply"), once per session
+  start: Claude Code then takes the terminal for one without kitty graphics, which a headless parser is in effect.
+  The test allows that drop and no other (nor one hidden behind the log's once-a-second line). Whether to answer the
+  probe (a query only, its `OK` reply only) is the lead's call.
+
 ## Sealed copies: the measurement (2026-11-13)
 
 Stage 2's Task 3b, on this machine: kernel 5.15.167.4-microsoft-standard-WSL2, Ubuntu 24.04 under WSL2, 24 cores,
