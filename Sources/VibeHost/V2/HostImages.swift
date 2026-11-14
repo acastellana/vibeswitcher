@@ -123,7 +123,7 @@ public enum HostImages {
     /// Where a host's build's files are.
     public struct Folders: Equatable, Sendable {
         /// The host's image as its build names it, never executed by this: its build id (`HostBuild.id`), the folder
-        /// of the rest, and what a fallback execs until Task 9c.
+        /// of the rest, and the name a fallback is given (`HandoverMemory.fallbackImageFlag`; its sealed copy is what runs).
         public var image: String
         /// The install folder the server child is told (`--node-root`): `--node-root`'s, else the image's folder.
         public var installFolder: String

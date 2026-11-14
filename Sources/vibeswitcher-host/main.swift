@@ -124,7 +124,8 @@ config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerat
     result.kept.append(item.element)
 }.kept)
 // This build's own copy, there for as long as it runs: if a build it hands over to can't restore, it comes back to it.
-// On Linux its image by path until Task 9c carries its sealed copy across the exec.
+// On Linux what runs is its own sealed copy (`HostImages.ownCopy`, carried across the exec: V2/HandoverMemory.swift);
+// this path only names it, as `--handover-fallback-image` (its build and folders). The Mac: its launcher copy, by path.
 config.fallback = images.own != nil ? folders.image : config.launcher == executable ? nil : config.launcher
 
 func log(_ text: String) { FileHandle.standardError.write(Data("vibeswitcher-host: \(text)\n".utf8)) }

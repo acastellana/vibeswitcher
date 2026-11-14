@@ -40,9 +40,9 @@ public struct HandoverImages: Codable, Equatable {
 /// - **A traced new image** goes back without reading the secrets, leaving them for the build before; the fallback,
 ///   traced too, ends, and with it every descriptor (`main`). A scratch host's test makes a new image take itself for
 ///   traced (`--handover-test-traced`, `testTracer`).
-/// - **Once restored** (`finish`) the state's and the secrets' memfds and the old image's copy are closed (never
-///   unlinked: there is no file), and every other descriptor the state names that this image still holds as inherited
-///   is made close-on-exec (`keep:` cleared the flag for the exec).
+/// - **Once restored** (`finish`) the state's and the secrets' memfds and every carried image copy but its own are
+///   closed (never unlinked: there is no file), and every other descriptor the state names that this image still holds
+///   as inherited is made close-on-exec (`keep:` cleared the flag for the exec).
 /// - **A fresh host** that holds the lock removes a stale `host.lock.handover` and its `.partial` (the Mac's format, a
 ///   scratch host's from before), saying so (`removeStaleStateFiles`).
 ///
@@ -168,8 +168,9 @@ public enum HandoverMemory {
     // MARK: The new image
 
     /// `main`'s hook once a new image (or a fallback) has restored and taken its server child and test stand-in again:
-    /// on Linux the state's memfd (`statePath`), the secrets' (`state.secretFD`) and the old image's copy
-    /// (`state.images.fallback`, unless it is this image's own, as in a fallback) closed when still held as inherited;
+    /// on Linux the state's memfd (`statePath`), the secrets' (`state.secretFD`) and each carried image copy that isn't
+    /// this image's own (`state.images.fallback` in the new image; `state.images.own` in a fallback, which holds it
+    /// still when the new image went back before adopting it) closed when still held as inherited;
     /// every other descriptor `state` names that is still held as inherited made close-on-exec. A scratch host says
     /// what it found (`reports`). The Mac: nothing.
     public static func finish(_ state: HostHandover.State, statePath: String, server: HostServer) {
@@ -177,7 +178,10 @@ public enum HandoverMemory {
         let own = HostImages.ownCopy?.fd
         let stateFD = descriptor(named: statePath)
         var closing = [stateFD, state.secretFD].compactMap { $0 }
-        if let fallback = state.images?.fallback, fallback != own { closing.append(fallback) }
+        // Each image carried that isn't this image's own: the old image's copy in the new image, and in a fallback the
+        // new build's copy, which it never adopted when its start was refused before `HostImages.load` (the 9c review).
+        // The server's copy (Task 9d) is `ServerChild`'s to take.
+        for image in [state.images?.fallback, state.images?.own].compactMap({ $0 }) where image != own { closing.append(image) }
         if reports {
             var lines: [String] = []
             if let stateFD { lines.append("state fd \(stateFD) " + described(stateFD)) }

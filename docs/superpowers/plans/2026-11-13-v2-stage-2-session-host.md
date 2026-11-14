@@ -1518,10 +1518,15 @@ is green.
   SHA-256 of the copy's bytes, of a format this build reads; a path inside a worktree or a session's working folder,
   and a script (`copy.isScript`), refused by name)
 - Modify: `HostServer.swift`: `Config.installRoot: URL?`, nil by default (the Mac's and every scratch host's
-  behaviour; kind 5); one line in `handOver(to:)` asking `HandoverTarget.check` on the sealed copy Task 9c loads, only
-  when it is set. On success the same build's `vibeswitcher-server` is loaded as a sealed copy, checked against the
-  same `build-info`, and passed in `State.images`; the new image restarts the server from it once idle (no session
-  request in flight), and only when its hash differs from the running server's (S2-D8). The exec's arguments carry the target's `--node-root` and `--server` (S2-D7). Non-seam edits.
+  behaviour; kind 5). Nothing more there: since Task 9c, `handOver(to:)` on Linux returns into
+  `HostServer.handOverThroughMemory` (`Sources/VibeHost/V2/HandoverMemory.swift`) before any copy is loaded, so
+  `handOver(to:)` holds no copy to check (the 9c review, 2026-11-14).
+- Modify: `Sources/VibeHost/V2/HandoverMemory.swift` `handOverThroughMemory` (a V2 file, no port-map line): asks
+  `HandoverTarget.check` on its sealed copy (`target`), only when `config.installRoot` is set. On success the same
+  build's `vibeswitcher-server` is loaded as a sealed copy, checked against the same `build-info`, and put in
+  `State.images.server`; the new image restarts the server from it once idle (no session request in flight), and only
+  when its hash differs from the running server's (S2-D8). The exec's arguments, built there, carry the target's
+  `--node-root` and `--server` (S2-D7). `HandoverMemory.finish` leaves `images.server` to `ServerChild`.
 - Modify: `Sources/vibeswitcher-host/main.swift`: `config.installRoot` is `~/.vibeswitcher/v2/builds` for a `--node`
   host, or a scratch host's `--install-root`; `--server` joins `handoverFlags` (deferred from Task 8a, which left it
   in `config.arguments`: otherwise the exec has two `--server`s, and `value(after:)` takes the first, the old

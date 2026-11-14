@@ -298,23 +298,24 @@ extension HandoverLinuxTests {
     /// refusal ends the handover before the exec, and the new image's goes back, as any failed read does
     /// (`aFallbackAfterAFailedRestoreKeepsTheVault`). Linux reads it from sealed memory, the Mac from its file.
     @Test func aDowngradeIsRefused() throws {
-        var state = HostHandover.State(fromBuild: 7, startedAt: Date(), lockFD: 3, listenFD: 4, secretFD: nil, sessions: [])
-        state.format = HostHandover.format + 1
-        let encoder = PropertyListEncoder()
-        encoder.outputFormat = .binary
-        let bytes = try encoder.encode(state)
-        let path: String
-        var memory: Int32?
-        if Platform.CodeIdentity.isAvailable {
-            path = "\(shortScratchRoot)/vsho-newer-\(UUID().uuidString.prefix(8))"
-            try bytes.write(to: URL(fileURLWithPath: path))
-        } else {
-            let fd = try HandoverMemory.seal(bytes, name: "newer-state")
-            memory = fd
-            path = HandoverMemory.path(of: fd)
+        /// A state of `format`, where this platform's handover puts it (Linux: sealed memory; the Mac: a file).
+        func stored(format: Int) throws -> (path: String, remove: () -> Void) {
+            var state = HostHandover.State(fromBuild: 7, startedAt: Date(), lockFD: 3, listenFD: 4, secretFD: nil, sessions: [])
+            state.format = format
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+            let bytes = try encoder.encode(state)
+            if Platform.CodeIdentity.isAvailable {
+                let path = "\(shortScratchRoot)/vsho-format-\(format)-\(UUID().uuidString.prefix(8))"
+                try bytes.write(to: URL(fileURLWithPath: path))
+                return (path, { unlink(path) })
+            }
+            let fd = try HandoverMemory.seal(bytes, name: "state-format-\(format)")
+            return (HandoverMemory.path(of: fd), { Sys.close(fd) })
         }
-        defer { if let memory { Sys.close(memory) } else { unlink(path) } }
-        #expect(throws: HostHandover.Failure.wrongFormat(HostHandover.format + 1)) { try HostHandover.read(from: path) }
+        let newer = try stored(format: HostHandover.format + 1)
+        defer { newer.remove() }
+        #expect(throws: HostHandover.Failure.wrongFormat(HostHandover.format + 1)) { try HostHandover.read(from: newer.path) }
 
         // The probe of this build refuses it too.
         var target = hostLauncher
@@ -324,7 +325,15 @@ extension HandoverLinuxTests {
             target = copy!.path
         }
         defer { if let copy { Sys.close(copy.fd) } }
-        #expect(throws: HostHandover.Failure.self) { try HostHandover.probe(target, statePath: path, timeout: hangGuard) }
+        // The control: the same probe, the same way, of a state of this build's format, answers that it can take over;
+        // so the refusal below is the probe's read of the format (it exits 1 having said so), not a probe that couldn't
+        // be started or read its state at all.
+        let current = try stored(format: HostHandover.format)
+        defer { current.remove() }
+        try HostHandover.probe(target, statePath: current.path, timeout: hangGuard)
+        #expect(throws: HostHandover.Failure.probe("it exited with status \(1 << 8)")) {
+            try HostHandover.probe(target, statePath: newer.path, timeout: hangGuard)
+        }
     }
 
     /// A fresh host that holds the lock removes a state file and its `.partial` left beside the lock (the Mac's format,
@@ -369,6 +378,45 @@ extension HandoverLinuxTests {
         let listed = again.text(after.id)
         for held in ["memfd:", "socket:", "ptmx", "h.lock"] { #expect(!listed.contains(held), "\(listed)") }
         #expect(listed.contains("/dev/pts/"), "\(listed)")
+    }
+
+    /// A fallback whose new image went back before it adopted its own copy (its start refused before `HostImages.load`:
+    /// `HostImages.startAsNode`, `mayStart`) is handed that copy still inherited: once restored, it closes it, as it does
+    /// every carried image that isn't its own, rather than holding a copy of the new build for its whole life.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies carried across the exec"))
+    func aFallbackClosesTheNewBuildsCopyItNeverAdopted() throws {
+        /// An inheritable descriptor (no close-on-exec, as `keep:` leaves one) for `fd`, which is closed.
+        func inherited(_ fd: Int32) throws -> Int32 {
+            defer { Sys.close(fd) }
+            let copy = dup(fd)
+            try #require(copy > STDERR_FILENO && fcntl(copy, F_GETFD) & FD_CLOEXEC == 0, "errno \(errno)")
+            return copy
+        }
+        func identity(_ fd: Int32) -> (dev_t, ino_t)? {
+            var info = stat()
+            return fstat(fd, &info) == 0 ? (info.st_dev, info.st_ino) : nil
+        }
+        let lockFD = try inherited(open("/dev/null", O_RDONLY | O_CLOEXEC))
+        let listenFD = try inherited(open("/dev/null", O_RDONLY | O_CLOEXEC))
+        defer { Sys.close(lockFD); Sys.close(listenFD) }
+        let newCopy = try inherited(HandoverMemory.seal(Data("the new build".utf8), name: "new-build-copy"))
+        let copyIdentity = try #require(identity(newCopy))
+        var state = HostHandover.State(fromBuild: 7, startedAt: Date(), lockFD: lockFD, listenFD: listenFD, secretFD: nil, sessions: [])
+        // This process holds no own copy (`HostImages.ownCopy` is nil in a test runner), as a fallback's would be another.
+        state.images = HandoverImages(own: newCopy, fallback: nil)
+        var config = HostServer.Config(socketPath: scratchSocketPath(), lockPath: "/nonexistent/h.lock", shell: "/bin/sh",
+                                       launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin"], hostBuild: 7)
+        config.idleExit = nil
+
+        HandoverMemory.finish(state, statePath: "/nonexistent/h.lock.handover", server: HostServer(config: config))
+
+        // Closed: the number is open no more, or (another test's since) names something else.
+        let after = identity(newCopy)
+        let stillHeld = after.map { $0 == copyIdentity } ?? false
+        if stillHeld { Sys.close(newCopy) }
+        #expect(!stillHeld, "the fallback still holds the new build's copy (fd \(newCopy))")
+        // The rest it kept, close-on-exec.
+        for fd in [lockFD, listenFD] { #expect(fcntl(fd, F_GETFD) & FD_CLOEXEC != 0, "fd \(fd)") }
     }
 
     /// The probe and the new image run from the target's sealed copy, so neither is reachable from its exec: every
