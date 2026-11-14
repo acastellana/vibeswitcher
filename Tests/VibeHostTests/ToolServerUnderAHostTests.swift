@@ -115,17 +115,15 @@ import Testing
         let initialized = try await pipes.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil
         #expect(initialized, "stderr: \(pipes.errors)")
         // The server waits up to `roleWait` (45 s) for its session's role, serving no tools meanwhile: asked again
-        // until the lead's are there, for 50 s from here.
+        // until the lead's are there, for 50 s from here, each ask a round trip.
         let wanted: Set<String> = ["start_worker", "audit", "merge", "status"]
         var tools: [String] = []
         var id = 2
-        let deadline = MacTime.real.awake() + 50
-        while MacTime.real.awake() < deadline, !Task.isCancelled {
-            let listed = try await pipes.ask(id, "tools/list", timeout: max(1, deadline - MacTime.real.awake()))
+        _ = await eventuallyAsync(timeout: 50) {
+            let listed = try? await pipes.ask(id, "tools/list", timeout: 5)
             id += 1
             tools = ((listed?["tools"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String }
-            if wanted.isSubset(of: tools) { break }
-            await pause(0.5)
+            return wanted.isSubset(of: tools)
         }
         #expect(wanted.isSubset(of: tools), "tools: \(tools); stderr: \(pipes.errors); host log: \(host.log)")
 
