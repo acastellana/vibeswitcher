@@ -194,7 +194,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(!lead.call("update_task", ["task": slug, "auto_advance": true]).isError)
         await advancing.settle()
         #expect(await advancing.until { task(slug, root)?.status == .running })
-        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "worker-\(slug)").appendingPathComponent("prompt.md"), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(of: "worker-\(slug)", runtime)
         for current in ["# Task: Current title", "Current goal", "Current acceptance", "Current boundaries", "Current context", "17 min"] {
             #expect(prompt.contains(current), "Missing \(current)")
         }
@@ -224,7 +224,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
 
         #expect(!lead.call("update_task", ["task": slug, "goal": "The sharpened goal"]).isError)
         #expect(await advancing.until { task(slug, root)?.status == .running })
-        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "worker-\(slug)").appendingPathComponent("prompt.md"), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(of: "worker-\(slug)", runtime)
         #expect(prompt.contains("The sharpened goal"))
         #expect(toWorker(slug, root, runtime).isEmpty, "A brief written from v2 needs no amendment")
     }
@@ -623,8 +623,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(second != first)
         #expect(vault.current(.verifier, root: root, task: "add-b")?.auditing == head("agent/add-b", root))
         let spawn = try #require(runtime.spawned.last { $0.id == second })
-        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
-        let prompt = try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(in: spawn.command)
         #expect(prompt.contains("## What this audit judges") && prompt.contains("against contract v1") && prompt.contains("Judge only what changed since v1")
                 && prompt.contains("Added: grep -q bee b.txt") && prompt.contains("This is contract v2."), "\(prompt)")
         // The re-audit of a contract's change isn't told what a re-audit of a worker's fixes is: it would rule the change out.

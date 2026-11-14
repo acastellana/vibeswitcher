@@ -146,7 +146,7 @@ struct LeadDoneEvidenceTests: LeadTeamFixture {
         #expect(shown.contains("Blind check: Found: b.txt lacked a newline. Fixed in the last commit."))
 
         #expect(!lead.call("audit", ["task": "add-b"]).isError)
-        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "verify-add-b").appendingPathComponent("prompt.md"), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(of: "verify-add-b", runtime)
         let section = try #require(prompt.range(of: LeadPrompts.reportHeading)).upperBound
         let report = prompt[section...]
         #expect(report.contains("its evidence is what it says it ran and saw: run the checks yourself, and a claimed result your run doesn't reproduce is a finding"))

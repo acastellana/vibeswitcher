@@ -58,7 +58,7 @@ struct StartWorkerPreflightTests: LeadTeamFixture {
         #expect(runtime.preflighted == [runtime.claude])
         #expect(runtime.spawned.count == 1)
         #expect(runtime.spawned.first?.cwd == Worktrees.path(root: root, slug: "add-b"))
-        #expect(runtime.spawned.first?.command.hasPrefix(runtime.claude + " --append-system-prompt-file") == true)
+        #expect(runtime.spawned.first?.command.hasPrefix(runtime.claude + " --append-system-prompt") == true)
         #expect(BoardStore(root: root).load().task("add-b")?.status == .running)
     }
 }

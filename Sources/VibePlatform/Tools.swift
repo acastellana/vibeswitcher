@@ -188,6 +188,56 @@ extension Platform {
             #endif
         }
 
+        // MARK: Roles' launch
+
+        /// Claude Code permission rules every role's session is refused on this system, the lead's included, on top
+        /// of the rules `LeadLaunch.deny` gives on both (the security architecture document's S10). The Mac: none.
+        /// Linux: the tracers (`strace`, `ltrace`, `gdbserver`, `perf`); the user's manager and timers (`systemctl
+        /// --user`, `systemd-run`, `loginctl`, `crontab`, `at`): an agent "restarting the node to test it" would end
+        /// every session and the vault; Windows' programs (`wsl.exe`, `cmd.exe`, `powershell.exe`); `gh` and git's
+        /// credential helpers; edits under the user's units and the manager's environment, and under the node's own
+        /// folders (`~/.vibeswitcher/v2`, `~/.vibeswitcher/lead`); and reads and edits under `/mnt/c` (as `//mnt/c`:
+        /// a rule's path that starts with one `/` is taken from the settings file's folder, `//` from the root).
+        ///
+        /// They stop a slip, not a worker that tries: a rule binds the tool it names, and a shell reaches each of these
+        /// in other spellings.
+        public static var roleDenyRules: [String] {
+            #if canImport(Darwin)
+            return []
+            #else
+            let commands = ["strace", "ltrace", "gdbserver", "perf", "systemctl --user", "systemd-run", "loginctl", "crontab", "at",
+                            "wsl.exe", "cmd.exe", "powershell.exe", "gh", "git credential"]
+            var rules = commands.map { "Bash(\($0):*)" } + ["Bash(git -c credential*)"]
+            for folder in ["~/.config/systemd", "~/.config/environment.d", "~/.vibeswitcher/v2", "~/.vibeswitcher/lead"] {
+                rules += ["Edit(\(folder)/**)", "Write(\(folder)/**)"]
+            }
+            return rules + ["Read(//mnt/c/**)", "Edit(//mnt/c/**)", "Write(//mnt/c/**)"]
+            #endif
+        }
+
+        /// Whether the lead's session is refused the debuggers too (`LeadLaunch.debuggers`, which workers and
+        /// verifiers always are). The Mac: no, as always (its debuggers ask for the user's password in a dialog, which
+        /// a lead's own runs don't reach). Linux: yes, with no Yama any process of the user may trace another.
+        public static var leadGetsTracerRules: Bool {
+            #if canImport(Darwin)
+            return false
+            #else
+            return true
+            #endif
+        }
+
+        /// Whether a role's launch settings (its `--settings` and `--mcp-config`) go to `claude` as JSON on its command
+        /// line, and its prompt too while the command fits one argument, rather than as files in its run folder,
+        /// which a worker could rewrite between their writing and `claude`'s read. The Mac: no, files as always.
+        /// Linux: yes (the security architecture document's S10).
+        public static var roleSettingsInline: Bool {
+            #if canImport(Darwin)
+            return false
+            #else
+            return true
+            #endif
+        }
+
         /// `text` as one word for a POSIX shell, in single quotes.
         static func quoted(_ text: String) -> String {
             "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"

@@ -42,8 +42,8 @@ import Testing
         let launch = try LeadLaunch.prepare(role: .verifier, root: team.root, task: "add-b", base: "claude", prompt: "p", start: "s",
                                             server: mcp, name: "verifier-add-b", folder: URL(fileURLWithPath: folder + "/run"), cwd: team.root,
                                             temporary: URL(fileURLWithPath: team.dir + "/session-temp"))
-        let settings = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
-        let mcpConfig = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any])
+        let settings = try LaunchArguments.json("--settings", in: launch.command)
+        let mcpConfig = try LaunchArguments.json("--mcp-config", in: launch.command)
         let server = try #require((mcpConfig["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])
         let serverLine = ([server["command"] as? String ?? ""] + (server["args"] as? [String] ?? [])).map(quoted).joined(separator: " ")
         let env = (settings["env"] as? [String: String] ?? [:]).sorted { $0.key < $1.key }

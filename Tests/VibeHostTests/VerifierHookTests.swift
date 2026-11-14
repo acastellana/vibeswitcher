@@ -27,7 +27,7 @@ import VibeCore
         try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
         let launch = try LeadLaunch.prepare(role: .verifier, root: root, task: "audit-me", base: "claude", prompt: "p", start: "Check.",
                                             server: mcp, name: "verifier-audit-me", temporary: temp.url("session-tmp"))
-        let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
+        let settings = try LaunchArguments.json("--settings", in: launch.command)
         let allow = ((settings["permissions"] as? [String: Any])?["allow"] as? [String]) ?? []
         let hooks = (((settings["hooks"] as? [String: Any])?["PermissionRequest"] as? [[String: Any]]) ?? [])
             .filter { ($0["matcher"] as? String).map { $0 == "Bash" || $0 == "*" || $0.isEmpty } ?? true }

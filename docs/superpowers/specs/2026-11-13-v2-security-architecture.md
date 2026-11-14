@@ -1161,7 +1161,10 @@ the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts
   doesn't bind Bash, and nothing watches the folder), making a verifier's `vibeswitcher` server its own script. On
   Linux the settings and the MCP config go to `claude` as JSON strings on its command line (`--settings`,
   `--mcp-config`; nothing secret in them); the prompt too, when it fits, else its file is named in S11. The folder goes
-  on the seal's list as a detector.
+  on the seal's list as a detector. Every role's launch also names its permission mode, on both systems
+  (`--permission-mode auto`, the mode a launch that named none ran in: Claude Code's default since 2.1.284, still
+  2.1.323's), so the mode no longer follows Claude Code's default or a `defaultMode` in the user's settings, which a
+  worker's shell can write; a project whose Claude command names a mode keeps it (stage 2's Task 10b).
 - **The lead's accepted git hooks.** GitGuard runs the lead's git with `core.hooksPath` set to its accepted copy under
   `~/.vibeswitcher/lead/git-hooks/<key>/copy` (`Git.swift:77, 341-353`), which any worker can write; a hook placed
   there runs under the lead's tool server and is the lead's to the host. Its accepted record (`accepted.json`) sits
@@ -1216,10 +1219,13 @@ bootstrap (S12 item 15).
 `SessionEnvironmentTests.aSpawnAddingALoaderVariableIsRefused`,
 `SessionEnvironmentTests.aSessionsProgramStartsWithSIGPIPEAtItsDefault`, `ToolsTests.theLocaleASessionGetsIsInstalled`,
 `ToolsTests.theMacsListIsTodays`, `ToolsTests.linuxSessionsGetNoAgentsAndAPlainBash`,
-`ToolsTests.aSpawnMayNotAddLoaderStartupOrNeverPassedVariables`; planned: stage 2 plan task 10.
+`ToolsTests.aSpawnMayNotAddLoaderStartupOrNeverPassedVariables`,
+`LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`, `LeadLaunchTests.theLeadOnLinuxGetsTheTracerRules`,
+`LeadLaunchTests.theMacsDenyRulesAreTodays`, `LeadLaunchTests.aRolesLaunchSettingsAreInlineOnLinux`,
+`LeadLaunchTests.eachRoleIsLaunchedInAutoModeByName`, `LeadLaunchTests.aProjectsOwnPermissionModeIsKept`; planned: stage 2
+plan task 10.
 
-**Tests to write:** Task 10: `LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`,
-`theLeadOnLinuxGetsTheTracerRules`, `theMacsDenyRulesAreTodays`, `aRolesLaunchSettingsAreInlineOnLinux`. The engine's
+**Tests to write:** The engine's
 E4: `LeadStartTests.theLeadGetsNoCodexWorkers`, `aLeadIsLaunchedByClaudesResolvedPath`,
 `aClaudeFoundOnlyThroughALoginShellIsRefused`, `RoleProgramTests.aWorkersProgramIsTheLeadsResolvedClaudeNotTheSettings`.
 After the bootstrap:

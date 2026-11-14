@@ -246,8 +246,7 @@ struct LeadAuditFindersTests: LeadTeamFixture {
     func prompt(_ index: Int, _ runtime: FakeRuntime) throws -> String {
         let name = index == 1 ? "verify-add-b" : "finder\(index)-add-b"
         let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
-        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
-        return try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+        return try LaunchArguments.prompt(in: spawn.command)
     }
 
     func lines(_ path: String) -> [String] {

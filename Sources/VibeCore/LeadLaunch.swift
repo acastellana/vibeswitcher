@@ -116,6 +116,11 @@ public enum LeadLaunch {
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
     /// (and commits to the base branch): a worker editing it would conflict with those commits.
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
+        let rules = deny(both: role, base: base, records: records)
+        return rules + LinuxLaunch.denyRules(for: role, base: rules)  // Linux's own rules (S10): none on the Mac.
+    }
+
+    static func deny(both role: Role, base: String?, records: String?) -> [String] {
         switch role {
         case .lead:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName
@@ -358,6 +363,7 @@ public enum LeadLaunch {
         // A verifier checks a branch a worker wrote: that branch's project settings, hooks and MCP servers don't run
         // in it (its rules come from --settings, VibeSwitcher's hooks from your user settings).
         if role == .verifier { parts.append("--setting-sources user --strict-mcp-config") }
+        parts += LinuxLaunch.permissionMode(command: parts[0])  // Named, auto, unless the project's command names one.
         parts.append("--name \(quote(name))")
         if let model { parts.append("--model \(quote(model))") }
         parts.append("-- \(quote(start))")
@@ -368,7 +374,7 @@ public enum LeadLaunch {
         if role == .verifier { prepared.environment.merge(verifierEnvironment(server: server)) { $1 } }
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
-        return prepared
+        return try LinuxLaunch.inline(prepared, prompt: prompt, mcp: mcp, settings: settings)  // Files on the Mac (S10).
     }
 
     /// A verifier isn't started when its tool server's path can't be its shell prefix (`BranchCode.prefixable`).
