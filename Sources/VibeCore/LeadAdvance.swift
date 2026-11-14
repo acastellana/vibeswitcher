@@ -397,6 +397,8 @@ public final class LeadAdvance: @unchecked Sendable {
         followFable()
         // Team walls' posts, to their members (not auto_advance's: a post is delivered whatever it says).
         lead.deliverWalls()
+        // Members' done parts, to their integrators, once each (moves nothing: the integrator takes them).
+        lead.deliverParts()
         guard workflow.autoAdvance else { return }
         // Off as the lead set it, whatever a worker wrote into workflow.md since.
         if let changed, changed.contains(where: { $0.key == "auto_advance" }) {
@@ -1124,7 +1126,9 @@ public final class LeadAdvance: @unchecked Sendable {
                 continue
             }
             guard waits.isEmpty, !beingMerged(task.slug) else { continue }
-            let running = board.tasks.filter { $0.status == .running }.count
+            // Live team members take a place too, as start_worker counts them.
+            let live = board.tasks.contains(where: \.isTeam) ? Set(((try? lead.advanceSessions()) ?? []).filter(\.live).map(\.id)) : []
+            let running = board.tasks.filter { $0.status == .running }.count + LeadTeam.memberWorkers(board, live: live)
             guard running < lead.maxWorkers(workflow) else { return }
             // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge.
             guard hasRoom(task.slug, need: 1) else { return roomWait("start_worker(\(task.slug))", need: 1) }

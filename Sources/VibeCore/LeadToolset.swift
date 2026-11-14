@@ -661,7 +661,7 @@ public final class LeadToolset: MCPToolset {
         case nil:
             return []
         case .worker?:
-            return [
+            return workerTools([
                 MCPToolInfo(name: "report", description: "Tell the lead you're done (everything committed, checks passing), blocked (say what you need), or over_budget (once VibeSwitcher says your task's time budget is reached: commit what works first). A verifier then checks a done branch. Done needs evidence for every acceptance check and your blind check's outcome: a done without them is refused, naming what's missing.",
                             properties: ["status": P(type: "string", description: "done, blocked, or over_budget", options: ["done", "blocked", Self.overBudgetStatus]),
                                          "summary": P(type: "string", description: "What changed and how you checked it, or what blocks you; for over_budget: what works (with evidence), what's missing, and your proposal (finish in N more minutes, cut scope, or another approach)"),
@@ -674,7 +674,7 @@ public final class LeadToolset: MCPToolset {
                             properties: ["text": P(type: "string", description: "One line: what's done or under way")], required: ["text"]),
                 MCPToolInfo(name: "answer_findings", description: "Answer your task's open audit findings by id: fixed (commit the fix first) or disagree, with a reason. The lead sees the answers, and the re-audit judges them: it checks each fix, and closes a finding whose disagreement it accepts.",
                             properties: ["answers": P(type: "array", description: Self.answersShape, items: "object")], required: ["answers"]),
-            ] + teamTools
+            ])
         case .verifier?:
             return [MCPToolInfo(name: "submit_audit", description: "Your verdict on the worker's branch, with evidence and your findings. Only this moves a task to done; an open Important finding holds its merge back.",
                                 properties: ["completion": P(type: "string", description: "Does the branch do what the contract asks?", options: ["complete", "incomplete", "blocked"]),
@@ -912,6 +912,7 @@ public final class LeadToolset: MCPToolset {
             case "progress": return try progress(arguments)
             case "answer_findings": return try answerFindings(arguments)
             case "split": return try split()
+            case "take_part": return try takePart(arguments)
             case "post": return try post(arguments)
             case "wall": return try wall(arguments)
             case "submit_audit": return try submitAudit(arguments, by: member)
@@ -5825,7 +5826,8 @@ public final class LeadToolset: MCPToolset {
     static let overBudgetStatus = "over_budget"
 
     private func report(_ arguments: [String: Any]) throws -> MCPToolResult {
-        try refuseMember("report")
+        // A team member's report is its part's (`memberReport`), never the task's.
+        if let seat = memberSeat() { return try memberReport(seat, arguments) }
         let reportedAt = Date().timeIntervalSince1970
         let slug = try taskSlug(arguments)
         let summary = try text(arguments, "summary", missing: "Say what changed and how you checked it, or what blocks you.")
@@ -5833,6 +5835,8 @@ public final class LeadToolset: MCPToolset {
         let overBudget = kind == Self.overBudgetStatus
         if overBudget { return try reportOverBudget(slug, summary) }
         let done = kind != "blocked"
+        // A team task's integrator: its done counts once every part is taken (`checkPartsTaken`).
+        if done { try checkPartsTaken(slug, status: kind) }
         // Before anything is recorded: a done that doesn't show how each check was checked doesn't count as one.
         var evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
         if done { try checkLoadProof(slug, arguments) }

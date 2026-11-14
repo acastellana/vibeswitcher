@@ -23,9 +23,12 @@ public struct LeadTeamMember: Codable, Equatable, Sendable {
     /// The integrator's commit its branch was made from by `split`; nil until the team is split (always nil for the
     /// integrator).
     public var from: String?
+    /// Its last part_done (`LeadPartHandoff`): the commit its part was done at and its handoff; nil until it reports
+    /// one (and after a re-roll).
+    public var handoff: LeadPartHandoff?
 
     public init(name: String, part: String, worker: String? = nil, branch: String, worktree: String,
-                wallSeen: Int? = nil, mainRedTold: [String]? = nil, from: String? = nil) {
+                wallSeen: Int? = nil, mainRedTold: [String]? = nil, from: String? = nil, handoff: LeadPartHandoff? = nil) {
         self.name = name
         self.part = part
         self.worker = worker
@@ -34,6 +37,35 @@ public struct LeadTeamMember: Codable, Equatable, Sendable {
         self.wallSeen = wallSeen
         self.mainRedTold = mainRedTold
         self.from = from
+        self.handoff = handoff
+    }
+}
+
+/// A member's part_done (docs/process/reviews/team-on-one-task-design.md, "The unit"; T7): its part passes its own
+/// tests at `commit`, and a short structured handoff for the integrator, three parts and nothing free-form: what
+/// changed, its caveats, and how to verify it. The integrator is told once (`told`), and take_part merges `commit`.
+public struct LeadPartHandoff: Codable, Equatable, Sendable {
+    /// The member's branch head the part was reported done at: what take_part merges.
+    public var commit: String
+    /// What changed: the files, and the interface the part provides or uses.
+    public var changed: String
+    /// What's stubbed, assumed or untested.
+    public var caveats: String
+    /// How to verify it: the exact focused test command.
+    public var verify: String
+    /// When it was reported (seconds since 1970).
+    public var at: Double
+    /// The integrator's worker it was told to (`LeadToolset.deliverParts`); nil until it was. A new integrator worker
+    /// is told again.
+    public var told: String?
+
+    public init(commit: String, changed: String, caveats: String, verify: String, at: Double, told: String? = nil) {
+        self.commit = commit
+        self.changed = changed
+        self.caveats = caveats
+        self.verify = verify
+        self.at = at
+        self.told = told
     }
 }
 
@@ -220,8 +252,10 @@ extension LeadTeam {
         The other members, each a worker of its own in its own worktree:
         \(others)
         Team rules: \(split) After the split, edit only your part's files: each member owns its part's. Only your report \
-        counts for the task: report done once every part is in agent/\(task.slug) and the acceptance checks pass there. \
-        Until the team's tools for taking a part in arrive, ask_lead when a member's part is ready.
+        counts for the task: report done once every part is in agent/\(task.slug) and the acceptance checks pass there; \
+        it's refused, naming the parts not taken, until then. When a member reports its part done you're told once, with \
+        its handoff: take it in with take_part(<name>) (VibeSwitcher merges its branch into yours and leaves any conflict \
+        for you to resolve and commit), then run its verify command.
         """
     }
 
@@ -237,8 +271,10 @@ extension LeadTeam {
         on theirs beside you, each in its own worktree, so edit nothing outside your part. Your branch was made from the \
         integrator's commit\(from), which holds the shared interface: if your part needs a change to it, ask_lead. The \
         contract below is the whole team's: its acceptance checks run on the integrated branch, not on yours. Only \
-        \(integrator) reports for the task (your report is refused): once your part passes its own tests and everything's \
-        committed, say so with progress ("part done") and ask_lead, so \(integrator) takes it in.
+        \(integrator) reports done for the task: once your part passes its own tests and everything's committed, call \
+        report(status: part_done) with its handoff (changed: the files, and the interface your part provides or uses; \
+        caveats: what's stubbed, assumed or untested; verify: the exact focused test command), and \(integrator) takes it \
+        in. report blocked or over_budget as any worker: they reach the lead, naming you.
         """
     }
 
@@ -251,6 +287,7 @@ extension LeadTeam {
             member.from = nil
             member.wallSeen = nil
             member.mainRedTold = nil
+            member.handoff = nil
             return member
         }
     }
@@ -268,7 +305,14 @@ extension LeadToolset {
     /// its integrator. Never a verifier's: it has no tool for the wall.
     var teamTools: [MCPToolInfo] {
         guard role == .worker, wallSeat() != nil else { return [] }
-        return (memberSeat() == nil ? [Self.splitTool] : []) + [Self.postTool, Self.wallTool]
+        return (memberSeat() == nil ? [Self.splitTool, Self.takePartTool] : []) + [Self.postTool, Self.wallTool]
+    }
+
+    /// A worker's tools, `plain` being a plain worker's: a member's `report` is its own (`memberReportTool`), and a team
+    /// task's worker has `teamTools` besides.
+    func workerTools(_ plain: [MCPToolInfo]) -> [MCPToolInfo] {
+        let tools = memberSeat() == nil ? plain : plain.map { $0.name == "report" ? Self.memberReportTool : $0 }
+        return tools + teamTools
     }
 
     /// This worker's place on a team task when it's a member other than the integrator (its grant is for
@@ -283,7 +327,7 @@ extension LeadToolset {
         guard let seat = memberSeat() else { return }
         let integrator = seat.task.integrator?.name ?? "member 1"
         throw Problem(text: "Only \(seat.task.slug)'s integrator, \(integrator), calls \(tool) for the team task; you're \(seat.member.name), a member. "
-                      + "Once your part passes its own tests and everything's committed, say so with progress (\"part done\") and ask_lead, so \(integrator) takes it in.")
+                      + "Once your part passes its own tests and everything's committed, report(status: part_done, …) with its handoff, so \(integrator) takes it in.")
     }
 
     /// Who asks in ask_lead's message to the lead: "The worker on x", or "Member b of x's team" (a lead's message to x
@@ -790,6 +834,286 @@ extension LeadToolset {
             guard let index = board.taskIndex(slug), let at = board.tasks[index].team?.firstIndex(where: { $0.name == name }),
                   board.tasks[index].team?[at].wallSeen == id else { return }
             board.tasks[index].team?[at].wallSeen = before == 0 ? nil : before
+        }
+    }
+}
+
+// MARK: A member's part done, and the integrator taking it (docs/process/reviews/team-on-one-task-design.md, "The
+// unit" and "Integration"; T7)
+
+extension LeadToolset {
+    /// The status a member reports its part done with (`report(status: part_done)`).
+    static let partDoneStatus = "part_done"
+
+    /// A member's `report`: part_done (its handoff's three parts), blocked or over_budget.
+    static let memberReportTool = MCPToolInfo(
+        name: "report",
+        description: "Team task, a member's report: part_done once your part passes its own tests and everything's committed (it starts no audit and no merge: "
+            + "your integrator is told once, with your handoff, and takes your branch in with take_part), blocked (say what you need), or over_budget. "
+            + "Blocked and over_budget reach the lead, naming you. Only your integrator reports done for the task.",
+        properties: ["status": MCPToolInfo.Property(type: "string", description: "part_done, blocked, or over_budget", options: [partDoneStatus, "blocked", overBudgetStatus]),
+                     "changed": MCPToolInfo.Property(type: "string", description: "part_done: what changed: the files, and the interface your part provides or uses"),
+                     "caveats": MCPToolInfo.Property(type: "string", description: "part_done: what's stubbed, assumed or untested (\"none\" when nothing is)"),
+                     "verify": MCPToolInfo.Property(type: "string", description: "part_done: how to verify it: the exact focused test command"),
+                     "summary": MCPToolInfo.Property(type: "string", description: "blocked or over_budget: what blocks you, or what works and what's missing")],
+        required: ["status"])
+
+    /// The integrator's `take_part`.
+    static let takePartTool = MCPToolInfo(
+        name: "take_part",
+        description: "Team task, integrator only: take a member's done part into your branch. VibeSwitcher's tool server runs git merge of the commit its part_done "
+            + "reported (agent/<task>--<member>) in your worktree; a conflict is left for you to resolve (fix the files, git add, git commit). Refused for a part "
+            + "not reported done, and while your worktree has uncommitted changes or a merge in progress. Your report done is refused until every part is taken.",
+        properties: ["member": MCPToolInfo.Property(type: "string", description: "The member whose part to take (its name, as in post's @name)")],
+        required: ["member"])
+
+    /// The handoff's three parts, as part_done takes them: (argument, what it says), in the order the notice shows them.
+    static let handoffParts = [("changed", "What changed"), ("caveats", "Caveats"), ("verify", "How to verify")]
+
+    /// A member's report: part_done records its part's handoff for its integrator; blocked and over_budget reach the
+    /// lead naming it, the task's status unchanged (the integrator works on); done is refused, saying what to use.
+    func memberReport(_ seat: (task: LeadTask, member: LeadTeamMember), _ arguments: [String: Any]) throws -> MCPToolResult {
+        let slug = seat.task.slug, name = seat.member.name
+        let integrator = seat.task.integrator?.name ?? "member 1"
+        let kind = (arguments["status"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        switch kind {
+        case Self.partDoneStatus:
+            return try partDone(slug, member: name, arguments)
+        case "blocked", Self.overBudgetStatus:
+            let summary = Self.given(arguments["summary"]) ?? Self.given(arguments["text"]) ?? ""
+            guard !summary.isEmpty else { throw Problem(text: "Not reported: say what blocks you (or, over budget, what works and what's missing) in `summary`.") }
+            let asker = askerText(slug)
+            let what = kind == "blocked" ? "is blocked" : "says it's over the task's time budget"
+            let decide = kind == "blocked" ? "" : "Decide what it does next: go on, re-plan its part, or stop it. "
+            // Its own grant (<slug>--<name>) names it: the vault seals a worker's line only about the task it holds.
+            let told = try tellLead("\(asker.who) \(what): \(summary)\n\(decide)Answer with message(\(slug), …)\(asker.answer), "
+                                    + "or post(task: \(slug), to: [\"@\(name)\"], …) on its wall.", about: "worker \(taskID ?? slug)")
+            return MCPToolResult(text: "Reported to the lead, naming you. \(slug)'s status doesn't change: \(integrator) works on. The lead will get back to you."
+                                 + (told ? "" : " (There's no lead running right now; it's on the board, and the next lead picks it up.)"))
+        default:
+            throw Problem(text: "Not reported: only \(slug)'s integrator, \(integrator), reports done for the team task; you're \(name), a member. "
+                          + "Once your part passes its own tests and everything's committed, report(status: part_done, changed, caveats, verify) with its handoff, "
+                          + "so \(integrator) takes it in (blocked and over_budget you report as any worker).")
+        }
+    }
+
+    /// A text argument, trimmed; nil when it's missing or empty.
+    static func given(_ value: Any?) -> String? {
+        let text = ((value as? [String])?.joined(separator: "\n") ?? value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text?.isEmpty == false ? text : nil
+    }
+
+    /// part_done: member `name` of `slug`'s team says its part passes its own tests at its branch's head, with the
+    /// handoff's three parts (each checked as a wall post is: they reach the integrator). Starts no audit and no merge:
+    /// it's recorded on the member (`LeadTeamMember.handoff`), and the lead's loop tells the integrator once
+    /// (`deliverParts`). Refused without the three parts, with uncommitted changes, with nothing committed since the
+    /// split, and again on the commit it was reported at.
+    func partDone(_ slug: String, member name: String, _ arguments: [String: Any]) throws -> MCPToolResult {
+        var parts: [String: String] = [:]
+        let missing = Self.handoffParts.filter { Self.given(arguments[$0.0]) == nil }.map(\.0)
+        guard missing.isEmpty else {
+            throw Problem(text: "Not reported: part_done takes a handoff of three parts, and \(missing.joined(separator: ", ")) \(missing.count == 1 ? "is" : "are") missing. "
+                          + "changed: the files, and the interface your part provides or uses; caveats: what's stubbed, assumed or untested (\"none\" when nothing is); "
+                          + "verify: the exact focused test command. Nothing was recorded.")
+        }
+        for (key, _) in Self.handoffParts {
+            let text = LeadWall.plainLines(Self.given(arguments[key]) ?? "")
+            if let refusal = LeadWall.textRefusal(text) {
+                throw Problem(text: "Not reported: its \(key) can't go to your integrator: " + refusal.description.replacingOccurrences(of: "Refused, not posted: ", with: "") + " Nothing was recorded.")
+            }
+            parts[key] = text
+        }
+        return try exclusively("part-\(slug)") {
+            guard let task = try store.read().task(slug), let member = task.teamMember(name), member.name != task.integrator?.name else {
+                throw Problem(text: "Not reported: you're no longer a member of \(slug)'s team.")
+            }
+            let memberSlug = Worktrees.memberSlug(slug, member: name)
+            guard Worktrees.isWorktree(root: root, slug: memberSlug), let head = branchHead(member.branch) else {
+                throw Problem(text: "Not reported: \(member.worktree) isn't a worktree on \(member.branch). Report blocked, saying so.")
+            }
+            let status = Git.run(["status", "--porcelain", "--untracked-files=all"], in: member.worktree)
+            guard status.ok else { throw Problem(text: "Not reported: your worktree's uncommitted changes can't be read (\(status.error)).") }
+            let changes = status.output.split(separator: "\n").map(String.init)
+            guard changes.isEmpty else {
+                throw Problem(text: "Not reported: your worktree has uncommitted changes, which your integrator's take_part wouldn't take: "
+                              + changes.prefix(10).joined(separator: "; ") + (changes.count > 10 ? "; …" : "")
+                              + ". Commit them (or move a scratch file out of the worktree), then report part_done again.")
+            }
+            if head == member.from {
+                throw Problem(text: "Not reported: your branch has no commit since the split (\(head.prefix(8))), so there's no part to take. Commit your part; if it needs no change, ask_lead.")
+            }
+            if member.handoff?.commit == head {
+                throw Problem(text: "Not reported: you reported part_done at \(head.prefix(8)) already, and your branch hasn't moved since. Your integrator was told; nothing more to do unless you commit more.")
+            }
+            let handoff = LeadPartHandoff(commit: head, changed: parts["changed"] ?? "", caveats: parts["caveats"] ?? "", verify: parts["verify"] ?? "",
+                                          at: Date().timeIntervalSince1970)
+            try store.update { board in
+                guard let index = board.taskIndex(slug), let at = board.tasks[index].team?.firstIndex(where: { $0.name == name }), at > 0 else { return }
+                board.tasks[index].team?[at].handoff = handoff
+                let line = LeadCheckpoint(text: "\(name): part done at \(head.prefix(8))")
+                board.tasks[index].checkpoints = ((board.tasks[index].checkpoints ?? []) + [line]).suffix(LeadTask.keptCheckpoints)
+            }
+            try? store.appendProgress("\(slug)'s member \(name) reported its part done at \(head.prefix(8))")
+            LeadAdvance.nudge(root: root)
+            let integrator = task.integrator?.name ?? "member 1"
+            return MCPToolResult(text: "Part done at \(head.prefix(8)). No audit or merge starts: \(integrator) is told once, with your handoff, and takes your part in with "
+                                 + "take_part(\(name)). Stay available: its merge may need you. If you commit more, report part_done again.")
+        }
+    }
+
+    /// Why the report with `status` on `slug` is refused for a team task, or nothing: part_done is a member's report;
+    /// an integrator's done counts once every part is taken (`partsNotTaken`). A plain task's worker reports as ever.
+    func checkPartsTaken(_ slug: String, status: String?) throws {
+        let task = store.load().task(slug)
+        if status == Self.partDoneStatus {
+            throw Problem(text: task?.isTeam == true
+                ? "Not reported: part_done is a member's report. You're \(slug)'s integrator: take_part each member's done part, then report done. Nothing was recorded."
+                : "Not reported: part_done is a team member's report, and \(slug) is a plain task: report done, blocked or over_budget. Nothing was recorded.")
+        }
+        guard let task, task.isTeam else { return }
+        let left = partsNotTaken(task)
+        guard !left.isEmpty else { return }
+        throw Problem(text: "Not reported: \(slug) is a team task, and your done counts once every member's part is taken into agent/\(slug). Not taken yet: "
+                      + left.joined(separator: "; ") + ". Nothing was recorded.")
+    }
+
+    /// The members of team task `task` whose part isn't taken yet, each with why: a part is taken when its member
+    /// reported it done (`handoff`) at its branch's head, and that commit is in agent/<slug> (git's word, not the
+    /// board's: a merge left in conflict isn't, nor one undone).
+    func partsNotTaken(_ task: LeadTask) -> [String] {
+        let branch = Worktrees.branch(task.slug)
+        return (task.team ?? []).dropFirst().compactMap { member in
+            guard let handoff = member.handoff else {
+                return LeadTeam.isSplit(task.team ?? []) ? "\(member.name) (no part_done yet)" : "\(member.name) (the team isn't split yet: split, then each member reports part_done)"
+            }
+            if let head = branchHead(member.branch), head != handoff.commit {
+                return "\(member.name) (committed since its part_done at \(handoff.commit.prefix(8)): it reports part_done again)"
+            }
+            let taken = Git.run(["merge-base", "--is-ancestor", handoff.commit, "refs/heads/\(branch)"], in: root)
+            return taken.ok ? nil : "\(member.name) (done at \(handoff.commit.prefix(8)), not in \(branch): take_part(\(member.name)))"
+        }
+    }
+
+    /// take_part: the integrator takes member `member`'s done part, its tool server running `git merge` of the commit
+    /// part_done reported in the integrator's worktree (the worker's shell rules are as they were). A conflict is left
+    /// in progress for the integrator. Refused for a non-integrator, an unknown member, a part not reported done (no
+    /// warning instead: what part_done vouched for is what's merged), and with uncommitted changes or a merge under way.
+    func takePart(_ arguments: [String: Any]) throws -> MCPToolResult {
+        guard role == .worker, let taskID else { throw Problem(text: "Only a team task's integrator takes its members' parts.") }
+        let board = try store.read()
+        if let seat = LeadTeam.seat(taskID, in: board) {
+            throw Problem(text: "Not taken: only \(seat.task.slug)'s integrator, \(seat.task.integrator?.name ?? "member 1"), takes parts; you're \(seat.member.name), a member. "
+                          + "Report your own with report(status: part_done, …).")
+        }
+        guard let task = board.task(taskID), task.slug == taskID else { throw Problem(text: "Your task isn't on the board any more.") }
+        guard let team = task.team, task.isTeam else { throw Problem(text: "Not taken: \(task.slug) is a plain task, with no members' parts to take.") }
+        guard LeadTeam.isSplit(team) else { throw Problem(text: "Not taken: \(task.slug)'s team isn't split yet: commit the shared interface and split first.") }
+        let given = Self.given(arguments["member"]) ?? Self.given(arguments["name"]) ?? ""
+        let name = given.hasPrefix("@") ? String(given.dropFirst()) : given
+        guard let member = team.dropFirst().first(where: { $0.name == name }) else {
+            let others = team.dropFirst().map(\.name).joined(separator: ", ")
+            throw Problem(text: name == team.first?.name ? "Not taken: \(name) is you, the integrator: your part is in your branch already. Take a member's: \(others)."
+                          : "Not taken: \(name.isEmpty ? "name the member" : "\"\(LeadMail.masked(name))\" isn't a member of \(task.slug)'s team"); its members: \(others).")
+        }
+        return try exclusively("take-part-\(task.slug)") { try takePartAlone(task.slug, member: member.name) }
+    }
+
+    private func takePartAlone(_ slug: String, member name: String) throws -> MCPToolResult {
+        guard let task = try store.read().task(slug), let member = task.teamMember(name) else { throw Problem(text: "Not taken: \(name) isn't on \(slug)'s team any more.") }
+        guard let handoff = member.handoff else {
+            throw Problem(text: "Not taken: \(name) hasn't reported its part done (part_done), so there's nothing it vouched for to take. You're told once it does.")
+        }
+        if let head = branchHead(member.branch), head != handoff.commit {
+            throw Problem(text: "Not taken: \(name) committed since its part_done at \(handoff.commit.prefix(8)) (\(member.branch) is at \(head.prefix(8))), so its part isn't done as it stands. "
+                          + "It reports part_done again once it is; you're told then.")
+        }
+        let worktree = Worktrees.path(root: root, slug: slug), branch = Worktrees.branch(slug)
+        guard Worktrees.isWorktree(root: root, slug: slug), Git.run(["symbolic-ref", "--short", "HEAD"], in: worktree).output == branch else {
+            throw Problem(text: "Not taken: \(worktree) isn't a worktree on \(branch). Report blocked, saying so.")
+        }
+        if Git.run(["rev-parse", "-q", "--verify", "MERGE_HEAD"], in: worktree).ok {
+            throw Problem(text: "Not taken: a merge is in progress in your worktree. Finish it (resolve, git add, git commit) or git merge --abort, then take_part(\(name)) again.")
+        }
+        let status = Git.run(["status", "--porcelain", "--untracked-files=all"], in: worktree)
+        guard status.ok else { throw Problem(text: "Not taken: your worktree's uncommitted changes can't be read (\(status.error)).") }
+        let changes = status.output.split(separator: "\n").map(String.init)
+        guard changes.isEmpty else {
+            throw Problem(text: "Not taken: your worktree has uncommitted changes, which a merge would mix with \(name)'s part: "
+                          + changes.prefix(10).joined(separator: "; ") + (changes.count > 10 ? "; …" : "")
+                          + ". Commit them (or move a scratch file out of the worktree), then take_part(\(name)) again.")
+        }
+        let verify = "To verify it, run its command: \(handoff.verify)"
+        let commit = String(handoff.commit.prefix(8))
+        if Git.run(["merge-base", "--is-ancestor", handoff.commit, "HEAD"], in: worktree).ok {
+            return MCPToolResult(text: "\(name)'s part at \(commit) is in \(branch) already: nothing to take. \(verify)")
+        }
+        let message = "Take \(name)'s part: \(member.branch) at \(commit)"
+        let merged = Worktrees.noEditor(["merge", "--no-ff", "--no-edit", "-q", "-m", message, handoff.commit], in: worktree)
+        if merged.ok {
+            let head = Git.run(["rev-parse", "HEAD"], in: worktree).output
+            try? store.appendProgress("\(slug)'s integrator took \(name)'s part (\(commit)) into \(branch) at \(head.prefix(8))")
+            let left = partsNotTaken(store.load().task(slug) ?? task).map { String($0.prefix { $0 != " " }) }
+            return MCPToolResult(text: "Took \(name)'s part (\(member.branch) at \(commit)) into \(branch), now at \(head.prefix(8)). \(verify)\n"
+                                 + "Its caveats, in its words: \(handoff.caveats)\n"
+                                 + (left.isEmpty ? "Every part is taken: run the acceptance checks on \(branch), then report done." : "Parts not taken yet: \(left.joined(separator: ", "))."))
+        }
+        guard Git.run(["rev-parse", "-q", "--verify", "MERGE_HEAD"], in: worktree).ok else {
+            throw Problem(text: "Not taken: git merge of \(name)'s part didn't run, and nothing is in progress: \(Worktrees.said(merged))")
+        }
+        let conflicts = Git.run(["diff", "--name-only", "--diff-filter=U"], in: worktree).output.split(whereSeparator: \.isNewline).map(String.init)
+        try? store.appendProgress("\(slug)'s integrator's take of \(name)'s part (\(commit)) stopped on conflicts, left for it to resolve")
+        return MCPToolResult(text: "The merge of \(name)'s part (\(member.branch) at \(commit)) into \(branch) stopped on conflicts, and is left in progress for you to resolve: "
+                             + (conflicts.isEmpty ? "see git status" : conflicts.prefix(20).joined(separator: ", ") + (conflicts.count > 20 ? ", …" : ""))
+                             + ". Fix those files, git add them, then git commit (or git merge --continue); git merge --abort starts over. "
+                             + "The part counts as taken once that commit is in. \(verify)")
+    }
+
+    /// The notice of a member's part_done to its integrator (`deliverParts`): the handoff in the member's own words,
+    /// each part quoted, marked unverified.
+    static func partNotice(_ slug: String, member: LeadTeamMember, _ handoff: LeadPartHandoff) -> String {
+        let fields = [handoff.changed, handoff.caveats, handoff.verify]
+        let parts = zip(handoffParts, fields).map { "\($0.0.1):\n" + SteerReply.quote($0.1) }.joined(separator: "\n")
+        return "Member \(member.name) of \(slug)'s team reports its part done, at \(handoff.commit.prefix(8)) on \(member.branch). Its handoff, in its own words (unverified):\n"
+            + parts + "\nTake it into agent/\(slug) with take_part(\(member.name)), then run its verify command."
+    }
+
+    /// Tells each team task's integrator, once per part_done (and per integrator worker), of its members' done parts
+    /// (`partNotice`), through `deliver`, as the lead's message: it wakes an integrator idle waiting on its parts. The
+    /// lead's loop runs it at each pass, auto_advance or not (it moves nothing). Main red's pattern: each notice is
+    /// claimed on the board (`LeadPartHandoff.told`) before it's sent, and rolled back when it didn't go. A handoff
+    /// that fails the wall's checks as the board holds it now (a worker's shell can write the board) isn't sent.
+    func deliverParts() {
+        guard role == .lead else { return }
+        for task in store.load().tasks where task.isTeam && (task.team ?? []).dropFirst().contains(where: { $0.handoff.map { $0.told != task.worker } ?? false }) {
+            deliverParts(task.slug)
+        }
+    }
+
+    private func deliverParts(_ slug: String) {
+        _ = try? exclusively("parts-\(slug)") {
+            guard let task = store.load().task(slug), let worker = task.worker, worker != task.stopped,
+                  let sessions = try? hostSessions("no part_done notice was delivered"), sessions.contains(where: { $0.id == worker && $0.live }) else { return }
+            for member in (task.team ?? []).dropFirst() {
+                guard let handoff = member.handoff, handoff.told != worker,
+                      [handoff.changed, handoff.caveats, handoff.verify].allSatisfy({ LeadWall.textRefusal($0) == nil && LeadWall.plainLines($0) == $0 }) else { continue }
+                var claimed = false
+                try? store.update { board in
+                    guard let index = board.taskIndex(slug), board.tasks[index].worker == worker,
+                          let at = board.tasks[index].team?.firstIndex(where: { $0.name == member.name }), at > 0,
+                          board.tasks[index].team?[at].handoff == handoff else { return }
+                    board.tasks[index].team?[at].handoff?.told = worker
+                    claimed = true
+                }
+                guard claimed else { continue }
+                let delivered = try? deliver(slug, worker: worker, text: Self.partNotice(slug, member: member, handoff), clearDraft: false)
+                if delivered.map(Self.went) != true {
+                    try? store.update { board in
+                        guard let index = board.taskIndex(slug), let at = board.tasks[index].team?.firstIndex(where: { $0.name == member.name }),
+                              board.tasks[index].team?[at].handoff?.commit == handoff.commit, board.tasks[index].team?[at].handoff?.told == worker else { return }
+                        board.tasks[index].team?[at].handoff?.told = nil
+                    }
+                }
+            }
         }
     }
 }
