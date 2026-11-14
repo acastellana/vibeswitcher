@@ -297,4 +297,32 @@ struct LeadTakePartTests: LeadTeamFixture {
         #expect(refused.isError && refused.text.contains("plain task"), "\(refused.text)")
         #expect(BoardStore(root: team.root).load().task("plain-one")?.status == .planned)
     }
+
+    @Test func aTamperedTeamOnTheBoardIsNeitherMergedNorAnnounced() throws {
+        let team = try team()
+        try partDone(team, "ui")
+        // Another task's branch, put in ui's place on the board (a worker's shell can write it), with its head.
+        Git.run(["branch", "agent/other", "main"], in: team.root)
+        let other = Git.run(["rev-parse", "agent/other"], in: team.root).output
+        try BoardStore(root: team.root).update { board in
+            guard let index = board.taskIndex("build-it") else { return }
+            board.tasks[index].team?[1].branch = "agent/other"
+            board.tasks[index].team?[1].handoff?.commit = other
+        }
+        let before = Git.run(["rev-parse", "HEAD"], in: team.worktree).output
+        let taken = team.core.call("take_part", ["member": "ui"])
+        #expect(taken.isError && taken.text.contains("isn't valid"), "\(taken.text)")
+        #expect(Git.run(["rev-parse", "HEAD"], in: team.worktree).output == before)
+        team.lead.deliverParts()
+        #expect(notices(team, to: "session-1").isEmpty)
+    }
+
+    @Test func aPartTakenBeforeItsNoticeIsNotAnnouncedAgain() throws {
+        let team = try team()
+        try partDone(team, "ui")
+        #expect(!team.core.call("take_part", ["member": "ui"]).isError)
+        team.lead.deliverParts()
+        #expect(notices(team, to: "session-1").isEmpty)
+        #expect(task(team)?.teamMember("ui")?.handoff?.told == "session-1")
+    }
 }

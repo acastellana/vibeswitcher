@@ -989,7 +989,7 @@ extension LeadToolset {
             guard let handoff = member.handoff else {
                 return LeadTeam.isSplit(task.team ?? []) ? "\(member.name) (no part_done yet)" : "\(member.name) (the team isn't split yet: split, then each member reports part_done)"
             }
-            if let head = branchHead(member.branch), head != handoff.commit {
+            guard branchHead(member.branch) == handoff.commit else {
                 return "\(member.name) (committed since its part_done at \(handoff.commit.prefix(8)): it reports part_done again)"
             }
             let taken = Git.run(["merge-base", "--is-ancestor", handoff.commit, "refs/heads/\(branch)"], in: root)
@@ -1023,11 +1023,16 @@ extension LeadToolset {
 
     private func takePartAlone(_ slug: String, member name: String) throws -> MCPToolResult {
         guard let task = try store.read().task(slug), let member = task.teamMember(name) else { throw Problem(text: "Not taken: \(name) isn't on \(slug)'s team any more.") }
+        // The board is anyone's to write: only a member's own branch is ever merged.
+        if let problem = LeadTeam.problem(task.team ?? [], slug: slug, root: root) {
+            throw Problem(text: "Not taken: \(slug)'s team as the board holds it isn't valid (\(problem)). Tell the lead with ask_lead.")
+        }
         guard let handoff = member.handoff else {
             throw Problem(text: "Not taken: \(name) hasn't reported its part done (part_done), so there's nothing it vouched for to take. You're told once it does.")
         }
-        if let head = branchHead(member.branch), head != handoff.commit {
-            throw Problem(text: "Not taken: \(name) committed since its part_done at \(handoff.commit.prefix(8)) (\(member.branch) is at \(head.prefix(8))), so its part isn't done as it stands. "
+        let head = branchHead(member.branch)
+        if head != handoff.commit {
+            throw Problem(text: "Not taken: \(name) committed since its part_done at \(handoff.commit.prefix(8)) (\(member.branch) is at \(head.map { String($0.prefix(8)) } ?? "no commit")), so its part isn't done as it stands. "
                           + "It reports part_done again once it is; you're told then.")
         }
         let worktree = Worktrees.path(root: root, slug: slug), branch = Worktrees.branch(slug)
@@ -1084,7 +1089,9 @@ extension LeadToolset {
     /// (`partNotice`), through `deliver`, as the lead's message: it wakes an integrator idle waiting on its parts. The
     /// lead's loop runs it at each pass, auto_advance or not (it moves nothing). Main red's pattern: each notice is
     /// claimed on the board (`LeadPartHandoff.told`) before it's sent, and rolled back when it didn't go. A handoff
-    /// that fails the wall's checks as the board holds it now (a worker's shell can write the board) isn't sent.
+    /// that fails the wall's checks as the board holds it now (a worker's shell can write the board) isn't sent, nor
+    /// one of a team that isn't valid (`LeadTeam.problem`) or whose commit isn't its member's branch head; one already
+    /// in agent/<slug> is claimed without a notice.
     func deliverParts() {
         guard role == .lead else { return }
         for task in store.load().tasks where task.isTeam && (task.team ?? []).dropFirst().contains(where: { $0.handoff.map { $0.told != task.worker } ?? false }) {
@@ -1095,10 +1102,13 @@ extension LeadToolset {
     private func deliverParts(_ slug: String) {
         _ = try? exclusively("parts-\(slug)") {
             guard let task = store.load().task(slug), let worker = task.worker, worker != task.stopped,
+                  LeadTeam.problem(task.team ?? [], slug: slug, root: root) == nil,
                   let sessions = try? hostSessions("no part_done notice was delivered"), sessions.contains(where: { $0.id == worker && $0.live }) else { return }
             for member in (task.team ?? []).dropFirst() {
-                guard let handoff = member.handoff, handoff.told != worker,
+                guard let handoff = member.handoff, handoff.told != worker, branchHead(member.branch) == handoff.commit,
                       [handoff.changed, handoff.caveats, handoff.verify].allSatisfy({ LeadWall.textRefusal($0) == nil && LeadWall.plainLines($0) == $0 }) else { continue }
+                // Taken already (a fresh integrator worker, say): claimed, not announced again.
+                let taken = Git.run(["merge-base", "--is-ancestor", handoff.commit, "refs/heads/\(Worktrees.branch(slug))"], in: root).ok
                 var claimed = false
                 try? store.update { board in
                     guard let index = board.taskIndex(slug), board.tasks[index].worker == worker,
@@ -1107,7 +1117,7 @@ extension LeadToolset {
                     board.tasks[index].team?[at].handoff?.told = worker
                     claimed = true
                 }
-                guard claimed else { continue }
+                guard claimed, !taken else { continue }
                 let delivered = try? deliver(slug, worker: worker, text: Self.partNotice(slug, member: member, handoff), clearDraft: false)
                 if delivered.map(Self.went) != true {
                     try? store.update { board in
