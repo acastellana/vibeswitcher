@@ -1112,8 +1112,8 @@ what it needs.
   hooks, `~/.local/share/claude/versions/*`, the shell startup files Claude Code's Bash tool sources. The config seal
   watches them (the bootstrap path's step 8 adds the Linux list: `~/.bash_profile`, `~/.bash_login`, `~/.profile` and
   `~/.bashrc`, each watched whether it exists or not, what they source (here `~/.local/share/swiftly/env.sh`), `~/bin`
-  (absent here, first on the snapshot's PATH once made), the agents' `shell-snapshots` folders,
-  `~/.config/systemd/user`, `~/.config/environment.d`,
+  (absent here, first on the snapshot's PATH once made), the agents' `shell-snapshots` folders (these, Task 12b's
+  additions, approved by the lead 2026-11-14), `~/.config/systemd/user`, `~/.config/environment.d`,
   `~/.config/autostart`, `~/.vibeswitcher/v2/projects`, `~/.vibeswitcher/v2/builds`, `~/.vibeswitcher/lead/run`,
   `~/.vibeswitcher/lead/git-hooks`, `~/.local/bin`, `~/.local/share/claude/versions`, the toolchain's `usr/bin`, every
   other user-writable folder on the unit's PATH, and, while `/mnt/c` is mounted, `.wslconfig` and the Windows Startup
