@@ -2986,3 +2986,19 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 09:47 The worker on wall-tools-members-post answered findings: wall-tools-members-post:F1 fixed at edc65468: c9d79eda: the lead's post is now sealed by the session host as the lead's when it is stored. LeadWall.post takes a seal closure and Post.seal holds the result. The seal covers SteerMessage id 'wall <slug> <id>', text LeadWall.delivery(post), from .lead('lead of <project>'), agentPid 0, at post.at. The in-memory vouched ids are gone. Every deliverWall pass (deliverWalls from LeadAdvance, sent()'s integrator ride-along, the lead's own post) trusts a _l…
 - 2026-11-14 09:58 Planned workers-and-verifiers-5: Workers and verifiers can't read Claude Code's daemon key and leftover stores (review audit, for security)
 - 2026-11-14 10:26 Audit of wall-tools-members-post at edc65468 tested its merged result cba35baa onto main: test command failed
+- 2026-11-14 10:26 Released wall-tools-members-post's worker (idle since its done report on edc65468) while its audit runs
+- 2026-11-14 10:26 Automatically (auto_advance): Started the audit of wall-tools-members-post at edc65468 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-14 10:26 Started a worker on workers-and-verifiers-5
+- 2026-11-14 10:26 Automatically (auto_advance): Started a worker on workers-and-verifiers-5 (Workers and verifiers can't read Claude Code's daemon key and leftover stores).
+- 2026-11-14 10:28 Audit of wall-tools-members-post: complete, clean, round 2: 2 Important closed, 2 Nit (1 open)
+- 2026-11-14 10:38 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Error lines in app.log within 10 min, by kind: app: failed ×1
+Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-14 10:38 Planned remove-the-floating-dots: Remove the floating dots panel
+- 2026-11-14 10:39 Started a worker on remove-the-floating-dots
+- 2026-11-14 10:39 Automatically (auto_advance): Started a worker on remove-the-floating-dots (Remove the floating dots panel).
+- 2026-11-14 10:48 Pipeline held: wall-tools-members-post ready to merge with none landing; cause: every test slot held
+- 2026-11-14 10:49 Planned deny-claude-by-listing: Deny ~/.claude by listing it at launch, with a short keep list (review audit, for security)
+- 2026-11-14 10:52 Released workers-and-verifiers-5's worker (idle since its done report on b3944b1b) while its audit runs
+- 2026-11-14 10:52 Automatically (auto_advance): Started the audit of workers-and-verifiers-5 at b3944b1b (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-14 10:53 Merged wall-tools-members-post: Wall tools: members post and read, each post delivered once (build 40766073a6b2)
