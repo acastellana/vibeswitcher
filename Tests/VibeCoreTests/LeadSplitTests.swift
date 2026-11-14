@@ -273,6 +273,22 @@ struct LeadSplitTests: LeadTeamFixture {
         #expect(task(root)?.isTeam == true)
     }
 
+    /// Audit F1: cleanup of a team task with a symlink at a member's folder (to another task's worktree) touches nothing
+    /// through it: not its build folder, not its files, not its worktree.
+    @Test func cleanupLeavesWhatASymlinkAtAMembersFolderLeadsTo() throws {
+        let (root, runtime, lead) = try started()
+        _ = runtime
+        let other = try Worktrees.create(root: root, slug: "other")
+        try FileManager.default.createDirectory(atPath: other + "/.build", withIntermediateDirectories: true)
+        try "built\n".write(toFile: other + "/.build/keep.txt", atomically: true, encoding: .utf8)
+        try "work\n".write(toFile: other + "/unsaved.txt", atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(atPath: Worktrees.path(root: root, slug: "build-it--ui"), withDestinationPath: other)
+
+        _ = lead.call("cleanup", ["task": "build-it", "force": true])
+        #expect(FileManager.default.fileExists(atPath: other + "/.build/keep.txt"))
+        #expect(FileManager.default.fileExists(atPath: other + "/unsaved.txt") && Worktrees.isWorktree(root: root, slug: "other"))
+    }
+
     /// A team task's re-roll ends its members' workers, keeps their branches as archives, removes their worktrees and
     /// branches, and its fresh integrator starts unsplit.
     @Test func aRerollStopsTheMembersAndArchivesTheirBranches() throws {
