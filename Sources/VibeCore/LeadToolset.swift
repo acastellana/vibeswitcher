@@ -2523,10 +2523,16 @@ public final class LeadToolset: MCPToolset {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
         let refused = "\(slug)'s worker wasn't stopped"
         // A session that's gone (ended, or lost with a replaced host) has nothing left to kill.
-        let running = try task.worker.flatMap { worker in try hostSessions(refused).first { $0.id == worker && $0.live } }
+        let sessions = try hostSessions(refused)
+        let running = task.worker.flatMap { worker in sessions.first { $0.id == worker && $0.live } }
         let ended = try running.map { try end([$0], refused: refused)[0] }
         if let ended, ended.failure != nil {
             throw Problem(text: "\(slug)'s worker wasn't stopped: \(ended.said). It's still running; if the host keeps refusing, tell the user (they can end it in VibeSwitcher).")
+        }
+        // A team task's members stop with it: none runs on, uncounted, beside a stopped task.
+        let members = try end(LeadTeam.liveMembers(task, in: sessions), refused: refused)
+        if let failed = members.first(where: { $0.failure != nil }) {
+            throw Problem(text: "\(slug)'s members weren't all stopped: \(failed.said). \(ended == nil ? "" : "Its integrator was. ")If the host keeps refusing, tell the user (they can end it in VibeSwitcher).")
         }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -2537,6 +2543,7 @@ public final class LeadToolset: MCPToolset {
             }
         }
         return MCPToolResult(text: (ended.map { "Stopped the worker on \(slug): \($0.said)." } ?? "\(slug)'s worker had already ended.")
+                             + (members.isEmpty ? "" : " Its members' workers too: \(members.map(\.said).joined(separator: ", ")).")
                              + " Its worktree and commits stay; start_worker continues there.")
     }
 
@@ -6037,7 +6044,9 @@ public final class LeadToolset: MCPToolset {
         let slug = try taskSlug(arguments)
         let question = try text(arguments, "question", missing: "Ask something.")
         let asker = askerText(slug)
-        guard try tellLead("\(asker.who) asks: \(question)\nAnswer with message(\(slug), …)\(asker.answer).", about: "worker \(slug)") else {
+        // A member's own grant (<slug>--<name>) names it: the vault seals a worker's line only about the task it holds.
+        let about = memberSeat() != nil ? (taskID ?? slug) : slug
+        guard try tellLead("\(asker.who) asks: \(question)\nAnswer with message(\(slug), …)\(asker.answer).", about: "worker \(about)") else {
             throw Problem(text: "There's no lead running to ask. Decide what you can within your contract, or report blocked.")
         }
         // Waiting on the answer isn't a stall (see `LeadStall`); the lead's next message answers it.

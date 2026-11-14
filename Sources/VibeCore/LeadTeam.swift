@@ -149,12 +149,19 @@ extension LeadTeam {
     /// them at once).
     public static func isSplit(_ team: [LeadTeamMember]) -> Bool { team.count > 1 && team.dropFirst().contains { $0.from != nil } }
 
-    /// The workers a board's running team tasks run beside their integrators (an integrator is its task's one worker,
-    /// as a plain task's is): each other member whose worker is in `live`.
+    /// The workers a board's team tasks run beside their integrators (an integrator is its task's one worker, as a
+    /// plain task's is): each other member whose worker is in `live`, whatever its task's status (a member still runs
+    /// while its task is blocked or stopped, and takes a place in max_workers all the same).
     public static func memberWorkers(_ board: LeadBoard, live: Set<String>) -> Int {
-        board.tasks.filter { $0.status == .running }.reduce(0) { count, task in
+        board.tasks.reduce(0) { count, task in
             count + (task.team ?? []).dropFirst().filter { $0.worker.map(live.contains) ?? false }.count
         }
+    }
+
+    /// The sessions of `task`'s members other than its integrator that are still live in `sessions`.
+    static func liveMembers(_ task: LeadTask, in sessions: [LeadSessionInfo]) -> [LeadSessionInfo] {
+        let workers = Set((task.team ?? []).dropFirst().compactMap(\.worker))
+        return sessions.filter { $0.live && workers.contains($0.id) }
     }
 
     /// "a (integrator), b, c".
