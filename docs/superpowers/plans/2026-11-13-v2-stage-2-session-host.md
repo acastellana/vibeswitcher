@@ -116,7 +116,9 @@ errors in 8 of 13 files), `docs/process/v2-stage1-recon.md` §1.2, §1.7, §1.9 
   world-readable here. A descriptor's number is not a secret.
 - **Test-only flags** (`--test-app-pid`, `--test-app-connector`, `--handover-test-secret`,
   `--handover-test-secret-file`, `--handover-test-traced`, `--install-root`, `--parser-test-hooks`, `--server-arg`,
-  `--hold-first-look`, the engine's `--test-user-seal-life`, the launcher's test delay, and Task 9a's
+  `--hold-first-look`, the engine's `--test-user-seal-life`, the launcher's test delay, Task 9b's
+  `--launcher-test-hold` (the 9b review fixes: a scratch host's launchers wait after making themselves dumpable until
+  a file exists), and Task 9a's
   `--test-stays-dumpable`, which makes a scratch host dumpable again so a test can count its descriptors from outside)
   are honoured only by a
   scratch host (on a lock of its own) and, but for `--server-arg`, `--hold-first-look` and `--test-user-seal-life`
@@ -248,12 +250,16 @@ document holds the reasoning in full (the section is named); this list is what t
    - **The exec windows are closed by sealed copies.** The kernel makes a process non-dumpable from its exec when the
      image it runs is one it can't read. Every image the host starts is a sealed copy (S2-D7) made `0111`, run from
      `/proc/self/fd/<copy>`; nobody but the host holds the copy, and the host is non-dumpable from its first statement.
+     Sessions' launchers start from a second copy of their own (the 9b review, below), and the host puts a copy's
+     mode back before each start.
      Task 3b measures it in the suite. **If the measurement fails** on a kernel, the windows are open there, the
      document's S11 lists them and the rule on switches (the bootstrap path, step 8) stays.
    - **What that costs a process started so:** its `/proc/self/*` files are root's, so it can't write its own
      `/proc/self/oom_score_adj` (measured here: `EACCES`). The launcher, which must, sets itself dumpable again just
      before that write (Task 9b), after its terminal check and after closing its inherited image, so it holds nothing
-     then that the session's program won't hold a moment later.
+     then that the session's program won't hold a moment later, but for its `/proc/<pid>/exe`: through it any process
+     of the user can `chmod` the copy the launcher runs (the 9b review, 2026-11-14). That copy is therefore the
+     launchers' own, never the parsers'.
    - **Descriptors are close-on-exec from creation** (Global Constraints; Task 4a).
    - **A parser's reply is typed only as a reply.** On Linux the host passes a parser's `.reply` bytes into the
      session only when they answer a query the host saw in that session's output since the last reply, and only in the
@@ -1342,7 +1348,7 @@ on both, and S5's `Held by:` names them.
   descriptor after a handover (Task 9c); the server's from `--server`; with `--node-root`, each copy's SHA-256 (taken
   through `withBytes`) compared with `<node-root>/build-info`, and the host refuses to start on a mismatch or a missing
   record.
-- Create: `Sources/VibeHost/V2/BuildInfo.swift`, which **fixes the `build-info` format** (the bootstrap path's step 8
+- Create: `Sources/VibeCore/V2/BuildInfo.swift` (in `VibeCore`, the 9b review: `ServerBuild` reads it), which **fixes the `build-info` format** (the bootstrap path's step 8
   writes it, `ServerBuild` reads it): `<installRoot>/<commit>/build-info`, JSON
   `{"format":1,"commit":"<40 hex>","binaries":{"vibeswitcher-host":"<sha256 hex>",…},"swift":"<swift --version>",
   "resolved":"<sha256 of Package.resolved>"}`, one entry per file in that build's `bin/`. A newer format is refused
@@ -1378,7 +1384,17 @@ on both, and S5's `Held by:` names them.
   from Task 9c) adopts that copy as its own (`/proc/self/exe` is then unreadable to it). `--node-root` stays in
   `config.arguments` until Task 9d appends the target's, as `--server` does; on Linux the fallback is the image's path
   until Task 9c. `--node` also takes only the account's own lock (`HostImages.mayStart`). A start refused by these
-  checks sends a handover's new image back rather than ending it.
+  checks sends a handover's new image back rather than ending it. **Awaiting the lead's approval** (the 9b review,
+  2026-11-14): no `Config.launcherImage`, as above; the review fixes make the case stronger, since sessions' launchers
+  and parsers now start from two different copies, which one field couldn't name.
+- *As made, the 9b review fixes (2026-11-14):* sessions' launchers start from a second sealed copy of the host's image,
+  made from its own (`Platform.ProcessSelf.sealedCopy(of:name:)` taking a copy, `HostImages.forSessions`, one more hook
+  line in `PTYSpawn.spawn`), never from the parsers' copy: a launcher made dumpable before its exec lets any process
+  of the user `chmod` its `/proc/<pid>/exe`, which was the parsers' copy. The host puts a copy's mode back before
+  each start from it (`Platform.ProcessSelf.restoreMode`). `BuildInfo` is in `Sources/VibeCore/V2/`, so
+  `ServerBuild` (VibeCore, linked by `vibeswitcher-mcp`) can read it. Test:
+  `aLaunchersImageChangedFromOutsideNeverReachesTheParsers` (with `--launcher-test-hold`), shown failing with the
+  launchers started from the parsers' copy.
 
 - [ ] **Step 1: Failing tests** (Linux). The two `build-info` tests are in `HandoverLinuxTests`, as the document's S9
   places them; the rest in `HostHardeningTests`.

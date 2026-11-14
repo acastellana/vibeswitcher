@@ -389,6 +389,45 @@ struct SealedCopyTests {
         #expect(Platform.ProcessSelf.sealedCopy(of: "/bin", name: "folder") == .failure(Platform.Errno(code: EINVAL)))
     }
 
+    /// A copy of a copy (its holder can't open the first by path) holds the same bytes in another memfd, sealed,
+    /// close-on-exec and `0111` as the first is, and runs; a mode put on one doesn't reach the other. A script's copy's
+    /// copy is `0555`, as the script's is.
+    @Test func aCopyOfACopyIsAnotherSealedCopyOfTheSameBytes() throws {
+        let first = try Platform.ProcessSelf.sealedCopy(of: "/bin/echo", name: "echo").get()
+        defer { close(first.fd) }
+        let second = try Platform.ProcessSelf.sealedCopy(of: first, name: "echo-again").get()
+        defer { close(second.fd) }
+        #expect(second.fd != first.fd)
+        #expect(Self.bytes(of: second) == Self.bytes(of: first) && second.size == first.size && !second.isScript)
+        #expect(vibe_get_seals(second.fd) == Platform.ProcessSelf.allSeals)
+        #expect(fcntl(second.fd, F_GETFD) & FD_CLOEXEC != 0)
+        #expect(Self.mode(of: second.fd) == 0o111)
+        var one = stat(), other = stat()
+        #expect(fstat(first.fd, &one) == 0 && fstat(second.fd, &other) == 0 && one.st_ino != other.st_ino)
+        #expect(fchmod(second.fd, 0o755) == 0)
+        #expect(Self.mode(of: first.fd) == 0o111)
+        // Its holder puts its mode back; nothing that isn't a sealed copy is touched.
+        #expect(Platform.ProcessSelf.restoreMode(of: second.fd) && Self.mode(of: second.fd) == 0o111)
+        #expect(Platform.ProcessSelf.restoreMode(of: first.fd) && Self.mode(of: first.fd) == 0o111)
+        let plain = open("/bin/echo", O_RDONLY | O_CLOEXEC)
+        try #require(plain >= 0)
+        defer { close(plain) }
+        #expect(!Platform.ProcessSelf.restoreMode(of: plain))
+        let ran = try Self.run(second, ["echo", "copied"])
+        #expect(ran.exit == 0 && ran.output == "copied\n", "\(ran)")
+
+        let script = try Self.scratchCopy(of: "/bin/true", named: "script")
+        defer { try? FileManager.default.removeItem(at: script.deletingLastPathComponent()) }
+        try Self.rewriteInPlace(script, with: "#!/bin/sh\necho script\n")
+        let scripted = try Platform.ProcessSelf.sealedCopy(of: script.path, name: "script").get()
+        defer { close(scripted.fd) }
+        let again = try Platform.ProcessSelf.sealedCopy(of: scripted, name: "script-again").get()
+        defer { close(again.fd) }
+        #expect(again.isScript && Self.mode(of: again.fd) == 0o555)
+        #expect(fchmod(again.fd, 0o111) == 0)
+        #expect(Platform.ProcessSelf.restoreMode(of: again.fd) && Self.mode(of: again.fd) == 0o555)
+    }
+
     // MARK: What runs is what was read
 
     /// The test binary, copied to a scratch path, is loaded into a helper's sealed copy; the file is then rewritten in

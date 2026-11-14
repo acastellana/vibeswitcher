@@ -674,7 +674,14 @@ image it runs is one the process can't read: then the kernel makes it non-dumpab
 the host starts (the server child, the parsers, the launcher, a handover's probe, the new image of a handover, and
 the fallback) is a **sealed copy** (S9): read once into a `memfd`, hashed from the copy's own bytes, sealed against
 writing, and `fchmod`'d to `0111`, then run from `/proc/self/fd/<copy>`. Nobody but the host holds the copy (the host
-is non-dumpable, so `/proc/<host>/fd/` is closed to others), so nobody can `chmod` it back. The host's own descriptors
+is non-dumpable, so `/proc/<host>/fd/` is closed to others), so nobody can `chmod` it back. One exception, and
+why the launchers have a copy of their own: a session's launcher makes itself dumpable just before it execs the
+session's program (to raise its `oom_score_adj`, S2-D5), and until that exec any process of the user can resolve its
+`/proc/<pid>/exe` and `chmod` the copy it runs (the seals don't stop a `chmod`; measured on this kernel by the 9b
+review, 2026-11-14). So the launchers start from a second copy of the host's image that only launchers start from,
+never a parser, never carried across a handover, and the host puts any copy's mode back before it starts a child from
+it (`Platform.ProcessSelf.restoreMode`): a `chmod` through a launcher reaches only later launchers, which make
+themselves dumpable anyway and hold nothing then that the session's program won't. The host's own descriptors
 were never reachable: it was non-dumpable from its first statement, and a child forked from it stays so until its
 exec. Measured by a reviewer on this kernel (a sealed `0111` copy of `/bin/sleep`, run from `/proc/self/fd/N`:
 `PTRACE_ATTACH`, `pidfd_getfd` refused, `/proc/<pid>/mem` refused); Task 3 measures it again in the suite. **If the
@@ -741,7 +748,9 @@ parser's reply grammar in Task 9; the server's own first statements in the engin
 `HostHardeningTests.anotherHardenedProcessIsNotTakenForTheHost`,
 `HostHardeningTests.nothingSecretIsInTheHostsArgumentsOrEnvironment`,
 `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`, `HostHardeningTests.aSessionsProgramHoldsNoImageDescriptor`,
-`HostHardeningTests.aSessionsProgramIsTheOOMKillersFirstPick`; planned: stage 2 plan task 9 (9c to 9e).
+`HostHardeningTests.aSessionsProgramIsTheOOMKillersFirstPick`,
+`HostHardeningTests.aLaunchersImageChangedFromOutsideNeverReachesTheParsers`,
+`SealedCopyTests.aCopyOfACopyIsAnotherSealedCopyOfTheSameBytes`; planned: stage 2 plan task 9 (9c to 9e).
 
 **Tests to write:** Task 9: `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`,
 `aHandoverImageIsNotDumpableFromItsExec`; `ParserReplyTests.aReplyWithNoQueryIsNotTyped`,

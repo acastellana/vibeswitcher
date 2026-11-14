@@ -573,6 +573,59 @@ extension HostHardeningTests {
         #expect(Platform.Processes.arguments(OrphanSweepTests.parsers(of: host.pid)[0]).first?.hasPrefix("/proc/self/fd/") == true)
     }
 
+    /// A session's launcher makes itself dumpable before it execs the session's program, and while it is, any process
+    /// of the user can `chmod` the image it runs through `/proc/<launcher>/exe` (the seals don't stop a `chmod`). That
+    /// image is the launchers' own copy, never the one the host's parsers start from: the parsers' copy stays `0111`,
+    /// so a parser started after it is still non-dumpable from its exec; and the host puts the launchers' copy back to
+    /// `0111` before the next launcher starts from it. The launchers are held after `HostImages.beforeProgram`
+    /// (`--launcher-test-hold`) until the test lets them go; the host is left dumpable (`--test-stays-dumpable`) so
+    /// that the test can read its copy's mode. Without the launchers' own copy the `chmod` lands on the parsers' copy.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies; the Mac has none"))
+    func aLaunchersImageChangedFromOutsideNeverReachesTheParsers() async throws {
+        let hold = "\(shortScratchRoot)/vshl-\(UUID().uuidString.prefix(8))"
+        defer { unlink(hold) }
+        let host = try await ScratchHostProcess(arguments: [HostImages.launcherTestHoldFlag, hold, HostHardening.staysDumpableFlag])
+        defer { host.stop() }
+        func mode(_ path: String) -> mode_t? {
+            var info = stat()
+            return stat(path, &info) == 0 ? info.st_mode & 0o7777 : nil
+        }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let first = try await client.spawn("printf 'first-up\\n'; exec sleep 600")
+        defer { kill(first.childPID, SIGKILL) }
+        // Held after `beforeProgram`: dumpable, and still running the launcher's image.
+        #expect(await eventually { Platform.Processes.isDumpable(first.childPID) == true }, "\(host.log)")
+        let exe = "/proc/\(first.childPID)/exe"
+        let image = (try? FileManager.default.destinationOfSymbolicLink(atPath: exe)) ?? ""
+        try #require(image.contains("memfd:"), "\(image)")
+        #expect(chmod(exe, 0o755) == 0, "errno \(errno)")
+        #expect(mode(exe) == 0o755)
+
+        // The parsers' copy, as the host holds it (a parser's first argument names its descriptor): still unreadable.
+        #expect(await eventually { !OrphanSweepTests.parsers(of: host.pid).isEmpty })
+        let parsersImage = try #require(Platform.Processes.arguments(OrphanSweepTests.parsers(of: host.pid)[0]).first)
+        try #require(parsersImage.hasPrefix("/proc/self/fd/"), "\(parsersImage)")
+        let held = "/proc/\(host.pid)/fd/" + parsersImage.dropFirst("/proc/self/fd/".count)
+        #expect(mode(held) == 0o111, "\(held)")
+
+        // The next launcher is started from a copy put back to `0111`, and its parser is out of reach.
+        let second = try await client.spawn("printf 'second-up\\n'; exec sleep 600")
+        defer { kill(second.childPID, SIGKILL) }
+        #expect(await eventually { Platform.Processes.isDumpable(second.childPID) == true }, "\(host.log)")
+        #expect(mode("/proc/\(second.childPID)/exe") == 0o111)
+        #expect(await eventually { OrphanSweepTests.parsers(of: host.pid).count == 2 })
+        for parser in OrphanSweepTests.parsers(of: host.pid) {
+            #expect(Platform.Processes.isDumpable(parser) == false, "parser \(parser)")
+            #expect(Self.openMemory(of: parser) == EACCES, "parser \(parser)")
+        }
+        #expect(mode(held) == 0o111, "\(held)")
+
+        // Let go, both programs run.
+        #expect(FileManager.default.createFile(atPath: hold, contents: nil))
+        #expect(await eventually { client.screen(first.id)?.contains("first-up") == true }, "\(client.screen(first.id) ?? "")\n\(host.log)")
+        #expect(await eventually { client.screen(second.id)?.contains("second-up") == true }, "\(client.screen(second.id) ?? "")")
+    }
+
     /// A session's program's `oom_score_adj` is the host's plus 500 (at most 1000), so the OOM killer picks it before
     /// the host, and nothing about it is on the session's terminal: the launcher, non-dumpable from its exec, made
     /// itself dumpable again before it wrote its own (its /proc files root's otherwise: `EACCES`, said on the terminal).

@@ -40,6 +40,8 @@ public enum PTYSpawn {
         // terminal's window size when its last slave descriptor closes, and a program that started on a 0×0 terminal
         // and never got a resize (no view attached) drew nothing: Codex's TUI (task codex-s-tui-renders).
         defer { close(terminal.slave) }
+        // On Linux the launchers' own sealed copy, never the parsers' (see V2/HostImages.swift).
+        let launcher = HostImages.forSessions(launcher)
 
         // In a session of its own, the terminal its only descriptors (opened by its path, so the launcher's own
         // `makeControlling` takes it), with default signals and an empty mask.

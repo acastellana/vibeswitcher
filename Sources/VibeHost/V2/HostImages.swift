@@ -6,14 +6,17 @@ import VibeCore
 ///
 /// - **Its own sealed copy.** At its start the host reads its own image (`/proc/self/exe`, the inode this process runs,
 ///   which can't be written in place while it runs) once into a sealed copy (`Platform.ProcessSelf.sealedCopy`), and
-///   every session's launcher and parser is started from that copy (`launching(_:environment:)`, one hook in
-///   `PTYSpawn.spawn` and one in `ParserLink.start`): no launcher copy is written under `~/.vibeswitcher/host`, a file
-///   changed on disk after the host loaded it is never what a session starts through, and the launcher and the parser,
-///   started from an image they can't read, are non-dumpable from their exec. Each closes the copy as its first act
+///   every parser is started from that copy, and every session's launcher from a second copy of the same bytes made
+///   from it, the launchers' own (`forSessions`, then `launching(_:environment:)`; hooks in `PTYSpawn.spawn` and one
+///   in `ParserLink.start`): no launcher copy is written under `~/.vibeswitcher/host`, a file changed on disk after the
+///   host loaded it is never what a session starts through, and the launcher and the parser, started from an image
+///   they can't read, are non-dumpable from their exec. Each closes the copy as its first act
 ///   (`Platform.ProcessSelf.closeInheritedImage`), so a session's program never holds it; the launcher then makes
 ///   itself dumpable again and raises its `oom_score_adj` by 500 (`beforeProgram`), so that the kernel's OOM killer
-///   picks a session's program before the host. After a handover the new image's own copy is Task 9c's (adopted from
-///   the descriptor the old image passes); until then it is made afresh, as at a fresh start.
+///   picks a session's program before the host. Dumpable, its `/proc/<pid>/exe` lets any process of the user `chmod`
+///   the copy it runs, which is why that copy is never the parsers' (`forSessions` says more). After a handover the
+///   new image's own copy is Task 9c's (adopted from the descriptor the old image passes); until then it is made
+///   afresh, as at a fresh start; its launchers' copy is always made afresh, never carried.
 /// - **`build-info`.** With `--node-root FOLDER` (a build folder: `FOLDER/bin/…`, `FOLDER/build-info`), the own copy's
 ///   SHA-256, and the `--server` image's (loaded here, so the copy checked is the copy that runs), must be what
 ///   `FOLDER/build-info` records (`BuildInfo`), or the host doesn't start, saying which binary.
@@ -147,23 +150,48 @@ public enum HostImages {
 
     // MARK: The sealed copies
 
-    /// The copies a host runs from: its own (the launcher's and the parsers'), and with `--node-root` its server's
-    /// (nil otherwise: `ServerChild` loads it then, as before). Both nil on the Mac.
+    /// The copies a host runs from: its own (the parsers'), the sessions' launchers' (a second copy of the same bytes,
+    /// `launcher`), and with `--node-root` its server's (nil otherwise: `ServerChild` loads it then, as before). All nil
+    /// on the Mac.
     public struct Loaded {
         public var own: Platform.ProcessSelf.SealedCopy?
         public var server: Platform.ProcessSelf.SealedCopy?
+        /// The copy sessions' launchers start from (`forSessions`), never a parser, never carried across a handover.
+        public var launcher: Platform.ProcessSelf.SealedCopy?
 
-        public init(own: Platform.ProcessSelf.SealedCopy?, server: Platform.ProcessSelf.SealedCopy?) {
+        public init(own: Platform.ProcessSelf.SealedCopy?, server: Platform.ProcessSelf.SealedCopy?,
+                    launcher: Platform.ProcessSelf.SealedCopy? = nil) {
             self.own = own
             self.server = server
+            self.launcher = launcher
         }
+    }
+
+    /// The name of the sessions' launchers' copy (`/memfd:vibeswitcher-launcher` in /proc's links).
+    static let launcherCopyName = "vibeswitcher-launcher"
+
+    /// What `forSessions` and `launching` read: the own copy's path, the launchers' copy's, and the test hold.
+    private struct Sessions {
+        var own: String?
+        var launcher: String?
+        var hold: String?
+    }
+
+    private static let sessionsLock = NSLock()
+    nonisolated(unsafe) private static var sessionsState = Sessions()
+
+    private static func sessions<T>(_ body: (inout Sessions) -> T) -> T {
+        sessionsLock.lock()
+        defer { sessionsLock.unlock() }
+        return body(&sessionsState)
     }
 
     /// On Linux: the sealed copy this process was started from (`VIBESWITCHER_IMAGE_FD`, a test's now, a handover's from
     /// Task 9c) adopted as its own when it is one (`Platform.ProcessSelf.adopt`: all four seals, mode `0111`), since
     /// `/proc/self/exe` then names an image this process can't read; otherwise that descriptor closed and its own image
     /// read into a fresh sealed copy. With `--node-root`, that copy and the `--server` image's are checked against its
-    /// `build-info` (`BuildInfo.mismatch`). The Mac: nothing loaded. Fails, nothing left open, saying why.
+    /// `build-info` (`BuildInfo.mismatch`). Last, a second copy of its own (`Loaded.launcher`), which `forSessions`
+    /// gives sessions' launchers from then on. The Mac: nothing loaded. Fails, nothing left open, saying why.
     public static func load(arguments: [String]) -> Result<Loaded, Refused> {
         guard !Platform.CodeIdentity.isAvailable else { return .success(Loaded(own: nil, server: nil)) }
         let own: Platform.ProcessSelf.SealedCopy
@@ -177,53 +205,104 @@ public enum HostImages {
             case .failure(let error): return .failure(Refused("its own image couldn't be loaded into a sealed copy (errno \(error.code))"))
             }
         }
-        guard let nodeRoot = value(after: nodeRootFlag, in: arguments) else { return .success(Loaded(own: own, server: nil)) }
         func refused(_ why: String, closing copies: [Platform.ProcessSelf.SealedCopy]) -> Result<Loaded, Refused> {
             for copy in copies { Sys.close(copy.fd) }
             return .failure(Refused(why))
         }
+        // The sessions' launchers' own copy, made last, once the rest is checked.
+        func loaded(server: Platform.ProcessSelf.SealedCopy?) -> Result<Loaded, Refused> {
+            switch Platform.ProcessSelf.sealedCopy(of: own, name: launcherCopyName) {
+            case .failure(let error):
+                return refused("its launchers' sealed copy couldn't be made (errno \(error.code))", closing: [own] + (server.map { [$0] } ?? []))
+            case .success(let launcher):
+                sessions { $0.own = own.path; $0.launcher = launcher.path }
+                return .success(Loaded(own: own, server: server, launcher: launcher))
+            }
+        }
+        guard let nodeRoot = value(after: nodeRootFlag, in: arguments) else { return loaded(server: nil) }
         let info: BuildInfo
         switch BuildInfo.read(buildFolder: nodeRoot) {
         case .success(let read): info = read
         case .failure(let why): return refused("its build-info: \(why)", closing: [own])
         }
         if let mismatch = info.mismatch(of: own, as: BuildInfo.host) { return refused(mismatch, closing: [own]) }
-        guard let path = value(after: "--server", in: arguments) else { return .success(Loaded(own: own, server: nil)) }
+        guard let path = value(after: "--server", in: arguments) else { return loaded(server: nil) }
         switch Platform.ProcessSelf.sealedCopy(of: path, name: BuildInfo.server) {
         case .failure(let error):
             return refused("\(BuildInfo.server): \(path) couldn't be loaded into a sealed copy (errno \(error.code))", closing: [own])
         case .success(let server):
             if let mismatch = info.mismatch(of: server, as: BuildInfo.server) { return refused(mismatch, closing: [own, server]) }
-            return .success(Loaded(own: own, server: server))
+            return loaded(server: server)
         }
     }
 
     // MARK: The launcher and the parsers
 
+    /// The image `PTYSpawn.spawn` starts a session's launcher from, for the host's `launcher`: on Linux, when it is the
+    /// host's own copy, the launchers' own copy (`Loaded.launcher`); otherwise `launcher` as given (the Mac's launcher
+    /// copy, a test's in-process host's, a host not loaded yet).
+    ///
+    /// **Why a copy of their own** (the 9b review, 2026-11-14): a launcher makes itself dumpable before it execs the
+    /// session's program (`beforeProgram`), and from then until its exec any process of the user may resolve
+    /// `/proc/<launcher>/exe`, the copy it was started from, and `chmod` it readable (the seals don't stop a `chmod`;
+    /// a non-dumpable process's link is refused to all but root). A copy that is readable starts dumpable children,
+    /// so were it the parsers' copy, every parser after it would be reachable from its exec until it hardens. The
+    /// launchers' copy is started by launchers only, which make themselves dumpable anyway and hold nothing by then that
+    /// the session's program won't; `launching` puts its mode back before each start all the same.
+    static func forSessions(_ launcher: String) -> String {
+        sessions { $0.own == launcher ? $0.launcher : nil } ?? launcher
+    }
+
     /// What `PTYSpawn.spawn` and `ParserLink.start` start their child with, for `launcher` and the child's
-    /// `environment`: when `launcher` is a sealed copy this process holds (`/proc/self/fd/N`, the host's own on Linux),
-    /// N kept in the child (else its path is gone before the exec resolves it) and named to it in
-    /// `VIBESWITCHER_IMAGE_FD`, so that its first act closes it; otherwise nothing kept and the environment as given
-    /// (the Mac's launcher, a test's in-process host's).
+    /// `environment`: when `launcher` is a sealed copy this process holds (`/proc/self/fd/N`, on Linux the host's own
+    /// for a parser and the launchers' for a session), its mode put back if anything changed it
+    /// (`Platform.ProcessSelf.restoreMode`), N kept in the child (else its path is gone before the exec resolves it)
+    /// and named to it in `VIBESWITCHER_IMAGE_FD`, so that its first act closes it; a scratch host's test hold named
+    /// to a session's launcher (`holdLaunchers(until:)`), and to nothing else. Otherwise nothing kept and the
+    /// environment as given (the Mac's launcher, a test's in-process host's). A copy whose mode can't be put back is
+    /// not kept, so the child isn't started from it.
     static func launching(_ launcher: String, environment: [String]) -> (keep: [Int32], environment: [String]) {
         let prefix = "/proc/self/fd/"
         guard launcher.hasPrefix(prefix), let fd = Int32(launcher.dropFirst(prefix.count)), fd > STDERR_FILENO,
               fcntl(fd, F_GETFD) >= 0 else { return ([], environment) }
         let variable = Platform.ProcessSelf.imageVariable
-        return ([fd], environment.filter { !$0.hasPrefix(variable + "=") } + ["\(variable)=\(fd)"])
+        let given = environment.filter { !$0.hasPrefix(variable + "=") && !$0.hasPrefix(launcherTestHoldVariable + "=") }
+        guard Platform.ProcessSelf.restoreMode(of: fd) else { return ([], given) }
+        let hold = sessions { $0.launcher == launcher ? $0.hold : nil }
+        return ([fd], given + ["\(variable)=\(fd)"] + (hold.map { ["\(launcherTestHoldVariable)=\($0)"] } ?? []))
     }
 
     /// The launcher's last act before it execs the session's program, after its terminal check (Linux; the Mac:
     /// nothing): dumpable again (started from an unreadable copy, its /proc entries are root's, and it holds nothing by
-    /// now that the program won't hold a moment later), then its `oom_score_adj` raised by `oomRaise` (at most 1000),
-    /// which the program keeps. A failed write is said on the terminal (descriptor 2), and the launch goes on.
+    /// now that the program won't hold a moment later; its image is the launchers' own copy, `forSessions`), then its
+    /// `oom_score_adj` raised by `oomRaise` (at most 1000), which the program keeps. A failed write is said on the
+    /// terminal (descriptor 2), and the launch goes on. Then, a scratch host's test only, held until the file its
+    /// host named exists (`holdLaunchers(until:)`, at most a minute), the hold's variable gone from what the program
+    /// gets.
     static func beforeProgram() {
         guard !Platform.CodeIdentity.isAvailable else { return }
+        let hold = getenv(launcherTestHoldVariable).map { String(cString: $0) }
+        unsetenv(launcherTestHoldVariable)
         _ = Platform.ProcessSelf.makeDumpable()
         if let why = raiseOOMScore(by: oomRaise) {
             let said = "VibeSwitcher: this session's oom_score_adj wasn't raised: \(why)\r\n"
             _ = said.withCString { write(2, $0, strlen($0)) }
         }
+        if let hold {
+            for _ in 0..<6_000 where access(hold, F_OK) != 0 { usleep(10_000) }
+        }
+    }
+
+    /// A scratch host's test flag (Linux; refused by the user's host, `HostHardening.testFlags`): its sessions'
+    /// launchers wait after `beforeProgram`, dumpable and still running the launchers' copy, until the file after it
+    /// exists, so a test can reach them there (`HostHardeningTests.aLaunchersImageChangedFromOutsideNeverReachesTheParsers`).
+    public static let launcherTestHoldFlag = "--launcher-test-hold"
+    /// How the hold reaches a launcher: set by `launching` alone, for a session's launcher of a host told to hold.
+    static let launcherTestHoldVariable = "VIBESWITCHER_LAUNCHER_TEST_HOLD"
+
+    /// Sessions' launchers started from now on are held until the file at `path` exists (`launcherTestHoldFlag`).
+    static func holdLaunchers(until path: String) {
+        sessions { $0.hold = path }
     }
 
     /// How much a session's program's `oom_score_adj` is above the host's.

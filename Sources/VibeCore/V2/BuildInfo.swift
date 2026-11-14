@@ -1,10 +1,10 @@
 import Foundation
-import VibeCore
 
 /// What an installed build is (the stage 2 plan's Task 9b, S2-D7; the security architecture document's S9): the file
 /// `<installRoot>/<commit>/build-info` the install writes (the bootstrap path's step 8) beside that build's `bin/`, and
 /// the user's host reads at its start (its own image and its `--server` image must match it), a handover's target
-/// check reads (Task 9d) and `ServerBuild` reads for merge receipts.
+/// check reads (Task 9d) and `ServerBuild` reads for merge receipts. In `VibeCore`, not `VibeHost`, for that last
+/// reader: `ServerBuild` is `VibeCore`'s, and `vibeswitcher-mcp` links only `VibeCore` (the 9b review, 2026-11-14).
 ///
 /// **The format** (format 1), JSON:
 ///

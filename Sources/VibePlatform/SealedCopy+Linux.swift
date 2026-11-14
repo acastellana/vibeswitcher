@@ -34,7 +34,33 @@ extension Platform.ProcessSelf {
         var info = stat()
         guard fstat(source, &info) == 0 else { return .failure(Platform.Errno(code: errno)) }
         guard info.st_mode & S_IFMT == S_IFREG else { return .failure(Platform.Errno(code: EINVAL)) }
+        return sealed(name) { pour(source, into: $0) }
+    }
 
+    /// A second, separate copy of `copy`'s bytes, named `name`: read through `copy`'s own descriptor
+    /// (`withBytes`), so its holder can copy a copy it can't open by path, sealed the same way and given the same mode.
+    /// For a holder that starts two kinds of children from one image and must keep what one kind can reach away from
+    /// the other (the host's sessions' launchers and its parsers). Fails as `sealedCopy(of:name:)` does, nothing
+    /// left open.
+    public static func sealedCopy(of copy: SealedCopy, name: String) -> Result<SealedCopy, Platform.Errno> {
+        sealed(name) { target in
+            copy.withBytes { bytes -> Result<Int, Platform.Errno> in
+                guard let base = bytes.baseAddress else { return .success(0) }
+                var written = 0
+                while written < bytes.count {
+                    let wrote = write(target, base + written, bytes.count - written)
+                    if wrote < 0, errno == EINTR { continue }
+                    guard wrote > 0 else { return .failure(Platform.Errno(code: wrote < 0 ? errno : EIO)) }
+                    written += wrote
+                }
+                return .success(written)
+            }
+        }
+    }
+
+    /// A new memfd named `name`, filled by `fill` (how many bytes), sealed (`allSeals`) and made `0111` for an ELF
+    /// image or `0555` for anything else, as read back from the copy itself.
+    private static func sealed(_ name: String, fill: (Int32) -> Result<Int, Platform.Errno>) -> Result<SealedCopy, Platform.Errno> {
         var copy = vibe_memfd_create(name, VIBE_MFD_CLOEXEC | VIBE_MFD_ALLOW_SEALING | VIBE_MFD_EXEC)
         if copy < 0, errno == EINVAL { copy = vibe_memfd_create(name, VIBE_MFD_CLOEXEC | VIBE_MFD_ALLOW_SEALING) }
         guard copy >= 0 else { return .failure(Platform.Errno(code: errno)) }
@@ -44,7 +70,7 @@ extension Platform.ProcessSelf {
         }
 
         let size: Int
-        switch pour(source, into: copy) {
+        switch fill(copy) {
         case .failure(let error): return failed(error.code)
         case .success(let count): size = count
         }
@@ -98,6 +124,23 @@ extension Platform.ProcessSelf {
         }
         guard markCloseOnExec(fd) else { return nil }
         return SealedCopy(fd: fd, size: Int(info.st_size), isScript: false)
+    }
+
+    /// Whether `fd` is a sealed copy (all four seals) with its own mode, `0111` for an ELF image and `0555` for
+    /// anything else, once made so again if something changed it: a process of the user that reached the copy through
+    /// a link to it (`/proc/<pid>/exe` of a dumpable process started from it) can `chmod` it, and the seals don't stop
+    /// that. Its holder calls this before it starts a child from it, so that the child is non-dumpable from its exec
+    /// again. False for anything else, or when the mode couldn't be put back.
+    public static func restoreMode(of fd: Int32) -> Bool {
+        let seals = vibe_get_seals(fd)
+        guard seals >= 0, seals & allSeals == allSeals else { return false }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return false }
+        var first = [UInt8](repeating: 0, count: 4)
+        let read = pread(fd, &first, first.count, 0)
+        guard read >= 0 else { return false }
+        let mode = isELF(first.prefix(read)) ? imageMode : scriptMode
+        return info.st_mode & 0o7777 == mode || fchmod(fd, mode) == 0
     }
 
     /// The number `imageVariable` names, taken out of the environment, the descriptor left open and made

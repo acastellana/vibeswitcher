@@ -173,6 +173,7 @@ public enum HostHardening {
         "--handover-test-secret": true, "--handover-test-secret-file": true, "--handover-test-traced": false,
         "--install-root": true, "--parser-test-hooks": false, staysDumpableFlag: false,
         "--server-arg": true, "--hold-first-look": false, "--test-user-seal-life": true,
+        HostImages.launcherTestHoldFlag: true,
     ]
 
     /// The test-only flags a scratch host carries across its handovers, so a test's settings survive one.
@@ -213,7 +214,8 @@ public enum HostHardening {
     }
 
     /// After the host's config is made: the flags `refused(in:ownsLaunchers:)` names said in its log and on stderr,
-    /// and, on Linux, a scratch host given `staysDumpableFlag` made dumpable again.
+    /// and, on Linux, a scratch host given `staysDumpableFlag` made dumpable again, and one given
+    /// `HostImages.launcherTestHoldFlag` holding its sessions' launchers (`HostImages.holdLaunchers(until:)`).
     public static func afterConfig(arguments: [String], ownsLaunchers: Bool, server: HostServer) {
         let refused = refused(in: arguments, ownsLaunchers: ownsLaunchers)
         if !refused.isEmpty {
@@ -223,6 +225,10 @@ public enum HostHardening {
         }
         if !Platform.CodeIdentity.isAvailable, !ownsLaunchers, arguments.contains(staysDumpableFlag) {
             _ = Platform.ProcessSelf.makeDumpable()
+        }
+        if !Platform.CodeIdentity.isAvailable, !ownsLaunchers,
+           let hold = HostImages.value(after: HostImages.launcherTestHoldFlag, in: arguments) {
+            HostImages.holdLaunchers(until: hold)
         }
     }
 
