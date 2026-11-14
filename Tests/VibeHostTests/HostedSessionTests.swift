@@ -54,12 +54,24 @@ struct HostedSessionTests {
         }
     }
 
-    @Test func argumentsUseAnInteractiveLoginShell() {
+    /// The Mac: `$SHELL`, an interactive login shell, as always.
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's login shell; Linux's is argumentsUseAPlainBashOnLinux"))
+    func argumentsUseAnInteractiveLoginShell() {
         #expect(HostedSession.arguments(shell: "/bin/zsh", command: "claude", keepShell: false)
                 == ["/bin/zsh", "-l", "-i", "-c", "claude"])
         #expect(HostedSession.arguments(shell: "/bin/zsh", command: nil, keepShell: false) == ["/bin/zsh", "-l", "-i"])
         #expect(HostedSession.arguments(shell: "/bin/zsh", command: "codex", keepShell: true)
                 == ["/bin/zsh", "-l", "-i", "-c", "codex; exec '/bin/zsh' -l -i"])
+    }
+
+    /// Linux: a plain bash, whatever `$SHELL` is, reading no startup file (the security architecture document's S10).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's plain shell; the Mac's is argumentsUseAnInteractiveLoginShell"))
+    func argumentsUseAPlainBashOnLinux() {
+        #expect(HostedSession.arguments(shell: "/bin/zsh", command: "claude", keepShell: false)
+                == ["/bin/bash", "--noprofile", "--norc", "-c", "claude"])
+        #expect(HostedSession.arguments(shell: "/bin/zsh", command: nil, keepShell: false) == ["/bin/bash", "--noprofile", "--norc", "-i"])
+        #expect(HostedSession.arguments(shell: "/bin/zsh", command: "codex", keepShell: true)
+                == ["/bin/bash", "--noprofile", "--norc", "-c", "codex; exec /bin/bash --noprofile --norc -i"])
     }
 
     @Test func environmentAddsTerminalVariablesAndExtras() {
@@ -150,8 +162,9 @@ struct HostedSessionTests {
         let oldPipe = signal(SIGPIPE, SIG_IGN), oldHup = signal(SIGHUP, SIG_IGN)
         defer { signal(SIGPIPE, oldPipe); signal(SIGHUP, oldHup) }
         let probe = SessionProbe()
-        let script = "echo mask=$(ps -o sigmask= -p $$ | tr -d ' '); sh -c 'kill -PIPE $$; echo pipe-ignored'; "
-            + "sh -c 'kill -HUP $$; echo hup-ignored'; echo end"
+        // The words split by quotes: bash (Linux's session shell) reports a job a signal ended with its command line.
+        let script = "echo mask=$(ps -o sigmask= -p $$ | tr -d ' '); sh -c 'kill -PIPE $$; echo pipe-\"ignored\"'; "
+            + "sh -c 'kill -HUP $$; echo hup-\"ignored\"'; echo end"
         let session = try start(script, probe: probe)
         #expect(await eventually { probe.text.contains("end") }, "\(probe.diagnosis(session))")
         #expect(probe.text.contains("mask=0"))
@@ -266,8 +279,10 @@ struct HostedSessionTests {
 
 extension HostedSessionTests {
     /// A login shell that isn't there (`$SHELL` names an uninstalled one): the launcher's exec fails with ENOENT, and the
-    /// session's screen names the program and where it was expected, rather than ending with nothing on it.
-    @Test func aShellThatIsntThereIsNamedOnTheSessionsScreen() async throws {
+    /// session's screen names the program and where it was expected, rather than ending with nothing on it. The Mac's:
+    /// on Linux a session runs /bin/bash whatever `$SHELL` names (`SessionEnvironmentTests.aSessionRunsBashWhateverTheHostsShell`).
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "Linux's sessions run /bin/bash whatever SHELL names"))
+    func aShellThatIsntThereIsNamedOnTheSessionsScreen() async throws {
         let probe = SessionProbe()
         let session = try start("true", shell: "/no/such/bin/fakesh", probe: probe)
         #expect(await eventually { probe.text.contains("Couldn't start fakesh: it should be at /no/such/bin/fakesh, and isn't (No such file or directory).") },

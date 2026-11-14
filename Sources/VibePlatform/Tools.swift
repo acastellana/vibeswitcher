@@ -88,6 +88,102 @@ extension Platform {
             #endif
         }
 
+        // MARK: Sessions
+
+        /// The variables of the host's own environment a session's program is started with (the security
+        /// architecture document's S10). The Mac: what a fresh Terminal session would inherit from launchd, the login
+        /// shell adding the rest, as always (`SSH_AUTH_SOCK` among them). Linux: what an agent and the user's tools
+        /// need, and not the user's keys to other systems: no `SSH_AUTH_SOCK` (the gpg-agent's ssh socket),
+        /// `WSL_INTEROP`, `DBUS_SESSION_BUS_ADDRESS`, `DISPLAY`, `WAYLAND_DISPLAY`, `PULSE_SERVER` or
+        /// `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` (`sessionEnvironmentNever`), and no `XDG_RUNTIME_DIR` either, which
+        /// points at the gpg-agent, the bus and WSLg's sockets and which no agent needs. Leaving them out stops a slip
+        /// only: each of those sockets is found by a fixed path too.
+        public static var sessionEnvironmentNames: [String] {
+            #if canImport(Darwin)
+            return ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE", "SSH_AUTH_SOCK",
+                    "__CF_USER_TEXT_ENCODING"]
+            #else
+            return ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE"]
+            #endif
+        }
+
+        /// The names a session never gets from the host, and that a spawn other than the app's may not add
+        /// (`spawnEnvironmentRefused`). The Mac: none.
+        public static var sessionEnvironmentNever: [String] {
+            #if canImport(Darwin)
+            return []
+            #else
+            return ["SSH_AUTH_SOCK", "WSL_INTEROP", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "PULSE_SERVER",
+                    "VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR"]
+            #endif
+        }
+
+        /// Variables every session's program, and every parser, is started with whatever the host's environment
+        /// says. The Mac: none. Linux: `SWIFT_BACKTRACE=enable=no`, so a Swift program that crashes there doesn't
+        /// start the backtracer, which reads the crashed process's memory.
+        public static var sessionEnvironmentFixed: [String: String] {
+            #if canImport(Darwin)
+            return [:]
+            #else
+            return ["SWIFT_BACKTRACE": "enable=no"]
+            #endif
+        }
+
+        /// A session's `LANG` when the host's environment has none. The Mac: `en_US.UTF-8`, as always. Linux:
+        /// `C.UTF-8`, which glibc always has (`en_US.UTF-8` is often not installed: `locale -a` here lists C, C.utf8
+        /// and POSIX).
+        public static var defaultLocale: String {
+            #if canImport(Darwin)
+            return "en_US.UTF-8"
+            #else
+            return "C.UTF-8"
+            #endif
+        }
+
+        /// The program a session runs and its arguments, its first word the program: `command` given to a shell, then
+        /// that shell kept, interactive, where `keepShell`; with no command, the shell alone.
+        ///
+        /// The Mac: `$SHELL -l -i [-c command]`, as always: an interactive login shell reads both `.zprofile` and
+        /// `.zshrc`, so the agent gets the PATH it has in Terminal (nvm, Homebrew…); kept, `exec '$SHELL' -l -i`.
+        ///
+        /// Linux: `/bin/bash --noprofile --norc [-c command]`, whatever `shell` names: a plain shell, which runs none of
+        /// the user's startup files (a login, interactive bash runs `.profile` and `.bashrc` and whatever they source:
+        /// tools that read per-folder config from the worktree among them). The PATH is the host's, which holds what
+        /// workers build with (the security architecture document's S10). Kept, `exec /bin/bash --noprofile --norc
+        /// -i`; with no command, `/bin/bash --noprofile --norc -i`.
+        public static func sessionShellArguments(shell: String, command: String?, keepShell: Bool) -> [String] {
+            #if canImport(Darwin)
+            guard let command else { return [shell, "-l", "-i"] }
+            let line = keepShell ? "\(command); exec \(quoted(shell)) -l -i" : command
+            return [shell, "-l", "-i", "-c", line]
+            #else
+            let plain = ["/bin/bash", "--noprofile", "--norc"]
+            guard let command else { return plain + ["-i"] }
+            let line = keepShell ? "\(command); exec \(plain.joined(separator: " ")) -i" : command
+            return plain + ["-c", line]
+            #endif
+        }
+
+        /// Those of `names` that a spawn from a caller other than the app may not set in a session's environment
+        /// (`SpawnRequest.env`), in `names`' order: the loader's (`LD_*`, `GCONV_PATH`, `GLIBC_TUNABLES`), those
+        /// through which a bash runs something before or around its command (`branchShellStartupVariables`,
+        /// `PROMPT_COMMAND`, exported functions), and `sessionEnvironmentNever`. The Mac: none, as always.
+        public static func spawnEnvironmentRefused(_ names: [String]) -> [String] {
+            #if canImport(Darwin)
+            return []
+            #else
+            let refused = Set(branchShellStartupVariables + sessionEnvironmentNever + ["GCONV_PATH", "GLIBC_TUNABLES", "PROMPT_COMMAND"])
+            return names.filter { name in
+                refused.contains(name) || name.hasPrefix("LD_") || branchShellFunctionPrefix.map { name.hasPrefix($0) } == true
+            }
+            #endif
+        }
+
+        /// `text` as one word for a POSIX shell, in single quotes.
+        static func quoted(_ text: String) -> String {
+            "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
+
         /// What a shell command runs right after `command -v "$1"` so that its exit status says a name the shell
         /// doesn't know as 1. POSIX lets that lookup exit with any status but 0: zsh and bash say 1, and dash
         /// (Ubuntu's /bin/sh) 127, the status a shell with no `command` at all ends with too. The Mac: nothing (its

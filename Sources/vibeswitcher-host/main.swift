@@ -39,9 +39,9 @@ var startRefusal = HostImages.startAsNode(arguments: arguments)
 
 VibePaths.ensurePrivateDirectories()
 let environment = ProcessInfo.processInfo.environment
-// What a fresh Terminal session would inherit from launchd; the login shell adds the rest.
-let inherited = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE", "SSH_AUTH_SOCK",
-                 "__CF_USER_TEXT_ENCODING"]
+// What a fresh Terminal session would inherit from launchd, the login shell adding the rest (the Mac); on Linux no
+// agent socket, interop, bus, display or runtime folder. Then what every session gets (see `Platform.Tools`).
+let inherited = Platform.Tools.sessionEnvironmentNames
 let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? Platform.Tools.loginShell
 let executable = Bundle.main.executablePath ?? arguments[0]
 // This build's folders: on Linux from --node-root, else --image-path, else the executable (see V2/HostImages.swift).
@@ -90,7 +90,8 @@ var config = HostServer.Config(
     // On Linux its own sealed copy (no launcher copy made); on the Mac a private copy, as always.
     launcher: images.own?.path ?? (startRefusal == nil ? ensureLauncher() : executable),
     // With vs-heavy on PATH (Mac-wide one-at-a-time heavy work, for every project's sessions).
-    baseEnvironment: TestLock.sessionEnvironment(environment.filter { inherited.contains($0.key) },
+    baseEnvironment: TestLock.sessionEnvironment(environment.filter { inherited.contains($0.key) }
+                                                     .merging(Platform.Tools.sessionEnvironmentFixed) { $1 },
                                                  adding: folders.commandFolder),
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600

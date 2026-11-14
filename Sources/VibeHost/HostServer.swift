@@ -482,6 +482,8 @@ public final class HostServer {
         case .spawn(let request):
             // Started now, it would be torn down with the host a moment later.
             guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }
+            // Linux: not the app, no loader, startup or never-passed variable (see V2/SpawnEnvironment.swift).
+            if let why = SpawnEnvironment.refusal(request, from: caller(of: client)) { log.note("spawn refused: \(why) \(HostLog.peer(client.peerPID))"); return reply(.error(why)) }
             guard let room = roomForSpawn() else {
                 return reply(.error("The session host runs \(max(1, config.maxSessions)) sessions, its limit: end one first."))
             }

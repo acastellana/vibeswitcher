@@ -283,6 +283,74 @@ struct ToolsTests {
         #endif
     }
 
+    // MARK: Sessions
+
+    /// The Mac's sessions get today's names, locale, login shell and spawns (`vibeswitcher-host/main.swift`'s list and
+    /// `HostedSession.arguments` at `47636aaf`): nothing changes there.
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's form"))
+    func theMacsListIsTodays() {
+        #expect(Platform.Tools.sessionEnvironmentNames == ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE",
+                                                           "SSH_AUTH_SOCK", "__CF_USER_TEXT_ENCODING"])
+        #expect(Platform.Tools.sessionEnvironmentNever == [])
+        #expect(Platform.Tools.sessionEnvironmentFixed == [:])
+        #expect(Platform.Tools.defaultLocale == "en_US.UTF-8")
+        #expect(Platform.Tools.sessionShellArguments(shell: "/bin/zsh", command: "claude", keepShell: false)
+                == ["/bin/zsh", "-l", "-i", "-c", "claude"])
+        #expect(Platform.Tools.sessionShellArguments(shell: "/bin/zsh", command: nil, keepShell: false) == ["/bin/zsh", "-l", "-i"])
+        #expect(Platform.Tools.sessionShellArguments(shell: "/bin/zsh", command: "codex", keepShell: true)
+                == ["/bin/zsh", "-l", "-i", "-c", "codex; exec '/bin/zsh' -l -i"])
+        #expect(Platform.Tools.sessionShellArguments(shell: "/opt/it's/sh", command: "x", keepShell: true)
+                == ["/opt/it's/sh", "-l", "-i", "-c", "x; exec '/opt/it'\\''s/sh' -l -i"])
+        #expect(Platform.Tools.spawnEnvironmentRefused(["LD_PRELOAD", "BASH_ENV", "SSH_AUTH_SOCK", "PATH"]) == [])
+    }
+
+    /// Linux's sessions: no agent socket, interop, bus, display, audio, runtime folder or test config folder; a
+    /// backtracer-free fixed part; a plain bash whatever `SHELL` names.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's form"))
+    func linuxSessionsGetNoAgentsAndAPlainBash() {
+        let names = Platform.Tools.sessionEnvironmentNames
+        #expect(names == ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE"])
+        for never in Platform.Tools.sessionEnvironmentNever + ["XDG_RUNTIME_DIR"] { #expect(!names.contains(never), "\(never)") }
+        #expect(Set(Platform.Tools.sessionEnvironmentNever) == ["SSH_AUTH_SOCK", "WSL_INTEROP", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY",
+                                                                 "WAYLAND_DISPLAY", "PULSE_SERVER", "VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR"])
+        #expect(Platform.Tools.sessionEnvironmentFixed == ["SWIFT_BACKTRACE": "enable=no"])
+        #expect(Platform.Tools.sessionShellArguments(shell: "/bin/sh", command: "claude", keepShell: false)
+                == ["/bin/bash", "--noprofile", "--norc", "-c", "claude"])
+        #expect(Platform.Tools.sessionShellArguments(shell: "/usr/bin/zsh", command: nil, keepShell: false)
+                == ["/bin/bash", "--noprofile", "--norc", "-i"])
+        #expect(Platform.Tools.sessionShellArguments(shell: "/bin/sh", command: "codex", keepShell: true)
+                == ["/bin/bash", "--noprofile", "--norc", "-c", "codex; exec /bin/bash --noprofile --norc -i"])
+    }
+
+    /// What a spawn other than the app's may not add, on Linux: the loader's variables, a bash's startup ones and
+    /// exported functions, and the names never passed. Anything else may be added.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's form"))
+    func aSpawnMayNotAddLoaderStartupOrNeverPassedVariables() {
+        let refused = ["LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "GCONV_PATH", "GLIBC_TUNABLES", "BASH_ENV", "ENV", "SHELLOPTS",
+                       "BASHOPTS", "PS4", "BASH_XTRACEFD", "PROMPT_COMMAND", "BASH_FUNC_git%%"] + Platform.Tools.sessionEnvironmentNever
+        let allowed = ["PATH", "VIBESWITCHER_ROLE", "CLAUDE_CONFIG_DIR", "LANG", "TERM", "OLD_PWD", "XLD_PRELOAD"]
+        #expect(Platform.Tools.spawnEnvironmentRefused(allowed + refused) == refused)
+        #expect(Platform.Tools.spawnEnvironmentRefused(allowed) == [])
+    }
+
+    /// The `LANG` a session gets when the host has none is a locale this system has: its codeset compared as glibc
+    /// normalises one (lowercased, `-` and `_` dropped), so `C.UTF-8` is `locale -a`'s `C.utf8`.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "glibc's locales; the Mac's en_US.UTF-8 is always there"))
+    func theLocaleASessionGetsIsInstalled() throws {
+        func normalised(_ locale: String) -> (name: String, codeset: String) {
+            let parts = locale.split(separator: ".", maxSplits: 1).map(String.init)
+            let codeset = parts.count > 1 ? parts[1].lowercased().filter { $0 != "-" && $0 != "_" } : ""
+            return (parts[0], codeset)
+        }
+        let locale = try #require(Platform.Tools.find("locale", path: "/usr/bin:/bin"))
+        let listed = try SpawnTests.output(of: Platform.Spawn(executable: locale, arguments: ["locale", "-a"]))
+        #expect(listed.exit == 0)
+        let installed = listed.output.split(whereSeparator: \.isNewline).map { normalised(String($0)) }
+        let wanted = normalised(Platform.Tools.defaultLocale)
+        #expect(wanted.codeset == "utf8")
+        #expect(installed.contains { $0 == wanted }, "\(Platform.Tools.defaultLocale) not in \(listed.output)")
+    }
+
     // MARK: The developer tools
 
     @Test func developerToolsAreAskedOnlyOfAMac() {

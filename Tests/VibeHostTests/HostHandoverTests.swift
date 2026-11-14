@@ -23,8 +23,10 @@ final class ScratchHostProcess {
     let appKey = SymmetricKey(size: .bits256)
 
     /// `old`: the build it starts as (another commit's host, for an upgrade); this one's otherwise. `prepare`: given the
-    /// scratch folder once it is made, before the host starts (a test's leftovers put there).
-    init(arguments extra: [String] = [], old: String = hostLauncher, prepare: (String) throws -> Void = { _ in }) async throws {
+    /// scratch folder once it is made, before the host starts (a test's leftovers put there). `environment`: added to
+    /// the host's own environment (or replacing a variable of it).
+    init(arguments extra: [String] = [], old: String = hostLauncher, environment: [String: String] = [:],
+         prepare: (String) throws -> Void = { _ in }) async throws {
         // Short: a socket's path has a 104-byte limit.
         dir = "\(shortScratchRoot)/vsho-\(UUID().uuidString.prefix(8))"
         home = dir + "/home"
@@ -52,7 +54,7 @@ final class ScratchHostProcess {
         process.executableURL = URL(fileURLWithPath: oldBinary)
         process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", sessionLog] + extra
         process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin",
-                               "TMPDIR": dir + "/"]
+                               "TMPDIR": dir + "/"].merging(environment) { $1 }
         files.createFile(atPath: dir + "/host.log", contents: nil)
         let log = try FileHandle(forWritingTo: URL(fileURLWithPath: dir + "/host.log"))
         process.standardOutput = log

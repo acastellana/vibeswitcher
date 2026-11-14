@@ -1202,13 +1202,16 @@ bootstrap (S12 item 15).
 
 **The user confirms:** decision 9 (the gpg-agent's ssh support off or no key cached, WSLg off, during the bootstrap).
 
-**Held by:** planned: stage 2 plan task 10.
+**Held by:** `SessionEnvironmentTests.aLinuxSessionGetsNoAgentSocketNoInteropNoBus`,
+`SessionEnvironmentTests.aLinuxSessionGetsNoRuntimeDir`, `SessionEnvironmentTests.aTeamSessionRunsNoShellStartupFile`,
+`SessionEnvironmentTests.aSessionRunsBashWhateverTheHostsShell`, `SessionEnvironmentTests.aParserGetsNoBacktracer`,
+`SessionEnvironmentTests.aSpawnAddingALoaderVariableIsRefused`,
+`SessionEnvironmentTests.aSessionsProgramStartsWithSIGPIPEAtItsDefault`, `ToolsTests.theLocaleASessionGetsIsInstalled`,
+`ToolsTests.theMacsListIsTodays`, `ToolsTests.linuxSessionsGetNoAgentsAndAPlainBash`,
+`ToolsTests.aSpawnMayNotAddLoaderStartupOrNeverPassedVariables`; planned: stage 2 plan task 10.
 
-**Tests to write:** Task 10: `SessionEnvironmentTests.aLinuxSessionGetsNoAgentSocketNoInteropNoBus`,
-`aLinuxSessionGetsNoRuntimeDir`, `aTeamSessionRunsNoShellStartupFile`, `aSpawnAddingALoaderVariableIsRefused`,
-`aSessionsProgramStartsWithSIGPIPEAtItsDefault`, `ToolsTests.theLocaleASessionGetsIsInstalled`, `theMacsListIsTodays`,
-`LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`, `theLeadOnLinuxGetsTheTracerRules`,
-`theMacsDenyRulesAreTodays`, `aRolesLaunchSettingsAreInlineOnLinux`. After the bootstrap:
+**Tests to write:** Task 10: `LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`,
+`theLeadOnLinuxGetsTheTracerRules`, `theMacsDenyRulesAreTodays`, `aRolesLaunchSettingsAreInlineOnLinux`. After the bootstrap:
 `GitGuardTests.aChangedHooksCopyIsRefused`. Task 12: `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`, `aVerifierCommandInItsOwnSessionStillTimesOut`.
 
 ## S11. What plain mode doesn't promise on Linux
