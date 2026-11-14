@@ -618,9 +618,9 @@ extension LeadToolset {
         }
         let named = Self.recipientsText(stored.to)
         if role == .lead {
-            // Its own post goes at once (its seal holds), with what waits for the members it's for riding along.
-            let named = Set(team.map(\.name).filter { stored.to.includes($0) })
-            let sent = deliverWall(task.slug, riding: named)
+            // Its own post goes at once (its seal holds) by the wall's one rule: a working member at its next step, an
+            // idle one only when it asks for an answer (else with its next message or turn).
+            let sent = deliverWall(task.slug)
             return MCPToolResult(text: "Posted #\(stored.id) on \(task.slug)'s wall to \(named), marked as yours. "
                                  + (sent.isEmpty ? "No member it names got it yet (none live, or idle and it doesn't wake them): each gets it once, at its next step or turn."
                                     : "Delivered to \(sent.joined(separator: ", ")); the rest get it once, at their next step or turn."))
@@ -697,10 +697,14 @@ extension LeadToolset {
         }.joined(separator: "\n")
     }
 
+    /// How `LeadActivity.idle(background:)` with a background task begins: its turn ended too (a delivery types into it).
+    static let backgroundIdle = String(LeadActivity.idle(background: "").text.prefix { $0 != "(" })
+
     /// A session that's ended its turn: a post that doesn't wake it waits for its next message or turn.
     static func isIdle(_ info: LeadSessionInfo) -> Bool {
         guard info.waiting == nil, let status = info.status else { return false }
-        return status == LeadActivity.idle(background: nil).text || status.hasPrefix("its turn ended") || status.hasSuffix("it does nothing until then")
+        return status == LeadActivity.idle(background: nil).text || status.hasPrefix(Self.backgroundIdle)
+            || status.hasPrefix("its turn ended") || status.hasSuffix("it does nothing until then")
     }
 
     /// Every team task's wall delivered (`deliverWall`): the lead's loop runs it at each pass.

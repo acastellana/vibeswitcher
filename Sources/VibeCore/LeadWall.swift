@@ -226,11 +226,11 @@ public struct LeadWall: Sendable {
         if let refusal = Self.textRefusal(text) { throw refusal }
 
         try VibePaths.ensurePrivate(file.deletingLastPathComponent(), within: top)
-        let fd = open(file.path, O_RDWR | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        let fd = open(file.path, O_RDWR | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0o600)
         guard fd >= 0 else { throw CocoaError(.fileWriteNoPermission) }
         defer { close(fd) }
         fchmod(fd, 0o600)
-        guard flock(fd, LOCK_EX) == 0 else { throw CocoaError(.fileWriteUnknown) }
+        guard Self.lock(fd) else { throw CocoaError(.fileWriteUnknown) }
         defer { flock(fd, LOCK_UN) }
 
         let posts = Self.decode(Self.read(fd))
@@ -253,14 +253,29 @@ public struct LeadWall: Sendable {
     }
 
     /// The wall's posts after `cursor` (a post's id; 0: from the first), oldest first. Empty when there's no wall
-    /// yet; a line that isn't a post is skipped.
+    /// yet; a line that isn't a post is skipped. It never waits on the file's lock: a worker's shell can take that lock
+    /// and keep it, and the session host reads the wall while it holds its own (the vault's `mayDeliverPost`). A post
+    /// goes in with one write, its line whole; a line still being written isn't a post yet, and is skipped. Opened not
+    /// to block (a pipe put in the file's place doesn't hang it).
     public func posts(since cursor: Int = 0) -> [Post] {
-        let fd = open(file.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        let fd = open(file.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         guard fd >= 0 else { return [] }
         defer { close(fd) }
-        flock(fd, LOCK_SH)
-        defer { flock(fd, LOCK_UN) }
         return Self.decode(Self.read(fd)).filter { $0.id > cursor }
+    }
+
+    /// How long `post` waits for the file's lock, held by another post being stored (or by a worker's shell, which
+    /// then has the post refused rather than hung).
+    static let lockWait: TimeInterval = 3
+
+    /// Takes the file's exclusive lock, waiting at most `lockWait`.
+    static func lock(_ fd: Int32) -> Bool {
+        let until = Date().addingTimeInterval(lockWait)
+        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            guard errno == EWOULDBLOCK || errno == EINTR, Date() < until else { return false }
+            usleep(10_000)
+        }
+        return true
     }
 
     // MARK: Delivery
@@ -308,7 +323,10 @@ public struct LeadWall: Sendable {
         return data
     }
 
+    /// The posts of the file's lines; a last line without its "\n" is one still being written, not a post yet.
     static func decode(_ data: Data) -> [Post] {
-        data.split(separator: 0x0A).compactMap { try? JSONDecoder().decode(Post.self, from: Data($0)) }
+        var lines = data.split(separator: 0x0A, omittingEmptySubsequences: false)
+        lines.removeLast()
+        return lines.filter { !$0.isEmpty }.compactMap { try? JSONDecoder().decode(Post.self, from: Data($0)) }
     }
 }

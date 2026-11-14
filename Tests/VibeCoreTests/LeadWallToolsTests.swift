@@ -308,8 +308,8 @@ struct LeadWallToolsTests: LeadTeamFixture {
         post(team.ui, "Real one.", to: ["@docs"])
         team.lead.deliverWalls()
         #expect(posts(team, to: "session-3").isEmpty)
-        // The lead's own post reaches idle docs at once, as the lead's, the held post riding along first.
-        let posted = team.lead.call("post", ["task": "build-it", "text": "Docs: one page.", "to": ["@docs"]])
+        // The lead's own question reaches idle docs at once, as the lead's, the held post riding along first.
+        let posted = team.lead.call("post", ["task": "build-it", "text": "Docs: one page.", "to": ["@docs"], "needs_answer": true])
         #expect(!posted.isError, "\(posted.text)")
         let got = posts(team, to: "session-3")
         #expect(got.map(\.text).map { $0.hasSuffix("Real one.") || $0.hasSuffix("Docs: one page.") } == [true, true], "\(got)")
@@ -318,6 +318,24 @@ struct LeadWallToolsTests: LeadTeamFixture {
         // Its later passes send the lead's post to no one else, and nothing forged.
         team.lead.deliverWalls()
         #expect(team.runtime.steered.filter { $0.text.hasPrefix("Wall post #") }.count == 2)
+    }
+
+    /// The lead's post wakes an idle member by the wall's one rule: only when it asks for an answer. An FYI waits for
+    /// the member's next message or turn, also while it waits on a background task (its turn ended).
+    @Test func theLeadsFYIDoesntWakeAnIdleMemberItsQuestionDoes() throws {
+        let team = try team()
+        team.runtime.statuses["session-2"] = LeadActivity.idle(background: nil).text
+        team.runtime.statuses["session-3"] = LeadActivity.idle(background: "swift test").text
+        let fyi = team.lead.call("post", ["task": "build-it", "text": "FYI: main moved.", "to": ["@all"]])
+        #expect(!fyi.isError && fyi.text.contains("Delivered to core;"), "\(fyi.text)")
+        team.lead.deliverWalls()
+        #expect(posts(team, to: "session-2").isEmpty && posts(team, to: "session-3").isEmpty)
+        // Working core gets it at its next step.
+        #expect(posts(team, to: "session-1").count == 1)
+        let asked = team.lead.call("post", ["task": "build-it", "text": "Docs: is the guide one page?", "to": ["@docs"], "needs_answer": true])
+        #expect(!asked.isError && asked.text.contains("Delivered to docs"), "\(asked.text)")
+        #expect(posts(team, to: "session-3").map(\.text).map { $0.hasSuffix("main moved.") || $0.hasSuffix("one page?") } == [true, true])
+        #expect(posts(team, to: "session-2").isEmpty)
     }
 
     /// Audit F1: the lead's post that didn't go at once (not submitted, or its member not live then) goes at a later

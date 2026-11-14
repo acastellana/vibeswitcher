@@ -228,6 +228,39 @@ struct LeadWallTests {
         #expect(posts.map(\.id) == Array(1...LeadWall.maxPosts))
         #expect(lines(wall).count == LeadWall.maxPosts)
     }
+
+    /// A worker's shell can take the wall file's lock and keep it: reading the wall (the lead's loop, the session
+    /// host under its own lock) never waits on it, and a post waits only `lockWait`, then is refused.
+    @Test func aHeldLockNeitherHangsAReadNorAPost() async throws {
+        let store = try self.wall()
+        try store.post("First.", by: "ui", to: ["@all"])
+        let fd = open(store.file.path, O_RDONLY)
+        #expect(fd >= 0 && flock(fd, LOCK_EX) == 0)
+        defer { close(fd) }
+        let read = try await offPool { store.posts() }
+        #expect(read.map(\.text) == ["First."])
+        await #expect(throws: (any Error).self) { try await offPool { try store.post("Second.", by: "ui", to: ["@all"]) } }
+        flock(fd, LOCK_UN)
+        #expect(try store.post("Second.", by: "ui", to: ["@all"]).id == 2)
+    }
+
+    /// A line still being written (no "\n" yet) isn't a post.
+    @Test func aLineWithoutItsNewlineIsNotAPostYet() throws {
+        let store = try self.wall()
+        try store.post("First.", by: "ui", to: ["@all"])
+        var line = try JSONEncoder().encode(LeadWall.Post(id: 2, at: 1, author: "ui", to: .all, needsAnswer: false, replyTo: nil, text: "Half"))
+        let handle = try FileHandle(forWritingTo: store.file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: line)
+        try handle.close()
+        #expect(store.posts().map(\.id) == [1])
+        line = Data("\n".utf8)
+        let again = try FileHandle(forWritingTo: store.file)
+        try again.seekToEnd()
+        try again.write(contentsOf: line)
+        try again.close()
+        #expect(store.posts().map(\.id) == [1, 2])
+    }
 }
 
 /// A clock a test moves by hand.
@@ -239,4 +272,5 @@ final class TestClock: @unchecked Sendable {
         get { lock.lock(); defer { lock.unlock() }; return value }
         set { lock.lock(); value = newValue; lock.unlock() }
     }
+
 }
