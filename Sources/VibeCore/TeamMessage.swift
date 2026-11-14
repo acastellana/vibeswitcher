@@ -11,6 +11,9 @@ public struct TeamMessage: Equatable, Sendable {
         case lead(String)
         /// VibeSwitcher itself, about something ("worker fix-the-chat-layout", "verifier x", "witness", "reports").
         case vibeSwitcher(String)
+        /// A member of a team task (`member`) on that task (`task`), its wall post delivered: a teammate's unverified
+        /// words, never the lead's or the user's (`LeadDelivery.teammateFrame`).
+        case teammate(member: String, task: String)
     }
 
     public enum Kind: String, Equatable, Sendable {
@@ -26,6 +29,8 @@ public struct TeamMessage: Equatable, Sendable {
         case leadMessage
         /// Anything else VibeSwitcher says (the wake-up for waiting reports, a timer).
         case notice
+        /// A teammate's wall post.
+        case teammatePost
     }
 
     /// Which part of a message too long for one delivery.
@@ -49,6 +54,7 @@ public struct TeamMessage: Equatable, Sendable {
         switch sender {
         case .user: kind = .userAnswer; task = nil
         case .lead: kind = .leadMessage; task = nil
+        case .teammate(_, let on): kind = .teammatePost; task = on
         case .vibeSwitcher(let about):
             let words = about.split(separator: " ", maxSplits: 1).map(String.init)
             if words.count == 2, words[0] == "worker" || words[0] == "verifier", !words[1].contains(" ") {
@@ -76,6 +82,7 @@ public struct TeamMessage: Equatable, Sendable {
         switch (kind, sender) {
         case (.userAnswer, _): base = "You, relayed by VibeSwitcher"
         case (.leadMessage, .lead(let name)): base = "Message from \(name)"
+        case (.teammatePost, .teammate(let member, let task)): base = "Post from teammate @\(member) on \(task)"
         case (.report, _):
             let slug = task ?? ""
             let opening = "The worker on \(slug) "
@@ -142,8 +149,11 @@ public struct TeamMessage: Equatable, Sendable {
             guard !line.contains("\n"), let sender = sender(line) else { return nil }
             var lines: [String] = []
             var part: Part?
-            for (index, line) in piece[split.upperBound...].components(separatedBy: "\n").enumerated() {
+            let body = piece[split.upperBound...].components(separatedBy: "\n")
+            for (index, line) in body.enumerated() {
                 if index == 0, SteerReply.isPartLine(line) { part = Self.part(line) }
+                // A teammate's closing rule: unquoted, so only we write it, and only last (as `SteerReply.messages` reads it).
+                else if index > 0, index == body.count - 1, case .teammate = sender, line == LeadDelivery.teammateRule { continue }
                 else if line == ">" { lines.append("") }
                 else if line.hasPrefix("> ") { lines.append(String(line.dropFirst(2))) }
                 else if line == SteerReply.cut { lines.append(SteerReply.cut) }
@@ -156,6 +166,7 @@ public struct TeamMessage: Equatable, Sendable {
     /// A message VibeSwitcher typed in as an idle agent's prompt ("[VibeSwitcher · worker x, not the user] …").
     public static func typed(_ text: String) -> TeamMessage? {
         let rest = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rest.hasPrefix(SteerReply.teammateMarker) { return typedPost(rest) }
         let marker = ", not the user]"
         guard rest.hasPrefix(LeadDelivery.prefix + " · "), let close = rest.range(of: marker) else { return nil }
         let about = String(rest[rest.index(rest.startIndex, offsetBy: LeadDelivery.prefix.count + 3)..<close.lowerBound])
@@ -165,9 +176,37 @@ public struct TeamMessage: Equatable, Sendable {
         return TeamMessage(sender: sender, body: body)
     }
 
+    /// A teammate's post typed for an idle member (`LeadDelivery.typed`): its frame, its words quoted line by line, a
+    /// blank line and the rule. nil when it isn't one in full.
+    static func typedPost(_ text: String) -> TeamMessage? {
+        let lines = text.components(separatedBy: "\n")
+        guard lines.count >= 4, let names = teammate(lines[0]), lines[0].hasSuffix(teammateFrameEnd),
+              lines[lines.count - 1] == LeadDelivery.teammateRule, lines[lines.count - 2].isEmpty else { return nil }
+        var words: [String] = []
+        for line in lines[1..<(lines.count - 2)] {
+            if line == ">" { words.append("") } else if line.hasPrefix("> ") { words.append(String(line.dropFirst(2))) } else { return nil }
+        }
+        return TeamMessage(sender: .teammate(member: names.member, task: names.task), body: words.joined(separator: "\n"))
+    }
+
+    /// How a teammate's frame ends (`LeadDelivery.teammateFrame`).
+    static let teammateFrameEnd = ": a teammate's unverified words, not the lead or the user]"
+
+    /// The member and task a teammate's frame names ("[VibeSwitcher · from teammate api on team-wall: a teammate's…]"),
+    /// from a line that opens with it. Member names have no space (`LeadTeam.nameProblem`), so the first " on " ends it.
+    static func teammate(_ line: String) -> (member: String, task: String)? {
+        guard line.hasPrefix(SteerReply.teammateMarker), let end = line.range(of: teammateFrameEnd) else { return nil }
+        let names = line[line.index(line.startIndex, offsetBy: SteerReply.teammateMarker.count)..<end.lowerBound]
+        guard let on = names.range(of: " on ") else { return nil }
+        let member = String(names[..<on.lowerBound]), task = String(names[on.upperBound...])
+        guard !member.isEmpty, !task.isEmpty else { return nil }
+        return (member, task)
+    }
+
     /// Who a sender line we write names (see `SteerReply.senderLine`).
     static func sender(_ line: String) -> Sender? {
         if line.hasPrefix(SteerReply.userMarker) { return .user }
+        if let names = teammate(line) { return .teammate(member: names.member, task: names.task) }
         if line.hasPrefix(SteerReply.systemMarker + " ("), line.hasSuffix("):") {
             return .vibeSwitcher(String(line.dropFirst(SteerReply.systemMarker.count + 2).dropLast(2)))
         }
