@@ -18,7 +18,8 @@ public struct LeadTeamMember: Codable, Equatable, Sendable {
     /// How many of the team wall's posts it has been delivered (its cursor on the wall); nil: none yet.
     public var wallSeen: Int?
     /// The tests its worker was last told the base is red on, as `LeadTask.mainRedTold` is for a plain task's worker;
-    /// nil: told it's green again, or never told.
+    /// nil: told it's green again, or never told. The integrator's is the task's own (`LeadTask.mainRedTold`): this one
+    /// is the other members' (`LeadToolset.tellRunningWorkers`).
     public var mainRedTold: [String]?
     /// The integrator's commit its branch was made from by `split`; nil until the team is split (always nil for the
     /// integrator).
@@ -26,9 +27,15 @@ public struct LeadTeamMember: Codable, Equatable, Sendable {
     /// Its last part_done (`LeadPartHandoff`): the commit its part was done at and its handoff; nil until it reports
     /// one (and after a re-roll).
     public var handoff: LeadPartHandoff?
+    /// Its workers' counted working time, in seconds, as `LeadTask.worked` is the task's (`LeadBoard.noteWork`, by
+    /// `LeadBudget.memberKey`); nil: never counted. A team task's receipt lists and sums it (`LeadReceipt.members`).
+    public var worked: Double?
+    /// When the count's current step began, as `LeadTask.workedAt`; nil while its worker isn't working.
+    public var workedAt: Double?
 
     public init(name: String, part: String, worker: String? = nil, branch: String, worktree: String,
-                wallSeen: Int? = nil, mainRedTold: [String]? = nil, from: String? = nil, handoff: LeadPartHandoff? = nil) {
+                wallSeen: Int? = nil, mainRedTold: [String]? = nil, from: String? = nil, handoff: LeadPartHandoff? = nil,
+                worked: Double? = nil, workedAt: Double? = nil) {
         self.name = name
         self.part = part
         self.worker = worker
@@ -38,6 +45,8 @@ public struct LeadTeamMember: Codable, Equatable, Sendable {
         self.mainRedTold = mainRedTold
         self.from = from
         self.handoff = handoff
+        self.worked = worked
+        self.workedAt = workedAt
     }
 }
 
@@ -290,6 +299,19 @@ extension LeadTeam {
             member.handoff = nil
             return member
         }
+        forgetWork(&task)
+    }
+
+    /// `task`'s members' working time from zero, as its own `worked` is when it's re-planned or re-rolled: else the
+    /// next round's receipt would count their earlier rounds again while the task's total starts over.
+    static func forgetWork(_ task: inout LeadTask) {
+        guard let team = task.team else { return }
+        task.team = team.map { member in
+            var member = member
+            member.worked = nil
+            member.workedAt = nil
+            return member
+        }
     }
 }
 
@@ -482,9 +504,13 @@ extension LeadToolset {
             try store.update { board in
                 guard let index = board.taskIndex(slug), let at = board.tasks[index].team?.firstIndex(where: { $0.name == member.name }) else { return }
                 board.tasks[index].team?[at].worker = session
+                // What its brief says of the base's red (`tellRunningWorkers` tells it only what's news since).
+                board.tasks[index].team?[at].mainRedTold = red?.tests
             }
             started.append(member.name)
         }
+        // Main turned red or green while they launched (their briefs have what was before): told now.
+        if !started.isEmpty, store.load().mainRed.flatMap({ $0.fixes.contains(slug) ? nil : $0 })?.tests != red?.tests { tellRunningWorkers() }
         let queued = pending.map(\.name).filter { !started.contains($0) }
         let reason = held.map { $0.hasPrefix("Not started: ") ? String($0.dropFirst("Not started: ".count)) : $0 } ?? ""
         let later = advances(slug) ? "auto_advance starts \(queued.count == 1 ? "it" : "them") once there's room." : "start_worker(\(slug)) again once there's room."
@@ -787,6 +813,8 @@ extension LeadToolset {
                 let due = LeadWall.posts(posts, for: member.name, after: member.wallSeen ?? 0)
                 guard !due.isEmpty else { continue }
                 if Self.isIdle(info), !riding.contains(member.name), !due.contains(where: { LeadWall.wakes($0, for: member.name, in: posts) }) { continue }
+                // The base's red or green it hasn't heard goes first, as the lead's: this is its next message.
+                tellMainRed(slug, member: index == 0 ? nil : member.name, worker: worker)
                 for post in due {
                     guard let before = claimWall(slug, member: member.name, worker: worker, post: post.id) else { break }
                     let sender: SteerMessage.Sender? = post.author == LeadWall.leadAuthor ? nil : .teammate(member: post.author, task: slug)
@@ -800,6 +828,34 @@ extension LeadToolset {
             }
         }
         return reached
+    }
+
+    /// Tells `slug`'s `member` (nil: its integrator, the task's worker), run by `worker`, the base's red or green that's
+    /// news to it (`mainRedNews`), as the lead's message: claimed under the board's lock, rolled back when it didn't go.
+    func tellMainRed(_ slug: String, member name: String?, worker: String) {
+        // Nothing new for it: no claim, and no write of the board (each write wakes the lead's loop).
+        let board = store.load()
+        guard let task = board.task(slug) else { return }
+        let told = name.map { name in task.team?.dropFirst().first { $0.name == name }?.mainRedTold } ?? task.mainRedTold
+        guard Self.mainRedNews(slug: slug, told: told, red: board.mainRed, base: base) != nil else { return }
+        var claimed: (news: (text: String, told: [String]?), before: [String]?)?
+        try? store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            let task = board.tasks[index]
+            if let name {
+                guard let at = task.team?.firstIndex(where: { $0.name == name }), at > 0, let member = task.team?[at], member.worker == worker,
+                      let news = Self.mainRedNews(slug: slug, told: member.mainRedTold, red: board.mainRed, base: base) else { return }
+                claimed = (news, member.mainRedTold)
+                board.tasks[index].team?[at].mainRedTold = news.told
+            } else {
+                guard task.worker == worker, let news = Self.mainRedNews(task, red: board.mainRed, base: base) else { return }
+                claimed = (news, task.mainRedTold)
+                board.tasks[index].mainRedTold = news.told
+            }
+        }
+        guard let claimed else { return }
+        let delivered = try? deliver(slug, worker: worker, text: claimed.news.text, clearDraft: false)
+        if delivered.map(Self.went) != true { untell(slug, member: name, worker: worker, claimed.news.told, back: claimed.before) }
     }
 
     /// Whether `post`, as the wall's file holds it, may be sent or shown: the lead's whose seal holds (`vouched`, from
@@ -1128,5 +1184,65 @@ extension LeadToolset {
                 }
             }
         }
+    }
+}
+
+// MARK: Main's red and green, and main moving, for every member (docs/process/reviews/team-on-one-task-design.md,
+// "Integration"; T8)
+
+extension LeadToolset {
+    /// What `task`'s members other than its integrator haven't heard of the base's red (`mainRedNews`, each by its own
+    /// `LeadTeamMember.mainRedTold`): those whose worker runs (in `live`), with their index in the team.
+    /// Empty for a plain task, and for a team the board holds that isn't valid (`LeadTeam.problem` needs a root, so
+    /// only its names are checked here). Never a verifier: only the members' own workers.
+    static func memberMainRedNews(_ task: LeadTask, red: LeadMainRed?, base: String, live: Set<String>)
+        -> [(at: Int, member: LeadTeamMember, worker: String, news: (text: String, told: [String]?))] {
+        guard task.isTeam, let team = task.team else { return [] }
+        return team.indices.dropFirst().compactMap { at in
+            let member = team[at]
+            guard let worker = member.worker, worker != task.stopped, worker != task.worker, live.contains(worker),
+                  LeadTeam.nameProblem(member.name) == nil,
+                  let news = mainRedNews(slug: task.slug, told: member.mainRedTold, red: red, base: base) else { return nil }
+            return (at, member, worker, news)
+        }
+    }
+
+    /// The branches of `task`'s members other than its integrator (`agent/<slug>--<name>`), made from their names,
+    /// never from what the board says a member's branch is; empty for a plain task or one whose team isn't valid.
+    func memberBranches(_ task: LeadTask) -> [String] {
+        guard task.isTeam, let team = task.team, LeadTeam.problem(team, slug: task.slug, root: root) == nil else { return [] }
+        return team.dropFirst().map { Worktrees.branch(Worktrees.memberSlug(task.slug, member: $0.name)) }
+    }
+
+    /// What a team task's member other than its integrator is told when `merged`'s merge into `base` changed `files`,
+    /// which its team's branches change too: its integrator merges `base` into the team branch, and it merges the team
+    /// branch in once that's done, never `base` itself (its part reaches `base` through the team branch).
+    static func memberCatchUp(_ task: LeadTask, base: String, merged: String, files: [String]) -> String {
+        let named = files.prefix(12).joined(separator: ", ") + (files.count > 12 ? ", …" : "")
+        let team = Worktrees.branch(task.slug), integrator = task.integrator?.name ?? "your integrator"
+        return "\(base) just moved: \(merged) merged, and it changed files your team's branches change too: \(named). \(integrator) merges \(base) into "
+            + "\(team) now. Once that merge is on \(team) (`git log -1 \(team)` shows it), take it into your part while any conflict is still small: in your "
+            + "worktree run `git merge \(team)`, resolve the conflicts if there are any, `git add` them, then `git commit`, each command on its own (no "
+            + "pipes, && or 2>&1). Don't merge \(base) yourself: your part reaches it through \(team). Then run the tests those files affect, commit, "
+            + "and carry on with your part."
+    }
+
+    /// `tellToCatchUp`'s part for a team task: each live member other than its integrator is sent `memberCatchUp`.
+    /// What the lead's result says of it ("" for a plain task, or none live).
+    func tellMembersToCatchUp(_ task: LeadTask, base: String, merged: String, files: [String]) -> String {
+        guard !memberBranches(task).isEmpty, let sessions = try? hostSessions("its members weren't told") else { return "" }
+        let live = Set(sessions.filter(\.live).map(\.id))
+        let text = Self.memberCatchUp(task, base: base, merged: merged, files: files)
+        var sent: [String] = [], failed: [String] = []
+        for member in (task.team ?? []).dropFirst() {
+            guard let worker = member.worker, worker != task.stopped, live.contains(worker) else { continue }
+            if let delivered = try? deliver(task.slug, worker: worker, text: text, clearDraft: false), Self.went(delivered) {
+                sent.append(member.name)
+            } else {
+                failed.append(member.name)
+            }
+        }
+        return (sent.isEmpty ? "" : " Its members \(sent.joined(separator: ", ")) were told to merge \(Worktrees.branch(task.slug)) in once its integrator has merged \(base).")
+            + (failed.isEmpty ? "" : " Telling \(failed.joined(separator: ", ")) failed: post it on its wall.")
     }
 }

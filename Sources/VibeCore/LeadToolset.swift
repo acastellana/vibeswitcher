@@ -1713,6 +1713,7 @@ public final class LeadToolset: MCPToolset {
                 if status == .planned, board.tasks[index].status != .planned {
                     board.tasks[index].worked = nil
                     board.tasks[index].workedAt = nil
+                    LeadTeam.forgetWork(&board.tasks[index])
                     store.dropBudgetClock(board.tasks[index].id)
                     board.tasks[index].overBudget = nil
                 }
@@ -2757,11 +2758,12 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: SessionDigest.text(log, limit: 12_000) + (waiting.map { "\n\n" + Self.waitingSection($0) } ?? ""))
     }
 
-    /// The tokens `task`'s own workers and verifiers spent, from their transcripts, for its receipt (see `LeadReceipts`).
+    /// The tokens `task`'s own workers and verifiers spent, from their transcripts, for its receipt (see `LeadReceipts`);
+    /// a team task's per member as well (`LeadReceipts.usage(root:task:…)`).
     func receiptUsage(_ task: LeadTask) -> LeadReceipts.Usage {
         // A Codex worker's tokens are in its rollouts, read only for a task one worked on.
         let codex = task.workerAgent == .codex || task.codexWorked == true
-        return LeadReceipts.usage(root: root, slug: task.slug, since: task.createdAt, home: claudeHome, codexHome: codex ? codexUsage.home.path : nil)
+        return LeadReceipts.usage(root: root, task: task, home: claudeHome, codexHome: codex ? codexUsage.home.path : nil)
     }
 
     /// read_session's last section: "Waiting on: since 09:52 (6 min), the prompt it shows:" and that prompt in full.
@@ -4228,32 +4230,43 @@ public final class LeadToolset: MCPToolset {
     /// and the base isn't; and what it was told then. Nil when that's no news, or for a task fixing the red. The text is
     /// VibeSwitcher's own record of the failing tests, never a worker's words.
     static func mainRedNews(_ task: LeadTask, red: LeadMainRed?, base: String) -> (text: String, told: [String]?)? {
+        mainRedNews(slug: task.slug, told: task.mainRedTold, red: red, base: base)
+    }
+
+    /// `mainRedNews` for a worker of task `slug` that was last told `told` (a team member's, `LeadTeamMember.mainRedTold`).
+    static func mainRedNews(slug: String, told: [String]?, red: LeadMainRed?, base: String) -> (text: String, told: [String]?)? {
         if let red {
-            guard !red.fixes.contains(task.slug), task.mainRedTold.map(Set.init) != Set(red.tests) else { return nil }
+            guard !red.fixes.contains(slug), told.map(Set.init) != Set(red.tests) else { return nil }
             return (red.workerText(base: base), red.tests)
         }
-        return task.mainRedTold.map { (LeadMainRed.greenText(tests: $0, base: base), nil) }
+        return told.map { (LeadMainRed.greenText(tests: $0, base: base), nil) }
     }
 
     /// Tells each running task's live worker (never a verifier) the base's red or green that's news to it
     /// (`mainRedNews`), one message each. One in review, failed or blocked hears it with the message that sends it back
-    /// to work (`sent`).
+    /// to work (`sent`). A team task's other live members are told as its worker is, each once (`memberMainRedNews`);
+    /// one not told hears it with its next message (a wall post, `deliverWall`).
     func tellRunningWorkers() {
-        guard let live = try? listed().filter(\.live).map(\.id) else { return }
+        guard let live = try? Set(listed().filter(\.live).map(\.id)) else { return }
         // Claimed under the board's lock: two merges finding the same red at once send it once.
-        var sends: [(slug: String, worker: String, news: (text: String, told: [String]?), before: [String]?)] = []
+        var sends: [(slug: String, member: String?, worker: String, news: (text: String, told: [String]?), before: [String]?)] = []
         try? store.update { board in
             for index in board.tasks.indices where board.tasks[index].status == .running {
                 let task = board.tasks[index]
-                guard let worker = task.worker, worker != task.stopped, live.contains(worker),
-                      let news = Self.mainRedNews(task, red: board.mainRed, base: base) else { continue }
-                board.tasks[index].mainRedTold = news.told
-                sends.append((task.slug, worker, news, task.mainRedTold))
+                if let worker = task.worker, worker != task.stopped, live.contains(worker),
+                   let news = Self.mainRedNews(task, red: board.mainRed, base: base) {
+                    board.tasks[index].mainRedTold = news.told
+                    sends.append((task.slug, nil, worker, news, task.mainRedTold))
+                }
+                for told in Self.memberMainRedNews(task, red: board.mainRed, base: base, live: live) {
+                    board.tasks[index].team?[told.at].mainRedTold = told.news.told
+                    sends.append((task.slug, told.member.name, told.worker, told.news, told.member.mainRedTold))
+                }
             }
         }
         for send in sends {
             let delivered = try? deliver(send.slug, worker: send.worker, text: send.news.text, clearDraft: false)
-            if delivered.map(Self.went) != true { untell(send.slug, worker: send.worker, send.news.told, back: send.before) }
+            if delivered.map(Self.went) != true { untell(send.slug, member: send.member, worker: send.worker, send.news.told, back: send.before) }
         }
     }
 
@@ -4262,10 +4275,18 @@ public final class LeadToolset: MCPToolset {
         if case .notSubmitted = delivered { return false } else { return true }
     }
 
-    /// `slug`'s worker didn't get the base's red or green it was claimed told (`told`): its next message says it.
-    private func untell(_ slug: String, worker: String, _ told: [String]?, back before: [String]?) {
+    /// `slug`'s worker (its team's `member`, given) didn't get the base's red or green it was claimed told (`told`):
+    /// its next message says it.
+    func untell(_ slug: String, member name: String? = nil, worker: String, _ told: [String]?, back before: [String]?) {
         try? store.update { board in
-            guard let index = board.taskIndex(slug), board.tasks[index].worker == worker, board.tasks[index].mainRedTold == told else { return }
+            guard let index = board.taskIndex(slug) else { return }
+            if let name {
+                guard let at = board.tasks[index].team?.firstIndex(where: { $0.name == name }), at > 0,
+                      board.tasks[index].team?[at].worker == worker, board.tasks[index].team?[at].mainRedTold == told else { return }
+                board.tasks[index].team?[at].mainRedTold = before
+                return
+            }
+            guard board.tasks[index].worker == worker, board.tasks[index].mainRedTold == told else { return }
             board.tasks[index].mainRedTold = before
         }
     }
@@ -4551,9 +4572,12 @@ public final class LeadToolset: MCPToolset {
             // What the branch changes since it last took the base in.
             let diff = Git.run(["diff", "--name-only", "\(new)...\(Worktrees.branch(task.slug))"], in: root)
             guard diff.ok else { continue }
-            let files = lines(diff.output).filter(changed.contains).sorted()
+            // A team task's: its members' branches' too (`memberBranches`).
+            let members = memberBranches(task).map { Git.run(["diff", "--name-only", "\(new)...\($0)"], in: root) }.filter(\.ok)
+            let files = Set(([diff] + members).flatMap { lines($0.output) }).filter(changed.contains).sorted()
             guard !files.isEmpty else { continue }
             let said = tellWorker(task, LeadDelivery.catchUp(base: base, merged: merged, files: files))
+                + tellMembersToCatchUp(task, base: base, merged: merged, files: files)
             told.append("\(task.slug) (\(files.prefix(4).joined(separator: ", "))\(files.count > 4 ? ", …" : "")): \(said)")
         }
         return told.isEmpty ? "" : " \(merged) changed files that running branches change too, so their workers were told to merge \(base) now: " + told.joined(separator: " ")

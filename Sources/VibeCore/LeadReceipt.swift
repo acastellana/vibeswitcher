@@ -94,11 +94,12 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
     }
 
     /// `task`'s receipt as it ends now: the board's numbers for it, `usage` from its transcripts (`LeadReceipts.usage`).
-    /// A team task's receipt lists its members (`Member`), with `memberWorked` (seconds by member name) and their
+    /// A team task's receipt lists its members (`Member`), with `memberWorked` (seconds by member name; by default each
+    /// member's own count, `LeadTeamMember.worked`) and their
     /// tokens from `usage.members`, and sums them: its `worked` is the members' summed when each was counted (else the
     /// task's own count), its `worker` the members' tokens summed when `usage` read them per member.
     public init(_ task: LeadTask, ending: Ending, questions: [LeadQuestion], usage: LeadReceipts.Usage, tests: Int? = nil,
-                mergeReruns: Int = 0, commits: Int? = nil, memberWorked: [String: Double] = [:], now: Double = Date().timeIntervalSince1970) {
+                mergeReruns: Int = 0, commits: Int? = nil, memberWorked: [String: Double]? = nil, now: Double = Date().timeIntervalSince1970) {
         let asked = questions.filter { $0.task == task.slug }
         let merged = ending == .merged ? task.merged : nil
         self.init(ending: ending, startedAt: task.startedAt, endedAt: now, worked: task.worked, worker: usage.worker, verifier: usage.verifier,
@@ -107,7 +108,8 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
                   onto: merged?.onto, commit: merged?.commit, commits: commits)
         waits = task.waits.map { $0.closed(at: now) }
         if task.isTeam, let team = task.team {
-            let listed = team.map { Member(name: $0.name, worked: memberWorked[$0.name], worker: usage.members?[$0.name]) }
+            let counted = memberWorked ?? Dictionary(team.compactMap { member in member.worked.map { (member.name, $0) } }, uniquingKeysWith: { first, _ in first })
+            let listed = team.map { Member(name: $0.name, worked: counted[$0.name], worker: usage.members?[$0.name]) }
             members = listed
             if listed.allSatisfy({ $0.worked != nil }) { worked = listed.reduce(0) { $0 + ($1.worked ?? 0) } }
             if usage.members != nil { worker = LeadReceipts.sum(listed.map(\.worker)) }
