@@ -71,14 +71,26 @@ struct BranchCodeTests {
         #expect(session == wrapper, "the command's session \(session) isn't the wrapper's \(wrapper)")
         #expect(status == 7)
 
-        // A SIGTERM to the prefix reaches the command, and the prefix ends by it.
-        let waiting = try Self.prefix("trap 'echo got-term; exit 3' TERM; echo ready; while :; do sleep 0.05; done")
-        let ready = Self.read(waiting.output) { $0.contains("ready\n") }
-        #expect(ready == "ready\n")
+        // A SIGTERM to the prefix reaches the command, and the prefix ends by it. The command says its process group
+        // (the wrapper's, in a session of its own), so it can be ended when it never hears: the prefix, catching the
+        // SIGTERM to send it on, would otherwise wait for it forever.
+        let waiting = try Self.prefix("trap 'echo got-term; exit 3' TERM; echo \"ready $(cut -d' ' -f5 /proc/self/stat)\"; while :; do sleep 0.05; done")
+        let ready = Self.read(waiting.output) { $0.hasPrefix("ready ") && $0.hasSuffix("\n") }
+        let group = pid_t(ready.dropFirst("ready ".count).trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        // Only a group that is neither none nor this test's own.
+        let commandGroup = group > 1 && group != getpgrp() ? group : 0
+        #expect(commandGroup != 0, "the command didn't say its process group: \(ready)")
+        #expect(commandGroup != waiting.pid, "the command is in its caller's process group")
         kill(waiting.pid, SIGTERM)
         let rest = Self.read(waiting.output) { $0.contains("got-term\n") }
+        if !rest.contains("got-term\n") {
+            // It never heard: ended, the command first, so the prefix's wait ends and this test fails rather than hangs.
+            if commandGroup != 0 { kill(-commandGroup, SIGKILL) }
+            kill(-waiting.pid, SIGKILL)
+        }
         let stopped = Self.ended(waiting.pid)
-        // Whatever is left in the prefix's group (the command, when it never heard), ended.
+        // Whatever is left in either group, ended.
+        if commandGroup != 0 { kill(-commandGroup, SIGKILL) }
         kill(-waiting.pid, SIGKILL)
         close(waiting.output)
         #expect(rest == "got-term\n", "the command never heard the SIGTERM: \(rest)")

@@ -347,7 +347,8 @@ extension Platform {
         // MARK: Internals
 
         /// What `git` is while none is found: a path with nothing at it (`/nonexistent` is, by convention, never made).
-        static let absentGit = "/nonexistent/vibeswitcher/git"
+        /// Public so a module that refuses to start without git (the engine plan's E1 and E4) can name it.
+        public static let absentGit = "/nonexistent/vibeswitcher/git"
         /// The folders looked in when the process has no PATH at all.
         static let pathWhenUnset = "/usr/local/bin:/usr/bin:/bin"
 
