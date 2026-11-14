@@ -3122,3 +3122,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 15:49 Automatically (auto_advance): Released cleanup-removes-a's worker, idle since its done report on 0ffcc9dd, while its audit runs (ended pid 60492 (Worker: Cleanup removes a leftover folder that isn't a worktree)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-14 15:53 Audit of cleanup-removes-a: complete, clean, round 1: 1 Nit open
 - 2026-11-14 16:08 Merged cleanup-removes-a: Cleanup removes a leftover folder that isn't a worktree (build c385b7943fb8)
+- 2026-11-14 16:08 Automatically (auto_advance): Merged cleanup-removes-a (Cleanup removes a leftover folder that isn't a worktree) into main at f5eb7e69, on its passing audit and the full test run.
+- 2026-11-14 16:08 Automatically (auto_advance): Cleaned up cleanup-removes-a (freed 1.7 GB of build output and temporary folders). It stays done.
