@@ -493,7 +493,7 @@ Written, attacked and revised before Task 2 starts.
   | S9 | What the host executes | S2-D7: sealed copies, the static build, the unit, git from root's folders, the tool server's switch, the clean install; the keeper after the bootstrap (decision 18) | yes | 3b, 8a, 9b, 9d, 10c; bootstrap step 8 |
   | S10 | The sessions' environment | S2-D12, corrected | yes | 10a, 10b, 10c, 12b |
   | S11 | What plain mode doesn't promise | the list of 31, and the allow-list (S2-D11) | yes | 10d; engine E1 |
-  | S12 | After the bootstrap | sixteen items, in order | no | [After the bootstrap](#after-the-bootstrap-from-this-stage) |
+  | S12 | After the bootstrap | seventeen items, in order | no | [After the bootstrap](#after-the-bootstrap-from-this-stage) |
 
 - [ ] **Step 3: The review record.** `docs/process/reviews/v2-security-review-2026-11-13.md` carries the four
   reviewers' findings as they gave them, each with its answer: the section of the document that took it (the
@@ -2063,3 +2063,5 @@ Added by this revision, and in the document's S12 as items 14 to 16 (decision 20
     "Also required"; stages 3 and 4, where rights and the wallet's page exist).
 - **A switch replaces the server child when no request is in flight**, by a count of unanswered requests in
   `HostServer.handle`, in place of Task 9d's 30 s bound (`ServerChild.idleLimit`).
+- **What a spawn other than the app's may add to a session's environment becomes an allow-list with the sandbox**
+  (today a list of refused names, Task 10a); the document's S12 item 17.

@@ -1523,6 +1523,9 @@ the unreadable images and the static build, which the plan had here, are before 
 16. **The design's requirements no list carried** (decision 20): reply rights type only into confined sessions; view
     rights get masked screens; the wallet's signing page on an origin of its own (stages 3 and 4, where rights and
     the wallet's page exist).
+17. **What a spawn other than the app's may add to a session's environment becomes an allow-list**, with the sandbox:
+    today it is a list of refused names (`Platform.Tools.spawnEnvironmentRefused`, stage 2 Task 10a), which lets
+    through any name it doesn't list (S10).
 
 **Why.** Confinement is what turns S11 from a list of what a worker can do into a list of what a confined worker
 can't, and it needs the bootstrap's lead to build it.
