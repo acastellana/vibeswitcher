@@ -2592,3 +2592,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-13 19:45 Automatically (auto_advance): Started the audit of merge-github-s-main-2 at 9f3507eb (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-13 20:28 Automatically (auto_advance): Resumed after sleep: restarted the audit of merge-github-s-main-2 on the same commit, 9f3507eb.
 - 2026-11-13 21:18 Automatically (auto_advance): Resumed after sleep: restarted the audit of merge-github-s-main-2 on the same commit, 9f3507eb.
+- 2026-11-14 05:09 Automatically (auto_advance): Resumed after sleep: restarted the audit of merge-github-s-main-2 on the same commit, 9f3507eb.
+- 2026-11-14 05:26 Automatically (auto_advance): The verifier on merge-github-s-main-2 ended without a verdict (exited 129 after pid 650 (VibeSwitcher) closed it): closed its session and started the audit again on the same commit, 9f3507eb. If this one ends without a verdict too, it's left to you.
