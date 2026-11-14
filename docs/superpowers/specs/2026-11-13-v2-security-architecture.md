@@ -740,7 +740,8 @@ parser's reply grammar in Task 9; the server's own first statements in the engin
 `HostHardeningTests.aSessionsProgramIsDumpableAsUsual`, `HostHardeningTests.anUnreadableHostIsTheHostNeverGone`,
 `HostHardeningTests.anotherHardenedProcessIsNotTakenForTheHost`,
 `HostHardeningTests.nothingSecretIsInTheHostsArgumentsOrEnvironment`,
-`HostHardeningTests.theUsersHostIgnoresTestSecretFlags`; planned: stage 2 plan task 9 (9b to 9e).
+`HostHardeningTests.theUsersHostIgnoresTestSecretFlags`, `HostHardeningTests.aSessionsProgramHoldsNoImageDescriptor`,
+`HostHardeningTests.aSessionsProgramIsTheOOMKillersFirstPick`; planned: stage 2 plan task 9 (9c to 9e).
 
 **Tests to write:** Task 9: `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`,
 `aHandoverImageIsNotDumpableFromItsExec`; `ParserReplyTests.aReplyWithNoQueryIsNotTyped`,
@@ -995,18 +996,22 @@ check, `build-info`, `--node`, `--node-root`), Task 10 (`Platform.Tools.git`); t
 resolved path); the bootstrap path's step 8 (the unit, the install script, the static build, the seal's list, the
 tool server across a switch). The keeper's copy: after the bootstrap (S12 item 14).
 
-**Held by:** `MCPHandoverTests.aBuildReplacedDuringItsProbeIsNeverExecutedUnprobed`; planned: stage 2 plan task 3,
-task 8, task 9.
+**Held by:** `MCPHandoverTests.aBuildReplacedDuringItsProbeIsNeverExecutedUnprobed`,
+`HostHardeningTests.aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`,
+`HostHardeningTests.theNodesRootIsNeverFromTheEnvironment`, `HostHardeningTests.aHostOnTheAccountsOwnHomeNeedsNode`,
+`HostHardeningTests.theNodeTakesItsFoldersFromNodeRootNotItsExecutable`,
+`HostHardeningTests.theUsersHostTakesOnlyItsInstallsServer`,
+`HandoverLinuxTests.aHostWhoseImageDiffersFromItsBuildInfoDoesNotStart`, `HandoverLinuxTests.aNewerBuildInfoFormatIsRefused`,
+`HandoverLinuxTests.aHostWhoseImagesMatchItsBuildInfoStartsAndTellsItsServerTheFolder`; planned: stage 2 plan task 3,
+task 8, task 9 (9c, 9d).
 
 **Tests to write:** Task 3: `ProcessSelfTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`,
 `aSealedCopysHashIsOfTheBytesItRuns`, `aPidsTokenIsItsPeerToken`. Task 8:
 `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`. Task 9:
-`HostHardeningTests.aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`,
-`aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`,
-`theNodesRootIsNeverFromTheEnvironment`; `HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`,
+`HostHardeningTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`;
+`HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`,
 `aHandoverToABuildOutsideTheInstallFolderIsRefused`, `aHandoverWhoseHashDiffersFromTheRecordIsRefused`,
 `aTargetRenamedOverAfterItsCheckIsNotWhatRuns`, `aHandoverToAnInstalledBuildIsAllowed`,
-`aHostWhoseImageDiffersFromItsBuildInfoDoesNotStart`, `aNewerBuildInfoFormatIsRefused`,
 `aScratchHostWithNoInstallRootHandsOverAsToday`. Task 10: `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`.
 E4: `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`. Step 8: `StartCommandTests` (the unit written,
 `Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, the commit's folder), `noNameIsBothUnsetAndAssigned`, a write

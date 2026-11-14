@@ -479,3 +479,211 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         #expect(!after.contains(secret))
     }
 }
+
+// MARK: Task 9b: the host's own sealed copy, its launcher and parsers, --node
+
+/// The host runs its sessions' launchers and parsers from its own sealed copy, which no program of a session holds; a
+/// session's program is the OOM killer's first pick; `--node` and the account's own lock; the build's folders (the
+/// stage 2 plan's Task 9b, S2-D5, S2-D7; the security architecture document's S6 and S9).
+extension HostHardeningTests {
+    /// A scratch host started (as a handover's exec will start one, Task 9c) from a sealed copy of a build's file, so
+    /// that no process runs the file and it can be rewritten in place, with `--image-path` naming the file. After the
+    /// rewrite, a session it starts still runs this build: its launcher is the host's own copy, not the file, and no
+    /// launcher copy was written under the scratch home's `host/`.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies; the Mac keeps its launcher copies"))
+    func aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild() async throws {
+        let dir = "\(shortScratchRoot)/vshi-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let home = dir + "/home", socket = dir + "/h.sock", image = dir + "/build/vibeswitcher-host", output = dir + "/host.out"
+        for folder in [home, dir + "/build"] { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
+        try FileManager.default.copyItem(atPath: hostLauncher, toPath: image)
+        let copy = try Platform.ProcessSelf.sealedCopy(of: image, name: "vibeswitcher-host").get()
+        defer { Sys.close(copy.fd) }
+        // This process is the host's app through a connector, as `TestHosts.connectAsApp` makes one.
+        let (hostEnd, testEnd) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        Platform.Sockets.enableCredentials(hostEnd)
+        HostConnection.register(connector: testEnd, for: socket)
+        defer {
+            HostConnection.unregister(path: socket)
+            Sys.close(testEnd)
+        }
+        let said = open(output, O_CREAT | O_WRONLY | O_CLOEXEC, 0o600)
+        try #require(said >= 0)
+        var spawn = Platform.Spawn(executable: copy.path,
+                                   arguments: [image, "--socket", socket, "--lock", dir + "/h.lock", "--idle-exit", "600", "--log", dir + "/session.log",
+                                               "--image-path", image, "--exit-with", String(getpid()),
+                                               TestAppPrincipal.pidFlag, String(getpid()), TestAppPrincipal.connectorFlag, "0"])
+        spawn.environment = ["HOME=\(home)", "CFFIXED_USER_HOME=\(home)", "SHELL=/bin/sh", "PATH=/usr/bin:/bin", "TMPDIR=\(dir)/",
+                             "\(Platform.ProcessSelf.imageVariable)=\(copy.fd)"]
+        spawn.stdin = .descriptor(hostEnd)
+        spawn.stdout = .descriptor(said)
+        spawn.stderr = .descriptor(said)
+        spawn.keep = [copy.fd]
+        spawn.group = .ownGroup
+        let started = spawn.start()
+        Sys.close(hostEnd)
+        Sys.close(said)
+        let host = try started.get()
+        defer { Self.end(host) }
+        func log() -> String { (try? String(contentsOfFile: output, encoding: .utf8)) ?? "" }
+        _ = await eventually { log().contains("vibeswitcher-host: started") || log().contains("not started") }
+        try #require(log().contains("vibeswitcher-host: started"), "\(log())")
+
+        // Rewritten in place with another program: no process runs the file, so no ETXTBSY.
+        let file = open(image, O_WRONLY | O_TRUNC | O_CLOEXEC)
+        try #require(file >= 0, "errno \(errno)")
+        let other = Array("#!/bin/sh\necho replaced-build\n".utf8)
+        #expect(write(file, other, other.count) == other.count)
+        Sys.close(file)
+
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(socket, appKey: SymmetricKey(size: .bits256))
+        let session = try await client.spawn("printf 'this-build\\n'; exec sleep 600")
+        defer { kill(session.childPID, SIGKILL) }
+        #expect(await eventually { client.screen(session.id)?.contains("this-build") == true }, "\(client.screen(session.id) ?? "")\n\(log())")
+        #expect(client.screen(session.id)?.contains("replaced-build") == false)
+        let launchers = (try? FileManager.default.contentsOfDirectory(atPath: home + "/.vibeswitcher/host")) ?? []
+        #expect(!launchers.contains { $0.hasPrefix("launcher-") }, "\(launchers)")
+    }
+
+    /// Ends a host this suite started itself (SIGTERM, then SIGKILL), and reaps it.
+    static func end(_ pid: pid_t) {
+        kill(pid, SIGTERM)
+        var status: Int32 = 0
+        if !eventuallyBlocking(timeout: 10, { waitpid(pid, &status, WNOHANG) == pid }) {
+            kill(pid, SIGKILL)
+            while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+        }
+    }
+
+    /// A session's program holds no copy of the host's image: no `memfd:` among its descriptors, and no
+    /// `VIBESWITCHER_IMAGE_FD` in its environment (its launcher, started from the host's copy, closed it first).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies; the Mac has none"))
+    func aSessionsProgramHoldsNoImageDescriptor() async throws {
+        let host = try await ScratchHostProcess()
+        defer { host.stop() }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let session = try await client.spawn("""
+            printf 'memfd=%s image=%s\\n' "$(ls -l /proc/self/fd | grep -c memfd)" "$(env | grep -c \(Platform.ProcessSelf.imageVariable))"; exec sleep 600
+            """)
+        defer { kill(session.childPID, SIGKILL) }
+        #expect(await eventually { client.screen(session.id)?.contains("image=") == true }, "\(client.screen(session.id) ?? "")\n\(host.log)")
+        #expect(client.screen(session.id)?.contains("memfd=0 image=0") == true, "\(client.screen(session.id) ?? "")")
+        // Its parser was started from the copy too.
+        #expect(await eventually { !OrphanSweepTests.parsers(of: host.pid).isEmpty })
+        #expect(Platform.Processes.arguments(OrphanSweepTests.parsers(of: host.pid)[0]).first?.hasPrefix("/proc/self/fd/") == true)
+    }
+
+    /// A session's program's `oom_score_adj` is the host's plus 500 (at most 1000), so the OOM killer picks it before
+    /// the host, and nothing about it is on the session's terminal: the launcher, non-dumpable from its exec, made
+    /// itself dumpable again before it wrote its own (its /proc files root's otherwise: `EACCES`, said on the terminal).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's oom_score_adj; the Mac has none"))
+    func aSessionsProgramIsTheOOMKillersFirstPick() async throws {
+        let host = try await ScratchHostProcess()
+        defer { host.stop() }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let session = try await client.spawn("printf 'oom=%s\\n' \"$(cat /proc/self/oom_score_adj)\"; exec sleep 600")
+        defer { kill(session.childPID, SIGKILL) }
+        #expect(await eventually { client.screen(session.id)?.contains("oom=") == true }, "\(client.screen(session.id) ?? "")\n\(host.log)")
+        let hosts = try #require(Int((try String(contentsOfFile: "/proc/\(host.pid)/oom_score_adj", encoding: .utf8))
+                                        .trimmingCharacters(in: .whitespacesAndNewlines)))
+        let screen = client.screen(session.id) ?? ""
+        #expect(screen.contains("oom=\(min(1000, hosts + HostImages.oomRaise))"), "\(screen)")
+        #expect(!screen.contains("oom_score_adj"), "\(screen)")
+        let program = try String(contentsOfFile: "/proc/\(session.childPID)/oom_score_adj", encoding: .utf8)
+        #expect(Int(program.trimmingCharacters(in: .whitespacesAndNewlines)) == min(1000, hosts + HostImages.oomRaise))
+    }
+
+    /// The account's own lock (by the user database, here a scratch folder standing for it) is taken by the node's host
+    /// and only by it, however it is spelled; a scratch home's lock isn't the account's, and the node's host takes none.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's --node; the Mac has none"))
+    func aHostOnTheAccountsOwnHomeNeedsNode() throws {
+        let (dir, root, accountLock) = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        for spelling in [accountLock, root + "//host.lock", root + "/sub/../host.lock"] {
+            #expect(HostImages.mayStart(lockPath: spelling, accountRoot: root, node: false)?.contains("is the account's own") == true, "\(spelling)")
+            #expect(HostImages.mayStart(lockPath: spelling, accountRoot: root, node: true) == nil, "\(spelling)")
+        }
+        let scratch = dir + "/scratch-home/.vibeswitcher"
+        try FileManager.default.createDirectory(atPath: scratch, withIntermediateDirectories: true)
+        #expect(HostImages.mayStart(lockPath: scratch + "/host.lock", accountRoot: root, node: false) == nil)
+        #expect(HostImages.mayStart(lockPath: scratch + "/host.lock", accountRoot: root, node: true)?.contains("takes only the account's own lock") == true)
+        #expect(symlink(accountLock, dir + "/link.lock") == 0)
+        #expect(HostImages.mayStart(lockPath: dir + "/link.lock", accountRoot: root, node: false)?.contains("symbolic link") == true)
+        #expect(HostImages.mayStart(lockPath: dir + "/link.lock", accountRoot: root, node: true)?.contains("symbolic link") == true)
+    }
+
+    /// The node's environment: `HOME` the account's, and neither `VIBESWITCHER_HOME` nor `CFFIXED_USER_HOME`, whatever
+    /// it was given; the rest as given. No `--node` host is started in a test: it would be the user's, on their own
+    /// `~/.vibeswitcher`.
+    @Test func theNodesRootIsNeverFromTheEnvironment() {
+        let given = ["HOME": "/scratch/home", "VIBESWITCHER_HOME": "/scratch/root", "CFFIXED_USER_HOME": "/scratch/fixed",
+                     "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash"]
+        let node = HostImages.nodeEnvironment(given, accountHome: "/home/someone")
+        #expect(node == ["HOME": "/home/someone", "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash"])
+        #expect(VibePaths.root(environment: node, fallbackHome: "/elsewhere").path == "/home/someone/.vibeswitcher")
+        #expect(HostImages.accountHome == VibePaths.accountHome)
+        // And --node is refused without its node root and its own server, before anything is changed.
+        #expect(HostImages.startAsNode(arguments: ["host"]) == nil)
+        if !Platform.CodeIdentity.isAvailable {
+            #expect(HostImages.startAsNode(arguments: ["host", "--node"])?.contains("needs --node-root") == true)
+            #expect(HostImages.startAsNode(arguments: ["host", "--node", "--node-root", "/nonexistent/build"])?.contains("needs --server") == true)
+            #expect(HostImages.startAsNode(arguments: ["host", "--node", "--node-root", "/nonexistent/build", "--server", "/etc/passwd"])?
+                .contains("isn't") == true)
+        }
+    }
+
+    /// With `--node-root` and `--image-path` naming different folders, the build's files are the node root's: its
+    /// `bin/vibeswitcher-host` (the build id's), `bin/vibeswitcher-mcp`, its command folder, its app; with
+    /// `--image-path` alone, that image's folder's; with neither, the executable's, as before.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's --node-root; the Mac's folders are its executable's"))
+    func theNodeTakesItsFoldersFromNodeRootNotItsExecutable() throws {
+        let dir = "\(shortScratchRoot)/vshf-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let node = dir + "/node", other = dir + "/other"
+        for root in [node, other] {
+            try FileManager.default.createDirectory(atPath: root + "/bin", withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(atPath: root + "/Resources/bin", withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: root + "/Resources/bin/" + TestLock.command, contents: Data("#!/bin/sh\n".utf8),
+                                           attributes: [.posixPermissions: 0o755])
+        }
+        let folders = HostImages.folders(arguments: ["host", "--image-path", other + "/bin/vibeswitcher-host", "--node-root", node],
+                                         executable: "/elsewhere/bin/vibeswitcher-host")
+        #expect(folders.image == node + "/bin/vibeswitcher-host")
+        #expect(folders.installFolder == node)
+        #expect(folders.toolServer == node + "/bin/vibeswitcher-mcp")
+        #expect(folders.commandFolder == node + "/Resources/bin")
+        #expect(folders.appExecutable == node + "/bin/VibeSwitcher")
+
+        let imaged = HostImages.folders(arguments: ["host", "--image-path", other + "/bin/vibeswitcher-host"], executable: "/elsewhere/bin/vibeswitcher-host")
+        #expect(imaged.image == other + "/bin/vibeswitcher-host" && imaged.installFolder == other + "/bin")
+        #expect(imaged.toolServer == other + "/bin/vibeswitcher-mcp" && imaged.commandFolder == other + "/Resources/bin")
+
+        let plain = HostImages.folders(arguments: ["host"], executable: "/elsewhere/bin/vibeswitcher-host")
+        #expect(plain.image == "/elsewhere/bin/vibeswitcher-host" && plain.installFolder == "/elsewhere/bin")
+        #expect(plain.toolServer == "/elsewhere/bin/vibeswitcher-mcp" && plain.commandFolder == nil)
+    }
+
+    /// The node's host takes no `--server` but its build's own, `<node-root>/bin/vibeswitcher-server`, compared once
+    /// both are resolved: a second spelling of it is it; another file, a symbolic link to it, a link in its place, or
+    /// a server that isn't there is refused.
+    @Test func theUsersHostTakesOnlyItsInstallsServer() throws {
+        let dir = "\(shortScratchRoot)/vshs-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let node = dir + "/node"
+        try FileManager.default.createDirectory(atPath: node + "/bin", withIntermediateDirectories: true)
+        let own = node + "/bin/vibeswitcher-server"
+        #expect(HostImages.serverRefusal(server: own, nodeRoot: node)?.contains("isn't there") == true)
+        FileManager.default.createFile(atPath: own, contents: Data("server".utf8), attributes: [.posixPermissions: 0o755])
+        #expect(HostImages.serverRefusal(server: own, nodeRoot: node) == nil)
+        #expect(HostImages.serverRefusal(server: node + "//bin/./vibeswitcher-server", nodeRoot: node) == nil)
+        #expect(HostImages.serverRefusal(server: own, nodeRoot: node + "/") == nil)
+        let elsewhere = dir + "/vibeswitcher-server"
+        FileManager.default.createFile(atPath: elsewhere, contents: Data("server".utf8), attributes: [.posixPermissions: 0o755])
+        #expect(HostImages.serverRefusal(server: elsewhere, nodeRoot: node)?.contains("isn't the node's own") == true)
+        #expect(symlink(own, dir + "/link") == 0)
+        #expect(HostImages.serverRefusal(server: dir + "/link", nodeRoot: node)?.contains("symbolic link") == true)
+        try FileManager.default.removeItem(atPath: own)
+        #expect(symlink(elsewhere, own) == 0)
+        #expect(HostImages.serverRefusal(server: own, nodeRoot: node)?.contains("symbolic link") == true)
+    }
+}

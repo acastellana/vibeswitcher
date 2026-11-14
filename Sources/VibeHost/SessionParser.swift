@@ -52,6 +52,8 @@ public enum SessionParser {
     public static func runIfAsked(_ arguments: [String]) {
         guard arguments.count >= 4, arguments[1] == "--parse-session", let cols = Int(arguments[2]), let rows = Int(arguments[3]) else { return }
         HostHardening.hardenAsParser()
+        // On Linux started from the host's sealed copy: closed, so nothing it starts holds it (see V2/HostImages.swift).
+        Platform.ProcessSelf.closeInheritedImage()
         let scrollback = arguments.firstIndex(of: "--scrollback").flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
         signal(SIGPIPE, SIG_IGN)
         // Ends with the host, even while stuck mid-parse (when it would never read the end of the link). The host
@@ -258,8 +260,10 @@ final class ParserLink {
         spawn.stdout = .path("/dev/null", flags: O_WRONLY)
         spawn.stderr = .inherit
         spawn.group = .ownGroup
-        spawn.environment = ["PATH=/usr/bin:/bin"]
-        spawn.keep = []
+        // On Linux the launcher is the host's sealed copy: kept, and named to it (see V2/HostImages.swift).
+        let image = HostImages.launching(launcher, environment: ["PATH=/usr/bin:/bin"])
+        spawn.environment = image.environment
+        spawn.keep = image.keep
         let spawned = spawn.start()
         Sys.close(theirs)
         guard case .success(let pid) = spawned else {

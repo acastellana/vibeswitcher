@@ -418,8 +418,13 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(scene.host.pid == pid)
         #expect(scene.host.log.contains("couldn't take over"))
         #expect(await eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
-        // The old build's own copy, the one it started its sessions with.
-        #expect(scene.host.runningExecutable?.hasSuffix("/.vibeswitcher/host/launcher-\(scene.host.oldBuild)") == true)
+        // The old build's own copy, the one it started its sessions with. On Linux, where its sessions start from its
+        // sealed copy and no launcher copy is written (Task 9b), its own file until Task 9c carries that copy across.
+        if Platform.CodeIdentity.isAvailable {
+            #expect(scene.host.runningExecutable?.hasSuffix("/.vibeswitcher/host/launcher-\(scene.host.oldBuild)") == true)
+        } else {
+            #expect(scene.host.runningExecutable == URL(fileURLWithPath: scene.host.oldBinary).resolvingSymlinksInPath().path)
+        }
     }
 }
 

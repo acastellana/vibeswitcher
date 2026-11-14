@@ -1372,6 +1372,13 @@ on both, and S5's `Held by:` names them.
   bytes (the commit security review of Task 8a, 2026-11-14: `--server` names the app's principal, so the user's
   host takes none but its own). Test: `theUsersHostTakesOnlyItsInstallsServer`.
 - Test: `Tests/VibeHostTests/HostHardeningTests.swift`, `HandoverLinuxTests.swift`
+- *As made:* no `Config.launcherImage`: `PTYSpawn.spawn` and `ParserLink.start` keep the descriptor the launcher's
+  path names when it is `/proc/self/fd/N` (`HostImages.launching`), which the field would have had to reach through
+  `HostedSession.spawn`, `restore` and `HistoryRead`. A host started from a sealed copy (a test's now, a handover's
+  from Task 9c) adopts that copy as its own (`/proc/self/exe` is then unreadable to it). `--node-root` stays in
+  `config.arguments` until Task 9d appends the target's, as `--server` does; on Linux the fallback is the image's path
+  until Task 9c. `--node` also takes only the account's own lock (`HostImages.mayStart`). A start refused by these
+  checks sends a handover's new image back rather than ending it.
 
 - [ ] **Step 1: Failing tests** (Linux). The two `build-info` tests are in `HandoverLinuxTests`, as the document's S9
   places them; the rest in `HostHardeningTests`.

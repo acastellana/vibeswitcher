@@ -27,6 +27,15 @@ func value(after flag: String) -> String? {
     guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
     return arguments[index + 1]
 }
+func notStarted(_ why: String) -> Never {
+    FileHandle.standardError.write(Data("vibeswitcher-host: not started: \(why)\n".utf8))
+    exit(1)
+}
+
+// The node's host (`--node`, Linux): HOME from the user database, VIBESWITCHER_HOME and CFFIXED_USER_HOME unset,
+// before anything reads a path; its --node-root and its own --server needed (see V2/HostImages.swift). Refused, it
+// doesn't start, or, as a new image of a handover, goes back (below).
+var startRefusal = HostImages.startAsNode(arguments: arguments)
 
 VibePaths.ensurePrivateDirectories()
 let environment = ProcessInfo.processInfo.environment
@@ -35,11 +44,25 @@ let inherited = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "
                  "__CF_USER_TEXT_ENCODING"]
 let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? Platform.Tools.loginShell
 let executable = Bundle.main.executablePath ?? arguments[0]
-let build = HostBuild.id(ofExecutableAt: executable)
+// This build's folders: on Linux from --node-root, else --image-path, else the executable (see V2/HostImages.swift).
+let folders = HostImages.folders(arguments: arguments, executable: executable)
+let build = HostBuild.id(ofExecutableAt: folders.image)
 let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
 // The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone). On Linux by
 // the lock file's identity, a link refused (see `HostHardening.lock`); on the Mac by its path, as always.
 let ownsLaunchers = HostHardening.ownsLaunchers(lockPath: lockPath, usersLock: VibePaths.hostLock.path)
+// On Linux the account's own lock is the node's host's alone; its own image and, with --node-root, its server read
+// into sealed copies, checked against build-info (see V2/HostImages.swift).
+startRefusal = startRefusal ?? HostImages.mayStart(lockPath: lockPath, accountRoot: (HostImages.accountHome ?? "/nonexistent") + "/.vibeswitcher",
+                                                   node: arguments.contains(HostImages.nodeFlag))
+var images = HostImages.Loaded(own: nil, server: nil)
+if startRefusal == nil {
+    switch HostImages.load(arguments: arguments) {
+    case .success(let loaded): images = loaded
+    case .failure(let why): startRefusal = why.description
+    }
+}
+if let startRefusal, HostHardening.handover(in: arguments) == nil { notStarted(startRefusal) }
 // Sessions are started through a launcher (see `PTYSpawn`). Not the app's copy: an update replaces that file while
 // this host keeps running, and this host must keep starting its own build. A private copy, named by build.
 let launchers = VibePaths.root.appendingPathComponent("host", isDirectory: true)
@@ -58,10 +81,11 @@ var config = HostServer.Config(
     socketPath: value(after: "--socket") ?? VibePaths.hostSocket.path,
     lockPath: lockPath,
     shell: shell,
-    launcher: ensureLauncher(),
+    // On Linux its own sealed copy (no launcher copy made); on the Mac a private copy, as always.
+    launcher: images.own?.path ?? (startRefusal == nil ? ensureLauncher() : executable),
     // With vs-heavy on PATH (Mac-wide one-at-a-time heavy work, for every project's sessions).
     baseEnvironment: TestLock.sessionEnvironment(environment.filter { inherited.contains($0.key) },
-                                                 adding: TestLock.commandFolder(besideExecutable: executable)),
+                                                 adding: folders.commandFolder),
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 // A bench's host: it ends, sessions and all, with the bench (see `HostServer.Config.owner`). Kept through a handover.
@@ -73,7 +97,7 @@ config.endsStrayParsers = true
 // By the user's host only (a scratch host beside a build folder would end that folder's, a test's or another run's),
 // or a scratch host told to (OrphanSweepTests).
 if ownsLaunchers || arguments.contains("--end-orphaned-tool-servers") {
-    config.toolServer = URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
+    config.toolServer = folders.toolServer
 }
 // A scratch host's parsers can be told to stall or trap (tests), and watched more closely.
 config.parser.testHooks = !ownsLaunchers && arguments.contains("--parser-test-hooks")
@@ -91,14 +115,15 @@ config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.append
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
                                      "--handover-fallback-app": true, "--app-executable": true,
-                                     HostStart.appKeyFlag: false].merging(TestAppPrincipal.handoverFlags) { $1 }
+                                     HostStart.appKeyFlag: false, HostImages.imagePathFlag: true].merging(TestAppPrincipal.handoverFlags) { $1 }
 config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
     if result.skip { result.skip = false; return }
     if let takesValue = handoverFlags[item.element] { result.skip = takesValue; return }
     result.kept.append(item.element)
 }.kept)
 // This build's own copy, there for as long as it runs: if a build it hands over to can't restore, it comes back to it.
-config.fallback = config.launcher == executable ? nil : config.launcher
+// On Linux its image by path until Task 9c carries its sealed copy across the exec.
+config.fallback = images.own != nil ? folders.image : config.launcher == executable ? nil : config.launcher
 
 func log(_ text: String) { FileHandle.standardError.write(Data("vibeswitcher-host: \(text)\n".utf8)) }
 
@@ -125,6 +150,7 @@ var restoredSecrets: Data?
 if let handoverPath {
     // Refused at its start (traced): back to the build before, its state and secrets unread here.
     if case .refused(let why) = hardening { goBack(handoverPath, HostHardening.Refused(why)) }
+    if let startRefusal { goBack(handoverPath, HostHardening.Refused(startRefusal)) }
     do {
         // A test of the fallback: as if this build couldn't read the state.
         if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
@@ -139,7 +165,7 @@ if let handoverPath {
 // Only an actual restoration may carry the original app's location from the old host's argv.
 // A fresh launch must not let a script designate itself as the app and replace a keyless host's key.
 config.appExecutable = (restoring != nil ? value(after: "--app-executable") : nil)
-    ?? URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
+    ?? folders.appExecutable
 // The lead's vault: the user's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; a scratch host
 // (on its own lock) keeps one in memory only, never touching the user's.
 // After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.
@@ -212,10 +238,11 @@ if let handoverPath, let state = restoring {
 TestAppPrincipal.adopt(arguments: arguments, restored: restoring?.testAppConnector, ownsLaunchers: ownsLaunchers, server: server)
 // The app on Linux: the server child, from a sealed copy of `--server PATH`, through its connector (see `ServerChild`);
 // after a handover, the one the build before ran, once checked.
-ServerChild.adopt(arguments: arguments, ownsLaunchers: ownsLaunchers, executable: executable, config: config, server: server, restored: restoring)
+ServerChild.adopt(arguments: arguments, ownsLaunchers: ownsLaunchers, nodeRoot: folders.installFolder, config: config, server: server,
+                  restored: restoring, copy: images.server)
 // Holding the user's lock now: no other host runs, so other builds' launchers can go (not for a scratch host on
 // its own lock, which runs beside the real one).
-for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path)) ?? [] where ownsLaunchers && name != "launcher-\(build)" {
+for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path)) ?? [] where ownsLaunchers && images.own == nil && name != "launcher-\(build)" {
     try? FileManager.default.removeItem(at: launchers.appendingPathComponent(name))
 }
 // Earlier versions kept the user's sealing key and the teams in files any of the team could read: gone.

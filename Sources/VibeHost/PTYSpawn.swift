@@ -13,8 +13,12 @@ public enum PTYSpawn {
     /// What the launcher does with `--pty-exec`; call it first thing in its `main`.
     public static func execIfLaunched(_ arguments: [String]) {
         guard arguments.count > 2, arguments[1] == "--pty-exec" else { return }
+        // On Linux started from the host's sealed copy: closed first, so the program never holds it (see V2/HostImages.swift).
+        Platform.ProcessSelf.closeInheritedImage()
         // Its terminal made its controlling terminal; on Linux, its own or it exits 127 (see `SessionIdentityChecks`).
         let program = SessionIdentityChecks.takeTerminal(Array(arguments[2...]))
+        // On Linux dumpable again, and its oom_score_adj raised for the program (see V2/HostImages.swift).
+        HostImages.beforeProgram()
         let argv = program.map { strdup($0) } + [nil]
         execv(program[0], argv)
         // On the session's terminal, so its window says which program wasn't there (the shell named by $SHELL, say)
@@ -45,8 +49,10 @@ public enum PTYSpawn {
         spawn.stderr = .sameAsStdin
         spawn.group = .ownSession
         spawn.directory = directory
-        spawn.environment = env
-        spawn.keep = []
+        // On Linux the launcher is the host's sealed copy: kept, and named to it (see V2/HostImages.swift).
+        let image = HostImages.launching(launcher, environment: env)
+        spawn.environment = image.environment
+        spawn.keep = image.keep
         switch spawn.start() {
         case .success(let pid):
             return (pid, master)

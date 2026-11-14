@@ -74,23 +74,26 @@ public final class ServerChild {
     }
 
     /// `main`'s hook, after the host has started: with `--server PATH` in `arguments`, the server child from it, as
-    /// `launch(arguments:ownsLaunchers:socketPath:root:nodeRoot:environment:)` says. The user's host (`ownsLaunchers`)
-    /// refuses `--server-arg`, saying so; the Mac ignores `--server`, saying so (no server child there: the app proves
-    /// itself by its code). `--server` stays in what a build this one hands over to is started with: without an
-    /// install root (Task 9d) the new image's server is the same file.
+    /// `launch(arguments:ownsLaunchers:socketPath:root:nodeRoot:environment:)` says, `nodeRoot` the host's install
+    /// folder (`HostImages.Folders.installFolder`: `--node-root`'s, else its image's folder). The user's host
+    /// (`ownsLaunchers`) refuses `--server-arg`, saying so; the Mac ignores `--server`, saying so (no server child there:
+    /// the app proves itself by its code). `--server` stays in what a build this one hands over to is started with:
+    /// without an install root (Task 9d) the new image's server is the same file.
     /// `restored`: the state a handover carried, if this image took over: its server child is taken again when
-    /// `restore` finds it sound, and started again otherwise.
+    /// `restore` finds it sound, and started again otherwise. `copy`: PATH's sealed copy when the host loaded it already
+    /// (`HostImages.load`, which checked it against `build-info`): the one every start is from; nil: loaded here.
     @discardableResult
-    public static func adopt(arguments: [String], ownsLaunchers: Bool, executable: String, config: HostServer.Config,
-                             server: HostServer, restored: HostHandover.State? = nil) -> ServerChild? {
+    public static func adopt(arguments: [String], ownsLaunchers: Bool, nodeRoot: String, config: HostServer.Config,
+                             server: HostServer, restored: HostHandover.State? = nil,
+                             copy: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
         guard let (launch, refused) = Self.launch(arguments: arguments, ownsLaunchers: ownsLaunchers, socketPath: config.socketPath,
-                                                  root: VibePaths.root.path,
-                                                  nodeRoot: URL(fileURLWithPath: executable).deletingLastPathComponent().path,
+                                                  root: VibePaths.root.path, nodeRoot: nodeRoot,
                                                   environment: config.baseEnvironment) else {
             if let restored, let record = restored.serverChild {
                 say(server, "server child record dropped: this image was started without --server")
                 release(record, sessionPrograms: Self.programs(of: restored), otherDescriptors: Self.otherDescriptors(of: restored))
             }
+            if let copy { Sys.close(copy.fd) }
             return nil
         }
         guard !Platform.CodeIdentity.isAvailable else {
@@ -100,9 +103,9 @@ public final class ServerChild {
         if !refused.isEmpty { say(server, "refused --server-arg: the user's host passes its server no test arguments") }
         if let restored, let record = restored.serverChild {
             return restore(record, launch: launch, sessionPrograms: Self.programs(of: restored),
-                           otherDescriptors: Self.otherDescriptors(of: restored), server: server)
+                           otherDescriptors: Self.otherDescriptors(of: restored), server: server, loaded: copy)
         }
-        return start(launch, server: server)
+        return start(launch, server: server, loaded: copy)
     }
 
     /// The restored sessions' programs.
@@ -125,20 +128,23 @@ public final class ServerChild {
     /// from the new build's server is Task 9d's (`State.images`, by hash), not this check's. Otherwise the record is let
     /// go (`release`) and the server started again from a fresh sealed copy (`start`), saying why. Nil on the Mac, and
     /// where `start` is.
+    /// `loaded`: `launch.image`'s copy the host loaded and checked already (`HostImages.load`), used in place of a fresh
+    /// one, and closed when the carried copy is taken again instead.
     static func restore(_ record: HostHandover.ServerChildRecord, launch: Launch, sessionPrograms: [pid_t], otherDescriptors: Set<Int32>,
-                        server: HostServer) -> ServerChild? {
+                        server: HostServer, loaded: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
         guard !Platform.CodeIdentity.isAvailable else { return nil }
         if let refusal = check(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors) {
             say(server, "server child record refused: \(refusal); starting the server again")
             release(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors)
-            return start(launch, server: server)
+            return start(launch, server: server, loaded: loaded)
         }
         let carriedCopy = isInherited(record.image) && !otherDescriptors.contains(record.image) && record.image != record.connector
         let copy: Platform.ProcessSelf.SealedCopy
         if record.path == launch.image, carriedCopy, let adopted = Platform.ProcessSelf.adopt(record.image) {
+            if let loaded { Sys.close(loaded.fd) }
             copy = adopted
         } else {
-            switch Platform.ProcessSelf.sealedCopy(of: launch.image, name: "vibeswitcher-server") {
+            switch loaded.map({ .success($0) }) ?? Platform.ProcessSelf.sealedCopy(of: launch.image, name: "vibeswitcher-server") {
             case .success(let fresh):
                 if carriedCopy { Sys.close(record.image) }
                 say(server, record.path == launch.image
@@ -209,24 +215,27 @@ public final class ServerChild {
         while waitpid(record.pid, &status, 0) < 0, errno == EINTR {}
     }
 
-    /// What `--server PATH` in `arguments` starts (nil without it): `--root ROOT --node-root NODE-ROOT` (S2-D1; until
-    /// Task 9b the node root is the host's executable's folder), then each `--server-arg X` as X, for a scratch host
-    /// only. `refused`: the `--server-arg` values the user's host (`ownsLaunchers`) left out.
+    /// What `--server PATH` in `arguments` starts (nil without it): for the node's host (`--node` in `arguments`)
+    /// `--node --node-root NODE-ROOT`, else `--root ROOT --node-root NODE-ROOT` (S2-D1; NODE-ROOT the host's install
+    /// folder, `HostImages.Folders.installFolder`), then each `--server-arg X` as X, for a scratch host only. `refused`:
+    /// the `--server-arg` values the user's host (`ownsLaunchers`) left out.
     static func launch(arguments: [String], ownsLaunchers: Bool, socketPath: String, root: String, nodeRoot: String,
                        environment: [String: String]) -> (launch: Launch, refused: [String])? {
         guard let at = arguments.firstIndex(of: "--server"), arguments.indices.contains(at + 1) else { return nil }
         let serverArguments = arguments.indices.dropLast().filter { arguments[$0] == "--server-arg" }.map { arguments[$0 + 1] }
+        let place = arguments.contains(HostImages.nodeFlag) ? [HostImages.nodeFlag, "--node-root", nodeRoot] : ["--root", root, "--node-root", nodeRoot]
         let launch = Launch(image: arguments[at + 1], socketPath: socketPath,
-                            arguments: ["--root", root, "--node-root", nodeRoot] + (ownsLaunchers ? [] : serverArguments),
+                            arguments: place + (ownsLaunchers ? [] : serverArguments),
                             environment: environment)
         return (launch, ownsLaunchers ? serverArguments : [])
     }
 
-    /// Loads `launch.image` into a sealed copy and starts the child from it on the host's queue (the host started
-    /// already). Nil, said on stderr, when the copy can't be made (the Mac has none: ENOTSUP), and on the Mac.
-    public static func start(_ launch: Launch, server: HostServer) -> ServerChild? {
+    /// Loads `launch.image` into a sealed copy (or takes `loaded`, the host's checked copy of it) and starts the child
+    /// from it on the host's queue (the host started already). Nil, said on stderr, when the copy can't be made (the
+    /// Mac has none: ENOTSUP), and on the Mac.
+    public static func start(_ launch: Launch, server: HostServer, loaded: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
         guard !Platform.CodeIdentity.isAvailable else { return nil }
-        switch Platform.ProcessSelf.sealedCopy(of: launch.image, name: "vibeswitcher-server") {
+        switch loaded.map({ .success($0) }) ?? Platform.ProcessSelf.sealedCopy(of: launch.image, name: "vibeswitcher-server") {
         case .failure(let error):
             say(server, "no server child: \(launch.image) couldn't be loaded (errno \(error.code))")
             return nil
