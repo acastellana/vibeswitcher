@@ -3079,3 +3079,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 14:23 Pipeline held: deny-claude-by-listing, team-view-member-lines ready to merge with none landing; cause: a merge in progress
 - 2026-11-14 14:27 Merged team-view-member-lines: Team view: member lines and the wall, in the app (in a batch: team-view-member-lines, deny-claude-by-listing landed on one test run) (build c385b7943fb8)
 - 2026-11-14 14:27 Merged deny-claude-by-listing: Deny ~/.claude by listing it at launch, with a short keep list (in a batch: team-view-member-lines, deny-claude-by-listing landed on one test run) (build c385b7943fb8)
+- 2026-11-14 14:27 Started a worker on peer-wait-deadline-no
+- 2026-11-14 14:27 Automatically (auto_advance): Merge of peer-wait-deadline-no failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
+- 2026-11-14 14:27 Automatically (auto_advance): Merged team-view-member-lines at d4c41007 (its passing audit), deny-claude-by-listing at f579c69b (its passing audit) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-14 14:27 Automatically (auto_advance): Cleaned up team-view-member-lines (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-14 14:27 Automatically (auto_advance): Cleaned up deny-claude-by-listing (freed 2.5 GB of build output and temporary folders). It stays done.
