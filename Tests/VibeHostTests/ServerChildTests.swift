@@ -1049,6 +1049,103 @@ final class ServerChildHost {
         guard case .error? = app.reply(to: seq) else { Issue.record("\(String(describing: app.reply(to: seq)))"); return }
     }
 
+    /// A host whose lock path names a file another process holds locked has no lock on the file there to carry: the
+    /// next image (and its fallback, given the same state) would refuse what it carries (`heldLockIsAllowed`) and the
+    /// host would end. So the handover is refused before its probe, and so before the exec, its reason answered and
+    /// logged, and the host serves on (a later request is answered).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aHandoverWhoseLockIsNoLongerAtThePathIsRefused() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, removing: dir, watchesItsPath: true, socket: dir + "/h.sock")
+        func noted() -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+        let other = dir + "/other.lock"
+        let locker = try PathSquatterHelper.Running.start(at: other, locking: true)
+        defer { locker.end() }
+        #expect(rename(other, host.lock) == 0)
+        #expect(await eventually { noted().contains("which another process holds locked") }, "\(noted())")
+        // A probe that says no, after leaving a mark: were it run, the handover would end there, the host serving on.
+        let probe = dir + "/probe.sh", ran = dir + "/probed"
+        try Data("#!/bin/sh\n: > '\(ran)'\nexit 1\n".utf8).write(to: URL(fileURLWithPath: probe))
+        #expect(chmod(probe, 0o755) == 0)
+        let app = try TestClient(host)
+        let seq = app.send(.handover(executable: probe))
+        #expect(await eventually { app.reply(to: seq) != nil })
+        let reason = "the lock it would carry is not on the file \(host.lock) names"
+        guard case .error(let answer)? = app.reply(to: seq) else { Issue.record("\(String(describing: app.reply(to: seq)))"); return }
+        #expect(answer.contains(reason), "\(answer)")
+        #expect(noted().contains("host: handover to \(probe) refused: \(reason)"), "\(noted())")
+        #expect(!FileManager.default.fileExists(atPath: ran), "the probe ran")
+        let notes = try #require(try await notes(of: host))
+        #expect(notes.lockHeldElsewhere == host.lock)
+    }
+
+    /// The new image's side of a real handover: the state a handover gave its probe carries the lock taken again at the
+    /// path, and a host restored from it (as the new image is, `start(restoring:)`, with the user's host's rule on the
+    /// lock it holds, `heldLockIsAllowed`, the lock path as the user's) takes it and records, from that descriptor, the
+    /// file its watch then expects at the lock path: its first check takes nothing back. The host's first lock, whose
+    /// file is no longer at the path, is what that rule refuses.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func theNewImageRecordsTheCarriedLockAsTheOneAtThePath() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, removing: dir, watchesItsPath: true, socket: dir + "/h.sock")
+        func noted() -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+        let original = dir + "/original.lock"
+        #expect(link(host.lock, original) == 0)
+        let other = dir + "/other.lock"
+        #expect(FileManager.default.createFile(atPath: other, contents: nil))
+        #expect(rename(other, host.lock) == 0)
+        #expect(await eventually { noted().contains("locked the file there again") }, "\(noted())")
+        let replaced = try #require(HostPathWatch.identity(atPath: host.lock))
+
+        let probe = dir + "/probe.sh", go = dir + "/go"
+        try Data("#!/bin/sh\nwhile [ ! -e '\(go)' ]; do sleep 0.05; done\nexit 1\n".utf8).write(to: URL(fileURLWithPath: probe))
+        #expect(chmod(probe, 0o755) == 0)
+        let app = try TestClient(host)
+        let seq = app.send(.handover(executable: probe))
+        var statePath: String?
+        #expect(await eventually {
+            statePath = HostProcesses.children(of: getpid()).lazy.compactMap { pid -> String? in
+                let arguments = Platform.Processes.arguments(pid)
+                guard let at = arguments.firstIndex(of: "--handover-probe"), arguments.indices.contains(at + 1) else { return nil }
+                return arguments[at + 1]
+            }.first
+            return statePath.flatMap { try? HostHandover.read(from: $0) } != nil
+        })
+        var state = try HostHandover.read(from: try #require(statePath))
+        // This process is the host: the state's numbers are its descriptors. The restored host gets its own of each.
+        state.lockFD = fcntl(state.lockFD, F_DUPFD_CLOEXEC, 0)
+        state.listenFD = fcntl(state.listenFD, F_DUPFD_CLOEXEC, 0)
+        #expect(FileManager.default.createFile(atPath: go, contents: nil))
+        #expect(await eventually { app.reply(to: seq) != nil })
+
+        let nextLog = dir + "/next.log"
+        var config = HostServer.Config(socketPath: host.socket, lockPath: host.lock, shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 43)
+        config.idleExit = nil
+        config.logPath = nextLog
+        config.watchesItsPath = true
+        config.housekeepingInterval = 3600
+        config.heldLockIsAllowed = HostHardening.heldLockIsAllowed(ownsLaunchers: true, usersLock: host.lock)
+        let next = HostServer(config: config)
+        _ = try next.start(restoring: state)
+        defer { next.stop(terminateSessions: false) }
+        // Its first check, queued as its watch began, done.
+        let recorded = next.queue.sync { next.pathWatch?.lockFile }
+        let carried = next.queue.sync { next.pathWatch?.lockToCarry }
+        #expect(recorded == replaced)
+        #expect(carried == nil, "the restored host locked the path's file again: it didn't take the carried lock for it")
+        let nextNoted = (try? String(contentsOfFile: nextLog, encoding: .utf8)) ?? ""
+        #expect(!nextNoted.contains("lock path"), "\(nextNoted)")
+
+        let first = open(original, O_RDWR | O_CLOEXEC)
+        defer { Sys.close(first) }
+        #expect(first >= 0 && config.heldLockIsAllowed?(first) == false)
+    }
+
     /// What `hostNotes` counted runs on across a handover: the counts the state carried are the new image's from its
     /// start, as `startedAt` is.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "hostNotes is Linux's"))

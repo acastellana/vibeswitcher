@@ -381,10 +381,41 @@ extension HostServer {
         return HandoverTarget.server(of: build).map { (build, $0) }
     }
 
+    /// A handover refused because the lock it would carry can't be the next image's (`carriedLockRefusal`).
+    struct CarriedLockRefused: Error, CustomStringConvertible {
+        var description: String
+    }
+
+    /// Why a handover carrying `lockFD` (`handoverState`'s: the lock taken again at the lock path, else the host's
+    /// own) would leave the host with no image to serve: its file isn't the one the lock path names (another
+    /// process's file there, which it holds locked, or none), or this host's rule on the lock it may hold
+    /// (`Config.heldLockIsAllowed`) refuses it now. The next image asks that rule of what it inherits and refuses to
+    /// restore, its fallback is given the same state and refuses too, and the host ends, hanging up every session.
+    /// Nil: neither. Only with a path watch (the user's host on Linux) is the lock path compared; the Mac never gets
+    /// here.
+    func carriedLockRefusal(_ lockFD: Int32) -> String? {
+        if pathWatch != nil, !Platform.Files.sameFile(lockFD, config.lockPath) {
+            return "the lock it would carry is not on the file \(config.lockPath) names"
+                + (tally.lockHeldElsewhere != nil ? " (another process holds that one locked)" : "")
+                + ": the next image would refuse it, and so would its fallback; this host serves on"
+        }
+        if config.heldLockIsAllowed?(lockFD) == false {
+            return "the lock it would carry is not one this host may hold: the next image would refuse it; this host serves on"
+        }
+        return nil
+    }
+
+    /// `why` in the host's log (its stderr has the handover's failure, `fail`'s line), as the error to throw.
+    private func refusedForItsLock(_ why: String, _ executable: String) -> CarriedLockRefused {
+        note("host: handover to \(executable) refused: \(why)")
+        return CarriedLockRefused(description: why)
+    }
+
     /// `handOver(to:)` on Linux (its one hook): the target loaded into a sealed copy before anything else, probed from
     /// that copy with a state of its own in sealed memory, then, on the queue, the secrets and the state written into
     /// sealed memory and the process replaced by the copy, keeping both, the images and every session's descriptor.
-    /// No file is written. Anything failing before the exec leaves this host as it was, and closes what it made.
+    /// No file is written. Anything failing before the exec leaves this host as it was, and closes what it made. The
+    /// lock it would carry is checked before the probe and again just before the exec (`carriedLockRefusal`).
     func handOverThroughMemory(to executable: String, reply: @escaping (HostEvent) -> Void) {
         let target: Platform.ProcessSelf.SealedCopy
         switch Platform.ProcessSelf.sealedCopy(of: executable, name: BuildInfo.host) {
@@ -415,7 +446,9 @@ extension HostServer {
         }
         let probeState: Int32
         do {
-            probeState = try HandoverMemory.seal(HandoverMemory.encoded(handoverState(secretFD: nil)), name: "vibeswitcher-handover-probe")
+            let state = handoverState(secretFD: nil)
+            if let why = carriedLockRefusal(state.lockFD) { throw refusedForItsLock(why, executable) }
+            probeState = try HandoverMemory.seal(HandoverMemory.encoded(state), name: "vibeswitcher-handover-probe")
         } catch {
             return fail(error)
         }
@@ -443,6 +476,7 @@ extension HostServer {
                     var state = self.handoverState(secretFD: secretFD)
                     state.images = HandoverImages(own: target.fd, fallback: fallback?.fd, server: serverCopy?.fd)
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
+                    if let why = self.carriedLockRefusal(state.lockFD) { throw self.refusedForItsLock(why, executable) }
                     let bytes = try HandoverMemory.encoded(state)
                     let stateFD = try HandoverMemory.seal(bytes, name: "vibeswitcher-handover-state")
                     made.append(stateFD)

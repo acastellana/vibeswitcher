@@ -329,7 +329,8 @@ socket's path is ever the app.
   changes don't check a recorded file again, so only the next housekeeping's check, a new race the loop must win
   again, finds it. The lock's: the lock descriptor's `fstat`. On a mismatch it binds a fresh listener at the path (with
   `SO_PASSCRED`; its file 0600 less the umask, never wider, as at accept step 1), logs it, and tells the server, which shows it in `status`. A lock path naming another file is locked
-  again, holding at most one such lock beside the first, and a handover carries the newest. A file there that another
+  again, holding at most one such lock beside the first, and a handover carries the newest (refused while the lock
+  it would carry isn't on the file the path names, S8). A file there that another
   process holds locked (a second host may be on it) can't be locked again: the host says so once in the journal, counts
   it, and names the lock path in `hostNotes`, which the server's `status` shows, until a check (at each change in the
   folder and each housekeeping) finds the path naming a file the host holds; it doesn't end that process or take the
@@ -895,7 +896,17 @@ memory and writes no file.
 - **The fallback** is the old image's sealed copy (S9), with the same descriptors and the same `--handover` path. It
   reads the state and the secrets as the new image would have. `goBack` today re-runs the fallback with the same path
   and, when that fails too, unlinks it and exits, hanging up every session (`main.swift:92-102`); with sealed memory
-  the fallback reads exactly what the old build wrote, so only a fault in the old build itself ends the host.
+  the fallback reads exactly what the old build wrote, so only a fault in the old build itself, or a lock the new
+  image refuses (below), ends the host.
+- **The lock it carries is the file at the lock path.** The new image asks `heldLockIsAllowed` of the lock it
+  inherits (the user's host: the user's lock, by identity, at its path), and its fallback, given the same state, asks
+  the same. So with a path watch (the user's host) a handover is refused, its reason answered and logged, the host
+  serving on, while the lock it would carry (the one taken again at the path, else its own) isn't on the file the lock
+  path names (another process's file there, held locked, or none); and any host on Linux refuses one whose lock that
+  rule refuses now. Both are checked before the probe and again on the queue just before the exec. A file renamed
+  over the lock path after that last check, during the exec, still makes the new image and its fallback refuse it,
+  and the host ends, hanging up every session: not promised (a process that can rename there can kill the host too).
+  Held by a refusal before the probe; the check just before the exec is the same function, untested on its own.
 - **A traced new image** closes the secrets unread and goes back; the fallback, traced, ends (S6). (As made in Task
   9c, approved by the lead 2026-11-14: the traced image leaves them unread and open, so that the fallback, which is the
   same process, still has the vault; a traced fallback ends, which closes them. A tracer can't attach to the
@@ -942,7 +953,9 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `ServerChildTests.theServerChildSurvivesAHandover`, `ServerChildTests.aForgedServerChildInTheStateIsNotTheApp`,
 `ServerChildTests.theRestoresCheckNamesWhatIsWrong` (stage 2 Task 8b); `ServerChildTests.aServerChildOfAnotherServerPathRunsOn`,
 `ServerChildTests.aCarriedCopyNotTakenIsClosed`, `ServerChildTests.aHandoverCarriesTheLockThePathNamesAndTheCounts`
-(Task 8b's review); `HostHardeningTests.theUsersHostIgnoresTestSecretFlags` (Task 9a);
+(Task 8b's review); `ServerChildTests.aHandoverWhoseLockIsNoLongerAtThePathIsRefused`,
+`ServerChildTests.theNewImageRecordsTheCarriedLockAsTheOneAtThePath` (the carried lock and the lock path);
+`HostHardeningTests.theUsersHostIgnoresTestSecretFlags` (Task 9a);
 `HandoverLinuxTests.aHandoverWritesNoFile`, `HandoverLinuxTests.theStateAndSecretsAreSealed`,
 `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsTheVault`, `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsEverySession`,
 `HandoverLinuxTests.aMegabyteOfSecretsIsHandedOver`, `HandoverLinuxTests.aDowngradeIsRefused`,
@@ -1196,7 +1209,8 @@ against it. Each line says what reduces it now, if anything.
    alone, so once those numbers come round it could answer for another socket. A worker can likewise put a file it
    holds locked at the host's lock path (renamed over it), or lock a fresh file there before the host does: the host
    can't take that lock, and a second host can start on the path; the host only says so (the journal, and `hostNotes`
-   until it clears, which `status` shows). S2.
+   until it clears, which `status` shows), and refuses a handover meanwhile. A rename there during a handover's exec
+   makes the new image and its fallback refuse the lock they inherit, and the host ends (S8). S2.
 
 **Acting as a session**
 

@@ -30,7 +30,8 @@ import VibeCore
 ///   (a second host may), that is said once and named in `hostNotes` (`HostTally.lockHeldElsewhere`, counted) until a
 ///   check finds the path naming a file this host holds. The host's own lock file put back there is held already (its
 ///   lock is this process's): the lock taken again is released. A handover carries the newest (`lockToCarry`), so the
-///   next image holds the lock the path names.
+///   next image holds the lock the path names, and is refused while the path names a file it isn't on
+///   (`HostServer.carriedLockRefusal`).
 ///
 /// Each is a line in the host's log and on its stderr (the user journal, through the unit), and each path taken back
 /// is counted for `hostNotes` (`HostTally`). Not on the Mac (`watchesItsPath` is false there), and not in a scratch
@@ -64,8 +65,9 @@ final class HostPathWatch {
     private var rebindAtHousekeeping = false
     /// The file the server's own lock is on (its descriptor's `fstat`, as the watch began).
     private var firstLock: FileIdentity?
-    /// What the lock path should name: the file the newest lock is on (the server's own, or `retakenLock`'s).
-    private var lockFile: FileIdentity?
+    /// What the lock path should name: the file the newest lock is on (the server's own, or `retakenLock`'s): after a
+    /// handover, the carried lock's.
+    private(set) var lockFile: FileIdentity?
     /// The lock taken at the path again, on the file the path named then; -1: none. At most one: a newer one releases
     /// it. The server's own lock is the server's to close.
     private(set) var retakenLock: Int32 = -1
