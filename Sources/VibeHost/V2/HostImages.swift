@@ -23,7 +23,8 @@ import VibeCore
 ///   `FOLDER/build-info` records (`BuildInfo`), or the host doesn't start, saying which binary.
 /// - **`--node`** marks the node's host, the user's: it needs `--node-root` and `--server`, takes `HOME` from the user
 ///   database and unsets `VIBESWITCHER_HOME` and `CFFIXED_USER_HOME` before anything reads a path, so that
-///   `VibePaths.root` is never the environment's (`startAsNode`), and takes no `--server` but its build's own. The
+///   `VibePaths.root` is never the environment's (`startAsNode`), and takes no `--server` but its build's own, opened
+///   once, no link followed, compared by device and inode, and copied from that same descriptor (`openServer`). The
 ///   account's own lock (`~/.vibeswitcher/host.lock`, by the user database) is held by a `--node` host and only by one
 ///   (`mayStart`): `ownsLaunchers` (the security rules) and `--node` (the install's) can't come apart on the real home.
 /// - **The build's folders** (`folders(arguments:executable:)`): `vibeswitcher-mcp`, the command folder, the app's
@@ -64,36 +65,101 @@ public enum HostImages {
     }
 
     /// `main`'s first act after hardening, Linux only, with `--node` in `arguments`: it needs `--node-root` and
-    /// `--server`, and the server must be its build's own (`serverRefusal`); then this process's environment is made
-    /// `nodeEnvironment`'s. Why it may not start, or nil. Without `--node`, and on the Mac: nil, nothing done.
+    /// `--server`, and the server must be its build's own (`openServer`), whose descriptor is then held for `load`
+    /// (`holdServer`), which copies the server from it; then this process's environment is made `nodeEnvironment`'s.
+    /// Why it may not start, or nil. Without `--node`, and on the Mac: nil, nothing done.
     public static func startAsNode(arguments: [String]) -> String? {
         guard !Platform.CodeIdentity.isAvailable, arguments.contains(nodeFlag) else { return nil }
         guard let nodeRoot = value(after: nodeRootFlag, in: arguments), nodeRoot.hasPrefix("/") else {
             return "\(nodeFlag) needs \(nodeRootFlag) and an absolute folder after it"
         }
         guard let server = value(after: "--server", in: arguments) else { return "\(nodeFlag) needs --server" }
-        if let why = serverRefusal(server: server, nodeRoot: nodeRoot) { return why }
-        guard let home = accountHome else { return "the account has no home in the user database" }
+        let checked: Int32
+        switch openServer(server: server, nodeRoot: nodeRoot) {
+        case .failure(let why): return why.description
+        case .success(let fd): checked = fd
+        }
+        guard let home = accountHome else {
+            Sys.close(checked)
+            return "the account has no home in the user database"
+        }
+        holdServer(checked)
         let wanted = nodeEnvironment(ProcessInfo.processInfo.environment, accountHome: home)
         setenv("HOME", home, 1)
         for name in ["VIBESWITCHER_HOME", "CFFIXED_USER_HOME"] where wanted[name] == nil { unsetenv(name) }
         return nil
     }
 
-    /// Why `server` isn't the node's own server, `<nodeRoot>/bin/vibeswitcher-server`, or nil when it is: compared once
-    /// both are resolved (`realpath`), so a second spelling of it is it; a symbolic link as the server (`lstat`) is
-    /// refused, as is a server that isn't there. The server names the app's principal (S2-D1): the node's host takes
-    /// none but its install's.
-    public static func serverRefusal(server: String, nodeRoot: String) -> String? {
+    /// `server` opened once, for reading, when it is the node's own server, `<nodeRoot>/bin/vibeswitcher-server`: its
+    /// descriptor (close-on-exec), the caller's. `server` is opened with `O_NOFOLLOW` (a symbolic link as the server is
+    /// refused, not followed) and `O_NONBLOCK` (a FIFO is refused at once, not waited on), must be a regular file, and
+    /// is the node's own when that descriptor's device and inode are what the node's path names (`lstat`, a link there
+    /// refused): a second spelling of it is it, and so is a hard link to it, the same file. What is checked is the
+    /// descriptor, so the server's copy made from it (`serverCopy`) is of the file checked, whatever the path names
+    /// by then. Otherwise why not, nothing left open. The server names the app's principal (S2-D1): the node's host
+    /// takes none but its install's.
+    static func openServer(server: String, nodeRoot: String) -> Result<Int32, Refused> {
         let own = (nodeRoot as NSString).appendingPathComponent("bin/" + BuildInfo.server)
+        let fd = open(server, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else {
+            let code = errno
+            switch code {
+            case ELOOP: return .failure(Refused("the server \(server) is a symbolic link"))
+            case ENOENT, ENOTDIR: return .failure(Refused("the server \(server) isn't there"))
+            default: return .failure(Refused("the server \(server) couldn't be opened (errno \(code))"))
+            }
+        }
+        func refused(_ why: String) -> Result<Int32, Refused> {
+            Sys.close(fd)
+            return .failure(Refused(why))
+        }
         var info = stat()
-        guard lstat(server, &info) == 0 else { return "the server \(server) isn't there" }
-        guard info.st_mode & S_IFMT != S_IFLNK else { return "the server \(server) is a symbolic link" }
-        guard let given = realPath(server), let expected = realPath(own) else { return "the node's server \(own) isn't there" }
-        guard given == expected else { return "the server \(server) isn't the node's own (\(own))" }
+        guard fstat(fd, &info) == 0 else { return refused("the server \(server) couldn't be read (errno \(errno))") }
+        guard info.st_mode & S_IFMT == S_IFREG else { return refused("the server \(server) isn't a regular file") }
         var ownInfo = stat()
-        guard lstat(own, &ownInfo) == 0, ownInfo.st_mode & S_IFMT != S_IFLNK else { return "the node's server \(own) is a symbolic link" }
-        return nil
+        guard lstat(own, &ownInfo) == 0 else { return refused("the node's server \(own) isn't there") }
+        guard ownInfo.st_mode & S_IFMT != S_IFLNK else { return refused("the node's server \(own) is a symbolic link") }
+        guard ownInfo.st_dev == info.st_dev, ownInfo.st_ino == info.st_ino else {
+            return refused("the server \(server) isn't the node's own (\(own))")
+        }
+        return .success(fd)
+    }
+
+    /// The node's server's descriptor `startAsNode` checked (`openServer`), held until `load` takes it (`serverCopy`).
+    private static let checkedServerLock = NSLock()
+    nonisolated(unsafe) private static var checkedServer: Int32?
+
+    /// `fd`, the node's server as `openServer` checked it, held for `serverCopy`; one held before is closed.
+    static func holdServer(_ fd: Int32) {
+        checkedServerLock.lock()
+        defer { checkedServerLock.unlock() }
+        if let held = checkedServer, held != fd { Sys.close(held) }
+        checkedServer = fd
+    }
+
+    /// The node's server's held descriptor, taken (no longer held), or nil when there is none.
+    static func takeCheckedServer() -> Int32? {
+        checkedServerLock.lock()
+        defer { checkedServerLock.unlock() }
+        defer { checkedServer = nil }
+        return checkedServer
+    }
+
+    /// The `--server` image's sealed copy, for `load`. The node's host's (`node`) is made from the descriptor its
+    /// check opened (`startAsNode`, `takeCheckedServer`), then closed: never from `path` again, so a file put at the
+    /// path after the check is not what runs; without one it refuses. Any other host's from `path`, as before.
+    static func serverCopy(path: String, node: Bool) -> Result<Platform.ProcessSelf.SealedCopy, Refused> {
+        let made: Result<Platform.ProcessSelf.SealedCopy, Platform.Errno>
+        if node {
+            guard let checked = takeCheckedServer() else {
+                return .failure(Refused("\(BuildInfo.server): \(path) wasn't checked as the node's own before it was loaded"))
+            }
+            made = Platform.ProcessSelf.sealedCopy(of: checked, name: BuildInfo.server)
+            Sys.close(checked)
+        } else {
+            made = Platform.ProcessSelf.sealedCopy(of: path, name: BuildInfo.server)
+        }
+        return made.mapError { Refused("\(BuildInfo.server): \(path) couldn't be loaded into a sealed copy (errno \($0.code))") }
     }
 
     /// Why a host told to take `lockPath` may not start, or nil (Linux; the Mac: nil): the account's own lock
@@ -193,7 +259,8 @@ public enum HostImages {
     /// Task 9c) adopted as its own when it is one (`Platform.ProcessSelf.adopt`: all four seals, mode `0111`), since
     /// `/proc/self/exe` then names an image this process can't read; otherwise that descriptor closed and its own image
     /// read into a fresh sealed copy. With `--node-root`, that copy and the `--server` image's are checked against its
-    /// `build-info` (`BuildInfo.mismatch`). Last, a second copy of its own (`Loaded.launcher`), which `forSessions`
+    /// `build-info` (`BuildInfo.mismatch`); the node's host's `--server` copy is made from the descriptor `startAsNode`
+    /// checked, not from its path (`serverCopy`). Last, a second copy of its own (`Loaded.launcher`), which `forSessions`
     /// gives sessions' launchers from then on. The Mac: nothing loaded. Fails, nothing left open, saying why.
     public static func load(arguments: [String]) -> Result<Loaded, Refused> {
         guard !Platform.CodeIdentity.isAvailable else { return .success(Loaded(own: nil, server: nil)) }
@@ -230,9 +297,9 @@ public enum HostImages {
         }
         if let mismatch = info.mismatch(of: own, as: BuildInfo.host) { return refused(mismatch, closing: [own]) }
         guard let path = value(after: "--server", in: arguments) else { return loaded(server: nil) }
-        switch Platform.ProcessSelf.sealedCopy(of: path, name: BuildInfo.server) {
-        case .failure(let error):
-            return refused("\(BuildInfo.server): \(path) couldn't be loaded into a sealed copy (errno \(error.code))", closing: [own])
+        switch serverCopy(path: path, node: arguments.contains(nodeFlag)) {
+        case .failure(let why):
+            return refused(why.description, closing: [own])
         case .success(let server):
             if let mismatch = info.mismatch(of: server, as: BuildInfo.server) { return refused(mismatch, closing: [own, server]) }
             return loaded(server: server)
@@ -336,12 +403,5 @@ public enum HostImages {
     static func value(after flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
-    }
-
-    /// `path` resolved (`realpath`), or nil when it can't be.
-    private static func realPath(_ path: String) -> String? {
-        guard let resolved = realpath(path, nil) else { return nil }
-        defer { free(resolved) }
-        return String(cString: resolved)
     }
 }

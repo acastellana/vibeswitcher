@@ -469,6 +469,46 @@ struct SealedCopyTests {
         #expect(rewritten.output == "replaced\n")
     }
 
+    /// A copy made from a descriptor is of the file that descriptor was opened on, read from its beginning, whatever
+    /// its path names by then (another file renamed over it, a link put in its place) and wherever the descriptor's
+    /// offset was; the descriptor stays open, its holder's. A descriptor of anything but a regular file (a FIFO, a
+    /// pipe) gives no copy (EINVAL), and a closed number none either (EBADF).
+    @Test func aCopyFromADescriptorIsOfTheFileItWasOpenedOn() throws {
+        let folder = try TestScriptLinuxTests.scratch("sealed")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appendingPathComponent("server").path, other = folder.appendingPathComponent("other").path
+        try "#!/bin/sh\necho checked\n".write(toFile: path, atomically: false, encoding: .utf8)
+        let source = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        try #require(source >= 0, "open: \(errno)")
+        defer { close(source) }
+        var skipped = [UInt8](repeating: 0, count: 4)
+        try #require(read(source, &skipped, skipped.count) == skipped.count)
+        try "#!/bin/sh\necho replaced\n".write(toFile: other, atomically: false, encoding: .utf8)
+        try #require(rename(other, path) == 0)
+        let copy = try Platform.ProcessSelf.sealedCopy(of: source, name: "server").get()
+        defer { close(copy.fd) }
+        #expect(String(decoding: Self.bytes(of: copy), as: UTF8.self) == "#!/bin/sh\necho checked\n")
+        #expect(copy.isScript && Self.mode(of: copy.fd) == 0o555 && vibe_get_seals(copy.fd) == Platform.ProcessSelf.allSeals)
+        #expect(fcntl(copy.fd, F_GETFD) & FD_CLOEXEC != 0)
+        #expect(fcntl(source, F_GETFD) >= 0, "the descriptor copied from is still open")
+        try #require(unlink(path) == 0 && symlink("/bin/echo", path) == 0)
+        let again = try Platform.ProcessSelf.sealedCopy(of: source, name: "server").get()
+        defer { close(again.fd) }
+        #expect(Self.bytes(of: again) == Self.bytes(of: copy))
+
+        let fifo = folder.appendingPathComponent("fifo").path
+        try #require(mkfifo(fifo, 0o600) == 0, "mkfifo: \(errno)")
+        let reader = open(fifo, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+        try #require(reader >= 0)
+        defer { close(reader) }
+        #expect(Platform.ProcessSelf.sealedCopy(of: reader, name: "fifo") == .failure(Platform.Errno(code: EINVAL)))
+        var pipe: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&pipe) == 0)
+        defer { pipe.forEach { close($0) } }
+        #expect(Platform.ProcessSelf.sealedCopy(of: pipe[0], name: "pipe") == .failure(Platform.Errno(code: EINVAL)))
+        #expect(Platform.ProcessSelf.sealedCopy(of: Int32(-1), name: "none") == .failure(Platform.Errno(code: EBADF)))
+    }
+
     // MARK: Adopting, scripts
 
     /// `adopt` takes a copy `sealedCopy` made, and nothing else: a plain memfd, one made `0111` but unsealed, one
@@ -670,6 +710,7 @@ struct SealedCopyTests {
     #else
     @Test func thereAreNoSealedCopiesOnTheMac() {
         #expect(Platform.ProcessSelf.sealedCopy(of: "/bin/sleep", name: "sleep") == .failure(Platform.Errno(code: ENOTSUP)))
+        #expect(Platform.ProcessSelf.sealedCopy(of: STDIN_FILENO, name: "stdin") == .failure(Platform.Errno(code: ENOTSUP)))
         #expect(Platform.ProcessSelf.adopt(STDIN_FILENO) == nil)
         #expect(Platform.ProcessSelf.closeInheritedImage() == nil)
         #expect([UInt8]([1]).withUnsafeBytes { Platform.ProcessSelf.sealedMemory($0, name: "data") } == .failure(Platform.Errno(code: ENOTSUP)))

@@ -7,6 +7,11 @@ extension Platform.ProcessSelf {
         .failure(Platform.Errno(code: ENOTSUP))
     }
 
+    /// `ENOTSUP`: the Mac has no sealed copies, and nothing on it copies a file it opened (`fd` left as it is).
+    public static func sealedCopy(of fd: Int32, name: String) -> Result<SealedCopy, Platform.Errno> {
+        .failure(Platform.Errno(code: ENOTSUP))
+    }
+
     /// `ENOTSUP`: the Mac has no sealed copies, so none to copy.
     public static func sealedCopy(of copy: SealedCopy, name: String) -> Result<SealedCopy, Platform.Errno> {
         .failure(Platform.Errno(code: ENOTSUP))

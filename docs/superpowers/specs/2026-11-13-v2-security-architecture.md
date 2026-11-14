@@ -1013,7 +1013,15 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
   (`{"format":1,"commit":…,"binaries":{…},"swift":…,"resolved":…}`, a newer format refused), checked on the sealed
   copy that is then probed and run (no gap between check and use). A path in a worktree or a session's folder is
   refused. At its start the user's host checks its own image and its `--server` image against `build-info` and refuses
-  to start otherwise. Scratch hosts have no install root and hand over as today.
+  to start otherwise. It takes no `--server` but its build's own, `<node-root>/bin/vibeswitcher-server`, and opens it
+  once (`O_NOFOLLOW`, so a link as the server is refused, not followed; `O_NONBLOCK`, so a FIFO is refused at once):
+  that descriptor must be a regular file whose device and inode are what the node's path names (`lstat`, a link there
+  refused; a hard link to it is the same file), and the server's sealed copy is read from that same descriptor, so a
+  file renamed over the path or a link put there after the check is not what is copied
+  (`HostImages.openServer`, `serverCopy`). It doesn't stop the user from rewriting that inode's bytes in place before
+  the copy is read, nor from rewriting the folder and `build-info` together (S11 item 3): the hash against
+  `build-info` is what catches a rewrite of the server alone. Scratch hosts have no install root and hand over as
+  today; one given `--node-root` without `--node` reads its `--server` by path.
 - **How the node is started** (the bootstrap path): a user unit, `vibeswitcher-node.service`, started and not
   enabled, `Restart=no`, `ExecStart=<prefix>/<commit>/bin/vibeswitcher-host --node --node-root <prefix>/<commit>
   --server <prefix>/<commit>/bin/vibeswitcher-server` (the commit's folder, never `current`), and:
@@ -1085,6 +1093,8 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `HostHardeningTests.theNodesRootIsNeverFromTheEnvironment`, `HostHardeningTests.aHostOnTheAccountsOwnHomeNeedsNode`,
 `HostHardeningTests.theNodeTakesItsFoldersFromNodeRootNotItsExecutable`,
 `HostHardeningTests.theUsersHostTakesOnlyItsInstallsServer`,
+`HostHardeningTests.theNodesServerIsCopiedFromTheFileItsCheckOpened`,
+`SealedCopyTests.aCopyFromADescriptorIsOfTheFileItWasOpenedOn`,
 `HandoverLinuxTests.aHostWhoseImageDiffersFromItsBuildInfoDoesNotStart`, `HandoverLinuxTests.aNewerBuildInfoFormatIsRefused`,
 `HandoverLinuxTests.aHostWhoseImagesMatchItsBuildInfoStartsAndTellsItsServerTheFolder`;
 `HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`, `aHandoverToABuildOutsideTheInstallFolderIsRefused`,

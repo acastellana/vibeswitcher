@@ -31,10 +31,20 @@ extension Platform.ProcessSelf {
         let source = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK)
         guard source >= 0 else { return .failure(Platform.Errno(code: errno)) }
         defer { close(source) }
+        return sealedCopy(of: source, name: name)
+    }
+
+    /// The file `fd` is open on (for reading), read once from its beginning through `fd` into a new memfd named
+    /// `name`, sealed and given its mode as `sealedCopy(of:name:)` does a path's: for a caller that checked the file
+    /// through `fd` and must copy the file it checked, not whatever its path names by then (the node's server,
+    /// `HostImages.openServer`). `fd` stays open, the caller's, its offset moved. Fails with the call's errno, nothing
+    /// left open: EBADF for a number not open for reading, EINVAL for anything but a regular file (a FIFO, a pipe).
+    public static func sealedCopy(of fd: Int32, name: String) -> Result<SealedCopy, Platform.Errno> {
         var info = stat()
-        guard fstat(source, &info) == 0 else { return .failure(Platform.Errno(code: errno)) }
+        guard fstat(fd, &info) == 0 else { return .failure(Platform.Errno(code: errno)) }
         guard info.st_mode & S_IFMT == S_IFREG else { return .failure(Platform.Errno(code: EINVAL)) }
-        return sealed(name) { pour(source, into: $0) }
+        guard lseek(fd, 0, SEEK_SET) == 0 else { return .failure(Platform.Errno(code: errno)) }
+        return sealed(name) { pour(fd, into: $0) }
     }
 
     /// A second, separate copy of `copy`'s bytes, named `name`: read through `copy`'s own descriptor

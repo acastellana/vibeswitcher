@@ -779,7 +779,7 @@ extension HostHardeningTests {
     /// The node's environment: `HOME` the account's, and neither `VIBESWITCHER_HOME` nor `CFFIXED_USER_HOME`, whatever
     /// it was given; the rest as given. No `--node` host is started in a test: it would be the user's, on their own
     /// `~/.vibeswitcher`.
-    @Test func theNodesRootIsNeverFromTheEnvironment() {
+    @Test func theNodesRootIsNeverFromTheEnvironment() throws {
         let given = ["HOME": "/scratch/home", "VIBESWITCHER_HOME": "/scratch/root", "CFFIXED_USER_HOME": "/scratch/fixed",
                      "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash"]
         let node = HostImages.nodeEnvironment(given, accountHome: "/home/someone")
@@ -791,8 +791,17 @@ extension HostHardeningTests {
         if !Platform.CodeIdentity.isAvailable {
             #expect(HostImages.startAsNode(arguments: ["host", "--node"])?.contains("needs --node-root") == true)
             #expect(HostImages.startAsNode(arguments: ["host", "--node", "--node-root", "/nonexistent/build"])?.contains("needs --server") == true)
-            #expect(HostImages.startAsNode(arguments: ["host", "--node", "--node-root", "/nonexistent/build", "--server", "/etc/passwd"])?
-                .contains("isn't") == true)
+            // A node root whose own server is there, and a --server elsewhere: refused as not the node's own.
+            let dir = "\(shortScratchRoot)/vshn-\(UUID().uuidString.prefix(8))"
+            defer { try? FileManager.default.removeItem(atPath: dir) }
+            try FileManager.default.createDirectory(atPath: dir + "/node/bin", withIntermediateDirectories: true)
+            for path in [dir + "/node/bin/vibeswitcher-server", dir + "/vibeswitcher-server"] {
+                FileManager.default.createFile(atPath: path, contents: Data("server".utf8), attributes: [.posixPermissions: 0o755])
+            }
+            let homeBefore = ProcessInfo.processInfo.environment["HOME"]
+            #expect(HostImages.startAsNode(arguments: ["host", "--node", "--node-root", dir + "/node", "--server", dir + "/vibeswitcher-server"])
+                == "the server \(dir)/vibeswitcher-server isn't the node's own (\(dir)/node/bin/vibeswitcher-server)")
+            #expect(ProcessInfo.processInfo.environment["HOME"] == homeBefore, "refused before anything is changed")
         }
     }
 
@@ -827,27 +836,89 @@ extension HostHardeningTests {
         #expect(plain.toolServer == "/elsewhere/bin/vibeswitcher-mcp" && plain.commandFolder == nil)
     }
 
-    /// The node's host takes no `--server` but its build's own, `<node-root>/bin/vibeswitcher-server`, compared once
-    /// both are resolved: a second spelling of it is it; another file, a symbolic link to it, a link in its place, or
-    /// a server that isn't there is refused.
+    /// The node's host takes no `--server` but its build's own, `<node-root>/bin/vibeswitcher-server`: `--server` is
+    /// opened once, no link followed (`O_NOFOLLOW`), and that descriptor's file compared by device and inode with what
+    /// the node's path names (`lstat`). A second spelling of it is it, and so is a hard link to it (the same file);
+    /// another file with the same bytes, a symbolic link to it, a link in its place, a FIFO, or a server that isn't
+    /// there is refused. Each answer closes what it opened but the accepted descriptor, which is the caller's.
     @Test func theUsersHostTakesOnlyItsInstallsServer() throws {
         let dir = "\(shortScratchRoot)/vshs-\(UUID().uuidString.prefix(8))"
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let node = dir + "/node"
         try FileManager.default.createDirectory(atPath: node + "/bin", withIntermediateDirectories: true)
         let own = node + "/bin/vibeswitcher-server"
-        #expect(HostImages.serverRefusal(server: own, nodeRoot: node)?.contains("isn't there") == true)
+        func refusal(_ server: String, _ root: String = node) -> String? {
+            switch HostImages.openServer(server: server, nodeRoot: root) {
+            case .failure(let why): return why.description
+            case .success(let fd):
+                Sys.close(fd)
+                return nil
+            }
+        }
+        #expect(refusal(own)?.contains("isn't there") == true)
         FileManager.default.createFile(atPath: own, contents: Data("server".utf8), attributes: [.posixPermissions: 0o755])
-        #expect(HostImages.serverRefusal(server: own, nodeRoot: node) == nil)
-        #expect(HostImages.serverRefusal(server: node + "//bin/./vibeswitcher-server", nodeRoot: node) == nil)
-        #expect(HostImages.serverRefusal(server: own, nodeRoot: node + "/") == nil)
+        #expect(refusal(own) == nil)
+        #expect(refusal(node + "//bin/./vibeswitcher-server") == nil)
+        #expect(refusal(own, node + "/") == nil)
+        #expect(link(own, dir + "/hard") == 0)
+        #expect(refusal(dir + "/hard") == nil)
         let elsewhere = dir + "/vibeswitcher-server"
         FileManager.default.createFile(atPath: elsewhere, contents: Data("server".utf8), attributes: [.posixPermissions: 0o755])
-        #expect(HostImages.serverRefusal(server: elsewhere, nodeRoot: node)?.contains("isn't the node's own") == true)
+        #expect(refusal(elsewhere)?.contains("isn't the node's own") == true)
         #expect(symlink(own, dir + "/link") == 0)
-        #expect(HostImages.serverRefusal(server: dir + "/link", nodeRoot: node)?.contains("symbolic link") == true)
+        #expect(refusal(dir + "/link")?.contains("symbolic link") == true)
+        #expect(mkfifo(dir + "/fifo", 0o600) == 0)
+        #expect(refusal(dir + "/fifo")?.contains("isn't a regular file") == true)
         try FileManager.default.removeItem(atPath: own)
         #expect(symlink(elsewhere, own) == 0)
-        #expect(HostImages.serverRefusal(server: own, nodeRoot: node)?.contains("symbolic link") == true)
+        #expect(refusal(own)?.contains("symbolic link") == true)
+        #expect(refusal(elsewhere)?.contains("symbolic link") == true, "the node's own path a link: refused, not followed")
+    }
+
+    /// The node's server's sealed copy is made from the descriptor its check opened (`startAsNode`, held for `load`),
+    /// never from its path again: once the check has passed, another file renamed over the path, or a link put in its
+    /// place, is not what is copied. Without a held descriptor the node's host refuses rather than open the path; a
+    /// host that isn't the node's (a scratch host with `--node-root`) reads its `--server` by path, as before.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies; the Mac loads no server copy"))
+    func theNodesServerIsCopiedFromTheFileItsCheckOpened() throws {
+        let dir = "\(shortScratchRoot)/vshc-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let node = dir + "/node"
+        try FileManager.default.createDirectory(atPath: node + "/bin", withIntermediateDirectories: true)
+        let own = node + "/bin/vibeswitcher-server", other = dir + "/other"
+        FileManager.default.createFile(atPath: own, contents: Data("#!/bin/sh\necho checked\n".utf8), attributes: [.posixPermissions: 0o755])
+        func text(_ copy: Platform.ProcessSelf.SealedCopy) -> String {
+            copy.withBytes { String(decoding: $0, as: UTF8.self) }
+        }
+
+        HostImages.holdServer(try HostImages.openServer(server: own, nodeRoot: node).get())
+        FileManager.default.createFile(atPath: other, contents: Data("#!/bin/sh\necho replaced\n".utf8), attributes: [.posixPermissions: 0o755])
+        try #require(rename(other, own) == 0)
+        let copy = try HostImages.serverCopy(path: own, node: true).get()
+        defer { Sys.close(copy.fd) }
+        #expect(text(copy) == "#!/bin/sh\necho checked\n")
+
+        // Held again, then the path made a link to another file: still the file checked.
+        FileManager.default.createFile(atPath: other, contents: Data("#!/bin/sh\necho linked\n".utf8), attributes: [.posixPermissions: 0o755])
+        HostImages.holdServer(try HostImages.openServer(server: own, nodeRoot: node).get())
+        try #require(unlink(own) == 0 && symlink(other, own) == 0)
+        let linked = try HostImages.serverCopy(path: own, node: true).get()
+        defer { Sys.close(linked.fd) }
+        #expect(text(linked) == "#!/bin/sh\necho replaced\n")
+
+        // The held descriptor is taken once: a second load of the node's server refuses rather than read the path.
+        #expect(HostImages.serverCopy(path: own, node: true).failureDescription?.contains("wasn't checked") == true)
+        // A host that isn't the node's reads its --server by path, as before.
+        let scratch = try HostImages.serverCopy(path: own, node: false).get()
+        defer { Sys.close(scratch.fd) }
+        #expect(text(scratch) == "#!/bin/sh\necho linked\n")
+    }
+}
+
+extension Result where Failure == HostImages.Refused {
+    /// The refusal's text, or nil for a success.
+    var failureDescription: String? {
+        if case .failure(let why) = self { return why.description }
+        return nil
     }
 }
