@@ -24,6 +24,11 @@ public struct LeadTeamMember: Codable, Equatable, Sendable {
     /// The integrator's commit its branch was made from by `split`; nil until the team is split (always nil for the
     /// integrator).
     public var from: String?
+    /// Its questions to teammates (`needs_answer` posts) still waiting on a reply, each with its deadline (T9). A reply
+    /// closes one; one whose deadline passes is told to it and the lead once, and goes (`LeadToolset.peerDeadlines`).
+    public var waits: [LeadPeerWait]?
+    /// The worker whose session's end without "part done" the lead was told of (`LeadWitness.endedMembers`), once.
+    public var endTold: String?
     /// Its last part_done (`LeadPartHandoff`): the commit its part was done at and its handoff; nil until it reports
     /// one (and after a re-roll).
     public var handoff: LeadPartHandoff?
@@ -75,6 +80,32 @@ public struct LeadPartHandoff: Codable, Equatable, Sendable {
         self.verify = verify
         self.at = at
         self.told = told
+    }
+}
+
+/// A member waiting on a teammate's answer (docs/process/reviews/team-on-one-task-design.md, section 4: "No worker
+/// waits idle on a peer without a timeout"; T9): its `needs_answer` post, whom it asked, and until when. While it runs,
+/// the member shows as "waiting on @x" and isn't a `LeadStall`; after it, the usual stall rules apply.
+public struct LeadPeerWait: Codable, Equatable, Sendable {
+    /// The question's place on the wall.
+    public var post: Int
+    /// Whom it asked: "@all", or "@b @c".
+    public var on: String
+    /// When its wait ends (seconds since 1970; `LeadWall.Post.answerBy`).
+    public var until: Double
+
+    public init(post: Int, on: String, until: Double) {
+        self.post = post
+        self.on = on
+        self.until = until
+    }
+
+    /// Its deadline hasn't passed at `now`.
+    public func runs(at now: Double) -> Bool { now < until }
+
+    /// "waiting on @ui (an answer to wall post #2; 7 min left of its deadline)".
+    public func text(now: Double) -> String {
+        "waiting on \(on) (an answer to wall post #\(post); \(max(1, Int(((until - now) / 60).rounded(.up)))) min left of its deadline)"
     }
 }
 
@@ -171,6 +202,32 @@ extension LeadTask {
 
     /// The member named `name`; nil when there's none (or it's a plain task).
     public func teamMember(_ name: String) -> LeadTeamMember? { team?.first { $0.name == name } }
+
+    /// The member whose worker is the session `session` (the integrator's is the task's worker); nil for none.
+    public func teamMember(session: String) -> LeadTeamMember? {
+        guard let team, !team.isEmpty else { return nil }
+        if session == worker { return team[0] }
+        return team.first { $0.worker == session }
+    }
+
+    /// The wait on a teammate's answer the member `name` is in at `now` (its earliest deadline still running); nil when
+    /// none runs.
+    public func peerWait(member name: String, now: Double) -> LeadPeerWait? {
+        teamMember(name)?.waits?.filter { $0.runs(at: now) }.min { $0.until < $1.until }
+    }
+
+    /// `peerWait` of the member run by the session `session`.
+    public func peerWait(session: String, now: Double) -> LeadPeerWait? {
+        teamMember(session: session).flatMap { peerWait(member: $0.name, now: now) }
+    }
+
+    /// Whether its members' questions' deadlines run: while it's running, or blocked on the lead with its members still
+    /// at work (its integrator reported blocked or over_budget; the wall flows meanwhile). Not once it's stopped by the
+    /// lead (stop_worker ends its members too), under audit, or settled: a deadline typed into a worker under audit
+    /// would start a turn on the audited branch, and the lead would hear of a finished task (audit F6).
+    public var deadlinesRun: Bool {
+        status == .running || (status == .blocked && worker != nil && stopped != worker)
+    }
 }
 
 // MARK: Splitting a team, and starting its members (docs/process/reviews/team-on-one-task-design.md, "The unit")
@@ -189,6 +246,13 @@ extension LeadTeam {
     /// The team was split: its members other than the integrator were branched (`LeadTeamMember.from`, set for all of
     /// them at once).
     public static func isSplit(_ team: [LeadTeamMember]) -> Bool { team.count > 1 && team.dropFirst().contains { $0.from != nil } }
+
+    /// The member `name` said its part is done: it reported part_done (`LeadTeamMember.handoff`), or a progress of its
+    /// on the task's lane says "part done".
+    public static func partDone(_ task: LeadTask, member name: String) -> Bool {
+        if task.teamMember(name)?.handoff != nil { return true }
+        return (task.checkpoints ?? []).contains { $0.text.hasPrefix("\(name): ") && $0.text.range(of: "part done", options: .caseInsensitive) != nil }
+    }
 
     /// The workers a board's team tasks run beside their integrators (an integrator is its task's one worker, as a
     /// plain task's is): each other member whose worker is in `live`, whatever its task's status (a member still runs
@@ -296,6 +360,8 @@ extension LeadTeam {
             member.from = nil
             member.wallSeen = nil
             member.mainRedTold = nil
+            member.waits = nil
+            member.endTold = nil
             member.handoff = nil
             return member
         }
@@ -605,8 +671,11 @@ extension LeadToolset {
             + "At most \(LeadWall.maxCharacters) characters (point to a file on your branch for more), \(LeadWall.perHour) posts an hour; no secrets.",
         properties: ["text": MCPToolInfo.Property(type: "string", description: "What you tell them"),
                      "to": MCPToolInfo.Property(type: "array", description: "Who it's for: [\"@all\"] (every other member), or member names ([\"@b\", \"@c\"])", items: "string"),
-                     "needs_answer": MCPToolInfo.Property(type: "boolean", description: "You wait on an answer: it wakes an idle member"),
-                     "reply_to": MCPToolInfo.Property(type: "integer", description: "The post (#id) this answers; a reply to a member's open question wakes it")],
+                     "needs_answer": MCPToolInfo.Property(type: "boolean", description: "You wait on an answer: it wakes an idle member. It has a deadline "
+                        + "(deadline_min): with no reply by then, VibeSwitcher tells you to go on with a stated assumption (post it) or ask_lead, and tells the lead"),
+                     "deadline_min": MCPToolInfo.Property(type: "integer", description: "With needs_answer: how many minutes you wait on the answer "
+                        + "(\(Int(LeadWall.answerWait / 60)) by default, \(Int(LeadWall.longestWait / 60)) at most)"),
+                     "reply_to": MCPToolInfo.Property(type: "integer", description: "The post (#id) this answers; a reply to a member's open question wakes it and closes its deadline")],
         required: ["text", "to"])
 
     /// A member's `wall`.
@@ -680,6 +749,7 @@ extension LeadToolset {
             let lead = "lead of \(project)", slug = task.slug
             stored = try wallStore(task.slug).post(arguments["text"] as? String ?? "", by: author, to: to,
                                                    needsAnswer: arguments["needs_answer"] as? Bool ?? false, replyTo: replyTo,
+                                                   waitMinutes: (arguments["deadline_min"] as? NSNumber)?.doubleValue,
                                                    seal: role == .lead ? { [vault] post in try vault.seal(LeadWall.sealed(post, task: slug, lead: lead)) } : nil)
         } catch let refusal as LeadWall.Refusal {
             throw Problem(text: refusal.description)
@@ -687,6 +757,7 @@ extension LeadToolset {
             throw Problem(text: "Not posted: VibeSwitcher's session host didn't seal it as yours (\(error.localizedDescription)), and a post marked as the lead's without its seal is never sent. Post it again.")
         }
         let named = Self.recipientsText(stored.to)
+        noteWaits(task.slug, stored)
         if role == .lead {
             // Its own post goes at once (its seal holds) by the wall's one rule: a working member at its next step, an
             // idle one only when it asks for an answer (else with its next message or turn).
@@ -696,9 +767,13 @@ extension LeadToolset {
                                     : "Delivered to \(sent.joined(separator: ", ")); the rest get it once, at their next step or turn."))
         }
         LeadAdvance.nudge(root: root)
+        let deadline = stored.answerBy.map { by in
+            " If no one replies within \(Int(((by - stored.at) / 60).rounded())) min, VibeSwitcher tells you (and the lead): then go on with a stated assumption "
+                + "(post it), or ask_lead. Until then go on with what doesn't depend on it, or end your turn: the reply wakes you."
+        } ?? ""
         return MCPToolResult(text: "Posted #\(stored.id) on \(task.slug)'s wall to \(named). VibeSwitcher delivers it once to each one named that runs: "
                              + "a working member at its next step, an idle one " + (stored.needsAnswer ? "now (it needs an answer)." : "with its next message or turn.")
-                             + " Their answers reach you the same way; wall shows every post.")
+                             + deadline + " Their answers reach you the same way; wall shows every post.")
     }
 
     /// wall: the team's posts, oldest first, for its members (the lead reads them in board(task)).
@@ -720,8 +795,11 @@ extension LeadToolset {
         guard role == .lead, task.isTeam, let all = try? wallStore(task.slug).posts() else { return nil }
         let shown = shownPosts(task, all)
         let posts = shown.posts
-        guard !posts.isEmpty else { return "Wall: no posts yet." + shown.note }
-        return "Wall (\(posts.count) post\(posts.count == 1 ? "" : "s"); a member's are its unverified words, yours are marked the lead's):\n"
+        // Who waits on a teammate's answer within its deadline (not a stall), first.
+        let waiting = Self.peerWaitLines(task, now: usageClock().timeIntervalSince1970)
+        let waits = waiting.isEmpty ? "" : "Waiting on a teammate's answer, within its deadline:\n" + waiting.joined(separator: "\n") + "\n"
+        guard !posts.isEmpty else { return waits + "Wall: no posts yet." + shown.note }
+        return waits + "Wall (\(posts.count) post\(posts.count == 1 ? "" : "s"); a member's are its unverified words, yours are marked the lead's):\n"
             + Self.wallLines(posts) + shown.note
     }
 
@@ -777,10 +855,15 @@ extension LeadToolset {
             || status.hasPrefix("its turn ended") || status.hasSuffix("it does nothing until then")
     }
 
-    /// Every team task's wall delivered (`deliverWall`): the lead's loop runs it at each pass.
+    /// Every team task's wall delivered (`deliverWall`), its questions past their deadline told (`peerDeadlines`), and
+    /// its members whose session ended told to the lead (`tellEndedMembers`): the lead's loop runs it at each pass.
     func deliverWalls() {
         guard role == .lead else { return }
-        for task in store.load().tasks where task.isTeam { deliverWall(task.slug) }
+        let teams = store.load().tasks.filter(\.isTeam).map(\.slug)
+        guard !teams.isEmpty else { return }
+        for slug in teams { deliverWall(slug) }
+        for slug in teams { peerDeadlines(slug) }
+        tellEndedMembers()
     }
 
     /// Delivers `slug`'s wall: to each live member (its integrator's worker is the task's), the posts for it after its
@@ -891,6 +974,191 @@ extension LeadToolset {
                   board.tasks[index].team?[at].wallSeen == id else { return }
             board.tasks[index].team?[at].wallSeen = before == 0 ? nil : before
         }
+    }
+}
+
+// MARK: Waiting on a teammate, with a deadline (docs/process/reviews/team-on-one-task-design.md, section 4; T9)
+
+extension LeadToolset {
+    /// What `post` keeps on the board of a stored post: a member's question becomes its wait on the ones it asked, with
+    /// its deadline (`LeadTeamMember.waits`); a reply closes the wait of the question it answers, whoever's it is. The
+    /// lead's own question is no member's wait.
+    func noteWaits(_ slug: String, _ post: LeadWall.Post) {
+        guard (post.needsAnswer && post.author != LeadWall.leadAuthor) || post.replyTo != nil else { return }
+        try? store.update { board in
+            guard let index = board.taskIndex(slug), let team = board.tasks[index].team else { return }
+            for (at, member) in team.enumerated() {
+                var waits = member.waits ?? []
+                if let answered = post.replyTo, member.name != post.author { waits.removeAll { $0.post == answered } }
+                if member.name == post.author, let until = post.answerBy {
+                    waits.append(LeadPeerWait(post: post.id, on: Self.recipientsText(post.to), until: until))
+                }
+                board.tasks[index].team?[at].waits = waits.isEmpty ? nil : waits
+            }
+        }
+    }
+
+    /// The deadline notices' wakes armed in this process, by "root|slug|post|until": each armed once.
+    private static let armedDeadlines = ArmedDeadlines()
+
+    final class ArmedDeadlines: @unchecked Sendable {
+        private let lock = NSLock()
+        private var keys: Set<String> = []
+        func arm(_ key: String) -> Bool { lock.withLock { keys.insert(key).inserted } }
+    }
+
+    /// `slug`'s questions whose deadline passed with no reply, by `usageClock`: each is taken off its asker's waits
+    /// under the board's lock (so it's told once, whichever tool server of the lead looks), then the asker is told
+    /// to go on with a stated assumption (post it) or ask_lead, and the lead is told. A question answered on the wall
+    /// meanwhile only goes. The next deadline still running has a look again armed (`usageWake`): nothing in the
+    /// project's folder changes when it passes. The lead's tool server only (it alone reaches the members' sessions).
+    func peerDeadlines(_ slug: String) {
+        guard role == .lead, let task = store.load().task(slug) else { return }
+        // A task whose deadlines no longer run (`deadlinesRun`: under audit, settled, or stopped by the lead): its waits
+        // go, unsaid. One blocked on the lead keeps them: its members run on, and the asker is told at its deadline.
+        guard task.deadlinesRun else {
+            if task.team?.contains(where: { $0.waits != nil }) == true {
+                try? store.update { board in
+                    guard let index = board.taskIndex(slug), !board.tasks[index].deadlinesRun, let team = board.tasks[index].team else { return }
+                    for at in team.indices { board.tasks[index].team?[at].waits = nil }
+                }
+            }
+            return
+        }
+        let now = usageClock().timeIntervalSince1970
+        var due: [(member: String, worker: String?, wait: LeadPeerWait)] = []
+        // Looked at without writing first: every pass of the lead's loop runs this, and a write of the board (a rename
+        // into the folder it watches) starts another pass.
+        let overdue = store.load().task(slug)?.team?.contains { $0.waits?.contains { !$0.runs(at: now) } == true } == true
+        if overdue { try? store.update { board in
+            guard let index = board.taskIndex(slug), let team = board.tasks[index].team else { return }
+            for (at, member) in team.enumerated() {
+                guard let waits = member.waits, waits.contains(where: { !$0.runs(at: now) }) else { continue }
+                let worker = at == 0 ? board.tasks[index].worker : member.worker
+                due += waits.filter { !$0.runs(at: now) }.map { (member: member.name, worker: worker, wait: $0) }
+                let left = waits.filter { $0.runs(at: now) }
+                board.tasks[index].team?[at].waits = left.isEmpty ? nil : left
+            }
+        } }
+        if !due.isEmpty {
+            let posts = (try? wallStore(slug).posts()) ?? []
+            let sessions = try? hostSessions("the deadline wasn't told")
+            let live = Set((sessions ?? []).filter(\.live).map(\.id))
+            for item in due {
+                // Answered on the wall but not closed on the board (the board's write failed): nothing to tell.
+                if let question = posts.first(where: { $0.id == item.wait.post }), LeadWall.answered(question, in: posts) { continue }
+                let minutes = posts.first { $0.id == item.wait.post }.map { Int(((item.wait.until - $0.at) / 60).rounded()) }
+                let within = minutes.map { " within its \($0) min" } ?? ""
+                // What the lead is told says whether the asker was reached: its wait is off the board already, so
+                // nothing tells it later (audit F1).
+                var unreached: String?
+                if sessions == nil {
+                    unreached = "the session host couldn't be read"
+                } else if let worker = item.worker, live.contains(worker) {
+                    do {
+                        _ = try deliver(slug, worker: worker, text: "No answer from \(item.wait.on) to your wall post #\(item.wait.post)\(within): go on with a stated "
+                                        + "assumption (post it, so they see it), or ask_lead. A reply that comes later still reaches you.", clearDraft: false)
+                    } catch {
+                        unreached = "its delivery failed: \(Self.clip("\(error)", 200))"
+                    }
+                } else {
+                    unreached = "its session isn't live"
+                }
+                let told = unreached.map {
+                    "It wasn't told (\($0)): message(\(slug), member: \(item.member)) tells it to go on with a stated assumption (posted on the wall) or ask_lead."
+                } ?? "It was told to go on with a stated assumption (posted on the wall) or ask_lead."
+                // The loop's word, which the lead's own server may seal (see `tellEndedMembers`).
+                _ = try? tellLead("Member \(item.member) of \(slug)'s team got no answer from \(item.wait.on) to its wall post #\(item.wait.post)\(within). "
+                                  + "\(told) board(\(slug)) shows the wall.", about: LeadAdvance.sender)
+            }
+        }
+        // The next deadline: a look again just after it.
+        guard let next = store.load().task(slug)?.team?.flatMap({ $0.waits ?? [] }).filter({ $0.runs(at: now) }).min(by: { $0.until < $1.until }),
+              Self.armedDeadlines.arm("\(root)|\(slug)|\(next.post)|\(next.until)") else { return }
+        let root = self.root
+        usageWake(Date(timeIntervalSince1970: next.until + 1)) { LeadAdvance.nudge(root: root) }
+    }
+
+    /// The lead told once of each member whose session ended before it said its part is done
+    /// (`LeadWitness.endedMembers`), claimed on the board (`LeadTeamMember.endTold`) before it's told.
+    func tellEndedMembers() {
+        guard role == .lead, store.load().tasks.contains(where: { $0.status == .running && $0.isTeam && $0.team.map(LeadTeam.isSplit) == true }),
+              let sessions = try? hostSessions("no member's end was looked at") else { return }
+        let live = Set(sessions.filter(\.live).map(\.id))
+        for ended in LeadWitness.endedMembers(board: store.load(), live: live) {
+            var claimed = false
+            try? store.update { board in
+                guard let index = board.taskIndex(ended.slug), let at = board.tasks[index].team?.firstIndex(where: { $0.name == ended.member }), at > 0,
+                      board.tasks[index].team?[at].worker == ended.worker, board.tasks[index].team?[at].endTold != ended.worker else { return }
+                board.tasks[index].team?[at].endTold = ended.worker
+                claimed = true
+            }
+            // The loop's word (`LeadAdvance.sender`), which the lead's own server may seal: a worker's ("worker <slug>")
+            // is sealed only from that worker's server, so it would reach the lead as an unverified sender's.
+            if claimed { _ = try? tellLead(LeadWitness.endedMemberText(slug: ended.slug, member: ended.member), about: LeadAdvance.sender) }
+        }
+    }
+
+    /// The members of `task` waiting on a teammate's answer at `now`, a line each ("- docs: waiting on @ui (…)").
+    static func peerWaitLines(_ task: LeadTask, now: Double) -> [String] {
+        (task.team ?? []).compactMap { member in task.peerWait(member: member.name, now: now).map { "- \(member.name): \($0.text(now: now))" } }
+    }
+
+    /// status's lines of the members waiting on a teammate's answer within its deadline (not stalled); none when none is.
+    func peerWaitStatus(_ board: LeadBoard) -> [String] {
+        let now = usageClock().timeIntervalSince1970
+        let lines = board.tasks.filter { $0.deadlinesRun && $0.isTeam }.flatMap { task in
+            Self.peerWaitLines(task, now: now).map { "- \(task.slug) " + $0.dropFirst(2) }
+        }
+        guard !lines.isEmpty else { return [] }
+        return ["\nWaiting on a teammate's answer, within its deadline, not stalled (\(lines.count)):"] + lines.prefix(Self.statusTasks).map { Self.clip($0, 300) }
+    }
+}
+
+// MARK: The lead's message to one member (T5's gap: message reached only the integrator)
+
+extension LeadToolset {
+    /// message(task, member:): the lead's message to one member of a team task other than its integrator, delivered as
+    /// the lead's and kept as a sealed lead note on the task (`note`), as a message to the integrator is. Nil when no
+    /// member is named, or the one named is the integrator: message goes to the task's worker as ever. The wall's posts
+    /// held for that member, idle, ride along with it.
+    func messageMember(_ slug: String, _ arguments: [String: Any], note: (String) -> LeadNote) throws -> MCPToolResult? {
+        guard let given = (arguments["member"] as? String)?.trimmingCharacters(in: .whitespaces), !given.isEmpty else { return nil }
+        let name = given.hasPrefix("@") ? String(given.dropFirst()) : given
+        guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
+        guard let team = task.team, task.isTeam else { throw Problem(text: "\(slug) is a plain task, with no members: message it without member.") }
+        guard let member = task.teamMember(name) else {
+            throw Problem(text: "\(LeadMail.masked(name)) isn't a member of \(slug)'s team (\(LeadTeam.names(team))). Nothing was sent.")
+        }
+        if member.name == task.integrator?.name { return nil }
+        guard let text = (arguments["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            throw Problem(text: "Nothing to send.")
+        }
+        guard let worker = member.worker, (try hostSessions("nothing was sent")).contains(where: { $0.id == worker && $0.live }) else {
+            throw Problem(text: "\(slug)'s member \(member.name) has no live worker, so nothing was sent. start_worker(\(slug)) starts it (on its branch, its commits kept).")
+        }
+        let delivered = try deliver(slug, worker: worker, text: text, clearDraft: arguments["clear_draft"] as? Bool ?? false)
+        if Self.went(delivered) { deliverWall(slug, riding: [member.name]) }
+        // Kept for the verifier, as a message to the integrator is: what the lead accepts here is in scope.
+        let kept = note(text)
+        try store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].keep(kept)
+            // A member's ask_lead marks the task as waiting on the lead (no idle stall); the lead's message answers it,
+            // as one to the integrator does (`sent`).
+            board.tasks[index].leadQuestionAt = nil
+        }
+        let how: String
+        switch delivered {
+        case .steered, .typedWhileWorking: how = "it works, and gets it at its next step"
+        case .typed: how = "typed in as its next prompt (it was between turns)"
+        case .awaitingAnswer(let asked): how = "it's stopped on a prompt\(asked.map { " (\(Self.clip($0)))" } ?? ""), and gets it once that's answered"
+        case .behindDraft, .draftStayed, .queued, .atTurnEnd:
+            how = "it waits in its inbox and goes in with its next prompt (its box holds a draft, or couldn't be read); message again with clear_draft: true to send it now"
+        case .notSubmitted(let shown):
+            how = "typed, but not submitted: its box still shows “\(Self.clip(shown))”; message again with clear_draft: true"
+        }
+        return MCPToolResult(text: "Sent to \(slug)'s member \(member.name), as yours: \(how).")
     }
 }
 

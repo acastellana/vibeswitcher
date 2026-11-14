@@ -29,6 +29,19 @@ public struct LeadWall: Sendable {
     /// The author the lead's own posts carry: no member can be named it (`LeadTeam.nameProblem` wants a letter first).
     public static let leadAuthor = "_lead"
 
+    /// How long a member's `needs_answer` post waits on an answer by default (T9: no member waits on a teammate without
+    /// a limit), and the longest it may: past its deadline with no reply, VibeSwitcher tells the asker to go on with a
+    /// stated assumption or ask_lead, and tells the lead (`LeadToolset.peerDeadlines`).
+    public static let answerWait: TimeInterval = 10 * 60
+    public static let longestWait: TimeInterval = 20 * 60
+
+    /// The wait a post asks for in `minutes`, capped at `longestWait` (and at least a minute); `answerWait` when none
+    /// is given, or one that isn't a number of minutes.
+    public static func wait(minutes: Double?) -> TimeInterval {
+        guard let minutes, minutes.isFinite, minutes > 0 else { return answerWait }
+        return min(max(minutes * 60, 60), longestWait)
+    }
+
     /// The line breaks `SteerReply.quote` doesn't split on, each made a plain "\n" before a post is checked or stored,
     /// so every line a reader sees of a delivered post is quoted: LINE and PARAGRAPH SEPARATOR, NEXT LINE, the vertical
     /// tab and the form feed.
@@ -106,6 +119,16 @@ public struct LeadWall: Sendable {
         /// private folder's, but a worker's shell can write it: a post marked as the lead's without a seal that holds
         /// is never sent or shown as the lead's.
         public var seal: String?
+        /// A `needsAnswer` post: when its wait on an answer ends (seconds since 1970). See `answerBy`.
+        public var deadline: Double?
+
+        /// When a question's wait on an answer ends: its `deadline`, never past `longestWait` after it was posted (a
+        /// line written into the file by hand can't ask for longer); `answerWait` after it for one stored without one.
+        /// Nil for a post that doesn't ask for an answer.
+        public var answerBy: Double? {
+            guard needsAnswer else { return nil }
+            return min(deadline ?? at + LeadWall.answerWait, at + LeadWall.longestWait)
+        }
 
         public init(id: Int, at: Double, author: String, to: Recipients, needsAnswer: Bool, replyTo: Int?, text: String) {
             self.id = id
@@ -118,7 +141,7 @@ public struct LeadWall: Sendable {
         }
 
         enum CodingKeys: String, CodingKey {
-            case id, at, author, to, text, seal
+            case id, at, author, to, text, seal, deadline
             case needsAnswer = "needs_answer"
             case replyTo = "reply_to"
         }
@@ -215,10 +238,10 @@ public struct LeadWall: Sendable {
     /// Appends a post by `author` and returns it as stored, or throws a `Refusal` (nothing stored) or a file error.
     /// The caps are checked against the wall as it is under the file's lock, so two members posting at once can't
     /// both take the last place. `seal`: the lead's post's seal (`Post.seal`), made for it as it's stored; what it
-    /// throws stores nothing.
+    /// throws stores nothing. `waitMinutes`: with `needsAnswer`, how long it waits on an answer (`wait(minutes:)`).
     @discardableResult
     public func post(_ text: String, by author: String, to: [String], needsAnswer: Bool = false, replyTo: Int? = nil,
-                     seal: ((Post) throws -> String)? = nil) throws -> Post {
+                     waitMinutes: Double? = nil, seal: ((Post) throws -> String)? = nil) throws -> Post {
         let text = Self.plainLines(text)
         guard Self.isName(author) else { throw Refusal.name(author) }
         guard let recipients = Recipients(to) else { throw Refusal.recipients }
@@ -244,6 +267,7 @@ public struct LeadWall: Sendable {
         if let replyTo, !posts.contains(where: { $0.id == replyTo }) { throw Refusal.replyTo(replyTo) }
 
         var post = Post(id: (posts.last?.id ?? 0) + 1, at: now, author: author, to: recipients, needsAnswer: needsAnswer, replyTo: replyTo, text: text)
+        if needsAnswer { post.deadline = now + Self.wait(minutes: waitMinutes) }
         if let seal { post.seal = try seal(post) }
         var line = try JSONEncoder().encode(post)
         line.append(0x0A)
@@ -292,6 +316,11 @@ public struct LeadWall: Sendable {
         guard let asked = post.replyTo, let question = posts.first(where: { $0.id == asked }),
               question.author == member, question.needsAnswer else { return false }
         return !posts.contains { $0.id < post.id && $0.replyTo == asked }
+    }
+
+    /// Whether `question` has its answer on the wall (`posts`): a reply to it (`replyTo`) by anyone but its author.
+    public static func answered(_ question: Post, in posts: [Post]) -> Bool {
+        posts.contains { $0.replyTo == question.id && $0.author != question.author }
     }
 
     /// The text a post is delivered as (the sender's frame, the teammate's or the lead's, goes around it): its place

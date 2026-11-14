@@ -168,8 +168,10 @@ public struct LeadStall: Codable, Equatable, Sendable {
     /// compacted, with undelivered beside it). Nothing for a worker that waits on a prompt, ended, or stopped on an
     /// API error or the usage limit: the witness tells those its own way. Nor silent, idle or compacted while a run of its waits in line
     /// for the Mac-wide test and build lock (`Seen.lockWait`): it goes on once a slot is free, and every holder's run
-    /// ends within its timeout (status says whom it waits for).
-    public static func detect(_ seen: LeadWitness.Seen, task: LeadTask, now: Date = Date()) -> [LeadStall] {
+    /// ends within its timeout (status says whom it waits for). Nor silent, idle or compacted while a team member waits
+    /// on a teammate's answer within its deadline (`waitingOn`, T9: it shows as "waiting on @x"); after the deadline,
+    /// the usual rules apply, counted from its last activity as ever.
+    public static func detect(_ seen: LeadWitness.Seen, task: LeadTask, now: Date = Date(), waitingOn: LeadPeerWait? = nil) -> [LeadStall] {
         guard task.status == .running, seen.live, !seen.agentQuit, seen.apiError == nil, seen.usageLimit == nil,
               seen.status != .needsInput, !(seen.activity.map { if case .needsInput = $0 { return true } else { return false } } ?? false)
         else { return [] }
@@ -187,7 +189,8 @@ public struct LeadStall: Codable, Equatable, Sendable {
         // session started: one first seen before its hooks fire reads as between turns since ever (`.distantPast`),
         // one on a reused terminal as the earlier session left it.
         let since = seen.lastActivity ?? (betweenTurns ? seen.since?.timeIntervalSince1970 : nil)
-        if seen.lockWait == nil, let last = since.flatMap({ known(max($0, seen.started ?? -.infinity)) }) {
+        let peerWait = waitingOn.map { $0.runs(at: at) } ?? false
+        if seen.lockWait == nil, !peerWait, let last = since.flatMap({ known(max($0, seen.started ?? -.infinity)) }) {
             let quiet = at - last
             // A compaction once its turn was over is Claude tidying an idle session: it's idle, if anything.
             if let compacted = seen.compactedAt, !betweenTurns, quiet >= compactedAfter {

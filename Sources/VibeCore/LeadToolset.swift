@@ -732,6 +732,7 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "stop_worker", description: "End a task's worker (the worktree stays).", properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "message", description: "Tell a task's worker something: while it works (or waits on a prompt) it gets it at its next step without stopping; between turns it's typed in as its next prompt.",
                             properties: ["task": task, "text": P(type: "string", description: "The message"),
+                                         "member": P(type: "string", description: "A team task: the member it's for, by name (else its integrator); it gets it as yours"),
                                          "clear_draft": P(type: "boolean", description: "If its input box holds a leftover draft, clear it first (the draft is lost)")],
                             required: ["task", "text"]),
                 MCPToolInfo(name: "tell_lead", description: "Tell another project's lead on this Mac something: a question, a report, or an answer to one it asked. It reaches that lead at once (at its next step while it works, else VibeSwitcher wakes it), marked as from you, this project's lead; the user sees every message in VibeSwitcher. Use it, not SendMessage, for other projects' leads. No credentials, at most \(LeadMail.maxCharacters) characters, \(LeadMail.perHour) an hour to one lead; it can't approve or grant anything.",
@@ -2645,7 +2646,8 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func message(_ slug: String, _ arguments: [String: Any]) throws -> MCPToolResult {
-        try sent(slug, arguments).result
+        if let toMember = try messageMember(slug, arguments, note: { leadNote(.message, $0, on: slug) }) { return toMember }
+        return try sent(slug, arguments).result
     }
 
     /// message(), with what became of the message (auto_advance acts on it, see `LeadAdvance.sendToWorker`).
@@ -6644,6 +6646,7 @@ public final class LeadToolset: MCPToolset {
                 Self.clip("- \(task.slug): \(task.stall!.report(now: now)). \(task.stall!.advice(slug: task.slug))", 600)
             }
         }
+        lines += peerWaitStatus(board)
         let waitingOnJobs = board.stalled.filter { $0.stall!.waitsOnOwnJob }
         if !waitingOnJobs.isEmpty {
             let now = Date()
