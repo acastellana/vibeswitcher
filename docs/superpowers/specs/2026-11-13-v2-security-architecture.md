@@ -1066,8 +1066,11 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
     and a name there removes the unit's own assignment too (`systemd.exec(5)`); a test refuses a name in both. `start`
     and `status` compare `systemctl --user show-environment` with the expected set and name anything extra;
   - `Environment=HOME=…` and `Environment="PATH=/usr/local/bin:/usr/bin:/bin:<swiftly's bin>:<node's bin>"`, quoted,
-    with no `/mnt/` folder: team sessions run with this PATH and no startup file (S10), so it holds what workers build
-    and test with. The two last folders are the user's, so every worker can write them: they are named in the unit,
+    with no `/mnt/` folder: a team session's shell and its program run with this PATH and no startup file (S10), and
+    so does what the program starts itself (its tool servers, and so merges' and audits' runs). An agent's Bash
+    commands don't: they run with the PATH of Claude Code's shell snapshot, taken in a login shell after the user's
+    startup files, which on this node puts `~/.local/share/swiftly/bin` and `~/.local/bin` ahead of `/usr/bin`
+    (S10, measured in Task 12b). The two last folders are the user's, so every worker can write them: they are named in the unit,
     on the seal's list and in S11 item 10 (decisions 12 and 17). `claude` is not on it: every lead and role runs the absolute
     path `~/.local/bin/claude` resolves to at its start (the engine's EN-D13), since that folder holds files named by
     version only;
@@ -1104,7 +1107,10 @@ what it needs.
   vouches for.
 - The files every agent runs, the lead's included: `~/.vibeswitcher/bin/vibeswitcher-hook`, the agents' settings and
   hooks, `~/.local/share/claude/versions/*`, the shell startup files Claude Code's Bash tool sources. The config seal
-  watches them (the bootstrap path's step 8 adds the Linux list: `~/.config/systemd/user`, `~/.config/environment.d`,
+  watches them (the bootstrap path's step 8 adds the Linux list: `~/.bash_profile`, `~/.bash_login`, `~/.profile` and
+  `~/.bashrc`, each watched whether it exists or not, what they source (here `~/.local/share/swiftly/env.sh`), `~/bin`
+  (absent here, first on the snapshot's PATH once made), the agents' `shell-snapshots` folders,
+  `~/.config/systemd/user`, `~/.config/environment.d`,
   `~/.config/autostart`, `~/.vibeswitcher/v2/projects`, `~/.vibeswitcher/v2/builds`, `~/.vibeswitcher/lead/run`,
   `~/.vibeswitcher/lead/git-hooks`, `~/.local/bin`, `~/.local/share/claude/versions`, the toolchain's `usr/bin`, every
   other user-writable folder on the unit's PATH, and, while `/mnt/c` is mounted, `.wslconfig` and the Windows Startup
@@ -1162,8 +1168,9 @@ the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts
 - **A plain shell, not a login shell.** `HostedSession.arguments` starts every session as `$SHELL -l -i -c command`
   (`HostedSession.swift:117-120`); a login, interactive bash runs `.profile` and `.bashrc` and whatever they source
   (here, among others, a file in another repository and `mise activate`, which reads per-folder config from the
-  worktree). On Linux team sessions start with `bash --noprofile --norc -c command`, with the PATH the unit holds;
-  the Mac's reason for `-l -i` (Terminal's PATH) is met by that PATH. `claude` isn't on it (its folder is the user's
+  worktree). On Linux team sessions start with `bash --noprofile --norc -c command`, with the PATH the unit holds:
+  the session's shell and its program get that PATH, an agent's Bash commands the snapshot's (below, "Doesn't
+  promise"); the Mac's reason for `-l -i` (Terminal's PATH) is met by that PATH. `claude` isn't on it (its folder is the user's
   `~/.local/bin`): until the engine's E4 runs the lead's and the roles' `claude` by the absolute path it resolves
   (EN-D13), a role launched as the bare `claude` passes the tool server's preflight, which still looks through a login
   shell (`LaunchPreflight`, `LoginShellCommand`), and then fails in its session with `command not found`.
@@ -1217,8 +1224,12 @@ Most of these are guard rails; the inline launch settings close a route that nee
   `~/.gnupg`, the agents' own logins in `~/.claude` and `~/.codex`) is a worker's to read and use (S11).
 - What Claude Code itself does with the user's shell: its Bash tool takes a snapshot of the user's shell
   configuration, so the startup files still run inside a session's agent. Measured (Task 12b, 2026-11-14, Claude Code
-  2.1.323, `docs/process/v2-linux-inventory.md`): every Bash command's shell reads `~/.bashrc` itself, and its start
-  reads `~/.bash_profile` and `~/.bashrc` into its snapshot, though the session's own bash reads neither.
+  2.1.323, `docs/process/v2-linux-inventory.md`), though the session's own bash reads none of them: every Bash
+  command's shell reads `~/.bashrc` itself (bash's rule for a stdin that is a socket); the snapshot's login shell
+  reads the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` there is (on this node `~/.profile`, which
+  has no interactive guard and sources swiftly's `env.sh`), and the snapshot's script sources `~/.bashrc`; and every
+  command runs with the PATH the snapshot recorded from that login shell, not the unit's: on this node
+  `~/.local/share/swiftly/bin` and `~/.local/bin` first, and `~/bin` first of all once a worker creates it.
 - Codex's sandbox (Landlock and seccomp) on this WSL kernel: unmeasured, so Codex workers are off (decision 15).
 - What a spawn's caller puts in the new session through its `command`: a lead can start a session with any of the
   variables `env` may not name, by setting them in the command line. The sandbox (S12) is what holds that.
@@ -1247,7 +1258,9 @@ bootstrap (S12 item 15).
 `InlineLaunchHostTests.aDayOfInlineRoleSessionsStillGetsAWelcome`; `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`,
 `BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup` (Task 10c: git from root's folders, and a verifier's
 command in a session of its own); `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`,
-`RealClaudeTests.aVerifierCommandInItsOwnSessionStillTimesOut` (Task 12b: gated measurements, run 2026-11-14).
+`RealClaudeTests.aVerifierCommandInItsOwnSessionStillTimesOut` (Task 12b: gated measurements, run 2026-11-14; the
+snapshot's second home, shaped like the node's, not yet run), `RealClaudeTests.theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`
+(bash's own rules in Claude Code's shapes, ungated).
 
 **Tests to write:** The engine's
 E4: `LeadStartTests.theLeadGetsNoCodexWorkers`, `aLeadIsLaunchedByClaudesResolvedPath`,
@@ -1324,7 +1337,10 @@ against it. Each line says what reduces it now, if anything.
    delivering only to the session the vault binds to the lead role (EN-D14).
 8. A worker can replace what every agent runs (the hook, the agents' settings and hooks, `claude`'s versions, the shell
    startup files Claude Code's Bash tool sources, folders on the PATH; measured 2026-11-14: `~/.bashrc` in every Bash
-   command's shell, `~/.bash_profile` and `~/.bashrc` in its snapshot). The seal detects it at its next look and holds
+   command's shell, and in its snapshot the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` there is,
+   and `~/.bashrc`, so all four, what they source (here swiftly's `env.sh`) and the snapshots in
+   `<config>/shell-snapshots` that each command sources; and the snapshot's PATH, with `~/.local/share/swiftly/bin`,
+   `~/.local/bin` and, once it exists, `~/bin` ahead of `/usr/bin`, S10). The seal detects it at its next look and holds
    workers and merges; a change swapped in and restored between two looks is missed; a host restart resets the seal to
    "held until accepted". The Linux list (`~/.local/share/claude/versions` and the rest) arrives with the bootstrap
    path's step 8. S7, S9.
@@ -1332,7 +1348,10 @@ against it. Each line says what reduces it now, if anything.
    S2-D10's clones). The vault's head record and `judge` catch it; after a host restart `base accept` shows the
    commits since the last accepted head. S7.
 10. Branch code (merge's tests, an audit's run, `init_command`) runs as the user, unconfined, with the user's
-    toolchain: a worker that replaces `swift-test` or patches a cached dependency makes every audit and merge pass. It
+    toolchain: a worker that replaces `swift-test` or patches a cached dependency makes every audit and merge pass.
+    A verifier's or a worker's Bash command, branch code under `runPrefix` included, runs with the snapshot's PATH
+    (S10), whose first folders, `~/.local/share/swiftly/bin`, `~/.local/bin` and `~/bin` once it exists, any worker
+    can write: a `git` or `swift` put there is what every agent's commands run. It
     is no session's to the host, and can do everything in this list. Reduced for installs by a root-owned toolchain
     (decision 12), not for tests.
 11. Writing a terminal query to a session's `/dev/pts/N` makes the host type the headless terminal's reply into that
@@ -1716,7 +1735,8 @@ file; every change keeps the Mac's code paths as they are (a platform answer or 
   from a pushed commit with a root-owned toolchain, `build-info`'s `swift` and `resolved`, the seal's Linux list as in
   S9 (and `.wslconfig` and the Startup folder while `/mnt/c` is mounted), the rule on switches until measured, the
   server image on a switch. The questions: now the one list in the bootstrap path; `~/.local/bin` is not first on
-  this PATH, so the seal's list doesn't call it so.
+  this PATH, so the seal's list doesn't call it so (it is near the front of the snapshot's PATH an agent's Bash
+  commands get, S10, Task 12b).
 
 ## Answers to the attack review
 

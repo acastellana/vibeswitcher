@@ -1984,9 +1984,15 @@ S10 and S11 (each result, one line, with the inventory's date)
     test asserts instead that the tree stays whole at the timeout (the prefix still runs), that the interrupt ends
     every process of it, and that `/exit` (its "Exit and stop tasks", answered with Enter) ends what the timeout
     left. Its "Move to background and exit", and a SIGKILL to Claude Code with a command running, aren't measured.
-  - The snapshot run: every Bash command's shell reads `~/.bashrc` itself (stdin a socket, `SHLVL` 1: Ubuntu's bash
-    takes it for an ssh shell), and the snapshot's login shell reads `~/.bash_profile` and `~/.bashrc`. The record is
-    in `docs/process/v2-linux-inventory.md`.
+  - The snapshot run: every Bash command's shell reads `~/.bashrc` itself (stdin a socket, `SHLVL` 1: bash's own rule
+    for a stdin that is a socket, bash(1)'s INVOCATION, upstream's and not Ubuntu's; Debian's `SSH_SOURCE_BASHRC` only adds the
+    `SSH_CLIENT` check), and the snapshot's login shell reads the first of `~/.bash_profile`, `~/.bash_login` and
+    `~/.profile` there is (the run's home had a `.bash_profile`; this node's has only `.profile`, which bash alone
+    shows is then read: `theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`, ungated), and its script
+    `~/.bashrc`. Every command runs with the PATH the snapshot took from that login shell, not the unit's (line 374's
+    "the PATH the unit holds" is the session's shell's only): on this node swiftly's `bin` and `~/.local/bin` ahead of
+    `/usr/bin`. The gated test's second home, shaped like the node's, with each startup file changing PATH, is written
+    and not yet run (the slice's four gated runs are spent). The record is in `docs/process/v2-linux-inventory.md`.
 
 **Done when:** both ran once here with the user's folder and their results are recorded; until then they are skipped,
 saying why.

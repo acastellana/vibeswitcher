@@ -10,7 +10,9 @@ import Testing
 /// can't be passed on). Gated as Task 12a is (`RealClaudeHostTests`): on demand only, with a throwaway Claude Code config
 /// folder the user logged in once, named on the run's command line (the user's decision 16):
 /// `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<that folder> bash scripts/test.sh --filter RealClaudeTests`. Each test sends
-/// one or two short prompts on sonnet. The results are recorded in `docs/process/v2-linux-inventory.md`. The tests
+/// one or two short prompts on sonnet (the snapshot's, once for each home in `homes`); bash's own rules behind the
+/// snapshot's record are measured ungated, with bash alone. The results are recorded in
+/// `docs/process/v2-linux-inventory.md`. The tests
 /// assert that the measurement was made, and, for the verifier's command, that no process of it is left cut off from
 /// Claude Code: its interrupt ends it; its timeout either ends it or leaves it whole in the background, prefix and all
 /// (2.1.323 moves a command that hits its timeout to the background); and the session's `/exit` ends what is left.
@@ -27,14 +29,25 @@ import Testing
         (".bashrc", "bashrc"), (".bash_profile", "bash_profile"), (".profile", "profile"), (".zshrc", "zshrc"),
     ]
 
-    /// A startup file that marks being read three ways: an exported variable, a function and an alias (what a shell
-    /// snapshot may carry), and a line in `$HOME/sourced.log` naming the shell that read it (what read it, and when),
-    /// with what makes a bash read a startup file unasked: `BASH_ENV`, `SHLVL`, and its stdin a socket (a
-    /// non-interactive bash reads `~/.bashrc` when its stdin is a network connection and its level is under 2,
-    /// Debian's and Ubuntu's `SSH_SOURCE_BASHRC`).
+    /// The homes the snapshot is measured in: one with every startup file (which of them a shell reads first), and one
+    /// shaped like the node's, which has `.profile` and `.bashrc` only (a login bash reads the first of
+    /// `.bash_profile`, `.bash_login` and `.profile` there is, so only a home without the first two shows `.profile`).
+    static let homes: [String: [String]] = [
+        "every startup file": startupFiles.map(\.file),
+        "the node's, .profile and .bashrc only": [".profile", ".bashrc"],
+    ]
+
+    /// A startup file that marks being read four ways: an exported variable, a function and an alias (what a shell
+    /// snapshot may carry), a folder of its own put first on `PATH` (`$HOME/vs-<mark>-bin`: which PATH a command
+    /// gets), and a line in `$HOME/sourced.log` naming the shell that read it (what read it, and when), with what
+    /// makes a bash read a startup file unasked: `BASH_ENV`, `SHLVL`, and its stdin a socket (bash's own rule, bash(1)'s
+    /// INVOCATION: a non-interactive bash whose stdin is a network connection, as under rshd or sshd, and whose
+    /// level is under 2 reads `~/.bashrc`; any socket counts; Debian's `SSH_SOURCE_BASHRC` only adds the
+    /// `SSH_CLIENT` check).
     static func startupFile(_ mark: String) -> String {
         """
         export VS_MARK_\(mark.uppercased())=1
+        export PATH="$HOME/vs-\(mark)-bin:$PATH"
         vs_mark_\(mark)() { :; }
         alias vs_alias_\(mark)=true
         printf '%s %s pid %s parent %s, BASH_ENV %s, SHLVL %s, stdin %s, $- %s: %.120s\\n' "$(date +%s.%N)" \(mark) "$$" "$PPID" "${BASH_ENV-unset}" "${SHLVL-unset}" "$(if [ -S /proc/$$/fd/0 ]; then echo a socket; elif [ -p /proc/$$/fd/0 ]; then echo a pipe; else readlink /proc/$$/fd/0; fi)" "$-" "$(tr '\\0\\n' '  ' < /proc/$$/cmdline)" >> "$HOME/sourced.log"
@@ -42,19 +55,73 @@ import Testing
         """
     }
 
-    @Test(.enabled(if: configFolder != nil, Comment(rawValue: gate)))
-    func whatClaudesBashToolSourcesIsMeasured() async throws {
-        let run = try await Run(name: "R12b snapshot")
+    /// Bash's own rules behind what the snapshot run records, measured with bash alone (no Claude Code, no gated
+    /// run), in the shapes Claude Code 2.1.323 starts it in (`whatClaudesBashToolSourcesIsMeasured`): the snapshot's
+    /// `/bin/bash -c -l <script>` and each command's `/bin/bash -c <command>`, stdin a socket, `SHLVL` unset, no
+    /// `SSH_CLIENT`. A login bash reads the first of `.bash_profile`, `.bash_login` and `.profile` there is (so in the
+    /// node's home, `.profile` and `.bashrc` only, it reads `.profile` and gets the PATH it sets), and a non-login
+    /// bash reads `~/.bashrc` when its stdin is a socket, not when it is /dev/null. Linux's bash; the Mac's /bin/bash
+    /// isn't measured here.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's bash; the Mac's isn't measured here"))
+    func theStartupFilesBashReadsInClaudeCodesShapesAreMeasured() throws {
+        let temp = Scratch()
+        let root = temp.url("r12b-bash")
+        let cases: [(name: String, files: [String], login: Bool, socket: Bool, read: [String])] = [
+            ("the node's home, login", [".profile", ".bashrc"], true, true, ["profile"]),
+            ("a .bash_login too, login", [".profile", ".bashrc", ".bash_login"], true, true, ["bash_login"]),
+            ("a .bash_profile too, login", [".profile", ".bashrc", ".bash_login", ".bash_profile"], true, true, ["bash_profile"]),
+            ("the node's home, a command, stdin a socket", [".profile", ".bashrc"], false, true, ["bashrc"]),
+            ("the node's home, a command, stdin /dev/null", [".profile", ".bashrc"], false, false, []),
+        ]
+        for (index, shape) in cases.enumerated() {
+            let home = root.appendingPathComponent("\(index)").path
+            try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+            for file in shape.files {
+                let mark = String(file.dropFirst())
+                try Self.startupFile(mark).write(toFile: home + "/" + file, atomically: true, encoding: .utf8)
+            }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = (shape.login ? ["-c", "-l"] : ["-c"]) + ["printf '%s' \"$PATH\""]
+            process.environment = ["HOME": home, "PATH": "/usr/bin:/bin"]
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            var ends: (Int32, Int32)?
+            if shape.socket {
+                ends = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+                process.standardInput = FileHandle(fileDescriptor: ends!.0, closeOnDealloc: false)
+            } else {
+                process.standardInput = FileHandle.nullDevice
+            }
+            try process.run()
+            let path = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            #expect(waitForEnd(process, within: 30), "\(shape.name): bash didn't end")
+            if let ends { close(ends.0); close(ends.1) }
+            let log = (try? String(contentsOfFile: home + "/sourced.log", encoding: .utf8)) ?? ""
+            let read = log.split(separator: "\n").map { String($0.split(separator: " ")[1]) }
+            print("R12b bash: \(shape.name): read \(read.isEmpty ? "nothing" : read.joined(separator: ", ")); PATH=\(path)")
+            #expect(read == shape.read, "\(shape.name): \(log)")
+            let first = shape.read.first.map { home + "/vs-\($0)-bin:" }
+            #expect(first.map { path.hasPrefix($0) } ?? !path.contains("/vs-"), "\(shape.name): PATH=\(path)")
+        }
+    }
+
+    @Test(.enabled(if: configFolder != nil, Comment(rawValue: gate)), arguments: homes.keys.sorted())
+    func whatClaudesBashToolSourcesIsMeasured(home: String) async throws {
+        let run = try await Run(name: "R12b snapshot, \(home) home")
         defer { run.end() }
-        for (file, mark) in Self.startupFiles {
+        let files = try #require(Self.homes[home])
+        for (file, mark) in Self.startupFiles where files.contains(file) {
             try Self.startupFile(mark).write(toFile: run.host.home + "/" + file, atomically: true, encoding: .utf8)
         }
-        // What the Bash tool's command sees: its environment's markers, its shell, and the shell that ran it.
+        // What the Bash tool's command sees: its environment's markers, its PATH, its shell, and the shell that ran it.
         let markers = run.project + "/markers.txt"
         let script = """
             #!/bin/bash
             {
               echo "SHELL=$SHELL"
+              echo "PATH=$PATH"
               echo "parent: $(tr '\\0\\n' '  ' < /proc/$PPID/cmdline | cut -c1-300)"
               echo "BASH_ENV=${BASH_ENV-unset} SHLVL=${SHLVL-unset}"
               env | grep '^VS_MARK_' | sort
@@ -86,7 +153,8 @@ import Testing
                     .filter { text.contains($0.1) }.map(\.0)
                 return "\(mark.file): \(kinds.isEmpty ? "nothing" : kinds.joined(separator: ", "))"
             }
-            run.say("snapshot \(name) (\(text.utf8.count) bytes): \(held.joined(separator: "; "))")
+            let path = text.split(separator: "\n").filter { $0.hasPrefix("export PATH=") }.joined(separator: " | ")
+            run.say("snapshot \(name) (\(text.utf8.count) bytes): \(held.joined(separator: "; ")); its \(path.isEmpty ? "PATH: none" : path)")
         }
         if made.isEmpty { run.say("no new snapshot in \(snapshots)") }
         run.say("what the command saw:\n" + seen)
@@ -100,8 +168,13 @@ import Testing
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         try #require(BranchCode.prefixable(mcp), "\(mcp) can't be a shell prefix")
         let run = try await Run(name: "R12b verifier")
+        // The POSIX sessions the commands' processes were seen in: the defer kills what is left of them there and
+        // under Claude Code, and nothing else on the machine.
+        var sessions: Set<pid_t> = []
         defer {
-            for seconds in ["611", "622"] { for pid in Self.tree(of: seconds, prefix: mcp, except: run.sessionPID).map(\.pid) { kill(pid, SIGKILL) } }
+            for seconds in ["611", "622"] {
+                for pid in Self.tree(of: seconds, prefix: mcp, root: run.sessionPID, sessions: sessions).map(\.pid) { kill(pid, SIGKILL) }
+            }
             run.end()
         }
 
@@ -119,6 +192,7 @@ import Testing
         // must not happen is the tree cut in two: the prefix ended and the command, in a session of its own, left
         // running.
         let timeout = try await Self.started("611", prefix: mcp, run: run, session: session)
+        sessions.formUnion(timeout.sessions)
         let timedOut = await Self.ended("611", prefix: mcp, run: run, session: session, since: timeout, within: 30)
         let flat = (run.screen(session) ?? "").filter { $0.isLetter }.lowercased()
         run.say("at its timeout the command was \(timedOut.ended ? "ended" : flat.contains("background") ? "moved to the background" : "left running")")
@@ -132,6 +206,7 @@ import Testing
             submit: true, key: nil), more: false))
         #expect(await eventually { run.client.reply(to: asked) != nil })
         let interrupt = try await Self.started("622", prefix: mcp, run: run, session: session)
+        sessions.formUnion(interrupt.sessions)
         try await Task.sleep(nanoseconds: 2_000_000_000)
         run.say(String(format: "interrupting (Escape) at %.1f s", MacTime.real.awake() - interrupt.at))
         let typed = run.client.send(.inputUnit(id: session.id, writes: HostInput.writes(text: nil, submit: false, key: "escape"), more: false))
@@ -156,12 +231,22 @@ import Testing
         var session: pid_t
     }
 
-    /// The processes of the Bash tool's command `./hold.sh <seconds>` (Claude Code's own process, `except`, holds it in
-    /// its prompt).
-    static func tree(of seconds: String, prefix: String, except: pid_t) -> [Member] {
+    /// The processes of the Bash tool's command `./hold.sh <seconds>`, among this run's only: Claude Code's
+    /// descendants (`root`, Claude Code itself, holds the command in its prompt and isn't one), and the processes of
+    /// `sessions`, the POSIX sessions the command's processes were seen in (one cut off from Claude Code is no longer
+    /// its descendant, but keeps its session). A process elsewhere on the machine whose arguments match isn't one.
+    static func tree(of seconds: String, prefix: String, root: pid_t, sessions: Set<pid_t>) -> [Member] {
         let command = "./hold.sh \(seconds)"
-        return (Platform.Processes.allPids() ?? []).compactMap { pid -> Member? in
-            guard pid != except, pid != getpid() else { return nil }
+        let all = Platform.Processes.allPids() ?? []
+        var parents: [pid_t: [pid_t]] = [:]
+        for pid in all { if case .brief(let brief) = Platform.Processes.brief(pid) { parents[brief.ppid, default: []].append(pid) } }
+        var candidates = Set<pid_t>()
+        var next = parents[root] ?? []
+        while let pid = next.popLast() { if candidates.insert(pid).inserted { next += parents[pid] ?? [] } }
+        let scoped = sessions.filter { $0 > 0 }
+        if !scoped.isEmpty { for pid in all where scoped.contains(getsid(pid)) { candidates.insert(pid) } }
+        return candidates.sorted().compactMap { pid -> Member? in
+            guard pid != root, pid != getpid() else { return nil }
             let arguments = Platform.Processes.arguments(pid)
             guard let first = arguments.first else { return nil }
             let role: String
@@ -193,6 +278,8 @@ import Testing
     struct Start {
         var members: [Member]
         var at: TimeInterval
+        /// The POSIX sessions its processes were in (the prefix's and the wrapper's).
+        var sessions: Set<pid_t> { Set(members.map(\.session).filter { $0 > 0 }) }
     }
 
     /// Waits for `./hold.sh <seconds>` to start (its `sleep` running), and says what it is made of.
@@ -200,7 +287,7 @@ import Testing
         let command = "./hold.sh \(seconds)"
         var members: [Member] = []
         let started = await run.eventuallyAnswering(timeout: 180, command) {
-            members = tree(of: seconds, prefix: prefix, except: run.sessionPID)
+            members = tree(of: seconds, prefix: prefix, root: run.sessionPID, sessions: [])
             return members.contains { $0.role == "sleep" }
         }
         if !started { run.diagnose(session) }
@@ -217,16 +304,20 @@ import Testing
         let command = "./hold.sh \(seconds)"
         let from = MacTime.real.awake()
         var known = start.members
+        var sessions = start.sessions
         var gone: [String] = []
         let ended = await eventually(timeout: within) {
-            let now = tree(of: seconds, prefix: prefix, except: run.sessionPID)
-            for member in now where !known.contains(where: { $0.pid == member.pid }) { known.append(member) }
+            let now = tree(of: seconds, prefix: prefix, root: run.sessionPID, sessions: sessions)
+            for member in now where !known.contains(where: { $0.pid == member.pid }) {
+                known.append(member)
+                if member.session > 0 { sessions.insert(member.session) }
+            }
             for member in known where !now.contains(where: { $0.pid == member.pid }) && !gone.contains(where: { $0.hasPrefix("\(member.role) \(member.pid) ") }) {
                 gone.append(String(format: "%@ %d ended at %.1f s", member.role, member.pid, MacTime.real.awake() - start.at))
             }
             return now.isEmpty
         }
-        let left = tree(of: seconds, prefix: prefix, except: run.sessionPID)
+        let left = tree(of: seconds, prefix: prefix, root: run.sessionPID, sessions: sessions)
         let record = "from its start: " + (gone.isEmpty ? "none ended" : gone.joined(separator: ", "))
             + (left.isEmpty ? "" : String(format: "; still running %.1f s later: ", MacTime.real.awake() - from)
                + left.map { "\($0.role) \($0.pid) in session \($0.session)" }.joined(separator: ", "))

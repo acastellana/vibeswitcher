@@ -232,7 +232,7 @@ order, within 30 ms of the start:
 | Who | Its command line | What it read |
 | --- | --- | --- |
 | Claude Code at its start, reading the shell's environment | `/bin/bash -c env`, stdin a socket, `SHLVL` 1 | `~/.bashrc` |
-| The snapshot's shell | `/bin/bash -c -l <script>` (a login shell), stdin a socket | `~/.bash_profile`, then `~/.bashrc`, which the script sources itself |
+| The snapshot's shell | `/bin/bash -c -l <script>` (a login shell), stdin a socket | `~/.bash_profile` (the first of `.bash_profile`, `.bash_login`, `.profile` there is), then `~/.bashrc`, which the script sources itself |
 | Each Bash tool command's shell | `/bin/bash -c "source <snapshot> … && eval '<command>' …"`, stdin a socket, `SHLVL` 1 | `~/.bashrc` |
 
 - The snapshot (`<config>/shell-snapshots/snapshot-bash-<ms>-<id>.sh`, 6 KB) holds the functions and aliases of
@@ -240,13 +240,35 @@ order, within 30 ms of the start:
   wrappers and `export PATH=…`; no variable either file exported.
 - The command saw `VS_MARK_BASHRC=1` and no other marker (`SHLVL` 2, `BASH_ENV` unset): its shell reads `~/.bashrc`
   itself, not through the snapshot. `BASH_ENV` was unset in every reader; each non-interactive bash that read
-  `~/.bashrc` unasked had a socket for its stdin and `SHLVL` under 2, which is Ubuntu's bash's rule for a shell it
-  takes for one started by ssh (Claude Code's children get socket pairs for their standard streams).
-- `.profile` was read by nobody: a login bash reads the first of `.bash_profile`, `.bash_login` and `.profile`, and
-  `.bash_profile` was there (a home without one wasn't measured). `.zshrc` by nobody (no zsh here; the snapshot is
-  bash's because `SHELL` is bash).
+  `~/.bashrc` unasked had a socket for its stdin and `SHLVL` under 2. That is bash's own rule (bash(1), INVOCATION:
+  a non-interactive bash whose stdin is a network connection, as under rshd or sshd, reads `~/.bashrc`; bash takes
+  any socket for one), not a distribution's: Debian's `SSH_SOURCE_BASHRC` only adds the `SSH_CLIENT` check. Claude
+  Code's children get socket pairs for their standard streams.
+- `.profile` was read by nobody here: a login bash reads the first of `.bash_profile`, `.bash_login` and `.profile`
+  there is, and `.bash_profile` was there. `.zshrc` by nobody (no zsh here; the snapshot is bash's because `SHELL` is
+  bash).
+- **This node's home is not that home**: it has `.profile` and `.bashrc` and no `.bash_profile` or `.bash_login`.
+  `.profile` has no interactive guard; it sources `.bashrc`, puts `~/bin` (when it exists) and `~/.local/bin` first on
+  `PATH` and sources `~/.local/share/swiftly/env.sh`, which puts swiftly's `bin` first. `.bashrc` returns at its
+  interactive guard (line 8) in any non-interactive shell. Measured with bash alone, ungated, in Claude Code's shapes
+  (`theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`, a scratch home, stdin a socket, no `SSH_CLIENT`): the
+  login bash in a home with `.profile` and `.bashrc` only reads `.profile` and keeps the PATH it sets; with a
+  `.bash_login` added it reads only that, with a `.bash_profile` added only that; the non-login `bash -c` reads
+  `.bashrc` with stdin a socket and nothing with stdin `/dev/null`. So on this node the snapshot's shell reads
+  `~/.profile`, and a worker that creates `~/.bash_profile` or `~/.bash_login` replaces it. The gated test now runs
+  in that home too (its second case, and `markers.sh` prints the command's `PATH`), not yet run: the slice's four
+  gated runs were spent.
+- **The command's PATH is the snapshot's.** The snapshot's script (2.1.323's, in the binary: "Add PATH to the file,
+  as this shell has it, plus missing plugin dirs", `builtin printf 'export PATH=%q\n'`) writes the PATH its login
+  shell has after the startup files and its own `source ~/.bashrc`, and every command sources the snapshot. The runs'
+  snapshots held `export PATH=/usr/bin:/bin`, the scratch host's: their startup files didn't change PATH, so the runs
+  couldn't show it (each file now puts a folder of its own first on PATH). A login bash here, started with
+  `PATH=/usr/local/bin:/usr/bin:/bin` in this home, ends with
+  `~/.local/share/swiftly/bin:~/.local/bin:/usr/local/bin:/usr/bin:/bin:/snap/bin:~/.local/bin`: two folders the user
+  (and every worker) can write ahead of `/usr/bin`.
 - So the plain bash a team session starts in (Task 10a) keeps the startup files out of the session's shell only: every
-  command an agent's Bash tool runs reads `~/.bashrc`, and its start reads `~/.bash_profile` too (S10, S11 item 8).
+  command an agent's Bash tool runs reads `~/.bashrc` and runs with the snapshot's PATH, and the snapshot reads the
+  first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` there is, and `~/.bashrc` (S9, S10, S11 items 8 and 10).
 
 **A verifier's command in a session of its own** (`aVerifierCommandInItsOwnSessionStillTimesOut`). The session gets a
 verifier's environment through its inline settings (`LeadLaunch.verifierEnvironment` with the built
