@@ -116,7 +116,11 @@ public enum LeadLaunch {
     /// What Claude Code keeps in `~/.claude` of every session on this Mac, other projects' included: the prompt
     /// history (`promptHistory`), pasted text (`paste-cache`), the shell's state at each session's start
     /// (`shell-snapshots`), the files its edits replaced (`file-history`), plans, task and todo lists, session records,
-    /// debug logs, feedback drafts and background jobs' timelines (`jobs`). Refused to workers and verifiers (an audit's finders among them), whose reports
+    /// debug logs, feedback drafts, background jobs' timelines (`jobs`), its daemon's folder (`daemon`: its `control.key`
+    /// is a credential), telemetry, the hooks' environment scripts (`session-env`) and its backups. Not one of them is a
+    /// file a session reads with its tools to run: Claude Code reads the hooks' scripts itself, by `readFile`, and puts
+    /// their text ahead of each Bash command (2.1.325, read in its bundle), which no Read rule binds. Refused to workers
+    /// and verifiers (an audit's finders among them), whose reports
     /// and commits go into a public repository: with the user's `defaultMode: auto`, Claude Code (2.1.325, read in its
     /// bundle) runs Read, Grep and Glob outside the working folder without asking, the safe-allowlist path, so before
     /// these rules a worker's Read of another project's prompts was allowed unasked. A Read rule also binds Claude Code's
@@ -124,7 +128,7 @@ public enum LeadLaunch {
     /// a deny rule"); the hook allows none outside the worktree (`ReadOnlyCommand.reachesOutside`). Its path as
     /// resolved, and the other projects' transcript folders, are added at launch (`otherSessions`). The lead keeps them.
     static let sessionStores = ["paste-cache", "shell-snapshots", "file-history", "plans", "tasks", "todos", "sessions", "debug", "feedback",
-                                "jobs"]
+                                "jobs", "daemon", "telemetry", "session-env", "backups"]
     static let claudeStores = [promptHistory] + sessionStores.flatMap { ["Read(~/.claude/\($0))", "Read(~/.claude/\($0)/**)"] }
 
     /// What a worker or verifier started in `cwd` for the project at `root` is also denied, read from `home` at its
@@ -135,7 +139,8 @@ public enum LeadLaunch {
     /// worktrees/…`), the role's own session among them; a team verifier's members are `memberTranscripts`'.
     /// A folder made after the launch (a project first opened later) isn't denied: a deny rule can't say "all but".
     /// Throws when a path as resolved is one a rule can't name as it is (`isRuleSafe`): the role isn't started rather
-    /// than started without its rule, as a team verifier's unreadable board (`team`).
+    /// than started without its rule, as a team verifier's unreadable board (`team`); so does a `projects` folder that's
+    /// there but can't be listed (none at all is no other project's sessions).
     public static func otherSessions(root: String, cwd: String, home: String = VibePaths.home) throws -> [String] {
         let claude = (home as NSString).appendingPathComponent(".claude")
         func real(_ path: String) -> String? {
@@ -152,7 +157,14 @@ public enum LeadLaunch {
             rules += store == "history.jsonl" ? ["Read(/\(resolved))"] : ["Read(/\(resolved))", "Read(/\(resolved)/**)"]
         }
         let projects = (claude as NSString).appendingPathComponent("projects")
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects) else { return rules }
+        let entries: [String]
+        do { entries = try FileManager.default.contentsOfDirectory(atPath: projects) } catch {
+            // Only a folder that isn't there (nor where a link leads) starts the role without these rules.
+            var info = stat()
+            guard stat(projects, &info) == 0 || errno != ENOENT else { return rules }
+            throw BoardError(text: "\(projects) couldn't be listed (\((error as NSError).localizedDescription)), so no worker or verifier "
+                + "was started: other projects' transcripts there couldn't be denied.")
+        }
         func name(_ path: String) -> String { (claudeProjectFolder(path, home: home) as NSString).lastPathComponent }
         let roots = spellings(root)
         let own = Set((roots + spellings(cwd)).map(name))

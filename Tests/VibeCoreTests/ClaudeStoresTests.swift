@@ -31,6 +31,12 @@ struct ClaudeStoresTests {
         try fm.createSymbolicLink(atPath: home + "/.claude", withDestinationPath: real)
         try Data("{\"display\":\"FAKE PROMPT\"}\n".utf8).write(to: URL(fileURLWithPath: real + "/history.jsonl"))
         try Data("FAKE PASTE".utf8).write(to: URL(fileURLWithPath: real + "/paste-cache/0.txt"))
+        // Fake files in the stores no prompt is in: the daemon's key, telemetry, a hook's environment script, a backup.
+        for (folder, file) in Self.otherStores {
+            let path = real + "/\(folder)/\(file)"
+            try fm.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try Data("FAKE".utf8).write(to: URL(fileURLWithPath: path))
+        }
         func name(_ path: String) -> String { (LeadLaunch.claudeProjectFolder(path, home: home) as NSString).lastPathComponent }
         let folders = (other: name(base + "/dev/other-repo"), main: name(root), sibling: name(Worktrees.path(root: root, slug: "add-b")),
                        own: name(cwd))
@@ -41,6 +47,11 @@ struct ClaudeStoresTests {
         return Home(home: home, real: real, root: root, cwd: cwd, other: folders.other, main: folders.main, sibling: folders.sibling,
                     own: folders.own)
     }
+
+    /// The stores beside the prompts' (each with a fake file's name in it): Claude Code's daemon folder (its
+    /// `control.key`), telemetry, the hooks' environment scripts and backups.
+    static let otherStores = [("daemon", "control.key"), ("telemetry", "1p_failed_events.json"),
+                              ("session-env", "5d041167/sessionstart-hook-0.sh"), ("backups", ".claude.json.backup")]
 
     func deny(_ role: LeadLaunch.Role, _ h: Home, name: String) throws -> [String] {
         let launch = try LeadLaunch.prepare(role: role, root: h.root, task: role == .lead ? nil : "fix-login", base: "claude", prompt: "p",
@@ -90,6 +101,50 @@ struct ClaudeStoresTests {
             let rules = try deny(role, h, name: name)
             #expect(denied("~/.claude/jobs", by: rules) && denied("~/.claude/jobs/5d041167/timeline.jsonl", by: rules), "\(name)")
             #expect(denied(h.real + "/jobs/5d041167/timeline.jsonl", by: rules), "\(name)")
+        }
+    }
+
+    /// Claude Code's daemon folder (`control.key`, a credential), telemetry, the hooks' environment scripts and its
+    /// backups: denied to every worker, verifier and finder, the folder and everything under it, as written and as
+    /// resolved; the lead keeps them.
+    @Test func theDaemonKeyTelemetryHookEnvironmentAndBackupsAreDenied() throws {
+        let h = try home()
+        for (role, name) in [(LeadLaunch.Role.worker, "worker-fix-login"), (.verifier, "verify-fix-login"), (.verifier, "finder2-fix-login")] {
+            let rules = try deny(role, h, name: name)
+            for (folder, file) in Self.otherStores {
+                #expect(rules.contains("Read(~/.claude/\(folder))") && rules.contains("Read(~/.claude/\(folder)/**)"), "\(name): \(folder)")
+                #expect(rules.contains("Read(/\(h.real)/\(folder))") && rules.contains("Read(/\(h.real)/\(folder)/**)"), "\(name): \(folder)")
+                for path in ["~/.claude/\(folder)", "~/.claude/\(folder)/\(file)", h.real + "/\(folder)", h.real + "/\(folder)/\(file)"] {
+                    #expect(denied(path, by: rules), "\(name): \(path)")
+                }
+            }
+        }
+        let lead = try deny(.lead, h, name: "lead-acme")
+        for (folder, file) in Self.otherStores {
+            #expect(!denied("~/.claude/\(folder)/\(file)", by: lead) && !denied(h.real + "/\(folder)/\(file)", by: lead), "lead: \(folder)")
+        }
+    }
+
+    /// A `projects` folder that's there but can't be listed starts no worker or verifier (as an unreadable board starts
+    /// no team verifier): the other projects' transcripts in it couldn't be denied (audit workers-and-verifiers-4:F3).
+    /// None at all still starts them, and the lead starts either way.
+    @Test func anUnlistableProjectsFolderStartsNoWorkerOrVerifier() throws {
+        let h = try home(in: "unlistable")
+        let projects = h.real + "/projects"
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: projects)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: projects) }
+        // The test runs as a user the mode binds (not root): the folder really can't be listed.
+        #expect(throws: (any Error).self) { _ = try FileManager.default.contentsOfDirectory(atPath: projects) }
+        for (role, name) in [(LeadLaunch.Role.worker, "worker-fix-login"), (.verifier, "verify-fix-login"), (.verifier, "finder2-fix-login")] {
+            #expect(throws: BoardError.self, "\(name)") { _ = try deny(role, h, name: name) }
+        }
+        _ = try deny(.lead, h, name: "lead-acme")
+
+        let missing = try home(in: "no-projects")
+        try FileManager.default.removeItem(atPath: missing.real + "/projects")
+        for (role, name) in [(LeadLaunch.Role.worker, "worker-fix-login"), (.verifier, "verify-fix-login")] {
+            let rules = try deny(role, missing, name: name)
+            #expect(denied("~/.claude/daemon/control.key", by: rules), "\(name)")
         }
     }
 
@@ -143,14 +198,20 @@ struct ClaudeStoresTests {
     }
 
     /// The shell forms the hook knows (head, tail, grep, rg, wc, sort; cat and sed it never allows) don't run unasked on
-    /// the history file for a worker or a verifier, by any spelling: `~`, the home's absolute path, as resolved, `$HOME`,
+    /// the history file, the daemon's key, telemetry, a hook's environment script or a backup, for a worker or a verifier, by any spelling: `~`, the home's absolute path, as resolved, `$HOME`,
     /// climbing out, or a link committed in the worktree that points at it.
     @Test func noShellReadOfThePromptHistoryRunsUnasked() throws {
         let h = try home()
         try FileManager.default.createSymbolicLink(atPath: h.cwd + "/notes.jsonl", withDestinationPath: h.real + "/history.jsonl")
         let climb = String(repeating: "../", count: h.cwd.split(separator: "/").count) + String(h.real.dropFirst())
-        let files = ["~/.claude/history.jsonl", h.home + "/.claude/history.jsonl", h.real + "/history.jsonl", "$HOME/.claude/history.jsonl",
-                     "\"$HOME\"/.claude/history.jsonl", climb + "/history.jsonl", "notes.jsonl", "./notes.jsonl"]
+        try FileManager.default.createSymbolicLink(atPath: h.cwd + "/key.txt", withDestinationPath: h.real + "/daemon/control.key")
+        var files = ["~/.claude/history.jsonl", h.home + "/.claude/history.jsonl", h.real + "/history.jsonl", "$HOME/.claude/history.jsonl",
+                     "\"$HOME\"/.claude/history.jsonl", climb + "/history.jsonl", "notes.jsonl", "./notes.jsonl", "key.txt"]
+        // The daemon's key, telemetry, a hook's environment script and a backup, by the same spellings.
+        for (folder, file) in Self.otherStores {
+            files += ["~/.claude/\(folder)/\(file)", h.home + "/.claude/\(folder)/\(file)", h.real + "/\(folder)/\(file)",
+                      "$HOME/.claude/\(folder)/\(file)", climb + "/\(folder)/\(file)"]
+        }
         let forms = ["cat %@", "head %@", "head -n 5 %@", "tail %@", "tail -n 1 %@", "grep -n x %@", "grep -c '' %@", "rg x %@",
                      "sed -n 1p %@", "wc -l %@", "sort %@", "git status && head %@", "grep -n x README.md %@", "cat < %@"]
         for role in [LeadLaunch.Role.worker, .verifier] {
