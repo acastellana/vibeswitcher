@@ -630,6 +630,48 @@ final class ServerChildHost {
         #expect(notes.replacedPaths == [host.lock])
     }
 
+    /// The app's `hostNotes`, asked through a fresh connection.
+    func notes(of host: TestHost) async throws -> HostNotes? {
+        let app = try TestClient(host)
+        let seq = app.send(.hostNotes)
+        #expect(await eventually { app.reply(to: seq) != nil })
+        guard case .hostNotes(let notes)? = app.reply(to: seq) else { Issue.record("\(String(describing: app.reply(to: seq)))"); return nil }
+        return notes
+    }
+
+    /// A host that watches its path: a file another process holds locked, renamed over its lock path, can't be locked
+    /// again (a second host may hold it): the host says so in its log once, counts it, and its `hostNotes` name the
+    /// lock path until it clears. Once that process lets go, the next housekeeping locks the file there again, and the
+    /// notes no longer name it (the count stays).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aLockPathAnotherProcessHoldsIsInTheNotesUntilItClears() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, housekeeping: 0.3, removing: dir, watchesItsPath: true, socket: dir + "/h.sock")
+        func noted() -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+        let other = dir + "/other.lock"
+        let locker = try PathSquatterHelper.Running.start(at: other, locking: true)
+        defer { locker.end() }
+        #expect(rename(other, host.lock) == 0)
+        let line = "lock path \(host.lock) names another file, which another process holds locked"
+        #expect(await eventually { noted().contains(line) }, "\(noted())")
+        let held = try #require(try await notes(of: host))
+        #expect(held.lockHeldElsewhere == host.lock && held.lockHeldElsewhereCount == 1 && held.replacedPaths.isEmpty, "\(held)")
+        // Checks meanwhile (as at a housekeeping) neither say it again nor count it again.
+        host.server.queue.sync {
+            host.server.pathWatch?.check(atHousekeeping: true)
+            host.server.pathWatch?.check(atHousekeeping: true)
+        }
+        #expect(noted().components(separatedBy: line).count == 2, "\(noted())")
+        #expect(try await notes(of: host)?.lockHeldElsewhereCount == 1)
+
+        locker.end()
+        #expect(await eventually { noted().contains("lock path \(host.lock) named another file: locked the file there again") }, "\(noted())")
+        let cleared = try #require(try await notes(of: host))
+        #expect(cleared.lockHeldElsewhere == nil && cleared.lockHeldElsewhereCount == 1 && cleared.replacedPaths == [host.lock], "\(cleared)")
+    }
+
     /// A host that isn't told to watch its path (every scratch host, and the Mac's) leaves a squatter there.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
     func aHostNotToldToWatchLeavesItsPath() async throws {

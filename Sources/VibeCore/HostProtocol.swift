@@ -338,12 +338,22 @@ public struct HostNotes: Codable, Equatable, Sendable {
     public var replacedPaths: [String]
     /// How many requests for an app connection it refused (a sender not its server child's, or a dumpable one).
     public var refusedAppConnections: Int
+    /// Its lock path, while the file there is one another process holds locked, so the host can't lock it again (a
+    /// second host may hold it): named from the check that finds it until a check finds the path naming a file the
+    /// host holds. Nil: not now, or a host that doesn't say.
+    public var lockHeldElsewhere: String?
+    /// How many times it found its lock path naming a file another process held locked (once each time that began).
+    /// Nil: a host that doesn't count it.
+    public var lockHeldElsewhereCount: Int?
 
-    public init(startedAt: Date, serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int) {
+    public init(startedAt: Date, serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int,
+                lockHeldElsewhere: String? = nil, lockHeldElsewhereCount: Int? = nil) {
         self.startedAt = startedAt
         self.serverRestarts = serverRestarts
         self.replacedPaths = replacedPaths
         self.refusedAppConnections = refusedAppConnections
+        self.lockHeldElsewhere = lockHeldElsewhere
+        self.lockHeldElsewhereCount = lockHeldElsewhereCount
     }
 }
 

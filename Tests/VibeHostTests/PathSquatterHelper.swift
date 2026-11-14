@@ -5,15 +5,24 @@ import Testing
 /// The test binary as a squatter on a host's path (the stage 2 plan's Task 8b): a process other than the host (and
 /// than this test process, in which a scratch host runs) listening on a socket of its own. Started again with
 /// `PathSquatterHelper.variable` set to a path, it listens there before any test of its own, says "listening" on its
-/// stdout, and ends (0) at its stdin's end.
+/// stdout, and ends (0) at its stdin's end. With `lockVariable` set instead, it opens the file at that path (made when
+/// missing), holds it locked (`flock`), says "locked", and ends the same way, its lock released with it.
 enum PathSquatterHelper {
     static let variable = "VIBE_PATH_SQUATTER_HELPER"
+    static let lockVariable = "VIBE_PATH_LOCKER_HELPER"
 
     static func listenIfAsked() {
-        guard let value = getenv(variable) else { return }
-        let path = String(cString: value)
-        guard (try? UnixSocket.listen(path: path)) != nil else { _exit(1) }
-        let line = "listening\n"
+        let line: String
+        if let value = getenv(lockVariable) {
+            let fd = open(value, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+            guard fd >= 0, flock(fd, LOCK_EX | LOCK_NB) == 0 else { _exit(1) }
+            line = "locked\n"
+        } else if let value = getenv(variable) {
+            guard (try? UnixSocket.listen(path: String(cString: value))) != nil else { _exit(1) }
+            line = "listening\n"
+        } else {
+            return
+        }
         _ = write(STDOUT_FILENO, line, line.utf8.count)
         var byte: UInt8 = 0
         while true {
@@ -36,9 +45,10 @@ enum PathSquatterHelper {
             self.stdin = stdin
         }
 
-        /// The test binary, started again in its squatter mode at `path`, once it listens there.
-        static func start(at path: String) throws -> Running {
-            try #require(getenv(variable) == nil)
+        /// The test binary, started again in its squatter mode at `path`, once it listens there; `locking`: in its
+        /// locker mode, once it holds the file at `path` locked.
+        static func start(at path: String, locking: Bool = false) throws -> Running {
+            try #require(getenv(variable) == nil && getenv(lockVariable) == nil)
             let binary = try #require(Bundle.main.executablePath)
             var input: [Int32] = [-1, -1]
             var output: [Int32] = [-1, -1]
@@ -48,7 +58,7 @@ enum PathSquatterHelper {
                 throw Failure(what: "no pipe: errno \(errno)")
             }
             var spawn = Platform.Spawn(executable: binary, arguments: ProcessInfo.processInfo.arguments)
-            spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" } + ["\(variable)=\(path)"]
+            spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" } + ["\(locking ? lockVariable : variable)=\(path)"]
             spawn.stdin = .descriptor(input[0])
             spawn.stdout = .descriptor(output[1])
             spawn.keep = []
@@ -69,9 +79,9 @@ enum PathSquatterHelper {
                 guard poll(&waiting, 1, Int32(hangGuard * 1_000)) > 0, read(output[0], &byte, 1) == 1 else { break }
                 said.append(byte)
             }
-            guard String(decoding: said, as: UTF8.self) == "listening\n" else {
+            guard String(decoding: said, as: UTF8.self) == (locking ? "locked\n" : "listening\n") else {
                 running.end()
-                throw Failure(what: "the squatter didn't listen at \(path)")
+                throw Failure(what: locking ? "the locker didn't lock \(path)" : "the squatter didn't listen at \(path)")
             }
             return running
         }

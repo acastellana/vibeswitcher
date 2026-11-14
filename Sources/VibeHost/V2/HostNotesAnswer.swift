@@ -2,8 +2,8 @@ import Foundation
 import VibeCore
 
 /// What the host saw that its server child should know (the stage 2 plan's Task 8b, the security architecture
-/// document's S2), counted where no other part keeps it: the app connections it refused (`AppConnector`) and the paths
-/// it took back (`HostPathWatch`). On the host's queue. The server child's restarts are `ServerChild`'s own; those of
+/// document's S2), counted where no other part keeps it: the app connections it refused (`AppConnector`), the paths
+/// it took back and its lock path while another process holds the file there (`HostPathWatch`). On the host's queue. The server child's restarts are `ServerChild`'s own; those of
 /// the images before this one are carried here. A handover carries all of it (`HostHandover.State.tally`), so the
 /// counts run from the host's start, as `startedAt` does, not from this image's.
 final class HostTally {
@@ -14,8 +14,19 @@ final class HostTally {
     private(set) var replacedPaths: [String] = []
     /// The server child's restarts under the images before this one.
     private(set) var earlierServerRestarts = 0
+    /// The lock path while the file it names is another process's to lock (`HostPathWatch`); nil: not now. Not
+    /// carried: the next image's watch checks the path as it begins (and a handover is refused meanwhile).
+    private(set) var lockHeldElsewhere: String?
+    /// How many times `lockHeldElsewhere` began.
+    private(set) var lockHeldElsewhereCount = 0
 
     func refusedAppConnection() { refusedAppConnections += 1 }
+
+    /// `path` (the lock path) names a file another process holds locked, from now on; nil: no longer.
+    func lockHeld(elsewhere path: String?) {
+        if path != nil, lockHeldElsewhere == nil { lockHeldElsewhereCount += 1 }
+        lockHeldElsewhere = path
+    }
 
     func replaced(_ path: String) {
         replacedPaths.append(path)
@@ -28,12 +39,14 @@ final class HostTally {
         refusedAppConnections = max(0, record.refusedAppConnections)
         replacedPaths = Array(record.replacedPaths.suffix(Self.pathsKept))
         earlierServerRestarts = max(0, record.serverRestarts)
+        lockHeldElsewhereCount = max(0, record.lockHeldElsewhereCount ?? 0)
     }
 
     /// The counts as a handover carries them, with `serverRestarts` this image's.
     func record(serverRestarts: Int) -> HostHandover.Tally {
         HostHandover.Tally(serverRestarts: earlierServerRestarts + serverRestarts, replacedPaths: replacedPaths,
-                           refusedAppConnections: refusedAppConnections)
+                           refusedAppConnections: refusedAppConnections,
+                           lockHeldElsewhereCount: lockHeldElsewhereCount > 0 ? lockHeldElsewhereCount : nil)
     }
 }
 
@@ -44,11 +57,14 @@ extension HostHandover {
         public var serverRestarts: Int
         public var replacedPaths: [String]
         public var refusedAppConnections: Int
+        /// `HostTally.lockHeldElsewhereCount`; nil: none, or a build that didn't count it.
+        public var lockHeldElsewhereCount: Int?
 
-        public init(serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int) {
+        public init(serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int, lockHeldElsewhereCount: Int? = nil) {
             self.serverRestarts = serverRestarts
             self.replacedPaths = replacedPaths
             self.refusedAppConnections = refusedAppConnections
+            self.lockHeldElsewhereCount = lockHeldElsewhereCount
         }
     }
 }
@@ -59,7 +75,8 @@ extension HostServer {
     /// included. On `queue`.
     func hostNotes(startedAt: Date) -> HostNotes {
         HostNotes(startedAt: startedAt, serverRestarts: tally.earlierServerRestarts + (serverChild?.restarts ?? 0),
-                  replacedPaths: tally.replacedPaths, refusedAppConnections: tally.refusedAppConnections)
+                  replacedPaths: tally.replacedPaths, refusedAppConnections: tally.refusedAppConnections,
+                  lockHeldElsewhere: tally.lockHeldElsewhere, lockHeldElsewhereCount: tally.lockHeldElsewhereCount)
     }
 
     /// `tally` for a handover's state (`HostHandover.State.tally`): nil on the Mac, which counts nothing (no connector,

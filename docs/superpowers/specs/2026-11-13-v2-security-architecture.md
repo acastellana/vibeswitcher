@@ -329,7 +329,11 @@ socket's path is ever the app.
   changes don't check a recorded file again, so only the next housekeeping's check, a new race the loop must win
   again, finds it. The lock's: the lock descriptor's `fstat`. On a mismatch it binds a fresh listener at the path (with
   `SO_PASSCRED`; its file 0600 less the umask, never wider, as at accept step 1), logs it, and tells the server, which shows it in `status`. A lock path naming another file is locked
-  again, holding at most one such lock beside the first, and a handover carries the newest. It checks once as it
+  again, holding at most one such lock beside the first, and a handover carries the newest. A file there that another
+  process holds locked (a second host may be on it) can't be locked again: the host says so once in the journal, counts
+  it, and names the lock path in `hostNotes`, which the server's `status` shows, until a check (at each change in the
+  folder and each housekeeping) finds the path naming a file the host holds; it doesn't end that process or take the
+  lock from it. It checks once as it
   begins too, so a path changed during a handover's exec is taken back then. The server does the same for its own
   socket. Task 8; E1 for the server.
 - **(call)** **What happened is written where the server can't unwrite it.** The host writes its starts, the server
@@ -400,7 +404,8 @@ own shell and Claude Code) are acceptable while the only project on the node is 
 `ServerChildTests.pathsChangedBeforeTheWatchBeginsAreTakenBackAtOnce`,
 `ServerChildTests.aLockPathReplacedAgainAndAgainHoldsOnlyTheNewest`,
 `ServerChildTests.aHandoverCarriesTheLockThePathNamesAndTheCounts`, `ServerChildTests.theCountsRunOnAcrossAHandover`
-(Task 8b's review); `SocketsTests.boundFileIsTheFileTheSocketIsBoundTo`, `SocketsTests.theMacKnowsNoBoundFile`,
+(Task 8b's review); `ServerChildTests.aLockPathAnotherProcessHoldsIsInTheNotesUntilItClears` (a lock held elsewhere, in
+`hostNotes`); `SocketsTests.boundFileIsTheFileTheSocketIsBoundTo`, `SocketsTests.theMacKnowsNoBoundFile`,
 `ServerChildTests.aSocketRenamedOverThePathIsNotTheHostsAtOnce`,
 `ServerChildTests.aRebindThatLosesEveryAttemptIsTriedAgainAtTheHousekeeping` (the socket's file from the kernel);
 `HostPathDeviceTests.aSocketOnAFileSystemWhoseStatDeviceIsNotItsOwnIsTheHosts` (on an overlay whose `st_dev` isn't
@@ -1188,7 +1193,10 @@ against it. Each line says what reduces it now, if anything.
    which a worker renaming files around it can beat, each time it wins until a housekeeping it loses (30 s each); on
    a file system whose inode numbers pass 32 bits, a file sharing the low 32 bits of the host's socket file's passes;
    and on a kernel before 4.12 (no `SO_COOKIE`) unix_diag names the host's listener by its 32-bit sockfs inode number
-   alone, so once those numbers come round it could answer for another socket. S2.
+   alone, so once those numbers come round it could answer for another socket. A worker can likewise put a file it
+   holds locked at the host's lock path (renamed over it), or lock a fresh file there before the host does: the host
+   can't take that lock, and a second host can start on the path; the host only says so (the journal, and `hostNotes`
+   until it clears, which `status` shows). S2.
 
 **Acting as a session**
 

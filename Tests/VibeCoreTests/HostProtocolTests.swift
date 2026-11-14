@@ -100,6 +100,8 @@ struct HostMessageTests {
             .challenge(Data(repeating: 3, count: 32), keyless: true), .vault(.startedOver(1_234)),
             .hostNotes(HostNotes(startedAt: Date(timeIntervalSince1970: 1_500), serverRestarts: 2, replacedPaths: ["/h/host.sock"],
                                  refusedAppConnections: 1)),
+            .hostNotes(HostNotes(startedAt: Date(timeIntervalSince1970: 1_500), serverRestarts: 0, replacedPaths: [],
+                                 refusedAppConnections: 0, lockHeldElsewhere: "/h/host.sock.lock", lockHeldElsewhereCount: 1)),
         ]
         // A unit's bytes go as base64, not an array of numbers.
         let unit = try HostCoding.encode(HostRequest.inputUnit(id: id, writes: [HostInput.Write(bytes: Array("hi".utf8), delay: 0)], more: false))

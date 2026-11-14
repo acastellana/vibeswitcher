@@ -26,10 +26,11 @@ import VibeCore
 ///   closed. Clients that connected to what was there stay its; the next ones are the host's. When every attempt
 ///   loses, the next attempt is at the next housekeeping, not at the folder's next change (the binds are changes).
 /// - The lock path naming another file: the file there is locked again and held beside the host's own lock (at most
-///   one such: the one taken before is released, its file no longer at the path), or, when another process holds it,
-///   that is said. The host's own lock file put back there is held already (its lock is this process's): the lock
-///   taken again is released. A handover carries the newest (`lockToCarry`), so the next image holds the lock the path
-///   names.
+///   one such: the one taken before is released, its file no longer at the path), or, when another process holds it
+///   (a second host may), that is said once and named in `hostNotes` (`HostTally.lockHeldElsewhere`, counted) until a
+///   check finds the path naming a file this host holds. The host's own lock file put back there is held already (its
+///   lock is this process's): the lock taken again is released. A handover carries the newest (`lockToCarry`), so the
+///   next image holds the lock the path names.
 ///
 /// Each is a line in the host's log and on its stderr (the user journal, through the unit), and each path taken back
 /// is counted for `hostNotes` (`HostTally`). Not on the Mac (`watchesItsPath` is false there), and not in a scratch
@@ -186,7 +187,8 @@ final class HostPathWatch {
     private func checkLock(_ server: HostServer) {
         let now = Self.identity(atPath: lockPath)
         if let now, now == lockFile {
-            said[lockPath] = nil
+            if server.tally.lockHeldElsewhere != nil { Self.say(server, "lock path \(lockPath) names the host's lock file again") }
+            lockSettled(server)
             return
         }
         if let now, now == firstLock {
@@ -194,7 +196,7 @@ final class HostPathWatch {
             // very lock (a lock belongs to the open file), and be said to be another process's.
             releaseRetakenLock()
             lockFile = firstLock
-            said[lockPath] = nil
+            lockSettled(server)
             Self.say(server, "lock path \(lockPath) names the host's own lock file again: holding that one only")
             return
         }
@@ -204,7 +206,10 @@ final class HostPathWatch {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             let code = errno
             Sys.close(fd)
-            return sayOnce(server, lockPath, "lock path \(lockPath) names \(what), which another process holds locked (errno \(code))")
+            // A second host may hold it: in `hostNotes` (what the server's `status` shows) until it clears.
+            server.tally.lockHeld(elsewhere: lockPath)
+            return sayOnce(server, lockPath, "lock path \(lockPath) names \(what), which another process holds locked (errno \(code)):"
+                           + " a second host may hold it; in the host's notes until the path names a file this host holds")
         }
         var info = stat()
         _ = fstat(fd, &info)
@@ -213,9 +218,15 @@ final class HostPathWatch {
         retakenLock = fd
         lockFile = FileIdentity(info)
         server.tally.replaced(lockPath)
-        said[lockPath] = nil
+        lockSettled(server)
         Self.say(server, "lock path \(lockPath) named \(what): locked the file there again, holding it beside the host's own"
                  + (hadOne ? " (the one locked again before released: it is no longer there)" : ""))
+    }
+
+    /// The lock path names a file this host holds: nothing more to say about it, and no longer another process's.
+    private func lockSettled(_ server: HostServer) {
+        said[lockPath] = nil
+        server.tally.lockHeld(elsewhere: nil)
     }
 
     private func releaseRetakenLock() {
