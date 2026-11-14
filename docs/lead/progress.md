@@ -3084,3 +3084,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 14:27 Automatically (auto_advance): Merged team-view-member-lines at d4c41007 (its passing audit), deny-claude-by-listing at f579c69b (its passing audit) into main as one batch, on 1 test run for 3 tasks.
 - 2026-11-14 14:27 Automatically (auto_advance): Cleaned up team-view-member-lines (freed 2.5 GB of build output and temporary folders). It stays done.
 - 2026-11-14 14:27 Automatically (auto_advance): Cleaned up deny-claude-by-listing (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-14 14:43 Automatically (auto_advance): Started the audit of main-red-green-and at 52946e0e (Its review is audit).
+- 2026-11-14 14:44 Released main-red-green-and's worker (idle since its done report on 52946e0e) while its audit runs
+- 2026-11-14 14:44 Automatically (auto_advance): Released main-red-green-and's worker, idle since its done report on 52946e0e, while its audit runs (ended pid 19451 (Worker: Main-red, green and catch-up notices reach every team member)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-14 14:46 Automatically (auto_advance): Started the audit of peer-wait-deadline-no at b8912729 (Its review is audit).
+- 2026-11-14 14:46 Released peer-wait-deadline-no's worker (idle since its done report on b8912729) while its audit runs
+- 2026-11-14 14:46 Automatically (auto_advance): Released peer-wait-deadline-no's worker, idle since its done report on b8912729, while its audit runs (ended pid 50065 (Worker: Peer-wait deadline: no member waits on a teammate without a limit)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-14 14:48 Audit of peer-wait-deadline-no: incomplete, clean, round 3: 2 Important (1 open), 3 Nit open, 1 Pre-existing open
+- 2026-11-14 14:48 Started a worker on peer-wait-deadline-no
+- 2026-11-14 14:48 Automatically (auto_advance): Sent peer-wait-deadline-no's worker the open Important findings peer-wait-deadline-no:F6 from its audit at b8912729 (in a new worker: its last one was released during the audit).
