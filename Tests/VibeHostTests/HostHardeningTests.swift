@@ -480,6 +480,35 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
     }
 }
 
+// MARK: Task 9c: a traced new image
+
+extension HostHardeningTests {
+    /// A new image after a handover that finds itself traced (a scratch host's `--handover-test-traced`, which the new
+    /// build is given) goes back without reading the secrets: the build before, back through its sealed copy, reads them
+    /// and serves on with its own vault (a lead grant issued before is still bound to its session).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's hardening and sealed memory; the Mac's does nothing"))
+    func aTracedNewImageGoesBackWithoutTheVault() async throws {
+        let host = try await ScratchHostProcess()
+        defer { host.stop() }
+        let (app, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let bound = try await BoundGrant(app)
+        defer { kill(bound.session.childPID, SIGKILL) }
+        #expect(await host.handOver(to: host.failingBuild("--handover-test-traced"), through: app) == .ok, "\(host.log)")
+        #expect(await eventually { host.log.contains("took over 1 sessions") }, "\(host.log)")
+        let log = host.log
+        #expect(log.contains("couldn't take over: traced by pid") && log.contains("(--handover-test-traced)"), "\(log)")
+        #expect(log.contains("going back to /proc/self/fd/"), "\(log)")
+        // The traced image said nothing of secrets: the only image that took them is the one back.
+        let traced = try #require(log.range(of: "couldn't take over: traced by pid"))
+        let back = try #require(log.range(of: "took over 1 sessions"))
+        #expect(!log[traced.upperBound..<back.lowerBound].contains("bytes of secrets"), "\(log)")
+        #expect(log[back.lowerBound...].contains("bytes of secrets"), "\(log)")
+        let (again, _, build, _, _, pid, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        #expect(build == host.oldBuild && pid == host.pid)
+        #expect(bound.isBound(in: again), "\(log)")
+    }
+}
+
 // MARK: Task 9b: the host's own sealed copy, its launcher and parsers, --node
 
 /// The host runs its sessions' launchers and parsers from its own sealed copy, which no program of a session holds; a

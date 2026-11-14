@@ -1453,6 +1453,27 @@ on both, and S5's `Held by:` names them.
   `secretsGoThroughAChannelAndNowhereElse` listed Mac-only by name, with the reason "Linux hands over through sealed
   memory; HandoverLinuxTests hold it".
 - Test: `Tests/VibeHostTests/HandoverLinuxTests.swift`, `HostHardeningTests.swift`
+- *As made (2026-11-14), awaiting the lead's approval where marked:*
+  - **A traced new image leaves the secrets unread and open, not closed** (awaiting approval): this task's own test
+    `aTracedNewImageGoesBackWithoutTheVault` wants the previous build to serve on with its vault, which it can't if
+    the traced image closes the only descriptor of it (the fallback is the same process). The traced image never
+    reads them; the fallback, traced too, ends, which closes them. A real tracer could not have attached to the
+    non-dumpable old image, so it was there all along and closing gains nothing against it. S8's bullet says so.
+  - `handOver(to:)`'s hook is one line into `HostServer.handOverThroughMemory` (`V2/HandoverMemory.swift`), which
+    reads and sets `config`, `clients`, `handingOver` and `handoverState(secretFD:)`: four `private`s dropped (kind 8).
+    `HostHandover.write` isn't edited (Linux never calls it); `probeIfAsked` gets a hook too: the probe closes its
+    copy and hardens as a parser does.
+  - The fallback's path (never executed: its build id, its folders) travels as `--handover-fallback-image`, a
+    handover flag, and the new image of an ELF target gets `--image-path <target>` (a script stand-in execs a file
+    that names itself).
+  - On Linux `--handover-fail-restore` fails after the state and secrets were read (just before the restore), so
+    the fallback tests read the secrets again from sealed memory; on the Mac it fails where it did.
+  - `MacOnlyTests.txt` lists `HostHandoverTests.swift` (the two tests wrapped in `#if canImport(Darwin)`, as the
+    list's lint requires of a listed file), not a runtime trait.
+  - `aHandoverImageIsNotDumpableFromItsExec` opens `/proc/<pid>/mem` rather than `pidfd_getfd` (the test target has
+    no shim; both need the process dumpable); it polls the probe whenever it catches one, the host at every poll.
+  - The new image's scratch-only report is two lines in its log (`handover memory taken`, `handover memory kept`),
+    and the old image's `handover memory written`; the user's host writes neither.
 
 - [ ] **Step 1: Failing tests** (Linux unless marked).
   - `HandoverLinuxTests.aHandoverWritesNoFile`: a folder watch on the scratch lock's folder sees no file made during a

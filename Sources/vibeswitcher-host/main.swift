@@ -16,7 +16,7 @@ HostHandover.probeIfAsked(CommandLine.arguments)
 signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)
 // The host, hardened before it reads or takes anything (see `HostHardening`); refused, it doesn't start (or goes back).
-let hardening = HostHardening.atStart(mode: .host)
+var hardening = HostHardening.atStart(mode: .host)
 if let why = HostHardening.refusal(hardening, arguments: CommandLine.arguments) {
     FileHandle.standardError.write(Data("vibeswitcher-host: not started: \(why)\n".utf8))
     exit(1)
@@ -51,6 +51,8 @@ let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
 // The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone). On Linux by
 // the lock file's identity, a link refused (see `HostHardening.lock`); on the Mac by its path, as always.
 let ownsLaunchers = HostHardening.ownsLaunchers(lockPath: lockPath, usersLock: VibePaths.hostLock.path)
+// A scratch host's test of a traced new image (Linux): refused as if traced, so it goes back (V2/HandoverMemory.swift).
+if let traced = HandoverMemory.testTracer(arguments: arguments, ownsLaunchers: ownsLaunchers) { hardening = traced }
 // On Linux the account's own lock is the node's host's alone; its own image and, with --node-root, its server read
 // into sealed copies, checked against build-info (see V2/HostImages.swift).
 startRefusal = startRefusal ?? HostImages.mayStart(lockPath: lockPath, accountRoot: (HostImages.accountHome ?? "/nonexistent") + "/.vibeswitcher",
@@ -115,7 +117,7 @@ config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.append
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
                                      "--handover-fallback-app": true, "--app-executable": true,
-                                     HostStart.appKeyFlag: false, HostImages.imagePathFlag: true].merging(TestAppPrincipal.handoverFlags) { $1 }
+                                     HostStart.appKeyFlag: false, HostImages.imagePathFlag: true, HandoverMemory.fallbackImageFlag: true].merging(TestAppPrincipal.handoverFlags) { $1 }
 config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
     if result.skip { result.skip = false; return }
     if let takesValue = handoverFlags[item.element] { result.skip = takesValue; return }
@@ -136,9 +138,11 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
         log("going back to \(fallback)")
         var arguments = config.arguments + ["--handover", statePath]
         if let app = value(after: "--handover-fallback-app") { arguments += ["--app-executable", app] }
-        log("\(HostHandover.exec(fallback, arguments: arguments, inherit: nil))")
+        // On Linux the old image's sealed copy, carried across the exec, by its path's name (V2/HandoverMemory.swift).
+        log("\(HandoverMemory.goBack(to: fallback, image: value(after: HandoverMemory.fallbackImageFlag), arguments: arguments) ?? HostHandover.exec(fallback, arguments: arguments, inherit: nil))")
     }
-    unlink(statePath)
+    // On Linux the state is sealed memory, no file: nothing to remove.
+    if HandoverMemory.descriptor(named: statePath) == nil { unlink(statePath) }
     exit(1)
 }
 
@@ -147,14 +151,18 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
 let handoverPath = HostHardening.handover(in: arguments)
 var restoring: HostHandover.State?
 var restoredSecrets: Data?
+// The state as handed over, its secrets' descriptor still named: what `HandoverMemory.finish` closes once restored.
+var handedOver: HostHandover.State?
 if let handoverPath {
     // Refused at its start (traced): back to the build before, its state and secrets unread here.
     if case .refused(let why) = hardening { goBack(handoverPath, HostHardening.Refused(why)) }
     if let startRefusal { goBack(handoverPath, HostHardening.Refused(startRefusal)) }
     do {
-        // A test of the fallback: as if this build couldn't read the state.
-        if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
+        // A test of the fallback: as if this build couldn't read the state (on Linux, once it has read it and its
+        // secrets, below: V2/HandoverMemory.swift).
+        if arguments.contains("--handover-fail-restore"), !HandoverMemory.failsRestoreLate { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
         var state = try HostHandover.read(from: handoverPath)
+        handedOver = state
         restoredSecrets = HostHandover.takeSecrets(from: &state)
         restoring = state
     } catch {
@@ -186,7 +194,8 @@ HostHardening.watch(server)
 // The vault is what a build this one hands over to must hold in memory too.
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
-let testSecret = HostHardening.takesTestFlags(ownsLaunchers: ownsLaunchers) ? value(after: "--handover-test-secret").map { Data($0.utf8) } : nil
+let testSecret = HostHardening.takesTestFlags(ownsLaunchers: ownsLaunchers) ? value(after: "--handover-test-secret").map { Data($0.utf8) }
+    ?? HandoverMemory.testSecret(arguments: arguments, ownsLaunchers: ownsLaunchers) : nil
 if let testSecret { server.secretsForHandover = { testSecret } }
 // Ended by a signal: said in the log first (with who sent it), then ended by it as before. Installed before
 // `start()` (or `start(restoring:)`), which logs "host: started": a signal from then on is always logged. Sessions
@@ -216,8 +225,9 @@ signals.setEventHandler {
 signals.resume()
 if let handoverPath, let state = restoring {
     do {
+        if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore, after its secrets") }
         _ = try server.start(restoring: state)
-        unlink(handoverPath)
+        if HandoverMemory.descriptor(named: handoverPath) == nil { unlink(handoverPath) }
         if let testSecret { log("test secret carried: \(restoredSecrets == testSecret ? "yes" : "no")") }
         log("took over \(state.sessions.count) sessions\(restoredSecrets.map { " and \($0.count) bytes of secrets" } ?? "") from build \(state.fromBuild) \(Date())")
     } catch {
@@ -226,6 +236,7 @@ if let handoverPath, let state = restoring {
 } else {
     do {
         try server.start()
+        HandoverMemory.removeStaleStateFiles(lockPath: lockPath, server: server)
     } catch HostServer.Failure.alreadyRunning {
         server.note("host: another host holds the lock; this one (build \(build)) exits")
         exit(0)
@@ -240,6 +251,9 @@ TestAppPrincipal.adopt(arguments: arguments, restored: restoring?.testAppConnect
 // after a handover, the one the build before ran, once checked.
 ServerChild.adopt(arguments: arguments, ownsLaunchers: ownsLaunchers, nodeRoot: folders.installFolder, config: config, server: server,
                   restored: restoring, copy: images.server)
+// Restored and taken again: on Linux the state's and secrets' sealed memory and the old image's copy closed, every
+// other descriptor kept marked close-on-exec (V2/HandoverMemory.swift).
+if let handedOver, let handoverPath { HandoverMemory.finish(handedOver, statePath: handoverPath, server: server) }
 // Holding the user's lock now: no other host runs, so other builds' launchers can go (not for a scratch host on
 // its own lock, which runs beside the real one).
 for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path)) ?? [] where ownsLaunchers && images.own == nil && name != "launcher-\(build)" {

@@ -32,5 +32,15 @@ extension Platform.ProcessSelf {
     public static func closeInheritedImage() -> Int32? {
         nil
     }
+
+    /// `ENOTSUP`: the Mac has no sealed memory; its host hands over through a file and a socket, as today.
+    public static func sealedMemory(_ bytes: UnsafeRawBufferPointer, name: String) -> Result<Int32, Platform.Errno> {
+        .failure(Platform.Errno(code: ENOTSUP))
+    }
+
+    /// False: nothing on the Mac is sealed memory.
+    public static func isSealed(_ fd: Int32) -> Bool {
+        false
+    }
 }
 #endif

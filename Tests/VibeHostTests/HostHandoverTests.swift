@@ -22,8 +22,9 @@ final class ScratchHostProcess {
     /// The app's key, as the app hands it to the host it starts.
     let appKey = SymmetricKey(size: .bits256)
 
-    /// `old`: the build it starts as (another commit's host, for an upgrade); this one's otherwise.
-    init(arguments extra: [String] = [], old: String = hostLauncher) async throws {
+    /// `old`: the build it starts as (another commit's host, for an upgrade); this one's otherwise. `prepare`: given the
+    /// scratch folder once it is made, before the host starts (a test's leftovers put there).
+    init(arguments extra: [String] = [], old: String = hostLauncher, prepare: (String) throws -> Void = { _ in }) async throws {
         // Short: a socket's path has a 104-byte limit.
         dir = "\(shortScratchRoot)/vsho-\(UUID().uuidString.prefix(8))"
         home = dir + "/home"
@@ -46,6 +47,7 @@ final class ScratchHostProcess {
         try files.setAttributes([.modificationDate: Date(timeIntervalSince1970: now - 1_000)], ofItemAtPath: newBinary)
         oldBuild = HostBuild.id(ofExecutableAt: oldBinary)
         newBuild = HostBuild.id(ofExecutableAt: newBinary)
+        try prepare(dir)
 
         process.executableURL = URL(fileURLWithPath: oldBinary)
         process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", sessionLog] + extra
@@ -419,7 +421,8 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(scene.host.log.contains("couldn't take over"))
         #expect(await eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
         // The old build's own copy, the one it started its sessions with. On Linux, where its sessions start from its
-        // sealed copy and no launcher copy is written (Task 9b), its own file until Task 9c carries that copy across.
+        // sealed copy and no launcher copy is written (Task 9b), that copy, carried across the exec (Task 9c) and named
+        // by its file's path, which its cmdline shows.
         if Platform.CodeIdentity.isAvailable {
             #expect(scene.host.runningExecutable?.hasSuffix("/.vibeswitcher/host/launcher-\(scene.host.oldBuild)") == true)
         } else {
@@ -429,6 +432,8 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
 }
 
 struct HostHandoverStateTests {
+    // Linux hands over through sealed memory, writing no state file and using no channel (HandoverLinuxTests hold it).
+    #if canImport(Darwin)
     @Test func theStateFileIsPrivateAndReadBack() throws {
         let path = "\(shortScratchRoot)/vsho-state-\(UUID().uuidString.prefix(8))"
         defer { unlink(path) }
@@ -442,6 +447,7 @@ struct HostHandoverStateTests {
         #expect(try HostHandover.read(from: path) == state)
         #expect(state.descriptors == [3, 4, 9])
     }
+    #endif
 
     @Test func aStateOfAnotherFormatIsRefused() throws {
         let path = "\(shortScratchRoot)/vsho-state-\(UUID().uuidString.prefix(8))"
@@ -454,6 +460,7 @@ struct HostHandoverStateTests {
         #expect(throws: HostHandover.Failure.self) { try HostHandover.read(from: path) }
     }
 
+    #if canImport(Darwin)
     @Test func secretsGoThroughAChannelAndNowhereElse() throws {
         let secret = Data((0..<300_000).map { UInt8($0 % 251) })
         let fd = try HostHandover.SecretChannel.make(secret)
@@ -463,6 +470,7 @@ struct HostHandoverStateTests {
         // Closed: the number may already be another test's descriptor (they run in parallel), but not the channel.
         #expect(!HostHandover.isOpen(fd) || Self.identity(fd) != channel)
     }
+    #endif
 
     /// What the descriptor is open on (device and inode), nil when it's closed.
     static func identity(_ fd: Int32) -> [UInt64]? {

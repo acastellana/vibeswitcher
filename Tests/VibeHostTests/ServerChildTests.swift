@@ -872,7 +872,9 @@ final class ServerChildHost {
 
     /// A handover's state carries the lock the lock path names (the one taken again), not the host's first lock, whose
     /// file is no longer there: the next image holds the user's lock. It carries what `hostNotes` counted too. The
-    /// state is read while the probe (a script that waits to be told) runs; the probe's no leaves the host serving.
+    /// state is read while the probe (a script that waits to be told) runs, from the sealed memory its arguments name
+    /// (this process is the host, so `/proc/self/fd/N` names the same memory here; no state file is written, Task 9c);
+    /// the probe's no leaves the host serving.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
     func aHandoverCarriesTheLockThePathNamesAndTheCounts() async throws {
         let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
@@ -900,9 +902,17 @@ final class ServerChildHost {
         #expect(chmod(probe, 0o755) == 0)
         let app = try TestClient(host)
         let seq = app.send(.handover(executable: probe))
-        let statePath = host.lock + ".handover"
-        #expect(await eventually { (try? HostHandover.read(from: statePath)) != nil })
-        let state = try HostHandover.read(from: statePath)
+        var statePath: String?
+        #expect(await eventually {
+            statePath = HostProcesses.children(of: getpid()).lazy.compactMap { pid -> String? in
+                let arguments = Platform.Processes.arguments(pid)
+                guard let at = arguments.firstIndex(of: "--handover-probe"), arguments.indices.contains(at + 1) else { return nil }
+                return arguments[at + 1]
+            }.first
+            return statePath.flatMap { try? HostHandover.read(from: $0) } != nil
+        })
+        let state = try HostHandover.read(from: try #require(statePath))
+        #expect(!FileManager.default.fileExists(atPath: host.lock + ".handover"))
         #expect(FileManager.default.createFile(atPath: go, contents: nil))
         var info = stat()
         #expect(fstat(state.lockFD, &info) == 0)

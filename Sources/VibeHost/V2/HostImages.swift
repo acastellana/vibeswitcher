@@ -15,8 +15,9 @@ import VibeCore
 ///   itself dumpable again and raises its `oom_score_adj` by 500 (`beforeProgram`), so that the kernel's OOM killer
 ///   picks a session's program before the host. Dumpable, its `/proc/<pid>/exe` lets any process of the user `chmod`
 ///   the copy it runs, which is why that copy is never the parsers' (`forSessions` says more). After a handover the
-///   new image's own copy is Task 9c's (adopted from the descriptor the old image passes); until then it is made
-///   afresh, as at a fresh start; its launchers' copy is always made afresh, never carried.
+///   new image's own copy is the target's sealed copy the old image loaded and executed (Task 9c, `HandoverMemory`),
+///   adopted from the descriptor it passes (a script stand-in's can't be: made afresh then, as at a fresh start); its
+///   launchers' copy is always made afresh, never carried.
 /// - **`build-info`.** With `--node-root FOLDER` (a build folder: `FOLDER/bin/…`, `FOLDER/build-info`), the own copy's
 ///   SHA-256, and the `--server` image's (loaded here, so the copy checked is the copy that runs), must be what
 ///   `FOLDER/build-info` records (`BuildInfo`), or the host doesn't start, saying which binary.
@@ -173,6 +174,8 @@ public enum HostImages {
     /// What `forSessions` and `launching` read: the own copy's path, the launchers' copy's, and the test hold.
     private struct Sessions {
         var own: String?
+        /// The own copy itself: a handover's fallback (Task 9c, `HandoverMemory`).
+        var ownCopy: Platform.ProcessSelf.SealedCopy?
         var launcher: String?
         var hold: String?
     }
@@ -215,7 +218,7 @@ public enum HostImages {
             case .failure(let error):
                 return refused("its launchers' sealed copy couldn't be made (errno \(error.code))", closing: [own] + (server.map { [$0] } ?? []))
             case .success(let launcher):
-                sessions { $0.own = own.path; $0.launcher = launcher.path }
+                sessions { $0.own = own.path; $0.ownCopy = own; $0.launcher = launcher.path }
                 return .success(Loaded(own: own, server: server, launcher: launcher))
             }
         }
@@ -237,6 +240,10 @@ public enum HostImages {
     }
 
     // MARK: The launcher and the parsers
+
+    /// This host's own sealed copy (`load`), which a handover carries for its fallback (`HandoverMemory`); nil before
+    /// it is loaded, on the Mac, and in a host that isn't a process of its own (a test runner's).
+    static var ownCopy: Platform.ProcessSelf.SealedCopy? { sessions { $0.ownCopy } }
 
     /// The image `PTYSpawn.spawn` starts a session's launcher from, for the host's `launcher`: on Linux, when it is the
     /// host's own copy, the launchers' own copy (`Loaded.launcher`); otherwise `launcher` as given (the Mac's launcher

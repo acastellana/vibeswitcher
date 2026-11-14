@@ -215,8 +215,10 @@ public enum HostHardening {
 
     /// After the host's config is made: the flags `refused(in:ownsLaunchers:)` names said in its log and on stderr,
     /// and, on Linux, a scratch host given `staysDumpableFlag` made dumpable again, and one given
-    /// `HostImages.launcherTestHoldFlag` holding its sessions' launchers (`HostImages.holdLaunchers(until:)`).
+    /// `HostImages.launcherTestHoldFlag` holding its sessions' launchers (`HostImages.holdLaunchers(until:)`). A scratch
+    /// host on Linux says what its handovers write and take (`HandoverMemory.reports`), for its tests.
     public static func afterConfig(arguments: [String], ownsLaunchers: Bool, server: HostServer) {
+        HandoverMemory.reports = !Platform.CodeIdentity.isAvailable && !ownsLaunchers
         let refused = refused(in: arguments, ownsLaunchers: ownsLaunchers)
         if !refused.isEmpty {
             let line = "refused test-only flags (the user's host takes none): \(refused.joined(separator: ", "))"

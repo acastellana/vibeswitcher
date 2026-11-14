@@ -633,11 +633,47 @@ struct SealedCopyTests {
         lines.append(String(format: "ten of the test binary at once: %.0f ms, Shmem +%.1f MB", took * 1000, Double(grew) / 1024))
         print("SealedCopyCost\n" + lines.joined(separator: "\n"))
     }
+
+    /// Sealed memory holds the bytes it was given, every seal on it (no write, no growth or shrinking, from its
+    /// maker too), close-on-exec and `0400`; read from offset 0 and by reopening `/proc/self/fd/N`, each from the
+    /// beginning. Nothing else is sealed memory: a pipe, a plain memfd, a closed number.
+    @Test func sealedMemoryHoldsItsBytesForGood() throws {
+        let bytes = (0..<300_000).map { UInt8($0 % 251) }
+        let fd = try bytes.withUnsafeBytes { Platform.ProcessSelf.sealedMemory($0, name: "data") }.get()
+        defer { close(fd) }
+        #expect(Platform.ProcessSelf.isSealed(fd))
+        #expect(vibe_get_seals(fd) == Platform.ProcessSelf.allSeals)
+        #expect(fcntl(fd, F_GETFD) & FD_CLOEXEC != 0)
+        #expect(Self.mode(of: fd) == 0o400)
+        var read = [UInt8](repeating: 0, count: bytes.count + 10)
+        #expect(pread(fd, &read, read.count, 0) == bytes.count && Array(read.prefix(bytes.count)) == bytes)
+        for _ in 0..<2 {
+            let again = try Data(contentsOf: URL(fileURLWithPath: "/proc/self/fd/\(fd)"))
+            #expect(Array(again) == bytes)
+        }
+        #expect(write(fd, [1, 2, 3], 3) < 0 && errno == EPERM)
+        #expect(ftruncate(fd, 10) < 0 && errno == EPERM)
+        let empty = try [UInt8]().withUnsafeBytes { Platform.ProcessSelf.sealedMemory($0, name: "empty") }.get()
+        defer { close(empty) }
+        #expect(Platform.ProcessSelf.isSealed(empty))
+
+        var pipe: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&pipe) == 0)
+        defer { pipe.forEach { close($0) } }
+        #expect(!Platform.ProcessSelf.isSealed(pipe[0]))
+        let plain = vibe_memfd_create("plain", VIBE_MFD_CLOEXEC | VIBE_MFD_ALLOW_SEALING)
+        try #require(plain >= 0)
+        defer { close(plain) }
+        #expect(!Platform.ProcessSelf.isSealed(plain))
+        #expect(!Platform.ProcessSelf.isSealed(-1))
+    }
     #else
     @Test func thereAreNoSealedCopiesOnTheMac() {
         #expect(Platform.ProcessSelf.sealedCopy(of: "/bin/sleep", name: "sleep") == .failure(Platform.Errno(code: ENOTSUP)))
         #expect(Platform.ProcessSelf.adopt(STDIN_FILENO) == nil)
         #expect(Platform.ProcessSelf.closeInheritedImage() == nil)
+        #expect([UInt8]([1]).withUnsafeBytes { Platform.ProcessSelf.sealedMemory($0, name: "data") } == .failure(Platform.Errno(code: ENOTSUP)))
+        #expect(!Platform.ProcessSelf.isSealed(STDIN_FILENO))
     }
     #endif
 }

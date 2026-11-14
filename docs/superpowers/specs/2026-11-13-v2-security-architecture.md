@@ -857,7 +857,10 @@ memory and writes no file.
   reads the state and the secrets as the new image would have. `goBack` today re-runs the fallback with the same path
   and, when that fails too, unlinks it and exits, hanging up every session (`main.swift:92-102`); with sealed memory
   the fallback reads exactly what the old build wrote, so only a fault in the old build itself ends the host.
-- **A traced new image** closes the secrets unread and goes back; the fallback, traced, ends (S6).
+- **A traced new image** closes the secrets unread and goes back; the fallback, traced, ends (S6). (As made in Task
+  9c, awaiting the lead's approval: the traced image leaves them unread and open, so that the fallback, which is the
+  same process, still has the vault; a traced fallback ends, which closes them. A tracer can't attach to the
+  non-dumpable image before it, so one there now was there all along.)
 - **The server child's record is checked again on restore:** its parent is this process, its start ticks match, it is
   no restored session's program and no parser; its connector is among the descriptors. Otherwise the record is
   cleared and the server started again.
@@ -894,18 +897,22 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 **The user confirms:** that builds are switched only while no worker or verifier runs, until the measurement passes.
 
 **Held by:** `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`,
-`HostHandoverTests.aBuildThatCantRestoreGoesBackToTheOldOne`, `HostHandoverStateTests.theStateFileIsPrivateAndReadBack`,
-`HostHandoverStateTests.aStateOfAnotherFormatIsRefused`, `HostHandoverStateTests.secretsGoThroughAChannelAndNowhereElse`
-(on the Mac now; on Linux from Task 5b, where the Linux forms replace the file and channel cases);
+`HostHandoverTests.aBuildThatCantRestoreGoesBackToTheOldOne`, `HostHandoverStateTests.aStateOfAnotherFormatIsRefused`
+(both systems); `HostHandoverStateTests.theStateFileIsPrivateAndReadBack`,
+`HostHandoverStateTests.secretsGoThroughAChannelAndNowhereElse` (the Mac's file and channel, the Mac only);
 `ServerChildTests.theServerChildSurvivesAHandover`, `ServerChildTests.aForgedServerChildInTheStateIsNotTheApp`,
 `ServerChildTests.theRestoresCheckNamesWhatIsWrong` (stage 2 Task 8b); `ServerChildTests.aServerChildOfAnotherServerPathRunsOn`,
 `ServerChildTests.aCarriedCopyNotTakenIsClosed`, `ServerChildTests.aHandoverCarriesTheLockThePathNamesAndTheCounts`
-(Task 8b's review); planned: stage 2 plan task 9.
+(Task 8b's review); `HostHardeningTests.theUsersHostIgnoresTestSecretFlags` (Task 9a);
+`HandoverLinuxTests.aHandoverWritesNoFile`, `HandoverLinuxTests.theStateAndSecretsAreSealed`,
+`HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsTheVault`, `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsEverySession`,
+`HandoverLinuxTests.aMegabyteOfSecretsIsHandedOver`, `HandoverLinuxTests.aDowngradeIsRefused`,
+`HandoverLinuxTests.aFreshHostRemovesAStaleStateFile`, `HandoverLinuxTests.everyDescriptorTheNewImageKeepsIsCloseOnExec`,
+`HandoverLinuxTests.aHandoverImageIsNotDumpableFromItsExec`, `HandoverLinuxTests.aFailedTakeOverGoesBackThroughTheSealedCopy`,
+`HandoverLinuxTests.aFallbackImageRewrittenInPlaceIsNotWhatRuns`, `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`
+(Task 9c); planned: stage 2 plan task 9d.
 
-**Tests to write:** Task 9: `ServerChildTests.aSwitchBringsTheNewBuildsServer` (9d),
-`HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`,
-`aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`, `aDowngradeIsRefused`,
-`aFreshHostRemovesAStaleStateFile`; `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`. Step 8:
+**Tests to write:** Task 9d: `ServerChildTests.aSwitchBringsTheNewBuildsServer`. Step 8:
 `aSwitchWhileAWorkerRunsIsRefused`.
 
 ## S9. What the host executes

@@ -103,11 +103,11 @@ public final class HostServer {
     /// `HostHandover.takeSecrets(from:)` (before it makes its server) or from `start(restoring:)`.
     public var secretsForHandover: (() -> Data)?
 
-    private let config: Config
+    let config: Config
     private let log: HostLog
     var sessions: [UUID: HostedSession] = [:]
     private var order: [UUID] = []
-    private var clients: [ObjectIdentifier: ClientConnection] = [:]
+    var clients: [ObjectIdentifier: ClientConnection] = [:]
     /// Per session, the session whose process asked for it (see `mayKill`).
     private var startedBy: [UUID: UUID] = [:]
     /// The sessions the app asked for: the user's own (the lead's among them, which its team tells apart). The git
@@ -145,7 +145,7 @@ public final class HostServer {
         + (Platform.CodeIdentity.isAvailable ? [] : [HostProtocol.Capability.hostNotes])
     /// Per session, its input from every client in order (see `InputOrder`).
     private var inputOrders: [UUID: InputOrder] = [:]
-    private var handingOver = false
+    var handingOver = false
     /// The app's connectors, by the number of the end `openAppConnector` gave out (see V2/AppConnector.swift): none
     /// on the Mac.
     var appConnectors: [Int32: AppConnector] = [:]
@@ -764,6 +764,8 @@ public final class HostServer {
         guard FileManager.default.isExecutableFile(atPath: executable) else {
             return reply(.error("Couldn't hand over: \(HostHandover.Failure.notExecutable(executable))."))
         }
+        // On Linux from the target's sealed copy, through sealed memory, writing no file (V2/HandoverMemory.swift).
+        if !Platform.CodeIdentity.isAvailable { return handOverThroughMemory(to: executable, reply: reply) }
         handingOver = true
         let path = config.handoverPath
         let fail: (Error) -> Void = { [weak self] error in
@@ -818,7 +820,7 @@ public final class HostServer {
         }
     }
 
-    private func handoverState(secretFD: Int32?) -> HostHandover.State {
+    func handoverState(secretFD: Int32?) -> HostHandover.State {
         HostHandover.State(fromBuild: config.hostBuild, startedAt: startedAt, lockFD: pathWatch?.lockToCarry ?? lockFD, listenFD: listenFD, secretFD: secretFD,
                            sessions: order.compactMap { id in
                                sessions[id].map { session in

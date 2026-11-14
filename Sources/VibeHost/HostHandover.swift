@@ -72,10 +72,14 @@ public enum HostHandover {
         /// What `hostNotes` counted so far (see V2/HostNotesAnswer.swift), so the counts run on across the handover as
         /// `startedAt` does. Nil: none kept (the Mac's always), and from builds before it.
         public var tally: Tally?
+        /// The sealed images the exec carries (see V2/HandoverMemory.swift): the new image's own copy and the old one's
+        /// for a fallback. Nil: none (the Mac's always), and from builds before it.
+        public var images: HandoverImages?
 
         /// Every descriptor the new image must inherit.
         var descriptors: [Int32] {
             [lockFD, listenFD] + [secretFD, testAppConnector?.fd, serverChild?.connector, serverChild?.image].compactMap { $0 }
+                + [images?.own, images?.fallback, images?.server].compactMap { $0 }
                 + sessions.compactMap(\.masterFD)
         }
     }
@@ -181,6 +185,8 @@ public enum HostHandover {
     /// `--handover-probe PATH`: whether this build can take over from the state at `path`. Call first thing in `main`.
     public static func probeIfAsked(_ arguments: [String]) {
         guard let index = arguments.firstIndex(of: "--handover-probe"), arguments.indices.contains(index + 1) else { return }
+        // On Linux: its sealed copy closed, then hardened (V2/HandoverMemory.swift); the Mac: nothing.
+        HandoverMemory.startProbe()
         do {
             _ = try read(from: arguments[index + 1])
             print(probeAnswer)
@@ -209,6 +215,8 @@ public enum HostHandover {
         spawn.stdout = .descriptor(pipe[1])
         spawn.stderr = .inherit
         spawn.keep = []
+        // On Linux the target's sealed copy and the state's sealed memory kept (V2/HandoverMemory.swift).
+        HandoverMemory.probing(&spawn, statePath: statePath)
         let spawned = spawn.start()
         Sys.close(pipe[1])
         let pid: pid_t
@@ -261,10 +269,13 @@ public enum HostHandover {
 
     /// The secrets the build before handed over (`HostServer.secretsForHandover`), exactly the bytes it gave; nil when
     /// it gave none. Read once: the channel is closed and `state` no longer names it, so `HostServer.start(restoring:)`
-    /// returns nil for them after this.
+    /// returns nil for them after this. On Linux they are sealed memory, left open until the restore succeeded, so a
+    /// fallback reads them again (`HandoverMemory.finish` closes them).
     public static func takeSecrets(from state: inout State) -> Data? {
         guard let fd = state.secretFD else { return nil }
         state.secretFD = nil
+        // On Linux sealed memory, read from its start and left open for a fallback (V2/HandoverMemory.swift).
+        if let kept = HandoverMemory.secrets(from: fd) { return kept }
         return isOpen(fd) ? SecretChannel.take(fd) : nil
     }
 

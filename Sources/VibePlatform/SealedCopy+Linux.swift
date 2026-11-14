@@ -168,5 +168,38 @@ extension Platform.ProcessSelf {
         close(fd)
         return fd
     }
+
+    /// The mode of sealed memory that holds data, not an image: read by its owner only, through its own descriptor or
+    /// by reopening `/proc/self/fd/N`, which a `0111` image's copy refuses.
+    static let dataMode: mode_t = 0o400
+
+    /// `bytes` in a new memfd named `name`, sealed (`allSeals`: nobody can change it, not even its maker) and made
+    /// `0400`, close-on-exec: data a process hands to the image it executes in its place (the host's handover, S8),
+    /// read back from offset 0 (`pread`) or by reopening `/proc/self/fd/N`, each from the beginning. Its descriptor,
+    /// or the call's errno with nothing left open.
+    public static func sealedMemory(_ bytes: UnsafeRawBufferPointer, name: String) -> Result<Int32, Platform.Errno> {
+        let memory = vibe_memfd_create(name, VIBE_MFD_CLOEXEC | VIBE_MFD_ALLOW_SEALING)
+        guard memory >= 0 else { return .failure(Platform.Errno(code: errno)) }
+        func failed(_ code: Int32) -> Result<Int32, Platform.Errno> {
+            close(memory)
+            return .failure(Platform.Errno(code: code))
+        }
+        var written = 0
+        while written < bytes.count, let base = bytes.baseAddress {
+            let wrote = write(memory, base + written, bytes.count - written)
+            if wrote < 0, errno == EINTR { continue }
+            guard wrote > 0 else { return failed(wrote < 0 ? errno : EIO) }
+            written += wrote
+        }
+        guard vibe_add_seals(memory, UInt32(allSeals)) == 0 else { return failed(errno) }
+        guard fchmod(memory, dataMode) == 0 else { return failed(errno) }
+        return .success(memory)
+    }
+
+    /// Whether `fd` is a memfd carrying every seal (`allSeals`): its bytes and size fixed for good, by anyone.
+    public static func isSealed(_ fd: Int32) -> Bool {
+        let seals = vibe_get_seals(fd)
+        return seals >= 0 && seals & allSeals == allSeals
+    }
 }
 #endif
