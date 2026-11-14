@@ -919,10 +919,13 @@ memory and writes no file.
   same-user process renaming files there at the probe could make it say "scratch" while the image inherits the user's
   lock and the vault: it would then take test-only flags, spawn for any client and watch no path. A handover can make a
   host more the user's, never less. The value is read early only by an image that reads the state anyway (hardened,
-  traced by no one, its start not refused already). A state forged by a process that wasn't the user's host (it can
-  start the host's image with one) can only give the new image the user's host's rules, and the new image then refuses
-  to restore unless the lock it inherits is the file at the user's lock path (`heldLockIsAllowed`). A fresh start's
-  probe is still open to the race (S11 item 5).
+  traced by no one, its start not refused already), and only from the sealed memory an exec passes on (`--handover
+  /proc/self/fd/<n>` naming a memfd that carries every seal), never from a file: a state file, which any process of
+  the user can write and name to a host it starts with `--handover`, gives no value, and the host is what its probe
+  says. Sealed memory doesn't prove who wrote it: a process of the user can seal a state of its own and start the
+  host's image with it. A state forged that way by a process that wasn't the user's host can only give the new image
+  the user's host's rules, and the new image then refuses to restore unless the lock it inherits is the file at the
+  user's lock path (`heldLockIsAllowed`). A fresh start's probe is still open to the race (S11 item 5).
 - **A traced new image** closes the secrets unread and goes back; the fallback, traced, ends (S6). (As made in Task
   9c, approved by the lead 2026-11-14: the traced image leaves them unread and open, so that the fallback, which is the
   same process, still has the vault; a traced fallback ends, which closes them. A tracer can't attach to the
@@ -975,7 +978,8 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `ServerChildTests.theNewImageRecordsTheCarriedLockAsTheOneAtThePath` (the carried lock and the lock path);
 `HostHardeningTests.theUsersHostIgnoresTestSecretFlags` (Task 9a);
 `HostHardeningTests.aHandoverNeverMakesTheUsersHostAScratchHost`, `theCarriedOwnershipIsReadOnlyByAnImageThatReadsTheState`,
-`aNewImageWhoseProbeSaysScratchIsStillTheUsersHost` (which host it is, carried);
+`aNewImageWhoseProbeSaysScratchIsStillTheUsersHost` (which host it is, carried), `aStateFileSayingTheUsersHostIsIgnored`
+(carried only in sealed memory);
 `HandoverLinuxTests.aHandoverWritesNoFile`, `HandoverLinuxTests.theStateAndSecretsAreSealed`,
 `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsTheVault`, `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsEverySession`,
 `HandoverLinuxTests.aMegabyteOfSecretsIsHandedOver`, `HandoverLinuxTests.aDowngradeIsRefused`,

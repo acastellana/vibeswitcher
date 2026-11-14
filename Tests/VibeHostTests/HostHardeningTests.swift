@@ -210,6 +210,33 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
                                                     hardening: .hardened, refused: false) == false)
     }
 
+    /// The carried value comes only from the sealed memory a handover's exec passes on, never from a file: a state file
+    /// saying the user's host (any process of the user can write one, then start a host with `--handover` naming it)
+    /// gives no carried value, so the host is what its probe says, a scratch host here. The file opened at a descriptor
+    /// and named as the handover names its memfd (`/proc/self/fd/<n>`) gives none either: it isn't sealed memory.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed memory; the Mac carries no value"))
+    func aStateFileSayingTheUsersHostIsIgnored() throws {
+        var state = HostHandover.State(fromBuild: 41, startedAt: Date(), lockFD: 3, listenFD: 4, secretFD: nil, sessions: [])
+        state.ownsLaunchers = true
+        let bytes = try HandoverMemory.encoded(state)
+        let dir = "\(shortScratchRoot)/vsof-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let file = dir + "/forged.handover"
+        try bytes.write(to: URL(fileURLWithPath: file))
+        // The file reads as a state that says the user's host: only where it is read from refuses it.
+        #expect(try HostHandover.read(from: file).ownsLaunchers == true)
+        let forged = ["host", "--lock", dir + "/h.lock", "--handover", file]
+        #expect(HandoverMemory.carriedOwnsLaunchers(arguments: forged, hardening: .hardened, refused: false) == nil)
+        #expect(!HandoverMemory.ownsLaunchers(probed: false, arguments: forged, hardening: .hardened, refused: false))
+        // The file opened at a descriptor, named as the handover names its memfd.
+        let opened = open(file, O_RDONLY | O_CLOEXEC)
+        try #require(opened >= 0)
+        defer { Sys.close(opened) }
+        #expect(HandoverMemory.carriedOwnsLaunchers(arguments: ["host", "--handover", HandoverMemory.path(of: opened)],
+                                                    hardening: .hardened, refused: false) == nil)
+    }
+
     /// A lock that can't be opened (no right to it) fails closed: the user's lock, by its entry or its spelling, is
     /// still the user's (the more restricted host); another is a scratch lock.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable && geteuid() != 0, "Linux's lock by identity; root opens any file"))

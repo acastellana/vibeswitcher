@@ -329,10 +329,14 @@ public enum HandoverMemory {
     /// after a handover (`arguments` name its state) on Linux that will read that state anyway: hardened and traced by
     /// no one (`hardening`), its start not refused already (`refused`), and no scratch host's test of a traced image
     /// (`tracedTestFlag`), which goes back with the state unread. The same sealed bytes `main` reads again to restore.
-    /// Nil otherwise, when the state can't be read (the restore then fails on it and goes back), and on the Mac.
+    /// Only from the sealed memory a handover's exec passes on (`/proc/self/fd/<n>`, `descriptor(named:)`, every seal
+    /// on it: `Platform.ProcessSelf.isSealed`), never from a file: any process of the user can write a state file and
+    /// start a host with `--handover` naming it. Nil otherwise, when the state can't be read (the restore then fails
+    /// on it and goes back), and on the Mac.
     public static func carriedOwnsLaunchers(arguments: [String], hardening: HostHardening.Start, refused: Bool) -> Bool? {
         guard !Platform.CodeIdentity.isAvailable, hardening == .hardened, !refused, !arguments.contains(tracedTestFlag),
-              let path = HostHardening.handover(in: arguments) else { return nil }
+              let path = HostHardening.handover(in: arguments), let fd = descriptor(named: path),
+              Platform.ProcessSelf.isSealed(fd) else { return nil }
         return (try? HostHandover.read(from: path))?.ownsLaunchers
     }
 
