@@ -424,6 +424,9 @@ extension HandoverLinuxTests {
     /// The probe and the new image run from the target's sealed copy, so neither is reachable from its exec: every
     /// open of the probe's memory, and of the host's across the exec, is refused (`pidfd_getfd` is refused alike: both
     /// ask that the process be dumpable).
+    /// Polls of the host made before the handover is asked for.
+    static let pollsBefore = 3
+
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies; the Mac has none"))
     func aHandoverImageIsNotDumpableFromItsExec() async throws {
         let host = try await ScratchHostProcess()
@@ -451,11 +454,15 @@ extension HandoverLinuxTests {
             }
         }
         poller.start()
+        // The handover starts only once the poller is looking: on a slow runner it can otherwise make few polls, or none,
+        // before the exec, and the test would judge the runner's speed rather than the image.
+        #expect(await eventually { polls.lock.withLock { polls.host.count >= Self.pollsBefore } })
+        let before = polls.lock.withLock { polls.host.count }
         #expect(await host.handOver(to: host.newBinary, through: client) == .ok, "\(host.log)")
         #expect(await eventually { host.log.contains("took over") }, "\(host.log)")
         polls.lock.withLock { polls.stop = true }
         let (onHost, onProbe) = polls.lock.withLock { (polls.host, polls.probe) }
-        #expect(onHost.count > 10 && Set(onHost) == [EACCES], "\(Set(onHost)) over \(onHost.count) polls")
+        #expect(onHost.count > before && Set(onHost) == [EACCES], "\(Set(onHost)) over \(onHost.count) polls, \(before) before the handover")
         #expect(Set(onProbe).isSubset(of: [EACCES]), "\(Set(onProbe)) over \(onProbe.count) polls of the probe")
         print("aHandoverImageIsNotDumpableFromItsExec: \(onHost.count) polls of the host, \(onProbe.count) of the probe, all refused")
     }
