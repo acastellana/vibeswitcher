@@ -206,6 +206,48 @@ struct LeadSplitTests: LeadTeamFixture {
         #expect(runtime.spawned.count == 3 && task(root)?.teamMember("docs")?.worker == runtime.spawned[2].id)
     }
 
+    /// Live members take their places in max_workers whatever their task's status, and stop_worker ends them with the
+    /// integrator: none runs on uncounted beside a blocked or stopped task.
+    @Test func liveMembersCountWhileTheirTaskIsBlockedAndStopWorkerEndsThem() throws {
+        let (root, runtime, lead) = try started(["max_workers": 3])
+        #expect(!(try split(root, runtime)).isError)
+        #expect(!lead.call("start_worker", ["task": "build-it"]).isError)
+        let members = [runtime.spawned[1].id, runtime.spawned[2].id]
+        #expect(!lead.call("configure", ["max_workers": 2]).isError)
+        // Blocked with its members still live (as the integrator's own blocked report leaves it): they still count.
+        try BoardStore(root: root).update { board in
+            board.tasks[try #require(board.taskIndex("build-it"))].status = .blocked
+        }
+        #expect(!lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"]]).isError)
+        let plain = lead.call("start_worker", ["task": "plain"])
+        #expect(plain.isError && plain.text.contains("2 workers already run"), "\(plain.text)")
+
+        // stop_worker ends the members too.
+        try BoardStore(root: root).update { board in
+            board.tasks[try #require(board.taskIndex("build-it"))].status = .running
+        }
+        let stopped = lead.call("stop_worker", ["task": "build-it"])
+        #expect(!stopped.isError && stopped.text.contains("members' workers too"), "\(stopped.text)")
+        #expect(Set(members).isSubset(of: Set(runtime.killed)))
+        #expect(!lead.call("start_worker", ["task": "plain"]).isError)
+    }
+
+    /// A member's ask_lead reaches the lead sealed: about its own grant's task (<slug>--<name>), which the vault seals
+    /// for its session, not the integrator's.
+    @Test func aMembersQuestionToTheLeadIsSealed() throws {
+        let (root, runtime, lead) = try started()
+        #expect(!(try split(root, runtime)).isError)
+        #expect(!lead.call("start_worker", ["task": "build-it"]).isError)
+        let session = try launched("worker-build-it--ui", runtime).session
+        let asked = try seat("worker-build-it--ui", runtime).call("ask_lead", ["question": "May I change the API?"])
+        #expect(!asked.isError, "\(asked.text)")
+        let line = try #require(runtime.steered.last { $0.text.contains("Member ui of build-it's team asks") })
+        let message = SteerMessage(text: line.text, from: line.sender, agentPid: 42, at: 1)
+        guard case .seal = book.answer(.seal(message), from: .session(session), agentSession: session) else {
+            Issue.record("a member's question wasn't sealed for its own session: \(line.sender)"); return
+        }
+    }
+
     /// The Mac-wide limits hold members back as they hold any worker.
     @Test func membersWithoutRoomOnTheMacWaitQueued() throws {
         let (root, runtime, lead) = try started()
