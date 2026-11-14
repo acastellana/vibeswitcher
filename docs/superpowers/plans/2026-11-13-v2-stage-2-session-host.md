@@ -1698,7 +1698,7 @@ is green.
   from a caller that isn't `.app` naming a refused variable is refused, saying which. Non-seam edit.
 - Test: `Tests/VibePlatformTests/ToolsTests.swift`, `Tests/VibeHostTests/SessionEnvironmentTests.swift`
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `SessionEnvironmentTests.aLinuxSessionGetsNoAgentSocketNoInteropNoBus` (Linux): with `SSH_AUTH_SOCK`,
     `WSL_INTEROP`, `DBUS_SESSION_BUS_ADDRESS`, `DISPLAY`, `WAYLAND_DISPLAY`, `PULSE_SERVER` and
     `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` in the host's environment, the session's `env` has none of them.
@@ -1719,7 +1719,7 @@ is green.
     (lowercased, `-` and `_` dropped), so `C.UTF-8` matches `locale -a`'s `C.utf8`; a plain case-blind comparison
     fails even when right.
   - `ToolsTests.theMacsListIsTodays` (Mac), with the Mac's shell arguments.
-- [ ] **Step 2: Implement; push; both green; commit** ("v2: the sessions' environment and shell on Linux").
+- [x] **Step 2: Implement; push; both green; commit** ("v2: the sessions' environment and shell on Linux").
 
 **Done when:** the tests pass, S10's `Held by:` names them, and the Mac's host job is green.
 
@@ -1761,14 +1761,14 @@ why: the Mac's launches change too, because the CLI's default changed under them
   since" above) and returns through `LinuxLaunch.inline`. The port map's line names each, with its real lines.
 - Test: `Tests/VibeCoreTests/LeadLaunchTests.swift`
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh` (Linux): every role's rules include each
     of the Linux list.
   - `theLeadOnLinuxGetsTheTracerRules` (Linux): the lead's rules include `debuggers` and the Linux tracers.
   - `theMacsDenyRulesAreTodays` (Mac): every role's list equals the list at `47636aaf`.
   - `aRolesLaunchSettingsAreInlineOnLinux` (Linux): after `prepare`, no `settings.json` or `mcp.json` is left; the
     command carries both as JSON that parses back to what the files held; a prompt over the limit stays a file.
-- [ ] **Step 2: Implement; push; both green; commit** ("v2: Linux's deny rules for every role; launch settings
+- [x] **Step 2: Implement; push; both green; commit** ("v2: Linux's deny rules for every role; launch settings
   inline").
 
 **Done when:** the tests pass, S10's `Held by:` names them, and the Mac's app and host jobs are green.
@@ -1798,7 +1798,7 @@ why: the Mac's launches change too, because the CLI's default changed under them
 - Test: `Tests/VibePlatformTests/ToolsTests.swift`, `Tests/VibeHostTests/VerifierBranchCodeHostTests.swift`,
   `Tests/VibeCoreTests/BranchCodeTests.swift` (new)
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite` (Linux): `trustedGit` given a PATH whose first folder
     is the user's and holds a `git` (a stand-in status function) resolves past it to the root-owned one; given only
     the user's folder, nil. `theMacsGitIsStillUsrBinGit` (Mac).
@@ -1808,7 +1808,7 @@ why: the Mac's launches change too, because the CLI's default changed under them
   - `BranchCodeTests.aCommandGetsItsOwnSessionWhenItsCallerLeadsAGroup` (Linux): `runPrefix` called from a helper
     that is its own process-group leader runs the command with its own session id (setsid in place would have failed
     `EPERM`), passes on its exit status, and passes on a SIGTERM.
-- [ ] **Step 2: Implement; push; both green; commit** ("v2: git from root's folders and branch code in a session of
+- [x] **Step 2: Implement; push; both green; commit** ("v2: git from root's folders and branch code in a session of
   its own, on Linux").
 
 **Done when:** the tests pass, S4's, S9's and S10's `Held by:` name them, and the Mac's jobs are green.
@@ -1826,7 +1826,7 @@ why: the Mac's launches change too, because the CLI's default changed under them
   line).
 - Test: `Tests/VibeHostTests/ProjectAllowListTests.swift`
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `aSpawnOutsideTheListIsRefusedWithItsReason`.
   - `aWorktreeOfAnAllowedRepositoryIsAllowed`.
   - `aForgedGitFileIsRefused`: a folder whose `.git` names an allowed repository's worktree folder that doesn't point
@@ -1837,7 +1837,7 @@ why: the Mac's launches change too, because the CLI's default changed under them
   - `aScratchHostHasNoList`.
   - `aMissingListRefusesEverySpawnAndSaysWhereTheListGoes`.
   - `noGitRunsInTheHost`: the check reads files only; a `git` that records being run, first on PATH, is never run.
-- [ ] **Step 2: Implement; push; both green; commit** ("v2: the project allow-list in the user's host").
+- [x] **Step 2: Implement; push; both green; commit** ("v2: the project allow-list in the user's host").
 
 **Done when:** the tests pass, S11's `Held by:` names them, and the Mac's host job is green.
 
@@ -1875,7 +1875,7 @@ why: the Mac's launches change too, because the CLI's default changed under them
 The lead's own start is never held by the vault: `lead` is refused on a fresh vault until the user's `config accept` and
 `base accept` (the engine's E4), so nothing a lead's start loads was taken unaccepted.
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `ConfigSealFirstLookTests.aVaultThatHoldsItsFirstLookHoldsEveryHomeFile`.
   - `aVaultThatDoesntSealsItsFirstLookAsToday` (both).
   - `aFreshVaultHoldsChangedGuardedSettings`: a `workflow.md` whose `test_command` and `sensitive_paths` were edited
@@ -1887,7 +1887,7 @@ The lead's own start is never held by the vault: `lead` is refused on a fresh va
   - `aRootsAcceptLetsItsFloorBeRecordedAndHoldsTheNext`: on a vault holding its first look, the app's
     `checkConfig(root: A, shown:)` and then `setReviewFloor(onlyIfUnset: true)` for A record A's floor; the same
     floor call for B, never accepted, records nothing; a floor call for A before its accept records nothing.
-- [ ] **Step 2: Implement; push; both green; commit** ("v2: a fresh memory vault holds every record's first look").
+- [x] **Step 2: Implement; push; both green; commit** ("v2: a fresh memory vault holds every record's first look").
 
 **Done when:** the tests pass, S7's `Held by:` names them, and the Mac's jobs are green.
 
@@ -1899,7 +1899,7 @@ Moved here from stage 1 (its R9), because the tool server learns its role from t
 
 **Files:** `Tests/VibeHostTests/ToolServerUnderAHostTests.swift`
 
-- [ ] `theLeadsToolServerListsItsToolsAndServesStatus`: a scratch host with the test as app (`TestHost`'s connector
+- [x] `theLeadsToolServerListsItsToolsAndServesStatus`: a scratch host with the test as app (`TestHost`'s connector
   stand-in); the test asks the vault for a lead grant (`.issue(role: .lead, root:)`) on a scratch repository, spawns a
   session whose program starts the built `vibeswitcher-mcp` with its stdin and stdout on two FIFOs in the scratch
   folder, and binds the grant to that session (`.bind`). Over the FIFOs: `initialize`; `tools/list` within 50 s (the
@@ -1939,7 +1939,7 @@ After the bootstrap it is built with the sandbox (install folder read-only there
 
 **Files:** `Tests/VibeHostTests/RealClaudeHostTests.swift`; `docs/process/v2-linux-inventory.md`
 
-- [ ] **Step 1: The test.** `aClaudeSessionSurvivesItsClientAHandoverAndAKilledParser`, enabled only when
+- [x] **Step 1: The test.** `aClaudeSessionSurvivesItsClientAHandoverAndAKilledParser`, enabled only when
   `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` is set on the command line of the run (the folder the user prepared for stage
   1's R10). A scratch host spawns `claude --model sonnet` in a scratch repository whose trust entry was written into
   that folder's `.claude.json`, with `CLAUDE_CONFIG_DIR` passed through the request's `env` (which
@@ -1951,7 +1951,7 @@ After the bootstrap it is built with the sandbox (install folder read-only there
   5. the session ends by `/exit` sent with an `inputUnit` request (there is no `type` request), and its exit is
      recorded;
   6. through it all, the host's log shows no parser reply dropped (Task 9e).
-- [ ] **Step 2:** the run, the Claude Code version and each step's time go into the inventory.
+- [x] **Step 2:** the run, the Claude Code version and each step's time go into the inventory.
 - *As made (2026-11-14), approved by the lead 2026-11-14:*
   - **The DECSET 1004 change to 9e's reply table** (approved): Step 6 found that Claude Code turns focus events on as it starts (`CSI ? 1004 h`), which SwiftTerm answers at once
     with `CSI I`; 9e's table had that responder as a view's only (its As-made list "left out … the focus report"), so
@@ -1992,14 +1992,14 @@ exists the test is skipped, saying why, and later work goes on.
 **Files:** `Tests/VibeHostTests/RealClaudeTests.swift`; `docs/process/v2-linux-inventory.md`; the security document's
 S10 and S11 (each result, one line, with the inventory's date)
 
-- [ ] `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured` (gated as 12a): a session started as Task 10a starts
+- [x] `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured` (gated as 12a): a session started as Task 10a starts
   one (`bash --noprofile --norc`), in a scratch `HOME` whose `.bashrc`, `.bash_profile`, `.profile` and `.zshrc` each
   set a marker variable; Claude Code's Bash tool is asked to print the markers. The result (which files its snapshot
   sources) is recorded; the test asserts only that it was measured.
-- [ ] `RealClaudeTests.aVerifierCommandInItsOwnSessionStillTimesOut` (gated): a verifier role's Bash, through
+- [x] `RealClaudeTests.aVerifierCommandInItsOwnSessionStillTimesOut` (gated): a verifier role's Bash, through
   `runPrefix` with Task 10c's `setsid`, runs `sleep 600` with a short timeout and, separately, is interrupted; both end
   the command (no process of it left), and the times are recorded.
-- [ ] commit ("v2: Claude Code's shell snapshot and a verifier's command in its own session, measured").
+- [x] commit ("v2: Claude Code's shell snapshot and a verifier's command in its own session, measured").
 - *As made (2026-11-14), approved by the lead 2026-11-14:*
   - Both sessions run `claude --permission-mode manual` with an inline `--settings` that allows only the command the
     prompt names (no question was shown), not a role's `auto`; the verifier's is its environment
