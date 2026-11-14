@@ -2954,3 +2954,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 08:02 Started a worker on workers-and-verifiers-4
 - 2026-11-14 08:02 Automatically (auto_advance): Started a worker on workers-and-verifiers-4 (Workers and verifiers can't read Claude Code's prompt history), its after tasks done (team-verifier-close-two).
 - 2026-11-14 08:02 Automatically (auto_advance): Cleaned up team-verifier-close-two (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-14 08:16 Released split-the-integrator's worker (idle since its done report on 815de519) while its audit runs
+- 2026-11-14 08:16 Automatically (auto_advance): Started the audit of split-the-integrator at 815de519 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
