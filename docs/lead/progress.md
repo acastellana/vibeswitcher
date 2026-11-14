@@ -2956,3 +2956,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 08:02 Automatically (auto_advance): Cleaned up team-verifier-close-two (freed 2.5 GB of build output and temporary folders). It stays done.
 - 2026-11-14 08:16 Released split-the-integrator's worker (idle since its done report on 815de519) while its audit runs
 - 2026-11-14 08:16 Automatically (auto_advance): Started the audit of split-the-integrator at 815de519 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-14 08:18 Audit of split-the-integrator: complete, clean, round 2: 1 Important closed, 3 Nit open
+- 2026-11-14 08:33 Automatically (auto_advance): Started the audit of workers-and-verifiers-4 at c766a3cc (Its review is audit).
+- 2026-11-14 08:33 Released workers-and-verifiers-4's worker (idle since its done report on c766a3cc) while its audit runs
+- 2026-11-14 08:33 Automatically (auto_advance): Released workers-and-verifiers-4's worker, idle since its done report on c766a3cc, while its audit runs (ended pid 32193 (Worker: Workers and verifiers can't read Claude Code's prompt history)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-14 08:36 Audit of workers-and-verifiers-4: incomplete, clean, round 1: 2 Important open, 1 Nit open
+- 2026-11-14 08:36 Started a worker on workers-and-verifiers-4
+- 2026-11-14 08:36 Automatically (auto_advance): Sent workers-and-verifiers-4's worker the open Important findings workers-and-verifiers-4:F1, workers-and-verifiers-4:F2 from its audit at c766a3cc (in a new worker: its last one was released during the audit).
+- 2026-11-14 08:38 Pipeline held: split-the-integrator ready to merge with none landing; cause: a merge in progress
+- 2026-11-14 08:40 Merged split-the-integrator: Split: the integrator starts its team's members (build 40766073a6b2)
