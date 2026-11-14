@@ -194,6 +194,8 @@ config.appExecutable = (restoring != nil ? value(after: "--app-executable") : ni
 let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
 config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey(), logPath: config.logPath).book(handedOver: restoredSecrets)
     : LeadVault.Book(restoring: restoredSecrets)
+// On Linux a fresh vault holds its first look for the user's accept; a restored one keeps its own (V2/VaultFirstLook.swift).
+if VaultFirstLook.holds(arguments: arguments, ownsLaunchers: ownsLaunchers, restored: restoredSecrets.map(LeadVault.Book.reads) ?? false) { config.vault?.holdsFirstLook = true }
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
 // holds none.
 if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {
@@ -207,6 +209,8 @@ HostHardening.afterConfig(arguments: Array(arguments.dropFirst()), ownsLaunchers
 HostHardening.watch(server)
 // The vault is what a build this one hands over to must hold in memory too.
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
+// What a held first look kept from being recorded, in the host's log.
+config.vault?.onHeld = { server.note($0) }
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
 let testSecret = HostHardening.takesTestFlags(ownsLaunchers: ownsLaunchers) ? value(after: "--handover-test-secret").map { Data($0.utf8) }
     ?? HandoverMemory.testSecret(arguments: arguments, ownsLaunchers: ownsLaunchers) : nil

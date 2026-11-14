@@ -867,12 +867,16 @@ runs `config held`, `config accept CARD`, `base show FOLDER [--from COMMIT]` and
 before starting the lead again.
 
 **Held by:** `VaultHandoverTests.grantsVerdictsAndSealsSurviveAHandoverAndAWorkerIsStillRefused`,
-`KeychainLintTests.onlyTheKeyStoresCallTheKeychain`; planned: stage 2 plan task 10.
+`KeychainLintTests.onlyTheKeyStoresCallTheKeychain`, `ConfigSealFirstLookTests.aVaultThatHoldsItsFirstLookHoldsEveryHomeFile`,
+`ConfigSealFirstLookTests.aVaultThatDoesntSealsItsFirstLookAsToday`,
+`ConfigSealFirstLookTests.aFreshVaultHoldsChangedGuardedSettings`,
+`ConfigSealFirstLookTests.aFreshVaultHoldsTheCheckoutsGitHooks`,
+`ConfigSealFirstLookTests.aFreshVaultSeedsNoFloorFromWorkflow`,
+`ConfigSealFirstLookTests.aVaultHandedOverBeforeItsFirstLookStillHoldsIt`,
+`ConfigSealFirstLookTests.aRootsAcceptLetsItsFloorBeRecordedAndHoldsTheNext`,
+`VaultFirstLookTests.onlyAFreshNodeVaultOrAScratchHostAskedHoldsItsFirstLook` (Task 10e: the extended first look).
 
-**Tests to write:** Task 10: `ConfigSealFirstLookTests.aVaultThatHoldsItsFirstLookHoldsEveryHomeFile`,
-`aVaultThatDoesntSealsItsFirstLookAsToday`, `aFreshVaultHoldsChangedGuardedSettings`,
-`aFreshVaultHoldsTheCheckoutsGitHooks`, `aFreshVaultSeedsNoFloorFromWorkflow`,
-`aVaultHandedOverBeforeItsFirstLookStillHoldsIt`, `aRootsAcceptLetsItsFloorBeRecordedAndHoldsTheNext`. E4: `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E8:
+**Tests to write:** E4: `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E8:
 `aHostRestartSaysTheTeamIsGone`, `aHostRestartHoldsWorkersUntilTheConfigIsAccepted`,
 `aStartTheUserDidntMakeIsShownUntilAcknowledged`, `configAcceptSealsOnlyWhatItShowed`,
 `configHeldShowsChangeTimesSizesAndHashes`, `baseAcceptAfterARestartShowsWhatMoved`,
