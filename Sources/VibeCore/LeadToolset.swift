@@ -4885,8 +4885,9 @@ public final class LeadToolset: MCPToolset {
         // replaced is off the board, not ended).
         let refused = "\(slug)'s sessions can't be checked; nothing was cleaned up"
         let folder = (Worktrees.path(root: root, slug: slug) as NSString).standardizingPath
-        // A team task's members too: their workers, and what runs in their worktrees.
-        let memberWorktrees = Worktrees.members(root: root, slug: slug, team: Self.memberNames(task)).map { Worktrees.path(root: root, slug: Worktrees.memberSlug(slug, member: $0)) }
+        // A team task's members too: their workers, and what runs in their worktrees. Only a folder that is the member's
+        // worktree (`memberCheckout`): through a symlink there, its build folder would be another task's.
+        let memberWorktrees = Worktrees.members(root: root, slug: slug, team: Self.memberNames(task)).compactMap { Worktrees.memberCheckout(root: root, slug: slug, member: $0) }
         let folders = [folder] + memberWorktrees.map { ($0 as NSString).standardizingPath }
         let workers = [task.worker, task.verifier] + (task.team ?? []).map(\.worker)
         let sessions = try hostSessions(refused).filter { session in
