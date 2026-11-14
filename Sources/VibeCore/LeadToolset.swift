@@ -4920,6 +4920,17 @@ public final class LeadToolset: MCPToolset {
         if let refusal = unmergedRefusal(task, force: force, base: base) { throw refusal }
         // A team task's members' work that would be lost, likewise.
         _ = try memberWork(task, force: force, base: base)
+        // Something at its worktree path that isn't a worktree, other than a folder holding only Finder's .DS_Store:
+        // nothing is touched (its build folder there would be someone else's), said once to auto_advance (`strayKept`).
+        if let stray = Worktrees.strayFolder(root: root, slug: slug), case .kept(let what) = stray {
+            try? store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                board.tasks[index].strayKept = what
+            }
+            throw Problem(text: "Not cleaned up: \(Worktrees.strayText(Worktrees.path(root: root, slug: slug), stray)), with its branch and sessions. "
+                          + "Cleanup removes a folder there only when it's empty or holds just .DS_Store; force doesn't change that. "
+                          + "Have the user move or remove what's there, then cleanup(\(slug)) again: auto_advance won't try while it's there.")
+        }
         // Only the ones still running are ended: a session that's gone (lost with a replaced host) has nothing to kill.
         // Its worker and verifier, and any earlier one still running in its worktree (a verifier a later audit
         // replaced is off the board, not ended).
@@ -4971,6 +4982,7 @@ public final class LeadToolset: MCPToolset {
         let after = try store.update { board -> LeadTask? in
             guard let index = board.taskIndex(slug) else { return nil }
             board.tasks[index].worktree = nil
+            board.tasks[index].strayKept = nil
             if ![.done, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .failed }
             if let usage, board.tasks[index].isAbandoned {
                 board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: .abandoned, questions: board.questions, usage: usage)

@@ -886,6 +886,10 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var after: [String]?
     /// False: VibeSwitcher moves nothing on it by itself (the contract opts it out of auto_advance); nil: it does.
     public var autoAdvance: Bool?
+    /// What cleanup found at its worktree path and left as it is, said once (`Worktrees.StrayFolder.kept`: not a git
+    /// worktree, holding more than Finder's .DS_Store, or a symlink): auto_advance doesn't try its cleanup again while
+    /// something is still there. nil: none found.
+    public var strayKept: String?
     /// The commit whose verdict's open Important findings VibeSwitcher last sent its worker by itself (`LeadAdvance`):
     /// each verdict's are sent once.
     public var autoSentBack: String?

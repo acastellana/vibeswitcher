@@ -2014,15 +2014,91 @@ public enum Worktrees {
     /// merged or committed; `force` is for leftovers of merged work, or work the lead chose to abandon.
     /// What still runs in the worktree is ended first (`SessionStrays.endInside`): a dev server or a suite left there
     /// would run on for days in a folder that's gone.
+    /// A folder at its path that isn't a worktree (`strayFolder`) goes only when it holds nothing but Finder's .DS_Store,
+    /// its branch then deleted if there is one; anything else there is refused, nothing touched.
     public static func remove(root: String, slug: String, force: Bool = false) throws {
         let path = path(root: root, slug: slug)
-        if FileManager.default.fileExists(atPath: path) {
+        if let stray = strayFolder(root: root, slug: slug) {
+            guard stray == .clutter else { throw Failure(description: strayText(path, stray)) }
+            try removeClutter(path)
+            guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch(slug))"], in: root).ok else { return }
+        } else if FileManager.default.fileExists(atPath: path) {
             SessionStrays.endInside(folder: path)
             let removed = Git.run(["worktree", "remove"] + (force ? ["--force"] : []) + [path], in: root)
             guard removed.ok else { throw Failure(description: removed.error) }
         }
         let deleted = Git.run(["branch", force ? "-D" : "-d", branch(slug)], in: root)
         guard deleted.ok else { throw Failure(description: deleted.error) }
+    }
+
+    /// What's at a task's worktree path when git doesn't list it as one of this repository's worktrees (a folder git
+    /// forgot, Finder's .DS_Store written into it after its removal): only Finder's file or nothing, which may go, or
+    /// anything else, which stays.
+    public enum StrayFolder: Equatable, Sendable {
+        case clutter
+        /// What's there, said: "holds notes.txt and 2 more", "is a symlink to /x".
+        case kept(String)
+    }
+
+    /// What `strayFolder` lets go: nothing else in a folder makes it clutter.
+    static let clutterNames: Set<String> = [".DS_Store"]
+
+    /// nil when nothing is at the task's worktree path, when git lists it as a worktree of this repository, or when git
+    /// can't say (left to `git worktree remove`, as before); else what's there (`StrayFolder`). Never follows a symlink:
+    /// one at the path is kept, whatever it leads to.
+    public static func strayFolder(root: String, slug: String) -> StrayFolder? {
+        let folder = path(root: root, slug: slug)
+        var info = stat()
+        guard lstat(folder, &info) == 0 else { return nil }
+        switch info.st_mode & S_IFMT {
+        case S_IFDIR: break
+        case S_IFLNK:
+            let target = (try? FileManager.default.destinationOfSymbolicLink(atPath: folder)).map { " to \($0)" } ?? ""
+            return .kept("is a symlink\(target)")
+        default: return .kept("is a file, not a folder")
+        }
+        let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+        // Its parent resolved, its own name as it is: it's no symlink (above).
+        let expected = (real((folder as NSString).deletingLastPathComponent) as NSString).appendingPathComponent((folder as NSString).lastPathComponent)
+        let listed = Git.run(["worktree", "list", "--porcelain"], in: root)
+        guard listed.ok else { return nil }
+        let worktrees = listed.output.components(separatedBy: "\n").filter { $0.hasPrefix("worktree ") }.map { String($0.dropFirst("worktree ".count)) }
+        guard !worktrees.contains(where: { real($0) == expected }) else { return nil }
+        let names: [String]
+        do { names = try FileManager.default.contentsOfDirectory(atPath: folder) } catch {
+            return .kept("can't be read (\(error.localizedDescription))")
+        }
+        // Finder's file counts only as a plain file: a folder or a symlink by that name is something else.
+        let other = names.filter { name in
+            guard clutterNames.contains(name) else { return true }
+            var entry = stat()
+            return lstat((folder as NSString).appendingPathComponent(name), &entry) != 0 || entry.st_mode & S_IFMT != S_IFREG
+        }.sorted()
+        guard !other.isEmpty else { return .clutter }
+        let shown = other.prefix(5).joined(separator: ", ")
+        return .kept("holds " + shown + (other.count > 5 ? " and \(other.count - 5) more" : ""))
+    }
+
+    /// "/x/.vibeswitcher/worktrees/a isn't a git worktree and holds notes.txt: it's left as it is".
+    public static func strayText(_ path: String, _ stray: StrayFolder) -> String {
+        guard case .kept(let what) = stray else { return "\(path) isn't a git worktree and holds nothing but .DS_Store" }
+        return "\(path) isn't a git worktree and \(what): it's left as it is"
+    }
+
+    /// Removes a clutter folder (`StrayFolder.clutter`): its .DS_Store, then the folder, which `rmdir` removes only
+    /// empty, so a file written there in between stays, refused.
+    static func removeClutter(_ folder: String) throws {
+        for name in clutterNames {
+            let file = (folder as NSString).appendingPathComponent(name)
+            var entry = stat()
+            guard lstat(file, &entry) == 0 else { continue }
+            guard entry.st_mode & S_IFMT == S_IFREG, unlink(file) == 0 || errno == ENOENT else {
+                throw Failure(description: "\(file) couldn't be removed: \(String(cString: strerror(errno)))")
+            }
+        }
+        guard rmdir(folder) == 0 else {
+            throw Failure(description: "\(folder) isn't a git worktree and couldn't be removed: \(String(cString: strerror(errno)))")
+        }
     }
 
     /// The commits on `agent/<slug>` a merge didn't take, newest first: on neither `base` nor behind `merged`, the

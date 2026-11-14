@@ -1037,6 +1037,99 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(!FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "add-b")))
     }
 
+    /// add-b merged, its worktree gone from git, and a plain folder left at its path holding `files` (name: text): what
+    /// Finder or a stray write leaves behind. Its path.
+    func leftover(_ root: String, _ files: [String: String]) throws -> String {
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        #expect(Git.run(["worktree", "remove", "--force", worktree], in: root).ok)
+        try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
+        for (name, text) in files { try text.write(toFile: worktree + "/" + name, atomically: true, encoding: .utf8) }
+        #expect(!Git.run(["worktree", "list", "--porcelain"], in: root).output.contains(worktree))
+        return worktree
+    }
+
+    /// 2026-11-12 on: "Didn't cleanup|an-animated-explainer: fatal: '…' is not a working tree" after every launch, for a
+    /// done task whose folder held only Finder's .DS_Store. Such a folder goes with the cleanup.
+    @Test func autoCleanupRemovesALeftoverFolderHoldingOnlyDSStore() async throws {
+        let (root, runtime, lead) = try mergedByHand()
+        let worktree = try leftover(root, [".DS_Store": "finder"])
+        #expect(!lead.call("update_task", ["task": "add-b", "auto_advance": true]).isError)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        await advancing.settle()
+        // A refusal reads "Didn't cleanup add-b: …", any other error "Didn't cleanup|add-b: fatal: … is not a working tree".
+        let failed = { reports(runtime).contains { $0.contains("Didn't cleanup add-b") || $0.contains("Didn't cleanup|add-b") } }
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("Cleaned up add-b") } || failed() })
+        #expect(!failed(), "\(reports(runtime))")
+        #expect(!FileManager.default.fileExists(atPath: worktree))
+        #expect(Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+        #expect(task("add-b", root)?.worktree == nil)
+    }
+
+    /// A stray folder holding anything besides .DS_Store stays, with its branch: named once, and not tried again by
+    /// auto_advance on later passes or after a restart (a new loop, its told-once memory empty). Once the user empties
+    /// it (Finder's .DS_Store left behind), auto_advance cleans it up: the mark holds only while it's still kept.
+    @Test func autoCleanupReportsAStrayFolderWithFilesOnceAcrossRestarts() async throws {
+        let (root, runtime, lead) = try mergedByHand()
+        let worktree = try leftover(root, [".DS_Store": "finder", "notes.txt": "the user's\n"])
+        #expect(!lead.call("update_task", ["task": "add-b", "auto_advance": true]).isError)
+        let told = { reports(runtime).filter { $0.contains("Didn't cleanup add-b") || $0.contains("Didn't cleanup|add-b") } }
+        let advancing = Advancing(lead)
+        await advancing.settle()
+        #expect(await advancing.until { !told().isEmpty })
+        await advancing.settle()
+        await advancing.settle()
+        advancing.stop()
+        #expect(told().count == 1 && told()[0].contains("notes.txt") && told()[0].contains("isn't a git worktree"), "\(told())")
+        #expect(task("add-b", root)?.strayKept?.contains("notes.txt") == true)
+        let restarted = Advancing(lead)
+        defer { restarted.stop() }
+        await restarted.settle()
+        await restarted.settle()
+        #expect(told().count == 1, "\(told())")
+        #expect((try? String(contentsOfFile: worktree + "/notes.txt", encoding: .utf8)) == "the user's\n")
+        #expect(FileManager.default.fileExists(atPath: worktree + "/.DS_Store"))
+        #expect(!Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+        #expect(task("add-b", root)?.worktree != nil)
+        try FileManager.default.removeItem(atPath: worktree + "/notes.txt")
+        await restarted.settle()
+        #expect(await restarted.until { reports(runtime).contains { $0.contains("Cleaned up add-b") } }, "\(reports(runtime))")
+        #expect(!FileManager.default.fileExists(atPath: worktree))
+        #expect(task("add-b", root)?.strayKept == nil)
+    }
+
+    /// An empty stray folder goes with the cleanup the lead calls, as a .DS_Store-only one does.
+    @Test func cleanupRemovesAnEmptyStrayFolder() throws {
+        let (root, _, lead) = try mergedByHand()
+        let worktree = try leftover(root, [:])
+        let cleaned = lead.call("cleanup", ["task": "add-b"])
+        #expect(!cleaned.isError, "\(cleaned.text)")
+        #expect(!FileManager.default.fileExists(atPath: worktree))
+        #expect(Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+        #expect(task("add-b", root)?.worktree == nil && task("add-b", root)?.strayKept == nil)
+    }
+
+    /// A symlink at the worktree path is never followed or removed through, force or not: what it leads to (a folder
+    /// with a build folder, say) stays whole, and the symlink is named.
+    @Test func cleanupNeverFollowsASymlinkAtTheWorktreePath() throws {
+        let (root, _, lead) = try mergedByHand()
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        #expect(Git.run(["worktree", "remove", "--force", worktree], in: root).ok)
+        let target = temp.url("elsewhere").path
+        try FileManager.default.createDirectory(atPath: target + "/.build", withIntermediateDirectories: true)
+        try "kept\n".write(toFile: target + "/.build/out", atomically: true, encoding: .utf8)
+        try ".".write(toFile: target + "/.DS_Store", atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(atPath: worktree, withDestinationPath: target)
+        for force in [false, true] {
+            let refused = lead.call("cleanup", ["task": "add-b", "force": force])
+            #expect(refused.isError && refused.text.contains("is a symlink"), "\(refused.text)")
+        }
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: worktree)) == target)
+        #expect(FileManager.default.fileExists(atPath: target + "/.build/out") && FileManager.default.fileExists(atPath: target + "/.DS_Store"))
+        #expect(!Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+        #expect(task("add-b", root)?.strayKept?.contains("symlink") == true)
+    }
+
     /// Tasks add-b and add-c reported done, add-b's merge held in its tests until `release` (the first test run waits
     /// for it, as a long suite would), and `meanwhile` done while it waits.
     func duringAMerge(_ meanwhile: (LeadToolset) -> Void) async throws -> (root: String, runtime: FakeRuntime, advancing: Advancing) {

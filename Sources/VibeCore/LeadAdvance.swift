@@ -1100,10 +1100,13 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     /// A merged task (a reverted one too: its work is out of the base, and it stays reverted) whose worktree or
-    /// branch is still there.
+    /// branch is still there. Not one whose cleanup found something at its worktree path it leaves as it is
+    /// (`LeadTask.strayKept`), said once, while what's there is still kept (`Worktrees.strayFolder`): once it's gone,
+    /// only .DS_Store, or a real worktree again, cleanup goes on as before.
     private func cleanup(_ slug: String) {
         guard let task = due(slug, [.done, .reverted]), task.merged != nil,
               task.worktree != nil || lead.advanceHead(slug) != nil, !beingMerged(slug) else { return }
+        if task.strayKept != nil, case .kept? = Worktrees.strayFolder(root: lead.root, slug: slug) { return }
         step("cleanup|\(slug)") {
             guard due(slug, [.done, .reverted]) != nil else { throw NotDue() }
             let result = try lead.advanceCleanup(slug)
