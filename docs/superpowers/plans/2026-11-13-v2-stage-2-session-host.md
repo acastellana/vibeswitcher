@@ -1974,6 +1974,13 @@ After the bootstrap it is built with the sandbox (install folder read-only there
     parser stopped for the handover, by a build that counted it without naming it. Unidentified; the next gated run
     names it. A likely candidate, not confirmed: Claude Code's binary holds a second kitty graphics probe
     (`s=1,v=1,a=q,t=f,f=32`) beside the `t=d,f=24` one whose reply was logged.
+  - *As made after that, for the lead's approval (2026-11-14):* a dropped reply's log line names its kind too, a
+    left-out responder's included ("a kitty graphics reply, left out", `ParserReplies.leftOutKind`, in the drop
+    line's text only: no hook added). The next gated run named the held-back drop: the answer to Claude Code
+    2.1.323's second kitty graphics probe (the `t=f,f=32` one), `APC G i=31;OK ST` as the first. Claude Code queues
+    each probe behind a DA1 sentinel and takes one unanswered as unsupported, so both stay dropped; step 6 now
+    requires exactly two drops in each log, each that answer, every one named (`RealClaudeHostTests.kittyGraphicsDrops`),
+    and the run after passed. The inventory has both runs.
 
 **Done when:** the gated test passed once here with the user's folder, and the record is committed. Until the folder
 exists the test is skipped, saying why, and later work goes on.

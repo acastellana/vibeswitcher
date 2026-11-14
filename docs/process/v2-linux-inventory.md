@@ -211,6 +211,23 @@ reply it was is not known; the flush line now names it, and the next gated run w
 second kitty graphics probe (`s=1,v=1,a=q,t=f,f=32`) beside the `t=d,f=24` one whose reply was logged: a likely
 candidate, not confirmed. The slice's four gated runs are spent.
 
+**Step 6 identified and made exact (2026-11-14, two gated runs, Claude Code 2.1.323, sonnet).** A dropped reply's
+log line now names its kind as well as its bytes (escaped, the first 64): a reply a left-out responder makes is "a
+kitty graphics reply, left out" (or clipboard, title report, DECRQCRA, mouse report), not "no reply"
+(`ParserReplies.leftOutKind`, `ParserReplyTests.aDroppedRepliesLineNamesItsKind`, shown failing first). The first
+run (17:29; steps 1 to 5 in 1.5, 0.1, 0.2, 0.1 and 0.4 s, 2.4 s from the spawn) named the drop held back: **a second
+kitty graphics answer, the same 12 bytes `ESC _ G i=31;OK ESC \`**, held back within a second of the first and logged
+by the flush as the first host image's parser stopped for the handover; nothing else was dropped, in either log.
+2.1.323 sends two probes, both id 31, as it starts: `i=31,s=1,v=1,a=q,t=d,f=24;AAAA` and `i=31,s=1,v=1,a=q,t=f,f=32;<a
+file name, base64>`, each queued behind a DA1 sentinel (`CSI c`): a query unanswered when the sentinel's DA1 reply
+comes is resolved as unsupported. So Claude Code needs neither answer and goes on without kitty graphics, as a
+headless parser is in effect; both stay dropped (9e's choice, the lead's call above). Step 6's allowance is now
+exact: each log (the session log and the host's) must count exactly two drops (`kittyGraphicsProbes`), every drop
+it counts named, each that 12-byte answer and nothing else; a line with "(and N more …)", a flush naming fewer than
+it counts, or anything cut short ("…") fails (`RealClaudeHostTests.kittyGraphicsDrops`,
+`onlyTheKittyGraphicsDropsAreCounted`). The second run (17:33), with that step 6, **passed**: steps 1 to 5 in 1.4,
+0.1, 0.2, 0.1 and 0.4 s (2.3 s from the spawn), the same two kitty graphics drops in each log and none other.
+
 ## Claude Code's shell snapshot and a verifier's command, measured (2026-11-14, Linux 5.15.167.4-microsoft-standard-WSL2)
 
 Stage 2's Task 12b, on this machine (Ubuntu 24.04 under WSL2, 24 cores): `RealClaudeTests` in
