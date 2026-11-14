@@ -2950,3 +2950,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 07:49 The worker on split-the-integrator answered findings: split-the-integrator:F1 fixed at 06848b39: 06848b39: cleanup's memberWorktrees is now members(...).compactMap(Worktrees.memberCheckout) instead of mapping names to paths, so a symlink (or any folder git doesn't list as a worktree on agent/<slug>--<name>) is never used for the .build removal, the session match, or the temporary-folder sweep. removeMembers already refused to remove such a folder, and the re-roll path already used memberCheckout. Regression test LeadSplitTests/cleanupLeavesWhatASym…
 - 2026-11-14 08:00 Pipeline held: team-verifier-close-two ready to merge with none landing; cause: a merge in progress
 - 2026-11-14 08:02 Merged team-verifier-close-two: Team verifier: close two remaining reads of members' posts (build 40766073a6b2)
+- 2026-11-14 08:02 Automatically (auto_advance): Merged team-verifier-close-two (Team verifier: close two remaining reads of members' posts) into main at 0fae0c8f, on its passing audit and the full test run.
+- 2026-11-14 08:02 Started a worker on workers-and-verifiers-4
+- 2026-11-14 08:02 Automatically (auto_advance): Started a worker on workers-and-verifiers-4 (Workers and verifiers can't read Claude Code's prompt history), its after tasks done (team-verifier-close-two).
+- 2026-11-14 08:02 Automatically (auto_advance): Cleaned up team-verifier-close-two (freed 2.5 GB of build output and temporary folders). It stays done.
