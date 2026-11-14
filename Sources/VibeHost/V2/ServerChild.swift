@@ -117,25 +117,33 @@ public final class ServerChild {
 
     /// The server child a handover carried, taken again (on the host's queue) once `check` finds it sound: its
     /// connector's end adopted as the app's (`HostServer.adoptAppConnector`, its sender the child's token, still
-    /// required non-dumpable), its sealed copy adopted for its next start (or, a copy this build wouldn't have made, a
-    /// script's, loaded again from `launch.image`), its end watched. Otherwise the record is let go (`release`) and the
-    /// server started again from a fresh sealed copy (`start`), saying why. Nil on the Mac, and where `start` is.
+    /// required non-dumpable), its sealed copy adopted for its next start, its end watched. The child runs on whatever
+    /// `--server` it was started from: when the record names another path than this image's (a build that hands over
+    /// to another passes that build's, S2-D7), or its copy is not one to take again (a copy this build wouldn't have
+    /// made, a script's), its next start is from a fresh sealed copy of `launch.image`, and the copy it carried, when
+    /// inherited and no other descriptor of the state, is closed. Whether the running child is started again at once
+    /// from the new build's server is Task 9d's (`State.images`, by hash), not this check's. Otherwise the record is let
+    /// go (`release`) and the server started again from a fresh sealed copy (`start`), saying why. Nil on the Mac, and
+    /// where `start` is.
     static func restore(_ record: HostHandover.ServerChildRecord, launch: Launch, sessionPrograms: [pid_t], otherDescriptors: Set<Int32>,
                         server: HostServer) -> ServerChild? {
         guard !Platform.CodeIdentity.isAvailable else { return nil }
-        if let refusal = check(record, image: launch.image, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors) {
+        if let refusal = check(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors) {
             say(server, "server child record refused: \(refusal); starting the server again")
             release(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors)
             return start(launch, server: server)
         }
+        let carriedCopy = isInherited(record.image) && !otherDescriptors.contains(record.image) && record.image != record.connector
         let copy: Platform.ProcessSelf.SealedCopy
-        if isInherited(record.image), !otherDescriptors.contains(record.image), record.image != record.connector,
-           let adopted = Platform.ProcessSelf.adopt(record.image) {
+        if record.path == launch.image, carriedCopy, let adopted = Platform.ProcessSelf.adopt(record.image) {
             copy = adopted
         } else {
             switch Platform.ProcessSelf.sealedCopy(of: launch.image, name: "vibeswitcher-server") {
             case .success(let fresh):
-                say(server, "server child pid \(record.pid)'s sealed copy wasn't one to take again: \(launch.image) loaded again for its next start")
+                if carriedCopy { Sys.close(record.image) }
+                say(server, record.path == launch.image
+                    ? "server child pid \(record.pid)'s sealed copy wasn't one to take again: \(launch.image) loaded again for its next start"
+                    : "server child pid \(record.pid) runs on from \(record.path); its next start is from this image's --server \(launch.image)")
                 copy = fresh
             case .failure(let error):
                 say(server, "server child record refused: no sealed copy to start it again from (errno \(error.code)); starting the server again")
@@ -153,15 +161,15 @@ public final class ServerChild {
 
     /// Why `record` is not the server child this image may take again, or nil when it is: `pid` is this process's
     /// child, started at `startTicks` (so it is the process the build before recorded, and its pid can't have been given
-    /// again: this process hasn't reaped it), no restored session's program and no parser; it names the `--server` this
-    /// image was started with; and its connector is a `SOCK_SEQPACKET` socket this image inherited across the exec (not
-    /// close-on-exec, which every descriptor this image makes is from its making) and no other descriptor of the state.
+    /// again: this process hasn't reaped it), no restored session's program and no parser; and its connector is a
+    /// `SOCK_SEQPACKET` socket this image inherited across the exec (not close-on-exec, which every descriptor this
+    /// image makes is from its making) and no other descriptor of the state. The `--server` path it names is not asked
+    /// (S2-D8: a handover to another build keeps the running child; `restore` starts the next one from this image's).
     /// `links` and `isParser`: how a process is read (tests give a table).
-    static func check(_ record: HostHandover.ServerChildRecord, image: String, sessionPrograms: [pid_t], otherDescriptors: Set<Int32>,
+    static func check(_ record: HostHandover.ServerChildRecord, sessionPrograms: [pid_t], otherDescriptors: Set<Int32>,
                       links: (pid_t) -> Platform.Processes.Link? = Platform.Processes.link,
                       isParser: (pid_t) -> Bool = HostProcesses.isParser) -> String? {
         let pid = record.pid
-        guard record.path == image else { return "it names \(record.path), not this host's --server \(image)" }
         guard pid > 1, let link = links(pid) else { return "pid \(pid) is gone" }
         guard link.parent == getpid() else { return "pid \(pid) isn't this host's child" }
         guard link.startTicks == record.startTicks else { return "pid \(pid) isn't the process recorded (it started at another time)" }

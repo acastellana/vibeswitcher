@@ -302,8 +302,12 @@ socket's path is ever the app.
   `vibeswitcher-server`.
 - **(call)** **The host keeps its path.** The user's host watches its socket's folder (`FolderWatch+Linux`) and, at
   each housekeeping (30 s), checks that its socket path and lock path still name the files it bound and locked (the
-  inode recorded at `bind`; the lock descriptor's `fstat`). On a mismatch it binds a fresh listener at the path (with
-  `SO_PASSCRED`), logs it, and tells the server, which shows it in `status`. The server does the same for its own
+  inode recorded at `bind`, kept only once a connection through the path reached this process's listener, so a socket
+  renamed over the path just after the bind is never taken for the host's, and the path connected through again at
+  each housekeeping; the lock descriptor's `fstat`). On a mismatch it binds a fresh listener at the path (with
+  `SO_PASSCRED`), logs it, and tells the server, which shows it in `status`. A lock path naming another file is locked
+  again, holding at most one such lock beside the first, and a handover carries the newest. It checks once as it
+  begins too, so a path changed during a handover's exec is taken back then. The server does the same for its own
   socket. Task 8; E1 for the server.
 - **(call)** **What happened is written where the server can't unwrite it.** The host writes its starts, the server
   child's exits and restarts, refused app connections and replaced paths to stderr, which the unit sends to the user
@@ -369,7 +373,11 @@ own shell and Claude Code) are acceptable while the only project on the node is 
 `ServerChildTests.theServerChildSurvivesAHandover`, `ServerChildTests.aSquattedHostPathIsBoundAgain`,
 `ServerChildTests.aReplacedLockPathIsLockedAgain`, `ServerChildTests.aHostNotToldToWatchLeavesItsPath`,
 `ServerChildTests.hostNotesCountWhatTheHostRefused`, `ServerChildTests.theHostWritesStartsAndServerRestartsToStderr`
-(stage 2 Task 8b); planned: stage 2 plan task 4b.
+(stage 2 Task 8b); `ServerChildTests.aSocketRenamedOverJustAfterTheBindIsNotTakenForTheHosts`,
+`ServerChildTests.pathsChangedBeforeTheWatchBeginsAreTakenBackAtOnce`,
+`ServerChildTests.aLockPathReplacedAgainAndAgainHoldsOnlyTheNewest`,
+`ServerChildTests.aHandoverCarriesTheLockThePathNamesAndTheCounts`, `ServerChildTests.theCountsRunOnAcrossAHandover`
+(Task 8b's review); planned: stage 2 plan task 4b.
 
 **Tests to write:** Task 4b: `HostIdentitySeamTests.theMacsAppIsStillTheCdhashCheck`,
 `aConnectorConnectionIsTheAppWithNoChallenge`, `noConnectionByPathIsTheAppOnLinux` (Tasks 8a's and 8b's are under
@@ -876,7 +884,9 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `HostHandoverStateTests.aStateOfAnotherFormatIsRefused`, `HostHandoverStateTests.secretsGoThroughAChannelAndNowhereElse`
 (on the Mac now; on Linux from Task 5b, where the Linux forms replace the file and channel cases);
 `ServerChildTests.theServerChildSurvivesAHandover`, `ServerChildTests.aForgedServerChildInTheStateIsNotTheApp`,
-`ServerChildTests.theRestoresCheckNamesWhatIsWrong` (stage 2 Task 8b); planned: stage 2 plan task 9.
+`ServerChildTests.theRestoresCheckNamesWhatIsWrong` (stage 2 Task 8b); `ServerChildTests.aServerChildOfAnotherServerPathRunsOn`,
+`ServerChildTests.aCarriedCopyNotTakenIsClosed`, `ServerChildTests.aHandoverCarriesTheLockThePathNamesAndTheCounts`
+(Task 8b's review); planned: stage 2 plan task 9.
 
 **Tests to write:** Task 9: `ServerChildTests.aSwitchBringsTheNewBuildsServer` (9d),
 `HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`,

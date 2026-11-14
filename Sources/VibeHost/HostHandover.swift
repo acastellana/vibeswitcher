@@ -69,6 +69,9 @@ public enum HostHandover {
         /// The server child, the app on Linux (see `ServerChild`), carried so the new image takes it again once it
         /// has checked it. Nil: none (the Mac's always, a host without `--server`), and from builds before it.
         public var serverChild: ServerChildRecord?
+        /// What `hostNotes` counted so far (see V2/HostNotesAnswer.swift), so the counts run on across the handover as
+        /// `startedAt` does. Nil: none kept (the Mac's always), and from builds before it.
+        public var tally: Tally?
 
         /// Every descriptor the new image must inherit.
         var descriptors: [Int32] {

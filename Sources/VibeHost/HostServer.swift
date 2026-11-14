@@ -183,6 +183,7 @@ public final class HostServer {
         // The socket keeps the backlog the build that first listened gave it (16, before): listening again sets ours.
         _ = Sys.listen(listenFD, SOMAXCONN)
         Platform.Sockets.enableCredentials(listenFD)
+        tally.restore(state.tally)
         var state = state
         let secrets = HostHandover.takeSecrets(from: &state)
         queue.sync {
@@ -811,7 +812,7 @@ public final class HostServer {
     }
 
     private func handoverState(secretFD: Int32?) -> HostHandover.State {
-        HostHandover.State(fromBuild: config.hostBuild, startedAt: startedAt, lockFD: lockFD, listenFD: listenFD, secretFD: secretFD,
+        HostHandover.State(fromBuild: config.hostBuild, startedAt: startedAt, lockFD: pathWatch?.lockToCarry ?? lockFD, listenFD: listenFD, secretFD: secretFD,
                            sessions: order.compactMap { id in
                                sessions[id].map { session in
                                    var saved = session.saved()
@@ -819,7 +820,7 @@ public final class HostServer {
                                    saved.openedByApp = openedByApp.contains(id) && !Self.another(lastInput[id])
                                    return saved
                                }
-                           }, testAppConnector: testAppConnectorForHandover, serverChild: serverChild?.record)
+                           }, testAppConnector: testAppConnectorForHandover, serverChild: serverChild?.record, tally: tallyForHandover)
     }
 
     func log(_ text: String) {

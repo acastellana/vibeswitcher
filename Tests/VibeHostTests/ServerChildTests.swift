@@ -484,7 +484,7 @@ final class ServerChildHost {
         }
         let binary = try #require(Bundle.main.executablePath)
         let record = HostHandover.ServerChildRecord(pid: program, startTicks: link.startTicks, connector: forged, image: -1, path: binary)
-        #expect(ServerChild.check(record, image: binary, sessionPrograms: [program], otherDescriptors: [])
+        #expect(ServerChild.check(record, sessionPrograms: [program], otherDescriptors: [])
                 == "pid \(program) is a session's program")
         let child = try #require(ServerChild.restore(record, launch: .init(image: binary, socketPath: host.socket, arguments: [],
                                                                            environment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()]),
@@ -512,8 +512,8 @@ final class ServerChildHost {
 
     /// The other half of the check: a record of the host's own child, started when it says, no session's program nor
     /// parser, is still refused when its connector isn't one handed over (one this image made, close-on-exec; another
-    /// descriptor of the state; no socket), when it names another `--server`, and when its start ticks or parent
-    /// differ.
+    /// descriptor of the state; no socket), and when its start ticks or parent differ. One that names another
+    /// `--server` is not refused: a handover to another build keeps the running server (S2-D8).
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
     func theRestoresCheckNamesWhatIsWrong() throws {
         var child: pid_t = 0
@@ -537,7 +537,7 @@ final class ServerChildHost {
         defer { Sys.close(inherited) }
         let record = HostHandover.ServerChildRecord(pid: child, startTicks: link.startTicks, connector: inherited, image: -1, path: "/srv/server")
         func check(_ record: HostHandover.ServerChildRecord, others: Set<Int32> = [], links: @escaping (pid_t) -> Platform.Processes.Link? = Platform.Processes.link) -> String? {
-            ServerChild.check(record, image: "/srv/server", sessionPrograms: [], otherDescriptors: others, links: links, isParser: { _ in false })
+            ServerChild.check(record, sessionPrograms: [], otherDescriptors: others, links: links, isParser: { _ in false })
         }
         #expect(check(record) == nil)
         var closedOnExec = record
@@ -551,14 +551,14 @@ final class ServerChildHost {
         #expect(check(notASocket)?.hasPrefix("its connector") == true)
         var elsewhere = record
         elsewhere.path = "/opt/server"
-        #expect(check(elsewhere) == "it names /opt/server, not this host's --server /srv/server")
+        #expect(check(elsewhere) == nil)
         var later = record
         later.startTicks += 1
         #expect(check(later) == "pid \(child) isn't the process recorded (it started at another time)")
         #expect(check(record, links: { pid in Platform.Processes.link(pid).map { var other = $0; other.parent = 1; return other } })
                 == "pid \(child) isn't this host's child")
         #expect(check(record, links: { _ in nil }) == "pid \(child) is gone")
-        #expect(ServerChild.check(record, image: "/srv/server", sessionPrograms: [], otherDescriptors: [], isParser: { $0 == child })
+        #expect(ServerChild.check(record, sessionPrograms: [], otherDescriptors: [], isParser: { $0 == child })
                 == "pid \(child) is a session's parser")
     }
 
@@ -680,6 +680,251 @@ final class ServerChildHost {
         #expect(restarted.hasPrefix("vibeswitcher-host: "), "\(restarted)")
         let refused = try #require(line("refused an app connection through connector"), "\(host.said)")
         #expect(refused.hasPrefix("vibeswitcher-host: ") && refused.contains("pid \(first) is dumpable"), "\(refused)")
+    }
+
+    /// A record the restore keeps, of a process of this test's (a `sleep`, the host's child as a server child is) and a
+    /// connector handed over, whose copy is a pipe's writing end inherited across the exec, which no sealed copy is:
+    /// restored with `path` as the record's `--server`, the child runs on, now the app's, and the copy is closed (the
+    /// pipe's reading end, here, sees its end). The host's log is returned.
+    private func restoreAKeptChild(recordedPath: (_ binary: String) -> String) async throws -> String {
+        let dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: dir + "/" + ServerChildHelper.actionsName, contents: Data("sleep\n".utf8))
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, removing: dir, socket: dir + "/h.sock")
+        var child: pid_t = 0
+        var spawn = Platform.Spawn(executable: "/bin/sleep", arguments: ["sleep", "600"])
+        spawn.keep = []
+        if case .success(let pid) = spawn.start() { child = pid }
+        try #require(child > 0)
+        let link = try #require(Platform.Processes.link(child))
+        // Ended here only when nothing reaped it (the restored child's `stop` does): its pid, once reaped, may be
+        // another test's process by now.
+        defer {
+            var status: Int32 = 0
+            if Platform.Processes.link(child)?.startTicks == link.startTicks, waitpid(child, &status, WNOHANG) == 0 {
+                kill(child, SIGKILL)
+                _ = waitpid(child, &status, 0)
+            }
+        }
+        let (made, othersEnd) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        defer { Sys.close(othersEnd) }
+        // As a handover's exec leaves kept descriptors: open, not close-on-exec.
+        let connector = fcntl(made, F_DUPFD, 3)
+        Sys.close(made)
+        var pipe: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&pipe) == 0)
+        defer { Sys.close(pipe[0]) }
+        let copy = fcntl(pipe[1], F_DUPFD, 3)
+        Sys.close(pipe[1])
+        let binary = try #require(Bundle.main.executablePath)
+        let record = HostHandover.ServerChildRecord(pid: child, startTicks: link.startTicks, connector: connector, image: copy,
+                                                    path: recordedPath(binary))
+        let restored = try #require(ServerChild.restore(record, launch: .init(image: binary, socketPath: host.socket, arguments: [],
+                                                                              environment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()]),
+                                                        sessionPrograms: [], otherDescriptors: [], server: host.server))
+        defer { restored.stop() }
+        #expect(await eventually { restored.pid == child })
+        #expect(kill(child, 0) == 0, "the child runs on")
+        #expect(host.server.queue.sync { host.server.appConnectors[connector]?.sender?.pid } == child)
+        // The copy's descriptor closed (by `restore` itself, before it returned): the pipe's other end reads its end.
+        var byte: UInt8 = 0
+        var waiting = pollfd(fd: pipe[0], events: Int16(POLLIN), revents: 0)
+        #expect(poll(&waiting, 1, 0) == 1 && read(pipe[0], &byte, 1) == 0, "the carried copy is still open")
+        return (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
+    }
+
+    /// A handover to another build (its `--server` another path, S2-D7) keeps the running server child: it is still
+    /// the app, and its next start is from this image's `--server`, the copy carried closed (S2-D8; Task 9d decides any
+    /// start again at once, by hash).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aServerChildOfAnotherServerPathRunsOn() async throws {
+        let log = try await restoreAKeptChild { _ in "/opt/an-older-build/vibeswitcher-server" }
+        #expect(log.contains("runs on from /opt/an-older-build/vibeswitcher-server; its next start is from this image's --server"), "\(log)")
+        #expect(!log.contains("record refused"), "\(log)")
+    }
+
+    /// A record whose copy is not one to take again (inherited, but no sealed copy): the next start is from a fresh copy,
+    /// and the inherited descriptor is closed, not left open and inheritable for the host's life.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aCarriedCopyNotTakenIsClosed() async throws {
+        let log = try await restoreAKeptChild { $0 }
+        #expect(log.contains("sealed copy wasn't one to take again"), "\(log)")
+    }
+
+    /// A process renames its own listening socket over the host's path just after the host bound a fresh one there
+    /// (the watch's test hook, between the bind and the check): what the path names then leads to that process, not the
+    /// host, so it is not recorded as the host's; the host binds again, and a client by the path reaches the host.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aSocketRenamedOverJustAfterTheBindIsNotTakenForTheHosts() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, removing: dir, watchesItsPath: true, socket: dir + "/h.sock")
+        let squat = dir + "/squat.sock"
+        let squatter = try PathSquatterHelper.Running.start(at: squat)
+        defer { squatter.end() }
+        let squatted = try #require(HostPathWatch.identity(atPath: squat))
+        let watch = try #require(host.server.queue.sync { host.server.pathWatch })
+        // The path alone: the hook, held by the host's watch, holds no `TestHost`, which would never go then.
+        let socket = host.socket
+        host.server.queue.sync {
+            var renamed = false
+            watch.afterBind = {
+                guard !renamed else { return }
+                renamed = true
+                _ = rename(squat, socket)
+            }
+        }
+        #expect(unlink(host.socket) == 0)
+        func noted() -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+        #expect(await eventually { noted().contains("socket path \(host.socket) named nothing: bound a fresh listener there") }, "\(noted())")
+        #expect(HostPathWatch.identity(atPath: squat) == nil, "the squatter's socket was renamed over the path")
+        let now = HostPathWatch.identity(atPath: host.socket)
+        #expect(now != nil && now != squatted)
+        let byPath = try TestClient(socket: host.socket, appKey: nil, viaConnector: false)
+        #expect(await eventually(timeout: 60) { byPath.hasEvent { if case .challenge = $0 { return true } else { return false } } })
+    }
+
+    /// Both paths changed before the watch begins (as during a handover's exec): a squatter's socket at the socket path
+    /// is not recorded as the host's, and the first check, at once rather than a housekeeping later, binds the path
+    /// again and locks the file at the lock path.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func pathsChangedBeforeTheWatchBeginsAreTakenBackAtOnce() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, removing: dir, socket: dir + "/h.sock")
+        let squat = dir + "/squat.sock"
+        let squatter = try PathSquatterHelper.Running.start(at: squat)
+        defer { squatter.end() }
+        let squatted = try #require(HostPathWatch.identity(atPath: squat))
+        #expect(rename(squat, host.socket) == 0)
+        // The server's own lock file, for its identity (as its descriptor's `fstat` gives it).
+        let ownLock = open(host.lock, O_RDWR | O_CLOEXEC)
+        defer { Sys.close(ownLock) }
+        let other = dir + "/other.lock"
+        #expect(FileManager.default.createFile(atPath: other, contents: nil))
+        let otherFD = open(other, O_RDWR | O_CLOEXEC)
+        defer { Sys.close(otherFD) }
+        #expect(rename(other, host.lock) == 0)
+        var config = HostServer.Config(socketPath: host.socket, lockPath: host.lock, shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: [:], hostBuild: 42)
+        // No housekeeping within the test: only the first check can take them back.
+        config.housekeepingInterval = 3600
+        host.server.queue.sync { host.server.pathWatch = HostPathWatch.start(for: host.server, config: config, lockFD: ownLock) }
+        func noted() -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+        #expect(await eventually(timeout: 60) { noted().contains("socket path \(host.socket) named another file: bound a fresh listener there") },
+                "\(noted())")
+        let now = HostPathWatch.identity(atPath: host.socket)
+        #expect(now != nil && now != squatted)
+        let byPath = try TestClient(socket: host.socket, appKey: nil, viaConnector: false)
+        #expect(await eventually(timeout: 60) { byPath.hasEvent { if case .challenge = $0 { return true } else { return false } } })
+        #expect(await eventually(timeout: 60) { noted().contains("lock path \(host.lock) named another file: locked the file there again") },
+                "\(noted())")
+        #expect(flock(otherFD, LOCK_EX | LOCK_NB) != 0 && errno == EWOULDBLOCK)
+    }
+
+    /// Fresh files renamed over the lock path one after another: each is locked again, and the one locked before
+    /// released (it is no longer at the path), so the host holds two locks at most, not one more each time. The host's
+    /// own lock file put back is held already: the lock taken again is released, and nothing says another process
+    /// holds it.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aLockPathReplacedAgainAndAgainHoldsOnlyTheNewest() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, removing: dir, watchesItsPath: true, socket: dir + "/h.sock")
+        func noted() -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+        let original = dir + "/original.lock"
+        #expect(link(host.lock, original) == 0)
+        var files: [Int32] = []
+        defer { files.forEach { Sys.close($0) } }
+        for round in 1...4 {
+            let file = dir + "/other-\(round).lock"
+            #expect(FileManager.default.createFile(atPath: file, contents: nil))
+            files.append(open(file, O_RDWR | O_CLOEXEC))
+            #expect(rename(file, host.lock) == 0)
+            #expect(await eventually { noted().components(separatedBy: "locked the file there again").count - 1 == round }, "\(noted())")
+        }
+        for (round, fd) in files.dropLast().enumerated() {
+            #expect(flock(fd, LOCK_EX | LOCK_NB) == 0, "the file of round \(round + 1) is still locked")
+            _ = flock(fd, LOCK_UN)
+        }
+        let newest = try #require(files.last)
+        #expect(flock(newest, LOCK_EX | LOCK_NB) != 0 && errno == EWOULDBLOCK)
+
+        #expect(rename(original, host.lock) == 0)
+        #expect(await eventually(timeout: 60) { noted().contains("lock path \(host.lock) names the host's own lock file again") }, "\(noted())")
+        #expect(!noted().contains("another process holds"), "\(noted())")
+        #expect(host.server.queue.sync { host.server.pathWatch?.retakenLock } == -1)
+        #expect(flock(newest, LOCK_EX | LOCK_NB) == 0, "the lock taken again is still held")
+    }
+
+    /// A handover's state carries the lock the lock path names (the one taken again), not the host's first lock, whose
+    /// file is no longer there: the next image holds the user's lock. It carries what `hostNotes` counted too. The
+    /// state is read while the probe (a script that waits to be told) runs; the probe's no leaves the host serving.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aHandoverCarriesTheLockThePathNamesAndTheCounts() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, removing: dir, watchesItsPath: true, socket: dir + "/h.sock")
+        func noted() -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+        let other = dir + "/other.lock"
+        #expect(FileManager.default.createFile(atPath: other, contents: nil))
+        #expect(rename(other, host.lock) == 0)
+        #expect(await eventually { noted().contains("locked the file there again") }, "\(noted())")
+        let replaced = try #require(HostPathWatch.identity(atPath: host.lock))
+        // A request on a connector whose process isn't named yet: refused and counted.
+        let connector = try #require(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil))
+        defer {
+            host.server.closeAppConnector(connector)
+            Sys.close(connector)
+        }
+        var byte: UInt8 = 1
+        #expect(send(connector, &byte, 1, 0) == 1)
+        #expect(await eventually { host.server.queue.sync { host.server.tally.refusedAppConnections } == 1 })
+
+        let probe = dir + "/probe.sh", go = dir + "/go"
+        try Data("#!/bin/sh\nwhile [ ! -e '\(go)' ]; do sleep 0.05; done\nexit 1\n".utf8).write(to: URL(fileURLWithPath: probe))
+        #expect(chmod(probe, 0o755) == 0)
+        let app = try TestClient(host)
+        let seq = app.send(.handover(executable: probe))
+        let statePath = host.lock + ".handover"
+        #expect(await eventually { (try? HostHandover.read(from: statePath)) != nil })
+        let state = try HostHandover.read(from: statePath)
+        #expect(FileManager.default.createFile(atPath: go, contents: nil))
+        var info = stat()
+        #expect(fstat(state.lockFD, &info) == 0)
+        #expect(HostPathWatch.FileIdentity(info) == replaced, "the state carries the host's first lock, no longer at the path")
+        #expect(state.tally == HostHandover.Tally(serverRestarts: 0, replacedPaths: [host.lock], refusedAppConnections: 1))
+        #expect(await eventually { app.reply(to: seq) != nil })
+        guard case .error? = app.reply(to: seq) else { Issue.record("\(String(describing: app.reply(to: seq)))"); return }
+    }
+
+    /// What `hostNotes` counted runs on across a handover: the counts the state carried are the new image's from its
+    /// start, as `startedAt` is.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "hostNotes is Linux's"))
+    func theCountsRunOnAcrossAHandover() throws {
+        let path = scratchSocketPath()
+        let lock = path + ".lock"
+        defer { unlink(path); unlink(lock) }
+        let lockFD = open(lock, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        #expect(flock(lockFD, LOCK_EX | LOCK_NB) == 0)
+        let listenFD = try UnixSocket.listen(path: path)
+        var config = HostServer.Config(socketPath: path, lockPath: lock, shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 43)
+        config.idleExit = nil
+        let server = HostServer(config: config)
+        var state = HostHandover.State(fromBuild: 42, startedAt: Date(timeIntervalSinceNow: -60), lockFD: lockFD, listenFD: listenFD,
+                                       secretFD: nil, sessions: [])
+        state.tally = HostHandover.Tally(serverRestarts: 2, replacedPaths: ["/a.sock"], refusedAppConnections: 3)
+        _ = try server.start(restoring: state)
+        defer { server.stop(terminateSessions: true) }
+        let notes = server.queue.sync { server.hostNotes(startedAt: state.startedAt) }
+        #expect(notes.serverRestarts == 2 && notes.replacedPaths == ["/a.sock"] && notes.refusedAppConnections == 3)
+        #expect(server.queue.sync { server.tallyForHandover } == state.tally)
     }
 
     /// The Mac: no server child, and no connector opened for one.
