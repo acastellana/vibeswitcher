@@ -8,12 +8,16 @@ import VibeCore
 /// there, at each housekeeping interval and once as it begins, checks that each path still names what it bound and
 /// what it locked.
 ///
-/// - The socket path: what it names is recorded only once a connection made through it reached a listener of this
-///   process (`SO_PEERCRED` on the connecting end names the process that listened) and it named the same socket file
-///   (`lstat`, no link followed) before and after (`verifiedIdentity`), so a socket renamed over the path just after
-///   the bind is never recorded as the host's. As the watch begins (a fresh start or a handover) the same is asked of
-///   what the path names then. Each housekeeping also connects through it (`leadsHere`), so a file that names the host's
-///   socket at one look and another's at the next is found then at the latest.
+/// - The socket path: what it names (`lstat`, no link followed) is recorded only when it is the file the host's
+///   listener is bound to, as the kernel says (`Platform.Sockets.boundFile`, Linux's unix_diag): nothing goes through
+///   the path, so no rename, before, during or after the check, makes another file pass for the host's, and each
+///   check after (at each change in the folder) compares what the path names with that file (`verifiedIdentity`). As
+///   the watch begins (a fresh start or a handover) the same is asked of what the path names then. Where the kernel
+///   can't say (no unix_diag), the check falls back to a connection made through the path that reaches a listener of
+///   this process (`SO_PEERCRED` on the connecting end, `leadsHere`), with the same socket file named before and
+///   after. A process renaming files over the path around that connect can beat it, and the file it passed off is
+///   then recorded: the folder's changes don't look again, each housekeeping does, the same way, a race that process
+///   must win again each time (the security architecture document's S2).
 /// - The socket path naming something else, nothing, or a listener not the host's: what is there is removed, a fresh
 ///   listener bound there (`UnixSocket.listen`, its senders passed before its first accept), checked as above (up to
 ///   `bindAttempts` times, each losing listener closed), swapped in for the accept source, and the old listener
@@ -78,7 +82,7 @@ final class HostPathWatch {
     /// `config.watchesItsPath`.
     static func start(for server: HostServer, config: HostServer.Config, lockFD: Int32) -> HostPathWatch {
         let watch = HostPathWatch(server: server, socketPath: config.socketPath, lockPath: config.lockPath)
-        watch.socketFile = verifiedIdentity(of: config.socketPath)
+        watch.socketFile = verifiedIdentity(of: config.socketPath, listener: server.listenFD)
         var info = stat()
         if fstat(lockFD, &info) == 0 {
             watch.firstLock = FileIdentity(info)
@@ -104,7 +108,8 @@ final class HostPathWatch {
     }
 
     /// Both paths checked, and each taken back that names something else. `atHousekeeping`: the socket path is also
-    /// connected through (`leadsHere`), and a rebind that lost every attempt is tried again. On the host's queue.
+    /// checked again (`verifiedIdentity`: by connecting through it where the kernel can't say what file the listener is
+    /// bound to), and a rebind that lost every attempt is tried again. On the host's queue.
     func check(atHousekeeping: Bool = false) {
         guard !stopped, let server, server.listenFD >= 0 else { return }
         if atHousekeeping || !rebindAtHousekeeping { checkSocket(server, probing: atHousekeeping) }
@@ -130,11 +135,11 @@ final class HostPathWatch {
         let now = Self.identity(atPath: socketPath)
         let what: String
         if let now, now == socketFile {
-            guard probing, !Self.leadsHere(socketPath) else {
+            guard probing, Self.verifiedIdentity(of: socketPath, listener: server.listenFD) != now else {
                 said[socketPath] = nil
                 return
             }
-            what = "a socket that didn't lead to the host"
+            what = "a socket that isn't the host's"
         } else {
             what = now == nil ? "nothing" : "another file"
         }
@@ -154,7 +159,7 @@ final class HostPathWatch {
             }
             Platform.Sockets.enableCredentials(fresh)
             afterBind?()
-            guard let bound = Self.verifiedIdentity(of: socketPath) else {
+            guard let bound = Self.verifiedIdentity(of: socketPath, listener: fresh) else {
                 Sys.close(fresh)
                 continue
             }
@@ -225,18 +230,26 @@ final class HostPathWatch {
         return lstat(path, &info) == 0 ? FileIdentity(info) : nil
     }
 
-    /// What `path` names, when it is a socket file (not a link) that led to a listener of this process
-    /// (`leadsHere`) and named the same file before and after; nil otherwise.
-    static func verifiedIdentity(of path: String) -> FileIdentity? {
+    /// What `path` names, when it is a socket file (not a link) and `listener`'s: the file the kernel says `listener`
+    /// is bound to (`Platform.Sockets.boundFile`), exactly, whatever is renamed where meanwhile. Where the kernel can't
+    /// say (the Mac, a Linux without unix_diag), a socket file that led to a listener of this process (`leadsHere`,
+    /// not `listener` in particular) and named the same file before and after: renames around the connect (the path
+    /// naming another file at both looks and the host's socket during the connect) can pass that file off as
+    /// `listener`'s. Nil otherwise.
+    static func verifiedIdentity(of path: String, listener: Int32) -> FileIdentity? {
         var info = stat()
-        guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK, leadsHere(path) else { return nil }
+        guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK else { return nil }
         let before = FileIdentity(info)
+        if let bound = Platform.Sockets.boundFile(of: listener) {
+            return Platform.Sockets.boundFile(bound, is: info) ? before : nil
+        }
+        guard leadsHere(path) else { return nil }
         return identity(atPath: path) == before ? before : nil
     }
 
     /// Whether a connection made through `path` now (not waiting: a full backlog is a no) reaches a listener of this
-    /// process: the connecting end's `SO_PEERCRED` names the process that listened. The connection is closed at once;
-    /// the host's listener, when it was that, accepts it and sees it end.
+    /// process (`verifiedIdentity`'s fallback): the connecting end's `SO_PEERCRED` names the process that listened. The
+    /// connection is closed at once; the host's listener, when it was that, accepts it and sees it end.
     static func leadsHere(_ path: String) -> Bool {
         guard var address = Platform.Sockets.unixAddress(path) else { return false }
         let fd = Platform.Sockets.makeSocket(type: Platform.Sockets.stream)

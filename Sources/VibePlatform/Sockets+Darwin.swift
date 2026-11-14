@@ -70,5 +70,9 @@ extension Platform.Sockets {
         let count = read(fd, buffer.baseAddress, buffer.count)
         return (count, count > 0 ? peerToken(fd) : nil)
     }
+
+    /// Nil on the Mac, which has no way to ask the kernel what file a socket is bound to (no unix_diag): a caller
+    /// keeps its own check through the path. Nothing on the Mac asks today (the host watches its path on Linux only).
+    public static func boundFile(of listener: Int32) -> (device: UInt64, inode: UInt64)? { nil }
 }
 #endif

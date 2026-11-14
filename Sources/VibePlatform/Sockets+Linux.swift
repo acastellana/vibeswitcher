@@ -100,6 +100,19 @@ extension Platform.Sockets {
         guard count > 0 else { return (count, nil) }
         return (count, token(pid: sender.pid, uid: sender.uid))
     }
+
+    /// The file the Unix socket `listener` is bound to, asked of the kernel (`NETLINK_SOCK_DIAG`'s unix_diag,
+    /// `UDIAG_SHOW_VFS`): the file `bind` made, wherever it has been renamed since. Nothing goes through a path, so a
+    /// file renamed over the socket's path can't answer in its place, at any moment. `device` is as `stat` gives
+    /// `st_dev`; `inode` is the low 32 bits of the file's inode number, all the kernel reports, so it is compared with
+    /// the low 32 bits of a `stat`'s (`boundFile(_:is:)`). nil when the kernel can't say: `listener` isn't bound to a
+    /// file (not bound, an abstract name), or the kernel has no unix_diag (`CONFIG_UNIX_DIAG`).
+    public static func boundFile(of listener: Int32) -> (device: UInt64, inode: UInt64)? {
+        var device: UInt64 = 0
+        var inode: UInt64 = 0
+        guard vibe_socket_bound_file(listener, &device, &inode) == 0 else { return nil }
+        return (device, inode)
+    }
 }
 
 // The C library's send(2), under a name `Platform.Sockets` doesn't have: inside it a bare `send` is its own.

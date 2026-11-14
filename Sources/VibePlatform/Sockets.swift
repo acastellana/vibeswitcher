@@ -1,3 +1,5 @@
+import Foundation
+
 extension Platform {
     /// Unix-domain sockets, where the systems differ: an address's layout and the longest path it holds, a stream
     /// socket's type, what a write to a peer that has gone does, and who is at the other end.
@@ -15,6 +17,8 @@ extension Platform {
     /// - `peerToken(_:) -> PeerToken?`: the process at the other end, in a form that tells it from a later one of the
     ///   same pid (`Platform.PeerToken`, each system's own).
     /// - `enableCredentials(_:)` and `receive(_:into:)`: bytes read with the process that sent them.
+    /// - `boundFile(of:) -> (device: UInt64, inode: UInt64)?`: the file a listener is bound to, as the kernel knows it
+    ///   (Linux's unix_diag); nil on the Mac, which can't say.
     public enum Sockets {
         /// The address of the socket at `path`; nil when the path is too long for one: with the 0 that ends it, it
         /// must fit `sun_path`, 104 bytes on the Mac and 108 on Linux. The Mac's address also holds its own length.
@@ -31,6 +35,14 @@ extension Platform {
                 raw[bytes.count] = 0
             }
             return address
+        }
+
+        /// Whether `info`, a `stat` of a path, is of the file `bound` (`boundFile(of:)`): the same device, and the
+        /// same low 32 bits of the inode number, all the kernel reports of it. On a file system whose inode numbers
+        /// go past 32 bits, two files on it can share those bits.
+        public static func boundFile(_ bound: (device: UInt64, inode: UInt64), is info: stat) -> Bool {
+            UInt64(truncatingIfNeeded: info.st_dev) == bound.device
+                && UInt32(truncatingIfNeeded: info.st_ino) == UInt32(truncatingIfNeeded: bound.inode)
         }
 
         /// `SOCK_STREAM` as the number `socket` and `socketpair` take: glibc's is an enum to Swift, the Mac's and

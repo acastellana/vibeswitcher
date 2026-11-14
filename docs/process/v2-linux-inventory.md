@@ -220,3 +220,14 @@ host took from the Mac:
   (a starter `sh` a zombie with `isRunning` true for 300 s, its background job holding a socket of the test process's).
   Tests that start a process which leaves another behind use `Platform.Spawn` and `waitpid`.
 - **No `plutil`**: the fake `claude` of `WorkerToolsTests` reads its config with `python3` where `plutil` is missing.
+
+## A Unix socket's file, from the kernel (2026-11-14, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+- **unix_diag answers here** (`CONFIG_UNIX_DIAG=y`): a `NETLINK_SOCK_DIAG` request (`SOCK_DIAG_BY_FAMILY`) for one
+  `AF_UNIX` socket by its sockfs inode number and its cookie (`SO_COOKIE`, which this kernel gives), with
+  `UDIAG_SHOW_VFS`, returns `UNIX_DIAG_VFS`: the device and inode of the file the socket is bound to, the same after
+  the file is renamed. `Platform.Sockets.boundFile` (`SocketsTests.boundFileIsTheFileTheSocketIsBoundTo`).
+- **Its device is the kernel's own `dev_t`** (the file system's `s_dev`: major from bit 20), not `stat`'s: the root
+  file system here, 8:32, is 0x800020 to unix_diag and 0x820 in `st_dev`. The shim converts with `makedev`.
+- **Its inode is 32 bits** (`udiag_vfs_ino` is a `__u32`): compared with the low 32 bits of `st_ino`. ext4 here (`/`,
+  which holds the home and `/tmp`), whose inode numbers fit them.

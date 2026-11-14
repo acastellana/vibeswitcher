@@ -798,6 +798,88 @@ final class ServerChildHost {
         #expect(await eventually(timeout: 60) { byPath.hasEvent { if case .challenge = $0 { return true } else { return false } } })
     }
 
+    /// A socket renamed over the path is not the host's, at once: here one that leads to this very process (the test's
+    /// own listener), renamed over a fresh listener just after its bind. That is what a rename loop around a check by
+    /// connect comes to (the path names another file at each look, the host's socket file during the connect between),
+    /// and a check by connect takes it for the host's. The kernel says which file the host's listener is bound to
+    /// (`Platform.Sockets.boundFile`), so the check after the bind finds another file there and binds again: no
+    /// housekeeping (an hour here) needed, and a client by the path reaches the host. Needs the kernel's unix_diag
+    /// (`CONFIG_UNIX_DIAG`), as the user's host does for this.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aSocketRenamedOverThePathIsNotTheHostsAtOnce() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, housekeeping: 3600, removing: dir, watchesItsPath: true, socket: dir + "/h.sock")
+        try #require(host.server.queue.sync { Platform.Sockets.boundFile(of: host.server.listenFD) } != nil, "this kernel has no unix_diag")
+        let squat = dir + "/squat.sock"
+        let squatter = try UnixSocket.listen(path: squat)
+        defer { Sys.close(squatter) }
+        let squatted = try #require(HostPathWatch.identity(atPath: squat))
+        let watch = try #require(host.server.queue.sync { host.server.pathWatch })
+        let socket = host.socket
+        host.server.queue.sync {
+            var renamed = false
+            watch.afterBind = {
+                guard !renamed else { return }
+                renamed = true
+                _ = rename(squat, socket)
+            }
+        }
+        #expect(unlink(host.socket) == 0)
+        func noted() -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+        #expect(await eventually { noted().contains("socket path \(host.socket) named nothing: bound a fresh listener there") }, "\(noted())")
+        #expect(HostPathWatch.identity(atPath: squat) == nil, "the test's socket was renamed over the path")
+        let now = HostPathWatch.identity(atPath: host.socket)
+        #expect(now != nil && now != squatted, "the path still names the test's socket")
+        let byPath = try TestClient(socket: host.socket, appKey: nil, viaConnector: false)
+        #expect(await eventually { byPath.hasEvent { if case .challenge = $0 { return true } else { return false } } })
+    }
+
+    /// A rebind whose every fresh listener loses (a squatter's socket renamed over each just after its bind) says the
+    /// path is tried again at the next housekeeping; until then a change in the folder (its own binds and renames are
+    /// such changes) starts no rebind, and the housekeeping's check binds the path again, so a client by the path
+    /// reaches the host. The checks are called here as the folder watch and the housekeeping timer call them, the
+    /// timer's interval an hour, so nothing waits on a clock.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    func aRebindThatLosesEveryAttemptIsTriedAgainAtTheHousekeeping() async throws {
+        let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let log = dir + "/host.log"
+        let host = try TestHost(log: log, housekeeping: 3600, removing: dir, watchesItsPath: true, socket: dir + "/h.sock")
+        var squatters: [PathSquatterHelper.Running] = []
+        defer { squatters.forEach { $0.end() } }
+        let squats = (0..<HostPathWatch.bindAttempts).map { "\(dir)/squat\($0).sock" }
+        for squat in squats { squatters.append(try PathSquatterHelper.Running.start(at: squat)) }
+        let lastSquatted = try #require(HostPathWatch.identity(atPath: squats[squats.count - 1]))
+        let watch = try #require(host.server.queue.sync { host.server.pathWatch })
+        let socket = host.socket
+        host.server.queue.sync {
+            var next = squats
+            watch.afterBind = {
+                guard !next.isEmpty else { return }
+                _ = rename(next.removeFirst(), socket)
+            }
+        }
+        #expect(unlink(host.socket) == 0)
+        func noted() -> String { (try? String(contentsOfFile: log, encoding: .utf8)) ?? "" }
+        let lost = "socket path \(socket) names nothing, and no listener bound there led to the host after \(HostPathWatch.bindAttempts) tries: "
+            + "tried again at the next housekeeping"
+        #expect(await eventually { noted().contains(lost) }, "\(noted())")
+        #expect(HostPathWatch.identity(atPath: socket) == lastSquatted)
+
+        host.server.queue.sync { watch.check() }
+        #expect(HostPathWatch.identity(atPath: socket) == lastSquatted, "a change in the folder rebound the path")
+        #expect(!noted().contains("bound a fresh listener there"), "\(noted())")
+
+        host.server.queue.sync { watch.check(atHousekeeping: true) }
+        #expect(noted().contains("socket path \(socket) named another file: bound a fresh listener there"), "\(noted())")
+        let now = HostPathWatch.identity(atPath: socket)
+        #expect(now != nil && now != lastSquatted)
+        let byPath = try TestClient(socket: socket, appKey: nil, viaConnector: false)
+        #expect(await eventually { byPath.hasEvent { if case .challenge = $0 { return true } else { return false } } })
+    }
+
     /// Both paths changed before the watch begins (as during a handover's exec): a squatter's socket at the socket path
     /// is not recorded as the host's, and the first check, at once rather than a housekeeping later, binds the path
     /// again and locks the file at the lock path.

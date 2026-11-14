@@ -301,10 +301,21 @@ socket's path is ever the app.
   server never execs: a lint refuses `execve`, `Platform.Spawn.replaceProcess` and `BinaryWatch` in
   `vibeswitcher-server`.
 - **(call)** **The host keeps its path.** The user's host watches its socket's folder (`FolderWatch+Linux`) and, at
-  each housekeeping (30 s), checks that its socket path and lock path still name the files it bound and locked (the
-  inode recorded at `bind`, kept only once a connection through the path reached this process's listener, so a socket
-  renamed over the path just after the bind is never taken for the host's, and the path connected through again at
-  each housekeeping; the lock descriptor's `fstat`). On a mismatch it binds a fresh listener at the path (with
+  each housekeeping (30 s), checks that its socket path and lock path still name the files it bound and locked. The
+  socket's: what the path names (`lstat`, no link followed) is compared with the file the kernel says the host's
+  listener is bound to (`Platform.Sockets.boundFile`: unix_diag, a `NETLINK_SOCK_DIAG` request for the listener by
+  its inode number and its cookie, `UDIAG_SHOW_VFS`). Nothing goes through the path, so no rename before, during or
+  after a check makes another file pass for the host's, and a socket renamed over the path is found at the check
+  its rename causes. unix_diag reports the low 32 bits of the file's inode number: on the file system that holds
+  `~/.vibeswitcher` here (ext4) inode numbers fit 32 bits and the match is exact; on one whose numbers go past them
+  (btrfs, XFS's `inode64`, tmpfs's `inode64`) a worker that made files on it until one shared those bits with the
+  host's socket file could pass that one off as the host's. **Where the kernel has no unix_diag**
+  (`CONFIG_UNIX_DIAG` off; and on the Mac, which doesn't watch its path) the check falls back to a connection made
+  through the path that reaches a listener of this process, the path naming the same socket file before and after.
+  That is probabilistic: a same-user process renaming files around the connect (its own socket at the path at both
+  looks, the host's during the connect) passes its file off as the host's, which the host then records; the folder's
+  changes don't check a recorded file again, so only the next housekeeping's check, a new race the loop must win
+  again, finds it. The lock's: the lock descriptor's `fstat`. On a mismatch it binds a fresh listener at the path (with
   `SO_PASSCRED`), logs it, and tells the server, which shows it in `status`. A lock path naming another file is locked
   again, holding at most one such lock beside the first, and a handover carries the newest. It checks once as it
   begins too, so a path changed during a handover's exec is taken back then. The server does the same for its own
@@ -377,7 +388,9 @@ own shell and Claude Code) are acceptable while the only project on the node is 
 `ServerChildTests.pathsChangedBeforeTheWatchBeginsAreTakenBackAtOnce`,
 `ServerChildTests.aLockPathReplacedAgainAndAgainHoldsOnlyTheNewest`,
 `ServerChildTests.aHandoverCarriesTheLockThePathNamesAndTheCounts`, `ServerChildTests.theCountsRunOnAcrossAHandover`
-(Task 8b's review); planned: stage 2 plan task 4b.
+(Task 8b's review); `SocketsTests.boundFileIsTheFileTheSocketIsBoundTo`, `SocketsTests.theMacKnowsNoBoundFile`,
+`ServerChildTests.aSocketRenamedOverThePathIsNotTheHostsAtOnce`,
+`ServerChildTests.aRebindThatLosesEveryAttemptIsTriedAgainAtTheHousekeeping` (the socket's file from the kernel); planned: stage 2 plan task 4b.
 
 **Tests to write:** Task 4b: `HostIdentitySeamTests.theMacsAppIsStillTheCdhashCheck`,
 `aConnectorConnectionIsTheAppWithNoChallenge`, `noConnectionByPathIsTheAppOnLinux` (Tasks 8a's and 8b's are under
@@ -1156,7 +1169,9 @@ against it. Each line says what reduces it now, if anything.
    that waits for a start (one it caused, or the user's) can ptrace it and own it. S6.
 5. A worker can put its own socket at the host's path: sessions' tool servers and hooks reach it until the host binds
    the path again (seconds). The server is unaffected (its connector). No more than ptrace of those sessions gives.
-   S2.
+   Where the kernel has no unix_diag the host's check of its path is by a connection through it, which a worker
+   renaming files around it can beat, each time it wins until a housekeeping it loses (30 s each); and on a file
+   system whose inode numbers pass 32 bits, a file sharing the low 32 bits of the host's socket file's passes. S2.
 
 **Acting as a session**
 
