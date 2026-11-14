@@ -3093,3 +3093,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-14 14:48 Audit of peer-wait-deadline-no: incomplete, clean, round 3: 2 Important (1 open), 3 Nit open, 1 Pre-existing open
 - 2026-11-14 14:48 Started a worker on peer-wait-deadline-no
 - 2026-11-14 14:48 Automatically (auto_advance): Sent peer-wait-deadline-no's worker the open Important findings peer-wait-deadline-no:F6 from its audit at b8912729 (in a new worker: its last one was released during the audit).
+- 2026-11-14 14:49 Audit of main-red-green-and: complete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-11-14 14:49 Started a worker on main-red-green-and
+- 2026-11-14 14:49 Automatically (auto_advance): Sent main-red-green-and's worker the open Important findings main-red-green-and:F1 from its audit at 52946e0e (in a new worker: its last one was released during the audit).
