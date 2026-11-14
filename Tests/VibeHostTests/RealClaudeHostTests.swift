@@ -165,45 +165,76 @@ import Testing
         print("R12a: the session ended: \(exit?.cause ?? "not recorded")")
         step("5, /exit, its exit recorded")
 
-        // 6. No parser reply dropped (the stage 2 plan's Task 9e), in either log, but the one 9e leaves out on purpose:
-        // the answer to Claude Code's kitty graphics probe as it starts (`APC G i=31,…,a=q;… ST`), which the headless
-        // terminal answers `APC G i=31;OK ST` (`ParserReplies.swiftTermResponders`: kitty graphics, left out). Each
-        // drop is in the log: a line a second at most; those the once-a-second limit held back are counted as "and N
-        // more" on the next line, or, when the parser stops first (before the handover's exec, as the session ends),
-        // in a line of their own naming the first four (`ParserReplies.flushDropped`). So the session's parser is
-        // waited out first; a line counting drops it doesn't name fails, and each drop named must be a kitty graphics
-        // reply.
+        // 6. No parser reply dropped (the stage 2 plan's Task 9e), in either log, but the two 9e leaves out on purpose:
+        // the answers to Claude Code's two kitty graphics probes as it starts (2.1.323's `APC G i=31,s=1,v=1,a=q,t=d,f=24`
+        // and `…,t=f,f=32`, sent behind a DA1 sentinel: unanswered, the sentinel's DA1 reply resolves them as
+        // unsupported, and Claude Code goes on without kitty graphics), each of which the headless terminal answers
+        // `APC G i=31;OK ST` (`ParserReplies.swiftTermResponders`: kitty graphics, left out). Each drop is in the log: a
+        // line a second at most; those the once-a-second limit held back are counted as "and N more" on the next line,
+        // or, when the parser stops first (before the handover's exec, as the session ends), in a line of their own
+        // naming the first four (`ParserReplies.flushDropped`). So the session's parser is waited out first; then each
+        // log must count exactly those two drops, every drop it counts named and that reply (`kittyGraphicsDrops`).
         #expect(await eventually(timeout: 10) { OrphanSweepTests.parsers(of: host.pid).isEmpty },
                 "parsers: \(OrphanSweepTests.parsers(of: host.pid))")
-        let dropped = (sessionLog() + host.log).components(separatedBy: "\n").filter { $0.contains("reply dropped") || $0.contains("more dropped") }
-        #expect(dropped.allSatisfy(Self.onlyKittyGraphicsDropped), "\(sessionLog())\n\(host.log)")
-        print("R12a: replies dropped: \(dropped.isEmpty ? "none" : dropped.joined(separator: "; "))")
+        for (name, log) in [("session log", sessionLog()), ("host log", host.log)] {
+            let dropped = log.components(separatedBy: "\n").filter { $0.contains("reply dropped") || $0.contains("more dropped") }
+            #expect(Self.kittyGraphicsDrops(dropped) == Self.kittyGraphicsProbes, "the \(name):\n\(log)")
+            print("R12a: replies dropped, \(name): \(dropped.isEmpty ? "none" : dropped.joined(separator: "; "))")
+        }
         print("R12a: the session log's watchdog lines: \(sessionLog().components(separatedBy: "\n").filter { $0.contains("watchdog:") })")
     }
 
-    /// Whether a log line about dropped parser replies names kitty graphics replies (`APC G …`, which Task 9e leaves
-    /// out) and nothing else: one drop's line, or `flushDropped`'s naming every drop it counts. A line with
-    /// "(and N more …)", or a flush with drops it doesn't name ("…"), is not.
-    static func onlyKittyGraphicsDropped(_ line: String) -> Bool {
-        let kitty = { (drop: Substring) in drop.contains("reply dropped, it is no reply: ") && drop.contains("ESC_Gi=") }
+    /// How many kitty graphics probes Claude Code 2.1.323 sends as it starts, each answered `APC G i=31;OK ST` by the
+    /// headless terminal and dropped (found by the gated run of 2026-11-14 17:29, which named both).
+    static let kittyGraphicsProbes = 2
+    /// That answer, as a drop's line shows it.
+    static let kittyGraphicsDrop = "reply dropped, it is a kitty graphics reply, left out: 12 bytes, ESC_Gi=31;OKESC\\"
+
+    /// How many parser replies a log's lines about dropped replies count, if every one is named and is the kitty
+    /// graphics answer (`kittyGraphicsDrop`); nil if any is not, or isn't named: a line with "(and N more …)", a flush
+    /// line naming fewer than it counts, or anything cut short ("…").
+    static func kittyGraphicsDrops(_ lines: [String]) -> Int? {
         let flush = "more dropped since the last line, as its parser stopped: "
-        guard let named = line.range(of: flush) else { return !line.contains("more dropped") && kitty(Substring(line)) }
-        let drops = line[named.upperBound...].components(separatedBy: "; ").map { Substring($0) }
-        guard let count = line.range(of: #"parser replies: \d+ "#, options: .regularExpression)
-            .flatMap({ Int(line[$0].dropFirst("parser replies: ".count).dropLast()) }) else { return false }
-        return drops.count == count && drops.allSatisfy(kitty)
+        var count = 0
+        for line in lines {
+            guard !line.contains("…") else { return nil }
+            guard let named = line.range(of: flush) else {
+                guard !line.contains("more dropped"), line.hasSuffix(" " + kittyGraphicsDrop),
+                      line.components(separatedBy: "reply dropped").count == 2 else { return nil }
+                count += 1
+                continue
+            }
+            let drops = line[named.upperBound...].components(separatedBy: "; ")
+            guard let counted = line.range(of: #"parser replies: \d+ "#, options: .regularExpression)
+                .flatMap({ Int(line[$0].dropFirst("parser replies: ".count).dropLast()) }),
+                  drops.count == counted,
+                  drops.allSatisfy({ $0.hasPrefix("parser (pid ") && $0.hasSuffix(") " + kittyGraphicsDrop)
+                      && $0.components(separatedBy: "reply dropped").count == 2 }) else { return nil }
+            count += counted
+        }
+        return count
     }
 
-    @Test func onlyKittyGraphicsDropsPass() {
-        let kitty = "parser (pid 9) reply dropped, it is no reply: 12 bytes, ESC_Gi=31;OKESC\\"
-        #expect(Self.onlyKittyGraphicsDropped("12:00 watchdog: session X's " + kitty))
-        #expect(!Self.onlyKittyGraphicsDropped("12:00 watchdog: session X's " + kitty + " (and 1 more dropped since the last line)"))
-        #expect(!Self.onlyKittyGraphicsDropped("12:00 watchdog: session X's parser (pid 9) reply dropped, no cursor position query is pending: 6 bytes, ESC[1;1R"))
+    @Test func onlyTheKittyGraphicsDropsAreCounted() {
+        let kitty = "parser (pid 9) " + Self.kittyGraphicsDrop
+        let line = "12:00 watchdog: session X's " + kitty
         let flush = "12:00 watchdog: session X's parser replies: 2 more dropped since the last line, as its parser stopped: "
-        #expect(Self.onlyKittyGraphicsDropped(flush + kitty + "; " + kitty))
-        #expect(!Self.onlyKittyGraphicsDropped(flush + kitty + "; parser (pid 9) reply dropped, it is no reply: 3 bytes, ESC[I"))
-        #expect(!Self.onlyKittyGraphicsDropped(flush + kitty))
-        #expect(!Self.onlyKittyGraphicsDropped(flush.replacingOccurrences(of: ": 2 ", with: ": 5 ") + [kitty, kitty, kitty, kitty, "…"].joined(separator: "; ")))
+        let one = flush.replacingOccurrences(of: ": 2 ", with: ": 1 ")
+        #expect(Self.kittyGraphicsDrops([]) == 0)
+        #expect(Self.kittyGraphicsDrops([line]) == 1)
+        #expect(Self.kittyGraphicsDrops([line, one + kitty]) == 2)
+        #expect(Self.kittyGraphicsDrops([line, flush + kitty + "; " + kitty]) == 3)
+        // Held back unnamed, or named short of the count, or cut short.
+        #expect(Self.kittyGraphicsDrops([line + " (and 1 more dropped since the last line)"]) == nil)
+        #expect(Self.kittyGraphicsDrops([flush + kitty]) == nil)
+        #expect(Self.kittyGraphicsDrops([flush.replacingOccurrences(of: ": 2 ", with: ": 5 ")
+            + [kitty, kitty, kitty, kitty, "…"].joined(separator: "; ")]) == nil)
+        #expect(Self.kittyGraphicsDrops([line.replacingOccurrences(of: "ESC_Gi=31;OKESC\\", with: "ESC_Gi=31;OKESC\\…")]) == nil)
+        // Any other drop: another reply, another kitty graphics answer, a reply of a kind with no query pending.
+        #expect(Self.kittyGraphicsDrops([one + "parser (pid 9) reply dropped, it is no reply: 3 bytes, ESC[I"]) == nil)
+        #expect(Self.kittyGraphicsDrops([line.replacingOccurrences(of: "12 bytes, ESC_Gi=31;OKESC", with: "19 bytes, ESC_Gi=31;ENOENT:xESC")]) == nil)
+        #expect(Self.kittyGraphicsDrops(["12:00 watchdog: session X's parser (pid 9) reply dropped, no cursor position query is pending: 6 bytes, ESC[1;1R"]) == nil)
+        #expect(Self.kittyGraphicsDrops([line + "; parser (pid 9) reply dropped, it is no reply: 1 bytes, x"]) == nil)
     }
 
     /// `claude --version`, in the scratch home with the config folder: what it prints, or why it printed nothing.
