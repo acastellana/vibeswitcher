@@ -140,6 +140,43 @@ import Testing
         #expect(Self.odBytes(afterHook).contains("Z") && !afterHook.contains("033"), "\(afterHook.debugDescription)")
     }
 
+    /// A parser sends a program status query (`OSC 7501 ; ?`, a test hook) its session's program never printed: the
+    /// host's answer, `OSC 7501 ; ? ST`, isn't typed, and the log says so (the program's own query is answered,
+    /// `HostedSessionTests`' program status test).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's reply check; the Mac passes every reply"))
+    func aStatusQueryTheProgramDidntPrintIsNotAnswered() async throws {
+        let probe = SessionProbe(), lines = Lines()
+        let session = try start("stty raw -echo; printf '\\033]7599;status:3f\\007'; echo asked; "
+            + "dd bs=1 count=1 2>/dev/null | od -An -c; echo done; stty sane; \(keepRunning)", probe: probe, lines: lines)
+        defer { probe.end(session) }
+        #expect(await eventually { lines.all.contains { $0.contains("reply dropped, no program status query is pending") } },
+                "\(lines.all) \(probe.diagnosis(session))")
+        probe.queue.sync { _ = session.write(Data("Z".utf8)) }
+        #expect(await eventually { probe.text.contains("done") }, "\(probe.diagnosis(session))")
+        let afterAsked = probe.text.components(separatedBy: "asked").last ?? ""
+        #expect(Self.odBytes(afterAsked).contains("Z") && !afterAsked.contains("033"), "\(afterAsked.debugDescription)")
+    }
+
+    /// A session restored after a handover (its replay fed quietly to a new parser) reads its next output from where
+    /// the replay left the parser: a query the replay began and the program ends now is seen, and one the replay
+    /// held whole is not pending (the new parser, fed quietly, never answers it).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's reply check; the Mac passes every reply"))
+    func aQueryBegunInTheReplayIsSeenWhenItEnds() throws {
+        let queue = DispatchQueue(label: "restore")
+        let info = HostSession(id: UUID(), tty: "ttypts0", childPID: getpid(), cwd: scratchRoot.path, command: "true",
+                               label: "Test", agent: nil, title: "", startedAt: Date(), cols: 80, rows: 24,
+                               exit: .init(status: 0, at: Date()))
+        let saved = HostHandover.Session(info: info, masterFD: nil, output: Data("old \u{1b}[5n screen \u{1b}[".utf8),
+                                         pendingInput: Data(), ended: nil)
+        let pending: [ParserReplies.Kind: Int] = queue.sync {
+            let session = HostedSession.restore(saved, launcher: hostLauncher, parser: ParserOptions(), ringCapacity: 1 << 20, queue: queue)
+            defer { session.close() }
+            session.parserReplies.noteQueries(in: Data("6n".utf8))
+            return session.parserReplies.pending
+        }
+        #expect(pending == [.cursor: 1])
+    }
+
     // MARK: The table (both)
 
     /// The Mac's form: every reply goes in while no view is attached, none while one is, and no query is read.
@@ -151,6 +188,61 @@ import Testing
         #expect(replies.pending.isEmpty)
         #expect(replies.admit(Data("\r".utf8), from: 1, clientsAttached: false, log: nil) == Data("\r".utf8))
         #expect(replies.admit(Data("\u{1b}[1;1R".utf8), from: 1, clientsAttached: true, log: nil) == nil)
+        let admitted = replies.admits(.query, from: 1, log: nil)
+        #expect(admitted)
+        replies.prime(with: Data("\u{1b}[".utf8))
+        replies.noteQueries(in: Data("6n".utf8))
+        #expect(replies.pending.isEmpty)
+    }
+
+    /// The program status query (`OSC 7501 ; ?`): the scanner counts as many as the parser forwards (`HeadlessDelegate`
+    /// as the parser has it, each payload `ProgramStatus.parse` reads as a query), and the host answers each once;
+    /// a status report isn't a query and goes through.
+    @Test func theProgramStatusQueryIsAnsweredOncePerQuery() {
+        for output in ["\u{1b}]7501;?\u{1b}\\", "\u{1b}]7501;?x\u{07}", "\u{1b}]7501;state=idle\u{07}", "\u{1b}]7501\u{07}",
+                       "\u{1b}]7501;?\u{07}\u{1b}]7501;?\u{07}", "\u{1b}]7502;?\u{07}", "\u{1b}]7501;?\u{18}", "\u{1b}P$q\u{1b}]7501;?\u{07}"] {
+            let delegate = HeadlessDelegate()
+            var queries = 0
+            delegate.onProgramStatus = { if ProgramStatus.parse(String(decoding: $0, as: UTF8.self), at: Date()) == .query { queries += 1 } }
+            let terminal = Terminal(delegate: delegate, options: TerminalOptions(cols: 80, rows: 24, scrollback: 10))
+            delegate.listen(to: terminal)
+            terminal.feed(buffer: Array(output.utf8)[...])
+            var replies = ParserReplies(checks: true)
+            replies.noteQueries(in: Data(output.utf8))
+            #expect(replies.pending[.programStatusQuery, default: 0] == queries, "\(output.debugDescription): \(queries) forwarded, \(replies.pending)")
+            for _ in 0..<queries {
+                let admitted = replies.admits(.query, from: 1, log: nil)
+                #expect(admitted)
+            }
+            var lines: [String] = []
+            let another = replies.admits(.query, from: 3, log: { lines.append($0) })
+            #expect(!another, "\(output.debugDescription)")
+            #expect(lines.first?.hasPrefix("parser (pid 3) reply dropped, no program status query is pending") == true, "\(lines)")
+            let report = replies.admits(.clear(id: nil), from: 1, log: nil)
+            #expect(report)
+        }
+    }
+
+    /// The replay a new parser is fed quietly: its queries aren't pending (none is answered), nor any before it, and a
+    /// sequence it leaves open goes on in the next output, as in the parser.
+    @Test func aReplayLeavesTheScannerWhereItLeavesTheParser() {
+        var replies = ParserReplies(checks: true)
+        replies.noteQueries(in: Data("\u{1b}[c".utf8))
+        replies.prime(with: Data("\u{1b}[6n screen \u{1b}]11;".utf8))
+        #expect(replies.pending.isEmpty)
+        replies.noteQueries(in: Data("?\u{07}".utf8))
+        #expect(replies.pending == [.dynamicColor(11): 1])
+    }
+
+    /// The XTVERSION reply is this build's SwiftTerm's own, exactly: a parser can't type free text through it.
+    @Test func theVersionReplyIsThisBuildsOnly() {
+        let real = ParserReplies.versionReply
+        #expect(real.starts(with: Data("\u{1b}P>|".utf8)) && real.count > 6, "\(ParserReplies.shown(real))")
+        #expect(ParserReplies.kinds(ofReply: real) == [.version])
+        #expect(ParserReplies.kinds(ofReply: Data("\u{1b}P>|rm -rf ~\r\u{1b}\\".utf8)).isEmpty)
+        #expect(ParserReplies.kinds(ofReply: Data("\u{1b}P>|rm -rf ~\u{1b}\\".utf8)).isEmpty)
+        // Longer than any reply: not read.
+        #expect(ParserReplies.kinds(ofReply: Data(("\u{1b}[?" + String(repeating: "1;", count: 400) + "1c").utf8)).isEmpty)
     }
 
     /// Each query SwiftTerm answers, fed to a headless terminal as the parser has it and to the host's scanner: the

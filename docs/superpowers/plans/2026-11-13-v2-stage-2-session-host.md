@@ -1615,7 +1615,9 @@ is green.
     holds no session's state); the pending queries are a stored `HostedSession.parserReplies` (a `ParserReplies`),
     used on the session's queue. A third hook, one line in `SessionParser.run`'s test hook (`--parser-test-hooks`
     only): `OSC 7599 ; reply:HEX` makes the parser send HEX as a reply, which is how the tests' parser "sends a
-    `.reply` the session never asked for". Each kind 4, in the port map.
+    `.reply` the session never asked for". The hooks are kind 4, in the port map; **the stored
+    `HostedSession.parserReplies` is outside the plan's eight kinds (kind 5 names `HostServer` and `HostConnection`
+    members only): a deviation awaiting the lead's approval**, the smallest place for a session's pending queries.
   - The output is read for queries by a scanner that mirrors SwiftTerm's own state table (`QueryScanner`: its ground
     state, ESC, CAN and SUB, the C1 controls, a CSI's parameters and collected bytes, where an OSC or a DCS ends), so
     a query split between two reads counts, and a query SwiftTerm wouldn't answer doesn't.
@@ -1629,6 +1631,17 @@ is green.
   - Two pure tests more, on both systems: `everyQueryIsAnsweredInItsGrammar` (each query fed to a SwiftTerm terminal
     and to the scanner: as many seen as answered, each reply in its query's grammar, passing once) and
     `aQuerySplitBetweenReadsIsSeen`; and `droppedRepliesAreLoggedOnceASecond`.
+  - The 9e review (2026-11-14): the program status query (`OSC 7501 ; ?`), which the host answers itself by typing
+    `ProgramStatus.queryReply` when the parser forwards it, is a kind of its own (`programStatusQuery`): on Linux
+    the host answers it only once per `OSC 7501 ; ?` the output asked (`admits`, a fifth hook, in
+    `link.onProgramStatus`; `aStatusQueryTheProgramDidntPrintIsNotAnswered`, `theProgramStatusQueryIsAnsweredOncePerQuery`).
+    A new parser's quiet replay primes the scanner (`prime(with:)`, a sixth hook, in `startParser`), so after a
+    handover or a replacement a query the replay began counts when it ends (`aQueryBegunInTheReplayIsSeenWhenItEnds`,
+    `aReplayLeavesTheScannerWhereItLeavesTheParser`). XTVERSION's grammar is this build's own reply exactly
+    (`versionReply`, a headless terminal asked once; the parser is this build's image), not 128 bytes of free text
+    (`theVersionReplyIsThisBuildsOnly`). The grammars are compiled once; a reply is matched only against the kinds
+    with a query pending, and one longer than any reply not at all (3.8 µs a reply with all 22 CSI kinds pending,
+    was 49 µs).
 
 - [ ] **Step 1: Failing tests** (Linux; the Mac's form passes every reply, as today, `theMacsParserRepliesAreTodays`).
   - `aCursorQueryIsAnswered`: a session's program writes `ESC[6n` and reads `ESC[r;cR` on its stdin.

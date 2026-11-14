@@ -244,9 +244,10 @@ public final class HostedSession {
             self.onChange?(self.info)
         }
         link.onBell = { [weak self] in self?.onBell?() }
-        link.onProgramStatus = { [weak self] payload in
+        link.onProgramStatus = { [weak self, pid = link.pid] payload in
             guard let report = ProgramStatus.parse(payload, at: Date()) else { return }
-            self?.programStatus(report)
+            guard let self, self.parserReplies.admits(report, from: pid, log: self.onParserTrouble) else { return }
+            self.programStatus(report)
         }
         link.onParsed = { [weak self] in self?.resumeReadingIfCaughtUp() }
         link.onBusy = { [weak self, weak link] in
@@ -257,6 +258,7 @@ public final class HostedSession {
             guard let self, let link, self.parser === link else { return }
             self.replaceParser(link, because: "ended (\(HostLog.waitStatus(status)))")
         }
+        parserReplies.prime(with: replay)
         link.feed(replay, quietly: true)
         parser = link
         startWatchdog()

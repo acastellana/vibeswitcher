@@ -1,4 +1,5 @@
 import Foundation
+import SwiftTerm
 import VibeCore
 
 /// A parser's reply is typed only as a reply (the stage 2 plan's Task 9e, S2-D5; the security architecture document's
@@ -20,6 +21,11 @@ import VibeCore
 ///   finds a query), on the session's queue before the parser is fed, so a query is pending before its reply can come.
 /// - **A view attached** answers the program's queries itself and the parser's replies are skipped, as before; a
 ///   skipped reply still ends its query's wait, so a later reply of that kind finds nothing pending.
+/// - **The program status query** (`OSC 7501 ; ?`), which the host answers itself when its parser forwards it (views
+///   don't speak it), is answered only as often as the output asked it too (`admits`).
+/// - **A new parser** (a handover's, or one replacing a stalled one) is fed its replay quietly and answers none of
+///   it: the scanner reads the same replay without counting (`prime`), so it is where the parser is, and nothing
+///   asked before it is pending.
 ///
 /// The Mac: none of it. Every reply goes in while no view is attached, as before (`checks` false).
 struct ParserReplies {
@@ -54,6 +60,9 @@ struct ParserReplies {
         case paletteColor
         /// The foreground, background or cursor colour (`OSC 10/11/12 ; ? ST`): `OSC code ; rgb:… ST`.
         case dynamicColor(Int)
+        /// The program status feature query (`OSC 7501 ; ? …`), which the host answers itself (`ProgramStatus.queryReply`)
+        /// when the parser forwards it: no parser's `.reply` is one.
+        case programStatusQuery
 
         var description: String {
             switch self {
@@ -71,6 +80,7 @@ struct ParserReplies {
             case .window(let number): "window report \(number)"
             case .paletteColor: "palette colour"
             case .dynamicColor(let code): "colour \(code)"
+            case .programStatusQuery: "program status"
             }
         }
     }
@@ -99,16 +109,46 @@ struct ParserReplies {
         case .kittyKeyboard: return #"\x1b\[\?\d{1,5}u"#
         // `DECRQSS.unhook`: what it reports of the margins, SGR, the cursor style and the conformance level.
         case .statusString: return #"\x1bP(0\$r|1\$r("q|65;1"p|\d{1,5};\d{1,5}[rs]|[0-9;:]{0,128}m?|\d q))\x1b\\"#
-        case .version: return #"\x1bP>\|[\x20-\x7e]{1,128}\x1b\\"#
+        // This build's own: the parser is this build's image (its SwiftTerm's `SwiftTermBuildInfo`, fixed at build time).
+        case .version: return versionReply.isEmpty ? "(?!)" : NSRegularExpression.escapedPattern(for: String(decoding: versionReply, as: UTF8.self))
         case .window(let number): return #"\x1b\["# + String(number) + #";\d{1,6};\d{1,6}t"#
         case .paletteColor: return #"\x1b\]4;\d{1,3};"# + rgb + #"\x1b\\"#
         case .dynamicColor(let code): return #"\x1b\]"# + String(code) + ";" + rgb + #"\x1b\\"#
+        case .programStatusQuery: return NSRegularExpression.escapedPattern(for: String(decoding: ProgramStatus.queryReply, as: UTF8.self))
         }
     }
 
-    /// Every kind a reply could be, by `grammar`: none for a reply outside every grammar (`CSI ; 0 $ y`, a mode report
-    /// with no mode, is both modes').
-    static func kinds(ofReply reply: Data) -> [Kind] {
+    /// SwiftTerm's XTVERSION reply (`DCS > | identity ST`) in this build, asked of a headless terminal once.
+    static let versionReply: Data = {
+        let delegate = HeadlessDelegate()
+        var made = Data()
+        delegate.onReply = { made.append($0) }
+        let terminal = Terminal(delegate: delegate, options: TerminalOptions(cols: 2, rows: 2, scrollback: 0))
+        terminal.feed(buffer: Array("\u{1b}[>q".utf8)[...])
+        return made
+    }()
+
+    /// Each kind a parser's reply can be, its grammar compiled once (a seized parser's flood of replies is read on the
+    /// queue every session shares).
+    private static let patterns: [Kind: NSRegularExpression] = {
+        let kinds: [Kind] = [.status, .cursor, .decCursor, .primaryAttributes, .secondaryAttributes, .decMode, .ansiMode,
+                             .kittyKeyboard, .statusString, .version, .paletteColor, .dynamicColor(10), .dynamicColor(11),
+                             .dynamicColor(12)]
+            + decReports.keys.map(Kind.decReport) + Set(windowReports.values).map(Kind.window)
+        var patterns: [Kind: NSRegularExpression] = [:]
+        for kind in kinds {
+            patterns[kind] = try? NSRegularExpression(pattern: #"\A(?:"# + grammar(kind) + #")\z"#)
+        }
+        return patterns
+    }()
+
+    /// No reply is longer (the longest grammar's is under 200 bytes, but for XTVERSION's, this build's own).
+    static let longestReply = max(256, versionReply.count)
+
+    /// Every kind a reply could be, by `grammar` (of those in `among`, if given): none for a reply outside every
+    /// grammar (`CSI ; 0 $ y`, a mode report with no mode, is both modes').
+    static func kinds(ofReply reply: Data, among: Set<Kind>? = nil) -> [Kind] {
+        guard reply.count <= longestReply else { return [] }
         // The terminal may have been told to send 8-bit controls (S8C1T): CSI, DCS, OSC and ST as one byte each.
         var bytes: [UInt8] = []
         for byte in reply {
@@ -121,9 +161,11 @@ struct ParserReplies {
             default: bytes.append(byte)
             }
         }
+        let candidates = candidates(for: bytes).filter { among?.contains($0) ?? true }
+        guard !candidates.isEmpty else { return [] }
         let text = String(decoding: bytes, as: UTF8.self)
-        return candidates(for: bytes).filter { kind in
-            guard let pattern = try? NSRegularExpression(pattern: #"\A(?:"# + grammar(kind) + #")\z"#) else { return false }
+        return candidates.filter { kind in
+            guard let pattern = patterns[kind] else { return false }
             return pattern.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
         }
     }
@@ -162,23 +204,59 @@ struct ParserReplies {
         scanner.scan(chunk) { pending[$0, default: 0] += 1 }
     }
 
+    /// A new parser is fed `replay` quietly (on Linux): the scanner reads it afresh too, counting none of its queries,
+    /// so it ends where the parser does, and nothing asked before is pending (the new parser answers none of it).
+    mutating func prime(with replay: Data) {
+        guard checks else { return }
+        scanner = QueryScanner()
+        scanner.scan(replay) { _ in }
+        pending = [:]
+    }
+
     /// What of a parser's reply goes into the session: the reply, or nil. The Mac: the reply while no view is attached,
     /// as before. On Linux, also only when it is in the grammar of a kind with a query pending, which it then answers
     /// (with a view attached too, though it isn't typed then); otherwise a line for the host's log (`log`, the
     /// session's parser trouble) says it was dropped. `parser`: its pid, for that line.
     mutating func admit(_ reply: Data, from parser: pid_t, clientsAttached: Bool, log: ((String) -> Void)?) -> Data? {
         guard checks else { return clientsAttached ? nil : reply }
-        let kinds = Self.kinds(ofReply: reply)
-        guard let kind = kinds.first(where: { pending[$0, default: 0] > 0 }) else {
-            let why = kinds.isEmpty ? "it is no reply" : "no \(kinds[0]) query is pending"
-            dropped("parser (pid \(parser)) reply dropped, \(why): \(Self.shown(reply))", log: log)
+        // Only the kinds pending are matched (none: no matching at all); why a reply went is worked out for the log only.
+        guard let kind = Self.kinds(ofReply: reply, among: Set(pending.keys)).first else {
+            dropped(log: log) {
+                let kinds = Self.kinds(ofReply: reply)
+                let why = kinds.isEmpty ? "it is no reply" : "no \(kinds[0]) query is pending"
+                return "parser (pid \(parser)) reply dropped, \(why): \(Self.shown(reply))"
+            }
             return nil
         }
-        pending[kind] = pending[kind, default: 1] > 1 ? pending[kind, default: 1] - 1 : nil
+        answered(kind)
         return clientsAttached ? nil : reply
     }
 
-    private mutating func dropped(_ line: String, log: ((String) -> Void)?, now: Date = Date()) {
+    /// Whether the host answers a parser's program status report (`ProgramStatus.Report`). The Mac: always, as before.
+    /// On Linux a query (`OSC 7501 ; ?`), which the host answers by typing `ProgramStatus.queryReply`, with a view
+    /// attached too, only when it answers one pending in the output, once per query; otherwise a line for the host's
+    /// log says it was dropped. A status report types nothing and goes through.
+    mutating func admits(_ report: ProgramStatus.Report, from parser: pid_t, log: ((String) -> Void)?) -> Bool {
+        guard checks, case .query = report else { return true }
+        guard pending[.programStatusQuery] != nil else {
+            dropped(log: log) {
+                "parser (pid \(parser)) reply dropped, no \(Kind.programStatusQuery) query is pending: the host's answer, "
+                    + Self.shown(ProgramStatus.queryReply)
+            }
+            return false
+        }
+        answered(.programStatusQuery)
+        return true
+    }
+
+    /// One query of `kind`'s is answered: it waits no more.
+    private mutating func answered(_ kind: Kind) {
+        let left = pending[kind, default: 0] - 1
+        pending[kind] = left > 0 ? left : nil
+    }
+
+    /// `line` goes to the log only once a second at most: it is made only then.
+    private mutating func dropped(log: ((String) -> Void)?, now: Date = Date(), _ line: () -> String) {
         guard now.timeIntervalSince(lastLogged) >= 1 else {
             unlogged += 1
             return
@@ -186,7 +264,7 @@ struct ParserReplies {
         let more = unlogged > 0 ? " (and \(unlogged) more dropped since the last line)" : ""
         lastLogged = now
         unlogged = 0
-        log?(line + more)
+        log?(line() + more)
     }
 
     /// A reply for the log: printable ASCII as it is, ESC as `ESC`, any other byte in hex; at most 64 bytes.
@@ -203,12 +281,19 @@ struct ParserReplies {
 
     // MARK: Test hooks
 
-    /// What a parser with test hooks (`--parser-test-hooks`, a scratch host's tests only) sends as a reply when the
-    /// program prints `OSC 7599 ; reply:HEX`: the bytes HEX names, as a parser bug or a seized parser would.
-    static func testReply(_ payload: ArraySlice<UInt8>) -> Data? {
+    /// What a parser with test hooks (`--parser-test-hooks`, a scratch host's tests only) sends when the program
+    /// prints `OSC 7599 ; reply:HEX` (a reply) or `OSC 7599 ; status:HEX` (a program status payload): the bytes HEX
+    /// names, as a parser bug or a seized parser would.
+    static func testFrame(_ payload: ArraySlice<UInt8>) -> (frame: SessionParser.FromParser, bytes: Data)? {
         let text = String(decoding: payload, as: UTF8.self)
-        guard text.hasPrefix("reply:") else { return nil }
-        let hex = Array(text.dropFirst(6))
+        for (prefix, frame) in [("reply:", SessionParser.FromParser.reply), ("status:", .programStatus)] where text.hasPrefix(prefix) {
+            return testBytes(text.dropFirst(prefix.count)).map { (frame, $0) }
+        }
+        return nil
+    }
+
+    private static func testBytes(_ text: Substring) -> Data? {
+        let hex = Array(text)
         guard hex.count % 2 == 0 else { return nil }
         var bytes: [UInt8] = []
         for index in stride(from: 0, to: hex.count, by: 2) {
@@ -482,7 +567,7 @@ struct QueryScanner {
     }
 
     /// The queries an OSC is, as `dispatchOsc` reads its code and `oscChangeOrQueryColorIndex` and `oscSetColors` their
-    /// content.
+    /// content, and the program status query as `ProgramStatus.parse` reads the payload the parser forwards.
     private func oscEnded(_ found: (ParserReplies.Kind) -> Void) {
         guard !osc.isEmpty else { return }
         let semicolon = osc.firstIndex(of: 0x3b)
@@ -508,6 +593,8 @@ struct QueryScanner {
                 let target = code - 10 + offset
                 if target <= 2 { found(.dynamicColor(10 + target)) }
             }
+        case ProgramStatus.code:
+            if content.first == 0x3f { found(.programStatusQuery) }
         default:
             return
         }

@@ -754,7 +754,9 @@ parser's reply grammar in Task 9; the server's own first statements in the engin
 `ParserReplyTests.aReplyWithNoQueryIsNotTyped`, `ParserReplyTests.aReplyOutsideTheGrammarIsDropped`,
 `ParserReplyTests.aQueryWrittenToTheSessionsTerminalFromOutsideIsAnsweredOnlyAsAReply`,
 `ParserReplyTests.aQueryAnsweredByAClientIsNoLongerPending`, `ParserReplyTests.everyResponderInSwiftTermIsListed`,
-`ParserReplyTests.everyQueryIsAnsweredInItsGrammar`, `ParserReplyTests.theMacsParserRepliesAreTodays` (Task 9e);
+`ParserReplyTests.everyQueryIsAnsweredInItsGrammar`, `ParserReplyTests.theMacsParserRepliesAreTodays`,
+`ParserReplyTests.aStatusQueryTheProgramDidntPrintIsNotAnswered`, `ParserReplyTests.theVersionReplyIsThisBuildsOnly`,
+`ParserReplyTests.aQueryBegunInTheReplayIsSeenWhenItEnds` (Task 9e);
 planned: stage 2 plan task 9 (9c, 9d).
 
 **Tests to write:** Task 9: `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`,
