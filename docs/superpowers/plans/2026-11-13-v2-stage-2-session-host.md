@@ -1197,7 +1197,7 @@ on both, and S5's `Held by:` names them.
   `--host-socket`, then does what a file beside that socket path tells it (`server-helper-actions`, one line each:
   `call census`, `handover PATH`, `spawn …`, `dumpable`, `sleep`), speaking to the host through `HostCall`.
 
-- [ ] **Step 1: Failing tests** (Linux unless marked).
+- [x] **Step 1: Failing tests** (Linux unless marked).
   - `theServerChildsConnectorConnectionsAreTheApp`: the helper makes three `HostCall` calls (three connections); each
     app-only request (`vault .issue(role: .lead, …)` on a scratch repository, `spawn`) is answered.
   - `aConnectionFromAnotherProcessIsNotTheApp`: the test's own connection by path, on a scratch host built without
@@ -1229,8 +1229,8 @@ on both, and S5's `Held by:` names them.
     (sealed `0555`, so it runs; it never asks for a connection, so its being dumpable doesn't matter); the audit's
     own client and a client the script starts both get errors for `proveApp`, `replaceAppKey`, `handover`, `vault`
     and `spawn`.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; the host and app jobs green on both; commit ("v2: the app on Linux is the host's server child,
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; the host and app jobs green on both; commit ("v2: the app on Linux is the host's server child,
   through its connector").
 
 **Done when:** the tests pass, S2's `Held by:` names them, and the Mac's host and app jobs are green.
@@ -1265,7 +1265,7 @@ on both, and S5's `Held by:` names them.
   step 8).
 - Test: `Tests/VibeHostTests/ServerChildTests.swift`.
 
-- [ ] **Step 1: Failing tests** (Linux).
+- [x] **Step 1: Failing tests** (Linux).
   - `theServerChildSurvivesAHandover`: after a handover to the same build, the same pid is the app over its
     connector, and an app-only request is answered.
   - `aForgedServerChildInTheStateIsNotTheApp`: the restore's own check, given a state (through `@testable`) whose
@@ -1276,8 +1276,8 @@ on both, and S5's `Held by:` names them.
     reaches the host again, and `hostNotes` lists the replaced path.
   - `theHostWritesStartsAndServerRestartsToStderr`: a scratch host's stderr has its start, the server's exit with its
     status, the restart, and a refused app connection, each as one line with no screen text.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; both green; commit ("v2: the server child across a handover; the host keeps its path and says
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; both green; commit ("v2: the server child across a handover; the host keeps its path and says
   what happened").
 
 **Done when:** the tests pass, S2's and S8's `Held by:` name them, and the Mac's host and app jobs are green.
@@ -1315,7 +1315,7 @@ on both, and S5's `Held by:` names them.
   time its welcome gave it, and with no welcome says "unknown". Non-seam edits, one port-map line each.
 - Test: `Tests/VibeHostTests/HostHardeningTests.swift`
 
-- [ ] **Step 1: Failing tests** (Linux unless marked).
+- [x] **Step 1: Failing tests** (Linux unless marked).
   - `theHostIsNotDumpableAfterStartAndAfterAHandover`: `open("/proc/<host>/mem")` from the test fails `EACCES`, before
     and after a handover to the same build.
   - `aSessionsProgramIsDumpableAsUsual`.
@@ -1337,8 +1337,8 @@ on both, and S5's `Held by:` names them.
     Keychain, which `KeychainLintTests` forbids a test, and `ServerChildHost(usersHost:)` throws there; a scratch
     host's carried test secret on the Mac stays `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`'s.
     `docs/process/v2-mac-tasks.md` records it.)
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; both green; commit ("v2: the host hardened from its first statement; unreadable is the host only
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; both green; commit ("v2: the host hardened from its first statement; unreadable is the host only
   by token").
 
 **Done when:** these pass on Linux, S6's `Held by:` names them, and the Mac's host job is green.
@@ -1403,7 +1403,7 @@ on both, and S5's `Held by:` names them.
   `aLaunchersImageChangedFromOutsideNeverReachesTheParsers` (with `--launcher-test-hold`), shown failing with the
   launchers started from the parsers' copy.
 
-- [ ] **Step 1: Failing tests** (Linux). The two `build-info` tests are in `HandoverLinuxTests`, as the document's S9
+- [x] **Step 1: Failing tests** (Linux). The two `build-info` tests are in `HandoverLinuxTests`, as the document's S9
   places them; the rest in `HostHardeningTests`.
   - `aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`: start a scratch host from a scratch copy, rewrite
     the file in place with another program (no process runs the file: the host runs its sealed copy), spawn a
@@ -1426,8 +1426,8 @@ on both, and S5's `Held by:` names them.
     test: it would be the user's host, on the user's `~/.vibeswitcher` (Global Constraints).
   - `theNodeTakesItsFoldersFromNodeRootNotItsExecutable`: with `--node-root` and `--image-path` naming different
     folders, `vibeswitcher-mcp` and the command folder are the node root's.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; both green; commit ("v2: the host runs its sealed copies; build-info and --node").
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; both green; commit ("v2: the host runs its sealed copies; build-info and --node").
 
 **Done when:** these pass on Linux, S6's and S9's `Held by:` name them, and the Mac's host job is green.
 
@@ -1482,7 +1482,7 @@ on both, and S5's `Held by:` names them.
   - The new image's scratch-only report is two lines in its log (`handover memory taken`, `handover memory kept`),
     and the old image's `handover memory written`; the user's host writes neither.
 
-- [ ] **Step 1: Failing tests** (Linux unless marked).
+- [x] **Step 1: Failing tests** (Linux unless marked).
   - `HandoverLinuxTests.aHandoverWritesNoFile`: a folder watch on the scratch lock's folder sees no file made during a
     handover, and none is left.
   - `theStateAndSecretsAreSealed`: inside the new image (a scratch-only report), the state's and the secrets'
@@ -1508,8 +1508,8 @@ on both, and S5's `Held by:` names them.
     build serves again, from the copy carried across the exec.
   - `aFallbackImageRewrittenInPlaceIsNotWhatRuns`: the old build's file rewritten in place (it no longer runs, so no
     `ETXTBSY`) before the failed restore; what serves again reports the old build's mark.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; both green; all of `HostHandoverTests` green on Linux; commit ("v2: the handover through sealed
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; both green; all of `HostHandoverTests` green on Linux; commit ("v2: the handover through sealed
   memory, with no file").
 
 **Done when:** these and all of `HostHandoverTests` pass on Linux, S8's `Held by:` names them, and the Mac's host job
@@ -1572,7 +1572,7 @@ is green.
     scratch host's second switch isn't checked as an installed build's (the node's `--node` is carried). The server helper says its image's
     hash when given `--server-arg report-image-hash`.
 
-- [ ] **Step 1: Failing tests** (Linux unless marked), with a scratch `--install-root` holding build folders and
+- [x] **Step 1: Failing tests** (Linux unless marked), with a scratch `--install-root` holding build folders and
   `build-info` files the test writes:
   - `aHandoverToAPathInsideAWorktreeIsRefused`; `aHandoverToABuildOutsideTheInstallFolderIsRefused`;
     `aHandoverWhoseHashDiffersFromTheRecordIsRefused`; `aHandoverToAnInstalledBuildIsAllowed`.
@@ -1588,8 +1588,8 @@ is green.
     `--node-root` and `--server` (its log and the server's mark say so).
   - `aScriptTargetIsRefusedByTheUsersHost`: with an install root, a target whose first bytes are `#!` is refused by
     name, before any probe.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; both green; commit ("v2: the user's host hands over only to an installed build it checked").
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; both green; commit ("v2: the user's host hands over only to an installed build it checked").
 
 **Done when:** these pass on Linux, S8's and S9's `Held by:` name them, and the Mac's host job is green.
 
@@ -1644,7 +1644,7 @@ is green.
     with a query pending, and one longer than any reply not at all (3.8 µs a reply with all 22 CSI kinds pending,
     was 49 µs).
 
-- [ ] **Step 1: Failing tests** (Linux; the Mac's form passes every reply, as today, `theMacsParserRepliesAreTodays`).
+- [x] **Step 1: Failing tests** (Linux; the Mac's form passes every reply, as today, `theMacsParserRepliesAreTodays`).
   - `aCursorQueryIsAnswered`: a session's program writes `ESC[6n` and reads `ESC[r;cR` on its stdin.
   - `aReplyWithNoQueryIsNotTyped`: a parser (with test hooks) sends a `.reply` the session never asked for; nothing
     reaches the program, and the host's log says it was dropped.
@@ -1659,8 +1659,8 @@ is green.
     that kind is dropped.
   - Task 12a asserts the host's log shows no dropped reply while Claude Code starts and runs its five steps: a
     dropped reply it waits for would stall the lead.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3:** push; both green; commit ("v2: a parser's bytes reach a session only as a reply").
+- [x] **Step 2: Implement.**
+- [x] **Step 3:** push; both green; commit ("v2: a parser's bytes reach a session only as a reply").
 
 **Done when:** these pass, S6's `Held by:` names them, and the Mac's host job is green.
 
