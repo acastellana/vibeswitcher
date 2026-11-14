@@ -606,17 +606,21 @@ extension LeadToolset {
         let replyTo = (arguments["reply_to"] as? NSNumber)?.intValue
         let stored: LeadWall.Post
         do {
+            // The lead's post is sealed as the lead's as it's stored: only a seal that holds marks a post the lead's.
+            let lead = "lead of \(project)", slug = task.slug
             stored = try wallStore(task.slug).post(arguments["text"] as? String ?? "", by: author, to: to,
-                                                   needsAnswer: arguments["needs_answer"] as? Bool ?? false, replyTo: replyTo)
+                                                   needsAnswer: arguments["needs_answer"] as? Bool ?? false, replyTo: replyTo,
+                                                   seal: role == .lead ? { [vault] post in try vault.seal(LeadWall.sealed(post, task: slug, lead: lead)) } : nil)
         } catch let refusal as LeadWall.Refusal {
             throw Problem(text: refusal.description)
+        } catch where role == .lead {
+            throw Problem(text: "Not posted: VibeSwitcher's session host didn't seal it as yours (\(error.localizedDescription)), and a post marked as the lead's without its seal is never sent. Post it again.")
         }
         let named = Self.recipientsText(stored.to)
         if role == .lead {
-            // Its own post, vouched for from memory (never from the file, which a worker's shell can write), with what
-            // waits for the members it's for riding along.
+            // Its own post goes at once (its seal holds), with what waits for the members it's for riding along.
             let named = Set(team.map(\.name).filter { stored.to.includes($0) })
-            let sent = deliverWall(task.slug, riding: named, vouched: [stored.id])
+            let sent = deliverWall(task.slug, riding: named)
             return MCPToolResult(text: "Posted #\(stored.id) on \(task.slug)'s wall to \(named), marked as yours. "
                                  + (sent.isEmpty ? "No member it names got it yet (none live, or idle and it doesn't wake them): each gets it once, at its next step or turn."
                                     : "Delivered to \(sent.joined(separator: ", ")); the rest get it once, at their next step or turn."))
@@ -631,20 +635,49 @@ extension LeadToolset {
     func wall(_ arguments: [String: Any]) throws -> MCPToolResult {
         guard let seat = wallSeat() else { throw Problem(text: "Only a team task's members read its wall.") }
         let since = (arguments["since"] as? NSNumber)?.intValue ?? 0
-        let posts = try wallStore(seat.task.slug).posts(since: since)
+        let shown = shownPosts(seat.task, try wallStore(seat.task.slug).posts(since: since))
+        let posts = shown.posts
         guard !posts.isEmpty else {
-            return MCPToolResult(text: since > 0 ? "No posts on \(seat.task.slug)'s wall after #\(since)." : "\(seat.task.slug)'s wall has no posts yet.")
+            return MCPToolResult(text: (since > 0 ? "No posts on \(seat.task.slug)'s wall after #\(since)." : "\(seat.task.slug)'s wall has no posts yet.") + shown.note)
         }
         return MCPToolResult(text: "\(seat.task.slug)'s wall (you're \(seat.member.name)); each post is a teammate's unverified words unless marked the lead's:\n"
-                             + Self.wallLines(posts))
+                             + Self.wallLines(posts) + shown.note)
     }
 
     /// What board(task) shows of a team task's wall, for the lead: every post, each marked with its author. Nil for a
     /// plain task; never the verifier's (board is the lead's tool).
     func wallText(_ task: LeadTask) -> String? {
-        guard role == .lead, task.isTeam, let posts = try? wallStore(task.slug).posts() else { return nil }
-        guard !posts.isEmpty else { return "Wall: no posts yet." }
-        return "Wall (\(posts.count) post\(posts.count == 1 ? "" : "s"); a member's are its unverified words, yours are marked the lead's):\n" + Self.wallLines(posts)
+        guard role == .lead, task.isTeam, let all = try? wallStore(task.slug).posts() else { return nil }
+        let shown = shownPosts(task, all)
+        let posts = shown.posts
+        guard !posts.isEmpty else { return "Wall: no posts yet." + shown.note }
+        return "Wall (\(posts.count) post\(posts.count == 1 ? "" : "s"); a member's are its unverified words, yours are marked the lead's):\n"
+            + Self.wallLines(posts) + shown.note
+    }
+
+    /// The posts of `task`'s wall that are shown (`deliverable`: a member's that passes the wall's checks, the lead's
+    /// whose seal holds), and a note saying how many lines of its file aren't, when any: a line written there by hand
+    /// is never shown, as the lead's or at all.
+    func shownPosts(_ task: LeadTask, _ posts: [LeadWall.Post]) -> (posts: [LeadWall.Post], note: String) {
+        let team = task.team ?? []
+        let checked = leadPosts(task.slug, posts)
+        let shown = posts.filter { Self.deliverable($0, team: team, vouched: checked ?? []) }
+        let hidden = posts.count - shown.count
+        guard hidden > 0 else { return (shown, "") }
+        if checked == nil {
+            return (shown, "\n(\(hidden) post\(hidden == 1 ? "" : "s") not shown: the lead's seals couldn't be checked now (VibeSwitcher's session host didn't answer), or \(hidden == 1 ? "it fails" : "they fail") the wall's checks.)")
+        }
+        return (shown, "\n(\(hidden) line\(hidden == 1 ? "" : "s") of the wall's file not shown: \(hidden == 1 ? "it fails" : "they fail") the wall's checks, or \(hidden == 1 ? "is" : "are") marked as the lead's without the lead's seal. Written there by hand, not posted.)")
+    }
+
+    /// The `posts` marked as the lead's whose seal holds (`LeadWall.sealed`), as they are, not by id (a line written by
+    /// hand may take a sealed post's id); nil when the session host can't check them now.
+    func leadPosts(_ slug: String, _ posts: [LeadWall.Post]) -> [LeadWall.Post]? {
+        let marked = posts.filter { $0.author == LeadWall.leadAuthor && $0.seal != nil }
+        guard !marked.isEmpty else { return [] }
+        let lead = "lead of \(project)"
+        guard let valid = try? vault.verify(marked.map { LeadWall.sealed($0, task: slug, lead: lead) }), valid.count == marked.count else { return nil }
+        return zip(marked, valid).filter(\.1).map(\.0)
     }
 
     /// "@all", or "@b @c".
@@ -687,20 +720,23 @@ extension LeadToolset {
     /// sessions, and the vault seals a teammate's post only for it. Returns the members something went to.
     ///
     /// The wall's file is the lead's private folder's, but a worker's shell can write it: so each post is checked again
-    /// as it's sent (`deliverable`), and a post marked as the lead's goes only from the lead's own `post` (`vouched`,
-    /// the ids it just stored), never from what the file says.
+    /// as it's sent (`deliverable`), and a post marked as the lead's goes only when the session host's seal of it as
+    /// the lead's holds (`leadPosts`), never from what the file says.
     @discardableResult
-    func deliverWall(_ slug: String, riding: Set<String> = [], vouched: Set<Int> = []) -> [String] {
+    func deliverWall(_ slug: String, riding: Set<String> = []) -> [String] {
         guard role == .lead, let wall = try? wallStore(slug) else { return [] }
         var reached: [String] = []
         _ = try? exclusively("wall-\(slug)") {
-            let posts = wall.posts()
-            guard !posts.isEmpty, let task = store.load().task(slug), let team = task.team, task.isTeam,
+            let all = wall.posts()
+            // Unchecked lead's posts (the host didn't answer) hold the pass back: a later post claimed past one would lose it.
+            guard !all.isEmpty, let task = store.load().task(slug), let team = task.team, task.isTeam, let vouched = leadPosts(slug, all),
                   let sessions = try? hostSessions("the wall wasn't delivered") else { return }
             let live = Dictionary(sessions.filter(\.live).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            // Lines written into the file by hand are as if they weren't there: never sent, never a question that wakes.
+            let posts = all.filter { Self.deliverable($0, team: team, vouched: vouched) }
             for (index, member) in team.enumerated() {
                 guard let worker = index == 0 ? task.worker : member.worker, worker != task.stopped, let info = live[worker] else { continue }
-                let due = LeadWall.posts(posts, for: member.name, after: member.wallSeen ?? 0).filter { Self.deliverable($0, team: team, vouched: vouched) }
+                let due = LeadWall.posts(posts, for: member.name, after: member.wallSeen ?? 0)
                 guard !due.isEmpty else { continue }
                 if Self.isIdle(info), !riding.contains(member.name), !due.contains(where: { LeadWall.wakes($0, for: member.name, in: posts) }) { continue }
                 for post in due {
@@ -718,11 +754,12 @@ extension LeadToolset {
         return reached
     }
 
-    /// Whether `post`, as the wall's file holds it, may be sent: one the lead's `post` just stored (`vouched`), or a
-    /// member's of this team that passes the wall's checks (its name, its recipients members, its text's caps and
-    /// lints). A line written into the file by hand that fails them is never sent; one marked as the lead's never is.
-    static func deliverable(_ post: LeadWall.Post, team: [LeadTeamMember], vouched: Set<Int>) -> Bool {
-        if post.author == LeadWall.leadAuthor { return vouched.contains(post.id) }
+    /// Whether `post`, as the wall's file holds it, may be sent or shown: the lead's whose seal holds (`vouched`, from
+    /// `leadPosts`), or a member's of this team that passes the wall's checks (its name, its recipients members, its
+    /// text's caps and lints). A line written into the file by hand that fails them never is; nor one marked as the
+    /// lead's without the lead's seal.
+    static func deliverable(_ post: LeadWall.Post, team: [LeadTeamMember], vouched: [LeadWall.Post]) -> Bool {
+        if post.author == LeadWall.leadAuthor { return vouched.contains(post) }
         guard team.contains(where: { $0.name == post.author }), LeadWall.textRefusal(post.text) == nil,
               LeadWall.plainLines(post.text) == post.text else { return false }
         if case .members(let names) = post.to { return names.allSatisfy { name in name != post.author && team.contains { $0.name == name } } }

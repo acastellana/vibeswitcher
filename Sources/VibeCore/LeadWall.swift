@@ -102,6 +102,10 @@ public struct LeadWall: Sendable {
         /// The post this one answers.
         public var replyTo: Int?
         public var text: String
+        /// A lead's post only: the session host's seal of it as the lead's (`sealed`). The wall's file is the lead's
+        /// private folder's, but a worker's shell can write it: a post marked as the lead's without a seal that holds
+        /// is never sent or shown as the lead's.
+        public var seal: String?
 
         public init(id: Int, at: Double, author: String, to: Recipients, needsAnswer: Bool, replyTo: Int?, text: String) {
             self.id = id
@@ -114,10 +118,18 @@ public struct LeadWall: Sendable {
         }
 
         enum CodingKeys: String, CodingKey {
-            case id, at, author, to, text
+            case id, at, author, to, text, seal
             case needsAnswer = "needs_answer"
             case replyTo = "reply_to"
         }
+    }
+
+    /// What the session host seals a lead's post as (`Post.seal`): its delivery (its place, who it's for, its words),
+    /// as lead `lead`'s on task `task`, so a sealed post can't be moved to another wall or place, or sent to others.
+    public static func sealed(_ post: Post, task: String, lead: String) -> SteerMessage {
+        var message = SteerMessage(id: "wall \(task) \(post.id)", text: delivery(post), from: .lead(lead), agentPid: 0, at: post.at)
+        message.seal = post.seal
+        return message
     }
 
     /// Why a post wasn't stored. Its `description` says which cap or lint, and what matched.
@@ -202,9 +214,11 @@ public struct LeadWall: Sendable {
 
     /// Appends a post by `author` and returns it as stored, or throws a `Refusal` (nothing stored) or a file error.
     /// The caps are checked against the wall as it is under the file's lock, so two members posting at once can't
-    /// both take the last place.
+    /// both take the last place. `seal`: the lead's post's seal (`Post.seal`), made for it as it's stored; what it
+    /// throws stores nothing.
     @discardableResult
-    public func post(_ text: String, by author: String, to: [String], needsAnswer: Bool = false, replyTo: Int? = nil) throws -> Post {
+    public func post(_ text: String, by author: String, to: [String], needsAnswer: Bool = false, replyTo: Int? = nil,
+                     seal: ((Post) throws -> String)? = nil) throws -> Post {
         let text = Self.plainLines(text)
         guard Self.isName(author) else { throw Refusal.name(author) }
         guard let recipients = Recipients(to) else { throw Refusal.recipients }
@@ -229,7 +243,8 @@ public struct LeadWall: Sendable {
         }
         if let replyTo, !posts.contains(where: { $0.id == replyTo }) { throw Refusal.replyTo(replyTo) }
 
-        let post = Post(id: (posts.last?.id ?? 0) + 1, at: now, author: author, to: recipients, needsAnswer: needsAnswer, replyTo: replyTo, text: text)
+        var post = Post(id: (posts.last?.id ?? 0) + 1, at: now, author: author, to: recipients, needsAnswer: needsAnswer, replyTo: replyTo, text: text)
+        if let seal { post.seal = try seal(post) }
         var line = try JSONEncoder().encode(post)
         line.append(0x0A)
         let written = line.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
