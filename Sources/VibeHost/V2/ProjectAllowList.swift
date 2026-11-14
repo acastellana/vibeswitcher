@@ -13,8 +13,8 @@ import VibeCore
 /// git in a folder a worker controls: the folder's `.git` file names its `gitdir:`, a folder directly under the allowed
 /// repository's `.git/worktrees`; that folder's `commondir` names the allowed repository's `.git`; and its `gitdir`
 /// names the folder's own `.git` back. A `.git` file alone, naming a real worktree's folder that points elsewhere, is
-/// refused. Each file is opened without waiting (`O_NONBLOCK`: a FIFO put there can't stall the host's queue), must be
-/// a regular file, and is read up to a limit.
+/// refused. Each file is opened without waiting (`O_NONBLOCK`: a FIFO put there can't stall the host's queue) and never
+/// as a controlling terminal (`O_NOCTTY`), must be a regular file, and is read up to a limit.
 ///
 /// `HostServer.Config.projectAllowList` is nil by default: the Mac's, and every scratch host's, spawns go anywhere, as
 /// always. Only a `--node` host on Linux has a list (`place`). The list goes when the user marks stage 6 passed.
@@ -106,10 +106,11 @@ public enum ProjectAllowList {
     }
 
     /// A regular file's whole contents, at most `limit` bytes, opened without waiting (a FIFO is refused, not waited
-    /// on); nil when it isn't a regular file, can't be read or is bigger. `followLink: false`: a link at `path` is
-    /// refused.
+    /// on) and never as a controlling terminal (`O_NOCTTY`: the Linux host leads a session that has none, and a list
+    /// linked to a terminal nobody holds would otherwise become the host's); nil when it isn't a regular file, can't be
+    /// read or is bigger. `followLink: false`: a link at `path` is refused.
     static func regularContents(_ path: String, limit: Int, followLink: Bool) -> Data? {
-        let fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | (followLink ? 0 : O_NOFOLLOW))
+        let fd = open(path, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC | (followLink ? 0 : O_NOFOLLOW))
         guard fd >= 0 else { return nil }
         defer { Sys.close(fd) }
         var info = stat()

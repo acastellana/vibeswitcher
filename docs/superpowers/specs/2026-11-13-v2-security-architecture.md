@@ -1407,8 +1407,10 @@ its `.git` file's `gitdir:`, that folder's `commondir`, and the allowed reposito
 pointing back at the folder. `HostServer.Config.projectAllowList` is nil by default (the Mac's and every scratch host's
 behaviour). The list goes when the user marks stage 6 passed. It is a guard rail: the file is the user's to edit, so a
 worker can add a line; a worker can also write both halves of the worktree check (an entry in the allowed repository's
-shared `.git/worktrees` and a `.git` file in any folder), and the pair passes; and a session can run a scratch host
-with no list (item 24).
+shared `.git/worktrees` and a `.git` file in any folder), and the pair passes; a repository cloned inside an allowed
+one is inside it; a folder swapped for a link between the check (which resolves it) and the session's start (in the
+folder as asked) is followed; and a session can run a scratch host with no list (item 24). The list itself is read
+following a link, but never as the host's controlling terminal (`O_NOCTTY`).
 
 **What still holds against a worker that tries, before the sandbox**, only while nothing is one step from root
 (item 1: interop off, no docker socket, no `sudo` used here while a team runs): another user is refused at both
@@ -1437,7 +1439,8 @@ clone.
 `ProjectAllowListTests.aWorktreeOfAnAllowedRepositoryIsAllowed`, `ProjectAllowListTests.aForgedGitFileIsRefused`,
 `ProjectAllowListTests.aForgedWorktreePairPassesAsKnown`, `ProjectAllowListTests.aScratchHostHasNoList`,
 `ProjectAllowListTests.aMissingListRefusesEverySpawnAndSaysWhereTheListGoes`,
-`ProjectAllowListTests.noGitRunsInTheHost` (Task 10d: the allow-list).
+`ProjectAllowListTests.noGitRunsInTheHost`, `ProjectAllowListTests.aListLinkedToATerminalDoesntBecomeTheHostsTerminal`
+(Task 10d: the allow-list).
 
 ## S12. After the bootstrap
 

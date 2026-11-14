@@ -219,6 +219,24 @@ struct ProjectAllowListTests {
         #expect(said == ["allowed", "allowed", "allowed", "refused", "refused"], "\(said)")
         #expect(!FileManager.default.fileExists(atPath: marker), "the check ran git")
     }
+
+    /// A list that is a link to a terminal nobody holds as theirs (a worker can link the file anywhere) doesn't become
+    /// the host's controlling terminal: the Linux host leads a session that has none (the app starts it with
+    /// `POSIX_SPAWN_SETSID`, systemd a service in one of its own), and an open without `O_NOCTTY` would take the
+    /// terminal, so its master could send the host ^C. The check, in a helper in a session of its own
+    /// (`ProjectAllowListHelper.runInOwnSession`), refuses the folder and then has no terminal (/dev/tty opens nothing).
+    @Test func aListLinkedToATerminalDoesntBecomeTheHostsTerminal() throws {
+        let repository = try repository("repo")
+        guard case .success(let terminal) = Platform.Terminals.open(rows: 24, cols: 80) else {
+            Issue.record("no terminal: errno \(errno)")
+            return
+        }
+        defer { Sys.close(terminal.master); Sys.close(terminal.slave) }
+        let list = URL(fileURLWithPath: try folder("tty-list")).appendingPathComponent("projects")
+        try FileManager.default.createSymbolicLink(atPath: list.path, withDestinationPath: terminal.devicePath)
+        let said = try ProjectAllowListHelper.runInOwnSession(list: list.path, folders: [repository])
+        #expect(said == ["refused", "own none"], "\(said)")
+    }
 }
 
 /// The test binary as the allow-list's check in a process of its own (`ProjectAllowListTests.noGitRunsInTheHost`).
@@ -228,6 +246,9 @@ struct ProjectAllowListTests {
 enum ProjectAllowListHelper {
     static let variable = "VIBE_ALLOW_LIST_HELPER"
     static let foldersVariable = "VIBE_ALLOW_LIST_HELPER_FOLDERS"
+    /// Set: after the checks it also says whether it has a controlling terminal, "own none" (/dev/tty opens nothing,
+    /// ENXIO), "own some" or "own errno N".
+    static let terminalVariable = "VIBE_ALLOW_LIST_HELPER_TERMINAL"
 
     static func checkIfAsked() {
         guard let value = getenv(variable) else { return }
@@ -235,7 +256,16 @@ enum ProjectAllowListHelper {
         let folders = getenv(foldersVariable).map { String(cString: $0).split(separator: "\n").map(String.init) } ?? []
         // Where the limit can't be set, the recording git alone tells.
         _ = noProcesses()
-        let said = folders.map { ProjectAllowList.refusal($0, list: list) == nil ? "allowed\n" : "refused\n" }.joined()
+        var said = folders.map { ProjectAllowList.refusal($0, list: list) == nil ? "allowed\n" : "refused\n" }.joined()
+        if getenv(terminalVariable) != nil {
+            let tty = Sys.open("/dev/tty", O_RDWR | O_NOCTTY | O_CLOEXEC)
+            if tty >= 0 {
+                said += "own some\n"
+                Sys.close(tty)
+            } else {
+                said += errno == ENXIO ? "own none\n" : "own errno \(errno)\n"
+            }
+        }
         _ = write(STDOUT_FILENO, said, said.utf8.count)
         _exit(0)
     }
@@ -273,6 +303,43 @@ enum ProjectAllowListHelper {
         process.waitUntilExit()
         guardTimer.cancel()
         #expect(process.terminationStatus == 0)
+        return String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+    }
+}
+
+extension ProjectAllowListHelper {
+    /// The helper's lines, for `folders` checked against the list at `list`, started in a session of its own with no
+    /// controlling terminal (as the Linux host is) and /dev/null as its stdin, ending with whether it has a terminal
+    /// then (`terminalVariable`).
+    static func runInOwnSession(list: String, folders: [String]) throws -> [String] {
+        var fds: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&fds) == 0)
+        var spawn = Platform.Spawn(executable: try #require(Bundle.main.executablePath), arguments: ProcessInfo.processInfo.arguments)
+        spawn.environment = ProcessInfo.processInfo.environment.filter { $0.key != variable && $0.key != foldersVariable }
+            .map { "\($0.key)=\($0.value)" }
+            + ["\(variable)=\(list)", "\(foldersVariable)=\(folders.joined(separator: "\n"))", "\(terminalVariable)=1"]
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .descriptor(fds[1])
+        spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        spawn.group = .ownSession
+        let started = spawn.start()
+        Sys.close(fds[1])
+        defer { Sys.close(fds[0]) }
+        let pid = try started.get()
+        let guardTimer = DispatchWorkItem { kill(pid, SIGKILL) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + hangGuard, execute: guardTimer)
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { read(fds[0], $0.baseAddress, $0.count) }
+            if count < 0, errno == EINTR { continue }
+            guard count > 0 else { break }
+            data.append(contentsOf: buffer[0..<count])
+        }
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+        guardTimer.cancel()
+        #expect(status == 0, "the helper ended with status \(status)")
         return String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
     }
 }
