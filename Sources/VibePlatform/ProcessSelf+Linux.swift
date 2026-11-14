@@ -16,6 +16,8 @@ extension Platform.ProcessSelf {
             return undumpable && noCore
         }
 
+        static func makeDumpable() -> Bool { vibe_set_dumpable(1) == 0 }
+
         /// 1 is dumpable by the process's own user. 0 is not; 2 (after a set-user-id program, with
         /// `fs.suid_dumpable` 2) is by root alone, which to another process of the user is the same.
         static func isDumpable() -> Bool? {

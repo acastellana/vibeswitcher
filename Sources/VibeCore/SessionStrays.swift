@@ -37,12 +37,13 @@ public enum SessionStrays {
 
     /// The session's processes: those carrying its id, and those of `started` (what its program started, see
     /// `descendants`) still running whose environment can't be read. One whose environment names another session, or
-    /// none, isn't.
+    /// none, isn't; nor is one the session host this runs in names as its own (see `UnreadableProcesses`).
     public static func of(session id: UUID, started: [Found], user: uid_t = geteuid()) -> [Found] {
         let carrying = carrying(session: id, user: user)
         let known = Set(carrying.map(\.pid))
         return carrying + started.filter { found in
             !known.contains(found.pid) && isRunning(found) && ProcessTable.environment(pid: found.pid)?.isEmpty != false
+                && UnreadableProcesses.reading(found.pid) != .ours
         }
     }
 

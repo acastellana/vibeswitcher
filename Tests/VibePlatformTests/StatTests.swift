@@ -40,6 +40,32 @@ struct StatTests {
         #expect((attributes[.size] as? NSNumber)?.int64Value == Platform.Files.byteSize(info))
     }
 
+    /// An open descriptor is the same file as every spelling of its path (`//`, `/./`, `..`), and not as a link to
+    /// it (read with `lstat`), another file, a file put in its place, or a path that names nothing.
+    @Test func sameFileIsTheInodeNotTheSpelling() throws {
+        let folder = try TestScriptLinuxTests.scratch("same")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let base = folder.path
+        try FileManager.default.createDirectory(atPath: base + "/sub", withIntermediateDirectories: true)
+        let path = base + "/lock"
+        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        try #require(fd >= 0, "open: errno \(errno)")
+        defer { close(fd) }
+        for spelling in [path, base + "//lock", base + "/./lock", base + "/sub/../lock"] {
+            #expect(Platform.Files.sameFile(fd, spelling), "\(spelling)")
+        }
+        #expect(symlink(path, base + "/link") == 0)
+        #expect(!Platform.Files.sameFile(fd, base + "/link"))
+        try Data().write(to: URL(fileURLWithPath: base + "/other"))
+        #expect(!Platform.Files.sameFile(fd, base + "/other"))
+        #expect(!Platform.Files.sameFile(fd, base + "/nothing"))
+        #expect(!Platform.Files.sameFile(-1, path))
+        // Removed and made again: another file at the same path.
+        #expect(unlink(path) == 0)
+        try Data().write(to: URL(fileURLWithPath: path))
+        #expect(!Platform.Files.sameFile(fd, path))
+    }
+
     /// A file's contents changing moves both times; its mode changing moves only `changed`.
     @Test func changedFollowsTheInodeAndModifiedDoesNot() throws {
         let folder = try TestScriptLinuxTests.scratch("stat")

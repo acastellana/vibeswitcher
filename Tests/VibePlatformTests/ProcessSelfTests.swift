@@ -15,6 +15,7 @@ private let onLinux = false
 /// line, answers each in one line on its stdout, and ends (0) at its stdin's end.
 ///
 /// - `harden`: `Platform.ProcessSelf.harden()`, "hardened true" or "hardened false".
+/// - `undump`: `Platform.ProcessSelf.makeDumpable()`, "undumped true" or "undumped false".
 /// - `dumpable`: `Platform.ProcessSelf.isDumpable()`, "dumpable true", "dumpable false" or "dumpable nil".
 /// - `tracer`: `Platform.ProcessSelf.tracer()`, "tracer 0" (none), "tracer <pid>" or "tracer nil".
 /// - `connect PATH`: a stream socket connected to the listener at PATH, one byte ("c") written on it and the socket
@@ -41,6 +42,8 @@ private func serveTheTestIfAsked() {
         pending = []
         if command == "harden" {
             say("hardened \(word(Platform.ProcessSelf.harden()))")
+        } else if command == "undump" {
+            say("undumped \(word(Platform.ProcessSelf.makeDumpable()))")
         } else if command == "dumpable" {
             say("dumpable \(word(Platform.ProcessSelf.isDumpable()))")
         } else if command == "tracer" {
@@ -351,6 +354,19 @@ struct ProcessSelfTests {
     }
     #endif
 
+    /// A hardened process made dumpable again is open again: its memory, and its descriptors' owner its own user.
+    @Test(.enabled(if: onLinux, "Linux's /proc; the Mac's forms do nothing")) func aProcessMadeDumpableAgainIsOpenAgain() throws {
+        let helper = try Helper.start()
+        defer { helper.end() }
+        #expect(try helper.ask("harden") == "hardened true")
+        #expect(Self.openMemory(of: helper.pid) == EACCES)
+        #expect(try helper.ask("undump") == "undumped true")
+        #expect(try helper.ask("dumpable") == "dumpable true")
+        #expect(Platform.Processes.isDumpable(helper.pid) == true)
+        #expect(Self.openMemory(of: helper.pid) == 0)
+        #expect(helper.end().exit == 0)
+    }
+
     /// The Mac's hardening is nothing, and says so; it reads no tracer and no dumpable state. Asked of a helper, so
     /// that a Mac form that did harden wouldn't harden the test process.
     @Test(.enabled(if: !onLinux, "the Mac's forms; Linux's are tested above")) func hardeningIsNothingOnTheMac() throws {
@@ -359,6 +375,7 @@ struct ProcessSelfTests {
         #expect(try helper.ask("harden") == "hardened false")
         #expect(try helper.ask("dumpable") == "dumpable nil")
         #expect(try helper.ask("tracer") == "tracer nil")
+        #expect(try helper.ask("undump") == "undumped false")
         #expect(Platform.Processes.isDumpable(helper.pid) == nil)
         #expect(helper.end().exit == 0)
     }

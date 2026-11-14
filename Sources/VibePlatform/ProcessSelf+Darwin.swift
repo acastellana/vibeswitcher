@@ -7,6 +7,9 @@ extension Platform.ProcessSelf {
         /// Nothing, and false: the Mac has no `PR_SET_DUMPABLE`, and its `RLIMIT_CORE` is left as it is.
         static func harden() -> Bool { false }
 
+        /// Nothing, and false: as `harden()`.
+        static func makeDumpable() -> Bool { false }
+
         /// nil: the Mac has no such state to ask.
         static func isDumpable() -> Bool? { nil }
 

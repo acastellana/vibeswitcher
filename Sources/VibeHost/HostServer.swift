@@ -66,6 +66,11 @@ public final class HostServer {
         /// Whether the host watches its socket's and lock's paths and takes them back when something else is put there
         /// (see V2/HostPathWatch.swift): the user's host on Linux. False: it doesn't, as always.
         public var watchesItsPath = false
+        /// Whether this host may hold the lock it holds, asked of the lock's descriptor once it is locked (`start()`) or
+        /// inherited (`start(restoring:)`); false refuses the start. On Linux, a host that took itself for a scratch
+        /// host never holds the user's lock, however its path was spelled (see V2/HostHardening.swift). Nil: nothing
+        /// asked, as always.
+        public var heldLockIsAllowed: ((Int32) -> Bool)?
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -100,7 +105,7 @@ public final class HostServer {
 
     private let config: Config
     private let log: HostLog
-    private var sessions: [UUID: HostedSession] = [:]
+    var sessions: [UUID: HostedSession] = [:]
     private var order: [UUID] = []
     private var clients: [ObjectIdentifier: ClientConnection] = [:]
     /// Per session, the session whose process asked for it (see `mayKill`).
@@ -165,6 +170,7 @@ public final class HostServer {
             lockFD = -1
             throw Failure.alreadyRunning
         }
+        guard config.heldLockIsAllowed?(lockFD) != false else { Sys.close(lockFD); lockFD = -1; throw Failure.lock(EPERM) }
         // Holding the lock: any socket file left behind is stale.
         listenFD = try UnixSocket.listen(path: config.socketPath)
         Platform.Sockets.enableCredentials(listenFD)
@@ -176,6 +182,7 @@ public final class HostServer {
     public func start(restoring state: HostHandover.State) throws -> Data? {
         queue.setSpecific(key: Self.queueKey, value: true)
         for fd in [state.lockFD, state.listenFD] where !HostHandover.isOpen(fd) { throw HostHandover.Failure.badDescriptor(fd) }
+        guard config.heldLockIsAllowed?(state.lockFD) != false else { throw HostHandover.Failure.unreadable("its lock may not be held by this host") }
         lockFD = state.lockFD
         startedAt = state.startedAt
         listenFD = state.listenFD

@@ -23,6 +23,12 @@ extension Platform {
         /// it is set for kernels where a core is a file. The Mac: nothing, and false.
         public static func harden() -> Bool { System.harden() }
 
+        /// Makes this process dumpable again (`PR_SET_DUMPABLE 1`): its /proc entries its own user's, open to every
+        /// other process of the user as any program's are. True when it held. For a process about to run what it
+        /// doesn't keep secret, or a scratch session host a test reads from outside (`--test-stays-dumpable`), never
+        /// for one that holds what `harden()` keeps. The Mac: nothing, and false.
+        public static func makeDumpable() -> Bool { System.makeDumpable() }
+
         /// Whether this process is dumpable now (`PR_GET_DUMPABLE` is 1: by its own user, not root alone); nil when
         /// that can't be asked. The Mac: nil.
         public static func isDumpable() -> Bool? { System.isDumpable() }

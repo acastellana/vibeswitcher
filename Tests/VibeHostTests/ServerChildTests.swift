@@ -18,13 +18,15 @@ final class ServerChildHost {
     let process = Process()
 
     /// `copyImage`: the server is a copy of the test binary in the host's folder (a test rewrites it), not the binary.
-    /// `idleExit`: the host's `--idle-exit`. `extra`: more of the host's arguments.
-    init(actions: [String] = [], copyImage: Bool = false, idleExit: String = "600", extra: [String] = []) async throws {
+    /// `idleExit`: the host's `--idle-exit`. `extra`: more of the host's arguments. `usersHost`: no `--lock`, so the host
+    /// takes its home's own lock (`<home>/.vibeswitcher/host.lock`) and is that home's user's host (`ownsLaunchers`).
+    init(actions: [String] = [], copyImage: Bool = false, idleExit: String = "600", extra: [String] = [],
+         usersHost: Bool = false) async throws {
         // Short: a socket's path has a 104-byte limit.
         dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
         home = dir + "/home"
         socket = dir + "/h.sock"
-        lock = dir + "/h.lock"
+        lock = usersHost ? home + "/.vibeswitcher/host.lock" : dir + "/h.lock"
         sessionLog = dir + "/session.log"
         output = dir + "/host.out"
         let files = FileManager.default
@@ -40,7 +42,8 @@ final class ServerChildHost {
                          contents: Data(actions.map { $0 + "\n" }.joined().utf8))
         files.createFile(atPath: output, contents: nil)
         process.executableURL = URL(fileURLWithPath: hostLauncher)
-        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", idleExit, "--log", sessionLog, "--server", image] + extra
+        process.arguments = ["--socket", socket] + (usersHost ? [] : ["--lock", lock])
+            + ["--idle-exit", idleExit, "--log", sessionLog, "--server", image] + extra
         process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin", "TMPDIR": dir + "/"]
         let said = try FileHandle(forWritingTo: URL(fileURLWithPath: output))
         process.standardOutput = said

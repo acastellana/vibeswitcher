@@ -70,9 +70,11 @@ final class ScratchHostProcess {
     var pid: pid_t { process.processIdentifier }
     var log: String { (try? String(contentsOfFile: dir + "/host.log", encoding: .utf8)) ?? "" }
 
-    /// The executable the host's process runs now.
+    /// The executable the host's process runs now. On Linux the host is non-dumpable (`HostHardening`) and its program
+    /// is root's to read: there, the one its last exec named first in its arguments (`HostHandover.exec` names it so),
+    /// which its `cmdline` still gives.
     var runningExecutable: String? {
-        guard let path = Platform.Processes.executable(pid) else { return nil }
+        guard let path = Platform.Processes.executable(pid) ?? Platform.Processes.arguments(pid).first else { return nil }
         return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     }
 
@@ -360,7 +362,10 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(await eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
         #expect(await eventually { scene.host.log.contains("took over") })
-        #expect(scene.host.log.contains("test secret carried: yes"))
+        // On Linux a test-only flag isn't carried across a handover (`HostHardening.withoutTestFlags`): the new build
+        // isn't told the secret to compare, only the count of bytes it got, below.
+        if Platform.CodeIdentity.isAvailable { #expect(scene.host.log.contains("test secret carried: yes")) }
+        #expect(!scene.host.log.contains("test secret carried: no"))
         #expect(scene.host.log.contains("and \(secret.utf8.count) bytes of secrets"))
         let handedOver = FileManager.default.contents(atPath: copy) ?? Data()
         #expect(!handedOver.isEmpty)

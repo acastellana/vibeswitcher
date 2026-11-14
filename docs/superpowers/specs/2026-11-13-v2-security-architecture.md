@@ -731,17 +731,19 @@ and so anything while interop is on.
 from creation), Task 8 (the server's helper), Task 9 (host, parsers, probe, fallback, readers of `/proc`); the
 parser's reply grammar in Task 9; the server's own first statements in the engine plan's E1.
 
-**Held by:** planned: stage 2 plan task 3, task 8, task 9.
+**Held by:** `ProcessSelfTests.aHardenedProcesssMemoryCantBeOpened`,
+`ProcessSelfTests.aHardenedProcesssDescriptorsCantBeTaken`, `ProcessSelfTests.hardeningIsNothingOnTheMac`,
+`ProcessSelfTests.tracerPidIsReadFromStatus`, `SealedCopyTests.aChildStartedFromASealedCopyIsNotDumpableFromItsExec`,
+`SealedCopyTests.aSealedCopyCantBeWrittenOrChmoddedByAnotherProcess`, `CloseOnExecLintTests.noBareSocketAcceptOrOpen`,
+`HostServerTests.aSpawnDuringAnAcceptInheritsNoConnection`, `ServerChildTests.theServerHelperIsNotDumpable`,
+`HostHardeningTests.theHostIsNotDumpableAfterStartAndAfterAHandover`, `HostHardeningTests.aParserIsNotDumpable`,
+`HostHardeningTests.aSessionsProgramIsDumpableAsUsual`, `HostHardeningTests.anUnreadableHostIsTheHostNeverGone`,
+`HostHardeningTests.anotherHardenedProcessIsNotTakenForTheHost`,
+`HostHardeningTests.nothingSecretIsInTheHostsArgumentsOrEnvironment`,
+`HostHardeningTests.theUsersHostIgnoresTestSecretFlags`; planned: stage 2 plan task 9 (9b to 9e).
 
-**Tests to write:** Task 3: `ProcessSelfTests.aHardenedProcesssMemoryCantBeOpened`,
-`aHardenedProcesssDescriptorsCantBeTaken`, `hardeningIsNothingOnTheMac`, `tracerPidIsReadFromStatus`,
-`aChildStartedFromASealedCopyIsNotDumpableFromItsExec` (polled `pidfd_getfd` from another process),
-`aSealedCopyCantBeWrittenOrChmoddedByAnotherProcess`. Task 4a: `CloseOnExecLintTests.noBareSocketAcceptOrOpen`,
-`HostServerTests.aSpawnDuringAnAcceptInheritsNoConnection`. Task 8: `ServerChildTests.theServerHelperIsNotDumpable`.
-Task 9: `HostHardeningTests.theHostIsNotDumpableAfterStartAndAfterAHandover`, `aParserIsNotDumpable`,
-`aSessionsProgramIsDumpableAsUsual`, `aTracedNewImageGoesBackWithoutTheVault`, `aHandoverImageIsNotDumpableFromItsExec`,
-`anUnreadableHostIsTheHostNeverGone`, `anotherHardenedProcessIsNotTakenForTheHost`,
-`nothingSecretIsInTheHostsArgumentsOrEnvironment`; `ParserReplyTests.aReplyWithNoQueryIsNotTyped`,
+**Tests to write:** Task 9: `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`,
+`aHandoverImageIsNotDumpableFromItsExec`; `ParserReplyTests.aReplyWithNoQueryIsNotTyped`,
 `aReplyOutsideTheGrammarIsDropped`.
 
 ## S7. The vault's key per mode

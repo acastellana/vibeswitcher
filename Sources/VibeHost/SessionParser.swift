@@ -51,6 +51,7 @@ public enum SessionParser {
     /// in `main`. Never returns then.
     public static func runIfAsked(_ arguments: [String]) {
         guard arguments.count >= 4, arguments[1] == "--parse-session", let cols = Int(arguments[2]), let rows = Int(arguments[3]) else { return }
+        HostHardening.hardenAsParser()
         let scrollback = arguments.firstIndex(of: "--scrollback").flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
         signal(SIGPIPE, SIG_IGN)
         // Ends with the host, even while stuck mid-parse (when it would never read the end of the link). The host

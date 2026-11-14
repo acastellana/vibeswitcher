@@ -7,13 +7,20 @@ import VibeHost
 
 // First: as the launcher of a session's program (posix_spawned by the host itself), nothing else runs.
 PTYSpawn.execIfLaunched(CommandLine.arguments)
-// As a session's parser (see `SessionParser`): its headless terminal, fed by the host.
+// As a session's parser (see `SessionParser`): its headless terminal, fed by the host. Hardened first (see
+// `HostHardening`).
 SessionParser.runIfAsked(CommandLine.arguments)
 // As the probe of a handover (see `HostHandover`): only whether this build can take over.
 HostHandover.probeIfAsked(CommandLine.arguments)
 
 signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)
+// The host, hardened before it reads or takes anything (see `HostHardening`); refused, it doesn't start (or goes back).
+let hardening = HostHardening.atStart(mode: .host)
+if case .refused(let why) = hardening, !CommandLine.arguments.contains("--handover") {
+    FileHandle.standardError.write(Data("vibeswitcher-host: not started: \(why)\n".utf8))
+    exit(1)
+}
 
 let arguments = CommandLine.arguments
 func value(after flag: String) -> String? {
@@ -30,8 +37,9 @@ let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? Platform.T
 let executable = Bundle.main.executablePath ?? arguments[0]
 let build = HostBuild.id(ofExecutableAt: executable)
 let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
-// The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone).
-let ownsLaunchers = lockPath == VibePaths.hostLock.path
+// The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone). On Linux by
+// the lock file's identity, a link refused (see `HostHardening.lock`); on the Mac by its path, as always.
+let ownsLaunchers = HostHardening.ownsLaunchers(lockPath: lockPath, usersLock: VibePaths.hostLock.path)
 // Sessions are started through a launcher (see `PTYSpawn`). Not the app's copy: an update replaces that file while
 // this host keeps running, and this host must keep starting its own build. A private copy, named by build.
 let launchers = VibePaths.root.appendingPathComponent("host", isDirectory: true)
@@ -75,6 +83,8 @@ config.spawnNeedsLead = ownsLaunchers && !Platform.CodeIdentity.isAvailable
 // On Linux the user's host takes its socket's and lock's paths back when something else is put there (see
 // `HostPathWatch`); on the Mac, and in a scratch host, it doesn't, as before.
 config.watchesItsPath = ownsLaunchers && !Platform.CodeIdentity.isAvailable
+// On Linux a host that took itself for a scratch host never holds the user's lock (see `HostHardening`).
+config.heldLockIsAllowed = HostHardening.heldLockIsAllowed(ownsLaunchers: ownsLaunchers, usersLock: VibePaths.hostLock.path)
 if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), limit > 0 { config.parser.stallLimit = limit }
 // The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
 config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
@@ -82,11 +92,11 @@ config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.append
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
                                      "--handover-fallback-app": true, "--app-executable": true,
                                      HostStart.appKeyFlag: false].merging(TestAppPrincipal.handoverFlags) { $1 }
-config.arguments = arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
+config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
     if result.skip { result.skip = false; return }
     if let takesValue = handoverFlags[item.element] { result.skip = takesValue; return }
     result.kept.append(item.element)
-}.kept
+}.kept)
 // This build's own copy, there for as long as it runs: if a build it hands over to can't restore, it comes back to it.
 config.fallback = config.launcher == executable ? nil : config.launcher
 
@@ -113,6 +123,8 @@ let handoverPath = value(after: "--handover")
 var restoring: HostHandover.State?
 var restoredSecrets: Data?
 if let handoverPath {
+    // Refused at its start (traced): back to the build before, its state and secrets unread here.
+    if case .refused(let why) = hardening { goBack(handoverPath, HostHardening.Refused(why)) }
     do {
         // A test of the fallback: as if this build couldn't read the state.
         if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
@@ -142,10 +154,13 @@ if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin
 
 let server = HostServer(config: config)
 server.onExit = { exit(0) }
+// The test-only flags the user's host refuses, said; who an unreadable process is to this host (see `HostHardening`).
+HostHardening.afterConfig(arguments: Array(arguments.dropFirst()), ownsLaunchers: ownsLaunchers, server: server)
+HostHardening.watch(server)
 // The vault is what a build this one hands over to must hold in memory too.
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
-let testSecret = value(after: "--handover-test-secret").map { Data($0.utf8) }
+let testSecret = HostHardening.takesTestFlags(ownsLaunchers: ownsLaunchers) ? value(after: "--handover-test-secret").map { Data($0.utf8) } : nil
 if let testSecret { server.secretsForHandover = { testSecret } }
 // Ended by a signal: said in the log first (with who sent it), then ended by it as before. Installed before
 // `start()` (or `start(restoring:)`), which logs "host: started": a signal from then on is always logged. Sessions

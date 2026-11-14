@@ -83,6 +83,13 @@ that two pushes haven't explained comes here too, with the experiment that will 
   that the four session-based `PeerPerMessageTests` start their lead at all there: the helper runs through the
   session's `/bin/sh`, which SIP keeps DYLD_ variables from, so the test sets `DYLD_FRAMEWORK_PATH` and
   `DYLD_LIBRARY_PATH` on its command line (the hosted runner, SIP off, doesn't show this).
+- **Which host is the user's, and its test-only flags (stage 2 Task 9a)**: unchanged on the Mac, and wrong there as
+  the security document found it on Linux. `ownsLaunchers` is still `lockPath == VibePaths.hostLock.path`
+  (`vibeswitcher-host/main.swift`), a comparison of strings, so `--lock ~/.vibeswitcher//host.lock`, a `..` or a symlink
+  to the user's lock takes the user's lock and yet makes a host that honours every test-only flag; and any host, the
+  user's included, takes `--handover-test-secret` and carries it across a handover (`config.arguments`), the secret
+  becoming the next image's vault. On Linux both are decided by `HostHardening` (the lock by its device and inode, a
+  link refused; the flags a scratch host's only, and not carried). Check on a real Mac whether to port both to main.
 - **The two replaced oracles**: the raw Darwin reads `IndexLockTests` and `ProcessTableTests` checked against, now
   platform calls; restore them under `#if canImport(Darwin)`.
 

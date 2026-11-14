@@ -36,7 +36,9 @@ import Testing
         let socket = scratchSocketPath()
         let host = Process()
         host.executableURL = URL(fileURLWithPath: hostLauncher)
-        host.arguments = ["--socket", socket, "--lock", socket + ".lock", "--idle-exit", "600"]
+        // Dumpable (a scratch host's test flag, see `HostHardening`): on Linux a host is otherwise non-dumpable from its
+        // start, and its descriptors root's to count.
+        host.arguments = ["--socket", socket, "--lock", socket + ".lock", "--idle-exit", "600", HostHardening.staysDumpableFlag]
         // Its own ~/.vibeswitcher (for the launcher copy), never the user's.
         host.environment = ["CFFIXED_USER_HOME": home.path, "HOME": home.path, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"]
         host.standardError = FileHandle.nullDevice
