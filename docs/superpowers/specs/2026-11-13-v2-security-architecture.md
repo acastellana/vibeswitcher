@@ -834,9 +834,12 @@ the branch is at. So on Linux, **(call, extended)**:
 
 - `LeadVault.Book.holdsFirstLook` covers every record: the home seal, the main checkout's seal, the guarded settings
   (an unrecorded key is held, not recorded) and the floor (none is recorded, from `workflow.md` or anyone, while
-  its root is held). **Each root is held until the user's accept for that root** (the app's `checkConfig(root:shown:)`
-  with the card's hashes), so a second project's first look is never sealed by the first one's accept; the home seal
-  is held until the first accept. It is kept in the vault's state, so a handover before the first look keeps it; it
+  its root is held). **Each root's floor and rails are held until the user's accept for that root** (the app's
+  `checkConfig(root:shown:)` with the card's hashes), so a second project's first look is never sealed by the first
+  one's accept. The seals hold more: a watched key never recorded, at home or in a checkout, is held for the user's
+  accept whenever it is first read, for as long as the vault holds its first look, so one the accept couldn't read
+  (an unreadable `~/.claude.json`) is no baseline at a later look (Task 10e's review, approved by the lead
+  2026-11-14). It is kept in the vault's state, so a handover before the first look keeps it; it
   is true when the vault holds no restored secrets (`main.swift` on Linux), false by default (the Mac is unchanged).
 - **The user accepts in two steps.** `vibeswitcher config held` lists everything held, each with its change time
   (ctime, which `touch` can't set back), size, hash prefix and, where a previous accept is known, what changed

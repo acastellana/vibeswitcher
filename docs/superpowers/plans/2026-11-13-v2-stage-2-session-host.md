@@ -222,11 +222,16 @@ document holds the reasoning in full (the section is named); this list is what t
    - `LeadVault.Book.holdsFirstLook` (false by default: the Mac's vault is unchanged; kind 5) covers **every record**
      on a fresh vault: the home seal and the main checkout's seal (`ConfigSeal.checkoutFiles`, `.git/config`,
      `.git/hooks`) hold what they first see instead of sealing it; a guarded setting with nothing recorded is held,
-     not recorded; no floor is seeded from `workflow.md`. **Each root's first look is held until the app's accept
-     for that root**: the app's `.setGuarded` carrying `ConfigSeal.checkKey` with shown hashes (what
-     `checkConfig(root:shown:)` sends for the user's `config accept`) records the root in
-     `Book.firstLookAccepted: Set<String>`; the home seal's first look is held until the first such accept. A second
-     project's first look is held on its own. Both holds are in the `Book`'s own handlers, where the flag lives
+     not recorded; no floor is seeded from `workflow.md`. **A watched key never recorded is held for the user's
+     accept whenever it is first read, for as long as the vault holds its first look** (as built in Task 10e's
+     review, approved by the lead 2026-11-14: strictly more than "until the first accept"): the home seal and each
+     main checkout's seal hold what they have nothing recorded for at the first look and at any later look that first
+     reads it (`~/.claude.json` unreadable at the accept is no baseline at the next look), and only the app's accept
+     that showed it seals it. **Each root's floor and rails are held until the app's accept for that root**: the
+     app's `.setGuarded` carrying `ConfigSeal.checkKey` with shown hashes (what `checkConfig(root:shown:)` sends for
+     the user's `config accept`), sealing with nothing held again, records the root in
+     `Book.firstLookAccepted: Set<String>`. A second project's first look is held on its own. Both holds are in the
+     `Book`'s own handlers, where the flag lives
      (`.setGuarded`, `LeadVault.swift:1033-1043`; `.setReviewFloor` with `onlyIfUnset`, 1045-1048), not in the
      client-side callers (`LeadVaultGuarded.changedSettings`, `LeadVault.startLead`), which run in the tool server or
      the engine and can't see it; each answers with a reply its caller already handles. Whether a root is still held
@@ -1846,9 +1851,14 @@ why: the Mac's launches change too, because the CLI's default changed under them
   `checkConfig(root:shown:)` sends for the user's `config accept CARD`), once it sealed with nothing held again; it adds
   the root to `Book.firstLookAccepted: Set<String>` (kept in the serialized state, optional, kind 6). After it, the
   app's `setReviewFloor(onlyIfUnset: true)` for that root records (the engine's EN-D7 calls the two in that order), and
-  another root stays held until its own accept. The home seal's first look is held until the first accept.
-  `ConfigSeal.swift` (the home seal's and the main checkout's first look hold what they see instead of sealing it). Non-seam edits, one port-map line each; the port-map row names the handlers'
-  lines, not the client's.
+  another root stays held until its own accept. The seals' first look (the home seal's and each main checkout's)
+  follows `holdsFirstLook` itself, not the accept: a watched key never recorded is held for the user's accept
+  whenever it is first read, for as long as the vault holds its first look, so a key the accept couldn't read (an
+  unreadable `~/.claude.json`) is held when it is first read after it, never sealed as it is (as built in the 10e
+  review, `ConfigSealFirstLookTests.aHomeFileUnreadAtTheAcceptIsStillHeldWhenItFirstReads`; approved by the lead
+  2026-11-14, strictly more than the "until the first accept" this task first named). `ConfigSeal.swift` needed no
+  edit: the first look is the `Book`'s `judge` in `sealConfig`. Non-seam edits, one port-map line each; the
+  port-map row names the handlers' lines, not the client's.
 - Modify: `Sources/vibeswitcher-host/main.swift`: `holdsFirstLook` is true for a `--node` host whose vault holds no
   restored secrets, and for a scratch host only with `--hold-first-look` (so `VaultHandoverTests` and every other
   scratch host seal as today). Non-seam edit.
