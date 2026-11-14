@@ -121,7 +121,8 @@ struct TeamVerifierLaunchTests {
         let own = folders[0]
         #expect(Set(verifier.dropFirst(today.count))
                 == Set(folders.dropFirst().flatMap { ["Read(\($0))", "Read(\($0)/**)"] }
-                       + ["Read(\(own)/*.jsonl)", "Read(\(own)/memory*)", "Read(\(own)/memory*/**)"]))
+                       + ["Read(\(own)/*.jsonl)", "Read(\(own)/memory*)", "Read(\(own)/memory*/**)"]
+                       + LeadLaunch.laterSessions(own) + [LeadLaunch.promptHistory]))
 
         // A plain task's verifier, and a team task's worker, keep today's rules exactly.
         #expect(try deny(try prepare(.verifier, root: root, task: "plain")) == today)
@@ -157,10 +158,10 @@ struct TeamVerifierLaunchTests {
         let rule = "~/.claude/projects/\(name)"
         let rules = LeadLaunch.memberTranscripts(root: root, slug: "journeys", team: team, cwd: team[0].worktree, home: home)
         let mine = rules.filter { $0.hasPrefix("Read(\(rule)") && !$0.hasPrefix("Read(\(rule)--") }
-        #expect(Set(mine) == ["Read(\(rule)/*.jsonl)", "Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)",
+        #expect(Set(mine) == Set(["Read(\(rule)/*.jsonl)", "Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)",
                               "Read(\(rule)/\(integrator))", "Read(\(rule)/\(integrator)/**)",
                               "Read(\(rule)/\(integrator).jsonl)", "Read(\(rule)/\(integrator).jsonl/**)",
-                              "Read(\(rule)/memory)", "Read(\(rule)/memory/**)"], "\(mine)")
+                              "Read(\(rule)/memory)", "Read(\(rule)/memory/**)"] + LeadLaunch.laterSessions(rule)), "\(mine)")
         // The other member's folder, where the verifier never starts, whole.
         let other = LeadLaunch.claudeProjectFolder(team[1].worktree, home: "~")
         #expect(rules.contains("Read(\(other))") && rules.contains("Read(\(other)/**)"))
@@ -184,7 +185,7 @@ struct TeamVerifierLaunchTests {
             Set(LeadLaunch.memberTranscripts(root: root, slug: "journeys", team: team, cwd: team[0].worktree, home: home)
                 .filter { $0.hasPrefix("Read(\(rule)") && !$0.hasPrefix("Read(\(rule)--") })
         }
-        #expect(mine() == ["Read(\(rule)/*.jsonl)", "Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)"])
+        #expect(mine() == Set(["Read(\(rule)/*.jsonl)", "Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)"] + LeadLaunch.laterSessions(rule)))
 
         try FileManager.default.createDirectory(atPath: folder + "/0d3e2d68-d467-49bc-b4db-9f13858722ab/tool-results",
                                                 withIntermediateDirectories: true)
@@ -192,6 +193,62 @@ struct TeamVerifierLaunchTests {
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder) }
         #expect((try? FileManager.default.contentsOfDirectory(atPath: folder)) == nil, "the folder still lists")
         #expect(mine() == ["Read(\(rule))", "Read(\(rule)/**)"])
+    }
+
+    /// Whether a Read of `path` (from the home, as `~/…`) is denied by one of `rules`, matched as Claude Code reads
+    /// them: gitignore-style (`LeadWorkflow.matches`), `~/` the home.
+    func denied(_ path: String, by rules: [String]) -> Bool {
+        let relative = String(path.dropFirst("~/".count))
+        return rules.contains { rule in
+            guard rule.hasPrefix("Read(~/"), rule.hasSuffix(")") else { return false }
+            return LeadWorkflow.matches(relative, glob: "/" + rule.dropFirst("Read(~/".count).dropLast())
+        }
+    }
+
+    /// Claude Code's prompt history (`~/.claude/history.jsonl`) records each post typed into a member: a team task's
+    /// verifier is denied it; a plain task's keeps today's rules.
+    @Test func aTeamTasksVerifierIsDeniedThePromptHistory() throws {
+        let root = try root()
+        let team = try LeadTeam.make(slug: "journeys", root: root, parts: [("lead", "glue"), ("ui", "views")])
+        try BoardStore(root: root).update { board in
+            var task = LeadTask(slug: "journeys", title: "Journeys", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""))
+            task.team = team
+            board.tasks.append(task)
+            board.tasks.append(LeadTask(slug: "plain", title: "Plain", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: "")))
+        }
+        let verifier = try deny(try prepare(.verifier, root: root, task: "journeys"))
+        #expect(verifier.contains("Read(~/.claude/history.jsonl)"), "\(verifier.suffix(8))")
+        #expect(denied("~/.claude/history.jsonl", by: verifier))
+        let plain = try deny(try prepare(.verifier, root: root, task: "plain"))
+        #expect(plain == LeadLaunch.deny(.verifier, records: "docs/lead"))
+        #expect(!denied("~/.claude/history.jsonl", by: plain))
+    }
+
+    /// In its own folder, what another session makes after the verifier's launch (a new session's folder, an earlier
+    /// one's new subagents) is denied where it holds transcripts: every nested `.jsonl` and every `subagents` folder.
+    /// The verifier's own session's tool results stay readable.
+    @Test func inItsOwnFolderTranscriptsMadeAfterLaunchAreDenied() throws {
+        let root = try root()
+        let home = temp.url("home").path
+        let team = try LeadTeam.make(slug: "journeys", root: root, parts: [("lead", "glue"), ("ui", "views")])
+        let name = (LeadLaunch.claudeProjectFolder(team[0].worktree, home: home) as NSString).lastPathComponent
+        let folder = (home as NSString).appendingPathComponent(".claude/projects/\(name)")
+        let integrator = "0d3e2d68-d467-49bc-b4db-9f13858722ab"
+        try FileManager.default.createDirectory(atPath: folder + "/\(integrator)/tool-results", withIntermediateDirectories: true)
+        let rules = LeadLaunch.memberTranscripts(root: root, slug: "journeys", team: team, cwd: team[0].worktree, home: home)
+        // Made after launch: the paths are only matched, nothing is listed again.
+        let later = "5b0c1f7e-2a43-4e8d-9c61-7f2d3a9b8e10"
+        let mine = "9e7a4c2b-61f0-4d3a-8b25-c4e1f0a7d963"
+        let rule = "~/.claude/projects/\(name)"
+        for path in ["\(rule)/\(later).jsonl", "\(rule)/\(later)/subagents", "\(rule)/\(later)/subagents/agent-a1b2.jsonl",
+                     "\(rule)/\(later)/subagents/agent-a1b2.meta.json", "\(rule)/\(later)/notes/deeper/x.jsonl",
+                     "\(rule)/\(integrator)/subagents/agent-c3d4.jsonl", "\(rule)/\(integrator)/tool-results/t.txt",
+                     "\(rule)/\(mine).jsonl"] {
+            #expect(denied(path, by: rules), "\(path) isn't denied: \(rules)")
+        }
+        for path in ["\(rule)/\(mine)/tool-results/toolu_01.txt", "\(rule)/\(mine)/tool-results"] {
+            #expect(!denied(path, by: rules), "\(path) is denied")
+        }
     }
 
     @Test func aBoardThatCantBeReadStartsNoVerifier() throws {

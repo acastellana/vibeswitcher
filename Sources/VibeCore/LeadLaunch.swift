@@ -273,9 +273,31 @@ public enum LeadLaunch {
     /// folder at its launch (earlier sessions' folders: the integrator's tool results, subagents, memory) are denied;
     /// only the verifier's own session's folder, made after this, isn't. An entry whose name a rule can't hold as it is,
     /// or a folder that's there but can't be listed, denies that folder whole.
+    ///
+    /// What a session there makes after the launch (an integrator restarted mid-audit, a subagent of one already
+    /// there) is denied where its transcripts are: every `.jsonl` at any depth and every `subagents` folder
+    /// (`laterSessions`). Not the rest of a session folder made after the launch, its `tool-results` above all: the
+    /// verifier's own is one, its session id isn't known before it starts, and a deny rule can't make an exception
+    /// (deny wins over allow; a rule has no "all but"). So a large tool result of a session started after the verifier
+    /// stays readable to it. The prompt history (`promptHistory`), where every post typed into a member is kept, is
+    /// denied too.
     public static func memberTranscripts(root: String, slug: String, team: [LeadTeamMember]?, cwd: String? = nil,
                                          home: String = VibePaths.home) -> [String] {
         guard let team, !team.isEmpty else { return [] }
+        return memberFolders(root: root, slug: slug, team: team, cwd: cwd, home: home) + [promptHistory]
+    }
+
+    /// Claude Code's prompt history: each prompt typed into a session on this Mac, a post delivered into a member's
+    /// among them, with its project's path.
+    public static let promptHistory = "Read(~/.claude/history.jsonl)"
+
+    /// In the verifier's own project folder (`rule`, as `~/…`), what holds a transcript in a session made after its
+    /// launch: a `.jsonl` at any depth (a subagent's, `<session>/subagents/agent-<id>.jsonl`) and a `subagents` folder.
+    static func laterSessions(_ rule: String) -> [String] {
+        ["Read(\(rule)/**/*.jsonl)", "Read(\(rule)/**/subagents)", "Read(\(rule)/**/subagents/**)"]
+    }
+
+    static func memberFolders(root: String, slug: String, team: [LeadTeamMember], cwd: String?, home: String) -> [String] {
         func spellings(_ path: String) -> [String] {
             var found = [path, URL(fileURLWithPath: path).resolvingSymlinksInPath().path]
             // As the kernel resolves it, `/private` kept (Foundation drops it): Claude Code names the folder after that.
@@ -301,7 +323,7 @@ public enum LeadLaunch {
             }
             guard entries.allSatisfy({ $0.unicodeScalars.allSatisfy(safe.contains) }) else { return whole }
             // `memory*` too: `setAsideMemory`, after this, renames one.
-            return ["Read(\(rule)/*.jsonl)", "Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)"] + entries.flatMap { ["Read(\(rule)/\($0))", "Read(\(rule)/\($0)/**)"] }
+            return ["Read(\(rule)/*.jsonl)"] + laterSessions(rule) + ["Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)"] + entries.flatMap { ["Read(\(rule)/\($0))", "Read(\(rule)/\($0)/**)"] }
         }
     }
 
