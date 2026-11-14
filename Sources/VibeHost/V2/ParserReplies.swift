@@ -236,7 +236,8 @@ struct ParserReplies {
         guard let kind = Self.kinds(ofReply: reply, among: Set(pending.keys)).first else {
             dropped(log: log) {
                 let kinds = Self.kinds(ofReply: reply)
-                let why = kinds.isEmpty ? "it is no reply" : "no \(kinds[0]) query is pending"
+                let why = !kinds.isEmpty ? "no \(kinds[0]) query is pending"
+                    : Self.leftOutKind(ofReply: reply).map { "it is a \($0) reply, left out" } ?? "it is no reply"
                 return "parser (pid \(parser)) reply dropped, \(why): \(Self.shown(reply))"
             }
             return nil
@@ -293,6 +294,19 @@ struct ParserReplies {
         log?("parser replies: \(unlogged) more dropped since the last line, as its parser stopped: \(named)")
         unlogged = 0
         heldBack = []
+    }
+
+    /// For the log: the kind of a reply in no grammar, if it is one a responder left out of the table makes
+    /// (`swiftTermResponders`), by its introducer: so a drop's line says which reply it was, not only its bytes.
+    static func leftOutKind(ofReply reply: Data) -> String? {
+        let bytes = Array(reply)
+        func starts(_ prefix: String) -> Bool { bytes.starts(with: Array(prefix.utf8)) }
+        if starts("\u{1b}_G") || bytes.starts(with: [0x9f, 0x47]) { return "kitty graphics" }
+        if starts("\u{1b}]52;") { return "clipboard (OSC 52)" }
+        if starts("\u{1b}]l") || starts("\u{1b}]L") { return "title report" }
+        if starts("\u{1b}P"), bytes.contains(0x21), bytes.contains(0x7e) { return "DECRQCRA" }
+        if starts("\u{1b}[M") || starts("\u{1b}[<") { return "mouse report" }
+        return nil
     }
 
     /// A reply for the log: printable ASCII as it is, ESC as `ESC`, any other byte in hex; at most 64 bytes.

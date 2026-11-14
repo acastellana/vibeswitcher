@@ -355,6 +355,27 @@ import Testing
                 .joined(separator: "; ") + "; …", "\(lines)")
     }
 
+    /// A dropped reply's line names its kind and its bytes: a kind with no query pending, a reply a left-out responder
+    /// makes (Claude Code's kitty graphics probe's answer, found by the stage 2 plan's Task 12a), or no reply at all.
+    @Test func aDroppedRepliesLineNamesItsKind() {
+        let cases: [(reply: String, line: String)] = [
+            ("\u{1b}_Gi=31;OK\u{1b}\\", "it is a kitty graphics reply, left out: 12 bytes, ESC_Gi=31;OKESC\\"),
+            ("\u{1b}]52;c;aGk=\u{1b}\\", "it is a clipboard (OSC 52) reply, left out: 13 bytes, ESC]52;c;aGk=ESC\\"),
+            ("\u{1b}]lname\u{1b}\\", "it is a title report reply, left out: 9 bytes, ESC]lnameESC\\"),
+            ("\u{1b}P1!~ABCD\u{1b}\\", "it is a DECRQCRA reply, left out: 11 bytes, ESCP1!~ABCDESC\\"),
+            ("\u{1b}[<0;1;1M", "it is a mouse report reply, left out: 9 bytes, ESC[<0;1;1M"),
+            ("\u{1b}[1;1R", "no cursor position query is pending: 6 bytes, ESC[1;1R"),
+            ("\u{1b}_Gx", "it is a kitty graphics reply, left out: 4 bytes, ESC_Gx"),
+            ("\u{1b}[?u", "it is no reply: 4 bytes, ESC[?u"),
+        ]
+        for (reply, line) in cases {
+            var replies = ParserReplies(checks: true)
+            var lines: [String] = []
+            _ = replies.admit(Data(reply.utf8), from: 4, clientsAttached: false, log: { lines.append($0) })
+            #expect(lines == ["parser (pid 4) reply dropped, " + line], "\(lines)")
+        }
+    }
+
     /// With no drop held back, a stopping parser logs nothing (and the Mac never holds one: it drops none).
     @Test func aStoppingParserWithNoDropHeldBackLogsNothing() {
         for checks in [true, false] {
