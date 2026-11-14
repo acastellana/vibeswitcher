@@ -366,7 +366,10 @@ document holds the reasoning in full (the section is named); this list is what t
     `.git` file alone is refused). The list's place is `HostServer.Config.projectAllowList: URL?`, nil by default (the
     Mac's and every scratch host's behaviour; kind 5). It goes when the user marks stage 6 passed. A guard rail,
     written down as one: the file is the user's to edit; a worker can write both halves of the worktree check (and the
-    pair passes); a session can run a scratch host with no list.
+    pair passes); a repository cloned inside an allowed one is inside it; a folder swapped for a link between the
+    check (which resolves it) and the session's start (in the folder as asked) is followed; a session can run a
+    scratch host with no list. (The clone and the link are the two limits Task 10d found and named in
+    `ProjectAllowList`'s doc comment; added here as approved by the lead 2026-11-14.)
 12. **S2-D12: The sessions' environment is a platform answer** (S10; corrected by the document).
     - **Passed on Linux:** `HOME USER LOGNAME SHELL TMPDIR PATH LANG LC_ALL LC_CTYPE`, plus `SWIFT_BACKTRACE=enable=no`
       (which the parsers' fixed environment, `PATH=/usr/bin:/bin` in `ParserLink.start`, gains too).

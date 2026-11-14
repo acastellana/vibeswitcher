@@ -1451,7 +1451,8 @@ behaviour). The list goes when the user marks stage 6 passed. It is a guard rail
 worker can add a line; a worker can also write both halves of the worktree check (an entry in the allowed repository's
 shared `.git/worktrees` and a `.git` file in any folder), and the pair passes; a repository cloned inside an allowed
 one is inside it; a folder swapped for a link between the check (which resolves it) and the session's start (in the
-folder as asked) is followed; and a session can run a scratch host with no list (item 24). The list itself is read
+folder as asked) is followed; and a session can run a scratch host with no list (item 24). (The clone and the link,
+the two limits Task 10d found, are in S2-D11 too, approved by the lead 2026-11-14.) The list itself is read
 following a link, but never as the host's controlling terminal (`O_NOCTTY`).
 
 **What still holds against a worker that tries, before the sandbox**, only while nothing is one step from root
@@ -1579,7 +1580,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T22 | worker | run Windows programs; `wsl.exe -u root` | works while interop is on; refused with it off | decision 2; deny rules for `wsl.exe`, `cmd.exe`, `powershell.exe` (Claude Code, slips). Leaving `WSL_INTEROP` out limits nothing | interop off; sandbox |
 | T23 | worker | persist: crontab, user units and timers, autostart, shell startup files, `set-environment`, `.wslconfig`'s kernel, the Windows Startup folder | works | seal watches the files (not the crontab); `start` and `status` compare the manager's environment; automount off | sandbox |
 | T24 | worker | move the lead's base branch through the shared `.git` | caught; after a host restart, shown by `base accept` | vault's head record and `judge`; `base accept`'s log since the last accepted head | clones |
-| T25 | worker | spawn a session in another repository | refused (guard rail) | allow-list; a forged worktree pair passes; a scratch host has no list | stage 6; sandbox |
+| T25 | worker | spawn a session in another repository | refused (guard rail) | allow-list; a forged worktree pair passes; a clone inside an allowed repository is inside it; a folder swapped for a link after the check is followed; a scratch host has no list | stage 6; sandbox |
 | T26 | branch code | merge's tests or an audit's run do any of the above; a patched toolchain passes every test | works | no session's to the host; root-owned toolchain for installs | sandbox for test runs |
 | T27 | worker | `LD_PRELOAD` and its kin into the host | refused for the unit's start | `UnsetEnvironment=`; static build | holds for the host; works for anything else the manager starts |
 | T28 | worker | fill the host's client slots; `SIGSTOP` the host | works (DoS) for sessions | app's connector connections uncounted | — |
