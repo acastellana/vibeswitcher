@@ -25,8 +25,9 @@ final class ServerChildHost {
     /// takes its home's own lock (`<home>/.vibeswitcher/host.lock`) and is that home's user's host (`ownsLaunchers`).
     /// Linux only: on the Mac the user's host reads its vault's key from the real Keychain (`VaultStorage.keychainKey()`),
     /// which no test may (`KeychainLintTests`), so there it throws before anything starts.
+    /// `server`: the `--server` path, in place of the test binary or its copy.
     init(actions: [String] = [], copyImage: Bool = false, idleExit: String = "600", extra: [String] = [],
-         usersHost: Bool = false) async throws {
+         usersHost: Bool = false, server: String? = nil) async throws {
         guard !usersHost || !Platform.CodeIdentity.isAvailable else { throw UsersHostOnTheMac() }
         // Short: a socket's path has a 104-byte limit.
         dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
@@ -38,7 +39,9 @@ final class ServerChildHost {
         let files = FileManager.default
         for folder in [home, dir + "/work"] { try files.createDirectory(atPath: folder, withIntermediateDirectories: true) }
         let binary = try #require(Bundle.main.executablePath)
-        if copyImage {
+        if let server {
+            image = server
+        } else if copyImage {
             image = dir + "/server-image"
             try files.copyItem(atPath: binary, toPath: image)
         } else {
@@ -954,5 +957,123 @@ final class ServerChildHost {
         let child = ServerChild.start(.init(image: binary, socketPath: host.socket, arguments: [], environment: [:]), server: host.server)
         #expect(child == nil)
         #expect(host.server.queue.sync { host.server.appConnectors.isEmpty && host.server.serverChild == nil })
+    }
+}
+
+// MARK: Task 9d: a switch brings the new build's server
+
+extension ServerChildTests {
+    /// Two builds installed under a scratch install root: A, whose host is the test's host image and whose server is
+    /// this test binary (the helper), as they are; B, each of the two with one more byte (another build's bytes, which
+    /// still run). `B`'s `build-info` records `serverRecord` for its server when given.
+    struct Switch {
+        let dir: String
+        let root: String
+        let a: String
+        let b: InstalledBuild
+        let binary: String
+        let serverHash: String
+
+        init(serverRecord: String? = nil) throws {
+            dir = "\(shortScratchRoot)/vssw-\(UUID().uuidString.prefix(8))"
+            root = dir + "/builds"
+            binary = try #require(Bundle.main.executablePath)
+            serverHash = try HandoverLinuxTests.sha256(of: binary)
+            a = try HandoverLinuxTests.buildFolder(in: root, "A", binaries: [BuildInfo.host: try HandoverLinuxTests.sha256(of: hostLauncher),
+                                                                            BuildInfo.server: serverHash])
+            b = try InstalledBuild(in: root, "B", appending: "\n", server: binary, serverAppending: "\n",
+                                   record: serverRecord.map { [BuildInfo.server: $0] } ?? [:])
+        }
+
+        /// The host on build A: its server the helper, which says its image's hash.
+        func host(_ extra: [String] = []) async throws -> ServerChildHost {
+            try await ServerChildHost(actions: ["sleep"], extra: ["--install-root", root, "--node-root", a,
+                                                                  "--server-arg", ServerChildHelper.reportImageHash] + extra,
+                                      server: binary)
+        }
+
+        func remove() { try? FileManager.default.removeItem(atPath: dir) }
+    }
+
+    /// `host`'s first helper asks for a handover to each of `targets` in turn; the actions file is replaced first (the
+    /// first helper reads the one it opened), so that a helper started after a handover doesn't ask again. What the
+    /// helper was answered, in order.
+    func handOver(_ host: ServerChildHost, helper: pid_t, to targets: String...) async throws -> [String] {
+        let path = host.dir + "/" + ServerChildHelper.actionsName
+        let first = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+        defer { try? first.close() }
+        try first.seekToEnd()
+        try host.replaceActions(["sleep"])
+        try first.write(contentsOf: Data(targets.map { "handover \($0)\n" }.joined().utf8))
+        func answers() -> [String] { host.lines(of: helper).filter { $0.hasPrefix("handover ") } }
+        _ = await eventually { answers().count >= targets.count }
+        return answers()
+    }
+
+    /// A scratch host on build A with an install root refuses a handover to a build C whose server differs from its
+    /// build-info, before the exec (A serves on), then hands over to build B: the new image checks itself against B's
+    /// build-info (not A's: its bytes are B's), names B's folders, and once idle ends the server child it carried (A's)
+    /// and starts it again from B's server, which says B's hash and folder.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child and installed builds"))
+    func aSwitchBringsTheNewBuildsServer() async throws {
+        let builds = try Switch()
+        defer { builds.remove() }
+        // C: its host recorded, its server not what its build-info says.
+        let other = BuildInfo.sha256(of: Data("another server".utf8))
+        let c = try InstalledBuild(in: builds.root, "C", server: "/bin/true", record: [BuildInfo.server: other])
+        let host = try await builds.host()
+        defer { host.stop() }
+        let helper = try #require(await host.firstHelper(), "\(host.said)")
+        let first = try #require(host.started.first?.line)
+        #expect(first.contains(" node-root=\(builds.a) ") && first.contains(" image-sha256=\(builds.serverHash) "), "\(first)")
+
+        let answers = try await handOver(host, helper: helper, to: c.host, builds.b.host)
+        #expect(answers.count == 2, "\(host.results)\n\(host.said)")
+        // The answer as the helper prints it (its quotes escaped).
+        #expect(answers.first?.contains("vibeswitcher-server: its sha256 \(try #require(c.serverHash)) isn") == true
+                && answers.first?.contains("t the one build-info records (\(other))") == true, "\(answers)")
+        #expect(!host.said.contains("handing over to \(c.host)"), "\(host.said)")
+        #expect(answers.last == "handover ok", "\(host.results)\n\(host.said)")
+        #expect(await eventually { host.said.contains("took over") }, "\(host.said)")
+        #expect(!host.said.contains("couldn't take over"), "\(host.said)")
+        #expect(await eventually { host.started.count >= 2 }, "\(host.results)\n\(host.said)")
+        let second = try #require(host.started.dropFirst().first)
+        #expect(second.line.contains(" image-sha256=\(try #require(builds.b.serverHash)) "), "\(second.line)")
+        #expect(second.line.contains(" node-root=\(builds.b.folder) ") && second.line.contains("dumpable-at-start=false"), "\(second.line)")
+        #expect(host.said.contains("server child pid \(helper) idle: ended, to start again from the new build's server"), "\(host.said)")
+        #expect(await eventually { kill(helper, 0) != 0 })
+        let arguments = Platform.Processes.arguments(host.pid)
+        #expect(HostImages.value(after: HostImages.nodeRootFlag, in: arguments) == builds.b.folder, "\(arguments)")
+        #expect(HostImages.value(after: "--server", in: arguments) == builds.b.server, "\(arguments)")
+        #expect(arguments.filter { $0 == "--server" || $0 == HostImages.nodeRootFlag }.count == 2, "\(arguments)")
+        #expect(!arguments.contains(HostImages.imagePathFlag), "\(arguments)")
+        #expect(HostImages.folders(arguments: arguments, executable: "/nonexistent").toolServer == builds.b.folder + "/bin/vibeswitcher-mcp")
+        #expect(host.started.count == 2 && kill(second.pid, 0) == 0, "\(host.results)")
+    }
+
+    /// The same switch to B, whose new image can't restore (`--handover-test-fail-next`): A serves again with its own
+    /// `--node-root` and `--server`, and its server child runs on; killed, it starts again from A's server (its hash,
+    /// its folder), not from B's, whose copy the fallback was carried.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child and installed builds"))
+    func aFallbackGetsTheOldBuildsFolders() async throws {
+        let builds = try Switch()
+        defer { builds.remove() }
+        let host = try await builds.host([HandoverMemory.failNextTestFlag])
+        defer { host.stop() }
+        let helper = try #require(await host.firstHelper(), "\(host.said)")
+        #expect(try await handOver(host, helper: helper, to: builds.b.host) == ["handover ok"], "\(host.results)\n\(host.said)")
+        #expect(await eventually { host.said.contains("took over") }, "\(host.said)")
+        #expect(host.said.contains("couldn't take over") && host.said.contains("going back to /proc/self/fd/"), "\(host.said)")
+        let arguments = Platform.Processes.arguments(host.pid)
+        #expect(HostImages.value(after: HostImages.nodeRootFlag, in: arguments) == builds.a, "\(arguments)")
+        #expect(HostImages.value(after: "--server", in: arguments) == builds.binary, "\(arguments)")
+        #expect(!arguments.contains(builds.b.folder) && !arguments.contains(builds.b.server), "\(arguments)")
+        #expect(await eventually { host.said.contains("server child pid \(helper) carried over from the build before") }, "\(host.said)")
+        #expect(!host.said.contains("new build's server"), "\(host.said)")
+
+        kill(helper, SIGKILL)
+        #expect(await eventually { host.started.count >= 2 }, "\(host.results)\n\(host.said)")
+        let second = try #require(host.started.dropFirst().first)
+        #expect(second.line.contains(" image-sha256=\(builds.serverHash) ") && second.line.contains(" node-root=\(builds.a) "), "\(second.line)")
     }
 }

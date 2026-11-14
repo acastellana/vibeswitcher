@@ -173,7 +173,7 @@ public enum HostHardening {
         "--handover-test-secret": true, "--handover-test-secret-file": true, "--handover-test-traced": false,
         "--install-root": true, "--parser-test-hooks": false, staysDumpableFlag: false,
         "--server-arg": true, "--hold-first-look": false, "--test-user-seal-life": true,
-        HostImages.launcherTestHoldFlag: true,
+        HostImages.launcherTestHoldFlag: true, HandoverMemory.failNextTestFlag: false, HandoverMemory.holdTestFlag: true,
     ]
 
     /// The test-only flags a scratch host carries across its handovers, so a test's settings survive one.
@@ -215,10 +215,15 @@ public enum HostHardening {
 
     /// After the host's config is made: the flags `refused(in:ownsLaunchers:)` names said in its log and on stderr,
     /// and, on Linux, a scratch host given `staysDumpableFlag` made dumpable again, and one given
-    /// `HostImages.launcherTestHoldFlag` holding its sessions' launchers (`HostImages.holdLaunchers(until:)`). A scratch
+    /// `HostImages.launcherTestHoldFlag` holding its sessions' launchers (`HostImages.holdLaunchers(until:)`), and one
+    /// given `HandoverMemory.failNextTestFlag` telling the image it hands over to to fail its restore, and one given
+    /// `HandoverMemory.holdTestFlag` holding its handovers before their probe. A scratch
     /// host on Linux says what its handovers write and take (`HandoverMemory.reports`), for its tests.
     public static func afterConfig(arguments: [String], ownsLaunchers: Bool, server: HostServer) {
         HandoverMemory.reports = !Platform.CodeIdentity.isAvailable && !ownsLaunchers
+        HandoverMemory.failsNext = !Platform.CodeIdentity.isAvailable && !ownsLaunchers && arguments.contains(HandoverMemory.failNextTestFlag)
+        HandoverMemory.holdBeforeProbe = !Platform.CodeIdentity.isAvailable && !ownsLaunchers
+            ? HostImages.value(after: HandoverMemory.holdTestFlag, in: arguments) : nil
         let refused = refused(in: arguments, ownsLaunchers: ownsLaunchers)
         if !refused.isEmpty {
             let line = "refused test-only flags (the user's host takes none): \(refused.joined(separator: ", "))"

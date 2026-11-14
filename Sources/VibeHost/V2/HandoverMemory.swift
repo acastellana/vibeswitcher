@@ -55,6 +55,29 @@ public enum HandoverMemory {
     public static let tracedTestFlag = "--handover-test-traced"
     /// A scratch host's test: the bytes of this file are what it hands over as its secrets.
     public static let secretFileTestFlag = "--handover-test-secret-file"
+    /// A scratch host's test (Linux): the image it hands over to is given `--handover-fail-restore`, so that an ELF
+    /// target (an installed build, which no script may stand in for) fails its restore and goes back.
+    public static let failNextTestFlag = "--handover-test-fail-next"
+    /// A scratch host's test (Linux): `--handover-test-hold PATH` holds each handover once its target is loaded (and,
+    /// with an install root, checked) and "handing over to" is said, before the probe: it waits (at most a minute) for
+    /// `PATH` to exist, so a test can change the target's file then.
+    public static let holdTestFlag = "--handover-test-hold"
+    /// The handing-over image's own `--node-root` and `--server`, given to the new image for its fallback (Task 9d,
+    /// S2-D7): `goBack` gives them back as `--node-root` and `--server`, so the old build serves again with its own.
+    public static let fallbackNodeRootFlag = "--handover-fallback-node-root"
+    public static let fallbackServerFlag = "--handover-fallback-server"
+
+    /// What `main` leaves out of `config.arguments` besides its own handover flags (each with its value), because a
+    /// handover appends its own (`folderArguments`): on Linux the build's `--node-root` and `--server`, and the
+    /// fallback's two. The Mac: only the fallback's two, which it is never given (its `config.arguments` as before).
+    public static var handoverFlags: [String: Bool] {
+        var flags = [fallbackNodeRootFlag: true, fallbackServerFlag: true]
+        if !Platform.CodeIdentity.isAvailable {
+            flags[HostImages.nodeRootFlag] = true
+            flags["--server"] = true
+        }
+        return flags
+    }
 
     private static let prefix = "/proc/self/fd/"
 
@@ -154,15 +177,53 @@ public enum HandoverMemory {
     /// own goes), named `image` (its path, from `--handover-fallback-image`) and given `--image-path image`, so its
     /// build is the old build's. Returns only when the exec failed. Nil when `fallback` is a path (the Mac's), or isn't
     /// a sealed copy this image holds: `main` executes it by its path then, as always.
-    public static func goBack(to fallback: String, image: String?, arguments: [String]) -> HostHandover.Failure? {
+    /// The old build's own `--node-root` and `--server` go back to it too (`fallbackArguments`, from `started`: what
+    /// this image was started with).
+    public static func goBack(to fallback: String, image: String?, arguments: [String],
+                              started: [String] = CommandLine.arguments) -> HostHandover.Failure? {
         guard !Platform.CodeIdentity.isAvailable, let fd = descriptor(named: fallback), Platform.ProcessSelf.restoreMode(of: fd) else {
             return nil
         }
         var spawn = Platform.Spawn(executable: fallback, arguments: [image ?? fallback] + arguments
-                                       + (image.map { [HostImages.imagePathFlag, $0] } ?? []))
+                                       + (image.map { [HostImages.imagePathFlag, $0] } ?? []) + fallbackArguments(started: started))
         spawn.environment = environment(image: fd)
         spawn.keep = nil
         return .exec(spawn.replaceProcess())
+    }
+
+    // MARK: The build's folders across the exec
+
+    /// What the exec appends for the new image's folders (S2-D7), and its fallback's: with a checked `build` (an install
+    /// root), `--node-root` its folder and, when this image runs a server child (`started` holds `--server`), `--server`
+    /// its own `bin/vibeswitcher-server` (whose copy travels in `State.images.server`), and no `--image-path`; without one
+    /// (a scratch host), this image's own `--node-root` and `--server` as `started` names them, and `--image-path
+    /// target` for an ELF target (a script stand-in execs a file that names itself). Then this image's own two again,
+    /// as `fallbackNodeRootFlag` and `fallbackServerFlag`, for a fallback (`goBack`). `started`: what this image was
+    /// started with (`CommandLine.arguments`), from which `main` dropped the two (`handoverFlags`).
+    public static func folderArguments(build: HandoverTarget.Build?, target: String, isScript: Bool, started: [String]) -> [String] {
+        let nodeRoot = HostImages.value(after: HostImages.nodeRootFlag, in: started)
+        let server = HostImages.value(after: "--server", in: started)
+        var arguments: [String] = []
+        if let build {
+            arguments += [HostImages.nodeRootFlag, build.folder]
+            if server != nil { arguments += ["--server", build.binary(BuildInfo.server)] }
+        } else {
+            if let nodeRoot { arguments += [HostImages.nodeRootFlag, nodeRoot] }
+            if let server { arguments += ["--server", server] }
+            if !isScript { arguments += [HostImages.imagePathFlag, target] }
+        }
+        if let nodeRoot { arguments += [fallbackNodeRootFlag, nodeRoot] }
+        if let server { arguments += [fallbackServerFlag, server] }
+        return arguments
+    }
+
+    /// What `goBack` appends for the old build's own folders: the `--node-root` and `--server` the handing-over image
+    /// named for its fallback in `started` (`folderArguments`), as `--node-root` and `--server`. Empty without them.
+    public static func fallbackArguments(started: [String]) -> [String] {
+        var arguments: [String] = []
+        if let nodeRoot = HostImages.value(after: fallbackNodeRootFlag, in: started) { arguments += [HostImages.nodeRootFlag, nodeRoot] }
+        if let server = HostImages.value(after: fallbackServerFlag, in: started) { arguments += ["--server", server] }
+        return arguments
     }
 
     // MARK: The new image
@@ -210,6 +271,28 @@ public enum HandoverMemory {
     static func described(_ fd: Int32) -> String {
         guard let bytes = secrets(from: fd) else { return "not sealed" }
         return "sealed, \(bytes.count) bytes, sha256 \(BuildInfo.sha256(of: bytes))"
+    }
+
+    /// Whether the image this host hands over to is told to fail its restore (`failNextTestFlag`): a scratch host on
+    /// Linux given the flag (set by `HostHardening.afterConfig`); never the user's host.
+    static var failsNext: Bool {
+        get { reportLock.withLock { failsNextFlag } }
+        set { reportLock.withLock { failsNextFlag = newValue } }
+    }
+    nonisolated(unsafe) private static var failsNextFlag = false
+
+    /// Where a scratch host's handovers are held before their probe (`holdTestFlag`, set by `HostHardening.afterConfig`);
+    /// nil: none, the user's host's always.
+    static var holdBeforeProbe: String? {
+        get { reportLock.withLock { holdPath } }
+        set { reportLock.withLock { holdPath = newValue } }
+    }
+    nonisolated(unsafe) private static var holdPath: String?
+
+    /// The hold `holdBeforeProbe` names, if any: off the host's queue.
+    static func holdIfAsked() {
+        guard let hold = holdBeforeProbe else { return }
+        for _ in 0..<6_000 where access(hold, F_OK) != 0 { usleep(10_000) }
     }
 
     /// Whether this host says what its handovers wrote and took (`finish`, `HostServer.handOverThroughMemory`): a scratch
@@ -264,6 +347,22 @@ public enum HandoverMemory {
 }
 
 extension HostServer {
+    /// With an install root (`Config.installRoot`), `target` (loaded from `path`) checked as an installed build
+    /// (`HandoverTarget.check`, the sessions' working folders refused), and, when this image runs a server child (it
+    /// was started with `--server`), that build's server loaded and checked (`HandoverTarget.server(of:)`): both, or
+    /// why not. Nil without an install root: any target, as before.
+    func installedTarget(_ target: Platform.ProcessSelf.SealedCopy, path: String)
+        -> Result<(build: HandoverTarget.Build, server: Platform.ProcessSelf.SealedCopy?)?, HandoverTarget.Refused> {
+        guard let installRoot = config.installRoot else { return .success(nil) }
+        let build: HandoverTarget.Build
+        switch HandoverTarget.check(target, path: path, installRoot: installRoot.path, sessionFolders: sessions.values.map(\.info.cwd)) {
+        case .failure(let why): return .failure(why)
+        case .success(let checked): build = checked
+        }
+        guard HostImages.value(after: "--server", in: CommandLine.arguments) != nil else { return .success((build, nil)) }
+        return HandoverTarget.server(of: build).map { (build, $0) }
+    }
+
     /// `handOver(to:)` on Linux (its one hook): the target loaded into a sealed copy before anything else, probed from
     /// that copy with a state of its own in sealed memory, then, on the queue, the secrets and the state written into
     /// sealed memory and the process replaced by the copy, keeping both, the images and every session's descriptor.
@@ -275,9 +374,22 @@ extension HostServer {
         case .failure(let error):
             return reply(.error("Couldn't hand over: \(executable) couldn't be loaded (\(String(cString: strerror(error.code))))."))
         }
+        // With an install root (the user's host), only an installed build this host checked, on the copy that runs,
+        // and its server, checked against the same record (V2/HandoverTarget.swift). Before any probe.
+        let build: HandoverTarget.Build?
+        let serverCopy: Platform.ProcessSelf.SealedCopy?
+        switch installedTarget(target, path: executable) {
+        case .failure(let why):
+            Sys.close(target.fd)
+            log("handover to \(executable) refused: \(why)")
+            return reply(.error("Couldn't hand over: \(why)."))
+        case .success(let checked):
+            (build, serverCopy) = (checked?.build, checked?.server)
+        }
         handingOver = true
         let fail: (Error) -> Void = { [weak self] error in
             Sys.close(target.fd)
+            if let serverCopy { Sys.close(serverCopy.fd) }
             self?.handingOver = false
             self?.log("handover to \(executable) failed: \(error)")
             reply(.error("Couldn't hand over: \(error)."))
@@ -288,10 +400,11 @@ extension HostServer {
         } catch {
             return fail(error)
         }
-        log("handing over to \(executable) (its sealed copy)")
+        log("handing over to \(executable) (its sealed copy\(build.map { ", the installed build \($0.folder)" } ?? ""))")
         DispatchQueue.global().async { [weak self] in
             do {
                 defer { Sys.close(probeState) }
+                HandoverMemory.holdIfAsked()
                 try HostHandover.probe(target.path, statePath: HandoverMemory.path(of: probeState))
             } catch {
                 self?.queue.async { fail(error) }
@@ -309,7 +422,7 @@ extension HostServer {
                     self.sessions.values.forEach { $0.finishNow() }
                     let fallback = HostImages.ownCopy
                     var state = self.handoverState(secretFD: secretFD)
-                    state.images = HandoverImages(own: target.fd, fallback: fallback?.fd)
+                    state.images = HandoverImages(own: target.fd, fallback: fallback?.fd, server: serverCopy?.fd)
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
                     let bytes = try HandoverMemory.encoded(state)
                     let stateFD = try HandoverMemory.seal(bytes, name: "vibeswitcher-handover-state")
@@ -328,9 +441,11 @@ extension HostServer {
                                                              fallback?.path ?? self.config.fallback ?? self.config.launcher]
                     if fallback != nil, let image = self.config.fallback { arguments += [HandoverMemory.fallbackImageFlag, image] }
                     if let app = self.config.appExecutable { arguments += ["--handover-fallback-app", app] }
-                    // Its build and folders by the target's path (S2-D7): its /proc/self/exe names the memfd. A script
-                    // stand-in (tests) execs a file of its own, which names itself.
-                    if !target.isScript { arguments += [HostImages.imagePathFlag, executable] }
+                    // Its build and folders (S2-D7): the installed build's, or by the target's path (its /proc/self/exe
+                    // names the memfd); this image's own for its fallback.
+                    arguments += HandoverMemory.folderArguments(build: build, target: executable, isScript: target.isScript,
+                                                                started: CommandLine.arguments)
+                    if HandoverMemory.failsNext { arguments.append("--handover-fail-restore") }
                     throw HandoverMemory.exec(target, argumentZero: executable, arguments: arguments, keep: state.descriptors + [stateFD])
                 } catch {
                     if parsersStopped { self.sessions.values.forEach { $0.resumeParser() } }

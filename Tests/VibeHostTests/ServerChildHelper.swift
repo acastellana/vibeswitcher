@@ -16,7 +16,9 @@ import Testing
 /// thing it does is a line in `server-helper-results` beside the socket, its pid first:
 ///
 /// - (at its start) `started mark=server-helper dumpable-at-start=B image=FD socket=S root=R node-root=N connector=C
-///   rest=A,B` (`rest`: the arguments after those, comma-separated).
+///   rest=A,B` (`rest`: the arguments after those, comma-separated). Given `reportImageHash` among its arguments (a
+///   scratch host's `--server-arg`), ` image-sha256=H` before ` rest=`: the SHA-256 of the sealed copy it was started
+///   from, read before it closes it, which tells one build's server from another's.
 /// - `call census`, `call vault-issue ROOT`, `call spawn CWD`: one `HostCall`, a connection of its own each:
 ///   "census ok", "vault-issue ok", "spawn ok", or "<what> refused <why>".
 /// - `hold`: a connection kept, through the connector, its hello answered: "held", or "hold refused <why>".
@@ -35,6 +37,8 @@ enum ServerChildHelper {
     static let actionsName = "server-helper-actions"
     static let resultsName = "server-helper-results"
     static let mark = "server-helper"
+    /// The argument that has it say its image's hash (see above).
+    static let reportImageHash = "report-image-hash"
     /// Starts this binary as a helper's child (`child-call`): "CONNECTOR SOCKET RESULTS". It says whether the
     /// connector's number is open in it, and asks for a census by the socket's path (through the connector instead,
     /// were it open): "child connector open|closed census ok|refused <why>".
@@ -51,7 +55,15 @@ enum ServerChildHelper {
             guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
             return arguments[index + 1]
         }
-        let image = Platform.ProcessSelf.closeInheritedImage()
+        var imageHash: String?
+        let image: Int32?
+        if arguments.contains(reportImageHash), let inherited = Platform.ProcessSelf.takeInheritedImage() {
+            imageHash = Platform.ProcessSelf.adopt(inherited).map { BuildInfo.sha256(of: $0) }
+            close(inherited)
+            image = inherited
+        } else {
+            image = Platform.ProcessSelf.closeInheritedImage()
+        }
         _ = fcntl(connector, F_SETFD, FD_CLOEXEC)
         _ = Platform.ProcessSelf.harden()
         signal(SIGPIPE, SIG_IGN)
@@ -68,7 +80,7 @@ enum ServerChildHelper {
         }
         report("started mark=\(mark) dumpable-at-start=\(dumpableAtStart.map(String.init) ?? "unknown") image=\(image.map(String.init) ?? "none")"
                + " socket=\(socket) root=\(value(after: "--root") ?? "") node-root=\(value(after: "--node-root") ?? "")"
-               + " connector=\(connector) rest=\(rest.joined(separator: ","))")
+               + " connector=\(connector)" + (imageHash.map { " image-sha256=\($0)" } ?? "") + " rest=\(rest.joined(separator: ","))")
 
         var held = Held()
         func act(_ line: String) {

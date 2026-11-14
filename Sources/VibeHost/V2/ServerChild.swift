@@ -21,6 +21,11 @@ import VibeCore
 /// - Across a handover (Task 8b, the document's S8) the child runs on: the state carries its record (`record`: its
 ///   pid and start ticks, the host's end of its connector, its sealed copy), and the new image takes it again only
 ///   once it has checked it (`restore`); otherwise it starts the server again.
+/// - A handover to an installed build (Task 9d, S2-D8) carries that build's server too, a sealed copy checked against
+///   its `build-info` (`State.images.server`): the new image takes it as the copy of every start from then on
+///   (`carriedServer`), and when its bytes differ from the running child's, ends that child once idle (no connection
+///   through its connector open: no request in flight) and starts it again from the new copy at once
+///   (`replaceWhenIdle`), so the host and the server are the same build. A fallback closes the copy unused.
 ///
 /// The Mac has none: no sealed copies there, no connector (its app proves itself by its code, `AppProof`), and
 /// `start` gives nil.
@@ -62,6 +67,9 @@ public final class ServerChild {
     private var child: Running?
     private typealias Running = (pid: pid_t, token: Platform.PeerToken?, connector: Int32, startedAt: Date, watch: any Platform.Cancellable)
     private var restartPending = false
+    /// The child being ended so that it starts again from a new build's server (`replaceWhenIdle`): started again at
+    /// once when it ends, not after the wait.
+    private var replacing: pid_t?
     private var stopped = false
     private var delay = ServerChild.firstDelay
     private var restartCount = 0
@@ -86,6 +94,8 @@ public final class ServerChild {
     public static func adopt(arguments: [String], ownsLaunchers: Bool, nodeRoot: String, config: HostServer.Config,
                              server: HostServer, restored: HostHandover.State? = nil,
                              copy: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
+        // The new build's server a handover to an installed build carried (Task 9d): this image's when it is that build.
+        let carried = carriedServer(restored)
         guard let (launch, refused) = Self.launch(arguments: arguments, ownsLaunchers: ownsLaunchers, socketPath: config.socketPath,
                                                   root: VibePaths.root.path, nodeRoot: nodeRoot,
                                                   environment: config.baseEnvironment) else {
@@ -94,6 +104,7 @@ public final class ServerChild {
                 release(record, sessionPrograms: Self.programs(of: restored), otherDescriptors: Self.otherDescriptors(of: restored))
             }
             if let copy { Sys.close(copy.fd) }
+            if let carried { Sys.close(carried.fd) }
             return nil
         }
         guard !Platform.CodeIdentity.isAvailable else {
@@ -103,9 +114,26 @@ public final class ServerChild {
         if !refused.isEmpty { say(server, "refused --server-arg: the user's host passes its server no test arguments") }
         if let restored, let record = restored.serverChild {
             return restore(record, launch: launch, sessionPrograms: Self.programs(of: restored),
-                           otherDescriptors: Self.otherDescriptors(of: restored), server: server, loaded: copy)
+                           otherDescriptors: Self.otherDescriptors(of: restored), server: server, loaded: copy, carried: carried)
+        }
+        if let carried {
+            if let copy { Sys.close(copy.fd) }
+            return start(launch, server: server, loaded: carried)
         }
         return start(launch, server: server, loaded: copy)
+    }
+
+    /// The server's sealed copy `state` carried (`State.images.server`, Task 9d), adopted (`Platform.ProcessSelf.adopt`:
+    /// all four seals, `0111`, made close-on-exec) only by the image it was carried for: the target, whose own copy is
+    /// `images.own`. In a fallback (its own copy is `images.fallback`), or when it can't be adopted, closed when still
+    /// inherited and no other descriptor of the state. Nil without one, and on the Mac.
+    static func carriedServer(_ state: HostHandover.State?) -> Platform.ProcessSelf.SealedCopy? {
+        guard !Platform.CodeIdentity.isAvailable, var others = state, let images = state?.images, let fd = images.server else { return nil }
+        others.images?.server = nil
+        guard isInherited(fd), !others.descriptors.contains(fd) else { return nil }
+        if let own = HostImages.ownCopy?.fd, own == images.own, let copy = Platform.ProcessSelf.adopt(fd) { return copy }
+        Sys.close(fd)
+        return nil
     }
 
     /// The restored sessions' programs.
@@ -130,15 +158,36 @@ public final class ServerChild {
     /// where `start` is.
     /// `loaded`: `launch.image`'s copy the host loaded and checked already (`HostImages.load`), used in place of a fresh
     /// one, and closed when the carried copy is taken again instead.
+    /// `carried`: the new build's server a handover to an installed build carried (`carriedServer`), the copy of every
+    /// start from now on in place of `loaded` (closed); the running child, when its own copy's bytes differ from it, is
+    /// ended once idle and started again from it (`replaceWhenIdle`).
     static func restore(_ record: HostHandover.ServerChildRecord, launch: Launch, sessionPrograms: [pid_t], otherDescriptors: Set<Int32>,
-                        server: HostServer, loaded: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
+                        server: HostServer, loaded: Platform.ProcessSelf.SealedCopy? = nil,
+                        carried: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
         guard !Platform.CodeIdentity.isAvailable else { return nil }
         if let refusal = check(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors) {
             say(server, "server child record refused: \(refusal); starting the server again")
             release(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors)
-            return start(launch, server: server, loaded: loaded)
+            if let carried, let loaded { Sys.close(loaded.fd) }
+            return start(launch, server: server, loaded: carried ?? loaded)
         }
         let carriedCopy = isInherited(record.image) && !otherDescriptors.contains(record.image) && record.image != record.connector
+        if let carried {
+            // The running child's image, by its own copy's bytes: another build's when they differ (or can't be read).
+            let running = carriedCopy ? Platform.ProcessSelf.adopt(record.image) : nil
+            let differs = running.map { BuildInfo.sha256(of: $0) != BuildInfo.sha256(of: carried) } ?? true
+            if carriedCopy { Sys.close(record.image) }
+            if let loaded { Sys.close(loaded.fd) }
+            say(server, "server child pid \(record.pid) runs on; its next start is from the new build's server \(launch.image), carried"
+                + (differs ? ", and it starts again from it once idle (another build's bytes)" : " (the same bytes)"))
+            let child = ServerChild(server: server, copy: carried, launch: launch)
+            server.queue.async {
+                server.serverChild = child
+                child.resume(record)
+                if differs { child.replaceWhenIdle() }
+            }
+            return child
+        }
         let copy: Platform.ProcessSelf.SealedCopy
         if record.path == launch.image, carriedCopy, let adopted = Platform.ProcessSelf.adopt(record.image) {
             if let loaded { Sys.close(loaded.fd) }
@@ -359,13 +408,43 @@ public final class ServerChild {
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0, errno == EINTR {}
         let ran = Date().timeIntervalSince(running.startedAt)
-        lock.withLock {
+        let replaced = lock.withLock { () -> Bool in
             child = nil
             if ran >= Self.steadyRun { delay = Self.firstDelay }
+            defer { if replacing == pid { replacing = nil } }
+            return replacing == pid
+        }
+        if replaced {
+            Self.say(server, "server child pid \(pid) ended for the new build's server: \(HostLog.waitStatus(status)); started again from it now")
+            return spawn()
         }
         Self.say(server, "server child pid \(pid) ended after \(Int(ran)) s: \(HostLog.waitStatus(status)); started again in \(Int(lock.withLock { delay })) s")
         scheduleRestart()
     }
+
+    /// The child running now, which a handover carried from the build before (`restore`), ended once no connection
+    /// through its connector is open (no request of it in flight, each being a connection of its own), looked at every
+    /// `idleLook`: its connector closed and SIGTERM, SIGKILL if it still runs `replaceLimit` later. `ended` then starts
+    /// it again at once from this child's copy, the new build's server. On `queue`.
+    func replaceWhenIdle() {
+        guard let server, !lock.withLock({ stopped }), let running = lock.withLock({ child }) else { return }
+        guard server.appConnectionsOpen(through: running.connector) == 0 else {
+            queue.asyncAfter(deadline: .now() + Self.idleLook) { [weak self] in self?.replaceWhenIdle() }
+            return
+        }
+        lock.withLock { replacing = running.pid }
+        Self.say(server, "server child pid \(running.pid) idle: ended, to start again from the new build's server")
+        server.closeAppConnector(running.connector)
+        kill(running.pid, SIGTERM)
+        queue.asyncAfter(deadline: .now() + Self.replaceLimit) { [weak self] in
+            guard let self, self.lock.withLock({ self.child?.pid }) == running.pid else { return }
+            kill(running.pid, SIGKILL)
+        }
+    }
+
+    /// How often `replaceWhenIdle` looks again, and how long a child it ended may take to go before SIGKILL.
+    static let idleLook: TimeInterval = 0.2
+    static let replaceLimit: TimeInterval = 10
 
     /// A start again after the wait, which then doubles (to `longestDelay`). On `queue`.
     private func scheduleRestart() {

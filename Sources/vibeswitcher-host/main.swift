@@ -111,6 +111,9 @@ config.spawnNeedsLead = ownsLaunchers && !Platform.CodeIdentity.isAvailable
 config.watchesItsPath = ownsLaunchers && !Platform.CodeIdentity.isAvailable
 // On Linux a host that took itself for a scratch host never holds the user's lock (see `HostHardening`).
 config.heldLockIsAllowed = HostHardening.heldLockIsAllowed(ownsLaunchers: ownsLaunchers, usersLock: VibePaths.hostLock.path)
+// On Linux the node's host hands over only to a build installed under ~/.vibeswitcher/v2/builds that it checked; a
+// scratch host to one under its --install-root; any other to any build, as before (see V2/HandoverTarget.swift).
+config.installRoot = HandoverTarget.installRoot(arguments: arguments, ownsLaunchers: ownsLaunchers, accountHome: HostImages.accountHome)
 if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), limit > 0 { config.parser.stallLimit = limit }
 // The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
 config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
@@ -118,6 +121,8 @@ config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.append
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
                                      "--handover-fallback-app": true, "--app-executable": true,
                                      HostStart.appKeyFlag: false, HostImages.imagePathFlag: true, HandoverMemory.fallbackImageFlag: true].merging(TestAppPrincipal.handoverFlags) { $1 }
+    // On Linux --node-root and --server too: a handover appends the target's, and its fallback's (V2/HandoverMemory.swift).
+    .merging(HandoverMemory.handoverFlags) { $1 }
 config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
     if result.skip { result.skip = false; return }
     if let takesValue = handoverFlags[item.element] { result.skip = takesValue; return }

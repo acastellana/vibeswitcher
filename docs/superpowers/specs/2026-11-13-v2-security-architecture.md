@@ -910,7 +910,8 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `HandoverLinuxTests.aFreshHostRemovesAStaleStateFile`, `HandoverLinuxTests.everyDescriptorTheNewImageKeepsIsCloseOnExec`,
 `HandoverLinuxTests.aHandoverImageIsNotDumpableFromItsExec`, `HandoverLinuxTests.aFailedTakeOverGoesBackThroughTheSealedCopy`,
 `HandoverLinuxTests.aFallbackImageRewrittenInPlaceIsNotWhatRuns`, `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`
-(Task 9c); planned: stage 2 plan task 9d.
+(Task 9c); `ServerChildTests.aSwitchBringsTheNewBuildsServer`, `ServerChildTests.aFallbackGetsTheOldBuildsFolders`,
+`HandoverLinuxTests.aHandoverGivesTheNewImageItsBuildsFoldersAndTheFallbackItsOwn` (Task 9d).
 
 **Tests to write:** Task 9d: `ServerChildTests.aSwitchBringsTheNewBuildsServer`. Step 8:
 `aSwitchWhileAWorkerRunsIsRefused`.
@@ -1018,8 +1019,12 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `HostHardeningTests.theNodeTakesItsFoldersFromNodeRootNotItsExecutable`,
 `HostHardeningTests.theUsersHostTakesOnlyItsInstallsServer`,
 `HandoverLinuxTests.aHostWhoseImageDiffersFromItsBuildInfoDoesNotStart`, `HandoverLinuxTests.aNewerBuildInfoFormatIsRefused`,
-`HandoverLinuxTests.aHostWhoseImagesMatchItsBuildInfoStartsAndTellsItsServerTheFolder`; planned: stage 2 plan task 3,
-task 8, task 9 (9c, 9d).
+`HandoverLinuxTests.aHostWhoseImagesMatchItsBuildInfoStartsAndTellsItsServerTheFolder`;
+`HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`, `aHandoverToABuildOutsideTheInstallFolderIsRefused`,
+`aHandoverWhoseHashDiffersFromTheRecordIsRefused`, `aHandoverToAnInstalledBuildIsAllowed`,
+`aTargetRenamedOverAfterItsCheckIsNotWhatRuns`, `aScriptTargetIsRefusedByTheUsersHost`,
+`aScratchHostWithNoInstallRootHandsOverAsToday`, `theInstallRootIsTheNodesOrAScratchHostsFlag`,
+`ServerChildTests.aSwitchBringsTheNewBuildsServer` (Task 9d); planned: stage 2 plan task 3, task 8, task 9 (9c).
 
 **Tests to write:** Task 3: `ProcessSelfTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`,
 `aSealedCopysHashIsOfTheBytesItRuns`, `aPidsTokenIsItsPeerToken`. Task 8:

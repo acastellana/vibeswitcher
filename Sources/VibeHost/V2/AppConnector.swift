@@ -52,6 +52,9 @@ final class AppConnector {
         made.append(Made(client: client))
     }
 
+    /// How many connections made through it are open now.
+    var openConnections: Int { made.compactMap(\.client).filter { !$0.closed }.count }
+
     /// Its end closed, and every connection made through it ended: what came from its child is no one's now.
     func close() {
         guard !closed else { return }
@@ -139,6 +142,12 @@ extension HostServer {
     /// state; nil when there is none, or it has closed. On `queue`.
     func appConnectorEnd(_ number: Int32) -> Int32? {
         appConnectors[number].flatMap { $0.closed ? nil : $0.fd }
+    }
+
+    /// How many connections made through the connector `number` names are open now: none while its child has no
+    /// request in flight (a request is one connection, `HostCall`). On `queue`.
+    func appConnectionsOpen(through number: Int32) -> Int {
+        appConnectors[number]?.openConnections ?? 0
     }
 
     /// The test stand-in's connector, for a handover's state (see `HostHandover.State.testAppConnector`): nil when

@@ -71,6 +71,10 @@ public final class HostServer {
         /// host never holds the user's lock, however its path was spelled (see V2/HostHardening.swift). Nil: nothing
         /// asked, as always.
         public var heldLockIsAllowed: ((Int32) -> Bool)?
+        /// Where installed builds are (`<installRoot>/<build>/bin/…`, `<installRoot>/<build>/build-info`): on Linux a
+        /// handover goes only to an installed build checked on its sealed copy (see V2/HandoverTarget.swift). Nil: any
+        /// target, as always (the Mac's and every scratch host's).
+        public var installRoot: URL?
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }

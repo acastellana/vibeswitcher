@@ -1532,6 +1532,25 @@ is green.
   in `config.arguments`: otherwise the exec has two `--server`s, and `value(after:)` takes the first, the old
   build's). Non-seam edit.
 - Test: `Tests/VibeHostTests/HandoverLinuxTests.swift`, `ServerChildTests.swift`
+- *As made (2026-11-14), awaiting the lead's approval:*
+  - `check(_:path:installRoot:sessionFolders:)` returns `Result<HandoverTarget.Build, HandoverTarget.Refused>` (the
+    record and the build's folder, which the exec's `--node-root` needs; a `String` isn't an `Error`), and takes the
+    sessions' working folders. A `.git` is looked for from the target's folder up to the install folder for a target
+    inside it (a home kept in git refuses nothing), up to `/` for one outside; a session's folder refuses only when it
+    doesn't hold the install folder (a shell in the home would refuse every build). The target must be
+    `<install folder>/<build>/bin/vibeswitcher-host`, both resolved.
+  - The build's server is loaded and checked, and `--server` appended, only when the host runs with `--server` (the
+    node's host always does); a scratch host with an install root and no server hands over with `--node-root` alone.
+  - "Once idle" is: no connection made through the running child's connector is open (each request is a connection
+    of its own); looked at every 0.2 s; the child's connector closed and SIGTERM (SIGKILL 10 s later), started again
+    at once from the carried copy. The carried copy is taken only by the image it was carried for (its own copy is
+    `images.own`); a fallback closes it.
+  - The old build's own `--node-root` and `--server` travel as `--handover-fallback-node-root` and
+    `--handover-fallback-server` (handover flags), which `goBack` gives back as its own. Two scratch-only test flags:
+    `--handover-test-fail-next` (the image handed over to is given `--handover-fail-restore`: a script can't stand in
+    for an installed build) and `--handover-test-hold PATH` (a handover waits, after its check, before its probe, until
+    PATH exists). `--install-root` is not carried across a scratch host's handover. The server helper says its image's
+    hash when given `--server-arg report-image-hash`.
 
 - [ ] **Step 1: Failing tests** (Linux unless marked), with a scratch `--install-root` holding build folders and
   `build-info` files the test writes:

@@ -506,3 +506,285 @@ extension HandoverLinuxTests {
         #expect(!host.log.contains("replaced-build"), "\(host.log)")
     }
 }
+
+// MARK: Task 9d: the handover's target in the user's host
+
+/// A build installed under an install folder, as the install lays it out (`<root>/<name>/bin/…`, `<root>/<name>/build-info`).
+struct InstalledBuild {
+    let folder: String
+    let host: String
+    let hostHash: String
+    let server: String
+    let serverHash: String?
+
+    /// `bin/vibeswitcher-host` a copy of `host` with `appending` after its bytes (another build's image, which still
+    /// runs: the loader reads none of them), `bin/vibeswitcher-server` likewise of `server` when given, and `build-info`
+    /// recording each one's SHA-256, `record`'s entries over them.
+    init(in root: String, _ name: String, host source: String = hostLauncher, appending: String = "", server serverSource: String? = nil,
+         serverAppending: String = "", record: [String: String] = [:]) throws {
+        folder = root + "/" + name
+        host = folder + "/bin/" + BuildInfo.host
+        server = folder + "/bin/" + BuildInfo.server
+        try FileManager.default.createDirectory(atPath: folder + "/bin", withIntermediateDirectories: true)
+        func copy(_ source: String, to path: String, appending: String) throws {
+            try FileManager.default.copyItem(atPath: source, toPath: path)
+            guard !appending.isEmpty else { return }
+            let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(appending.utf8))
+        }
+        try copy(source, to: host, appending: appending)
+        hostHash = try HandoverLinuxTests.sha256(of: host)
+        var binaries = [BuildInfo.host: hostHash]
+        if let serverSource {
+            try copy(serverSource, to: server, appending: serverAppending)
+            let hash = try HandoverLinuxTests.sha256(of: server)
+            binaries[BuildInfo.server] = hash
+            serverHash = hash
+        } else {
+            serverHash = nil
+        }
+        _ = try HandoverLinuxTests.buildFolder(in: root, name, binaries: binaries.merging(record) { $1 })
+    }
+}
+
+extension HandoverLinuxTests {
+    /// `HandoverTarget.check` of the file at `path`, from its sealed copy, as the host checks it.
+    static func check(_ path: String, installRoot: String, sessionFolders: [String] = []) throws -> Result<HandoverTarget.Build, HandoverTarget.Refused> {
+        let copy = try Platform.ProcessSelf.sealedCopy(of: path, name: "target").get()
+        defer { Sys.close(copy.fd) }
+        return HandoverTarget.check(copy, path: path, installRoot: installRoot, sessionFolders: sessionFolders)
+    }
+
+    /// The reason a refused check gives, or nil when it passed.
+    static func refusal(_ result: Result<HandoverTarget.Build, HandoverTarget.Refused>) -> String? {
+        if case .failure(let why) = result { return why.description }
+        return nil
+    }
+
+    /// A target inside a git worktree (a folder holding `.git`, a folder or a worktree's file) is refused by name,
+    /// outside the install folder and inside it, whatever its build-info says; so is one inside a session's working
+    /// folder. A `.git` above the install folder (a home kept in git) refuses nothing, nor does a session whose folder
+    /// holds the install folder (a shell in the home).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's handover target check; the Mac hands over by path"))
+    func aHandoverToAPathInsideAWorktreeIsRefused() throws {
+        let dir = "\(shortScratchRoot)/vsht-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let root = dir + "/home/.vibeswitcher/v2/builds"
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let installed = try InstalledBuild(in: root, "b1")
+        // The home above the install folder is a git checkout of its own: that says nothing of the build.
+        try FileManager.default.createDirectory(atPath: dir + "/home/.git", withIntermediateDirectories: true)
+        #expect(try Self.refusal(Self.check(installed.host, installRoot: root)) == nil)
+        #expect(try Self.refusal(Self.check(installed.host, installRoot: root, sessionFolders: [dir + "/home", "/"])) == nil)
+
+        let repo = try InstalledBuild(in: dir + "/repo", "build")
+        try FileManager.default.createDirectory(atPath: dir + "/repo/.git", withIntermediateDirectories: true)
+        #expect(try Self.refusal(Self.check(repo.host, installRoot: root)) == "\(repo.host) is inside a git worktree (\(dir)/repo)")
+
+        let worktree = try InstalledBuild(in: root, "b2")
+        FileManager.default.createFile(atPath: worktree.folder + "/.git", contents: Data("gitdir: /elsewhere\n".utf8))
+        #expect(try Self.refusal(Self.check(worktree.host, installRoot: root)) == "\(worktree.host) is inside a git worktree (\(worktree.folder))")
+
+        let work = try InstalledBuild(in: dir + "/work", "build")
+        #expect(try Self.refusal(Self.check(work.host, installRoot: root, sessionFolders: [dir + "/work"]))
+                == "\(work.host) is inside a session's working folder (\(dir)/work)")
+        // A session working inside an installed build's folder: refused too.
+        #expect(try Self.refusal(Self.check(installed.host, installRoot: root, sessionFolders: [installed.folder]))
+                == "\(installed.host) is inside a session's working folder (\(installed.folder))")
+    }
+
+    /// A build outside the install folder is refused though its build-info records it; so is a link inside the install
+    /// folder to it (resolved first), and a file inside the install folder that isn't `<build>/bin/vibeswitcher-host`.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's handover target check; the Mac hands over by path"))
+    func aHandoverToABuildOutsideTheInstallFolderIsRefused() throws {
+        let dir = "\(shortScratchRoot)/vsht-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let root = dir + "/builds"
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let outside = try InstalledBuild(in: dir + "/elsewhere", "build")
+        #expect(try Self.refusal(Self.check(outside.host, installRoot: root)) == "\(outside.host) isn't inside the install folder (\(root))")
+
+        try FileManager.default.createDirectory(atPath: root + "/linked/bin", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: root + "/linked/bin/" + BuildInfo.host, withDestinationPath: outside.host)
+        _ = try Self.buildFolder(in: root, "linked", binaries: [BuildInfo.host: outside.hostHash])
+        #expect(try Self.refusal(Self.check(root + "/linked/bin/" + BuildInfo.host, installRoot: root))
+                == "\(root)/linked/bin/\(BuildInfo.host) isn't inside the install folder (\(root))")
+
+        try FileManager.default.copyItem(atPath: hostLauncher, toPath: root + "/" + BuildInfo.host)
+        #expect(try Self.refusal(Self.check(root + "/" + BuildInfo.host, installRoot: root))
+                == "\(root)/\(BuildInfo.host) isn't an installed build's \(BuildInfo.host) (\(root)/<build>/bin/\(BuildInfo.host))")
+        #expect(try Self.refusal(Self.check(outside.host, installRoot: dir + "/no-such-folder")) == "the install folder \(dir)/no-such-folder isn't there")
+    }
+
+    /// A build whose build-info records another hash for its host image, none, or a newer format is refused, by its
+    /// check and by a host with an install root, before any probe: the host serves on, the same build.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's handover target check; the Mac hands over by path"))
+    func aHandoverWhoseHashDiffersFromTheRecordIsRefused() async throws {
+        let root = "\(shortScratchRoot)/vshr-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let other = BuildInfo.sha256(of: Data("another build".utf8))
+        let wrong = try InstalledBuild(in: root, "wrong", record: [BuildInfo.host: other])
+        #expect(try Self.refusal(Self.check(wrong.host, installRoot: root))
+                == "vibeswitcher-host: its sha256 \(wrong.hostHash) isn't the one build-info records (\(other))")
+        let none = try InstalledBuild(in: root, "none")
+        _ = try Self.buildFolder(in: root, "none", binaries: [:])
+        #expect(try Self.refusal(Self.check(none.host, installRoot: root)) == "vibeswitcher-host: build-info holds no record for it")
+        let newer = try InstalledBuild(in: root, "newer")
+        _ = try Self.buildFolder(in: root, "newer", binaries: [BuildInfo.host: newer.hostHash], format: BuildInfo.format + 1)
+        #expect(try Self.refusal(Self.check(newer.host, installRoot: root))
+                == "its build-info: \(newer.folder)/build-info: its format \(BuildInfo.format + 1) is newer than this build's (\(BuildInfo.format))")
+
+        let host = try await ScratchHostProcess(arguments: ["--install-root", root])
+        defer { host.stop() }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let answer = await host.handOver(to: wrong.host, through: client)
+        #expect(answer == .error("Couldn't hand over: vibeswitcher-host: its sha256 \(wrong.hostHash) isn't the one build-info records (\(other))."),
+                "\(String(describing: answer))\n\(host.log)")
+        #expect(!host.log.contains("handing over to"), "\(host.log)")
+        let (_, _, build, _, _, pid, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        #expect(build == host.oldBuild && pid == host.pid)
+    }
+
+    /// A scratch host with an install root hands over to a build installed there that its record names: the new image
+    /// is given that build's folder as its `--node-root` (once) and no `--image-path`, and checks itself against it.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's handover target check; the Mac hands over by path"))
+    func aHandoverToAnInstalledBuildIsAllowed() async throws {
+        let root = "\(shortScratchRoot)/vshr-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        // Another build's bytes (one more at its end), so that a check against any other record would fail.
+        let installed = try InstalledBuild(in: root, "b", appending: "\n")
+        let host = try await ScratchHostProcess(arguments: ["--install-root", root])
+        defer { host.stop() }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let session = try await client.spawn("printf 'up\\n'; exec sleep 600")
+        defer { kill(session.childPID, SIGKILL) }
+        #expect(await host.handOver(to: installed.host, through: client) == .ok, "\(host.log)")
+        #expect(await eventually { host.log.contains("took over 1 sessions") }, "\(host.log)")
+        #expect(!host.log.contains("couldn't take over"), "\(host.log)")
+        #expect(host.log.contains("handing over to \(installed.host) (its sealed copy, the installed build \(installed.folder))"), "\(host.log)")
+        let (_, _, build, sessions, _, pid, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        #expect(build == HostBuild.id(ofExecutableAt: installed.host) && pid == host.pid && sessions.map(\.id) == [session.id])
+        let arguments = Platform.Processes.arguments(host.pid)
+        #expect(arguments.filter { $0 == HostImages.nodeRootFlag }.count == 1, "\(arguments)")
+        #expect(HostImages.value(after: HostImages.nodeRootFlag, in: arguments) == installed.folder, "\(arguments)")
+        #expect(!arguments.contains(HostImages.imagePathFlag) && !arguments.contains("--install-root"), "\(arguments)")
+        #expect(HostImages.folders(arguments: arguments, executable: "/nonexistent").toolServer == installed.folder + "/bin/vibeswitcher-mcp")
+    }
+
+    /// The target file renamed over (by a build its record doesn't name) once the host has checked its copy, before
+    /// the probe (a scratch host's `--handover-test-hold`): what the probe and the exec run is the copy checked, which
+    /// then checks itself against the build's record, and takes over.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies; the Mac hands over by path"))
+    func aTargetRenamedOverAfterItsCheckIsNotWhatRuns() async throws {
+        let root = "\(shortScratchRoot)/vshr-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let installed = try InstalledBuild(in: root, "b", appending: "\n")
+        // Another build, the test's own image unchanged, which the record doesn't name.
+        let replacement = root + "/replacement"
+        try FileManager.default.copyItem(atPath: hostLauncher, toPath: replacement)
+        let hold = root + "/hold"
+        let host = try await ScratchHostProcess(arguments: ["--install-root", root, HandoverMemory.holdTestFlag, hold])
+        defer { host.stop() }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let seq = client.send(.handover(executable: installed.host))
+        // Said once the copy is loaded and checked; the probe waits for the hold's file.
+        #expect(await eventually { host.log.contains("handing over to \(installed.host) (its sealed copy, the installed build \(installed.folder))") },
+                "\(host.log)")
+        #expect(rename(replacement, installed.host) == 0, "errno \(errno)")
+        #expect(try Self.sha256(of: installed.host) != installed.hostHash)
+        FileManager.default.createFile(atPath: hold, contents: nil)
+        #expect(await eventually { client.reply(to: seq) != nil })
+        #expect(client.reply(to: seq) == .ok, "\(host.log)")
+        #expect(await eventually { host.log.contains("took over") }, "\(host.log)")
+        #expect(!host.log.contains("couldn't take over"), "\(host.log)")
+        let (_, _, _, _, _, servedBy, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        #expect(servedBy == host.pid)
+    }
+
+    /// With an install root, a target whose first bytes are `#!` is refused by name, before any probe: it never runs.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's handover target check; the Mac hands over by path"))
+    func aScriptTargetIsRefusedByTheUsersHost() async throws {
+        let root = "\(shortScratchRoot)/vshr-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let ran = root + "/ran"
+        try FileManager.default.createDirectory(atPath: root + "/s/bin", withIntermediateDirectories: true)
+        let script = root + "/s/bin/" + BuildInfo.host
+        FileManager.default.createFile(atPath: script, contents: Data("#!/bin/sh\ntouch '\(ran)'\nexec '\(hostLauncher)' \"$@\"\n".utf8),
+                                       attributes: [.posixPermissions: 0o755])
+        _ = try Self.buildFolder(in: root, "s", binaries: [BuildInfo.host: try Self.sha256(of: script)])
+        #expect(try Self.refusal(Self.check(script, installRoot: root)) == "\(script) is a script, not an installed build's image")
+
+        let host = try await ScratchHostProcess(arguments: ["--install-root", root])
+        defer { host.stop() }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        #expect(await host.handOver(to: script, through: client) == .error("Couldn't hand over: \(script) is a script, not an installed build's image."),
+                "\(host.log)")
+        #expect(!host.log.contains("handing over to"), "\(host.log)")
+        #expect(!FileManager.default.fileExists(atPath: ran))
+    }
+
+    /// A scratch host with no install root hands over to any build, as before: on Linux the new image is told the
+    /// target's path (`--image-path`), once, and no `--node-root` it wasn't started with.
+    @Test func aScratchHostWithNoInstallRootHandsOverAsToday() async throws {
+        let host = try await ScratchHostProcess()
+        defer { host.stop() }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        let session = try await client.spawn("printf 'up\\n'; exec sleep 600")
+        defer { kill(session.childPID, SIGKILL) }
+        #expect(await host.handOver(to: host.newBinary, through: client) == .ok, "\(host.log)")
+        #expect(await eventually { host.log.contains("took over 1 sessions") }, "\(host.log)")
+        let (_, _, build, sessions, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
+        #expect(build == host.newBuild && sessions.map(\.id) == [session.id])
+        guard !Platform.CodeIdentity.isAvailable else { return }
+        let arguments = Platform.Processes.arguments(host.pid)
+        #expect(arguments.filter { $0 == HostImages.imagePathFlag }.count == 1, "\(arguments)")
+        #expect(HostImages.value(after: HostImages.imagePathFlag, in: arguments) == host.newBinary, "\(arguments)")
+        #expect(!arguments.contains(HostImages.nodeRootFlag) && !arguments.contains("--server"), "\(arguments)")
+    }
+
+    /// What the exec appends for the new image's folders and its fallback's (S2-D7): an installed build's folder and
+    /// server, and no `--image-path`; without an install root this image's own, unchanged, and the target's path; each
+    /// once, and this image's own again for a fallback, which `goBack` gives back as its own.
+    @Test func aHandoverGivesTheNewImageItsBuildsFoldersAndTheFallbackItsOwn() {
+        let started = ["h", HostImages.nodeRootFlag, "/i/a", "--server", "/i/a/bin/vibeswitcher-server"]
+        let build = HandoverTarget.Build(info: BuildInfo(commit: String(repeating: "b", count: 40), binaries: [:], swift: "", resolved: ""),
+                                         folder: "/i/b")
+        let fallback = [HandoverMemory.fallbackNodeRootFlag, "/i/a", HandoverMemory.fallbackServerFlag, "/i/a/bin/vibeswitcher-server"]
+        #expect(HandoverMemory.folderArguments(build: build, target: "/i/b/bin/vibeswitcher-host", isScript: false, started: started)
+                == [HostImages.nodeRootFlag, "/i/b", "--server", "/i/b/bin/vibeswitcher-server"] + fallback)
+        #expect(HandoverMemory.folderArguments(build: nil, target: "/s/new/vibeswitcher-host", isScript: false, started: started)
+                == [HostImages.nodeRootFlag, "/i/a", "--server", "/i/a/bin/vibeswitcher-server", HostImages.imagePathFlag, "/s/new/vibeswitcher-host"]
+                    + fallback)
+        // No server child: no server named, an installed build's or this image's.
+        #expect(HandoverMemory.folderArguments(build: build, target: "/i/b/bin/vibeswitcher-host", isScript: false, started: ["h"])
+                == [HostImages.nodeRootFlag, "/i/b"])
+        #expect(HandoverMemory.folderArguments(build: nil, target: "/s/script", isScript: true, started: ["h"]).isEmpty)
+        #expect(HandoverMemory.fallbackArguments(started: ["h", "--node-root", "/i/b"] + fallback)
+                == [HostImages.nodeRootFlag, "/i/a", "--server", "/i/a/bin/vibeswitcher-server"])
+        #expect(HandoverMemory.fallbackArguments(started: ["h"]).isEmpty)
+        // A build's --node-root and --server are dropped from what it hands over with on Linux, as each handover appends
+        // its own; the Mac keeps them (it is never given them).
+        let dropped = HandoverMemory.handoverFlags
+        #expect(dropped[HandoverMemory.fallbackNodeRootFlag] == true && dropped[HandoverMemory.fallbackServerFlag] == true)
+        #expect((dropped[HostImages.nodeRootFlag] == true) == !Platform.CodeIdentity.isAvailable)
+        #expect((dropped["--server"] == true) == !Platform.CodeIdentity.isAvailable)
+    }
+
+    /// The install root: the node's own under the account's home, a scratch host's `--install-root`, never the user's
+    /// host's from the flag; none on the Mac.
+    @Test func theInstallRootIsTheNodesOrAScratchHostsFlag() {
+        let node = HandoverTarget.installRoot(arguments: ["h", HostImages.nodeFlag, "--install-root", "/x"], ownsLaunchers: true, accountHome: "/home/u")
+        let scratch = HandoverTarget.installRoot(arguments: ["h", "--install-root", "/x"], ownsLaunchers: false, accountHome: "/home/u")
+        let users = HandoverTarget.installRoot(arguments: ["h", "--install-root", "/x"], ownsLaunchers: true, accountHome: "/home/u")
+        let none = HandoverTarget.installRoot(arguments: ["h"], ownsLaunchers: false, accountHome: "/home/u")
+        if Platform.CodeIdentity.isAvailable {
+            #expect([node, scratch, users, none].allSatisfy { $0 == nil })
+        } else {
+            #expect(node?.path == "/home/u/.vibeswitcher/v2/builds")
+            #expect(scratch?.path == "/x")
+            #expect(users == nil && none == nil)
+        }
+    }
+}
