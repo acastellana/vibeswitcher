@@ -443,7 +443,9 @@ import Testing
         #expect(await eventually { app.reply(to: seq) != nil })
         #expect(app.reply(to: seq) == .ok, "\(host.log)")
         #expect(await eventually { host.log.contains("took over") }, "\(host.log)")
-        #expect(host.log.contains("carried over"), "\(host.log)")
+        // The new image says it took over, then takes the stand-in again (`TestAppPrincipal.adopt`) and says so:
+        // a line of its own, later, so it's waited for too.
+        #expect(await eventually { host.log.contains(" for pid \(getpid()), carried over") }, "\(host.log)")
         let (after, _, newBuild, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
         #expect(newBuild == host.newBuild)
         #expect(await Self.census(after) == true)
