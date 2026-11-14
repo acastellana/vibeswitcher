@@ -301,7 +301,7 @@ struct ToolsTests {
                 == ["/bin/zsh", "-l", "-i", "-c", "codex; exec '/bin/zsh' -l -i"])
         #expect(Platform.Tools.sessionShellArguments(shell: "/opt/it's/sh", command: "x", keepShell: true)
                 == ["/opt/it's/sh", "-l", "-i", "-c", "x; exec '/opt/it'\\''s/sh' -l -i"])
-        #expect(Platform.Tools.spawnEnvironmentRefused(["LD_PRELOAD", "BASH_ENV", "SSH_AUTH_SOCK", "PATH"]) == [])
+        #expect(Platform.Tools.spawnEnvironmentRefused(["LD_PRELOAD", "BASH_ENV", "SSH_AUTH_SOCK", "PS1", "SWIFT_BACKTRACE", "PATH"]) == [])
     }
 
     /// Linux's sessions: no agent socket, interop, bus, display, audio, runtime folder or test config folder; a
@@ -322,13 +322,14 @@ struct ToolsTests {
                 == ["/bin/bash", "--noprofile", "--norc", "-c", "codex; exec /bin/bash --noprofile --norc -i"])
     }
 
-    /// What a spawn other than the app's may not add, on Linux: the loader's variables, a bash's startup ones and
-    /// exported functions, and the names never passed. Anything else may be added.
+    /// What a spawn other than the app's may not add, on Linux: the loader's variables, a bash's startup ones, its
+    /// prompts and exported functions, the names never passed, and the fixed part's. Anything else may be added.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's form"))
     func aSpawnMayNotAddLoaderStartupOrNeverPassedVariables() {
         let refused = ["LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "GCONV_PATH", "GLIBC_TUNABLES", "BASH_ENV", "ENV", "SHELLOPTS",
-                       "BASHOPTS", "PS4", "BASH_XTRACEFD", "PROMPT_COMMAND", "BASH_FUNC_git%%"] + Platform.Tools.sessionEnvironmentNever
-        let allowed = ["PATH", "VIBESWITCHER_ROLE", "CLAUDE_CONFIG_DIR", "LANG", "TERM", "OLD_PWD", "XLD_PRELOAD"]
+                       "BASHOPTS", "PS4", "BASH_XTRACEFD", "PROMPT_COMMAND", "PS0", "PS1", "PS2", "BASH_FUNC_git%%", "SWIFT_BACKTRACE"]
+            + Platform.Tools.sessionEnvironmentNever
+        let allowed = ["PATH", "VIBESWITCHER_ROLE", "CLAUDE_CONFIG_DIR", "LANG", "TERM", "OLD_PWD", "XLD_PRELOAD", "PS3"]
         #expect(Platform.Tools.spawnEnvironmentRefused(allowed + refused) == refused)
         #expect(Platform.Tools.spawnEnvironmentRefused(allowed) == [])
     }

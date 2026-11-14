@@ -1141,15 +1141,20 @@ the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts
   `DBUS_SESSION_BUS_ADDRESS`, `DISPLAY`, `WAYLAND_DISPLAY`, `PULSE_SERVER`, `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`. A
   session's default `LANG` is `C.UTF-8`. A session's program starts with SIGPIPE at its default, though the host
   ignores it. The lead's session gets `VIBESWITCHER_CODEX_WORKERS=0` (decision 15) until Codex's sandbox is measured
-  here.
+  here: the engine's E4 sets it where it starts a lead, not stage 2.
 - **A plain shell, not a login shell.** `HostedSession.arguments` starts every session as `$SHELL -l -i -c command`
   (`HostedSession.swift:117-120`); a login, interactive bash runs `.profile` and `.bashrc` and whatever they source
   (here, among others, a file in another repository and `mise activate`, which reads per-folder config from the
   worktree). On Linux team sessions start with `bash --noprofile --norc -c command`, with the PATH the unit holds;
-  the Mac's reason for `-l -i` (Terminal's PATH) is met by that PATH.
+  the Mac's reason for `-l -i` (Terminal's PATH) is met by that PATH. `claude` isn't on it (its folder is the user's
+  `~/.local/bin`): until the engine's E4 runs the lead's and the roles' `claude` by the absolute path it resolves
+  (EN-D13), a role launched as the bare `claude` passes the tool server's preflight, which still looks through a login
+  shell (`LaunchPreflight`, `LoginShellCommand`), and then fails in its session with `command not found`.
 - **What a spawn may add.** `SpawnRequest.env` from a caller that isn't the app may not set loader or shell-startup
-  variables or any name in the "never" list above (`LD_*`, `BASH_ENV`, `ENV`, `SSH_AUTH_SOCK`, …); such a request is
-  refused, saying which. On Linux only the app and a lead may spawn at all (S2).
+  variables, bash's prompts (`PS0`, `PS1`, `PS2`: an interactive bash runs their `$(…)`, `--norc` or not), the fixed
+  `SWIFT_BACKTRACE`, or any name in the "never" list above (`LD_*`, `BASH_ENV`, `ENV`, `SSH_AUTH_SOCK`, …); such a
+  request is refused, saying which. On Linux only the app and a lead may spawn at all (S2). This catches a slip in
+  `env` only: the same caller's `command` is a bash line, which can set every one of these names itself.
 - **A role's launch settings are given inline.** Today `LeadLaunch.prepare` writes a role's `mcp.json`,
   `settings.json` and `prompt.md` into `~/.vibeswitcher/lead/run/<key>/<name>/` (`LeadLaunch.swift:317-320`,
   `LeadVault.runFolder`), which a worker can rewrite between the write and `claude`'s read (the `Edit` deny rule
@@ -1193,11 +1198,14 @@ Most of these are guard rails; the inline launch settings close a route that nee
 - What Claude Code itself does with the user's shell: its Bash tool takes a snapshot of the user's shell
   configuration, so the startup files still run inside a session's agent. Task 12 measures it.
 - Codex's sandbox (Landlock and seccomp) on this WSL kernel: unmeasured, so Codex workers are off (decision 15).
+- What a spawn's caller puts in the new session through its `command`: a lead can start a session with any of the
+  variables `env` may not name, by setting them in the command line. The sandbox (S12) is what holds that.
 
 **Before the bootstrap:** yes.
 
 **Built in:** stage 2, Task 10 (names, plain shell, spawn's env, deny rules, inline launch settings); the bootstrap
-path's step 8 (the seal's list, the hooks folder on it); Task 12 (the measurements). GitGuard's check: after the
+path's step 8 (the seal's list, the hooks folder on it); Task 12 (the measurements); the engine's E4 (the lead's
+`VIBESWITCHER_CODEX_WORKERS=0`, `claude` by its resolved path). GitGuard's check: after the
 bootstrap (S12 item 15).
 
 **The user confirms:** decision 9 (the gpg-agent's ssh support off or no key cached, WSLg off, during the bootstrap).
@@ -1211,7 +1219,10 @@ bootstrap (S12 item 15).
 `ToolsTests.aSpawnMayNotAddLoaderStartupOrNeverPassedVariables`; planned: stage 2 plan task 10.
 
 **Tests to write:** Task 10: `LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`,
-`theLeadOnLinuxGetsTheTracerRules`, `theMacsDenyRulesAreTodays`, `aRolesLaunchSettingsAreInlineOnLinux`. After the bootstrap:
+`theLeadOnLinuxGetsTheTracerRules`, `theMacsDenyRulesAreTodays`, `aRolesLaunchSettingsAreInlineOnLinux`. The engine's
+E4: `LeadStartTests.theLeadGetsNoCodexWorkers`, `aLeadIsLaunchedByClaudesResolvedPath`,
+`aClaudeFoundOnlyThroughALoginShellIsRefused`, `RoleProgramTests.aWorkersProgramIsTheLeadsResolvedClaudeNotTheSettings`.
+After the bootstrap:
 `GitGuardTests.aChangedHooksCopyIsRefused`. Task 12: `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`, `aVerifierCommandInItsOwnSessionStillTimesOut`.
 
 ## S11. What plain mode doesn't promise on Linux

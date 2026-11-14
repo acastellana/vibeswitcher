@@ -119,8 +119,9 @@ extension Platform {
         }
 
         /// Variables every session's program, and every parser, is started with whatever the host's environment
-        /// says. The Mac: none. Linux: `SWIFT_BACKTRACE=enable=no`, so a Swift program that crashes there doesn't
-        /// start the backtracer, which reads the crashed process's memory.
+        /// says; a spawn other than the app's may not set them (`spawnEnvironmentRefused`). The Mac: none. Linux:
+        /// `SWIFT_BACKTRACE=enable=no`, so a Swift program that crashes there doesn't start the backtracer, which
+        /// reads the crashed process's memory.
         public static var sessionEnvironmentFixed: [String: String] {
             #if canImport(Darwin)
             return [:]
@@ -167,12 +168,20 @@ extension Platform {
         /// Those of `names` that a spawn from a caller other than the app may not set in a session's environment
         /// (`SpawnRequest.env`), in `names`' order: the loader's (`LD_*`, `GCONV_PATH`, `GLIBC_TUNABLES`), those
         /// through which a bash runs something before or around its command (`branchShellStartupVariables`,
-        /// `PROMPT_COMMAND`, exported functions), and `sessionEnvironmentNever`. The Mac: none, as always.
+        /// `PROMPT_COMMAND`, exported functions, and the prompts `PS0`, `PS1` and `PS2`, whose `$(…)` an interactive
+        /// bash runs, `--norc` or not: a session with no command, or a kept shell, is one), `sessionEnvironmentNever`,
+        /// and `sessionEnvironmentFixed`'s names (the request's `env` goes on top of the host's). The Mac: none, as
+        /// always.
+        ///
+        /// A guard against a slip in `env` only: the same caller's `command` is a bash line, which can set any of
+        /// these itself (`LD_PRELOAD=… claude`, `export …`), so this is no limit on what a session can have the host
+        /// start.
         public static func spawnEnvironmentRefused(_ names: [String]) -> [String] {
             #if canImport(Darwin)
             return []
             #else
-            let refused = Set(branchShellStartupVariables + sessionEnvironmentNever + ["GCONV_PATH", "GLIBC_TUNABLES", "PROMPT_COMMAND"])
+            let refused = Set(branchShellStartupVariables + sessionEnvironmentNever + Array(sessionEnvironmentFixed.keys)
+                              + ["GCONV_PATH", "GLIBC_TUNABLES", "PROMPT_COMMAND", "PS0", "PS1", "PS2"])
             return names.filter { name in
                 refused.contains(name) || name.hasPrefix("LD_") || branchShellFunctionPrefix.map { name.hasPrefix($0) } == true
             }

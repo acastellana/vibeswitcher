@@ -134,9 +134,10 @@ struct SessionEnvironmentTests {
         #expect(!lines.contains { $0.hasPrefix("HOME=") }, "\(lines)")
     }
 
-    /// A session's process asks the host to start a session with `LD_PRELOAD`, `BASH_ENV` or `SSH_AUTH_SOCK` in its
-    /// `env`: each is refused, naming it, while its spawn with an ordinary variable is started. The app's spawn with all
-    /// three is started, and its program has them.
+    /// A session's process asks the host to start a session with `LD_PRELOAD`, `BASH_ENV`, `SSH_AUTH_SOCK`, `PS1` or
+    /// `SWIFT_BACKTRACE` (the fixed part, which the request's `env` would otherwise go over) in its `env`: each is
+    /// refused, naming it, while its spawn with an ordinary variable is started. The app's spawn with all of them is
+    /// started, and its program has them.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's spawn rule; the Mac refuses none"))
     func aSpawnAddingALoaderVariableIsRefused() async throws {
         let vault = LeadVaultHostTests()
@@ -150,21 +151,23 @@ struct SessionEnvironmentTests {
         let stop = vault.folder.appendingPathComponent("spawn.stop")
         let asker = try await app.spawn("while [ ! -f '\(go.path)' ]; do sleep 0.02; done; " + vault.nc(host, requests, answers, until: stop)
             + "; " + keepRunning)
-        let refused = ["LD_PRELOAD": "", "BASH_ENV": "/dev/null", "SSH_AUTH_SOCK": "/nonexistent/agent"]
+        let refused = ["LD_PRELOAD": "", "BASH_ENV": "/dev/null", "SSH_AUTH_SOCK": "/nonexistent/agent", "PS1": "$ ",
+                       "SWIFT_BACKTRACE": "enable=yes,swift-backtrace=/nonexistent/backtracer"]
         func request(_ env: [String: String]) -> HostRequest {
             .spawn(SpawnRequest(cwd: vault.folder.path, command: keepRunning, env: env, cols: 80, rows: 24, keepShell: false, label: "Asked", agent: nil))
         }
         let names = refused.keys.sorted()
         try vault.frames(names.map { request([$0: refused[$0]!]) } + [request(["VIBE_FINE": "1"])]).write(to: requests)
         FileManager.default.createFile(atPath: go.path, contents: nil)
-        #expect(await eventually { vault.answered(answers, 2...5) })
+        let fineSeq = names.count + 2
+        #expect(await eventually { vault.answered(answers, 2...fineSeq) })
         FileManager.default.createFile(atPath: stop.path, contents: nil)
         let got = try vault.replies(Data(contentsOf: answers))
         for (offset, name) in names.enumerated() {
             guard case .error(let why)? = got[offset + 2] else { Issue.record("\(name): not refused: \(String(describing: got[offset + 2]))"); continue }
             #expect(why.contains(name), "\(why)")
         }
-        guard case .spawned(let fine)? = got[5] else { Issue.record("an ordinary variable refused: \(String(describing: got[5]))"); return }
+        guard case .spawned(let fine)? = got[fineSeq] else { Issue.record("an ordinary variable refused: \(String(describing: got[fineSeq]))"); return }
         #expect(fine.childPID > 0)
         _ = asker
 
@@ -175,7 +178,8 @@ struct SessionEnvironmentTests {
         guard case .spawned(let started)? = app.reply(to: seq) else { Issue.record("the app's refused: \(String(describing: app.reply(to: seq)))"); return }
         #expect(await eventually { FileManager.default.fileExists(atPath: ran) })
         let environment = Self.environment(of: started.childPID)
-        for name in names { #expect(environment?[name] == refused[name], "\(name): \(String(describing: environment))") }
+        // A bash that isn't interactive unsets `PS1` and `PS2` as it starts, so the program its command ends in doesn't have it.
+        for name in names where name != "PS1" { #expect(environment?[name] == refused[name], "\(name): \(String(describing: environment))") }
     }
 
     /// The host ignores SIGPIPE; a session's program (its shell, reading its own mask through ps) starts with it at its
