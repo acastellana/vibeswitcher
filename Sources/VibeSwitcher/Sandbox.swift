@@ -1086,6 +1086,56 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ]
     }
 
+    /// The team task `team wall` puts on the fake lead's board.
+    static let teamWallSlug = "team-wall-in-the-app"
+
+    /// `team wall`: a running team task on the fake lead's board, its 3 members with their parts and progress, and 5
+    /// posts on its wall (one with markup and a link, shown as typed; one asking @core, so ui is waiting on it); its
+    /// lane shown in the Team tab, opened to its Wall section.
+    func teamWall(_ done: @escaping (String?) -> Void) {
+        guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
+        let slug = Self.teamWallSlug
+        let now = Date().timeIntervalSince1970
+        let contract = LeadContract(goal: "The Team view shows a team task's members and its wall.", acceptance: ["It shows."], boundaries: [], context: "")
+        let parts = [("core", "Shared types, the sandbox hooks and the integration"), ("api", "The post and wall tools"),
+                     ("ui", "The Team view's member lines and Wall section")]
+        do {
+            try BoardStore(root: root).update { board in
+                board.tasks.removeAll { $0.slug == slug }
+                var task = LeadTask(id: slug, slug: slug, title: "Team wall in the app", contract: contract, status: .running)
+                task.since = now - 1_500
+                task.team = parts.enumerated().map { index, part in
+                    LeadTeamMember(name: part.0, part: part.1, branch: index == 0 ? "agent/\(slug)" : "agent/\(slug)--\(part.0)",
+                                   worktree: root + "/.vibeswitcher/worktrees/" + (index == 0 ? slug : "\(slug)--\(part.0)"),
+                                   from: index == 0 ? nil : "4f1c2a9e")
+                }
+                task.checkpoints = [
+                    LeadCheckpoint(text: "Shared types and stubs committed; split at 4f1c2a9", at: now - 1_400),
+                    LeadCheckpoint(text: "api: post() stores and checks a post; wall(since:) next", at: now - 900),
+                    LeadCheckpoint(text: "ui: member lines drawn in the lane; the Wall section next", at: now - 600),
+                    LeadCheckpoint(text: "Took api's part; its tests pass on the team branch", at: now - 240),
+                ]
+                board.tasks.insert(task, at: 0)
+            }
+            // A wall of its own each time: the posts below, from the first.
+            let wall = try LeadWall(root: root, slug: slug, clock: { now - 60 })
+            try? FileManager.default.removeItem(at: wall.file)
+            try wall.post("post() and wall(since:) are in. A post is capped at 1,500 characters: see Sources/VibeCore/LeadWall.swift on my branch.",
+                          by: "api", to: ["@all"])
+            try wall.post("Does wall(since:) give the lead's posts too? The Wall marks each post's author.\n**This stays as typed**, and so does [this link](https://example.invalid/spec).",
+                          by: "ui", to: ["@api"], needsAnswer: true)
+            try wall.post("Both: the lead's are marked as the lead's and sealed; show one only when its seal holds.", by: "api", to: ["@ui"], replyTo: 2)
+            try wall.post("Taking api's part now. ui, merge agent/\(slug) in once it's there.", by: "core", to: ["@api", "@ui"])
+            try wall.post("Can I use the Team view's Fold for the earlier posts, or are you changing it?", by: "ui", to: ["@core"], needsAnswer: true)
+        } catch {
+            return done("couldn't write the team task: \(error)")
+        }
+        UserDefaults.standard.set("team", forKey: "inspectorTab")
+        leads.refresh()
+        done(nil)
+    }
+
     /// `leadmail`: the made-up messages written to the fake lead's record, as tell_lead keeps them, and its Team tab shown.
     func leadMail(_ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
@@ -1336,6 +1386,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("startlead", "starts a real project lead (LeadController.startLead, as Project Lead does: the host first if none runs, its vault grant) in a new repository, its agent a fake Claude, and shows its chat; first thing after `run --empty`, no session host runs before it"),
         ("lead [FILE]", "shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
+        ("team wall", "puts a running team task on the fake lead's board (start the lead first): 3 members with their parts and progress, one waiting on a teammate, and 5 posts on its wall; shows the Team tab with its lane opened to the Wall section"),
         ("team named", "starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>, verify-<slug>) and moves the lead's agent into its .vibeswitcher/worktrees (start the lead first): its team still folds under it"),
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
@@ -2436,6 +2487,19 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 lines.append(String(format: "longest between beats (0.25 s apart when free): %.2f s, ended %@", longest.gap, "\(longest.at)"))
             }
             reply(true, lines.isEmpty ? "none" : lines.joined(separator: "\n"))
+        case "team" where rest == "wall":
+            teamWall { [weak self] problem in
+                guard let self else { return }
+                if let problem { return reply(false, problem) }
+                self.chat("lead") { ok, text in
+                    guard ok else { return reply(false, text) }
+                    // The Team tab reads the walls with its 5-second tick: one tick, then its row opened to the Wall.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                        NotificationCenter.default.post(name: TeamTaskList.revealRow, object: Self.teamWallSlug)
+                        self.settle { reply(true, "a team task with 3 members and 5 posts on its wall, its lane opened to the Wall section in the Team tab") }
+                    }
+                }
+            }
         case "team" where rest == "named": startNamedTeam { problem in reply(problem == nil, problem ?? "worker and verifier started, the lead's agent in its worktrees folder") }
         case "team": startWorker { problem in reply(problem == nil, problem ?? "worker started") }
         case "unfold":

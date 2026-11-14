@@ -725,7 +725,7 @@ extension LeadToolset {
     }
 
     /// "@all", or "@b @c".
-    static func recipientsText(_ to: LeadWall.Recipients) -> String {
+    public static func recipientsText(_ to: LeadWall.Recipients) -> String {
         switch to {
         case .all: return LeadWall.everyone
         case .members(let names): return names.map { "@" + $0 }.joined(separator: " ")
@@ -806,7 +806,7 @@ extension LeadToolset {
     /// `leadPosts`), or a member's of this team that passes the wall's checks (its name, its recipients members, its
     /// text's caps and lints). A line written into the file by hand that fails them never is; nor one marked as the
     /// lead's without the lead's seal.
-    static func deliverable(_ post: LeadWall.Post, team: [LeadTeamMember], vouched: [LeadWall.Post]) -> Bool {
+    public static func deliverable(_ post: LeadWall.Post, team: [LeadTeamMember], vouched: [LeadWall.Post]) -> Bool {
         if post.author == LeadWall.leadAuthor { return vouched.contains(post) }
         guard team.contains(where: { $0.name == post.author }), LeadWall.textRefusal(post.text) == nil,
               LeadWall.plainLines(post.text) == post.text else { return false }
