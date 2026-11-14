@@ -395,6 +395,8 @@ public final class LeadAdvance: @unchecked Sendable {
         }) else { return }
         resumeAfterSleep()
         followFable()
+        // Team walls' posts, to their members (not auto_advance's: a post is delivered whatever it says).
+        lead.deliverWalls()
         guard workflow.autoAdvance else { return }
         // Off as the lead set it, whatever a worker wrote into workflow.md since.
         if let changed, changed.contains(where: { $0.key == "auto_advance" }) {

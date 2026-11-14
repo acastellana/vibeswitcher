@@ -650,6 +650,9 @@ extension LeadVault {
         public var onChange: ((Data) -> Void)?
         /// The home whose agents' config this vault seals (`ConfigSeal`): its own process's (a test's scratch one).
         public var configHome = VibePaths.home
+        /// The lead's private folder the team tasks' walls are in (`LeadWall`), which a teammate's post is sealed from:
+        /// nil, the Mac's (`LeadVault.standard`'s); a test's scratch one.
+        public var wallFolder: URL?
 
         /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
         /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read.
@@ -1282,10 +1285,34 @@ extension LeadVault {
                       state.teams.values.contains(where: { $0.members.contains { $0.role == role && $0.task == words[1] && $0.session == session } })
                 else { return "Only VibeSwitcher seals a message as its own (a worker or verifier, only its report about its own task)." }
                 return nil
-            case .teammate:
-                // Nothing posts as a teammate yet: until the wall's delivery says who may, only the app seals one.
-                return "Only VibeSwitcher seals a message as a teammate's."
+            case .teammate(let member, let task):
+                return mayDeliverPost(by: member, on: task, text: message.text, caller: caller, agentSession: agentSession)
             }
+        }
+
+        /// Why `caller` may not seal `text` as member `member`'s post on team task `task` (nil: it may). Only the wall's
+        /// delivery seals one (`LeadToolset.deliverWall`): it runs in the lead's own tool server, which alone may reach
+        /// the members' sessions. So: `caller` is the lead of a team where `agentSession`, the recipient, works on that
+        /// task (its integrator, `<task>`, or a member, `<task>--<name>`); and `text` is the delivery
+        /// (`LeadWall.delivery`) of a post that `member` wrote on that task's wall and that is for the recipient (when
+        /// its grant names it). A worker's session, its tool server or its Bash, never seals a teammate's post, as itself
+        /// or as another member; nor does anyone seal words that aren't a stored post.
+        private func mayDeliverPost(by member: String, on task: String, text: String, caller: Caller, agentSession: String?) -> String? {
+            let refusal = "Only VibeSwitcher, or a project lead's tool server delivering a post stored on that team task's wall to one of its members, seals a message as a teammate's."
+            guard case .session(let session) = caller, member != LeadWall.leadAuthor, let to = agentSession else { return refusal }
+            let prefix = task + LeadTeam.joiner
+            guard let team = state.teams.values.first(where: { team in
+                team.members.contains { $0.role == .lead && $0.session == session }
+                    && team.members.contains { $0.role == .worker && $0.session == to && ($0.task == task || $0.task?.hasPrefix(prefix) == true) }
+            }), let seat = team.members.first(where: { $0.role == .worker && $0.session == to })?.task else { return refusal }
+            // The recipient's own name when its grant gives it (a member's); the integrator's is the board's.
+            let recipient = seat.hasPrefix(prefix) ? String(seat.dropFirst(prefix.count)) : nil
+            guard let wall = try? LeadWall(root: team.root, slug: task, folder: wallFolder ?? VibePaths.root.appendingPathComponent("lead", isDirectory: true)),
+                  wall.posts().contains(where: { post in
+                      post.author == member && LeadWall.delivery(post) == text
+                          && recipient.map { post.author != $0 && post.to.includes($0) } ?? true
+                  }) else { return refusal }
+            return nil
         }
 
         /// The names a lead's own messages carry, by its project (`LeadMail.project`): `lead of <project>` to its team

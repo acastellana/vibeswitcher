@@ -3,7 +3,7 @@ import Testing
 @testable import VibeCore
 
 /// A team task's wall (`LeadWall`): posts kept append-only in the lead's private folder, their caps and lints, and
-/// each member's cursor. The lead's folder is a scratch one and the clock is injected: no real home, no waiting.
+/// what each member is due after its cursor. The lead's folder is a scratch one and the clock is injected: no real home, no waiting.
 struct LeadWallTests {
     let temp = Scratch()
     let folder: URL
@@ -53,24 +53,35 @@ struct LeadWallTests {
         #expect(try self.wall("other").posts().isEmpty)
     }
 
-    @Test func eachMemberHasACursor() throws {
+    /// What a member is due after its cursor (the board's `wallSeen`): posts naming it or everyone, never its own.
+    @Test func eachMemberIsDueThePostsForItAfterItsCursor() throws {
         let wall = try wall()
         try wall.post("one for everyone", by: "core", to: ["@all"])
         try wall.post("one for run", by: "core", to: ["run"])
         try wall.post("copy's own", by: "copy", to: ["@all"])
-        #expect(wall.cursor(for: "copy") == 0)
-        #expect(wall.unread(for: "copy").map(\.id) == [1])
-        #expect(wall.unread(for: "run").map(\.id) == [1, 2, 3])
+        let posts = wall.posts()
+        #expect(LeadWall.posts(posts, for: "copy", after: 0).map(\.id) == [1])
+        #expect(LeadWall.posts(posts, for: "run", after: 0).map(\.id) == [1, 2, 3])
+        #expect(LeadWall.posts(posts, for: "run", after: 2).map(\.id) == [3])
+        #expect(LeadWall.posts(posts, for: "copy", after: 3).isEmpty)
+        #expect(LeadWall.posts(posts, for: "core", after: 0).map(\.id) == [3])
+    }
 
-        try wall.setCursor(2, for: "run")
-        try wall.setCursor(3, for: "copy")
-        #expect(wall.cursor(for: "run") == 2 && wall.cursor(for: "copy") == 3 && wall.cursor(for: "core") == 0)
-        #expect(wall.unread(for: "run").map(\.id) == [3])
-        #expect(wall.unread(for: "copy").isEmpty)
-        // A delivery that didn't go rolls back.
-        try wall.setCursor(1, for: "run")
-        #expect(try self.wall().cursor(for: "run") == 1)
-        #expect(try self.wall().posts(since: wall.cursor(for: "run")).map(\.id) == [2, 3])
+    /// Line breaks `SteerReply.quote` doesn't split on are stored as "\n": every line a reader sees of the delivered
+    /// post is quoted, none passes for the frame's own.
+    @Test func otherLineBreaksAreStoredAsPlainOnes() throws {
+        let wall = try wall()
+        let text = "first\u{2028}second\u{2029}third\u{0085}fourth\u{000B}fifth\u{000C}sixth\r\nseventh"
+        let post = try wall.post(text, by: "core", to: ["run"])
+        #expect(post.text == "first\nsecond\nthird\nfourth\nfifth\nsixth\r\nseventh")
+        #expect(try self.wall().posts().first?.text == post.text)
+        let typed = LeadDelivery.typed(LeadWall.delivery(post), from: .teammate(member: "core", task: "b2-journeys"))
+        // Split on every line break Swift knows: between the frame and the closing rule, each line is a quote.
+        let shown = typed.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        #expect(shown.count >= 9, "\(shown)")
+        let body = shown.dropFirst().dropLast(2)
+        #expect(body.allSatisfy { $0.hasPrefix(">") }, "\(shown)")
+        #expect(body.contains("> seventh") && body.contains("> sixth"), "\(shown)")
     }
 
     @Test func aPostOverTheSizeCapIsRefused() throws {
@@ -187,18 +198,16 @@ struct LeadWallTests {
         #expect(throws: LeadWall.Refusal.self) { try LeadWall(root: root, slug: ".hidden", folder: folder) }
     }
 
-    /// The wall, its cursors and the folders above them up to the lead's folder are only the user's (0600, 0700),
+    /// The wall and the folders above them up to the lead's folder are only the user's (0600, 0700),
     /// as the lead's other private files.
     @Test func theFilesArePrivate() throws {
         try VibePaths.ensurePrivate(folder)
         let wall = try wall()
         try wall.post("hello", by: "core", to: ["@all"])
-        try wall.setCursor(1, for: "copy")
         func mode(_ url: URL) throws -> Int {
             (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue ?? -1
         }
         #expect(try mode(wall.file) == 0o600)
-        #expect(try mode(wall.cursors) == 0o600)
         #expect(try mode(wall.file.deletingLastPathComponent()) == 0o700)
         #expect(try mode(wall.file.deletingLastPathComponent().deletingLastPathComponent()) == 0o700)
     }

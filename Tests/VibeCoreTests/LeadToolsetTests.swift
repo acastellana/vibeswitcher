@@ -216,6 +216,8 @@ extension LeadTeamFixture {
         let book = LeadVault.Book()
         // The agents' config it seals (`ConfigSeal`): a scratch home of its own, never the Mac's or another test's.
         book.configHome = temp.url("config-home").path
+        // The team walls a teammate's post is sealed from: the leads' folder here (`LeadToolset.wallStore`).
+        book.wallFolder = folder
         booksLock.lock()
         books[folder.path] = book
         booksLock.unlock()

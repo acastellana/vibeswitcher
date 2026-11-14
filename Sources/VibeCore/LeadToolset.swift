@@ -691,7 +691,7 @@ public final class LeadToolset: MCPToolset {
             return [
                 MCPToolInfo(name: "status", description: "The board at a glance: tasks by state, workers and what they're doing, open questions, and each report that came in since you last asked, in one line (board(task) or read_session has the full text)."),
                 MCPToolInfo(name: "board", description: "The board in one line per task, with the open questions and the latest updates; with task, that task in full: its contract, evidence, setback, reports, questions, updates naming it, checkpoints and merge. Not a task: the updates whose title holds it.",
-                            properties: ["task": P(type: "string", description: "A task's slug (or id): that task in full")]),
+                            properties: ["task": P(type: "string", description: "A task's slug (or id): that task in full, with its wall for a team task")]),
                 MCPToolInfo(name: "add_task", description: "Put a task on the board with its contract (title, goal and acceptance), or make one of an audit's finding (from_finding: the contract comes from it, anything you pass replaces that part, and the finding is closed as moved to the new task).",
                             properties: ["title": P(type: "string", description: "Short title"),
                                          "goal": P(type: "string", description: "What must be true when it's done"),
@@ -837,6 +837,7 @@ public final class LeadToolset: MCPToolset {
                                          "audit_sample_percent": P(type: "integer", description: "The share of review none tasks, in percent (0 to 100), that auto_advance audits anyway when their worker reports done (default 10; 0: off): a seeded random draw, recorded on the task, so the unaudited path's escape rate is known, not assumed zero"),
                                          "small_task_min": P(type: "integer", description: "A review audit task whose worker reports done on its first round with fewer minutes of counted work than this, touching no sensitive_paths or strict_paths, not flagged by the risk check, not Codex's and not filed with an audit_reason, merges as review none that round: its tests, the risk check and the audit sample are its checks (default 30; 0: off)"),
                                          "watch_app_logs": P(type: "boolean", description: "Whether you get VibeSwitcher's own health digests (default false; only for the project that builds VibeSwitcher): its freezes, crashes and error lines as it logs them, and a daily trend, each as a witness report to turn into tasks where it's a real bug")]),
+                Self.leadPostTool,
             ]
         }
     }
@@ -911,6 +912,8 @@ public final class LeadToolset: MCPToolset {
             case "progress": return try progress(arguments)
             case "answer_findings": return try answerFindings(arguments)
             case "split": return try split()
+            case "post": return try post(arguments)
+            case "wall": return try wall(arguments)
             case "submit_audit": return try submitAudit(arguments, by: member)
             default: return fail("No tool \(name).")
             }
@@ -2577,14 +2580,15 @@ public final class LeadToolset: MCPToolset {
 
     /// Delivers `text` to the task's `worker` under the task's delivery lock, which `releaseWorker` holds from its last
     /// look at the worker through its end, recording it first (`LeadTask.messagedAt`): a worker idle when looked at is
-    /// never ended with a message just gone in, its new turn not begun yet.
-    private func deliver(_ slug: String, worker: String, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {
+    /// never ended with a message just gone in, its new turn not begun yet. `sender`: the lead's unless given (a
+    /// teammate's wall post, `deliverWall`).
+    func deliver(_ slug: String, worker: String, text: String, clearDraft: Bool, from sender: SteerMessage.Sender? = nil) throws -> LeadDelivery.Delivered {
         try exclusively("deliver-\(slug)") {
             try? store.update { board in
                 guard let index = board.taskIndex(slug), board.tasks[index].worker == worker else { return }
                 board.tasks[index].messagedAt = Date().timeIntervalSince1970
             }
-            return try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: clearDraft)
+            return try runtime.steer(.session(worker), from: sender ?? .lead("lead of \(project)"), text: text, clearDraft: clearDraft)
         }
     }
 
@@ -2664,6 +2668,8 @@ public final class LeadToolset: MCPToolset {
             throw error
         }
         if let news, !Self.went(delivered) { untell(slug, worker: worker, news.told, back: news.before) }
+        // The wall's posts held for an idle integrator ride along with this message (`deliverWall`).
+        if Self.went(delivered), let integrator = store.load().task(slug)?.integrator?.name { deliverWall(slug, riding: [integrator]) }
         // Kept for the verifier: what the lead accepts here (an edit outside the contract's files) is in scope.
         let note = leadNote(.message, text, on: slug)
         try store.update { board in
@@ -4251,7 +4257,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// A delivery that went (into its context, or its inbox), not one typed and left in its box.
-    private static func went(_ delivered: LeadDelivery.Delivered) -> Bool {
+    static func went(_ delivered: LeadDelivery.Delivered) -> Bool {
         if case .notSubmitted = delivered { return false } else { return true }
     }
 
@@ -7142,6 +7148,7 @@ public final class LeadToolset: MCPToolset {
                 + (task.auditBrief.map { brief in task.evidence == nil && brief.version < task.contractRevision ? " (its audit's verifiers have v\(brief.version))" : "" } ?? "")
                 + (task.waitsForContract ? " (record_incident's generic brief: it doesn't start by itself until update_task changes its contract, or auto_advance: true or start_worker sets it going)" : ""))
             lines.append("Worker: \(Self.agentText(task))" + (task.codexAudit.map { " (\($0))" } ?? ""))
+            if let wall = wallText(task) { lines.append(wall) }
             lines.append("Review: \(task.reviewLevel.rawValue)" + (task.merged.map { $0.unaudited ? " (merged with no audit)" : "" } ?? "")
                 + (task.riskRaised.map { " (audited: \($0.reason), raised by the risk check at \($0.commit.prefix(8)))" } ?? "")
                 + (task.auditReason.map { " (audit_reason \($0.rawValue): small_task_min never drops it)" } ?? "")

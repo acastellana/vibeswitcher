@@ -4,8 +4,8 @@ import Foundation
 /// A team task's wall (docs/process/reviews/team-on-one-task-design.md, sections 3 and 4; T1): the members' posts,
 /// kept append-only, one JSON `Post` a line, in the lead's private folder
 /// (`~/.vibeswitcher/lead/<project key>/walls/<slug>.jsonl`, never in the repository: a verifier is denied that folder),
-/// with a read cursor per member beside it (`<slug>.seen.json`). This is the store only: the `post` and `wall` tools
-/// and delivery to the named members come later (T6) and go through here.
+/// This is the store; the `post` and `wall` tools and delivery to the named members (`LeadTeam.swift`, T6) go through
+/// it. What each member has been delivered is the board's (`LeadTeamMember.wallSeen`), claimed under the board's lock.
 ///
 /// A post is checked before anything is stored, and refused saying why, with nothing written:
 /// - its size, the members' rate and the wall's count (`maxCharacters`, `perHour`, `maxPosts`);
@@ -25,6 +25,19 @@ public struct LeadWall: Sendable {
 
     /// What `to` names for every member.
     public static let everyone = "@all"
+
+    /// The author the lead's own posts carry: no member can be named it (`LeadTeam.nameProblem` wants a letter first).
+    public static let leadAuthor = "_lead"
+
+    /// The line breaks `SteerReply.quote` doesn't split on, each made a plain "\n" before a post is checked or stored,
+    /// so every line a reader sees of a delivered post is quoted: LINE and PARAGRAPH SEPARATOR, NEXT LINE, the vertical
+    /// tab and the form feed.
+    static let otherLineBreaks: [Character] = ["\u{2028}", "\u{2029}", "\u{0085}", "\u{000B}", "\u{000C}"]
+
+    /// `text` with `otherLineBreaks` made "\n".
+    public static func plainLines(_ text: String) -> String {
+        String(text.map { otherLineBreaks.contains($0) ? "\n" : $0 })
+    }
 
     // MARK: Post
 
@@ -150,9 +163,8 @@ public struct LeadWall: Sendable {
 
     // MARK: Store
 
-    /// The wall's file and its members' cursors.
+    /// The wall's file.
     public let file: URL
-    public let cursors: URL
     /// The lead's private folder (`LeadVault.folder`): every folder made for a wall is made private (0700) up to it.
     let top: URL
     let clock: @Sendable () -> Double
@@ -164,7 +176,6 @@ public struct LeadWall: Sendable {
         guard Self.isName(slug, longest: 200) else { throw Refusal.name(slug) }
         let walls = folder.appendingPathComponent(LeadVault.key(root), isDirectory: true).appendingPathComponent("walls", isDirectory: true)
         file = walls.appendingPathComponent("\(slug).jsonl")
-        cursors = walls.appendingPathComponent("\(slug).seen.json")
         top = folder
         self.clock = clock
     }
@@ -194,6 +205,7 @@ public struct LeadWall: Sendable {
     /// both take the last place.
     @discardableResult
     public func post(_ text: String, by author: String, to: [String], needsAnswer: Bool = false, replyTo: Int? = nil) throws -> Post {
+        let text = Self.plainLines(text)
         guard Self.isName(author) else { throw Refusal.name(author) }
         guard let recipients = Recipients(to) else { throw Refusal.recipients }
         if case .members(let names) = recipients, let bad = names.first(where: { !Self.isName($0) }) { throw Refusal.name(bad) }
@@ -236,38 +248,34 @@ public struct LeadWall: Sendable {
         return Self.decode(Self.read(fd)).filter { $0.id > cursor }
     }
 
-    // MARK: Cursors
+    // MARK: Delivery
 
-    /// The id of the last post `member` has been given (0: none yet).
-    public func cursor(for member: String) -> Int {
-        loadCursors()[member] ?? 0
+    /// The posts after `cursor` (a post's id) that are for `member`: those that name it or everyone, not its own.
+    public static func posts(_ posts: [Post], for member: String, after cursor: Int) -> [Post] {
+        posts.filter { $0.id > cursor && $0.author != member && $0.to.includes(member) }
     }
 
-    /// Records that `member` has been given the posts up to `id`. It can go back too: a delivery that didn't go is
-    /// rolled back to the cursor before it (the main-red notice's pattern, `untell`).
-    public func setCursor(_ id: Int, for member: String) throws {
-        guard Self.isName(member) else { throw Refusal.name(member) }
-        try VibePaths.ensurePrivate(cursors.deletingLastPathComponent(), within: top)
-        // Under the wall's lock, so two members' cursors set at once don't lose one.
-        let fd = open(file.path, O_RDWR | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw CocoaError(.fileWriteNoPermission) }
-        defer { close(fd) }
-        fchmod(fd, 0o600)
-        guard flock(fd, LOCK_EX) == 0 else { throw CocoaError(.fileWriteUnknown) }
-        defer { flock(fd, LOCK_UN) }
-        var all = loadCursors()
-        all[member] = max(0, id)
-        try VibePaths.writePrivate(try JSONEncoder().encode(all), to: cursors)
+    /// Whether `post` may wake `member` while it's idle: it asks for an answer, or it's the first reply to `member`'s
+    /// own post that asked for one (`posts`: the wall up to it).
+    public static func wakes(_ post: Post, for member: String, in posts: [Post]) -> Bool {
+        if post.needsAnswer { return true }
+        guard let asked = post.replyTo, let question = posts.first(where: { $0.id == asked }),
+              question.author == member, question.needsAnswer else { return false }
+        return !posts.contains { $0.id < post.id && $0.replyTo == asked }
     }
 
-    /// The posts for `member` after its cursor: those that name it or everyone, not its own.
-    public func unread(for member: String) -> [Post] {
-        posts(since: cursor(for: member)).filter { $0.author != member && $0.to.includes(member) }
-    }
-
-    func loadCursors() -> [String: Int] {
-        guard let data = FileManager.default.contents(atPath: cursors.path) else { return [:] }
-        return (try? JSONDecoder().decode([String: Int].self, from: data)) ?? [:]
+    /// The text a post is delivered as (the sender's frame, the teammate's or the lead's, goes around it): its place
+    /// on the wall, who it's for, and how to answer it, then its words. The vault seals a teammate's delivery only when
+    /// its text is this for a post stored on that wall by that member (`LeadVault`'s `maySeal`).
+    public static func delivery(_ post: Post) -> String {
+        let to: String
+        switch post.to {
+        case .all: to = everyone
+        case .members(let names): to = names.map { "@" + $0 }.joined(separator: " ")
+        }
+        let answer = post.needsAnswer ? ", needs an answer: reply with post(reply_to: \(post.id))" : ""
+        let reply = post.replyTo.map { ", replying to post #\($0)" } ?? ""
+        return "Wall post #\(post.id) to \(to)\(reply)\(answer):\n\(post.text)"
     }
 
     // MARK: Reading

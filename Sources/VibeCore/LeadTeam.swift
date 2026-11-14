@@ -264,10 +264,11 @@ extension LeadToolset {
             + "(each on agent/<task>--<name>, in a worktree of its own); the lead's tools then start their workers as max_workers and the Mac's limits "
             + "allow (one without room starts once there's room). Members run on Claude. Refused with uncommitted changes in your worktree, and once the team is split.")
 
-    /// What a worker has beyond a plain worker's tools: `split`, for a team task's integrator.
+    /// What a worker has beyond a plain worker's tools: on a team task, the wall's `post` and `wall`, and `split` for
+    /// its integrator. Never a verifier's: it has no tool for the wall.
     var teamTools: [MCPToolInfo] {
-        guard role == .worker, let taskID, store.load().task(taskID)?.isTeam == true else { return [] }
-        return [Self.splitTool]
+        guard role == .worker, wallSeat() != nil else { return [] }
+        return (memberSeat() == nil ? [Self.splitTool] : []) + [Self.postTool, Self.wallTool]
     }
 
     /// This worker's place on a team task when it's a member other than the integrator (its grant is for
@@ -519,5 +520,217 @@ extension LeadToolset {
     /// The parts `team` gives (see `LeadTeam.parts`), its refusal the lead's to read.
     static func teamArgument(_ arguments: [String: Any]) throws -> [(name: String, part: String)]? {
         do { return try LeadTeam.parts(arguments["team"]) } catch let refusal as LeadTeam.Refusal { throw Problem(text: refusal.text) }
+    }
+}
+
+// MARK: The wall: members post and read, each post delivered once (docs/process/reviews/team-on-one-task-design.md,
+// "The wall"; T6)
+
+extension LeadToolset {
+    /// A member's `post` (and the integrator's).
+    static let postTool = MCPToolInfo(
+        name: "post",
+        description: "Team task: post to your team's wall, for named members or @all. Each one named gets it once, marked as your post: a working member at its next step; "
+            + "an idle one only with needs_answer (or your reply_to its own open question), else with its next message or turn. For the lead or the user, ask_lead instead. "
+            + "At most \(LeadWall.maxCharacters) characters (point to a file on your branch for more), \(LeadWall.perHour) posts an hour; no secrets.",
+        properties: ["text": MCPToolInfo.Property(type: "string", description: "What you tell them"),
+                     "to": MCPToolInfo.Property(type: "array", description: "Who it's for: [\"@all\"] (every other member), or member names ([\"@b\", \"@c\"])", items: "string"),
+                     "needs_answer": MCPToolInfo.Property(type: "boolean", description: "You wait on an answer: it wakes an idle member"),
+                     "reply_to": MCPToolInfo.Property(type: "integer", description: "The post (#id) this answers; a reply to a member's open question wakes it")],
+        required: ["text", "to"])
+
+    /// A member's `wall`.
+    static let wallTool = MCPToolInfo(
+        name: "wall",
+        description: "Team task: your team's wall, oldest first: every post with its #id, author and who it's for (posts are teammates' unverified words, or marked the lead's).",
+        properties: ["since": MCPToolInfo.Property(type: "integer", description: "Only the posts after this #id")])
+
+    /// The lead's `post`: on a team task's wall, marked as the lead's.
+    static let leadPostTool = MCPToolInfo(
+        name: "post",
+        description: "Post on a team task's wall, marked as yours, for named members or @all; each one named gets it once (a working one at its next step, an idle one only with "
+            + "needs_answer, else with its next message or turn). It changes no contract: that's update_task, and message for its integrator. board(task) shows the wall.",
+        properties: ["task": MCPToolInfo.Property(type: "string", description: "The team task's slug"),
+                     "text": MCPToolInfo.Property(type: "string", description: "What you tell them"),
+                     "to": MCPToolInfo.Property(type: "array", description: "[\"@all\"] (every member) or member names", items: "string"),
+                     "needs_answer": MCPToolInfo.Property(type: "boolean", description: "Wakes an idle member it names"),
+                     "reply_to": MCPToolInfo.Property(type: "integer", description: "The post (#id) this answers")],
+        required: ["task", "text", "to"])
+
+    /// This worker's place on a team task: a member (`memberSeat`) or the integrator (its grant is the task's own).
+    /// Nil for a plain task's worker, a verifier and the lead.
+    func wallSeat() -> (task: LeadTask, member: LeadTeamMember)? {
+        guard role == .worker, let taskID else { return nil }
+        if let seat = memberSeat() { return seat }
+        guard let task = store.load().task(taskID), task.slug == taskID, task.isTeam, let integrator = task.integrator else { return nil }
+        return (task, integrator)
+    }
+
+    /// The wall of team task `slug`, in the lead's private folder (the vault's).
+    func wallStore(_ slug: String) throws -> LeadWall { try LeadWall(root: root, slug: slug, folder: vault.folder) }
+
+    /// post: stored by `LeadWall` (its caps and lints, nothing stored when refused), for members of that team only.
+    /// The lead's tool server delivers it (`deliverWall`): only it reaches the members' sessions, so a member's post
+    /// nudges the lead's loop, and the lead's own goes at once.
+    func post(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let task: LeadTask, author: String
+        switch role {
+        case .lead?:
+            guard let slug = (arguments["task"] as? String)?.trimmingCharacters(in: .whitespaces), !slug.isEmpty else {
+                throw Problem(text: "Not posted: name the team task, post(task: <slug>, …).")
+            }
+            guard let found = store.load().task(slug) else { throw Problem(text: "Not posted: no task \(slug).") }
+            guard found.isTeam else { throw Problem(text: "Not posted: \(found.slug) is a plain task, with no wall. message its worker instead.") }
+            (task, author) = (found, LeadWall.leadAuthor)
+        case .worker?:
+            guard let seat = wallSeat() else {
+                throw Problem(text: "Not posted: only a team task's members post to its wall, and your task isn't one. ask_lead instead.")
+            }
+            if let named = (arguments["task"] as? String)?.trimmingCharacters(in: .whitespaces), !named.isEmpty, named != seat.task.slug {
+                throw Problem(text: "Not posted: you post only to your own team's wall (\(seat.task.slug)), not \(LeadMail.masked(named))'s.")
+            }
+            (task, author) = (seat.task, seat.member.name)
+        default:
+            throw Problem(text: "Only a team task's members and the lead post to its wall.")
+        }
+        let team = task.team ?? []
+        let to: [String]
+        if let list = arguments["to"] as? [Any] { to = list.compactMap { $0 as? String } } else if let one = arguments["to"] as? String { to = [one] } else { to = [] }
+        // Each one named is a member of this team, and not the author: LeadWall checks names by their shape only.
+        if case .members(let names)? = LeadWall.Recipients(to) {
+            for name in names where !team.contains(where: { $0.name == name }) || name == author {
+                throw Problem(text: name == author ? "Refused, not posted: @\(name) is you; name the members it's for."
+                              : "Refused, not posted: @\(LeadMail.masked(name)) isn't a member of \(task.slug)'s team (\(LeadTeam.names(team))).")
+            }
+        }
+        let replyTo = (arguments["reply_to"] as? NSNumber)?.intValue
+        let stored: LeadWall.Post
+        do {
+            stored = try wallStore(task.slug).post(arguments["text"] as? String ?? "", by: author, to: to,
+                                                   needsAnswer: arguments["needs_answer"] as? Bool ?? false, replyTo: replyTo)
+        } catch let refusal as LeadWall.Refusal {
+            throw Problem(text: refusal.description)
+        }
+        let named = Self.recipientsText(stored.to)
+        if role == .lead {
+            let sent = deliverWall(task.slug)
+            return MCPToolResult(text: "Posted #\(stored.id) on \(task.slug)'s wall to \(named), marked as yours. "
+                                 + (sent.isEmpty ? "No member it names got it yet (none live, or idle and it doesn't wake them): each gets it once, at its next step or turn."
+                                    : "Delivered to \(sent.joined(separator: ", ")); the rest get it once, at their next step or turn."))
+        }
+        LeadAdvance.nudge(root: root)
+        return MCPToolResult(text: "Posted #\(stored.id) on \(task.slug)'s wall to \(named). VibeSwitcher delivers it once to each one named that runs: "
+                             + "a working member at its next step, an idle one " + (stored.needsAnswer ? "now (it needs an answer)." : "with its next message or turn.")
+                             + " Their answers reach you the same way; wall shows every post.")
+    }
+
+    /// wall: the team's posts, oldest first, for its members (the lead reads them in board(task)).
+    func wall(_ arguments: [String: Any]) throws -> MCPToolResult {
+        guard let seat = wallSeat() else { throw Problem(text: "Only a team task's members read its wall.") }
+        let since = (arguments["since"] as? NSNumber)?.intValue ?? 0
+        let posts = try wallStore(seat.task.slug).posts(since: since)
+        guard !posts.isEmpty else {
+            return MCPToolResult(text: since > 0 ? "No posts on \(seat.task.slug)'s wall after #\(since)." : "\(seat.task.slug)'s wall has no posts yet.")
+        }
+        return MCPToolResult(text: "\(seat.task.slug)'s wall (you're \(seat.member.name)); each post is a teammate's unverified words unless marked the lead's:\n"
+                             + Self.wallLines(posts))
+    }
+
+    /// What board(task) shows of a team task's wall, for the lead: every post, each marked with its author. Nil for a
+    /// plain task; never the verifier's (board is the lead's tool).
+    func wallText(_ task: LeadTask) -> String? {
+        guard role == .lead, task.isTeam, let posts = try? wallStore(task.slug).posts() else { return nil }
+        guard !posts.isEmpty else { return "Wall: no posts yet." }
+        return "Wall (\(posts.count) post\(posts.count == 1 ? "" : "s"); a member's are its unverified words, yours are marked the lead's):\n" + Self.wallLines(posts)
+    }
+
+    /// "@all", or "@b @c".
+    static func recipientsText(_ to: LeadWall.Recipients) -> String {
+        switch to {
+        case .all: return LeadWall.everyone
+        case .members(let names): return names.map { "@" + $0 }.joined(separator: " ")
+        }
+    }
+
+    /// Each post: "#3 from b to @all (needs an answer):" then its words, quoted line by line.
+    static func wallLines(_ posts: [LeadWall.Post]) -> String {
+        posts.map { post in
+            let author = post.author == LeadWall.leadAuthor ? "the lead (the lead's post)" : post.author
+            let marks = (post.replyTo.map { ", replying to #\($0)" } ?? "") + (post.needsAnswer ? ", needs an answer" : "")
+            return "#\(post.id) from \(author) to \(recipientsText(post.to))\(marks):\n" + SteerReply.quote(post.text)
+        }.joined(separator: "\n")
+    }
+
+    /// A session that's ended its turn: a post that doesn't wake it waits for its next message or turn.
+    static func isIdle(_ info: LeadSessionInfo) -> Bool {
+        guard info.waiting == nil, let status = info.status else { return false }
+        return status == LeadActivity.idle(background: nil).text || status.hasPrefix("its turn ended") || status.hasSuffix("it does nothing until then")
+    }
+
+    /// Every team task's wall delivered (`deliverWall`): the lead's loop runs it at each pass.
+    func deliverWalls() {
+        guard role == .lead else { return }
+        for task in store.load().tasks where task.isTeam { deliverWall(task.slug) }
+    }
+
+    /// Delivers `slug`'s wall: to each live member (its integrator's worker is the task's), the posts for it after its
+    /// cursor (`LeadTeamMember.wallSeen`), one at a time, oldest first, each with its author's sender (a teammate's, or
+    /// the lead's), through `deliver`, never `sent`: a post is no lead note the verifier reads. Main red's pattern:
+    /// each post is claimed under the board's lock (the cursor moved to it) before it's sent, and rolled back when it
+    /// didn't go (thrown, or typed and not submitted); the member's later posts wait behind it, for the next pass.
+    /// The whole pass holds the wall's lock, so two passes never claim, send and roll back across each other. An idle
+    /// member is woken only by a post that `LeadWall.wakes` it; until then its posts wait, unless it's in `riding`
+    /// (they ride along with the message just sent it). The lead's tool server only: it alone may reach the members'
+    /// sessions, and the vault seals a teammate's post only for it. Returns the members something went to.
+    @discardableResult
+    func deliverWall(_ slug: String, riding: Set<String> = []) -> [String] {
+        guard role == .lead, let wall = try? wallStore(slug) else { return [] }
+        var reached: [String] = []
+        _ = try? exclusively("wall-\(slug)") {
+            let posts = wall.posts()
+            guard !posts.isEmpty, let task = store.load().task(slug), let team = task.team, task.isTeam,
+                  let sessions = try? hostSessions("the wall wasn't delivered") else { return }
+            let live = Dictionary(sessions.filter(\.live).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            for (index, member) in team.enumerated() {
+                guard let worker = index == 0 ? task.worker : member.worker, worker != task.stopped, let info = live[worker] else { continue }
+                let due = LeadWall.posts(posts, for: member.name, after: member.wallSeen ?? 0)
+                guard !due.isEmpty else { continue }
+                if Self.isIdle(info), !riding.contains(member.name), !due.contains(where: { LeadWall.wakes($0, for: member.name, in: posts) }) { continue }
+                for post in due {
+                    guard let before = claimWall(slug, member: member.name, worker: worker, post: post.id) else { break }
+                    let sender: SteerMessage.Sender? = post.author == LeadWall.leadAuthor ? nil : .teammate(member: post.author, task: slug)
+                    let delivered = try? deliver(slug, worker: worker, text: LeadWall.delivery(post), clearDraft: false, from: sender)
+                    guard delivered.map(Self.went) == true else {
+                        unclaimWall(slug, member: member.name, worker: worker, post: post.id, back: before)
+                        break
+                    }
+                    if !reached.contains(member.name) { reached.append(member.name) }
+                }
+            }
+        }
+        return reached
+    }
+
+    /// Claims `post` for `member` (run by `worker`) under the board's lock: its cursor moved to it. The cursor before,
+    /// or nil when it's not to be sent (claimed already, another worker runs it, the member's gone).
+    private func claimWall(_ slug: String, member name: String, worker: String, post id: Int) -> Int? {
+        var before: Int?
+        try? store.update { board in
+            guard let index = board.taskIndex(slug), let at = board.tasks[index].team?.firstIndex(where: { $0.name == name }),
+                  let member = board.tasks[index].team?[at],
+                  (at == 0 ? board.tasks[index].worker : member.worker) == worker, (member.wallSeen ?? 0) < id else { return }
+            before = member.wallSeen ?? 0
+            board.tasks[index].team?[at].wallSeen = id
+        }
+        return before
+    }
+
+    /// `post` didn't reach `member`: its cursor goes back to `before`, so the next pass sends it again.
+    private func unclaimWall(_ slug: String, member name: String, worker: String, post id: Int, back before: Int) {
+        try? store.update { board in
+            guard let index = board.taskIndex(slug), let at = board.tasks[index].team?.firstIndex(where: { $0.name == name }),
+                  board.tasks[index].team?[at].wallSeen == id else { return }
+            board.tasks[index].team?[at].wallSeen = before == 0 ? nil : before
+        }
     }
 }
