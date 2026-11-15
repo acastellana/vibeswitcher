@@ -26,7 +26,7 @@ final class DeliveryWorld: @unchecked Sendable {
     /// The node's session scan on the link (`scan`), started with the world: the agents its fakes are (E7's witness).
     let sessions: NodeSessions?
 
-    private init(host: NodeTestHost, fake: FakeClaude.Install, repo: String, scan: Bool) {
+    private init(host: NodeTestHost, fake: FakeClaude.Install, repo: String, scan: Bool, sweepsRoles: Bool) {
         self.host = host
         self.fake = fake
         self.repo = repo
@@ -36,6 +36,7 @@ final class DeliveryWorld: @unchecked Sendable {
         var options = LeadEngine.Options()
         options.answersTrust = false
         options.home = host.home.path
+        options.sweepsRoles = sweepsRoles
         engine = LeadEngine(root: host.root, nodeRoot: nil, link: link, clock: nil, sessions: sessions, options: options)
         let (engine, steps, typed, onStep) = (engine, steps, typed, onStep)
         link.onWelcome = { _, _ in engine.welcomed() }
@@ -51,13 +52,14 @@ final class DeliveryWorld: @unchecked Sendable {
     }
 
     /// A world on a new scratch host, its link welcomed unless `connect` is false.
-    /// `scan`: with the node's session scan (`NodeSessions`) on the link, started once it's welcomed.
-    static func make(_ scratch: Scratch, connect: Bool = true, scan: Bool = false) async throws -> DeliveryWorld {
+    /// `scan`: with the node's session scan (`NodeSessions`) on the link, started once it's welcomed. `sweepsRoles`: the
+    /// engine ends the finished tasks' role sessions from the host's roster, as the server's does (`RoleSweep`).
+    static func make(_ scratch: Scratch, connect: Bool = true, scan: Bool = false, sweepsRoles: Bool = false) async throws -> DeliveryWorld {
         let host = try NodeTestHost(scratch)
         let fake = try FakeClaude.install(in: host.folder.appendingPathComponent("fake", isDirectory: true))
         let repo = host.folder.appendingPathComponent("repo", isDirectory: true)
         try await scratchRepository(repo)
-        let world = DeliveryWorld(host: host, fake: fake, repo: repo.resolvingSymlinksInPath().path, scan: scan)
+        let world = DeliveryWorld(host: host, fake: fake, repo: repo.resolvingSymlinksInPath().path, scan: scan, sweepsRoles: sweepsRoles)
         if connect { await world.connect() }
         if let sessions = world.sessions { world.queue.sync { sessions.start() } }
         return world

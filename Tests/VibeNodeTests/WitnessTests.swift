@@ -155,6 +155,79 @@ struct WitnessTests {
         #expect(nudged.value == [world.repo], "\(nudged.value)")
     }
 
+    /// The E7 review: the disk watch's look (its statfs, its `disk-watch.json`) and the nudge of auto_advance's loop
+    /// (a write into the project's `.vibeswitcher/`) are file work, done on the reads queue, never the engine's.
+    @Test func theDiskWatchAndTheNudgeAreOffTheEngineQueue() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        _ = try await world.lead(idle: false)
+        let verifier = try await endedSession(world, label: "Verifier: off-queue", cwd: try worktree(world, "off-queue"))
+        try task(world, "off-queue", .review) { $0.verifier = verifier.id.uuidString }
+        let run = (BoardStore(root: world.repo).folder as NSString).appendingPathComponent("run")
+        try FileManager.default.createDirectory(atPath: run, withIntermediateDirectories: true)
+        let loop = try #require(FileLock.attempt((run as NSString).appendingPathComponent("advancing.lock")))
+        defer { loop.release() }
+        let calls = Locked<[(call: String, onEngine: Bool)]>([])
+        world.queue.sync {
+            world.engine.freeSpace = { _ in
+                calls.mutate { $0.append(("free", world.onEngine)) }
+                return nil
+            }
+            world.engine.nudgeAdvance = { _ in calls.mutate { $0.append(("nudge", world.onEngine)) } }
+        }
+        world.engine.refresh()
+        #expect(await eventually(timeout: 60) { calls.value.contains { $0.call == "free" } && calls.value.contains { $0.call == "nudge" } },
+                "\(calls.value)")
+        await refresh(world)
+        #expect(!calls.value.contains { $0.onEngine }, "\(calls.value)")
+    }
+
+    /// The E7 review: the engine's role sweep (`Options.sweepsRoles`, as the server's engine has it) ends a finished
+    /// task's live worker through the link, from the host's roster; it looks again only 6 s on; and what the roster says
+    /// of the worker's tools reaches the witness, on the engine's queue.
+    @Test func theEnginesRoleSweepEndsAFinishedTasksWorkerThroughTheLink() async throws {
+        let world = try await DeliveryWorld.make(scratch, sweepsRoles: true)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        let worker = try await world.host.spawn("exec /bin/sleep 600", cwd: try worktree(world, "swept"), label: "Worker: swept")
+        let (book, folder, repo) = (world.host.book, world.host.folder, world.repo)
+        let (leadID, workerID) = (lead.session.id.uuidString, worker.id.uuidString)
+        let before = Date().timeIntervalSince1970
+        try await offPool {
+            // The lead's tool server asks for the worker's grant and binds it to the session it started.
+            let tools = book.vault(folder: folder, as: { .session(leadID) })
+            try tools.bind(try tools.issue(role: .worker, root: repo, task: "swept"), root: repo, session: workerID)
+        }
+        try task(world, "swept", .done) { $0.worker = workerID }
+        world.engine.refresh()
+        #expect(await eventually(timeout: 60) { listed(world, worker.id)?.isLive != true }, "\(String(describing: listed(world, worker.id)))")
+        #expect(await eventually(timeout: 60) {
+            world.queue.sync { world.engine.toolTimes[workerID] != nil && !world.engine.sweeping }
+        })
+        let bound = try #require(world.queue.sync { world.engine.toolTimes[workerID]?.bound })
+        // The roster's time for this bind (the host keeps it), not one from before.
+        #expect(bound >= before, "\(bound) \(before)")
+        // Asked again at once: the sweep waits its 6 s.
+        let swept = world.queue.sync { world.engine.sweptAt }
+        await refresh(world)
+        #expect(world.queue.sync { world.engine.sweptAt } == swept)
+    }
+
+    /// The E7 review (the app's `ReportsWaiting.keep`): a lead that ended has no reports waiting in `status`.
+    @Test func aLeadThatEndedHasNoReportsWaiting() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        try world.post("The worker on parser says it's done.", from: .system("witness"), to: lead, age: LeadWake.shownAfter + 30)
+        world.engine.refresh()
+        #expect(await eventually(timeout: 60) { world.stored?.reportsWaiting == 1 }, "\(String(describing: world.stored))")
+        world.queue.async { world.link.kill(lead.session.id) }
+        #expect(await eventually(timeout: 60) { listed(world, lead.session.id)?.isLive != true && world.stored?.session == nil })
+        world.engine.refresh()
+        #expect(await eventually(timeout: 60) { world.stored?.reportsWaiting == 0 }, "\(String(describing: world.stored))")
+        #expect(world.stored?.value["reportsWaiting"]?.int == 0)
+    }
+
     /// A worker that reached its task's time budget: it's told to stop and report over_budget (in its inbox, or typed
     /// in between turns), and the lead is told, once, however many refreshes see it. Nothing is ended.
     @Test func theTaskBudgetStopsTheWorkerAndTellsTheLeadOnce() async throws {

@@ -7,8 +7,8 @@ import VibeCore
 /// (every 6 s at most); then, on `reads`, the questions' timers, the boards, which lead each board names, the base
 /// moves' refusals, the team readings and the finished tasks' ended sessions are read; then `refreshed`, on the engine's
 /// queue, tells the timers, keeps the boards, marks the replaced leads, looks at the two card stores, keeps the notices
-/// for `status`, runs the witness for each lead, drops the finished tasks' ended sessions and the wakes of leads that
-/// ended. Nothing the refresh reads is read on the engine's queue.
+/// for `status` (`Requests.statusValue`), runs the witness for each lead, drops the finished tasks' ended sessions and
+/// the wakes and waiting counts of leads that ended. Nothing the refresh reads is read on the engine's queue.
 ///
 /// Not here, as the app has it: team activity and keep-awake (the Mac's, and after the bootstrap); `rotateIfDue` and
 /// the all-done watch (after the bootstrap); the account watch (after the bootstrap); `keepRunningLeads` (E8's). The
@@ -101,22 +101,30 @@ extension LeadEngine {
         lookAtBases()
         lookAtConfig()
         retireTaken()
-        notices = notices.filter { roots.contains($0.key) }
+        // A base move that refused one of the lead's merges waits on the user: in `status` while it does (the app's
+        // alert), and in the log once per move while it stands.
+        var standing: [String: [String]] = [:]
+        var keys: Set<String> = []
         for (root, board) in loaded.sorted(by: { $0.key < $1.key }) {
-            // A base move that refused one of its merges waits on the user (said once per move).
             if case .broken(let title, let body, _, let key)? = AlertRules.baseMoved(baseMoves.asking[root], refused: refusals[root], root: root,
-                                                                                    leadTTY: board.leadTTY),
-               noticed.insert(key ?? title).inserted {
+                                                                                    leadTTY: board.leadTTY) {
                 let said = ConfigSeal.inert(title + ": " + body, limit: 400)
-                notices[root, default: []].append(said)
-                note("lead: \(said)")
+                standing[root, default: []].append(said)
+                keys.insert(key ?? title)
+                if !noticed.contains(key ?? title) { note("lead: \(said)") }
             }
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
         }
+        if standing != notices { notices = standing }
+        noticed = keys
         forgetFinished(finished)
-        // A lead that ended, or another agent on its terminal now: its wake-ups go.
+        // A lead that ended, or another agent on its terminal now: its wake-ups and its waiting count go (the app's
+        // `ReportsWaiting.keep`).
         let live = Set(loaded.values.compactMap { board in board.leadTTY.flatMap { tty in board.leadPid.map { "\(tty)#\($0)" } } })
         wakes = wakes.filter { live.contains($0.key) }
+        for lead in leads.leads.values where lead.reportsWaiting != 0 && loaded[lead.root]?.leadTTY == nil {
+            reportsWaiting(0, root: lead.root)
+        }
     }
 
     /// Every 6 s at most, off the engine's queue: the finished tasks' role sessions end, in every project (`RoleSweep`).

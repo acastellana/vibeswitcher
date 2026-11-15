@@ -149,10 +149,10 @@ public final class LeadEngine: @unchecked Sendable {
     /// A refresh's reads are under way, and another was asked meanwhile (it runs once they're in).
     var refreshing = false
     var refreshAgain = false
-    /// What a refresh's notices say for `status`, by root: a base move that refused a merge waits on the user
-    /// (`AlertRules.baseMoved`).
+    /// What the last refresh's notices say for `status`, by root, while they stand: a base move that refused a merge of
+    /// the running lead's waits on the user (`AlertRules.baseMoved`).
     public internal(set) var notices: [String: [String]] = [:]
-    /// The notices' keys already kept, so each is said once.
+    /// The standing notices' keys, so each is logged once while it stands.
     var noticed: Set<String> = []
     /// How long the machine has slept since this engine started, noted at each witness look (`MacSleepLog`).
     var macSleep = MacSleepLog()
@@ -165,8 +165,8 @@ public final class LeadEngine: @unchecked Sendable {
     /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"
     /// on the engine's queue once a look is applied (`witnessed`); tests watch or slow them. Set on `queue`.
     var witnessStep: ((String) -> Void)?
-    /// Each project's free disk space, watched (`LeadWitness.Disk`), by root.
-    var disks: [String: LeadWitness.Disk] = [:]
+    /// Each project's free disk space, watched (`LeadWitness.Disk`), by root: on `reads` only.
+    let disks = DiskWatches()
     /// The bytes free on the volume holding a path, as the disk watch reads them (`DiskSpace.free`). Faked in tests.
     var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
     /// Makes a project's lead tool server look again (`LeadAdvance.nudge`): an ended verifier auto_advance audits

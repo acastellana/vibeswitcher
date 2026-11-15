@@ -9,7 +9,7 @@ import VibeCore
 /// once; low disk is told once per episode; the working time is counted and a task's time budget stops its worker and
 /// tells the lead; the stalls go on the board; what was held for the lead goes; the lead is woken. What the team's
 /// transcripts and inboxes say was read on `reads` (`TeamReading`), what to tell worked out there (`WitnessWork`), and
-/// only applied on the engine's queue.
+/// only applied on the engine's queue; the files it writes (the nudge, the disk watch's) are written on `reads` too.
 extension LeadEngine {
     /// Tells the lead what its team can't, and types waiting messages into idle team members. `team`: what the team's
     /// transcripts and inboxes say, read on `reads` with the sessions as they were then. On `queue`.
@@ -85,12 +85,13 @@ extension LeadEngine {
         }
         // A verifier that ended without a verdict, which auto_advance audits again: its loop looks now (an agent that
         // quit leaving its shell open writes nothing in the project's folder), and the lead hears of it in its report;
-        // past `LeadWitness.advanceGrace` with no retry, from here as ever.
+        // past `LeadWitness.advanceGrace` with no retry, from here as ever. The nudge is a file written on `reads`.
+        var nudges = 0
         for verifier in work.endedForAdvance {
             let key = "\(root)|\(verifier)"
             if advanceSeen[key] == nil {
                 advanceSeen[key] = now
-                nudgeAdvance(root)
+                nudges += 1
             }
         }
         // A worker whose turn ended after its audit started (it had only just reported): its loop looks now and releases
@@ -99,8 +100,12 @@ extension LeadEngine {
             let key = "\(root)|release|\(worker)"
             if advanceSeen[key] == nil {
                 advanceSeen[key] = now
-                nudgeAdvance(root)
+                nudges += 1
             }
+        }
+        if nudges > 0 {
+            let nudge = nudgeAdvance
+            reads.async { _ in for _ in 0..<nudges { nudge(root) } }
         }
         // Only the keys here: each text is built where it's posted, on `reads`. One a look before this told already (two
         // looks under way at once) isn't told again.
@@ -114,19 +119,24 @@ extension LeadEngine {
             note("witness: declining the prompt verifier \(stuck.session.prefix(8)) on \(ConfigSeal.inert(stuck.slug, limit: 80)) waits on")
             PromptDecline.handle(stuck, link: link) { [weak self] text in self?.deliver(built: text, from: .system("witness"), root: root, action: nil) }
         }
-        // Low disk space, once per episode; what takes it is sized off the engine's queue.
-        var disk = disks[root] ?? LeadWitness.Disk(free: { [weak self] path in self?.freeSpace(path) ?? nil }, scratch: ClaudeScratch.root, sessions: temporaryRoot,
-                                                   file: self.root.appendingPathComponent("disk-watch.json"))
+        // Low disk space, once per episode: the watch looks on `reads` (a statfs, its `disk-watch.json`), and what takes
+        // the space is sized on `work`; only the message comes back to the engine's queue.
         let workflow = team.workflow
-        if let free = disk.check(root: root, workflow: workflow) {
-            let (sizing, cwds) = (disk, link.sessions.map(\.cwd))
-            self.work.async { [weak self] in
-                let text = sizing.text(free: free, root: root, board: board, workflow: workflow, cwds: cwds)
+        let (watches, free, sessionsRoot, cwds) = (disks, freeSpace, temporaryRoot, link.sessions.map(\.cwd))
+        let file = self.root.appendingPathComponent("disk-watch.json")
+        reads.async { [weak self, work = self.work] _ in
+            watches.free = free
+            var disk = watches.watches[root] ?? LeadWitness.Disk(free: { [watches] in watches.free($0) }, scratch: ClaudeScratch.root,
+                                                                 sessions: sessionsRoot, file: file)
+            let low = disk.check(root: root, workflow: workflow)
+            watches.watches[root] = disk
+            guard let low else { return }
+            work.async {
+                let text = disk.text(free: low, root: root, board: board, workflow: workflow, cwds: cwds)
                 guard let engine = self else { return }
                 engine.queue.async { engine.deliver(built: { text }, from: .system("witness"), root: root, action: nil) }
             }
         }
-        disks[root] = disk
         // Working time, and the stop at a task's time budget (see `LeadBudget`): counted on the board as it is when
         // written, so each budget is told once, to its worker and to the lead. The count is written on `reads`, under
         // the board's lock.
@@ -192,4 +202,12 @@ extension LeadEngine {
         case .system(let about): return "VibeSwitcher (\(about))"
         }
     }
+}
+
+/// Each project's disk watch (`LeadWitness.Disk`), by root, with the free-space read it uses: only ever touched on the
+/// engine's `reads` queue, where the watch's statfs and its `disk-watch.json` are read and written.
+final class DiskWatches: @unchecked Sendable {
+    var watches: [String: LeadWitness.Disk] = [:]
+    /// The engine's `freeSpace`, as the last look handed it.
+    var free: (String) -> Int64? = { _ in nil }
 }
