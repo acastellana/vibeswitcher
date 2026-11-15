@@ -18,6 +18,12 @@ import VibeCore
 /// - When the child ends: its connector is closed, which ends every connection made through it (so what the child
 ///   left open is no one's), then the child is reaped, then started again from the same copy with a fresh connector
 ///   after 1 s, doubling to 30 s, back to 1 s once a child had run 10 minutes. Each start and end is a line on stderr.
+/// - When its connector closes on the host's side while the child runs (the child closed or shut its end, or the read
+///   failed), the child can't reach the host again: it is ended at once (SIGKILL, `connectorClosed`), and a handover
+///   meanwhile is refused (`handoverRefusal`). So **the server must never close or shut down its connector before it
+///   exits**, not even on its way to a graceful exit: it would be killed mid-shutdown, and the host would log its
+///   ordinary exit as "ended: its connector closed while it ran". It exits with the connector open, and the kernel
+///   closes it (the engine plan's E1 says so too).
 /// - While one runs, or is about to be started again, the host doesn't exit idle (`isRunning`, read by `tidy`).
 /// - Across a handover (Task 8b, the document's S8) the child runs on: the state carries its record (`record`: its
 ///   pid and start ticks, the host's end of its connector, its sealed copy), and the new image takes it again only
