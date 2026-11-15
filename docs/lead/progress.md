@@ -3273,3 +3273,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 23:37 Pipeline held: ui-journeys-a3-run ready to merge with none landing; cause: a merge in progress
 - 2026-11-15 23:40 Merged ui-journeys-a3-run: UI journeys A3: Run card journey (in a batch, on a test run of its own) (build 64a972289c0f with changes not committed)
 - 2026-11-15 23:40 Flaky in the batch ui-journeys-a3-run: twoEndsAtOnceCloseOnce(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-15 23:40 Started a worker on ui-journeys-a4-dictation
+- 2026-11-15 23:40 Automatically (auto_advance): Merge of ui-journeys-a4-dictation failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
+- 2026-11-15 23:40 Automatically (auto_advance): Merged ui-journeys-a3-run at 550126bb (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-15 23:41 Automatically (auto_advance): Cleaned up ui-journeys-a3-run (freed 2.7 GB of build output and temporary folders). It stays done.
