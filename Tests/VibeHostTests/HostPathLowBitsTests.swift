@@ -31,14 +31,14 @@ import Testing
         #expect(HostPathWatch.verifiedIdentity(of: path, kernel: .another) == nil)
 
         // A socket file nobody listens on: bound, never listening, so every connect is refused, whoever holds a copy
-        // (`held`, as a spawn in flight would).
+        // (`held`, as a spawn in flight would; close-on-exec, so no other test's child inherits it).
         let quiet = scratchSocketPath()
         defer { unlink(quiet) }
         let bound = Platform.Sockets.makeSocket(type: Platform.Sockets.stream)
         try #require(bound >= 0)
         defer { Sys.close(bound) }
         try #require(Platform.Sockets.bindOwnerOnly(bound, to: try UnixSocket.address(quiet), path: quiet, mode: 0o600) == nil)
-        let held = dup(bound)
+        let held = fcntl(bound, F_DUPFD_CLOEXEC, 0)
         try #require(held >= 0)
         defer { Sys.close(held) }
         let file = try #require(HostPathWatch.identity(atPath: quiet))
