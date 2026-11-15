@@ -3171,3 +3171,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 12:39 Automatically (auto_advance): Merged a-batch-merge-s (A batch merge's receipts carry the merge-ready time) into main at 9cdab7e8, on its passing audit and the full test run.
 - 2026-11-15 12:39 Automatically (auto_advance): Cleaned up a-batch-merge-s (freed 2.5 GB of build output and temporary folders). It stays done.
 - 2026-11-15 12:54 Merged the-witness-watches: The witness watches every team member, not only the integrator (build 9495e6702ce2)
+- 2026-11-15 12:54 Automatically (auto_advance): Merged the-witness-watches (The witness watches every team member, not only the integrator) into main at 0b7338cb, on its passing audit and the full test run.
+- 2026-11-15 12:54 Automatically (auto_advance): Cleaned up the-witness-watches (freed 3.1 GB of build output and temporary folders). It stays done.
+- 2026-11-15 12:55 Update: Team mode is built: several workers on one task — **What changed**
