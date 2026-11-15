@@ -3,3 +3,15 @@ desc Open a fake session's chat, type into its composer, and shoot it.
 chat
 type hello from the smoke journey
 shot chat
+
+# What changes from run to run on its own, in the 2560x1600 shots of the main window: the session's age in its sidebar
+# row and in the header's state pill, the clock time under the question, and the inspector's values that come from the
+# clock (State's age, Since, Started, Running for) or from the run (Session's id, Process's pid and tty, Command's
+# scratch paths).
+mask chat-main-* 430 250 75 45
+mask chat-main-* 1115 118 140 44
+mask chat-main-* 1940 325 95 35
+mask chat-main-* 2220 256 340 130
+mask chat-main-* 2245 770 315 55
+mask chat-main-* 2440 825 120 75
+mask chat-main-* 2100 1050 460 550

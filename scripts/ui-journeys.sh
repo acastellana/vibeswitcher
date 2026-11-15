@@ -12,7 +12,7 @@
 # Exits 0 when every shot is unchanged (within the threshold) or new; 1 when one changed or a journey failed; 64 on a
 # wrong command line.
 #
-# Options (run): --threshold PERCENT  a shot counts as changed when more than this share of its pixels differ (0.5)
+# Options (run): --threshold PERCENT  a shot counts as changed when more than this share of its pixels differ (0.05)
 #                --tolerance N        a pixel differs when a channel (0–255) moves by more than N (8)
 #                --binary PATH        run this build of VibeSwitcher (vibeswitcher-host beside it) instead of building
 #
@@ -37,16 +37,17 @@
 #   type hello from the smoke journey
 #   shot chat
 #
-# What never trips it: a composer's caret is drawn only when its window is key, and a sandbox window never is, so it
-# doesn't blink in a shot; the fake sessions' times are set relative to the launch, so "5m ago" reads the same each run.
-# Anything else that moves on its own goes under a `mask` in its journey.
+# Noise: a composer's caret isn't drawn in a shot (a sandbox window is never key, so it never blinks there), and
+# anti-aliasing stays under the tolerance. What does change from run to run on its own (clock times, ages like "10s",
+# a fake session's id, pid, tty and scratch paths) goes under `mask` lines in the journey: see smoke.journey. To find
+# them, run a journey twice and look at the red in its .diff.png files.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 repo=$(pwd -P)
 root=$repo/.build/ui-journeys
 journeys=$repo/scripts/ui-journeys
-threshold=0.5
+threshold=0.05
 tolerance=8
 binary=""
 
@@ -62,7 +63,7 @@ while [[ $# -gt 0 ]]; do
         *) break ;;
     esac
 done
-[[ $threshold =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "--threshold $threshold: a percentage, e.g. 0.5"; exit 64; }
+[[ $threshold =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "--threshold $threshold: a percentage, e.g. 0.05"; exit 64; }
 [[ $tolerance =~ ^[0-9]+$ ]] && ((tolerance <= 255)) || { echo "--tolerance $tolerance: 0–255"; exit 64; }
 [[ $# -gt 0 ]] || { usage; exit 64; }
 

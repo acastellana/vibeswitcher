@@ -35,11 +35,24 @@ import VibeCore
         var current = baseline
         current.fill(ImageDiff.Rect(x: 0, y: 0, width: 10, height: 4), (0, 0, 0, 255))   // 40 pixels: 0.4 %
         let small = ImageDiff.compare(baseline, current)
-        #expect(!small.exceeds(threshold: ImageDiff.defaultThreshold))
+        #expect(!small.exceeds(threshold: 0.5))
+        #expect(!small.exceeds(threshold: 0.4))
         #expect(small.exceeds(threshold: 0.3))
         current.fill(ImageDiff.Rect(x: 0, y: 4, width: 10, height: 2), (0, 0, 0, 255))   // 60 pixels: 0.6 %
-        #expect(ImageDiff.compare(baseline, current).exceeds(threshold: ImageDiff.defaultThreshold))
+        #expect(ImageDiff.compare(baseline, current).exceeds(threshold: 0.5))
         #expect(!ImageDiff.compare(baseline, current).exceeds(threshold: 1))
+    }
+
+    /// The default trips on a short word's worth of a 2560x1600 shot (a label "Attention" -> "Attn TEMP" changed
+    /// 4,269 pixels, 0.11 %) and not on a few stray pixels.
+    @Test func theDefaultThresholdCatchesALabelChange() {
+        let baseline = ImageDiff.Pixels(width: 2_560, height: 1_600, filled: white)
+        var current = baseline
+        current.fill(ImageDiff.Rect(x: 84, y: 116, width: 352, height: 12), (0, 0, 0, 255))   // 4,224 pixels
+        #expect(ImageDiff.compare(baseline, current).exceeds(threshold: ImageDiff.defaultThreshold))
+        var speck = baseline
+        speck.fill(ImageDiff.Rect(x: 10, y: 10, width: 20, height: 20), (0, 0, 0, 255))   // 400 pixels
+        #expect(!ImageDiff.compare(baseline, speck).exceeds(threshold: ImageDiff.defaultThreshold))
     }
 
     @Test func noiseWithinTheToleranceAndMaskedPixelsDontCount() {

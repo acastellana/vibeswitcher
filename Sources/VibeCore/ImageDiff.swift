@@ -67,7 +67,7 @@ public enum ImageDiff {
     /// The default per-channel tolerance: anti-aliasing and colour-space rounding stay under it.
     public static let defaultTolerance = 8
     /// The default threshold, in percent of the pixels.
-    public static let defaultThreshold = 0.5
+    public static let defaultThreshold = 0.05
 
     public static func compare(_ a: Pixels, _ b: Pixels, tolerance: Int = defaultTolerance, masks: [Rect] = []) -> Result {
         guard a.width == b.width, a.height == b.height else {
