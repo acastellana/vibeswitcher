@@ -847,3 +847,44 @@ struct ProcessesTests {
         #expect(Processes.link(getpid()) == nil)
     }
 }
+
+/// `Platform.Processes.lockHolder(path:)` (the engine plan's EN-D8): the process holding a lock on a file, found in
+/// `/proc/locks` by the file's device and inode.
+extension ProcessesTests {
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux: /proc/locks"))
+    func theLockHolderIsFoundByTheFilesInode() throws {
+        let folder = try TestScriptLinuxTests.scratch("locks")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let held = folder.appendingPathComponent("held.lock").path
+        let free = folder.appendingPathComponent("free.lock").path
+        FileManager.default.createFile(atPath: held, contents: nil)
+        FileManager.default.createFile(atPath: free, contents: nil)
+        let fd = open(held, O_RDWR | O_CLOEXEC)
+        try #require(fd >= 0)
+        defer { close(fd) }
+        #expect(Platform.Processes.lockHolder(path: held) == nil)
+        try #require(flock(fd, LOCK_EX | LOCK_NB) == 0)
+        #expect(Platform.Processes.lockHolder(path: held) == getpid())
+        #expect(Platform.Processes.lockHolder(path: free) == nil)
+        // Another file renamed over the path is another file: its holder (none) is what counts.
+        let other = folder.appendingPathComponent("other").path
+        FileManager.default.createFile(atPath: other, contents: nil)
+        #expect(rename(other, held) == 0)
+        #expect(Platform.Processes.lockHolder(path: held) == nil)
+        #expect(Platform.Processes.lockHolder(path: folder.appendingPathComponent("none").path) == nil)
+    }
+
+    @Test func theLocksListIsReadByDeviceAndInode() {
+        let locks = """
+            1: POSIX  ADVISORY  WRITE 1203 08:20:524301 0 EOF
+            2: FLOCK  ADVISORY  WRITE 4242 08:20:9001 0 EOF
+            2: -> FLOCK  ADVISORY  WRITE 5555 08:20:9001 0 EOF
+            3: OFDLCK ADVISORY  READ  -1 00:1a:77 0 EOF
+            4: FLOCK  ADVISORY  WRITE 6000 fd:01:9001 0 EOF
+            """
+        #expect(Platform.Processes.lockHolder(locks: locks, major: 8, minor: 0x20, inode: 9001) == 4242)
+        #expect(Platform.Processes.lockHolder(locks: locks, major: 0xfd, minor: 1, inode: 9001) == 6000)
+        #expect(Platform.Processes.lockHolder(locks: locks, major: 0, minor: 0x1a, inode: 77) == nil)
+        #expect(Platform.Processes.lockHolder(locks: locks, major: 8, minor: 0x20, inode: 1) == nil)
+    }
+}

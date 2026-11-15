@@ -137,10 +137,11 @@ attack checks it.
 **Held by:** `SecurityDocumentLintTests.everyNamedTestExists`,
 `SecurityDocumentLintTests.everySectionSaysWhatItDoesNotPromise`,
 `SecurityDocumentLintTests.everySectionSaysWhenItIsNeeded` (stage 2 Task 1: the document's shape, not its promises);
-planned: the engine plan task E1.
+`StartCommandTests.startRefusesWhileInteropIsOnUnlessTold`, `NodeFactsTests.statusSaysPlainModeAndInterop`,
+`NodeFactsTests.statusSaysWhenAutomountIsOnAndAKernelLineIsSet` (the engine's E1: `start` refuses with interop on
+unless told, `status` says interop, automount and a `kernel=` line).
 
-**Tests to write:** E1: `StartCommandTests.startRefusesWhileInteropIsOnUnlessTold`,
-`NodeFactsTests.statusSaysPlainModeAndInterop`.
+**Tests to write:** none left: E1's are under Held by.
 
 ## Principals: who may do what, and how the host knows
 
@@ -427,7 +428,15 @@ on as nobody's app), `ServerChildTests.aHandoverWhileTheServerChildIsReplacedIsR
 `ServerChildTests.aServerChildEndedDuringTheHandoversProbeIsRefusedBeforeTheExec` (no handover drops the server child),
 `ServerChildTests.aHostStoppedBeforeTheFirstStartStartsNoServerChild`,
 `ServerChildTests.aCarriedServerChildOfAHostStoppedBeforeItsRestoreIsEnded` (no server child outlives a host that
-stopped).
+stopped); and the server's half from the engine's E1: `ServerTests.everyHostCallInTheServerGoesThroughTheConnector`,
+`ServerTests.theServersChildrenInheritNoConnector`, `ServerTests.theServerExitsWhenTheHostIsGone`,
+`ServerTests.theServerRefusesAHostSocketOtherThanItsRoots`, `ServerTests.theServerRefusesToStartWithoutRootsGit`,
+`ServerTests.theServersSocketIsBoundAgainWhenReplaced` (the server keeps its own path),
+`ServerTests.aServerRestartIsCountedInStatus`, `ServerLintTests.theServerIsThere`,
+`PlatformLintTests.theServersHardeningStatementsComeFirstInTheirOrder` (its first statements); the journal the command
+line reads and writes: `NodeJournalTests.aStartTheJournalDoesntExplainIsMarkedUntilAcknowledged`,
+`NodeJournalTests.aForgedStartEntryFromAUserUnitDoesntClearTheMark`, `NodeJournalTests.anAckSurvivesAServerRestart`,
+`JournalTests.anEntryCarriesIdsAndNoText`.
 
 **Tests to write:** none left: Tasks 4b's, 8a's and 8b's are under Held by.
 
@@ -532,15 +541,28 @@ Acceptable only on VibeSwitcher's own repository, with interop off, until stage 
 **Built in:** the engine plan, E1 (the socket, the voices, the cgroup rule, the journal, the check of the server), E4
 (`lead`), E6 (cards, answers at rest, holds), E8 (the restart path), and the bootstrap path's step 8 (`hooks install`).
 
-**Held by:** planned: the engine plan task E1, E4, E6.
+**Held by:** the engine's E1: `ServerTests.theServerIsNotDumpable`, `ServerTests.anUnknownRequestIsAnsweredNotFatal`,
+`ServerTests.aMustUnderstandRequestNobodyKnowsClosesTheConnection`, `ServerTests.aNewerVersionIsAnsweredAndClosed`,
+`ServerTests.statusThroughTheServerListsWhatTheProbeLists`, `ServerTests.aSessionsProcessCannotStopTheNode`,
+`ServerTests.anUnlistedRequestIsRefused`, `ServerTests.anAcceptedRequestIsShownByStatus`,
+`ServerTests.aRequestFromAnotherSenderOnTheServersSocketIsRefused`, `ServerTests.theServersSocketIsTheUsersAlone`,
+`ServerTests.aStopFromTheUserEndsEverySessionThenTheHost`, `ServerTests.twoScratchNodesInOneRunUseTheirOwnSockets`,
+`ServerCheckTests.theCommandLineRefusesAServerThatIsntTheHostsChild`, `ServerCheckTests.theCommandLineRefusesADumpableListener`,
+`ServerCheckTests.theCommandLineWithNoNodeSaysSoNotConnectionRefused`, `ServerCheckTests.aScratchNodeIsNamedOnStderr`,
+`ServerCheckTests.aScratchHomeThatIsTheAccountsOwnGetsTheNodesCheck`, `VoiceRuleTests.aTerminalScopeIsTheUser`,
+`VoiceRuleTests.anAnswerFromTheNodesCgroupIsRefused`, `VoiceRuleTests.anAnswerFromATransientUserUnitIsRefused`,
+`VoiceRuleTests.atAndCronAreRefused`, `VoiceRuleTests.aPeerWhoseCgroupCantBeReadIsNotTheUser`,
+`VoiceRuleTests.aPeerWhoseEnvironmentCantBeReadIsNotTheUser`, `VoiceRuleTests.aPeerUnderALiveSessionIsNotTheUser`,
+`VoiceRuleTests.aPeerOnASessionsTerminalIsNotTheUser`, `VoiceRuleTests.aPeerWithTheSessionMarkerIsNotTheUser`,
+`VoiceRuleTests.aPeerUnderABranchCodeRunnerIsNotTheUser`, `VoiceRuleTests.withoutSystemdTheRuleIsTheOtherFourAndSaysSo`,
+`VoiceRuleTests.theWeakerRuleIsChosenOnlyFromTheServersOwnCgroup`, `StartCommandTests.aStateChangeWithNoTerminalIsRefused`,
+`NodeJournalTests.aJournalEntryFromANonTerminalCgroupIsMarkedInStatus`,
+`NodeJournalTests.anAcceptedRequestWithNoJournalEntryIsMarked`, `NodeWireTests.aLineOverOneMebibyteIsRefused`. The
+scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (a Windows
+Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. Planned: the engine plan task
+E4, E6.
 
-**Tests to write:** E1: `theServerIsNotDumpable`, `anUnknownRequestIsAnsweredNotFatal`,
-`statusThroughTheServerListsWhatTheProbeLists`, `aSessionsProcessCannotStopTheNode`, `anUnlistedRequestIsRefused`,
-`anAcceptedRequestIsShownByStatus`, `aRequestFromAnotherSenderOnTheServersSocketIsRefused`,
-`theServersSocketIsTheUsersAlone`, `theCommandLineRefusesAServerThatIsntTheHostsChild`,
-`theCommandLineRefusesADumpableListener`, `anAnswerFromTheNodesCgroupIsRefused`,
-`anAnswerFromATransientUserUnitIsRefused`, `aPeerWhoseCgroupCantBeReadIsNotTheUser`,
-`aPeerWhoseEnvironmentCantBeReadIsNotTheUser`, `aStateChangeWithNoTerminalIsRefused`. E4:
+**Tests to write:** E4:
 `aSessionsProcessCannotStartALead`, `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E6:
 `anAnswerFromASessionsProcessIsRefused`, `anAnswerFromAProcessCarryingASessionMarkerIsRefused`,
 `anAnswerFromBranchCodeIsRefused`, `anApprovalCardIsBuiltFromGitAndTheVault`, `aQuestionWrittenToTheBoardIsNotShown`.
@@ -816,7 +838,8 @@ parser's reply grammar in Task 9; the server's own first statements in the engin
 `ParserReplyTests.droppedRepliesAreLoggedOnceASecond` (Task 12a and its review);
 `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`, `HandoverLinuxTests.aHandoverImageIsNotDumpableFromItsExec`
 (Task 9c; S8 names them too); `ServerChildTests.aServerCopyMadeReadableIsPutBackBeforeTheNextStart` (every start from
-a sealed copy puts its mode back, S2-D5: the server child's too, the stage 2 sweep).
+a sealed copy puts its mode back, S2-D5: the server child's too, the stage 2 sweep); `ServerTests.theServerIsNotDumpable`
+(the real server, the engine's E1).
 
 **Tests to write:** none left: Task 9's are under Held by.
 
@@ -1510,7 +1533,10 @@ clone.
 `ProjectAllowListTests.aForgedWorktreePairPassesAsKnown`, `ProjectAllowListTests.aScratchHostHasNoList`,
 `ProjectAllowListTests.aMissingListRefusesEverySpawnAndSaysWhereTheListGoes`,
 `ProjectAllowListTests.noGitRunsInTheHost`, `ProjectAllowListTests.aListLinkedToATerminalDoesntBecomeTheHostsTerminal`
-(Task 10d: the allow-list).
+(Task 10d: the allow-list); `NodeFactsTests.statusSaysPlainModeAndInterop`,
+`ServerTests.statusThroughTheServerListsWhatTheProbeLists` (`status`'s standing plain-mode line),
+`StartCommandTests.startPrintsTheNotPromisedListOnceAndRecordsTheAck` (`start` prints the list once and records the
+acknowledgment in the journal; the engine's E1).
 
 ## S12. After the bootstrap
 

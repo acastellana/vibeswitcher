@@ -1,0 +1,116 @@
+import Foundation
+import Testing
+import VibeNode
+
+/// The journal as the command line reads it (`NodeJournal`, the engine plan's EN-D15), on a stand-in `journalctl -o
+/// json`'s output: an entry counts for what journald's own fields say (`_UID`, `_SYSTEMD_CGROUP`), never for what it
+/// carries. The Mac runs these.
+struct NodeJournalTests {
+    static let uid: uid_t = 1000
+    static let rule = VoiceRule(mode: .systemd, scopes: VoiceRule.terminalScopes, uid: uid, says: "test")
+    static let start = Date(timeIntervalSince1970: 1_800_000_000)
+
+    /// One line of `journalctl -o json`.
+    static func line(_ fields: [String: Any], at date: Date) -> String {
+        var all = fields
+        all["__REALTIME_TIMESTAMP"] = String(Int64(date.timeIntervalSince1970 * 1_000_000))
+        let data = try! JSONSerialization.data(withJSONObject: all, options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// systemd's line for the node's unit's start (or stop).
+    static func job(_ type: String, at date: Date) -> String {
+        line(["USER_UNIT": "vibeswitcher-node.service", "JOB_TYPE": type, "JOB_RESULT": "done", "MESSAGE": "Started vibeswitcher-node.service.",
+              "_UID": "1000", "_SYSTEMD_CGROUP": "/user.slice/user-1000.slice/user@1000.service/init.scope"], at: date)
+    }
+
+    /// An entry of the command line's, from `cgroup`.
+    static func own(_ event: String, kind: String? = nil, action: String? = nil, cgroup: String = "/init.scope", uid: String = "1000", at date: Date) -> String {
+        var fields: [String: Any] = ["SYSLOG_IDENTIFIER": "vibeswitcher", "VIBESWITCHER_EVENT": event, "MESSAGE": "vibeswitcher \(event)",
+                                     "_UID": uid, "_SYSTEMD_CGROUP": cgroup]
+        if let kind { fields["VIBESWITCHER_KIND"] = kind }
+        if let action { fields["VIBESWITCHER_ACTION"] = action }
+        return line(fields, at: date)
+    }
+
+    static func read(_ lines: [String]) -> [JournalEntry] { NodeJournal.entries(json: lines.joined(separator: "\n")) }
+
+    @Test func aStartTheJournalDoesntExplainIsMarkedUntilAcknowledged() throws {
+        let entries = Self.read([Self.job("start", at: Self.start)])
+        let events = NodeJournal.events(entries)
+        #expect(events == [.init(kind: .start, at: Self.start)])
+        let unexplained = NodeJournal.unexplained(starts: events, entries: entries, rule: Self.rule)
+        #expect(unexplained == events)
+        #expect(!NodeJournal.acknowledged(events[0], entries: entries, rule: Self.rule))
+        // A `vibeswitcher start` of the user's a moment before explains it.
+        let explained = Self.read([Self.own("request", kind: "start", at: Self.start.addingTimeInterval(-5)), Self.job("start", at: Self.start)])
+        #expect(NodeJournal.unexplained(starts: NodeJournal.events(explained), entries: explained, rule: Self.rule).isEmpty)
+        // One long before, or after it, doesn't.
+        let stale = Self.read([Self.own("request", kind: "start", at: Self.start.addingTimeInterval(-600)), Self.job("start", at: Self.start),
+                               Self.own("request", kind: "stop", at: Self.start.addingTimeInterval(5))])
+        #expect(NodeJournal.unexplained(starts: NodeJournal.events(stale), entries: stale, rule: Self.rule).count == 1)
+        // Acknowledged by a later ack of the user's.
+        let acked = Self.read([Self.job("start", at: Self.start), Self.own("ack", at: Self.start.addingTimeInterval(30))])
+        let event = try #require(NodeJournal.events(acked).first)
+        #expect(NodeJournal.acknowledged(event, entries: acked, rule: Self.rule))
+        // An ack from before it acknowledges nothing.
+        let early = Self.read([Self.own("ack", at: Self.start.addingTimeInterval(-30)), Self.job("start", at: Self.start)])
+        #expect(!NodeJournal.acknowledged(event, entries: early, rule: Self.rule))
+        // The host's line for a server child ended is a server restart.
+        let restart = Self.read([Self.line(["MESSAGE": "vibeswitcher-host: server child pid 77 ended after 12 s: killed by SIGKILL; started again in 1 s"], at: Self.start)])
+        #expect(NodeJournal.events(restart) == [.init(kind: .serverRestart, at: Self.start)])
+    }
+
+    @Test func aForgedStartEntryFromAUserUnitDoesntClearTheMark() {
+        let unit = "/user.slice/user-1000.slice/user@1000.service/app.slice/run-u7.service"
+        let forged = Self.read([Self.own("request", kind: "start", cgroup: unit, at: Self.start.addingTimeInterval(-5)), Self.job("start", at: Self.start)])
+        #expect(NodeJournal.unexplained(starts: NodeJournal.events(forged), entries: forged, rule: Self.rule).count == 1)
+        // Nor one from another user, nor one with no cgroup, nor a forged ack.
+        let other = Self.read([Self.own("request", kind: "start", uid: "1001", at: Self.start.addingTimeInterval(-5)), Self.job("start", at: Self.start)])
+        #expect(NodeJournal.unexplained(starts: NodeJournal.events(other), entries: other, rule: Self.rule).count == 1)
+        let ack = Self.read([Self.job("start", at: Self.start), Self.own("ack", cgroup: unit, at: Self.start.addingTimeInterval(9))])
+        #expect(!NodeJournal.acknowledged(NodeJournal.events(ack)[0], entries: ack, rule: Self.rule))
+        // A field the entry names `_UID` or `_SYSTEMD_CGROUP` is journald's, so a sender can't write it.
+        #expect(entriesNameNoTrustedField())
+    }
+
+    /// The entries the command line writes can't carry journald's trusted fields (`Platform.Journal.encode` refuses
+    /// them), so a forged `_SYSTEMD_CGROUP` never reaches the journal from it.
+    private func entriesNameNoTrustedField() -> Bool {
+        NodeJournal.entry(event: "request", action: "a", kind: "start").allSatisfy { !$0.name.hasPrefix("_") }
+    }
+
+    @Test func anAckSurvivesAServerRestart() throws {
+        // The ack is the journal's, read afresh by each command line: a server that restarted (a new epoch, nothing
+        // in its memory) changes nothing.
+        let lines = [Self.job("start", at: Self.start), Self.own("ack", at: Self.start.addingTimeInterval(60)),
+                     Self.line(["MESSAGE": "vibeswitcher-host: server child pid 9 ended after 300 s: exit 1; started again in 1 s"], at: Self.start.addingTimeInterval(120))]
+        for _ in 0..<2 {
+            let entries = Self.read(lines)
+            let shown = NodeJournal.unexplained(starts: NodeJournal.events(entries), entries: entries, rule: Self.rule)
+                .filter { !NodeJournal.acknowledged($0, entries: entries, rule: Self.rule) }
+            // The start is acknowledged; the server restart after the ack is still shown.
+            #expect(shown == [.init(kind: .serverRestart, at: Self.start.addingTimeInterval(120))])
+        }
+    }
+
+    @Test func aJournalEntryFromANonTerminalCgroupIsMarkedInStatus() {
+        let entries = Self.read([Self.own("request", kind: "stop", action: "a1", at: Self.start),
+                                 Self.own("request", kind: "start", action: "a2", cgroup: "/system.slice/cron.service", at: Self.start)])
+        let marks = NodeJournal.marks(accepted: [("stop", "a1", Self.start), ("start", "a2", Self.start)], entries: entries, rule: Self.rule)
+        #expect(marks.count == 1, "\(marks)")
+        #expect(marks.first?.contains("/system.slice/cron.service, not a terminal's") == true, "\(marks)")
+    }
+
+    @Test func anAcceptedRequestWithNoJournalEntryIsMarked() {
+        let entries = Self.read([Self.own("request", kind: "start", action: "a1", at: Self.start)])
+        let marks = NodeJournal.marks(accepted: [("start", "a1", Self.start), ("stop", "a9", Self.start)], entries: entries, rule: Self.rule)
+        #expect(marks.count == 1, "\(marks)")
+        #expect(marks.first?.contains("accepted stop") == true && marks.first?.contains("a9") == true, "\(marks)")
+        // What the command line writes for a request carries ids and hashes only.
+        let fields = NodeJournal.entry(event: "request", action: "a1", kind: "answer", digest: String(repeating: "f", count: 64), epoch: "e")
+        #expect(Set(fields.map(\.name)) == ["SYSLOG_IDENTIFIER", "MESSAGE", "VIBESWITCHER_EVENT", "VIBESWITCHER_ACTION", "VIBESWITCHER_KIND",
+                                             "VIBESWITCHER_DIGEST", "VIBESWITCHER_EPOCH"])
+        #expect(fields.first { $0.name == "MESSAGE" }?.value == "vibeswitcher request answer")
+    }
+}

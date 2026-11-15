@@ -11,7 +11,7 @@ struct PlatformLintTests {
 
     /// The portable targets' folders.
     static let folders = ["Sources/VibeCore", "Sources/VibeHost", "Sources/vibeswitcher-host", "Sources/vibeswitcher-hook",
-                          "Sources/vibeswitcher-mcp", "Sources/VibeNode", "Sources/vibeswitcher-cli"]
+                          "Sources/vibeswitcher-mcp", "Sources/VibeNode", "Sources/vibeswitcher-cli", "Sources/vibeswitcher-server"]
     /// The Mac's own files, each wrapped whole in `#if canImport(Darwin)`.
     static let macOnly = "Sources/VibeCore/MacOnly/"
     /// VibeCore's one file of exported imports: the platform layer, and what a system names differently.
@@ -239,9 +239,15 @@ struct PlatformLintTests {
     /// What breaks the rule in a main's `text`, one line each: its first top-level statement that is neither an
     /// import nor a mode dispatch isn't `signal(SIGPIPE, …)`; a dispatch that settles SIGPIPE does so after it has
     /// written; a dispatch that is a hook (it reads an agent's event on stdin and answers on stdout) doesn't settle it.
-    static func sigpipeProblems(_ text: String) -> [String] {
+    static func sigpipeProblems(_ text: String, hardening: [String] = []) -> [String] {
         var problems: [String] = []
+        var hardened = 0
         for statement in topLevelStatements(text) where !statement[0].hasPrefix("import ") {
+            // The server's hardening statements, each in its place in their canonical order: none of them writes.
+            if statement.count == 1, hardened < hardening.count, statement[0] == hardening[hardened] {
+                hardened += 1
+                continue
+            }
             guard isDispatch(statement) else {
                 if !statement[0].hasPrefix("signal(SIGPIPE") {
                     problems.append("the first statement after the mode dispatches isn't signal(SIGPIPE, …): \(statement[0])")
@@ -270,11 +276,37 @@ struct PlatformLintTests {
     @Test func everyExecutableSettlesSIGPIPEBeforeItWrites() throws {
         let mains = Self.executables()
         #expect(mains.contains("Sources/vibeswitcher-hook/main.swift") && mains.contains("Sources/vibeswitcher-mcp/main.swift")
-                && mains.contains("Sources/vibeswitcher-host/main.swift"), "\(mains)")
+                && mains.contains("Sources/vibeswitcher-host/main.swift") && mains.contains("Sources/vibeswitcher-server/main.swift"), "\(mains)")
         for main in mains {
             let text = try String(contentsOf: Self.repo.appendingPathComponent(main), encoding: .utf8)
-            #expect(Self.sigpipeProblems(text) == [], "\(main)")
+            #expect(Self.sigpipeProblems(text, hardening: main == "Sources/vibeswitcher-server/main.swift" ? Self.serverHardening : []) == [], "\(main)")
         }
+    }
+
+    /// The server's first statements before SIGPIPE (the engine plan's E1, canonical, in this order; the traced
+    /// server's `_exit(75)` between the second and the third is a mode dispatch): none of them writes.
+    static let serverHardening = ["Platform.ProcessSelf.closeInheritedImage()", "_ = Platform.ProcessSelf.harden()",
+                                  "ServerStart.markConnector(CommandLine.arguments)"]
+
+    /// The server's hardening statements pass only as listed and in their order; anything else first still fails.
+    @Test func theServersHardeningStatementsComeFirstInTheirOrder() {
+        let main = """
+            import Foundation
+            Platform.ProcessSelf.closeInheritedImage()
+            _ = Platform.ProcessSelf.harden()
+            if ServerStart.isTraced { _exit(75) }
+            ServerStart.markConnector(CommandLine.arguments)
+            signal(SIGPIPE, SIG_IGN)
+
+            """
+        #expect(Self.sigpipeProblems(main, hardening: Self.serverHardening) == [])
+        #expect(Self.sigpipeProblems(main).count == 1)
+        let swapped = main.replacingOccurrences(of: "Platform.ProcessSelf.closeInheritedImage()\n_ = Platform.ProcessSelf.harden()",
+                                                with: "_ = Platform.ProcessSelf.harden()\nPlatform.ProcessSelf.closeInheritedImage()")
+        #expect(swapped != main)
+        #expect(Self.sigpipeProblems(swapped, hardening: Self.serverHardening).count == 1)
+        #expect(Self.sigpipeProblems(main.replacingOccurrences(of: "_ = Platform.ProcessSelf.harden()", with: "print(1)"),
+                                     hardening: Self.serverHardening).count == 1)
     }
 
     /// The rule on mains of its own: what passes, and each way to break it.

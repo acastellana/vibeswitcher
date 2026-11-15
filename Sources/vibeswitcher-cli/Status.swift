@@ -2,25 +2,39 @@ import Foundation
 import VibeCore
 import VibeNode
 
-/// `vibeswitcher status [--json]`: the agent sessions on this machine (`LocalSessions`), one line each: terminal,
-/// agent, folder, status, since when. It reads the files directly, as a local probe; stage 3's protocol client
-/// replaces it, and its output may change until then (the JSON's `format`, `node` and `id` are there from the start).
+/// `vibeswitcher status [--json]`: the node as its server sees it (sessions, leads, cards, the user's-voice requests
+/// it accepted, its notices, the host's notes), with what the command line reads itself (the engine plan's E1,
+/// EN-D15): the machine's facts (`NodeFacts`, the standing plain-mode line first) and the journal (starts, stops and
+/// server restarts nothing explains, until acknowledged; accepted requests the journal has no entry for; entries from
+/// a cgroup that isn't a terminal's). With no node it exits 69, naming `status --probe`.
+///
+/// `vibeswitcher status --probe [--json]`: stage 1's local read, without the server: the agent sessions on this machine
+/// (`LocalSessions`), one line each: terminal, agent, folder, status, since when.
+///
+/// `vibeswitcher status --ack`: acknowledges what the journal shows (a journal entry the command line writes after the
+/// typed code), never a server request.
 enum StatusCommand {
-    static let usage = "usage: vibeswitcher status [--json]"
+    static let usage = "usage: vibeswitcher status [--json] | status --probe [--json] | status --ack"
 
     /// The JSON form's version.
     static let format = 1
 
     static func run(_ arguments: [String]) -> Int32 {
-        guard arguments.isEmpty || arguments == ["--json"] else {
-            try? FileHandle.standardError.write(contentsOf: Data((usage + "\n").utf8))
-            return 64
-        }
+        let words = Set(arguments)
+        guard words.count == arguments.count, words.isSubset(of: ["--json", "--probe", "--ack"]),
+              !(words.contains("--ack") && words.count > 1) else { return Say.usage(usage) }
+        if words.contains("--probe") { return probe(json: words.contains("--json")) }
+        if words.contains("--ack") { return acknowledge() }
+        return throughServer(json: words.contains("--json"))
+    }
+
+    /// Stage 1's read, as it was.
+    static func probe(json asJSON: Bool) -> Int32 {
         guard let sessions = LocalSessions().read() else {
             try? FileHandle.standardError.write(contentsOf: Data("vibeswitcher: the process table couldn't be read; try again\n".utf8))
             return 1
         }
-        let text = arguments == ["--json"] ? json(sessions) : lines(sessions)
+        let text = asJSON ? json(sessions) : lines(sessions)
         do {
             try FileHandle.standardOutput.write(contentsOf: Data((text + "\n").utf8))
         } catch {
@@ -28,6 +42,103 @@ enum StatusCommand {
         }
         return 0
     }
+
+    static func throughServer(json asJSON: Bool) -> Int32 {
+        let context = NodeContext.current()
+        context.sayScratch()
+        let client: NodeClient
+        switch NodeClient.connect(context) {
+        case .failure(let failure):
+            if case .notRunning = failure {
+                Say.err("vibeswitcher: \(failure.message); `vibeswitcher status --probe` reads this machine's sessions without it")
+                return 69
+            }
+            return Say.failed(failure)
+        case .success(let connected): client = connected
+        }
+        let result: NodeWire.Value
+        switch client.request("status") {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let reply):
+            guard reply.ok, let given = reply.result else { return Say.replyError(reply) }
+            result = given
+        }
+        let facts = context.facts()
+        let journal = journalLines(context, accepted: result["accepted"]?.array ?? [])
+        if asJSON {
+            var report = result.object ?? [:]
+            report["format"] = .int(format)
+            report["facts"] = .array(facts.lines.map(NodeWire.Value.string))
+            report["journal"] = .array(journal.map(NodeWire.Value.string))
+            let data = NodeWire.line(NodeWire.Value.object(report))
+            try? FileHandle.standardOutput.write(contentsOf: data)
+            return 0
+        }
+        var out: [String] = []
+        let server = result["server"], host = result["host"]
+        out.append("node \(inert(result["node"]?.string)), server pid \(server?["pid"]?.int.map(String.init) ?? "?") since \(inert(server?["startedAt"]?.string)), build \(inert(server?["commit"]?.string))")
+        let notes = host?["notes"]
+        out.append("host since \(inert(host?["startedAt"]?.string)) (\(inert(host?["state"]?.string)))"
+                   + (notes?.object != nil ? ", server restarts: \(notes?["serverRestarts"]?.int ?? 0), refused app connections: \(notes?["refusedAppConnections"]?.int ?? 0)" : ""))
+        for path in notes?["replacedPaths"]?.array ?? [] { out.append("the host took back its path \(inert(path.string))") }
+        out += facts.lines
+        out.append("voice rule: \(inert(result["rule"]?["says"]?.string))")
+        let sessions = result["sessions"]?.array ?? []
+        out.append(sessions.isEmpty ? "No agent sessions." : "sessions:")
+        for session in sessions {
+            out.append("  \(inert(session["terminal"]?.string))  \(inert(session["agent"]?.string))  \(inert(session["cwd"]?.string))  \(inert(session["status"]?.string))")
+        }
+        let leads = result["leads"]?.array ?? []
+        out.append("leads: \(leads.count)")
+        for accepted in result["accepted"]?.array ?? [] {
+            out.append("accepted: \(inert(accepted["kind"]?.string)) at \(inert(accepted["at"]?.string)) from pid \(accepted["pid"]?.int.map(String.init) ?? "?") in \(inert(accepted["cgroup"]?.string)): \(inert(accepted["commandLine"]?.array?.compactMap(\.string).joined(separator: " ")))")
+        }
+        for notice in result["notices"]?.array ?? [] { out.append("notice: \(inert(notice.string))") }
+        out += journal
+        Say.out(out.joined(separator: "\n"))
+        return 0
+    }
+
+    /// What the journal says that the user should see (EN-D15): unexplained starts, stops and server restarts not yet
+    /// acknowledged, how the unit's last process ended, and `NodeJournal.marks`.
+    static func journalLines(_ context: NodeContext, accepted: [NodeWire.Value]) -> [String] {
+        let entries: [JournalEntry]
+        switch context.journalEntries() {
+        case .failure(let failure): return ["journal: \(failure.reason)"]
+        case .success(let read): entries = read
+        }
+        let rule = context.journalRule
+        var lines: [String] = []
+        if let state = context.unitState(), let result = state.result {
+            lines.append("the node's unit last ended: \(inert(result)), status \(inert(state.execMainStatus)), started \(inert(state.execMainStartTimestamp))")
+        }
+        for event in NodeJournal.unexplained(starts: NodeJournal.events(entries), entries: entries, rule: rule)
+            where !NodeJournal.acknowledged(event, entries: entries, rule: rule) {
+            lines.append("journal: a \(event.kind.rawValue) at \(NodeWire.dateText(event.at)) that no `vibeswitcher start` or `stop` explains (`vibeswitcher status --ack` once read)")
+        }
+        let requests = accepted.map { ($0["kind"]?.string ?? "?", $0["action"]?.string, $0["at"]?.string.flatMap(NodeWire.date)) }
+        lines += NodeJournal.marks(accepted: requests, entries: entries, rule: rule).map { "journal: " + $0 }
+        return lines
+    }
+
+    /// `status --ack`: the journal entry that clears what it shows, after the typed code.
+    static func acknowledge() -> Int32 {
+        let context = NodeContext.current()
+        context.sayScratch()
+        guard context.journalSocket != nil else { return Say.refused(NodeContext.noStandIn) }
+        let action = UUID().uuidString.lowercased()
+        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: "This acknowledges the starts, stops and restarts the journal shows.")
+        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        guard context.writeJournal(NodeJournal.entry(event: "ack", action: action)) else {
+            Say.err("vibeswitcher: the acknowledgment couldn't be written to the journal")
+            return 1
+        }
+        Say.out("acknowledged")
+        return 0
+    }
+
+    /// Untrusted text for the terminal (`ConfigSeal.inert`, no length limit).
+    static func inert(_ text: String?) -> String { ConfigSeal.inert(text ?? "?", limit: .max) }
 
     /// `{"format":1,"node":"local","sessions":[{"id","terminal","agent","cwd","status","since"}]}`: `cwd` null when
     /// it isn't known, `since` an ISO 8601 date.

@@ -60,16 +60,17 @@ final class FakeAgent {
     }
 }
 
-/// `vibeswitcher status`: the sessions on this machine, from the process table and the hooks' state files, run as
-/// built (`vibeswitcher-cli`) in a scratch home. Agents in other terminals on this machine (a real `claude` the user
+/// `vibeswitcher status --probe`: the sessions on this machine, from the process table and the hooks' state files, run
+/// as built (`vibeswitcher-cli`) in a scratch home: stage 1's `status`, its assertions kept, now under `--probe` since
+/// `status` itself goes through the node's server (the engine's E1, `ServerTests.statusThroughTheServerListsWhatTheProbeLists`). Agents in other terminals on this machine (a real `claude` the user
 /// runs) are listed too, as the design says: each test reads only its own fake's terminal.
 struct StatusCommandTests {
     private let scratch = Scratch()
 
-    /// The parsed `status --json`, and the one session on `tty` in it.
+    /// The parsed `status --probe --json`, and the one session on `tty` in it.
     private func json(_ environment: [String: String], tty: String) async throws -> (report: [String: Any], session: [String: Any]) {
-        let ran = try await run(commandLine, ["status", "--json"], environment: environment)
-        #expect(ran.status == 0, "status --json: \(ran.errors)")
+        let ran = try await run(commandLine, ["status", "--probe", "--json"], environment: environment)
+        #expect(ran.status == 0, "status --probe --json: \(ran.errors)")
         let report = try #require(try JSONSerialization.jsonObject(with: Data(ran.output.utf8)) as? [String: Any], "\(ran.output)")
         let sessions = try #require(report["sessions"] as? [[String: Any]], "\(ran.output)")
         let mine = sessions.filter { $0["terminal"] as? String == tty }
@@ -92,7 +93,7 @@ struct StatusCommandTests {
         try state.save(to: states.appendingPathComponent("\(fake.tty).json"))
 
         let (_, session) = try await json(environment, tty: fake.tty)
-        let plain = try await run(commandLine, ["status"], environment: environment)
+        let plain = try await run(commandLine, ["status", "--probe"], environment: environment)
         await fake.stop()
 
         #expect(session["status"] as? String == "needs-you")

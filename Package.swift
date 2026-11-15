@@ -39,9 +39,13 @@ let portableTargets: [Target] = [
     .target(name: "VibeNode", dependencies: ["VibeCore"]),
     // The command line, installed as `vibeswitcher` (a folder named so would be the app's on the Mac).
     .executableTarget(name: "vibeswitcher-cli", dependencies: ["VibeNode", "VibeCore"]),
+    // The node's server: the session host's server child, which runs the engine (the engine plan's E1).
+    .executableTarget(name: "vibeswitcher-server", dependencies: ["VibeNode", "VibeCore"]),
     // Depends on the host too: its scratch hosts (`NodeTestHost`) run in the test process and start their sessions
-    // through the built host (`--pty-exec`), as VibeHostTests' do.
-    .testTarget(name: "VibeNodeTests", dependencies: ["VibeNode", "VibeCore", "VibeHost", "vibeswitcher-host"],
+    // through the built host (`--pty-exec`), as VibeHostTests' do; and on the server, the command line, the tool server
+    // and the hook, so they are built for a process-started scratch node (`ScratchNode`).
+    .testTarget(name: "VibeNodeTests", dependencies: ["VibeNode", "VibeCore", "VibeHost", "vibeswitcher-host", "vibeswitcher-server",
+                                                      "vibeswitcher-cli", "vibeswitcher-mcp", "vibeswitcher-hook"],
                 swiftSettings: testSettings),
     // The session host's internals: PTYs, replay buffers, the socket server (stage 2).
     .target(name: "VibeHost", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm"), crypto]),
@@ -102,8 +106,11 @@ let package = Package(
         .target(name: "VibeNode", dependencies: ["VibeCore"]),
         // The command line, installed as `vibeswitcher` (a folder named so would be the app's on the Mac).
         .executableTarget(name: "vibeswitcher-cli", dependencies: ["VibeNode", "VibeCore"]),
-        // Depends on the host too: as the Linux half says.
-        .testTarget(name: "VibeNodeTests", dependencies: ["VibeNode", "VibeCore", "VibeHost", "vibeswitcher-host"],
+        // The node's server: as the Linux half says.
+        .executableTarget(name: "vibeswitcher-server", dependencies: ["VibeNode", "VibeCore"]),
+        // Depends on the host, the server, the command line, the tool server and the hook too: as the Linux half says.
+        .testTarget(name: "VibeNodeTests", dependencies: ["VibeNode", "VibeCore", "VibeHost", "vibeswitcher-host", "vibeswitcher-server",
+                                                          "vibeswitcher-cli", "vibeswitcher-mcp", "vibeswitcher-hook"],
                     swiftSettings: testSettings),
         // Depends on the host executable too: sessions are started through it (`--pty-exec`). Fixtures: terminal
         // output captured from scratch programs. MacOnlyTests.txt: as the Linux half says.

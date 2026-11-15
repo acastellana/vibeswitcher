@@ -11,6 +11,10 @@ How to build, test and check changes to VibeSwitcher. The rules for agents worki
 - `Sources/VibeHost`, `Sources/vibeswitcher-host`: the session host.
 - `Sources/vibeswitcher-hook`: the hook binary.
 - `Sources/vibeswitcher-mcp`: the project lead's tool server.
+- `Sources/VibeNode`, `Sources/vibeswitcher-server`, `Sources/vibeswitcher-cli` (version 2): the node's engine, its
+  server (the session host's server child, on `<root>/v2/server.sock`) and the command line, `vibeswitcher`, which
+  goes through the server (`status --probe` reads this machine without it). Their tests start a scratch node as
+  processes (`Tests/VibeNodeTests/ScratchNode.swift`), never the user's.
 - `Web/`: the phone's web app. `Resources/`: Info.plist, entitlements, the app icon, `bin/vs-heavy`.
 - `Tests/`: `VibeCoreTests`, `VibeHostTests`, `VibeSwitcherTests`, and the web tests in `Tests/Web`.
 

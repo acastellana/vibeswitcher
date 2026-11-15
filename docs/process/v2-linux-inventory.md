@@ -415,3 +415,47 @@ host took from the Mac:
   inode's mode, less the umask): `fchmod(fd, 0600)` then `bind` gave a 0600 file under umask 0, 022 and 077; without
   it, 0777 under umask 0. `glibc`'s `fchmodat(…, AT_SYMLINK_NOFOLLOW)` refuses a link (`EOPNOTSUPP`; this kernel has no
   `fchmodat2`, ENOSYS, so glibc 2.39 goes through `O_PATH`).
+
+## The voice rule's scopes (the engine's E1, 2026-11-15, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+What `/proc/<pid>/cgroup` says for each process the voice rule (`VoiceRule`, the security architecture document's S3)
+must tell apart. The layout here is **hybrid**: a unified `0::` line and v1 lines, `name=systemd` among them; the rule
+reads both, and each that is there must pass. Every process measured so far gave the same lines:
+
+```
+29:name=systemd:/init.scope
+26:pids:/init.scope
+20:devices:/init.scope
+19:memory:/init.scope
+(the other v1 lines: /)
+0::/init.scope
+```
+
+| Process | Lines | Source |
+| --- | --- | --- |
+| the agent's own Bash tool's child (a `claude` started by WSL's `/init` relay, its Bash tool's `bash`) | `0::/init.scope`, `name=systemd:/init.scope` | measured by the agent, 2026-11-15 |
+| a scratch host started by a test (`ScratchNode`), its server child (from its sealed copy), and a session's program | `0::/init.scope`, `name=systemd:/init.scope` (the test process's own) | measured by the agent, 2026-11-15 |
+| a shell in a new Windows Terminal tab here (`cat /proc/self/cgroup`) | pending the user's M4 | the bootstrap path's M4 |
+| a `claude` started in that tab, its Bash tool's child | pending the user's M4 | the bootstrap path's M4 |
+| a `systemd-run --user --wait --pipe cat /proc/self/cgroup` | pending the user's M4 (expected under `/user.slice/user-1000.slice/user@1000.service/app.slice/run-u*.service`, which the rule refuses) | the bootstrap path's M4 |
+| whether `journalctl --user` lists the user's own entries (`logger -t vibeswitcher-probe hello; journalctl --user -t vibeswitcher-probe -n 1 --no-pager`), or the command line needs `_UID=` | pending the user's M4 | the bootstrap path's M4 |
+| cron (`/system.slice/cron.service`), at (`/system.slice/atd.service`) | refused | documented fixtures, not measured: no crontab for this account, no `atd` |
+| ssh (`/user.slice/user-<uid>.slice/session-<n>.scope`) | taken | a documented fixture, not measured: no sshd here |
+
+So `VoiceRule.terminalScopes` holds `/init.scope` (measured) and `/user.slice/user-{uid}.slice/session-*.scope`
+(documented); anything else is refused, and so is anything under `user@<uid>.service` or in the node's unit.
+The agent started nothing in the user's systemd manager and read nothing from the user's journal for this.
+
+What this means, and what S3 already says it doesn't promise: **the agent's own Bash tool runs in `/init.scope`, as a
+user's terminal does**, so the cgroup line can't tell the user's own Claude Code from the user; the typed word (EN-D5)
+and the user's deny rules (decision 14) are the guard rails there. A scratch host's children are in the test
+process's scope too: a scratch node's tests give the server their own scope (`--test-user-scopes`), and a session's
+process is refused by the other lines (its ancestry holds the host, its terminal is a session's, its environment
+carries `VIBESWITCHER_SESSION`).
+
+**The M4 follow-up**: each row marked pending gets its measured lines here; a scope the Windows Terminal tab or its
+`claude` shows that isn't `/init.scope` becomes one more `VoiceRule.Scope` row in `VoiceRule.terminalScopes` (one
+line) with a `VoiceRuleTests` case that it is taken; the `systemd-run` line becomes a `VoiceRuleTests` fixture that
+is refused (if it isn't under `user@1000.service`, the rule's first line needs another look before the bootstrap);
+and the journal answer decides whether `NodeContext.journalEntries` adds `_UID=<uid>` to its `journalctl --user`
+matches.

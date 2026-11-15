@@ -501,3 +501,25 @@ extension Platform.Processes.System {
     }
 }
 #endif
+
+#if os(Linux)
+// `/proc/locks` and `/proc/<pid>/cgroup`.
+extension Platform.Processes.System {
+    /// The file's device (split as the kernel's `MAJOR`/`MINOR` do: 12 bits and 20 bits, in glibc's encoding of
+    /// `dev_t`) and inode, then `/proc/locks` read for them.
+    static func lockHolder(path: String) -> pid_t? {
+        var info = stat()
+        guard stat(path, &info) == 0, case .success(let bytes) = contents("/proc/locks") else { return nil }
+        let device = UInt64(info.st_dev)
+        let major = ((device >> 8) & 0xfff) | ((device >> 32) & ~UInt64(0xfff))
+        let minor = (device & 0xff) | ((device >> 12) & ~UInt64(0xff))
+        return Platform.Processes.lockHolder(locks: String(decoding: bytes, as: UTF8.self), major: major, minor: minor,
+                                             inode: UInt64(info.st_ino))
+    }
+
+    static func cgroup(_ pid: pid_t) -> [String]? {
+        guard case .success(let bytes) = contents("/proc/\(pid)/cgroup"), !bytes.isEmpty else { return nil }
+        return String(decoding: bytes, as: UTF8.self).split(separator: "\n").map(String.init)
+    }
+}
+#endif

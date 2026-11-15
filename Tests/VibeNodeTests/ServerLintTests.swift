@@ -8,7 +8,8 @@ import Testing
 /// `Sources/VibeNode` call no `execve` or `execv` (nor their `p`/`e` forms, nor `fexecve`), no
 /// `Platform.Spawn(…).replaceProcess()`, no `HostHandover.exec`, no `BinaryWatch` (which restarts a process in place
 /// when its file changes), and never ask the host for a connection by its path (`viaConnector: false`): its
-/// connections are its connector's. Comments and string literals don't count. It passes on nothing until the engine's E1 creates the server.
+/// connections are its connector's. Comments and string literals don't count. Since the engine's E1 it reads the server
+/// that exists (`theServerIsThere`).
 struct ServerLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
@@ -73,6 +74,13 @@ struct ServerLintTests {
             }
         }
         return found
+    }
+
+    /// The rule reads real code: the server's main and the engine's server are there.
+    @Test func theServerIsThere() {
+        for file in ["Sources/vibeswitcher-server/main.swift", "Sources/VibeNode/Server/ServerStart.swift", "Sources/VibeNode/Server/NodeServer.swift"] {
+            #expect(FileManager.default.fileExists(atPath: Self.repo.appendingPathComponent(file).path), "\(file)")
+        }
     }
 
     @Test func theServerNeverExecs() throws {

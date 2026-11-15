@@ -256,3 +256,35 @@ extension Platform.Processes {
     /// its pid, `ProcessTable.ancestry`).
     public static func link(_ pid: pid_t) -> Link? { System.link(pid) }
 }
+
+extension Platform.Processes {
+    /// The process holding a lock on the file at `path` (a `flock` or a POSIX lock, as `/proc/locks` lists it), found
+    /// by the file's device and inode, never by its name: a file renamed over `path` is another file, and its holder
+    /// another process. Linux: the first holder `/proc/locks` names with a pid (an open file description's lock, which
+    /// names none, and a waiter, are passed over); nil when nothing holds one, the file isn't there, or the list can't
+    /// be read. The Mac: nil (it has no such list). The engine plan's EN-D8: the command line's check of a scratch
+    /// node, whose server must be the child of the host holding `<root>/scratch-host.lock`.
+    public static func lockHolder(path: String) -> pid_t? { System.lockHolder(path: path) }
+
+    /// `lockHolder`'s reading of a `/proc/locks` text: the pid of the first lock (not a waiter, `->`) on the file of
+    /// device `major:minor` and inode `inode`, whose pid is a number above 0. Each line is
+    /// `N: KIND ADVISORY|MANDATORY READ|WRITE PID MAJOR:MINOR:INODE START END`, the device's two numbers in hex.
+    public static func lockHolder(locks: String, major: UInt64, minor: UInt64, inode: UInt64) -> pid_t? {
+        for line in locks.split(separator: "\n") {
+            let words = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+            guard words.count >= 6, words[1] != "->" else { continue }
+            let file = words[5].split(separator: ":").map(String.init)
+            guard file.count == 3, UInt64(file[0], radix: 16) == major, UInt64(file[1], radix: 16) == minor,
+                  UInt64(file[2]) == inode, let pid = pid_t(words[4]), pid > 0 else { continue }
+            return pid
+        }
+        return nil
+    }
+
+    /// The cgroup lines of the process `pid` (`/proc/<pid>/cgroup`, mode 0444, readable for a non-dumpable process
+    /// too): `0::/init.scope` on the unified hierarchy, and on a hybrid one also each v1 line such as
+    /// `1:name=systemd:/init.scope`. nil when they can't be read (gone, a thread's number, no such file), and on the
+    /// Mac, which has no cgroups. The engine plan's voice rule (E1) reads them; a process of the user can't move
+    /// itself out of the user's manager's tree.
+    public static func cgroup(_ pid: pid_t) -> [String]? { pid > 0 ? System.cgroup(pid) : nil }
+}

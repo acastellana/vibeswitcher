@@ -192,8 +192,9 @@ private final class StatusWatch {
     /// One poll: the status now (nil when `status` doesn't list the terminal), noted.
     private func look() async throws -> String? {
         if let state = try? String(contentsOf: stateFile, encoding: .utf8), state != states.last { states.append(state) }
-        let ran = try await run(commandLine, ["status", "--json"], environment: environment)
-        #expect(ran.status == 0, "status --json: \(ran.errors)")
+        // Stage 1's local read: `status` itself goes through a node's server since the engine's E1.
+        let ran = try await run(commandLine, ["status", "--probe", "--json"], environment: environment)
+        #expect(ran.status == 0, "status --probe --json: \(ran.errors)")
         let report = try JSONSerialization.jsonObject(with: Data(ran.output.utf8)) as? [String: Any]
         let sessions = report?["sessions"] as? [[String: Any]] ?? []
         let status = sessions.first { $0["terminal"] as? String == tty }?["status"] as? String

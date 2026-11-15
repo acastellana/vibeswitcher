@@ -303,3 +303,13 @@ extension Platform.Processes.System {
     static func names(_ token: Platform.PeerToken, _ link: Platform.Processes.Link) -> Bool { false }
 }
 #endif
+
+#if canImport(Darwin)
+extension Platform.Processes.System {
+    /// nil: the Mac has no `/proc/locks`.
+    static func lockHolder(path: String) -> pid_t? { nil }
+
+    /// nil: the Mac has no cgroups.
+    static func cgroup(_ pid: pid_t) -> [String]? { nil }
+}
+#endif

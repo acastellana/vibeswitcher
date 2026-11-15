@@ -13,9 +13,9 @@ import Testing
 struct CloseOnExecLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
-    /// What the rule covers: folders, and single files, relative to the repository. The server's folder once it exists.
+    /// What the rule covers: folders, and single files, relative to the repository: the server and the engine too (E1).
     static let covered = ["Sources/VibeHost", "Sources/vibeswitcher-host", "Sources/VibeCore/UnixSocket.swift",
-                          "Sources/vibeswitcher-server", "Sources/VibePlatform"]
+                          "Sources/vibeswitcher-server", "Sources/VibeNode", "Sources/VibePlatform"]
 
     /// Where every spawn names what it keeps.
     static let spawning = ["Sources/VibeHost", "Sources/vibeswitcher-host"]

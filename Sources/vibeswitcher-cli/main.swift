@@ -1,6 +1,7 @@
 // The command line, installed as `vibeswitcher` (built as `vibeswitcher-cli`: a folder named `vibeswitcher` would be
 // the app's `Sources/VibeSwitcher` on the Mac's case-insensitive file system). In stage 1 its commands read and write
-// local files, as a probe: `status` and `hooks`. From the engine on, every command goes through the node's server.
+// local files, as a probe: `status` and `hooks`. From the engine on, every command goes through the node's server
+// (`status --probe` keeps stage 1's local read).
 import Foundation
 import VibeCore
 import VibeNode
@@ -10,7 +11,9 @@ import VibeNode
 signal(SIGPIPE, SIG_IGN)
 
 let usage = """
-    usage: vibeswitcher status [--json]
+    usage: vibeswitcher status [--json] | status --probe [--json] | status --ack
+           vibeswitcher start [--interop-is-on]
+           vibeswitcher stop
            vibeswitcher hooks install|remove [--agent claude|codex]
     """
 
@@ -18,6 +21,10 @@ let words = Array(CommandLine.arguments.dropFirst())
 switch words.first {
 case "status":
     exit(StatusCommand.run(Array(words.dropFirst())))
+case "start":
+    exit(StartCommand.run(Array(words.dropFirst())))
+case "stop":
+    exit(StopCommand.run(Array(words.dropFirst())))
 case "hooks":
     exit(HooksCommand.run(Array(words.dropFirst())))
 case "help", "-h", "--help":
