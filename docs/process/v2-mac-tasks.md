@@ -62,6 +62,17 @@ that two pushes haven't explained comes here too, with the experiment that will 
   main's for the same folder.
 - **`a5499162`**: the config seal hashes a big named file's contents too where ctime is coarse: Linux only
   (`Platform.Files.changeTimeIsCoarse` is false on the Mac). Check: a seal written by main still verifies.
+- **`6da32dd2`** (stage 2 Task 10b): every role's launch (the lead, workers and verifiers) names
+  `--permission-mode auto` on both systems (`LeadLaunch.prepare`'s `LinuxLaunch.permissionMode(command:)`), unless the
+  project's Claude command names a mode itself (`--permission-mode x`, `--permission-mode=x`,
+  `--dangerously-skip-permissions`), which it keeps. On main a role's launch named no mode, so Claude Code's own
+  default (auto mode since 2.1.284, measured on Linux in 2.1.323) or the user's `permissions.defaultMode` decided it;
+  now a `defaultMode` in the user's settings no longer reaches a role. The tests
+  (`LeadLaunchTests.eachRoleIsLaunchedInAutoModeByName`, `aProjectsOwnPermissionModeIsKept`) run on the hosted Mac,
+  which has no real Claude Code. Check on a real Mac: the Claude Code installed there accepts `--permission-mode auto`
+  (one older than auto mode would refuse every role's launch); a role started where `~/.claude/settings.json` sets a
+  `defaultMode` (`plan`, `acceptEdits`, `manual`) runs in auto mode; the lead's, workers' and verifiers' approvals
+  behave as they do on main.
 
 ## What `v2` found on the Mac and doesn't change
 
