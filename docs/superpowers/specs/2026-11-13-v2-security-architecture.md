@@ -464,16 +464,21 @@ counting as "not the user's voice"**:
 - that isn't under a `BranchCode` runner.
 
 The server asks the host for the live sessions' programs and terminals (it is the app) and reads the rest from `/proc`.
-Without a user systemd (the fallback start), there is no cgroup to tell by, the rule is the weaker four lines, and
-`status` says so.
+Without a user systemd (the fallback start), there is no cgroup to tell by: the rule is the weaker one, the other four
+lines and a state change only from a peer with a controlling terminal (the call below), and `status` says so.
 
 **(call, 2026-11-15)** **Which rule is fixed once, at the server's start, from the server's own cgroup**
 (`/proc/self/cgroup`) and its own arguments, never from what a peer sends or a file a session can write or remove:
 inside the node's unit, the cgroup rule; inside the user's manager in another unit (`systemd-run --user`, a unit not
 the node's), the cgroup rule too, because the server's sessions are in the manager with it and the rule refuses them;
-the weaker rule only where no user manager runs the server. A session can't move the server out of the node's unit
-without restarting the node into a host of its own, which is T3's route (S11 item 3), and on the user's node the
-command line refuses a listener outside the node's unit (below) before any request.
+the weaker rule only from a cgroup the server read that names no user manager. A session can move the host within
+the user manager's delegated subtree and have the server restarted there (the host restarts it): the path still names
+the manager, so the rule is the cgroup rule. It can also make that path unreadable (a chain of cgroups past `PATH_MAX`
+there: `/proc/self/cgroup` then fails with ENAMETOOLONG), so **(call, 2026-11-15, review)** a server whose own cgroup
+can't be read (on Linux) is on the closed rule: no peer is the user's voice until the node restarts, and `status`
+says so; that read failing never chooses the weaker rule. A session leaves the manager only by restarting the node
+into a host of its own, which is T3's route (S11 item 3), and on the user's node the command line refuses a listener
+outside the node's unit (below) before any request.
 
 **(call, 2026-11-15)** **Under the weaker rule a state change needs a controlling terminal.** Without the cgroup line, a
 session's process that double-forks out of the host's tree, drops its terminal (`setsid`) and unsets
@@ -482,14 +487,16 @@ own action id (`stop`, `lead`: EN-D5's "own" code), so it checks the one fact th
 rule, a request that changes state (every user's-voice kind but `start`, `config held` and `base show`, which change
 nothing and ask no typed word; a kind added later counts as changing state) is refused, as `voice`, from a peer with no
 controlling terminal, or one that can't be read; the terminal must still be no session's. That was not already
-required: the command line asks the typed code on its terminal, but the server took a state change from a peer with
+required: the command line asks the typed code on its controlling terminal (`/dev/tty` alone: **(call, 2026-11-15,
+review)** a terminal on stdin that isn't the controlling one, as under `setsid`, is refused as no terminal, so the
+command line asks no code the server would then refuse), but the server took a state change from a peer with
 none. Kept a guard rail, not a lock: a process that makes itself a terminal (`script`) passes, as it passes the typed
 word. The cgroup rule doesn't ask it: there the cgroup refuses the escaped process, and a peer with no terminal in a
 terminal's scope is the user's.
 
 **(call, new)** **A state-changing request asks for the user's hands.** The command line shows what the request will
-do (S7's lists, the answer's card) and asks for a word typed on its controlling terminal; with no terminal on stdin it
-refuses, saying why. An agent's Bash tool has none (S1); `script` gives it one, so this is a guard rail against the
+do (S7's lists, the answer's card) and asks for a word typed on its controlling terminal; with none (no `/dev/tty`,
+even with a terminal on stdin) it refuses, saying why. An agent's Bash tool has none (S1); `script` gives it one, so this is a guard rail against the
 user's own Claude Code acting on text it read, not a lock. The user also puts deny rules for these subcommands in the
 user's own Claude Code settings (decision 14).
 
@@ -592,7 +599,10 @@ from E1's security follow-ups (2026-11-15): `NodeJournalTests.aForgedRequestEntr
 `NodeJournalTests.aRequestEntryCountsOnlyForTheServersEpoch` (only the user's entries record a request),
 `VoiceRuleTests.theRuleIsFixedOnceAtTheServersStartFromItsOwnCgroup`,
 `VoiceRuleTests.underTheWeakerRuleAStateChangeNeedsAControllingTerminal`,
-`RequestsTests.underTheWeakerRuleAStateChangeFromAPeerWithNoTerminalIsRefused` (the weaker rule, pinned). The
+`RequestsTests.underTheWeakerRuleAStateChangeFromAPeerWithNoTerminalIsRefused` (the weaker rule, pinned); and from
+their review: `VoiceRuleTests.anUnreadOwnCgroupClosesTheRule`,
+`RequestsTests.underTheClosedRuleNoStateChangeIsTakenAndStatusSaysWhy`,
+`StartCommandTests.aTerminalOnStdinThatIsntTheControllingOneIsNotAskedOn`. The
 scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (a Windows
 Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. The engine's E4:
 `LeadStartTests.aSessionsProcessCannotStartALead`, `LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`,

@@ -134,7 +134,10 @@ struct VoiceRuleTests {
         #expect(VoiceRule.at(start: ["0::/system.slice/vibeswitcher-node.service"], testScopes: nil, uid: Self.uid).mode == .weaker)
         #expect(VoiceRule.at(start: ["0::/user.slice/user-1001.slice/user@1001.service/app.slice/vibeswitcher-node.service"], testScopes: nil, uid: Self.uid).mode == .weaker)
         #expect(VoiceRule.at(start: Self.hybrid("/init.scope"), testScopes: nil, uid: Self.uid).mode == .weaker)
-        #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid).mode == .weaker)
+        // Its own cgroup unread where the system has cgroups: closed, never the weaker rule (`anUnreadOwnCgroupClosesTheRule`).
+        #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid, cgroups: true).mode == .closed)
+        // Read, and naming neither hierarchy the rule reads (cgroup v1 with no systemd): no user manager, the weaker rule.
+        #expect(VoiceRule.at(start: ["26:pids:/", "15:cpuset:/"], testScopes: nil, uid: Self.uid, cgroups: true).mode == .weaker)
         // Where the user's manager runs the server (another unit than the node's: `systemd-run --user`, a unit of a
         // worker's), the cgroup tells: the systemd rule, never the weaker one. Its sessions are in the user's manager
         // with it, so the rule refuses them.
@@ -178,25 +181,53 @@ struct VoiceRuleTests {
         #expect(!requests.contains("var rule"))
     }
 
+    /// A session can make the server's own cgroup read fail (in the user manager's delegated subtree, a chain of
+    /// cgroups whose path is past `PATH_MAX`: `/proc/<pid>/cgroup` then fails with ENAMETOOLONG; the host moved there,
+    /// the server killed, and the host's restart of it inherits the path). That read failing must not choose the
+    /// weaker rule: the rule is closed, every peer refused, and `status` says so.
+    @Test func anUnreadOwnCgroupClosesTheRule() {
+        for unread in [nil, [String]()] as [[String]?] {
+            let closed = VoiceRule.at(start: unread, testScopes: nil, uid: Self.uid, cgroups: true)
+            #expect(closed.mode == .closed && closed.scopes.isEmpty, "\(String(describing: unread)): \(closed)")
+            #expect(closed.says.contains("closed") && closed.says.contains("couldn't be read"), "\(closed.says)")
+            // The peer every other rule takes, and the escaped one the weaker rule's four lines pass, are refused.
+            #expect(Self.judged(Self.peer(), rule: closed) == .notUser(VoiceRule.closedRefusal))
+            #expect(Self.judged(Self.peer(cgroup: nil, terminal: .none), rule: closed) == .notUser(VoiceRule.closedRefusal))
+        }
+        // On Linux the server's own read decides it (the default): an unread cgroup there is closed.
+        #if os(Linux)
+        #expect(VoiceRule.systemHasCgroups)
+        #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid).mode == .closed)
+        #endif
+        // A system with no cgroups at all (the Mac's scratch nodes) has no user manager to tell by: the weaker rule.
+        #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid, cgroups: false).mode == .weaker)
+        // A scratch host's test scopes still give their cgroup rule.
+        #expect(VoiceRule.at(start: nil, testScopes: ["/test.scope"], uid: Self.uid, cgroups: true).mode == .systemd)
+    }
+
     @Test func underTheWeakerRuleAStateChangeNeedsAControllingTerminal() {
-        let weaker = VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid)
+        let weaker = VoiceRule.at(start: Self.hybrid("/init.scope"), testScopes: nil, uid: Self.uid)
+        #expect(weaker.mode == .weaker)
         #expect(weaker.says.contains("a state change needs a controlling terminal"), "\(weaker.says)")
         // An escaped session's process: out of the host's tree, no terminal, no marker. The four lines pass it.
         let escaped = Self.peer(cgroup: nil, ancestry: [.init(pid: 900, startTicks: 5), .init(pid: 1, startTicks: 1)], terminal: .none)
         #expect(Self.judged(escaped, rule: weaker) == .user)
         // A state change from it is refused; with a terminal (no session's) it isn't.
-        for kind in ["stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch"] {
+        // A kind missing from `NodeWire.kinds` needs the user's voice (`Requests.handle`) and so changes state.
+        for kind in ["stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch", "unlisted"] {
             let why = Voice.handsRefusal(escaped, kind: kind, rule: weaker)
             #expect(why?.contains("controlling terminal") == true, "\(kind): \(String(describing: why))")
             #expect(Voice.handsRefusal(Self.peer(cgroup: nil, terminal: .named("ttypts0")), kind: kind, rule: weaker) == nil, "\(kind)")
             #expect(Voice.handsRefusal(Self.peer(cgroup: nil, terminal: .unreadable), kind: kind, rule: weaker) != nil, "\(kind)")
         }
         // What changes nothing (no typed word), the reads and the lead's tool server's kinds aren't asked it.
-        for kind in ["start", "config.held", "base.show", "status", "questions", "question.post", "unlisted"] {
+        for kind in ["start", "config.held", "base.show", "status", "questions", "question.post"] {
             #expect(Voice.handsRefusal(escaped, kind: kind, rule: weaker) == nil, "\(kind)")
         }
         // Every user's-voice kind is one or the other: a kind added later changes state unless listed as not.
         #expect(NodeWire.kinds.filter { $0.value == .user }.keys.allSatisfy { NodeWire.changesState($0) != NodeWire.changesNothing.contains($0) })
+        #expect(NodeWire.changesState("unlisted") && NodeWire.changesState("e9.later"))
+        #expect(NodeWire.kinds.filter { $0.value != .user }.keys.allSatisfy { !NodeWire.changesState($0) })
         // The cgroup rule doesn't ask it: there a peer with no terminal is the user's when its cgroup is a terminal's.
         #expect(Voice.handsRefusal(Self.peer(terminal: .none), kind: "stop", rule: Self.systemd) == nil)
     }

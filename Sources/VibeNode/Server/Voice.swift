@@ -17,8 +17,9 @@ public enum Voice: Equatable, Sendable {
     /// - whose controlling terminal is no live session's;
     /// - whose environment has no `VIBESWITCHER_SESSION`;
     /// - that isn't under a `BranchCode` runner.
-    /// A field that can't be read fails the rule.
+    /// A field that can't be read fails the rule. Under the closed rule (the server's own cgroup unread) no peer is.
     public static func judge(_ facts: PeerFacts, live: LiveSessions, rule: VoiceRule) -> Voice {
+        guard rule.mode != .closed else { return .notUser(VoiceRule.closedRefusal) }
         guard let uid = facts.uid else { return .notUser("its user can't be read") }
         guard uid == rule.uid else { return .notUser("it is another user's (uid \(uid))") }
         if rule.mode == .systemd {
@@ -47,7 +48,8 @@ public enum Voice: Equatable, Sendable {
     /// (no cgroup to tell by), a request that changes state (`NodeWire.changesState`) from a peer with no controlling
     /// terminal. A session's process that left the host's tree (a double fork), its terminal (`setsid`) and its marker
     /// passes the four lines; the command line asks every state change's typed code on its controlling terminal
-    /// (EN-D5), so the user's request has one. A process that makes itself one (`script`) still passes: a guard rail,
+    /// (`/dev/tty` alone, EN-D5: a terminal on stdin that isn't the controlling one isn't asked on), so the user's
+    /// request has one. A process that makes itself one (`script`) still passes: a guard rail,
     /// as the typed word is (S3).
     public static func handsRefusal(_ facts: PeerFacts, kind: String, rule: VoiceRule) -> String? {
         guard rule.mode == .weaker, NodeWire.changesState(kind) else { return nil }
@@ -92,7 +94,23 @@ public struct VoiceRule: Equatable, Sendable {
         /// No systemd to tell by: the other four lines only, a state change only from a peer with a controlling
         /// terminal (`Voice.handsRefusal`), and `status` says so.
         case weaker
+        /// The server's own cgroup couldn't be read at its start, on a system that has cgroups: which rule holds can't
+        /// be told, so no peer is the user's (`closedRefusal`) until the node restarts, and `status` says so. A session
+        /// can make that read fail (a cgroup path past `PATH_MAX` in the user manager's delegated subtree, then the
+        /// server restarted into it): failing open there would hand it the weaker rule.
+        case closed
     }
+
+    /// Why every peer is refused under the closed rule.
+    public static let closedRefusal = "the server's own cgroup couldn't be read at its start, so no rule can tell the user's voice: restart the node"
+
+    /// Whether this system has cgroups (Linux): there an unread own cgroup is the closed rule, not the weaker one. The
+    /// Mac has none, so its server (a scratch node's) is on the weaker rule.
+    #if os(Linux)
+    public static let systemHasCgroups = true
+    #else
+    public static let systemHasCgroups = false
+    #endif
 
     /// A cgroup a user's terminal runs in: a path, `*` standing for one path component's characters (no `/`), `{uid}`
     /// for the user's id; and where the row comes from.
@@ -156,12 +174,21 @@ public struct VoiceRule: Equatable, Sendable {
     /// `terminalScopes`; inside the user's manager in another unit (the unified or the systemd line: `systemd-run
     /// --user`, a unit not the node's), the systemd rule too, since the server's sessions are in the manager with it
     /// and the rule refuses them; given `testScopes` (a scratch host's `--server-arg --test-user-scopes=…`, never the
-    /// user's server's), the cgroup rule with those; anything else (no user manager runs the server), the weaker rule.
-    /// No file decides it, and where the user's manager runs the server it is never the weaker rule.
-    public static func at(start ownCgroup: [String]?, testScopes: [String]?, uid: uid_t = getuid()) -> VoiceRule {
+    /// user's server's), the cgroup rule with those; its own cgroup unread where the system has cgroups (`cgroups`),
+    /// the closed rule: no peer is the user's; read, and naming no user manager (or no cgroups at all), the weaker
+    /// rule. No file decides it, and where the user's manager runs the server it is never the weaker rule: a session
+    /// can move the server within the manager's delegated subtree, where its path still names the manager, or make
+    /// its path unreadable, which is the closed rule.
+    public static func at(start ownCgroup: [String]?, testScopes: [String]?, uid: uid_t = getuid(),
+                          cgroups: Bool = systemHasCgroups) -> VoiceRule {
         if let testScopes {
             return VoiceRule(mode: .systemd, scopes: testScopes.map { Scope($0, basis: "a scratch host's test") }, uid: uid,
                              says: "the cgroup rule, on a scratch node's test scopes (\(testScopes.joined(separator: ", ")))")
+        }
+        let ownCgroup = ownCgroup.flatMap { $0.isEmpty ? nil : $0 }
+        if ownCgroup == nil, cgroups {
+            return VoiceRule(mode: .closed, scopes: [], uid: uid,
+                             says: "closed: the server's own cgroup couldn't be read at its start, so no request is taken as the user's voice; restart the node")
         }
         let path = ownCgroup.flatMap { PeerFacts.unifiedPath($0) ?? PeerFacts.systemdPath($0) } ?? ""
         let components = path.split(separator: "/").map(String.init)

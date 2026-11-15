@@ -17,14 +17,15 @@ struct RequestsTests {
     private static let rule = VoiceRule(mode: .weaker, scopes: [], uid: getuid(), says: "a test's")
 
     /// A link on `stub`, started, and the server's requests on it, whose host shutdown is `shutdown`.
-    private func requests(_ stub: StubHost, welcomed: Bool = true, shutdown: @escaping () -> HostEvent? = { .ok }) async throws -> Requests {
+    private func requests(_ stub: StubHost, welcomed: Bool = true, rule: VoiceRule = RequestsTests.rule,
+                          shutdown: @escaping () -> HostEvent? = { .ok }) async throws -> Requests {
         var timing = HostLink.Timing()
         timing.reconnectDelays = [0.05, 0.1, 0.2, 0.5, 1, 2]
         let link = HostLink(dialer: stub.dialer, root: scratch.url("link-root"), queue: DispatchQueue(label: "engine"), timing: timing,
                             sweep: { _ in })
         link.start()
         if welcomed { try #require(await eventually { link.queue.sync { link.state == .connected } }, "the link was never welcomed") }
-        let requests = Requests(link: link, sessions: nil, rule: Self.rule, root: scratch.url("node-root"),
+        let requests = Requests(link: link, sessions: nil, rule: rule, root: scratch.url("node-root"),
                                 hostSocket: stub.path, commit: "test", hostPID: 1)
         requests.shutdown = shutdown
         return requests
@@ -189,5 +190,30 @@ struct RequestsTests {
         let stop = try #require(await ask(requests, "stop"))
         #expect(stop.ok, "\(stop)")
         #expect(asked.value == 1)
+    }
+
+    @Test func underTheClosedRuleNoStateChangeIsTakenAndStatusSaysWhy() async throws {
+        // The server's own cgroup unread at its start (a session can make it so): no peer is the user's, not even one
+        // with a terminal of its own; the reads are still answered and say why.
+        let stub = try StubHost(scratch)
+        defer { stub.quit() }
+        let asked = Locked(0)
+        let closed = VoiceRule.at(start: nil, testScopes: nil, cgroups: true)
+        let requests = try await requests(stub, rule: closed) {
+            asked.mutate { $0 += 1 }
+            return .ok
+        }
+        for kind in ["stop", "start"] {
+            let reply = try #require(await ask(requests, kind))
+            #expect(reply.ok == false && reply.error?.code == NodeWire.Code.voice.rawValue, "\(kind): \(reply)")
+            #expect(reply.error?.message.contains(VoiceRule.closedRefusal) == true, "\(kind): \(reply)")
+        }
+        #expect(asked.value == 0)
+        #expect(requests.queue.sync { requests.stopping } == false)
+        #expect(requests.queue.sync { requests.accepted }.isEmpty)
+        let status = try #require(await ask(requests, "status"))
+        #expect(status.ok, "\(status)")
+        #expect(status.result?["rule"]?["mode"]?.string == "closed", "\(status)")
+        #expect(status.result?["rule"]?["says"]?.string?.contains("couldn't be read") == true, "\(status)")
     }
 }

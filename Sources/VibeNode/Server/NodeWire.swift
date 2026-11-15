@@ -256,8 +256,9 @@ public enum NodeWire {
     /// started; `config.held` and `base.show` make the card the next request takes.
     public static let changesNothing: Set<String> = ["start", "config.held", "base.show"]
 
-    /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included.
-    public static func changesState(_ kind: String) -> Bool { kinds[kind] == .user && !changesNothing.contains(kind) }
+    /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included. A kind
+    /// missing from `kinds` needs the user's voice, as `Requests.handle` reads it, so it changes state too.
+    public static func changesState(_ kind: String) -> Bool { (kinds[kind] ?? .user) == .user && !changesNothing.contains(kind) }
 
     /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6).
     public static let taken = ["status", "start", "stop", "lead", "questions", "answer", "hold", "config.held", "config.accept",

@@ -2,9 +2,11 @@ import Foundation
 import VibeCore
 
 /// The typed word (the engine plan's EN-D5): every state-changing request asks, on the command line's controlling
-/// terminal, for a four-letter code printed with what the request will do. No terminal on stdin and no `/dev/tty`:
-/// refused, saying why. A guard rail against a request run without the user's hands (an agent's Bash tool has no
-/// terminal; `script` gives it one), not a lock.
+/// terminal (`/dev/tty`), for a four-letter code printed with what the request will do. No controlling terminal:
+/// refused, saying why, even with a terminal on stdin (a process `setsid` started, or given a pty it doesn't control),
+/// since the server's weaker rule refuses a state change from a peer with no controlling terminal (S3) and the code
+/// would be typed for nothing. A guard rail against a request run without the user's hands (an agent's Bash tool has
+/// no terminal; `script` gives it one), not a lock.
 enum TypedWord {
     enum Outcome: Equatable {
         case typed
@@ -17,21 +19,15 @@ enum TypedWord {
         switch outcome {
         case .typed: return ""
         case .wrong: return "the code typed isn't the one shown: nothing was done"
-        case .noTerminal: return "this needs a code typed on a terminal (no terminal on stdin and no /dev/tty): nothing was done"
+        case .noTerminal: return "this needs a code typed on a terminal (this process has no controlling terminal: /dev/tty can't be opened): nothing was done"
         }
     }
 
-    /// Shows `what` and `code` on the controlling terminal (`/dev/tty`, else stdin when it is a terminal) and reads
-    /// one line there.
+    /// Shows `what` and `code` on the controlling terminal (`/dev/tty` alone) and reads one line there.
     static func ask(code: String, what: String) -> Outcome {
-        var fd = open("/dev/tty", O_RDWR | O_NOCTTY | O_CLOEXEC)
-        var own = true
-        if fd < 0 {
-            guard isatty(STDIN_FILENO) == 1 else { return .noTerminal }
-            fd = STDIN_FILENO
-            own = false
-        }
-        defer { if own { Sys.close(fd) } }
+        let fd = open("/dev/tty", O_RDWR | O_NOCTTY | O_CLOEXEC)
+        guard fd >= 0 else { return .noTerminal }
+        defer { Sys.close(fd) }
         let prompt = "\(what)\nType \(code) and Enter to go on (anything else stops): "
         _ = prompt.withCString { Sys.write(fd, $0, strlen($0)) }
         var line: [UInt8] = []
