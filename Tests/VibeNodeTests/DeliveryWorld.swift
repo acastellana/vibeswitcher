@@ -23,19 +23,25 @@ final class DeliveryWorld: @unchecked Sendable {
     /// Called with each step as it's recorded, on the engine's queue (a test's hook into the moment).
     let onStep = Locked<(WakeStep) -> Void>({ _ in })
 
-    private init(host: NodeTestHost, fake: FakeClaude.Install, repo: String) {
+    /// The node's session scan on the link (`scan`), started with the world: the agents its fakes are (E7's witness).
+    let sessions: NodeSessions?
+
+    private init(host: NodeTestHost, fake: FakeClaude.Install, repo: String, scan: Bool) {
         self.host = host
         self.fake = fake
         self.repo = repo
         queue.setSpecific(key: key, value: true)
         link = HostLink(dialer: host.dialer, root: host.root, queue: queue)
+        sessions = scan ? NodeSessions(root: host.root, home: host.home.path, queue: queue, link: link) : nil
         var options = LeadEngine.Options()
         options.answersTrust = false
         options.home = host.home.path
-        engine = LeadEngine(root: host.root, nodeRoot: nil, link: link, clock: nil, options: options)
+        engine = LeadEngine(root: host.root, nodeRoot: nil, link: link, clock: nil, sessions: sessions, options: options)
         let (engine, steps, typed, onStep) = (engine, steps, typed, onStep)
         link.onWelcome = { _, _ in engine.welcomed() }
         queue.sync {
+            // The disk watch (E7) reads no real volume unless a case gives it one: a full disk here isn't the case's.
+            engine.freeSpace = { _ in nil }
             engine.wakeStep = { step in
                 steps.mutate { $0.append(step) }
                 onStep.value(step)
@@ -45,13 +51,15 @@ final class DeliveryWorld: @unchecked Sendable {
     }
 
     /// A world on a new scratch host, its link welcomed unless `connect` is false.
-    static func make(_ scratch: Scratch, connect: Bool = true) async throws -> DeliveryWorld {
+    /// `scan`: with the node's session scan (`NodeSessions`) on the link, started once it's welcomed.
+    static func make(_ scratch: Scratch, connect: Bool = true, scan: Bool = false) async throws -> DeliveryWorld {
         let host = try NodeTestHost(scratch)
         let fake = try FakeClaude.install(in: host.folder.appendingPathComponent("fake", isDirectory: true))
         let repo = host.folder.appendingPathComponent("repo", isDirectory: true)
         try await scratchRepository(repo)
-        let world = DeliveryWorld(host: host, fake: fake, repo: repo.resolvingSymlinksInPath().path)
+        let world = DeliveryWorld(host: host, fake: fake, repo: repo.resolvingSymlinksInPath().path, scan: scan)
         if connect { await world.connect() }
+        if let sessions = world.sessions { world.queue.sync { sessions.start() } }
         return world
     }
 
@@ -68,7 +76,10 @@ final class DeliveryWorld: @unchecked Sendable {
         _ = await eventually(timeout: 60) { self.queue.sync { self.link.state == .connected } }
     }
 
-    func stop() { host.stop() }
+    func stop() {
+        if let sessions { queue.sync { sessions.stop() } }
+        host.stop()
+    }
 
     var project: String { NodeIds.project(root: repo) }
     var name: String { (repo as NSString).lastPathComponent }

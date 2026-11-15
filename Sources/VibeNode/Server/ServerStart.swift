@@ -85,9 +85,14 @@ public enum ServerStart {
         options.firstLook = parsed.node || parsed.testFirstLook
         // A held `.user` message is the user's after a restart only when the vault's record holds its action (EN-D9, E6).
         options.userActions = VaultUserActions(client: link.vaultV2)
+        // The finished tasks' role sessions end (E7); the user's node's witness reads the machine's test lock, a
+        // scratch one's none outside its root.
+        options.sweepsRoles = true
+        options.lock = parsed.node ? TestLock.standard() : nil
         let engine = LeadEngine(root: root, nodeRoot: parsed.nodeRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, link: link,
                                 clock: clock, sessions: sessions, options: options, note: say)
         requests.engine = engine
+        engine.watchRoom()
         let server = NodeServer(root: root, requests: requests, housekeeping: parsed.testHousekeeping ?? ServerArguments.housekeeping,
                                 clock: clock, note: say)
         link.onWelcome = { _, _ in

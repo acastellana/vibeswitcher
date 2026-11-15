@@ -9,7 +9,8 @@ import VibeCore
 ///
 /// E4 gives it starting a lead (`startLead`, in `LeadStart.swift`) and the lead store; E5 delivery to the lead the vault
 /// binds, held messages at rest (`engine.json`) and waking the lead (`Delivery.swift`, `Wake.swift`, `EngineState.swift`);
-/// E6 to E8 add cards, the refresh and restarts.
+/// E6 cards and answers; E7 the refresh every 3 s on its clock, the witness and the room watch (`Refresh.swift`,
+/// `Witness.swift`, `RoomWatch.swift`); E8 restarts.
 public final class LeadEngine: @unchecked Sendable {
     /// What a start did: started a lead (its session and the program it runs), showed the one running (its session),
     /// waits for the host's welcome (and goes on then), or refused, saying why.
@@ -40,6 +41,12 @@ public final class LeadEngine: @unchecked Sendable {
         public var userActions: UserActions = NoUserActions()
         /// The vault the cards are built from and the answers recorded in (E6): the link's (`HostLink.vault`) by default.
         public var vault: LeadVault?
+        /// Ends the role sessions of finished tasks from the vault's roster, in every project (`RoleSweep`, E7): the
+        /// server's engine does; off by default, so a test's engine ends nothing it didn't ask for.
+        public var sweepsRoles = false
+        /// The Mac-wide test and build lock the witness reads its workers' waits from (`TestLock.standard()` for the
+        /// user's node, which the server gives); none by default, so a test's engine reads no lock outside its root.
+        public var lock: TestLock?
 
         public init() {}
     }
@@ -116,8 +123,8 @@ public final class LeadEngine: @unchecked Sendable {
     /// Sends what's typed as one unit and tells whether the host took all of it, on `queue` (for tests: nil, the link's
     /// `type`).
     var typeUnit: ((_ writes: [HostInput.Write], _ id: UUID, _ confirmed: @escaping (Bool) -> Void) -> Void)?
-    /// The engine's look every 3 s on its clock (`look`), which E7's refresh takes over.
-    private var refresh: Subscription?
+    /// The engine's refresh every 3 s on its clock (`refresh`, E7).
+    private var refreshTimer: Subscription?
 
     // Cards, answers and holds (E6), on `queue`.
     /// Every card the user answers: the lead's questions and approvals, held config, base moves.
@@ -133,6 +140,60 @@ public final class LeadEngine: @unchecked Sendable {
     var recordingUser: [String: Int] = [:]
     /// A look at what the vault holds (`lookAtConfig`) is under way.
     var lookingAtConfig = false
+
+    // The refresh, the witness and the room watch (E7), on `queue`.
+    /// The time the refresh runs the questions' timers at (now; a test's later).
+    var timersNow: () -> Double = { Date().timeIntervalSince1970 }
+    /// Each lead's board as the last refresh read it, by root.
+    public internal(set) var boards: [String: LeadBoard] = [:]
+    /// A refresh's reads are under way, and another was asked meanwhile (it runs once they're in).
+    var refreshing = false
+    var refreshAgain = false
+    /// What a refresh's notices say for `status`, by root: a base move that refused a merge waits on the user
+    /// (`AlertRules.baseMoved`).
+    public internal(set) var notices: [String: [String]] = [:]
+    /// The notices' keys already kept, so each is said once.
+    var noticed: Set<String> = []
+    /// How long the machine has slept since this engine started, noted at each witness look (`MacSleepLog`).
+    var macSleep = MacSleepLog()
+    var missingJobs = LeadWitness.MissingJobs()
+    /// Witness events already told, by root and key, so each is told once.
+    var told: Set<String> = []
+    /// When the witness first saw each verifier that auto_advance audits again end without a verdict (by root and
+    /// session; see `LeadWitness.leftToAdvance`), and each worker it released.
+    var advanceSeen: [String: Date] = [:]
+    /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"
+    /// on the engine's queue once a look is applied (`witnessed`); tests watch or slow them. Set on `queue`.
+    var witnessStep: ((String) -> Void)?
+    /// Each project's free disk space, watched (`LeadWitness.Disk`), by root.
+    var disks: [String: LeadWitness.Disk] = [:]
+    /// The bytes free on the volume holding a path, as the disk watch reads them (`DiskSpace.free`). Faked in tests.
+    var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
+    /// Makes a project's lead tool server look again (`LeadAdvance.nudge`): an ended verifier auto_advance audits
+    /// again, a worker it releases. Faked in tests.
+    var nudgeAdvance: (String) -> Void = { LeadAdvance.nudge(root: $0) }
+    /// Ended team sessions of finished tasks the host has been asked to drop.
+    var forgetting: Set<UUID> = []
+    /// Ends the sessions of finished tasks (`RoleSweep`), when `Options.sweepsRoles`.
+    var roleSweep: RoleSweep?
+    /// A look of `roleSweep` under way, and when the last began.
+    var sweeping = false
+    var sweptAt = Date.distantPast
+    /// What the roster said each verifier submitted, by session: its end is expected (see `LeadWitness.Seen`).
+    var submitted: [String: Double] = [:]
+    /// What the roster said of each worker's and verifier's tools: when it was bound, and when they connected (see
+    /// `LeadWitness.Seen.boundAt`).
+    var toolTimes: [String: (bound: Double, tools: Double?)] = [:]
+    /// Sessions that never got their tools, asked to end, and when last (asked again a minute on while they run).
+    var endingNoTools: [String: Date] = [:]
+    /// The leads refused for the machine's room or load (`LeadWitness.RoomWaits`): each told once there's room, on the
+    /// room watch's 60 s client (`watchRoom`); none until it's started.
+    var roomWaits: LeadWitness.RoomWaits?
+    var roomTimer: Subscription?
+    /// The machine's load as the room watch reads it, as the leads' tools judge it (`MacLoad.steady`); faked in tests.
+    var macLoad: () -> Double? = MacLoad.steady
+    /// Each room look's read of the machine's memory (`MacMemory.read`), on the reads queue; faked in tests.
+    var memory: () -> MacMemory? = { MacMemory.read() }
 
     /// `root`: the node's root (its policy, limits, sessions' temporary folders; a scratch node's lead gets it as
     /// `VIBESWITCHER_HOME`). `nodeRoot`: the build's folder. `link`: the host. `clock`: the engine's clock.
@@ -154,10 +215,8 @@ public final class LeadEngine: @unchecked Sendable {
         restoreHeld()
         leads.heldChanged = { [weak self] in self?.saveHeld() }
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }
-        refresh = clock?.every(3) { [weak self] in
-            guard let engine = self else { return }
-            engine.queue.async { engine.look() }
-        }
+        if options.sweepsRoles { roleSweep = makeRoleSweep() }
+        refreshTimer = clock?.every(3) { [weak self] in self?.refresh() }
     }
 
     /// The vault the cards are built from and the user's answers recorded in: the link's, or a test's.

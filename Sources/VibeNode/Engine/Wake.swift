@@ -18,8 +18,9 @@ public enum WakeStep: Equatable, Sendable {
 /// agent runs on its terminal: never into a shell the agent left. The boards, the inboxes and the transcripts are read on
 /// `reads`, never the engine's queue. No dictation check: `ClaudeVoiceRun` is the Mac's.
 extension LeadEngine {
-    /// What the app's refresh does for delivery, every 3 s on the engine's clock until E7's refresh takes it: for each
-    /// project's lead, what's held for it goes once it can take it, and it's woken for what waits. On `queue`.
+    /// What the app's refresh does for delivery, for each project's lead: what's held for it goes once it can take it,
+    /// and it's woken for what waits; then E6's looks. E7's refresh (`refresh`, on the engine's clock) does the same for
+    /// each running lead after its witness; this look stays for what asks it alone (tests). On `queue`.
     public func look() {
         for root in Set(leads.leads.values.map(\.root)).sorted() {
             deliverHeld(root: root)

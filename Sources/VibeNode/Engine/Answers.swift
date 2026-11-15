@@ -201,6 +201,8 @@ extension LeadEngine {
                 if let message = outcome.message(given: text) { self.tellAsUser(message, root: root, action: action) }
                 then(.success(.object(["outcome": .string(Self.word(outcome)), "notice": notice.map(NodeWire.Value.string) ?? .null,
                                        "card": self.cards.cards[id]?.value ?? .null])))
+                // The app refreshes after each answer (`LeadController.refresh`): the board as answered, its timers.
+                self.refresh()
             }
         }
     }
@@ -222,6 +224,7 @@ extension LeadEngine {
                     self.tellAsUser("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with "
                                     + "‘\(held.proposal ?? "")’; wait for their answer.", root: root, action: action)
                     then(.success(.object(["held": .bool(true), "card": self.cards.cards[id]?.value ?? .null])))
+                    self.refresh()
                 case .failure(let error):
                     self.cards.change(id) { $0.notice = "\(error)" }
                     then(.failure(.refused("\(error)")))
@@ -231,32 +234,45 @@ extension LeadEngine {
     }
 
     /// Runs out the timers of the leads' questions (`BoardStore.runTimers`, on `reads`): the lead is told to go ahead
-    /// with each proposal no one answered, once, and the card says it was decided. From any thread (E7's refresh runs it).
+    /// with each proposal no one answered, once, and the card says it was decided. From any thread (E7's refresh runs
+    /// the same read in its own, `fireTimers`, and tells them with `tell(timers:)`).
     public func runTimers(now: Double = Date().timeIntervalSince1970) {
         queue.async { [self] in
-            let roots = Set(leads.leads.values.map(\.root)).union(cards.list().filter { $0.question != nil }.map(\.root))
-            reads.async({ files -> [String: [(question: LeadQuestion, message: String)]] in
-                var fired: [String: [(question: LeadQuestion, message: String)]] = [:]
-                for root in roots where files.board(root).hasExpired(now: now) {
-                    if let expired = try? BoardStore(root: root).runTimers(now: now), !expired.isEmpty { fired[root] = expired }
-                }
-                return fired
-            }) { [weak self] fired in
-                guard let self else { return }
-                for (root, expired) in fired {
-                    for (question, message) in expired {
-                        if let card = self.cards.card(question: question.id, root: root) {
-                            self.cards.change(card.id) {
-                                $0.question = question
-                                $0.closed = Self.closed(question)
-                            }
-                        }
-                        self.deliver(built: { message }, from: .system("timer"), root: root, action: nil)
+            let roots = timerRoots
+            reads.async({ files in Self.fireTimers(roots, files: &files, now: now) }) { [weak self] fired in self?.tell(timers: fired) }
+        }
+    }
+
+    /// The roots whose boards' timers run: every lead's, and every root a question card was posted for. On `queue`.
+    var timerRoots: Set<String> {
+        Set(leads.leads.values.map(\.root)).union(cards.list().filter { $0.question != nil }.map(\.root))
+    }
+
+    /// The questions whose timer ran out on `roots`' boards, each decided on its board now, with what the lead is told
+    /// (`BoardStore.runTimers`). On `reads`.
+    static func fireTimers(_ roots: Set<String>, files: inout BoardFiles, now: Double) -> [String: [(question: LeadQuestion, message: String)]] {
+        var fired: [String: [(question: LeadQuestion, message: String)]] = [:]
+        for root in roots where files.board(root).hasExpired(now: now) {
+            if let expired = try? BoardStore(root: root).runTimers(now: now), !expired.isEmpty { fired[root] = expired }
+        }
+        return fired
+    }
+
+    /// The lead told of each question its timer decided (`tell(timers:)`, `LeadController` 1187-1201), once, and its
+    /// card closed saying so. On `queue`.
+    func tell(timers fired: [String: [(question: LeadQuestion, message: String)]]) {
+        for (root, expired) in fired {
+            for (question, message) in expired {
+                if let card = cards.card(question: question.id, root: root) {
+                    cards.change(card.id) {
+                        $0.question = question
+                        $0.closed = Self.closed(question)
                     }
                 }
-                if !fired.isEmpty { self.cardsChanged() }
+                deliver(built: { message }, from: .system("timer"), root: root, action: nil)
             }
         }
+        if !fired.isEmpty { cardsChanged() }
     }
 
     /// `text` to `root`'s lead as the user's: its digest recorded in the vault under `action` (kind `message`), so after
