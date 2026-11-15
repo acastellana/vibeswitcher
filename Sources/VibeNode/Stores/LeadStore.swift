@@ -5,8 +5,10 @@ import VibeCore
 /// running for it (the live session labelled as its lead, the one its board names where two share the root), the
 /// session the board names, the session the vault binds the lead's role to (EN-D14), the sessions a start replaced
 /// (`StatusRules.replacedLeads`), the messages held for it (a goal for a running lead, what waited in a replaced lead's
-/// inbox: E5 delivers them), and what its last start said. `status` shows it. On the engine's queue; `changes` carries
-/// each project's value as it changes.
+/// inbox, a message sent while no lead the vault binds runs: E5 delivers them, and keeps them at rest in `engine.json`),
+/// how many reports have waited for it too long, a notice when its board names a session the vault doesn't bind, and
+/// what its last start said. `status` shows it. On the engine's queue; `changes` carries each project's value as it
+/// changes.
 public final class LeadStore: @unchecked Sendable {
     /// One project's lead, as `status` shows it.
     public struct Lead: Equatable, Sendable {
@@ -22,6 +24,11 @@ public final class LeadStore: @unchecked Sendable {
         public var replaced: [UUID: UUID] = [:]
         /// How many messages wait for the lead (E5 delivers them).
         public var held = 0
+        /// How many reports have waited for the lead too long to be woken for (`LeadWake.waiting`: its draft, a dialog).
+        public var reportsWaiting = 0
+        /// What's wrong with delivering to it, when something is: the board names a session the vault doesn't bind the
+        /// lead's role to (EN-D14), so what's sent to the lead is held.
+        public var notice: String?
         /// A start is under way.
         public var starting = false
         /// What the last start said (`started`, `shown`, `waiting`, or a refusal), and when.
@@ -38,19 +45,26 @@ public final class LeadStore: @unchecked Sendable {
                      "session": session.map { .string(NodeIds.session(host: $0)) } ?? .null,
                      "named": named.map(NodeWire.Value.string) ?? .null, "bound": bound.map(NodeWire.Value.string) ?? .null,
                      "replaced": .array(replaced.keys.sorted { $0.uuidString < $1.uuidString }.map { .string(NodeIds.session(host: $0)) }),
-                     "held": .int(held), "starting": .bool(starting),
+                     "held": .int(held), "reportsWaiting": .int(reportsWaiting),
+                     "notice": notice.map(NodeWire.Value.string) ?? .null, "starting": .bool(starting),
                      "lastStart": lastStart.map(NodeWire.Value.string) ?? .null,
                      "lastStartAt": lastStartAt.map(NodeWire.Value.date) ?? .null])
         }
     }
 
-    /// A message held for a project's lead until it can be delivered (E5's): its text and sender, in the order sent.
+    /// A message held for a project's lead until it can be delivered (E5's): its text and sender, its place among what
+    /// was sent (held messages go in that order), and the action id of the user's request that made it (EN-D9).
     public struct Held: Equatable, Sendable {
         public var text: String
         public var from: SteerMessage.Sender
-        public init(text: String, from: SteerMessage.Sender) {
+        /// Nil until it's held: `hold` gives it the next place.
+        public var order: Int?
+        public var action: String?
+        public init(text: String, from: SteerMessage.Sender, order: Int? = nil, action: String? = nil) {
             self.text = text
             self.from = from
+            self.order = order
+            self.action = action
         }
     }
 
@@ -59,6 +73,10 @@ public final class LeadStore: @unchecked Sendable {
     public private(set) var leads: [String: Lead] = [:]
     /// The messages held for each project's lead, in the order sent. On the engine's queue.
     public private(set) var held: [String: [Held]] = [:]
+    /// Called on the engine's queue each time what's held changed (the engine keeps it at rest).
+    var heldChanged: () -> Void = {}
+    /// The last place given to a message sent to a lead.
+    private var sent = 0
     /// Lead sessions a start replaced, with their root: replaced from that moment, before the new lead's board names
     /// it (the app's `replacing`).
     private var replacing: [UUID: String] = [:]
@@ -76,17 +94,40 @@ public final class LeadStore: @unchecked Sendable {
         return lead
     }
 
-    /// Holds `message` for `root`'s lead, after what's held already.
-    func hold(_ message: Held, root: String) {
-        let project = NodeIds.project(root: root)
-        held[project, default: []].append(message)
-        lead(root: root) { $0.held = self.held[project]?.count ?? 0 }
+    /// The next place among what's sent to the leads.
+    func next() -> Int {
+        sent += 1
+        return sent
     }
 
-    /// The messages held for `project`'s lead, taken out (E5 delivers them).
+    /// Holds `message` for `root`'s lead, among what's held in the order sent (one without a place gets the next).
+    func hold(_ message: Held, root: String) {
+        let project = NodeIds.project(root: root)
+        var message = message
+        let order = message.order ?? next()
+        message.order = order
+        sent = max(sent, order)
+        var waiting = held[project] ?? []
+        waiting.insert(message, at: waiting.firstIndex { ($0.order ?? 0) > order } ?? waiting.endIndex)
+        held[project] = waiting
+        lead(root: root) { $0.held = waiting.count }
+        heldChanged()
+    }
+
+    /// The held message of `project` at `order` went: it's held no more.
+    func delivered(project: String, order: Int?) {
+        guard let index = held[project]?.firstIndex(where: { $0.order == order }) else { return }
+        held[project]?.remove(at: index)
+        if held[project]?.isEmpty == true { held[project] = nil }
+        if let lead = leads[project] { self.lead(root: lead.root) { $0.held = self.held[project]?.count ?? 0 } }
+        heldChanged()
+    }
+
+    /// The messages held for `project`'s lead, taken out.
     public func takeHeld(project: String) -> [Held] {
         let taken = held.removeValue(forKey: project) ?? []
         if let lead = leads[project] { self.lead(root: lead.root) { $0.held = 0 } }
+        if !taken.isEmpty { heldChanged() }
         return taken
     }
 

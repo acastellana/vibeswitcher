@@ -153,7 +153,8 @@ public final class Requests: @unchecked Sendable {
     }
 
     /// `status`'s result: the node, the server, the host and its notes, the rule, the sessions, leads and cards
-    /// (none before E4 and E6), the accepted requests and the notices. On `queue`.
+    /// (none before E4 and E6), the accepted requests and the notices (the node stopping; a lead whose board names a
+    /// session the vault doesn't bind, E5). On `queue`.
     public func statusValue() -> NodeWire.Value {
         let list = sessions?.sessions ?? []
         return .object([
@@ -170,7 +171,8 @@ public final class Requests: @unchecked Sendable {
             "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(\.value)),
             "cards": .object(["questions": .int(0), "approvals": .int(0), "config": .int(0), "base": .int(0)]),
             "accepted": .array(accepted.map(\.value)),
-            "notices": .array(stopping ? [.string("the node is stopping")] : []),
+            "notices": .array((stopping ? ["the node is stopping"] : []).map(NodeWire.Value.string)
+                + (engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []).map(NodeWire.Value.string)),
         ])
     }
 

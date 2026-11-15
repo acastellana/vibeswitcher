@@ -89,20 +89,21 @@ final class NodeHarness: @unchecked Sendable {
         }
     }
 
-    /// The agent's hook at its next step (`vibeswitcher-hook` on PostToolUse): it takes the steered messages from the
-    /// host's inbox (`SteerReply.answer` against the host's root, never this process's `VibePaths.root`), and Claude
-    /// records the hook's added context in its transcript. True when it took any.
+    /// The agent's hook at its next step (`vibeswitcher-hook` on PostToolUse; `event` another, UserPromptSubmit for a
+    /// prompt typed in, which takes what a wake-up was typed for): it takes the steered messages from the host's inbox
+    /// (`SteerReply.answer` against the host's root, never this process's `VibePaths.root`), and Claude records the
+    /// hook's added context in its transcript. True when it took any.
     @discardableResult
-    func hookTakes() -> Bool {
+    func hookTakes(event: String = "PostToolUse") -> Bool {
         guard let pid = agentPid else { return false }
         let transcript = files.transcript
-        let written = SteerReply.answer(["hook_event_name": "PostToolUse"], tty: session.tty, agentPid: pid, root: host.root) { data in
+        let written = SteerReply.answer(["hook_event_name": event], tty: session.tty, agentPid: pid, root: host.root) { data in
             guard let reply = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let output = reply["hookSpecificOutput"] as? [String: Any], let context = output["additionalContext"] as? String
             else { return false }
             let line: [String: Any] = ["type": "attachment", "uuid": UUID().uuidString, "isSidechain": false,
                                        "timestamp": ISO8601DateFormatter().string(from: Date()),
-                                       "attachment": ["type": "hook_additional_context", "content": [context], "hookEvent": "PostToolUse"]]
+                                       "attachment": ["type": "hook_additional_context", "content": [context], "hookEvent": event]]
             guard let encoded = try? JSONSerialization.data(withJSONObject: line), let handle = try? FileHandle(forWritingTo: transcript)
             else { return false }
             handle.seekToEndOfFile()

@@ -7,8 +7,9 @@ import VibeCore
 /// `LeadReads`), git and the vault's calls on a utility queue. Every root it takes is a parameter, never this process's
 /// `VibePaths.root` (one root per test).
 ///
-/// E4 gives it starting a lead (`startLead`, in `LeadStart.swift`) and the lead store; E5 to E8 add delivery, cards,
-/// the refresh and restarts.
+/// E4 gives it starting a lead (`startLead`, in `LeadStart.swift`) and the lead store; E5 delivery to the lead the vault
+/// binds, held messages at rest (`engine.json`) and waking the lead (`Delivery.swift`, `Wake.swift`, `EngineState.swift`);
+/// E6 to E8 add cards, the refresh and restarts.
 public final class LeadEngine: @unchecked Sendable {
     /// What a start did: started a lead (its session and the program it runs), showed the one running (its session),
     /// waits for the host's welcome (and goes on then), or refused, saying why.
@@ -31,8 +32,12 @@ public final class LeadEngine: @unchecked Sendable {
         public var firstLook = false
         /// Answers Claude's trust question in a lead it started (the user asked for the lead there).
         public var answersTrust = true
-        /// The node's home: the agents' transcripts (the replaced lead's last turns). `VibePaths.home` by default.
+        /// The node's home: the agents' transcripts (the replaced lead's last turns, what a lead is doing). `VibePaths.home`
+        /// by default.
         public var home: String?
+        /// The vault's record of the user's actions, which a held `.user` message passes after a restart (EN-D9): none
+        /// until E6 gives the vault's, so none passes.
+        public var userActions: UserActions = NoUserActions()
 
         public init() {}
     }
@@ -80,6 +85,34 @@ public final class LeadEngine: @unchecked Sendable {
     var holders: [String: UUID] = [:]
     private var watch: Subscription?
 
+    // Delivery and wake (E5), on `queue`.
+    /// Whether an agent runs on its terminal (`ProcessTable.info`): the lead the board names gets nothing otherwise, and
+    /// nothing is typed into a terminal its agent left (a shell). For tests.
+    public var leadRuns: (LeadAgent) -> Bool = { agent in
+        ProcessTable.info(pid: agent.pid).map { $0.tty == agent.tty && $0.agent != nil } == true
+    }
+    /// What an agent is doing, from its hooks' state under `root` and its transcript under the node's home.
+    let observer: LeadObserver
+    /// Roots whose held messages are being sent, one after another.
+    var sendingHeld: Set<String> = []
+    /// Each lead's wake-ups (`LeadWake`), by terminal and agent, with the one each root's lead has now, and the ones with
+    /// a look again scheduled.
+    var wakes: [String: LeadWake] = [:]
+    var wakeKeys: [String: String] = [:]
+    var wakeLater: Set<String> = []
+    /// Terminals being typed into, and when something was last typed into each (its hooks need a moment to say it's
+    /// working again; until then another would type a second prompt).
+    var flushing: Set<String> = []
+    var typedAt: [String: Date] = [:]
+    /// Each steer inbox read (its terminal), on the thread that reads (for tests): every one is on `reads`.
+    public var inboxRead: (String) -> Void = { _ in }
+    /// Each step of typing into a session (for tests). On `queue`.
+    public var wakeStep: (WakeStep) -> Void = { _ in }
+    /// What's typed into each session, as the writes sent (for tests). On `queue`.
+    public var typing: (UUID, [HostInput.Write]) -> Void = { _, _ in }
+    /// The engine's look every 3 s on its clock (`look`), which E7's refresh takes over.
+    private var refresh: Subscription?
+
     /// `root`: the node's root (its policy, limits, sessions' temporary folders; a scratch node's lead gets it as
     /// `VIBESWITCHER_HOME`). `nodeRoot`: the build's folder. `link`: the host. `clock`: the engine's clock.
     /// `sessions`: the node's session list (the replaced lead's transcript), when there is one.
@@ -95,8 +128,19 @@ public final class LeadEngine: @unchecked Sendable {
         queue = link.queue
         reads = BoardReads(handTo: link.queue)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        observer = LeadObserver(home: options.home ?? VibePaths.home, stateFile: { states.appendingPathComponent("\($0).json") })
+        restoreHeld()
+        leads.heldChanged = { [weak self] in self?.saveHeld() }
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }
+        refresh = clock?.every(3) { [weak self] in
+            guard let engine = self else { return }
+            engine.queue.async { engine.look() }
+        }
     }
+
+    /// The hooks' state file of `tty` under this root.
+    func stateFile(_ tty: String) -> URL { observer.stateFile(tty) }
 
     /// The lead's tool server (S9: from the node's build folder).
     var toolServer: String? { nodeRoot.map { $0.appendingPathComponent("bin/vibeswitcher-mcp").path } }
