@@ -3291,3 +3291,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 00:02 Automatically (auto_advance): Started a worker on dark-mode-the-code (Dark mode: the code block's Run confirmation sheet draws white on white in sandbox shots), its after tasks done (ui-journeys-a3-run, ui-journeys-a4-dictation).
 - 2026-11-16 00:02 Automatically (auto_advance): Overlap for dark-mode-the-code's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ui-journeys-b-team (review: its branch changes it).
 - 2026-11-16 00:02 Automatically (auto_advance): Cleaned up ui-journeys-a4-dictation (freed 2.7 GB of build output and temporary folders). It stays done.
+- 2026-11-16 00:12 Planned ui-journeys-select-copy: UI journeys: select-copy reports all shots changed on a second back-to-back run
