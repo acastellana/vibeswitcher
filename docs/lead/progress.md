@@ -3174,3 +3174,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 12:54 Automatically (auto_advance): Merged the-witness-watches (The witness watches every team member, not only the integrator) into main at 0b7338cb, on its passing audit and the full test run.
 - 2026-11-15 12:54 Automatically (auto_advance): Cleaned up the-witness-watches (freed 3.1 GB of build output and temporary folders). It stays done.
 - 2026-11-15 12:55 Update: Team mode is built: several workers on one task — **What changed**
+- 2026-11-15 20:13 Planned the-chat-s-model: The chat's model chip follows /model at once, and its menu offers Fable
+- 2026-11-15 20:13 Started a worker on the-chat-s-model (auto → Claude: Claude weekly 20%, 28 points behind pace (limits ignored), not tight; Codex 24%)
+- 2026-11-15 20:13 Automatically (auto_advance): Started a worker on the-chat-s-model (The chat's model chip follows /model at once, and its menu offers Fable); its agent is auto, so it went to Claude: Claude weekly 20%, 28 points behind pace (limits ignored), not tight; Codex 24%.
