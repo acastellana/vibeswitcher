@@ -78,6 +78,7 @@ public enum CardText {
                 line += ", hash " + inert(item["hash"]?.string)
                 if let change = item["change"]?.string { line += ": " + inert(change) }
                 if item["outside"]?.bool == true { line += " (changed outside a team session)" }
+                if let since = item["sinceAccept"]?.string { line += "; " + inert(since) }
                 lines.append(line)
                 for file in item["files"]?.array?.compactMap(\.string) ?? [] { lines.append("      " + inert(file)) }
             }
@@ -89,6 +90,17 @@ public enum CardText {
                 lines.append(said)
             }
             if let base = config["baseBranch"]?.string { lines.append("  its base branch: " + inert(base)) }
+            let rails = config["guarded"]?.array ?? []
+            if !rails.isEmpty { lines.append("  workflow.md's guard rails (read each value: the accept records them):") }
+            for rail in rails {
+                lines.append("    \(inert(rail["key"]?.string)): \(inert(rail["value"]?.string))"
+                             + (rail["sinceAccept"]?.string.map { "; " + inert($0) } ?? ""))
+            }
+            if let at = config["lastAccept"]?.string {
+                lines.append("  compared with your last accept (\(inert(at))), from an unsealed snapshot a worker could rewrite: read the values")
+            } else if config["items"]?.array?.isEmpty == false {
+                lines.append("  no earlier accept is known here: everything held is new to this card")
+            }
         }
         if let base = card["base"], base != .null {
             let from = base["from"]?.string.map { "\(inert($0)) (\(inert(base["fromIs"]?.string)))" } ?? "unknown"

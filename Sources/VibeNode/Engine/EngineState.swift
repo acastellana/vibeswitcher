@@ -16,7 +16,9 @@ public struct NoUserActions: UserActions {
 }
 
 /// The engine's own state file, `<root>/v2/engine.json` (format 1; the engine plan's EN-D9): what isn't the user's and
-/// what a restarted server needs not to repeat itself. E5 keeps the held messages there; E8 adds the rest. Nothing in it
+/// what a restarted server needs not to repeat itself. E5 keeps the held messages there; E8 adds the witness's told keys,
+/// auto_advance's first sightings, the last host start seen, the roots with a lead under it and the last host restart
+/// (each optional: a file of E5's reads as before, rule 3). None of those is taken as the user's either. Nothing in it
 /// is taken as its sender's: a worker of the user's uid can write it, so a held `.user` message goes as the user's after
 /// a restart only when the vault's record of the user's actions holds the action id it carries with the digest of its
 /// text as it is now (`restored`); any other goes as from an unverified sender (`SteerInbox.unverified`), saying so,
@@ -46,13 +48,48 @@ public struct EngineState: Codable, Equatable, Sendable {
         }
     }
 
+    /// A session host's restart the engine saw (E8): the welcome's start time differed from the one this file held. Every
+    /// project's lead and team ended with the old host, and its vault started over.
+    public struct Restart: Codable, Equatable, Sendable {
+        /// When the host that welcomed the engine started, and when the one before it had (seconds since 1970).
+        public var at: Double
+        public var before: Double
+        /// The roots whose lead ran under the old host, each until a lead starts there again.
+        public var gone: [String]
+
+        public init(at: Double, before: Double, gone: [String]) {
+            self.at = at
+            self.before = before
+            self.gone = gone
+        }
+    }
+
     public var format: Int
     /// In the order sent.
     public var held: [Held]
+    /// The witness's events already told, by root and key (`LeadEngine.told`): none is told twice across a restart (E8).
+    /// Absent from a file written before E8.
+    public var told: [String]?
+    /// When the witness first saw each verifier auto_advance audits again end, and each worker it released, by root and
+    /// session (`LeadEngine.advanceSeen`, seconds since 1970): each nudged once across a restart (E8).
+    public var firstSightings: [String: Double]?
+    /// The start time of the last session host that welcomed the engine (seconds since 1970): a welcome with another is a
+    /// host restart (E8).
+    public var hostStartedAt: Double?
+    /// The roots with a lead that ran under that host: a host restart ended them.
+    public var leads: [String]?
+    /// The last host restart the engine saw, while `status` says so.
+    public var restart: Restart?
 
-    public init(held: [Held] = []) {
+    public init(held: [Held] = [], told: [String]? = nil, firstSightings: [String: Double]? = nil, hostStartedAt: Double? = nil,
+                leads: [String]? = nil, restart: Restart? = nil) {
         format = Self.currentFormat
         self.held = held
+        self.told = told
+        self.firstSightings = firstSightings
+        self.hostStartedAt = hostStartedAt
+        self.leads = leads
+        self.restart = restart
     }
 
     /// `<root>/v2/engine.json`.

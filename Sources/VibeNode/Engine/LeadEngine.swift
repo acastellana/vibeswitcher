@@ -10,7 +10,8 @@ import VibeCore
 /// E4 gives it starting a lead (`startLead`, in `LeadStart.swift`) and the lead store; E5 delivery to the lead the vault
 /// binds, held messages at rest (`engine.json`) and waking the lead (`Delivery.swift`, `Wake.swift`, `EngineState.swift`);
 /// E6 cards and answers; E7 the refresh every 3 s on its clock, the witness and the room watch (`Refresh.swift`,
-/// `Witness.swift`, `RoomWatch.swift`); E8 restarts.
+/// `Witness.swift`, `RoomWatch.swift`); E8 restarts (`Restarts.swift`: the server's start binds the running leads again
+/// and tells them which questions the user no longer sees; a host restart says the team is gone).
 public final class LeadEngine: @unchecked Sendable {
     /// What a start did: started a lead (its session and the program it runs), showed the one running (its session),
     /// waits for the host's welcome (and goes on then), or refused, saying why.
@@ -195,6 +196,24 @@ public final class LeadEngine: @unchecked Sendable {
     /// Each room look's read of the machine's memory (`MacMemory.read`), on the reads queue; faked in tests.
     var memory: () -> MacMemory? = { MacMemory.read() }
 
+    // Restarts (E8), on `queue`.
+    /// The start time of the last host that welcomed the engine, as `engine.json` keeps it (seconds since 1970).
+    var lastHostStart: Double?
+    /// The roots with a lead that ran under that host (a host restart ended them).
+    var knownLeads: Set<String> = []
+    /// The last host restart the engine saw (its roots whose team it ended, each until a lead starts there again).
+    public internal(set) var hostRestart: EngineState.Restart?
+    /// Whether this engine took a welcome yet: its first is the server's start, where the running leads are bound again
+    /// and told which questions the user no longer sees.
+    var welcomedOnce = false
+    /// Lead sessions whose role was asked to be bound again (`keepRunningLeads`), once each; and a binding that failed
+    /// (tried again at the next refresh).
+    var adopting: Set<UUID> = []
+    var keepingRunning = false
+    var rebindAgain = false
+    /// The running leads the vault gives no role, by root, while each runs: `status` says so.
+    public internal(set) var roleless: [String: Roleless] = [:]
+
     /// `root`: the node's root (its policy, limits, sessions' temporary folders; a scratch node's lead gets it as
     /// `VIBESWITCHER_HOME`). `nodeRoot`: the build's folder. `link`: the host. `clock`: the engine's clock.
     /// `sessions`: the node's session list (the replaced lead's transcript), when there is one.
@@ -212,8 +231,8 @@ public final class LeadEngine: @unchecked Sendable {
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
         let states = root.appendingPathComponent("state", isDirectory: true)
         observer = LeadObserver(home: options.home ?? VibePaths.home, stateFile: { states.appendingPathComponent("\($0).json") })
-        restoreHeld()
-        leads.heldChanged = { [weak self] in self?.saveHeld() }
+        restoreState()
+        leads.heldChanged = { [weak self] in self?.saveState() }
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }
         if options.sweepsRoles { roleSweep = makeRoleSweep() }
         refreshTimer = clock?.every(3) { [weak self] in self?.refresh() }
@@ -245,6 +264,7 @@ public final class LeadEngine: @unchecked Sendable {
     public func welcomed() {
         startPending()
         sessionsChanged()
+        restartLook()
     }
 
     /// `stop` is under way: no start goes on from now, and what waits for one is refused. On `queue`.
@@ -264,5 +284,6 @@ public final class LeadEngine: @unchecked Sendable {
     /// The host's list changed: each project's lead sessions again.
     private func sessionsChanged() {
         leads.update(sessions: link.sessions, holders: holders)
+        noteKnownLeads()
     }
 }

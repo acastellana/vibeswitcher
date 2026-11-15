@@ -296,8 +296,13 @@ extension CardStore.Card {
                 i["change"] = text(item.change)
                 i["outside"] = .bool(item.outside)
                 i["files"] = texts(item.files.map { ConfigSeal.fileLabel($0, in: item.name) })
+                i["sinceAccept"] = text(item.sinceAccept)
                 return .object(i)
             })
+            c["guarded"] = .array(config.guarded.map { rail in
+                .object(["key": .string(rail.key), "value": .string(rail.value), "sinceAccept": text(rail.sinceAccept)])
+            })
+            c["lastAccept"] = config.lastAccept.map(NodeWire.Value.date) ?? .null
             if let floor = config.floor {
                 var f: [String: NodeWire.Value] = [:]
                 f["mergePolicy"] = .string(floor.mergePolicy.rawValue)

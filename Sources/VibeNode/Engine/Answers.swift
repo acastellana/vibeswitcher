@@ -347,9 +347,10 @@ extension LeadEngine {
     /// it shows (any earlier open one of the project closed), with the floor and rails workflow.md proposes; `diff`,
     /// that held thing's difference too. From any thread.
     public func configHeld(root: String, diff: String?, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
-        let (vault, home) = (cardVault, self.home)
+        let (vault, home, node) = (cardVault, self.home, self.root)
         work.async { [weak self] in
-            let held = ConfigHoldStore.held(root: root, vault: vault, home: home)
+            // The last accept the snapshot knows (E8): each held thing said the same, changed or new since.
+            let held = ConfigHoldStore.held(root: root, vault: vault, home: home, snapshot: AcceptedSnapshot.load(root: node).projects[root])
             let difference: [String]? = { if case .success(let shown) = held, let diff { return ConfigHoldStore.difference(shown, name: diff, home: home) } else { return nil } }()
             guard let self else { return }
             self.queue.async {
@@ -377,10 +378,12 @@ extension LeadEngine {
         let roots = Set(leads.leads.values.filter { $0.session != nil }.map(\.root))
         guard !roots.isEmpty, !lookingAtConfig else { return }
         lookingAtConfig = true
-        let (vault, home) = (cardVault, self.home)
+        let (vault, home, node) = (cardVault, self.home, self.root)
         work.async { [weak self] in
+            let snapshot = AcceptedSnapshot.load(root: node)
             let found = roots.sorted().reduce(into: [String: ConfigHoldStore.Shown]()) { found, root in
-                if case .success(let shown) = ConfigHoldStore.held(root: root, vault: vault, home: home, look: false) { found[root] = shown }
+                if case .success(let shown) = ConfigHoldStore.held(root: root, vault: vault, home: home, look: false,
+                                                                   snapshot: snapshot.projects[root]) { found[root] = shown }
             }
             guard let self else { return }
             self.queue.async {
@@ -409,9 +412,9 @@ extension LeadEngine {
     public func configAccept(card id: String, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
         queue.async { [self] in
             guard let card = cards.cards[id], let shown = card.config else { return then(.failure(.gone("no held-config card \(id)"))) }
-            let (root, vault) = (card.root, cardVault)
+            let (root, vault, node) = (card.root, cardVault, self.root)
             work.async { [weak self] in
-                let accepted = ConfigHoldStore.accept(shown, root: root, vault: vault)
+                let accepted = ConfigHoldStore.accept(shown, root: root, vault: vault, snapshotRoot: node)
                 guard let self else { return }
                 self.queue.async {
                     switch accepted {
@@ -473,9 +476,10 @@ extension LeadEngine {
 
     /// `base show FOLDER [--from COMMIT]`: a base-move card made on demand, also with no lead running. From any thread.
     public func baseShow(root: String, from: String?, then: @escaping (Result<CardStore.Card, CardFailure>) -> Void) {
-        let vault = cardVault
+        let (vault, node) = (cardVault, self.root)
         work.async { [weak self] in
-            let shown = BaseMoveStore.show(root: root, from: from, vault: vault)
+            // After a host restart the vault lost the head: the snapshot's, marked unverified (E8).
+            let shown = BaseMoveStore.show(root: root, from: from, vault: vault, snapshotHeads: AcceptedSnapshot.load(root: node).projects[root]?.heads ?? [:])
             guard let self else { return }
             self.queue.async {
                 switch shown {
@@ -499,10 +503,12 @@ extension LeadEngine {
         queue.async { [self] in
             guard let card = cards.cards[id], let shown = card.base else { return then(.failure(.gone("no base card \(id)"))) }
             let root = card.root
+            let node = self.root
             if let move = shown.move {
                 return baseMoves.accept(root, move: move) { [weak self] failure in
                     guard let self else { return }
                     if let failure { return then(.failure(.refused("the vault didn't take it: \(failure)"))) }
+                    self.work.async { Self.snapshotHead(move.to, branch: move.branch, root: root, node: node) }
                     then(.success(.object(["head": .string(move.to), "branch": .string(move.branch), "card": self.cards.cards[id]?.value ?? .null])))
                 }
             }
@@ -512,6 +518,7 @@ extension LeadEngine {
                 if case .success = set {
                     LeadVault.BaseMoveNote.clear(root: root)
                     LeadVault.BaseMoveRefusal.clear(root: root)
+                    Self.snapshotHead(shown.to, branch: shown.branch, root: root, node: node)
                 }
                 guard let self else { return }
                 self.queue.async {
@@ -521,6 +528,15 @@ extension LeadEngine {
                     then(.success(.object(["head": .string(shown.to), "branch": .string(shown.branch), "card": self.cards.cards[id]?.value ?? .null])))
                 }
             }
+        }
+    }
+
+    /// The head `base accept` recorded, kept in the snapshot (E8): after a host restart `base show` takes it as "from",
+    /// marked unverified. Off the engine's queue.
+    static func snapshotHead(_ head: String, branch: String, root: String, node: URL) {
+        try? AcceptedSnapshot.update(root: node, project: root) { project in
+            project.heads[branch] = head
+            project.headsAt = Date().timeIntervalSince1970
         }
     }
 

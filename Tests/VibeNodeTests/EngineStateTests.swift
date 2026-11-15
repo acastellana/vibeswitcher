@@ -110,4 +110,81 @@ import VibeCore
         try VibePaths.writePrivate(Data(#"{"format":2,"held":[]}"#.utf8), to: EngineState.url(root: root))
         #expect(EngineState.load(root: root).problem?.contains("format 2") == true)
     }
+
+    // MARK: E8: what a restarted server needs not to repeat itself
+
+    /// A link to no host (its dialer never connects): an engine that only reads and writes its root.
+    private struct NoHost: HostDialer {
+        func connect(queue: DispatchQueue, patience: TimeInterval) throws -> HostConnection { throw HostLink.Failure("no host in this test") }
+    }
+
+    /// E8's fields are kept beside the held messages, and a file of E5's (held messages only) reads as before, with
+    /// none of them.
+    @Test func whatTheEngineSawIsKeptAtRestBesideTheHeldMessages() throws {
+        let root = scratch.url("engine-state-e8")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try VibePaths.ensurePrivate(EngineState.url(root: root).deletingLastPathComponent())
+        try VibePaths.writePrivate(Data(#"{"format":1,"held":[{"root":"/r","order":1,"text":"hi","from":{"system":{"_0":"witness"}}}]}"#.utf8),
+                                   to: EngineState.url(root: root))
+        let old = EngineState.load(root: root)
+        #expect(old.problem == nil, "\(String(describing: old.problem))")
+        #expect(old.state.held.count == 1)
+        #expect(old.state.told == nil && old.state.firstSightings == nil && old.state.hostStartedAt == nil && old.state.restart == nil)
+
+        let state = EngineState(held: [], told: ["/r|stall|w1"], firstSightings: ["/r|v1": 1_000], hostStartedAt: 1_700_000_000.25,
+                                leads: ["/r"], restart: .init(at: 1_700_000_000.25, before: 1_600_000_000, gone: ["/r"]))
+        try state.save(root: root)
+        #expect(EngineState.load(root: root).state == state)
+    }
+
+    /// A restarted engine on the same root takes back what the one before told and saw (the witness's told keys,
+    /// auto_advance's first sightings), the host it last saw start and the roots with a lead under it.
+    @Test func aRestartedEngineTakesBackWhatItToldAndSaw() async throws {
+        let root = scratch.url("engine-state-restart").appendingPathComponent(".vibeswitcher", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let queue = DispatchQueue(label: "engine-state-tests.engine")
+        let first = LeadEngine(root: root, nodeRoot: nil, link: HostLink(dialer: NoHost(), root: root, queue: queue), clock: nil)
+        queue.sync {
+            first.told.insert("/r|stall|w1")
+            first.advanceSeen["/r|v1"] = Date(timeIntervalSince1970: 1_000)
+            first.lastHostStart = 1_700_000_000
+            first.knownLeads = ["/r"]
+            first.saveState()
+        }
+        #expect(await eventually(timeout: 60) { EngineState.load(root: root).state.told == ["/r|stall|w1"] })
+        let second = LeadEngine(root: root, nodeRoot: nil, link: HostLink(dialer: NoHost(), root: root, queue: queue), clock: nil)
+        queue.sync {
+            #expect(second.told == ["/r|stall|w1"])
+            #expect(second.advanceSeen["/r|v1"] == Date(timeIntervalSince1970: 1_000))
+            #expect(second.lastHostStart == 1_700_000_000)
+            #expect(second.knownLeads == ["/r"])
+            #expect(second.hostRestart == nil)
+        }
+    }
+
+    /// The snapshot of the last accept (S7's diff aid): of each held thing and guard rail, the same, changed or new
+    /// since; nothing when no accept is known. Written 0600 in a 0700 folder, never making a root that isn't there.
+    @Test func theSnapshotSaysOfEachThingWhetherItsTheSameChangedOrNew() throws {
+        let root = scratch.url("snapshot")
+        #expect(throws: (any Error).self) { try AcceptedSnapshot.update(root: root, project: "/r") { $0.configAt = 1 } }
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try AcceptedSnapshot.update(root: root, project: "/r") { project in
+            project.configAt = 1_700_000_000
+            project.hashes = ["k.same": "A", "k.changed": "B"]
+            project.guarded = ["test_command": "make check"]
+        }
+        try AcceptedSnapshot.update(root: root, project: "/r") { $0.heads["main"] = "abc" }
+        let url = AcceptedSnapshot.url(root: root)
+        #expect(url.path.hasSuffix("/v2/accepted.json"))
+        #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int == 0o600)
+        let project = try #require(AcceptedSnapshot.load(root: root).projects["/r"])
+        #expect(project.heads == ["main": "abc"] && project.hashes.count == 2)
+        #expect(AcceptedSnapshot.since(key: "k.same", hash: "A", in: project)?.hasPrefix("the same as at your last accept") == true)
+        #expect(AcceptedSnapshot.since(key: "k.changed", hash: "C", in: project)?.hasPrefix("changed since your last accept") == true)
+        #expect(AcceptedSnapshot.since(key: "k.new", hash: "D", in: project)?.hasPrefix("not in your last accept") == true)
+        #expect(AcceptedSnapshot.since(rail: "test_command", value: "make test", in: project)?.contains("from “make check”") == true)
+        #expect(AcceptedSnapshot.since(key: "k.same", hash: "A", in: AcceptedSnapshot.Project()) == nil)
+        #expect(AcceptedSnapshot.since(key: "k.same", hash: "A", in: nil) == nil)
+    }
 }

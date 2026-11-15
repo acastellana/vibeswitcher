@@ -76,6 +76,9 @@ extension LeadEngine {
     /// stalls, held messages go, and the lead is woken.
     func witnessed(_ work: WitnessWork, root: String, board: LeadBoard, team: TeamReading, now: Date) {
         let project = LeadMail.project(of: root)
+        // What's told and nudged is kept at rest too (E8): a restarted server doesn't tell or nudge it again.
+        let (toldBefore, seenBefore) = (told.count, advanceSeen.count)
+        defer { if told.count != toldBefore || advanceSeen.count != seenBefore { saveState() } }
         // A worker or verifier whose tools never connected only holds a slot: it ends (`events` tells the lead).
         for id in work.withoutTools {
             guard let uuid = UUID(uuidString: id), endingNoTools[id].map({ now.timeIntervalSince($0) >= 60 }) ?? true else { continue }

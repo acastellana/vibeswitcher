@@ -13,14 +13,19 @@ import VibeNode
 ///   each one's SHA-256 (stage 2's `BuildInfo`), so the host's start check (Task 9b) passes and stays exercised.
 /// - `<root>/v2/test/` holds the stand-ins of the Global Constraints: a recording journal socket (`journal.sock`,
 ///   each datagram recorded with its sender's credentials as journald stamps them, in `journal.jsonl`), a stand-in
-///   `journalctl` (that record) and `systemctl`, `claude` linked to `FakeClaude`'s launcher (EN-D13), and
+///   `journalctl` (that record) and `systemctl` (how the unit last ended from `unit-state` when a test writes it, E8),
+///   `claude` linked to `FakeClaude`'s launcher (EN-D13), and
 ///   `user-scopes`, the test's scopes for the command line's journal check.
 /// - `userScopes` (by default this process's own cgroup) goes to the server as `--server-arg --test-user-scopes=…`;
 ///   nil leaves the server on the weaker rule. `housekeeping`: `--server-arg --test-housekeeping=…`. `testChild`:
 ///   `--server-arg --test-child=…`. `path`: the host's PATH. `holdFirstLook`: `--hold-first-look`, and
-///   `--server-arg --test-first-look` so the server's engine knows (E4). `socketName`: the
+///   `--server-arg --test-first-look` so the server's engine knows (E4; `serverKnowsFirstLook: false` leaves that out, for
+///   a case that shows the vault's own hold with the engine's gate away, E8). `socketName`: the
 ///   host's socket in the root (another than `host.sock` isn't the root's: its server refuses it). `waitForServer`:
 ///   returns once the server answers, its link to the host welcomed.
+///
+/// `reusing`: the root of a node stopped before (its host ended), for a host restart (E8): its files are kept (its
+/// `engine.json`, its snapshot, its journal's record, its repositories), its links and stand-ins made again where missing.
 ///
 /// Ended, with its server, sessions and files, by `stop()` or when it goes.
 final class ScratchNode: @unchecked Sendable {
@@ -31,7 +36,10 @@ final class ScratchNode: @unchecked Sendable {
     let lock: String
     let output: String
     let testFolder: URL
-    let process = Process()
+    /// The host, started with `Platform.Spawn` (not Foundation's `Process`: one of those whose child closes the
+    /// descriptor Foundation watches for its exit, as a handover's new image does, holds Foundation's one thread for
+    /// children's exits in a `waitpid` until it ends, and no other child's exit is seen meanwhile, E8).
+    private(set) var process = SpawnedHost(pid: 0)
     let recorder: JournalRecorder?
     /// The fake Claude its `claude` link names (EN-D13): a lead the server starts runs it.
     let fake: FakeClaude.Install
@@ -43,9 +51,9 @@ final class ScratchNode: @unchecked Sendable {
     static let ownScope: String? = Platform.Processes.cgroup(getpid()).flatMap { PeerFacts.unifiedPath($0) ?? PeerFacts.systemdPath($0) }
 
     init(_ scratch: Scratch, userScopes: [String]? = ScratchNode.ownScope.map { [$0] }, housekeeping: Int? = nil,
-         path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, testChild: String? = nil, socketName: String = "host.sock",
-         sealLife: Int? = nil, waitForServer: Bool = true) async throws {
-        root = try scratch.shortFolder("vsn")
+         path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
+         socketName: String = "host.sock", sealLife: Int? = nil, reusing: URL? = nil, waitForServer: Bool = true) async throws {
+        root = try reusing ?? scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
         nodeRoot = root.appendingPathComponent("build", isDirectory: true)
         socket = root.appendingPathComponent(socketName).path
@@ -56,11 +64,18 @@ final class ScratchNode: @unchecked Sendable {
         for folder in [home, nodeRoot.appendingPathComponent("bin"), testFolder, root.appendingPathComponent("tmp")] {
             try files.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
-        try Self.install(into: nodeRoot)
-        try Self.standIns(in: testFolder, scopes: userScopes)
-        // The node's `claude` (EN-D13): a link a test puts there, to the fake's launcher.
-        fake = try FakeClaude.install(in: testFolder.appendingPathComponent("fake-claude", isDirectory: true))
-        try files.createSymbolicLink(atPath: testFolder.appendingPathComponent("claude").path, withDestinationPath: fake.launcher.path)
+        let fakeFolder = testFolder.appendingPathComponent("fake-claude", isDirectory: true)
+        if reusing == nil {
+            try Self.install(into: nodeRoot)
+            try Self.standIns(in: testFolder, scopes: userScopes)
+            // The node's `claude` (EN-D13): a link a test puts there, to the fake's launcher.
+            fake = try FakeClaude.install(in: fakeFolder)
+            try files.createSymbolicLink(atPath: testFolder.appendingPathComponent("claude").path, withDestinationPath: fake.launcher.path)
+        } else {
+            // A host restart on the same root: what the node before made stays (the journal's record too).
+            fake = FakeClaude.Install(launcher: fakeFolder.appendingPathComponent("fake-bin/claude"), folder: fakeFolder.appendingPathComponent("fake"))
+            try? files.removeItem(at: testFolder.appendingPathComponent("journal.sock"))
+        }
         recorder = try JournalRecorder(folder: testFolder)
         files.createFile(atPath: output, contents: nil)
 
@@ -70,25 +85,28 @@ final class ScratchNode: @unchecked Sendable {
         if let housekeeping { arguments += ["--server-arg", ServerArguments.testHousekeepingFlag + String(housekeeping)] }
         if let testChild { arguments += ["--server-arg", ServerArguments.testChildFlag + testChild] }
         // The vault holds its first look, and the server knows it (its engine refuses `lead` until the accepts, S7).
-        if holdFirstLook { arguments += ["--hold-first-look", "--server-arg", ServerArguments.testFirstLookFlag] }
+        if holdFirstLook { arguments += ["--hold-first-look"] + (serverKnowsFirstLook ? ["--server-arg", ServerArguments.testFirstLookFlag] : []) }
         // How long the vault's `.user` seals verify (the engine plan's EN-D11), for a test that waits one out.
         if let sealLife { arguments += ["--test-user-seal-life", String(sealLife)] }
-        process.executableURL = nodeRoot.appendingPathComponent("bin/vibeswitcher-host")
-        process.environment = ["HOME": home.path, "CFFIXED_USER_HOME": home.path, "VIBESWITCHER_HOME": root.path, "SHELL": "/bin/sh",
-                               "PATH": path, "TMPDIR": root.appendingPathComponent("tmp").path + "/"]
-        let said = try FileHandle(forWritingTo: URL(fileURLWithPath: output))
-        process.standardOutput = said
-        process.standardError = said
+        let executable = nodeRoot.appendingPathComponent("bin/vibeswitcher-host").path
         // The test process as the host's app too (stage 2's `TestHosts.connectAsApp`): one end of a pair as the host's
         // stdin, the other registered for its socket, so this process can start sessions on it.
         guard let (hostEnd, testEnd) = Platform.Sockets.pair(type: Platform.Sockets.seqpacket) else { throw CancellationError() }
         Platform.Sockets.enableCredentials(hostEnd)
-        process.standardInput = FileHandle(fileDescriptor: hostEnd, closeOnDealloc: false)
-        process.arguments = arguments + ["--test-app-pid", String(getpid()), "--test-app-connector", "0"]
+        var spawn = Platform.Spawn(executable: executable,
+                                   arguments: [executable] + arguments + ["--test-app-pid", String(getpid()), "--test-app-connector", "0"])
+        spawn.environment = ["HOME=\(home.path)", "CFFIXED_USER_HOME=\(home.path)", "VIBESWITCHER_HOME=\(root.path)", "SHELL=/bin/sh",
+                             "PATH=\(path)", "TMPDIR=\(root.appendingPathComponent("tmp").path)/"]
+        spawn.stdin = .descriptor(hostEnd)
+        spawn.stdout = .path(output, flags: O_WRONLY | O_APPEND)
+        spawn.stderr = .path(output, flags: O_WRONLY | O_APPEND)
         self.testEnd = testEnd
         HostConnection.register(connector: testEnd, for: socket)
         defer { Sys.close(hostEnd) }
-        try process.run()
+        switch spawn.start() {
+        case .failure(let error): throw HostCall.Failure(description: "the scratch host didn't start (errno \(error.code))")
+        case .success(let pid): process = SpawnedHost(pid: pid)
+        }
         ScratchNodes.started(process.processIdentifier)
         if waitForServer {
             // Its link welcomed (the hello carries the host's start): before, a state change is answered `not-yet`.
@@ -218,7 +236,7 @@ final class ScratchNode: @unchecked Sendable {
             #!/bin/sh
             case "$*" in
               *show-environment*) printf 'HOME=/home/test\\nLANG=C.UTF-8\\nPATH=/usr/bin:/bin\\nUSER=test\\nXDG_RUNTIME_DIR=/run/user/1000\\n' ;;
-              *ExecMainStartTimestamp*) printf 'Result=success\\nExecMainStatus=0\\nExecMainStartTimestamp=\\n' ;;
+              *ExecMainStartTimestamp*) if [ -f '\(folder.path)/unit-state' ]; then cat '\(folder.path)/unit-state'; else printf 'Result=success\\nExecMainStatus=0\\nExecMainStartTimestamp=\\n'; fi ;;
             esac
             exit 0
 
@@ -442,7 +460,7 @@ enum ScratchNodes {
     /// when it shows "Type CODE and Enter", `answer(CODE)` is typed (nothing when nil). Its status and what it showed.
     static func onTerminal(_ program: String, _ arguments: [String], environment: [String: String],
                            answer: @escaping @Sendable (String) -> String?) async throws -> CommandRun {
-        let process = Process()
+            let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
         let line = ([program] + arguments).map(FakeClaude.quoted).joined(separator: " ")
         process.arguments = ["-q", "-e", "-c", line, "/dev/null"]
@@ -471,5 +489,45 @@ enum ScratchNodes {
         try? input.fileHandleForWriting.close()
         #expect(await exited(process, within: 120), "\(arguments.joined(separator: " ")) on a terminal never ended")
         return CommandRun(status: process.terminationStatus, output: shown, errors: "")
+    }
+}
+
+/// A child started with `Platform.Spawn`, reaped by its own pid (`waitpid` with `WNOHANG`, never a wait for any child):
+/// what `Process` gives of one, for a scratch node's host.
+final class SpawnedHost: @unchecked Sendable {
+    let processIdentifier: pid_t
+    private let lock = NSLock()
+    private var status: Int32?
+
+    init(pid: pid_t) { processIdentifier = pid }
+
+    /// Whether it still runs (it is reaped here once it ended).
+    var isRunning: Bool {
+        lock.withLock {
+            guard processIdentifier > 0, status == nil else { return false }
+            var raw: Int32 = 0
+            let reaped = waitpid(processIdentifier, &raw, WNOHANG)
+            if reaped == processIdentifier { status = raw } else if reaped < 0, errno == ECHILD { status = -1 }
+            return status == nil
+        }
+    }
+
+    /// Its wait status once it ended (-1: reaped elsewhere), nil while it runs.
+    var waitStatus: Int32? {
+        _ = isRunning
+        return lock.withLock { status }
+    }
+}
+
+/// Whether `host` ended within `timeout`; SIGKILLed (and waited for, 10 s at most) when it didn't.
+func exited(_ host: SpawnedHost, within timeout: TimeInterval = hangGuard) async -> Bool {
+    await offPool {
+        let deadline = MacTime.real.awake() + timeout
+        while host.isRunning, MacTime.real.awake() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        guard host.isRunning else { return true }
+        kill(host.processIdentifier, SIGKILL)
+        let killed = MacTime.real.awake() + 10
+        while host.isRunning, MacTime.real.awake() < killed { Thread.sleep(forTimeInterval: 0.01) }
+        return false
     }
 }

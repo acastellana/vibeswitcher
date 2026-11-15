@@ -391,6 +391,8 @@ extension LeadEngine {
             $0.lastStart = Self.word(outcome)
             $0.lastStartAt = Date()
         }
+        // A lead runs there again: a host restart's notice for the project is over (E8).
+        if case .started = outcome { teamStarted(root: root) }
         guard !waiting.isEmpty else { return }
         waiting.removeFirst().completion(outcome)
         for joined in waiting {

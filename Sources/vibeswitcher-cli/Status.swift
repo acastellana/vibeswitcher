@@ -64,7 +64,7 @@ enum StatusCommand {
             result = given
         }
         let facts = context.facts()
-        let journal = journalLines(context, accepted: result["accepted"]?.array ?? [])
+        let journal = journalLines(context, accepted: result["accepted"]?.array ?? [], restart: result["restart"])
         if asJSON {
             var report = result.object ?? [:]
             report["format"] = .int(format)
@@ -98,17 +98,29 @@ enum StatusCommand {
         return 0
     }
 
-    /// What the journal says that the user should see (EN-D15): unexplained starts, stops and server restarts not yet
-    /// acknowledged, how the unit's last process ended, and `NodeJournal.marks`.
-    static func journalLines(_ context: NodeContext, accepted: [NodeWire.Value]) -> [String] {
+    /// What the journal says that the user should see (EN-D15): a host restart the server saw (`restart`, E8) with how
+    /// the host ended and whether a `vibeswitcher start` explains it, until acknowledged; unexplained starts, stops and
+    /// server restarts not yet acknowledged, how the unit's last process ended, and `NodeJournal.marks`.
+    static func journalLines(_ context: NodeContext, accepted: [NodeWire.Value], restart: NodeWire.Value? = nil) -> [String] {
         let entries: [JournalEntry]
+        let state = context.unitState()
+        let ended = state?.result.map { "it last ended \(inert($0)), status \(inert(state?.execMainStatus))" }
         switch context.journalEntries() {
-        case .failure(let failure): return ["journal: \(failure.reason)"]
+        case .failure(let failure):
+            // Without a journal the restart is still said, and that nothing here can say how the host ended.
+            return restartLines(restart, ended: ended ?? "how it ended isn't known (\(failure.reason))", explained: nil, acknowledged: false)
+                + ["journal: \(failure.reason)"]
         case .success(let read): entries = read
         }
         let rule = context.journalRule
         var lines: [String] = []
-        if let state = context.unitState(), let result = state.result {
+        if let at = restart?["at"]?.string.flatMap(NodeWire.date) {
+            let event = NodeJournal.Event(kind: .start, at: at)
+            lines += restartLines(restart, ended: ended ?? "how it ended isn't known (the node's unit says nothing)",
+                                  explained: NodeJournal.unexplained(starts: [event], entries: entries, rule: rule).isEmpty,
+                                  acknowledged: NodeJournal.acknowledged(event, entries: entries, rule: rule))
+        }
+        if let state, let result = state.result {
             lines.append("the node's unit last ended: \(inert(result)), status \(inert(state.execMainStatus)), started \(inert(state.execMainStartTimestamp))")
         }
         for event in NodeJournal.unexplained(starts: NodeJournal.events(entries), entries: entries, rule: rule)
@@ -118,6 +130,20 @@ enum StatusCommand {
         let requests = accepted.map { ($0["kind"]?.string ?? "?", $0["action"]?.string, $0["at"]?.string.flatMap(NodeWire.date)) }
         lines += NodeJournal.marks(accepted: requests, entries: entries, rule: rule).map { "journal: " + $0 }
         return lines
+    }
+
+    /// The host restart the server saw (E8), until acknowledged: when, what it reset, how the host before ended
+    /// (`ended`) and whether a `vibeswitcher start` or `stop` entry explains it (`explained`; nil: no journal to ask).
+    static func restartLines(_ restart: NodeWire.Value?, ended: String, explained: Bool?, acknowledged: Bool) -> [String] {
+        guard let restart, let at = restart["at"]?.string, !acknowledged else { return [] }
+        let explains: String
+        switch explained {
+        case true?: explains = "a `vibeswitcher start` or `stop` entry in the journal explains it"
+        case false?: explains = "no `vibeswitcher start` or `stop` entry in the journal explains it"
+        case nil: explains = "whether you started it can't be read"
+        }
+        return ["restart: the session host restarted at \(inert(at)) (the one before started at \(inert(restart["before"]?.string))); \(ended); "
+                + "\(explains). Its vault started over: \(inert(restart["reset"]?.string)) (`vibeswitcher status --ack` once read)"]
     }
 
     /// `status --ack`: the journal entry that clears what it shows, after the typed code.

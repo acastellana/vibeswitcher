@@ -577,8 +577,10 @@ Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path
 `LeadVaultV2Tests.aRetiredUserSealVerifiesFalse`, `LeadVaultV2Tests.aUserSealExpiresAfterItsTime`,
 `VaultV2HostTests.theHostListsV2AndAnswersTheAppAlone`, `ServerTests.theFreshVaultOrderAcceptsThenStartsTheLead`, and the
 answer in `ServerTests.anAcceptedRequestIsShownByStatus` and `ServerTests.everyHostCallInTheServerGoesThroughTheConnector`.
+The engine's E8: `RestartTests.anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`,
+`RestartTests.aHeldUserMessageIsTheUsersAfterARestartOnlyFromTheVault`.
 
-**Tests to write:** E8: `anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`. Step 8: `aSessionsProcessCannotInstallHooks`.
+**Tests to write:** Step 8: `aSessionsProcessCannotInstallHooks`.
 
 ## S4. Session identity
 
@@ -934,13 +936,15 @@ before starting the lead again.
 `VaultFirstLookTests.onlyAFreshNodeVaultOrAScratchHostAskedHoldsItsFirstLook`,
 `VaultFirstLookHostTests.aScratchHostAskedHoldsItsVaultsFirstLook` (Task 10e: the extended first look);
 `LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`, `LeadStartTests.noFloorIsSeededFromWorkflowOnLinux` (the
-engine's E4: `lead` refused, no floor seeded).
+engine's E4: `lead` refused, no floor seeded); `RestartTests.aHostRestartSaysTheTeamIsGone`,
+`RestartTests.aHostRestartHoldsWorkersUntilTheConfigIsAccepted`, `RestartTests.aStartTheUserDidntMakeIsShownUntilAcknowledged`,
+`RestartTests.configAcceptSealsOnlyWhatItShowed`, `RestartTests.configHeldShowsChangeTimesSizesAndHashes`,
+`RestartTests.baseAcceptAfterARestartShowsWhatMoved`, `RestartTests.configAcceptRecordsTheFloorWorkflowProposes`,
+`RestartTests.theSnapshotTurnsEverythingNewIntoWhatChanged`, `RestartTests.theRestartNoticeSaysWhatWasResetAndHowTheHostEnded`,
+`RestartTests.aHandoverKeepsTheServerAndItsLeads`, `EngineStateTests.theSnapshotSaysOfEachThingWhetherItsTheSameChangedOrNew`
+(the engine's E8: the restart path, the two-step accept, the snapshot).
 
-**Tests to write:** E8:
-`aHostRestartSaysTheTeamIsGone`, `aHostRestartHoldsWorkersUntilTheConfigIsAccepted`,
-`aStartTheUserDidntMakeIsShownUntilAcknowledged`, `configAcceptSealsOnlyWhatItShowed`,
-`configHeldShowsChangeTimesSizesAndHashes`, `baseAcceptAfterARestartShowsWhatMoved`,
-`configAcceptRecordsTheFloorWorkflowProposes`.
+**Tests to write:** none left: E8's are under Held by.
 
 ## S8. The handover
 

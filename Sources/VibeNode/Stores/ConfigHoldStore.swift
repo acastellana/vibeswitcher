@@ -27,9 +27,12 @@ public enum ConfigHoldStore {
         public var outside: Bool
         /// A held folder's files that changed.
         public var files: [ConfigSeal.HeldFile]
+        /// What it is against the last accept the snapshot knows (`AcceptedSnapshot.since`: the same, changed, new),
+        /// when one is known (E8). A diff aid: the snapshot is unsealed.
+        public var sinceAccept: String?
 
         public init(name: String, changedAt: Date? = nil, size: Int? = nil, hash: String = "", change: String? = nil, outside: Bool = false,
-                    files: [ConfigSeal.HeldFile] = []) {
+                    files: [ConfigSeal.HeldFile] = [], sinceAccept: String? = nil) {
             self.name = name
             self.changedAt = changedAt
             self.size = size
@@ -37,6 +40,21 @@ public enum ConfigHoldStore {
             self.change = change
             self.outside = outside
             self.files = files
+            self.sinceAccept = sinceAccept
+        }
+    }
+
+    /// One of workflow.md's guard rails as the card shows it (E8, S7: "a guarded key shows its value"): its key, its
+    /// value now (the `test_command` text, the `merge_policy`), and what it is against the last accept.
+    public struct Rail: Equatable, Sendable {
+        public var key: String
+        public var value: String
+        public var sinceAccept: String?
+
+        public init(key: String, value: String, sinceAccept: String? = nil) {
+            self.key = key
+            self.value = value
+            self.sinceAccept = sinceAccept
         }
     }
 
@@ -49,14 +67,20 @@ public enum ConfigHoldStore {
         public var rails: [String: String]
         /// The base branch `workflow.md` names, as the card showed it.
         public var baseBranch: String?
+        /// The guard rails workflow.md sets (a value that isn't empty), with their values, as the card showed them (E8).
+        public var guarded: [Rail]
+        /// When the last accept the snapshot knows was, if one is (E8).
+        public var lastAccept: Date?
 
         public init(items: [Item] = [], hashes: [String: String] = [:], floor: LeadReviewFloor? = nil, rails: [String: String] = [:],
-                    baseBranch: String? = nil) {
+                    baseBranch: String? = nil, guarded: [Rail] = [], lastAccept: Date? = nil) {
             self.items = items
             self.hashes = hashes
             self.floor = floor
             self.rails = rails
             self.baseBranch = baseBranch
+            self.guarded = guarded
+            self.lastAccept = lastAccept
         }
     }
 
@@ -80,8 +104,10 @@ public enum ConfigHoldStore {
     /// it has nothing recorded for and what changed since the last look is held, while nothing is sealed: an app's look
     /// with no card (`checkConfig(root:)`) would seal everything held that didn't move since, as an older app's Accept
     /// does (the E6 review), and the app's `ConfigHolds.look` only reads the record. A look the vault refuses is only
-    /// said. Fails when the record can't be read.
-    public static func held(root: String, vault: LeadVault, home: String, look: Bool = true) -> Result<Shown, Error> {
+    /// said. `snapshot`: the project's last accepts (E8's `AcceptedSnapshot`), which say of each held thing and guard rail
+    /// whether it's the same, changed or new since. Fails when the record can't be read.
+    public static func held(root: String, vault: LeadVault, home: String, look: Bool = true,
+                            snapshot: AcceptedSnapshot.Project? = nil) -> Result<Shown, Error> {
         if look { _ = try? vault.checkConfig(root: root, shown: [:]) }
         let record: [String: String]?
         do { record = try vault.guardedRecord(root: root) } catch { return .failure(error) }
@@ -93,14 +119,25 @@ public enum ConfigHoldStore {
         let details = ConfigSeal.heldDetails(in: record)
         // By the record's key, as the accept seals them (`checkConfig(root:shown:)`); the card shows each by its name.
         let hashes = ConfigSeal.heldHashes(in: record)
-        let byName = Dictionary(hashes.map { (ConfigSeal.name(ofKey: $0.key), $0.value) }) { first, _ in first }
+        let byName = Dictionary(hashes.map { (ConfigSeal.name(ofKey: $0.key), (key: $0.key, hash: $0.value)) }) { first, _ in first }
         let items = names.map { name in
-            Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name] ?? "").prefix(12)), change: changes[name],
-                 outside: outside.contains(name), files: details[name]?.files ?? [])
+            Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name]?.hash ?? "").prefix(12)), change: changes[name],
+                 outside: outside.contains(name), files: details[name]?.files ?? [],
+                 sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot) })
         }
         let workflow = LeadWorkflow.load(from: workflowPath(root: root))
+        let guarded = guardedValues(workflow).map { Rail(key: $0.key, value: $0.value, sinceAccept: AcceptedSnapshot.since(rail: $0.key, value: $0.value, in: snapshot)) }
         return .success(Shown(items: items, hashes: hashes, floor: LeadReviewFloor.starting(from: workflow), rails: recordedHashes(workflow),
-                              baseBranch: workflow.baseBranch))
+                              baseBranch: workflow.baseBranch, guarded: guarded,
+                              lastAccept: snapshot?.configAt.map { Date(timeIntervalSince1970: $0) }))
+    }
+
+    /// workflow.md's guard rails that are set (`LeadVault.guardedValue` isn't empty), in `LeadVault.guardedKeys`' order.
+    public static func guardedValues(_ workflow: LeadWorkflow) -> [(key: String, value: String)] {
+        LeadVault.guardedKeys.compactMap { key in
+            let value = LeadVault.guardedValue(key, in: workflow)
+            return value.isEmpty ? nil : (key, value)
+        }
     }
 
     /// What an accept did.
@@ -115,14 +152,25 @@ public enum ConfigHoldStore {
     /// The user's accept of the card that showed `shown`, in EN-D7's order: the seal of exactly those hashes first
     /// (`checkConfig(root:shown:)`, which ends the root's first-look hold), then the rails and the floor `workflow.md`
     /// proposed as the card showed them (`setReviewFloor(onlyIfUnset: true)`, which the vault refuses while the first
-    /// look still holds). Fails when the vault can't be asked.
-    public static func accept(_ shown: Shown, root: String, vault: LeadVault) -> Result<Accepted, Error> {
+    /// look still holds). Then the snapshot (`snapshotRoot`, E8's `AcceptedSnapshot`) keeps what the vault records now of
+    /// the watched things, the rails' values and the floor the card showed: a diff aid for the next `config held`, not
+    /// written when nothing was sealed. Fails when the vault can't be asked.
+    public static func accept(_ shown: Shown, root: String, vault: LeadVault, snapshotRoot: URL? = nil) -> Result<Accepted, Error> {
         do {
             let check = try vault.checkConfig(root: root, shown: shown.hashes)
             guard check.held.isEmpty else { return .success(.changedSince(held: check.held)) }
             if !shown.rails.isEmpty { try vault.setGuardedSettings(shown.rails, root: root) }
             var floor: LeadReviewFloor?
             if let proposed = shown.floor { floor = try vault.setReviewFloor(proposed, root: root, onlyIfUnset: true) }
+            if let snapshotRoot {
+                let recorded = ((try? vault.guardedRecord(root: root)) ?? nil)?.filter { ConfigSeal.isWatchedKey($0.key) } ?? shown.hashes
+                try? AcceptedSnapshot.update(root: snapshotRoot, project: root) { project in
+                    project.configAt = Date().timeIntervalSince1970
+                    project.hashes = project.hashes.merging(recorded) { $1 }
+                    project.guarded = Dictionary(shown.guarded.map { ($0.key, $0.value) }) { first, _ in first }
+                    project.floor = floor ?? shown.floor
+                }
+            }
             return .success(.sealed(names: check.resealed.isEmpty ? shown.items.map(\.name) : check.resealed, floor: floor))
         } catch {
             return .failure(error)
@@ -159,12 +207,17 @@ public enum ConfigHoldStore {
     }
 
     /// When each of `names` was last changed (the app's `ConfigHolds.changedAt`, copied): nothing for a missing file, a
-    /// folder (its own time moves with whatever is written in it), a plugin or a settings file's scripts. Reads the disk.
+    /// folder (its own time moves with whatever is written in it), a plugin or a settings file's scripts. The file's
+    /// change time (ctime, E8 and S7), which `touch` can't set back, never its modification time, which anyone who
+    /// writes it can. Reads the disk.
     public static func changedAt(_ names: [String], root: String, home: String) -> [String: Date] {
         guard !names.isEmpty else { return [:] }
         var times: [String: Date] = [:]
         for watched in ConfigSeal.watched(home: home, root: root) where names.contains(watched.name) && (watched.kind == .file || watched.kind == .mcpServers) {
-            times[watched.name] = (try? FileManager.default.attributesOfItem(atPath: watched.path))?[.modificationDate] as? Date
+            var info = stat()
+            guard stat(watched.path, &info) == 0 else { continue }
+            let changed = Platform.Files.changed(info)
+            times[watched.name] = Date(timeIntervalSince1970: Double(changed.tv_sec) + Double(changed.tv_nsec) / 1_000_000_000)
         }
         return times
     }

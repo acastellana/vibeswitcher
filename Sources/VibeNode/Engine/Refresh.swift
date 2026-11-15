@@ -11,10 +11,11 @@ import VibeCore
 /// the wakes and waiting counts of leads that ended. Nothing the refresh reads is read on the engine's queue.
 ///
 /// Not here, as the app has it: team activity and keep-awake (the Mac's, and after the bootstrap); `rotateIfDue` and
-/// the all-done watch (after the bootstrap); the account watch (after the bootstrap); `keepRunningLeads` (E8's). The
-/// board's questions aren't told from here (`AlertRules.look`): the user sees only the cards the lead's tool server
-/// posts (S3, E6), and the all-done mark is after the bootstrap. The host's notes are asked by the server's housekeeping
-/// and at each `status` (`Requests.refreshNotes`), not every 3 s.
+/// the all-done watch (after the bootstrap); the account watch (after the bootstrap). `keepRunningLeads` (E8's) runs at
+/// the server's start, and again here only when the vault couldn't be asked then. The board's questions aren't told
+/// from here (`AlertRules.look`): the user sees only the cards the lead's tool server posts (S3, E6), and the all-done
+/// mark is after the bootstrap. The host's notes are asked by the server's housekeeping and at each `status`
+/// (`Requests.refreshNotes`), not every 3 s.
 extension LeadEngine {
     /// A refresh, on the engine's queue. From any thread.
     public func refresh() {
@@ -31,6 +32,8 @@ extension LeadEngine {
     /// On `queue`.
     func refreshNow() {
         startPending()
+        // A running lead the vault couldn't be asked about at the server's start is bound again now (E8).
+        if rebindAgain { keepRunningLeads() }
         sweepRoles()
         guard !refreshing else {
             refreshAgain = true
@@ -89,6 +92,7 @@ extension LeadEngine {
             if leads.leads[NodeIds.project(root: root)]?.named != holder?.uuidString { leads.lead(root: root) { $0.named = holder?.uuidString } }
         }
         leads.update(sessions: link.sessions, holders: holders)
+        noteKnownLeads()
     }
 
     /// What a refresh read, on the engine's queue (the app's `refreshed`, 1526-1562). `finished`: the ended sessions of

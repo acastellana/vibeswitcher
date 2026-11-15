@@ -263,9 +263,11 @@ public final class BaseMoveStore: @unchecked Sendable {
 
     /// The card `base show FOLDER [--from COMMIT]` makes (S7, E8), also with no lead running: the base is
     /// `workflow.md`'s `base_branch`, read only while its hash is the one the user's `config accept` recorded
-    /// (`ConfigHoldStore.baseBranchKey`); "from" is the commit given, else the head the vault records, else none (the
-    /// card lists the base's last `unknownFromCommits` commits and says so). A refusal says why. Reads git and the vault.
-    public static func show(root: String, from given: String?, vault: LeadVault) -> Result<Shown, ShowRefusal> {
+    /// (`ConfigHoldStore.baseBranchKey`); "from" is the commit given, else the head the vault records, else the head the
+    /// snapshot of the last `base accept` keeps for the branch (`snapshotHeads`, E8: after a host restart, whose vault
+    /// lost it), marked unverified (a worker can rewrite the snapshot), else none (the card lists the base's last
+    /// `unknownFromCommits` commits and says so). A refusal says why. Reads git and the vault.
+    public static func show(root: String, from given: String?, vault: LeadVault, snapshotHeads: [String: String] = [:]) -> Result<Shown, ShowRefusal> {
         let workflow = LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: root))
         let record: [String: String]?
         do { record = try vault.guardedRecord(root: root) } catch { return .failure(.init("the vault can't be asked about \(root): \(error)")) }
@@ -289,6 +291,9 @@ public final class BaseMoveStore: @unchecked Sendable {
         } else if let recordedHead = try? vault.head(root: root, branch: branch) {
             from = recordedHead
             fromIs = .recorded
+        } else if let kept = snapshotHeads[branch], Git.run(["rev-parse", "--verify", "--quiet", kept + "^{commit}"], in: root).ok {
+            from = kept
+            fromIs = .unverified
         }
         let range = from.map { ["\($0)..\(head.output)"] } ?? ["-n", String(unknownFromCommits), head.output]
         let log = Git.run(["log", "--format=%H%x09%s"] + range, in: root)
@@ -302,6 +307,10 @@ public final class BaseMoveStore: @unchecked Sendable {
             reason = "\(branch) at \(head.output.prefix(8)) doesn't descend from \(from.prefix(8)): it was rewritten"
         }
         if fromIs == .none { reason = "no head is recorded for \(branch) and none was given: the last \(unknownFromCommits) commits are listed" }
+        if fromIs == .unverified {
+            reason = (reason.map { $0 + "; " } ?? "") + "the vault records no head for \(branch) (a host restart erases it): \(from?.prefix(8) ?? "") is the head "
+                + "your last `base accept` recorded, from an unsealed snapshot a worker could rewrite, so check the commits listed against it"
+        }
         return .success(Shown(branch: branch, from: from, fromIs: fromIs, to: head.output, commits: from == head.output ? [] : commits, reason: reason))
     }
 

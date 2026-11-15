@@ -198,12 +198,11 @@ extension LeadEngine {
 
     // MARK: At rest
 
-    /// What `engine.json` held when the engine started, taken back (EN-D9): a `.user` message stays the user's only when
-    /// the vault's record of the user's actions vouches for it; any other goes as VibeSwitcher's, said in the log.
-    func restoreHeld() {
-        let loaded = EngineState.load(root: root)
-        if let problem = loaded.problem { note("engine state: \(problem)") }
-        let restored = EngineState.restored(loaded.state.held, actions: options.userActions)
+    /// The held messages `engine.json` held when the engine started, taken back (EN-D9; `restoreState` reads the file):
+    /// a `.user` message stays the user's only when the vault's record of the user's actions vouches for it; any other
+    /// goes as from an unverified sender, said in the log.
+    func restoreHeld(_ held: [EngineState.Held]) {
+        let restored = EngineState.restored(held, actions: options.userActions)
         if restored.notVouched > 0 {
             note("engine state: \(restored.notVouched) held message(s) marked as the user's weren't vouched for by the vault's record of "
                  + "the user's actions: they go as from an unverified sender, not the user's")
@@ -218,18 +217,14 @@ extension LeadEngine {
         }
     }
 
-    /// What's held now, written to `engine.json` on `reads` (in order with every other write there). On `queue`.
-    func saveHeld() {
-        let held = leads.held.flatMap { project, messages in
+    /// What's held now, as `engine.json` keeps it (`saveState` writes it with the rest). On `queue`.
+    func heldAtRest() -> [EngineState.Held] {
+        leads.held.flatMap { project, messages in
             messages.compactMap { message -> EngineState.Held? in
                 guard let root = leads.leads[project]?.root else { return nil }
                 return EngineState.Held(id: message.id, root: root, order: message.order ?? 0, text: message.text, from: message.from,
                                         action: message.action)
             }
         }.sorted { $0.order < $1.order }
-        let (state, root) = (EngineState(held: held), self.root)
-        reads.async({ _ in Result { try state.save(root: root) } }) { [weak self] saved in
-            if case .failure(let error) = saved { self?.note("engine state: \(EngineState.url(root: root).path) not written: \(error)") }
-        }
     }
 }
