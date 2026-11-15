@@ -3160,3 +3160,11 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 11:43 Audit of the-witness-watches: incomplete, clean, round 1: 1 Important open, 2 Nit open
 - 2026-11-15 11:44 Started a worker on the-witness-watches
 - 2026-11-15 11:44 Automatically (auto_advance): Sent the-witness-watches's worker the open Important findings the-witness-watches:F1 from its audit at a02ec497 (in a new worker: its last one was released during the audit).
+- 2026-11-15 11:45 Committed the records at b4997e08 before merging a-batch-merge-s: the last merge failed on docs/lead/decisions.md, docs/lead/progress.md
+- 2026-11-15 11:52 The worker on the-witness-watches answered findings: the-witness-watches:F1 fixed at 8d40504d: 91fdd915 + 8d40504d: memberNotices no longer skips a live member whose agent quit; it tells the lead once, by name, under key '<session>|member-ended' ('Member ui of build-it's team ended without saying its part is done: its agent quit and left the session's shell open… ask the user to close that session, then start_worker(slug)…; or stop_worker + start_worker'). Not once its part is done. Its own key (not '|ended') because unbuiltMessages gathers 2+ '|e…
+- 2026-11-15 11:53 Automatically (auto_advance): Started the audit of the-witness-watches at 8d40504d (Its review is audit).
+- 2026-11-15 11:54 Released the-witness-watches's worker (idle since its done report on 8d40504d) while its audit runs
+- 2026-11-15 11:54 Automatically (auto_advance): Released the-witness-watches's worker, idle since its done report on 8d40504d, while its audit runs (ended pid 25631 (Worker: The witness watches every team member, not only the integrator)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-15 11:55 Audit of the-witness-watches: complete, clean, round 2: 1 Important closed, 2 Nit closed
+- 2026-11-15 12:16 Pipeline held: a-batch-merge-s, the-witness-watches ready to merge with none landing; cause: a merge in progress
+- 2026-11-15 12:39 Merged a-batch-merge-s: A batch merge's receipts carry the merge-ready time (build 9495e6702ce2)
