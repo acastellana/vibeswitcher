@@ -551,13 +551,13 @@ stages 1 to 4 are each cut to what a lead needs first, and the rest of each is t
 | Stage | Before the bootstrap | After it, built by the lead |
 | --- | --- | --- |
 | 1 | The platform services a lead's path uses (processes, spawning, file watching, clocks and `stat`, load and cores, the settings store with its format, tools on PATH), swift-crypto, the hook and tool server, `scripts/test.sh` on Linux, `VibeCoreTests` green, `vibeswitcher status` as a local probe, `vibeswitcher hooks install` | Dev previews' proxy, image thumbnails, power and keep-awake, `doctor`, the adapters with their version ranges and nightly run, resources inside the binaries, format versions in every other file, the binary decision, the parity file (the static build moved before the bootstrap: stage 4's install) |
-| 2 | The security architecture document; the host with PTYs, parsers, handover through sealed memory, per-message credentials, the server child as the app through its connector, the host, parsers and server non-dumpable from their exec, everything the host runs from sealed copies, the handover's target checked, the project allow-list | The sandbox itself (and in it the subreaper), the egress proxy, sessions identified by an inherited socket, clones for workers, strong mode, the keeper's sealed copy, GitGuard's check against the vault (each awaiting the user's answer: [the one list](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user)) |
+| 2 | The security architecture document; the host with PTYs, parsers, handover through sealed memory, per-message credentials, the server child as the app through its connector, the host, parsers and server non-dumpable from their exec, everything the host runs from sealed copies, the handover's target checked, the project allow-list | The sandbox itself (and in it the subreaper), the egress proxy, sessions identified by an inherited socket, clones for workers, strong mode, the keeper's sealed copy, GitGuard's check against the vault (each decided with [the one list](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user), every recommendation accepted on 2026-11-13: [Decided](#decided)) |
 | 3 | `vibeswitcher-server` with a small versioned request/reply protocol on a Unix socket, and the command line as its client | The sessions and chats stores with snapshot and delta, the WebSocket, device keys and pairing, the terminal spike, the two-node smoke test |
 | 4 | The lead engine (a plan of its own), the merge gate, `auto_advance`, limits, `vibeswitcher lead` and answering from the command line, `vibeswitcher start`, the install step with the static build, the config seal's Linux list | The team seam with clones, boards and cards as stores, approvals as device signatures, launch rules checked against the adapters |
 
 Rules 10 and 11 hold before the bootstrap only for the build's identity (the install's `build-info`) and the files
-the node adds; the rest is the lead's. Moving sessions identified by an inherited socket and clones for workers to
-after the bootstrap is the stage 2 plan's proposal (S2-D9, S2-D10) and waits on the user.
+the node adds; the rest is the lead's. Sessions identified by an inherited socket and clones for workers come after
+the bootstrap: the stage 2 plan's S2-D9 and S2-D10, decided as D7 and D8 (the user, 2026-11-13; [Decided](#decided)).
 
 **(call)** What shapes the host (the app's principal, per-message credentials, what the host executes) comes before
 the bootstrap; the sandbox comes after, because until then the only repository a lead works on here is
@@ -578,8 +578,8 @@ allow-list (the stage 2 plan's S2-D11, held by the security document's S11).
   verdicts and merges: with no Yama a worker can ptrace a session's agent or tool server and act as that session,
   the lead or a verifier included, and a worker can restart the host, emptying its memory-only vault, into whatever
   the install folder and the systemd unit then name (the stage 2 plan's S2-D1 and S2-D3).
-- The order of the work, and what the user is asked once at its start, are in
-  [the bootstrap path](../plans/2026-11-13-v2-bootstrap-path.md).
+- The order of the work, and what the user was asked once at its start (answered on 2026-11-13, under
+  [Decided](#decided)), are in [the bootstrap path](../plans/2026-11-13-v2-bootstrap-path.md).
 
 Done when (**the bootstrap**): from an installed build, a lead on this machine plans a real version 2 task, a worker
 builds it, it is audited, and it merges into `v2` through the gate with the tests green.
@@ -627,8 +627,9 @@ Before the bootstrap ([plan](../plans/2026-11-13-v2-stage-2-session-host.md)):
 
 After it (the lead's): sessions identified by an inherited socket (S2-D9); the sandbox and the clone for team
 sessions; the egress proxy; the subreaper; strong mode; the keeper's sealed copy and GitGuard's check against the
-vault; `vibeswitcher attach ID` (the security document's S12; the user is asked once, in
-[the one list](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user)).
+vault; `vibeswitcher attach ID` (the security document's S12; decided with
+[the one list](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user) on 2026-11-13, under
+[Decided](#decided)).
 
 Done when, before the bootstrap: a `claude` session under the host survives its client quitting, a handover and a
 killed parser. After it: from inside a confined session, another session's screen, the node's state and the host's

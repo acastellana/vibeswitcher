@@ -11,7 +11,9 @@ recommendations; the answers go into the design's Decided section before stage 2
 the recommendation changes the tasks it names first. **This is the only list**: the security document, the stage 2
 plan, the engine plan and the design point here. Those documents cite a decision by a fixed tag ("decision 2"); the
 tag is in brackets after each title ([D2]); the numbers 1 to 11 are only the order of importance. A gated test
-waiting on one of these is an open item, not a stop.
+waiting on one of these is an open item, not a stop. **Answered on 2026-11-13**: every recommendation accepted, D1 to
+D20 ([the design's Decided section](../specs/2026-11-12-vibeswitcher-2-design.md#decided)); the machine actions are
+asked for at the step that needs each.
 
 ### Trade-offs to accept
 
