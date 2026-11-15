@@ -444,3 +444,7 @@ The design's pre-registered experiment. Starting both together controls for Mac 
 
 Instance 1: arm A's runner merged at about 21:45 and arm B's audit was then refused for conflicts in scripts/ui-journeys.sh and smoke.journey. Neither arm did anything wrong; the design (§5) didn't say how the same feature lands twice.
 
+## 2026-11-15 23:10:59 Experiment instance 1: the team arm's audit passed at 23:09 (round 2). Its dry run conflicts with main because the normal arm keeps merging the same files. Its merge-ready time is therefore counted as that audit pass plus the duration of one passing dry run's test run, taken once the normal arm has fully merged and the team's integrator has merged main once more (that merge's minutes are excluded).
+
+Every normal-arm merge (A2 at about 23:05, A3 and A4 next) re-breaks the team branch's merge onto main. Repeating the catch-up after each one would charge the team arm for the experiment's setup, not for its way of working.
+
