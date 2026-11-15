@@ -59,17 +59,69 @@ struct LeadVaultV2Tests {
         LeadVaultV2.sealed(answer, book: &book, changed: &changed, now: made)
         #expect(changed)
         let life = LeadVaultV2.defaultSealLife
-        #expect(LeadVaultV2.verified([answer], [true], book: book, now: made + life - 1) == [true])
-        #expect(LeadVaultV2.verified([answer], [true], book: book, now: made + life + 1) == [false])
+        func verified(_ message: SteerMessage, _ valid: Bool = true, at now: Double) -> Bool? {
+            LeadVaultV2.verified([message], [valid], book: &book, changed: &changed, now: now).first
+        }
+        #expect(verified(answer, at: made + life - 1) == true)
+        #expect(verified(answer, at: made + life + 1) == false)
         // A seal that didn't check stays false; another sender's seal has no life here.
-        #expect(LeadVaultV2.verified([answer], [false], book: book, now: made) == [false])
+        #expect(verified(answer, false, at: made) == false)
         let report = SteerMessage(text: "done", from: .system("worker t"), agentPid: 1, at: made - 99_999)
-        #expect(LeadVaultV2.verified([report], [true], book: book, now: made) == [true])
+        #expect(verified(report, at: made) == true)
         // One the record never saw is as old as its own time says (which its seal covers).
         let unseen = SteerMessage(text: "old", from: .user, agentPid: 1, at: made - life - 1)
-        #expect(LeadVaultV2.verified([unseen], [true], book: book, now: made) == [false])
+        #expect(verified(unseen, at: made) == false)
         // A seal is recorded with its time as made, not the message's.
         #expect(book?.seals[answer.id] == made)
+    }
+
+    /// The E6 review: a `.user` message that waits untaken in its lead's inbox (a long tool call: no hook takes it) has
+    /// its seal renewed by the server at each look, so it is still the user's when taken past the first life; once a
+    /// check passed it (the hook took it), or it was retired, or its life ran out, it is renewed no more, so a copy put
+    /// back lives one life at most.
+    @Test(.enabled(if: linux, "Linux: the record is kept there only")) func aWaitingUserSealIsRenewedUntilItIsChecked() throws {
+        var book: LeadVaultV2.Book?
+        var changed = false
+        let life = LeadVaultV2.defaultSealLife
+        let made = 1_800_000_000.0
+        let answer = SteerMessage(text: "yes", from: .user, agentPid: 1, at: made)
+        LeadVaultV2.sealed(answer, book: &book, changed: &changed, now: made)
+        func renew(_ ids: [String], at now: Double) -> LeadVaultV2.Reply { LeadVaultV2.answer(.renewUserSeals(ids), from: .app, book: &book, now: now) }
+        func verified(_ message: SteerMessage, at now: Double) -> Bool? {
+            LeadVaultV2.verified([message], [true], book: &book, changed: &changed, now: now).first
+        }
+        // Only the app renews; a renewal before a third of the life went writes nothing.
+        let before = book
+        guard case .refused = LeadVaultV2.answer(.renewUserSeals([answer.id]), from: .session("worker"), book: &book, now: made + life / 2) else {
+            Issue.record("a worker renewed a seal")
+            return
+        }
+        #expect(renew([answer.id], at: made + 1) == .ok)
+        #expect(book == before)
+        // Waiting: renewed twice, it verifies well past its first life.
+        #expect(renew([answer.id], at: made + life * 0.9) == .ok)
+        #expect(renew([answer.id], at: made + life * 1.8) == .ok)
+        #expect(book?.seals[answer.id] == made + life * 1.8)
+        changed = false
+        #expect(verified(answer, at: made + life * 2.5) == true)
+        #expect(changed && book?.checked[answer.id] == made + life * 2.5)
+        // Checked (taken): renewed no more, so a copy dies with this life.
+        #expect(renew([answer.id], at: made + life * 2.7) == .ok)
+        #expect(book?.seals[answer.id] == made + life * 1.8)
+        #expect(verified(answer, at: made + life * 2.9) == false)
+        // A seal whose life ran out isn't brought back; a retired one isn't renewed.
+        let late = SteerMessage(text: "late", from: .user, agentPid: 1, at: made)
+        LeadVaultV2.sealed(late, book: &book, changed: &changed, now: made)
+        #expect(renew([late.id], at: made + life + 1) == .ok)
+        #expect(book?.seals[late.id] == made)
+        let retired = SteerMessage(text: "retired", from: .user, agentPid: 1, at: made)
+        LeadVaultV2.sealed(retired, book: &book, changed: &changed, now: made)
+        _ = LeadVaultV2.answer(.retireUserSeals([retired.id]), from: .app, book: &book, now: made + 1)
+        #expect(renew([retired.id], at: made + life / 2) == .ok)
+        #expect(book?.seals[retired.id] == made)
+        // A record saved before `checked` reads.
+        let older = try JSONSerialization.data(withJSONObject: ["actions": [], "seals": ["x": made], "retired": [:]] as [String: Any])
+        #expect(try JSONDecoder().decode(LeadVaultV2.Book.self, from: older).seals == ["x": made])
     }
 
     /// A vault saved before the field (no `v2` key) reads as before, and one without anything recorded saves none.

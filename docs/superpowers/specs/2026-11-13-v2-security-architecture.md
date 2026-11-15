@@ -1493,8 +1493,10 @@ against it. Each line says what reduces it now, if anything.
     edit; merge takes the base's copy.
 29. Delivery records for steer messages (`<tty>.delivered`, `handedOver`) are outside the seal: a worker that copies
     the user's earlier sealed message back into the lead's inbox gets it delivered again, verified as the user's.
-    From the engine's E6, a `.user` seal verifies false once the server retired it or 15 minutes after it was made
-    (EN-D11), so a replay is delivered at most once, inside that window; signed approvals close it.
+    From the engine's E6, a `.user` seal verifies false once the server retired it or 15 minutes after it was made or
+    last renewed (EN-D11; the server renews the seal of each of the user's messages it still sees waiting in the
+    lead's inbox, and the vault renews none a check has passed, so an answer that waits through a long tool call stays
+    the user's), so a replay is delivered at most once, inside that window; signed approvals close it.
 30. Until the handover through sealed memory is built (Task 9), nothing; after it, no handover state on disk. A stale
     Mac-format file is removed by a fresh host (S8).
 
@@ -1664,7 +1666,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T38 | worker | get a genuine approval for its commit through a card it wrote on the board | refused | cards built from git and the vault, bound to their id | holds |
 | T39 | worker | open a window on the Windows desktop asking for a password | works while WSLg is on | decision 9 | sandbox |
 | T40 | worker | reach Windows-side localhost services (mirrored networking) | works | none | egress proxy |
-| T41 | worker | replay a sealed message of the user's into the lead's inbox | works until E6; from E6, at most once within a seal's 15 minutes | E6: a `.user` seal verifies false once retired or after 15 minutes (EN-D11) | signed approvals |
+| T41 | worker | replay a sealed message of the user's into the lead's inbox | works until E6; from E6, at most once within a seal's 15 minutes | E6: a `.user` seal verifies false once retired or 15 minutes after it was made or renewed while untaken (EN-D11) | signed approvals |
 | T42 | worker | take a new session's terminal before its launcher does | refused (Task 6) | launcher checks `TIOCSCTTY`; host checks `TIOCGSID` | holds |
 
 ## The Mac and Linux
@@ -1803,7 +1805,7 @@ file; every change keeps the Mac's code paths as they are (a platform answer or 
   `start` refusing with interop on, `status`'s plain-mode line and interop, automount and `kernel=` reports, the
   comparison of the manager's environment. E4: `lead` refused on a fresh vault until accepted. E6: approval cards built
   from git and the vault and bound to their id, questions from the lead's tool server and not from `board.json`,
-  answers at rest in the vault, `.user` seals expiring after 15 minutes or once retired (EN-D11). E8: the restart
+  answers at rest in the vault, `.user` seals expiring 15 minutes after they were made or renewed while untaken, or once retired (EN-D11). E8: the restart
   path's `config held` and `config accept CARD`, `base show` and `base accept CARD`, the snapshot, no floor seeded on
   a fresh vault, the restart notice listing what was reset and how the host ended.
 - The bootstrap path. Step 8: the unit's lines (S9), `--node` and `--node-root`, the static build, the clean install

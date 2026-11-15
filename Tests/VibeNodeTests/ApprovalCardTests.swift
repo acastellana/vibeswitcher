@@ -65,6 +65,53 @@ struct ApprovalCardTests {
         #expect(try await offPool { try world.host.vault.approved(root: world.repo, task: "change", commit: commit) } == false)
     }
 
+    /// The E6 review: a revision that offers another commit's approval shows that commit's facts, never the first one's
+    /// beside the new wording; a question revised to offer an approval becomes an approval card; and an answer approving a
+    /// commit the card doesn't show is refused, recording nothing.
+    @Test func aRevisedApprovalShowsTheNewCommitsFactsAndApprovesOnlyThat() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let first = try await taskBranch(world.repo, task: "first", file: "one.txt", subject: "First change")
+        let second = try await taskBranch(world.repo, task: "second", file: "two.txt", subject: "Second change")
+        let lead = try await world.sleepingLead()
+        let vault = world.host.vault
+
+        let asked = try await world.asked("Merge?", options: [LeadWorkflow.approval(of: first), "Not yet"], priority: .blocking, lead: lead)
+        #expect(await eventually(timeout: 60) { world.card(asked.card.id)?.approval?.tasks == ["first"] })
+        let revised = try BoardStore(root: world.repo).update {
+            try $0.revise(asked.question.id, text: "Merge?", options: [LeadWorkflow.approval(of: second), "Not yet"], note: "the other one")
+        }
+        #expect(try #require(await world.post(revised, op: .revise, lead: lead)).ok)
+        #expect(world.card(asked.card.id)?.approval?.commit == second)
+        #expect(await eventually(timeout: 60) { world.card(asked.card.id)?.approval?.tasks == ["second"] }, "\(String(describing: world.card(asked.card.id)?.approval))")
+        let facts = try #require(world.card(asked.card.id)?.approval)
+        #expect(facts.subject == "Second change" && facts.files == ["two.txt"], "\(facts)")
+
+        // The commit the card no longer shows: refused, nothing on the board or in the vault.
+        let current = try #require(world.card(asked.card.id))
+        let stale = try #require(await world.answer(current, LeadWorkflow.approval(of: first)))
+        #expect(stale.error?.code == NodeWire.Code.refused.rawValue, "\(stale)")
+        #expect(world.board().questions.first { $0.id == asked.question.id }?.state == .open)
+        #expect(try await offPool { try vault.approved(root: world.repo, task: "first", commit: first) } == false)
+        let reply = try #require(await world.answer(current, LeadWorkflow.approval(of: second)))
+        #expect(reply.ok, "\(reply)")
+        #expect(try await offPool { try vault.approved(root: world.repo, task: "second", commit: second) })
+
+        // A question first posted with no approval, revised to offer one: an approval card with that commit's facts.
+        let plain = try await world.asked("Anything else?", options: ["No"], lead: lead)
+        #expect(plain.card.kind == .question)
+        let offered = try BoardStore(root: world.repo).update {
+            try $0.revise(plain.question.id, text: "Merge the first?", options: [LeadWorkflow.approval(of: first), "No"], note: "ready")
+        }
+        #expect(try #require(await world.post(offered, op: .revise, lead: lead)).ok)
+        #expect(world.card(plain.card.id)?.kind == .approval)
+        #expect(await eventually(timeout: 60) { world.card(plain.card.id)?.approval?.tasks == ["first"] })
+        // An approval typed on a question card that shows no commit is refused too.
+        let other = try await world.asked("Which name?", options: ["A", "B"], lead: lead)
+        let typed = try #require(await world.answer(other.card, LeadWorkflow.approval(of: second)))
+        #expect(typed.error?.code == NodeWire.Code.refused.rawValue, "\(typed)")
+    }
+
     /// S3: a board whose task title, commit and files were rewritten after the post shows git's and the vault's facts,
     /// never the board's.
     @Test func anApprovalCardIsBuiltFromGitAndTheVault() async throws {

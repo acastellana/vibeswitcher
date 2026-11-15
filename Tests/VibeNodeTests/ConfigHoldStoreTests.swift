@@ -97,6 +97,64 @@ struct ConfigHoldStoreTests {
         #expect(ConfigHoldStore.difference(shown, name: "~/.nothing", home: team.home) == nil)
     }
 
+    /// The E6 review: `config held` (EN-D5: it changes nothing) lists a held change and leaves it held; its look seals
+    /// nothing, also what a look held before and hasn't moved since.
+    @Test func lookingAtTheHeldListSealsNothing() throws {
+        let team = try team()
+        try "name: browser\nnew\nend\n".write(toFile: team.skill, atomically: true, encoding: .utf8)
+        #expect(try team.asLead.checkConfig(root: team.root).held == ["~/.claude/skills"])
+
+        let shown = try ConfigHoldStore.held(root: team.root, vault: team.app, home: team.home).get()
+        #expect(shown.items.map(\.name) == ["~/.claude/skills"])
+        #expect(ConfigSeal.held(in: try team.app.guardedRecord(root: team.root)) == ["~/.claude/skills"])
+        // Looked at again: still held, and the card drawn then still seals it.
+        let again = try ConfigHoldStore.held(root: team.root, vault: team.app, home: team.home).get()
+        #expect(again.items.map(\.name) == ["~/.claude/skills"])
+        #expect(again.hashes == shown.hashes)
+        guard case .sealed(let names, _) = try ConfigHoldStore.accept(again, root: team.root, vault: team.app).get() else {
+            Issue.record("the card drawn didn't seal")
+            return
+        }
+        #expect(names == ["~/.claude/skills"])
+    }
+
+    /// The E6 review (the app's refresh calling `ConfigHolds.look`): what the vault holds for a project with a lead running
+    /// becomes a card at the engine's look, which `status` counts, once; the look reads the record only, so the change
+    /// stays held for the user's accept.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(5))) func whatTheVaultHoldsBecomesACardAtTheEnginesLook() async throws {
+        let book = LeadVault.Book()
+        let world = try await CardWorld.make(scratch) { host in
+            book.configHome = host.home.path
+            return book.vault(folder: self.scratch.url("vault"), as: { .app })
+        }
+        defer { world.stop() }
+        let home = world.host.home.path
+        let skill = home + "/.claude/skills/mine/SKILL.md"
+        try FileManager.default.createDirectory(atPath: (skill as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try "name: mine\nold\n".write(toFile: skill, atomically: true, encoding: .utf8)
+        let app = book.vault(folder: scratch.url("vault"), as: { .app })
+        try app.bind(try app.startLead(root: world.repo, branch: "main"), root: world.repo, session: "lead-session")
+        #expect(try app.checkConfig(root: world.repo).held.isEmpty)
+        let lead = book.vault(folder: scratch.url("vault"), as: { .session("lead-session") })
+        try lead.bind(try lead.issue(role: .worker, root: world.repo, task: "t"), root: world.repo, session: "worker-session")
+        try "name: mine\nnew\n".write(toFile: skill, atomically: true, encoding: .utf8)
+        #expect(try lead.checkConfig(root: world.repo).held == ["~/.claude/skills"])
+
+        _ = try await world.sleepingLead()
+        let configCards = { world.queue.sync { world.engine.cards.list(project: world.project).filter { $0.kind == .configHeld } } }
+        #expect(await eventually(timeout: 60) {
+            world.queue.async { world.engine.look() }
+            return configCards().first?.config?.items.map(\.name) == ["~/.claude/skills"]
+        }, "\(configCards())")
+        let card = try #require(configCards().first)
+        world.queue.async { world.engine.look() }
+        await world.drained()
+        #expect(configCards().map(\.id) == [card.id])
+        #expect(ConfigSeal.held(in: try app.guardedRecord(root: world.repo)) == ["~/.claude/skills"])
+        let status = try #require(await world.ask("status"))
+        #expect(status.result?["cards"]?["config"]?.int == 1, "\(status)")
+    }
+
     /// An accept seals what the card showed: a file that changed after the card was drawn, even one a look has held
     /// since, isn't sealed, and it says so; a card drawn again seals it.
     @Test func acceptOnAListDrawnBeforeAChangeSealsNothing() throws {

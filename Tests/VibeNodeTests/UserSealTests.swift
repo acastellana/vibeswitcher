@@ -80,6 +80,21 @@ struct UserSealTests {
         #expect(copy.from != .user, "\(copy.from)")
     }
 
+    /// The E6 review: an answer that waits in the lead's inbox past its seal's life (the lead's tool call runs on, a
+    /// merge's tests: no hook takes the inbox) is still the user's when the lead takes it, since the server renews the
+    /// seal of each of the user's messages it still sees waiting.
+    @Test func anAnswerWaitingPastItsSealsLifeIsStillTheUsers() async throws {
+        let life = 6
+        let node = try await ScratchNode(scratch, sealLife: life)
+        defer { node.stop() }
+        let (lead, message, _) = try await answered(node)
+        // The event: twice the seal's life has gone by since it was sealed, the message untaken.
+        try #require(await eventually(timeout: 60) { Date().timeIntervalSince1970 > message.at + Double(2 * life) })
+        let taken = take(node, lead)
+        let answer = try #require(taken.first { $0.id == message.id }, "\(taken) \(node.said)")
+        #expect(answer.from == .user, "\(answer.from)")
+    }
+
     @Test func aReplayIsRefusedEvenWithTheDeliveredRecordRemoved() async throws {
         let node = try await ScratchNode(scratch, sealLife: 5)
         defer { node.stop() }

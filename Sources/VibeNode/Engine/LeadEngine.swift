@@ -128,6 +128,11 @@ public final class LeadEngine: @unchecked Sendable {
     /// once its delivered record shows them.
     var postedUser: [String: String] = [:]
     var retiring = false
+    /// The user's messages being recorded in the vault before they're delivered (`tellAsUser`), by root: what's sent to
+    /// that lead meanwhile waits behind them.
+    var recordingUser: [String: Int] = [:]
+    /// A look at what the vault holds (`lookAtConfig`) is under way.
+    var lookingAtConfig = false
 
     /// `root`: the node's root (its policy, limits, sessions' temporary folders; a scratch node's lead gets it as
     /// `VIBESWITCHER_HOME`). `nodeRoot`: the build's folder. `link`: the host. `clock`: the engine's clock.

@@ -118,6 +118,26 @@ struct AnswerTests {
         #expect(try await offPool { try client.holds(action: action, digest: LeadVaultV2.digest(message.text)) })
     }
 
+    /// The E6 review: the user's message keeps the place it was sent in while the vault records it (the record runs on
+    /// the engine's `work`, held up here), so what VibeSwitcher sends that lead meanwhile comes after it.
+    @Test func theUsersMessageKeepsItsPlaceWhileTheVaultRecordsIt() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        _ = try await world.sleepingLead()
+        let gate = DispatchSemaphore(value: 0)
+        world.engine.work.async(flags: .barrier) { gate.wait() }
+        world.queue.async {
+            world.engine.tellAsUser("first, the user's", root: world.repo, action: UUID().uuidString.lowercased())
+            world.engine.deliver(built: { "second, VibeSwitcher's" }, from: .system("test"), root: world.repo, action: nil)
+        }
+        let waited = await eventually(timeout: 30) { world.held().contains { $0.text.hasPrefix("second") } }
+        gate.signal()
+        #expect(waited, "\(world.held())")
+        #expect(await eventually(timeout: 60) { world.held().count == 2 }, "\(world.held())")
+        #expect(world.held().map(\.text) == ["first, the user's", "second, VibeSwitcher's"])
+        #expect(world.held().first?.from == .user)
+    }
+
     /// Each kind the server records, in the vault when it acts.
     @Test func everyAcceptedRequestIsInTheVaultBeforeItActs() async throws {
         let world = try await CardWorld.make(scratch)

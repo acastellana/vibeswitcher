@@ -61,6 +61,8 @@ public final class Requests: @unchecked Sendable {
     private var replyOrder: [String] = []
     /// Each request as it is acted on, after the voice, the code and the vault's record (for tests). On `queue`.
     public var acting: (NodeWire.Request) -> Void = { _ in }
+    /// The repository a request's folder is in (`repository(_:)`, git: never on `queue`); a test's instead.
+    var repositoryOf: @Sendable (String) -> String = { Requests.repository($0) }
 
     public init(link: HostLink, sessions: NodeSessions?, rule: VoiceRule, root: URL, hostSocket: String, commit: String,
                 hostPID: pid_t = getppid(), note: @escaping (String) -> Void = { _ in }) {

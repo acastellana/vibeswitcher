@@ -87,15 +87,20 @@ final class BaseMoveStoreTests {
         try yours("git commit -m b") { try commit("b.txt") }
         let moves = moves()
         let gate = DispatchSemaphore(value: 0)
+        let wroteOnLooker = Locked<Bool?>(nil)
+        let looker = pthread_self()
         reads.async({ _ in gate.wait() })
         moves.look([root])
         #expect(taken.map(\.to) == [head()])
         // The queue is held: nothing written yet.
         #expect(!BoardStore(root: root).load().updates.contains { $0.title.hasPrefix("Took") })
+        reads.async({ _ in wroteOnLooker.value = pthread_equal(pthread_self(), looker) != 0 })
         gate.signal()
         let update = try #require(board().updates.last)
         #expect(update.title == "Took 1 commit on main")
         #expect(update.body.hasPrefix("accepted 1 commit on main from your session"), "\(update.body)")
+        // Written on the reads queue, not on the thread that looked (the app's `wroteOnMain == false`).
+        #expect(wroteOnLooker.value == false)
     }
 
     @Test func aMoveNobodyAccountsForIsAskedOnceAndAcceptingTakesIt() throws {
@@ -182,7 +187,9 @@ final class BaseMoveStoreTests {
         #expect(note.state == .asking && note.from == left && note.to == now && note.commits == 1)
         let refusal = LeadVault.moveRefusal(base: "fair-launch", known: left, current: now,
                                             move: .success(try app.acceptMove(root: root, branch: "fair-launch")), root: root)
-        #expect(refusal.contains("VibeSwitcher is asking the user"), "\(refusal)")
+        #expect(refusal.contains("VibeSwitcher is asking the user: a card in your chat"), "\(refusal)")
+        #expect(refusal.contains("Don't ask them to restart you"), "\(refusal)")
+        #expect(!refusal.contains("starting the lead again"))
         try LeadVault.BaseMoveRefusal(branch: "fair-launch", to: now, at: 1).save(root: root)
 
         moves.accept(root)

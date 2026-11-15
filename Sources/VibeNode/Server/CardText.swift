@@ -8,6 +8,26 @@ import VibeCore
 public enum CardText {
     static func inert(_ text: String?) -> String { ConfigSeal.inert(text ?? "", limit: .max) }
 
+    /// `status`'s lines for the leads and the open cards (its result's `leads` and `cards`): per lead its project,
+    /// folder and session, its open and blocking questions and its open cards' ids; then the open cards counted by kind.
+    public static func statusLines(leads: [NodeWire.Value], cards: NodeWire.Value?) -> [String] {
+        var lines = ["leads: \(leads.count)"]
+        for lead in leads {
+            let questions = lead["questions"]
+            let open = questions?["open"]?.int ?? 0, blocking = questions?["blocking"]?.int ?? 0
+            let ids = lead["cards"]?.array?.compactMap(\.string) ?? []
+            lines.append("  \(inert(lead["project"]?.string))  \(inert(lead["root"]?.string))  session \(inert(lead["session"]?.string ?? "none"))"
+                         + ": \(open) open question\(open == 1 ? "" : "s") (\(blocking) blocking)"
+                         + (ids.isEmpty ? "" : ", cards \(ids.map(inert).joined(separator: ", "))"))
+        }
+        if let cards {
+            let count = { (kind: String) in cards[kind]?.int ?? 0 }
+            lines.append("open cards: \(count("questions")) questions, \(count("approvals")) approvals, \(count("config")) held config, "
+                         + "\(count("base")) base moves")
+        }
+        return lines
+    }
+
     /// The lines for `card` (`CardStore.Card.value`).
     public static func lines(_ card: NodeWire.Value) -> [String] {
         let id = inert(card["id"]?.string)

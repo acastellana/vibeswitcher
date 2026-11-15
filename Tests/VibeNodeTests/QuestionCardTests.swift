@@ -42,6 +42,51 @@ struct QuestionCardTests {
         #expect(shown?["notice"]?.string?.hasPrefix("Withdrawn before your answer") == true, "\(String(describing: shown))")
     }
 
+    /// EN-D1 (the E6 review): the repository a folder names is found by git off the engine's queue, for `questions`,
+    /// `config held` and `base show` alike, so a slow or hung filesystem under the folder holds no other request. The
+    /// lookup is held here; meanwhile the engine's queue runs.
+    @Test func aFoldersRepositoryIsFoundOffTheEnginesQueue() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let gate = DispatchSemaphore(value: 0)
+        let looked = Locked(0)
+        world.queue.sync {
+            world.requests.repositoryOf = { folder in
+                looked.value += 1
+                gate.wait()
+                return Requests.repository(folder)
+            }
+        }
+        for (index, kind) in ["questions", "config.held", "base.show"].enumerated() {
+            let reply = Locked<NodeWire.Reply?>(nil)
+            let request = NodeWire.Request(id: UUID().uuidString, kind: kind, args: ["folder": .string(world.repo)], action: nil)
+            world.queue.async { world.requests.handle(request, from: CardWorld.user) { reply.value = $0 } }
+            #expect(await eventually(timeout: 30) { looked.value == index + 1 }, "\(kind)")
+            let ran = Locked(false)
+            world.queue.async { ran.value = true }
+            let free = await eventually(timeout: 10) { ran.value }
+            gate.signal()
+            #expect(free, "\(kind): the engine's queue waited on git")
+            #expect(await eventually(timeout: 60) { reply.value != nil }, "\(kind)")
+        }
+    }
+
+    /// The plan's "`status` gains, per lead, its open and blocking questions and cards" in what `status` prints, not only
+    /// in its JSON (the E6 review).
+    @Test func statusPrintsEachLeadsQuestionsAndCards() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.sleepingLead()
+        let blocking = try await world.asked("Ship it?", options: ["Yes", "No"], priority: .blocking, lead: lead)
+        _ = try await world.asked("Blue or red?", options: ["Blue", "Red"], lead: lead)
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.leads.leads[world.project]?.session != nil } })
+        let status = try #require(await world.ask("status"))
+        let text = CardText.statusLines(leads: status.result?["leads"]?.array ?? [], cards: status.result?["cards"]).joined(separator: "\n")
+        #expect(text.contains("leads: 1"), "\(text)")
+        #expect(text.contains(world.repo) && text.contains("2 open questions (1 blocking)") && text.contains(blocking.card.id), "\(text)")
+        #expect(text.contains("open cards: 2 questions, 0 approvals, 0 held config, 0 base moves"), "\(text)")
+    }
+
     /// S3: a question written to the board by anyone (no post) is never a card.
     @Test func aQuestionWrittenToTheBoardIsNotShown() async throws {
         let world = try await CardWorld.make(scratch)

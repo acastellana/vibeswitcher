@@ -42,14 +42,15 @@ extension LeadEngine {
         }
     }
 
-    /// On `queue`. Behind what's held already for `root`'s lead, what of it is being sent, and a message whose post is
+    /// On `queue`. Behind what's held already for `root`'s lead, what of it is being sent, a message whose post is
     /// still under way (a lead that became able to take the next one before that post came back would get them out of
-    /// order), or sent.
+    /// order), and a message of the user's still being recorded in the vault (`tellAsUser`, which took its place,
+    /// `order`, when it was asked), or sent.
     func deliver(built: @escaping @Sendable () -> String, from sender: SteerMessage.Sender, root: String, action: String?,
-                 then: @escaping (Bool) -> Void = { _ in }) {
+                 order given: Int? = nil, then: @escaping (Bool) -> Void = { _ in }) {
         let project = NodeIds.project(root: root)
-        let (order, id) = (leads.next(), UUID().uuidString)
-        if leads.held[project]?.isEmpty == false || sendingHeld.contains(root) || posting.contains(root) {
+        let (order, id) = (given ?? leads.next(), UUID().uuidString)
+        if leads.held[project]?.isEmpty == false || sendingHeld.contains(root) || posting.contains(root) || recordingUser[root] != nil {
             reads.async({ _ in built() }) { [weak self] text in
                 guard let self else { return }
                 self.leads.hold(.init(id: id, text: text, from: sender, order: order, action: action), root: root)
@@ -76,7 +77,7 @@ extension LeadEngine {
     /// held (and at rest) until it went. On `queue`.
     func deliverHeld(root: String) {
         let project = NodeIds.project(root: root)
-        guard !sendingHeld.contains(root), !posting.contains(root), let first = leads.held[project]?.first else { return }
+        guard !sendingHeld.contains(root), !posting.contains(root), recordingUser[root] == nil, let first = leads.held[project]?.first else { return }
         sendingHeld.insert(root)
         post(id: first.id, built: { first.text }, from: first.from, root: root) { [weak self] went, _ in
             guard let self else { return }

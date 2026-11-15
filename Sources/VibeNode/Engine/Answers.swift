@@ -82,37 +82,49 @@ extension LeadEngine {
     func questionPosted(_ op: NodeQuestionPost.Op, question: LeadQuestion, root: String) -> CardStore.Card? {
         let root = (root as NSString).standardizingPath
         leads.lead(root: root)
-        if var card = cards.card(question: question.id, root: root) {
-            card.question = question
-            card.closed = Self.closed(question)
-            cards.put(card)
-            cardsChanged()
-            return card
-        }
-        guard op == .post else { return nil }
-        let commit = Self.approvalCommit(question)
-        var card = CardStore.Card(root: root, kind: commit == nil ? .question : .approval)
+        let existing = cards.card(question: question.id, root: root)
+        guard existing != nil || op == .post else { return nil }
+        var card = existing ?? CardStore.Card(root: root, kind: .question)
         card.question = question
         card.closed = Self.closed(question)
-        if let commit { card.approval = CardStore.ApprovalFacts(commit: commit) }
+        // The commit the options approve now: a revision that names another commit (or adds or drops "Approve") makes
+        // the card show that one's facts, built anew, never the earlier commit's beside the new wording.
+        let commit = Self.approvalCommit(question)
+        let rebuild = commit != nil && commit != card.approval?.commit
+        card.kind = commit == nil ? .question : .approval
+        if commit == nil { card.approval = nil } else if rebuild, let commit { card.approval = CardStore.ApprovalFacts(commit: commit) }
         cards.put(card)
         cardsChanged()
-        if let commit { buildApproval(card: card.id, commit: commit, root: root) }
+        if rebuild, let commit { buildApproval(card: card.id, commit: commit, root: root) }
         return card
     }
 
     /// An approval card's facts, from git and the vault (S3): the tasks whose branch points at `commit`, the files and
     /// diffstat of `<base>...<commit>`, its subject, each task's verdict, and the sensitive paths it touches (read from
-    /// workflow.md only while `sensitive_paths`' hash is the one the vault records).
+    /// workflow.md only while `sensitive_paths`' hash is the one the vault records). Kept only while the card still
+    /// approves `commit` (a revision meanwhile builds its own).
     func buildApproval(card id: String, commit: String, root: String) {
         let vault = cardVault
         work.async { [weak self] in
             let facts = Self.approvalFacts(commit: commit, root: root, vault: vault)
             guard let self else { return }
             self.queue.async {
-                self.cards.change(id) { $0.approval = facts }
+                self.cards.change(id) { card in
+                    if card.approval?.commit == commit { card.approval = facts }
+                }
             }
         }
+    }
+
+    /// Why `text` can't answer `card`: it approves a commit ("Approve <commit>") the card doesn't show the facts of (an
+    /// approval card of another commit, or a question card), so the user would approve what they weren't shown.
+    static func approvalRefusal(_ text: String, card: CardStore.Card) -> String? {
+        guard let approved = LeadVault.approvedCommit(in: text), approved != card.approval?.commit.lowercased() else { return nil }
+        if let shown = card.approval?.commit {
+            return "This card shows the facts of commit \(shown), not \(approved): nothing was answered. Approve the commit the card shows, "
+                + "or list the questions again (the lead may have revised it)."
+        }
+        return "This card shows no commit's facts, so it can't approve \(approved): nothing was answered."
     }
 
     /// The facts of an approval of `commit` in `root`, as the card shows them. Reads git and the vault.
@@ -161,6 +173,7 @@ extension LeadEngine {
             guard let card = cards.cards[id], card.kind == .question || card.kind == .approval, let question = card.question else {
                 return then(.failure(.gone("no question card \(id)")))
             }
+            if let why = Self.approvalRefusal(text, card: card) { return then(.failure(.refused(why))) }
             let (root, vault, seen) = (card.root, cardVault, min(version ?? question.version, question.version))
             reads.async({ _ -> (LeadAnswerOutcome, String?) in
                 let outcome = (try? BoardStore(root: root).update { board in board.answer(question.id, with: text, saw: seen) }) ?? .missing
@@ -247,16 +260,23 @@ extension LeadEngine {
     }
 
     /// `text` to `root`'s lead as the user's: its digest recorded in the vault under `action` (kind `message`), so after
-    /// a restart a held copy is vouched for (EN-D9), then delivered (or held). On `queue`.
+    /// a restart a held copy is vouched for (EN-D9), then delivered (or held). Its place among what's sent to that lead
+    /// is taken now: what's sent while it's recorded waits behind it (`recordingUser`). On `queue`.
     func tellAsUser(_ text: String, root: String, action: String?) {
         guard let action else { return deliver(built: { text }, from: .user, root: root, action: nil) }
-        let (client, project, note) = (link.vaultV2, NodeIds.project(root: root), self.note)
+        let (client, project, note, order) = (link.vaultV2, NodeIds.project(root: root), self.note, leads.next())
+        recordingUser[root, default: 0] += 1
         work.async { [weak self] in
             do { try client.recordUserAction(action, kind: "message", subject: project, digest: LeadVaultV2.digest(text)) } catch {
                 note("lead: the user's message for \(LeadMail.project(of: root)) wasn't recorded in the vault (\(error)): after a restart it isn't vouched for")
             }
             guard let self else { return }
-            self.queue.async { self.deliver(built: { text }, from: .user, root: root, action: action) }
+            self.queue.async {
+                let left = (self.recordingUser[root] ?? 1) - 1
+                self.recordingUser[root] = left > 0 ? left : nil
+                // Held behind what's held or recorded still, and what waited behind it goes after it.
+                self.deliver(built: { text }, from: .user, root: root, action: action, order: order)
+            }
         }
     }
 
@@ -266,24 +286,35 @@ extension LeadEngine {
     }
 
     /// Retires in the vault each `.user` message the lead took (its inbox's delivered record shows it): its seal verifies
-    /// false from then on, so a copy put back in the inbox arrives as unverified (T41). On `queue`.
+    /// false from then on, so a copy put back in the inbox arrives as unverified (T41). Each one still waiting in the
+    /// inbox has its seal renewed (`renewUserSeals`: its life counts from now), so an answer that waits while the lead's
+    /// tool call runs long (a merge's tests) is still the user's when the lead takes it; the vault renews none a check
+    /// has passed, and the server none it no longer sees waiting. On `queue`, at each `look`.
     func retireTaken() {
         guard !postedUser.isEmpty, !retiring else { return }
         retiring = true
         let (posted, inbox, client, note) = (postedUser, root, link.vaultV2, self.note)
-        reads.async({ _ -> [String] in
-            let byTerminal = Dictionary(grouping: posted, by: \.value)
-            return byTerminal.flatMap { tty, entries -> [String] in
+        reads.async({ _ -> (taken: [String], waiting: [String]) in
+            var taken: [String] = [], waiting: [String] = []
+            for (tty, entries) in Dictionary(grouping: posted, by: \.value) {
                 let delivered = SteerInbox.delivered(tty: tty, root: inbox)
-                return entries.map(\.key).filter(delivered.contains)
+                let pending = Set(SteerInbox.pending(tty: tty, root: inbox).map(\.id))
+                for id in entries.map(\.key).sorted() {
+                    if delivered.contains(id) { taken.append(id) } else if pending.contains(id) { waiting.append(id) }
+                }
             }
-        }) { [weak self] taken in
+            return (taken, waiting)
+        }) { [weak self] found in
             guard let self else { return }
-            guard !taken.isEmpty else {
+            let taken = found.taken
+            guard !taken.isEmpty || !found.waiting.isEmpty else {
                 self.retiring = false
                 return
             }
             self.work.async {
+                if (try? client.renewUserSeals(found.waiting)) == nil {
+                    note("lead: \(found.waiting.count) waiting message(s) of the user's not renewed in the vault: tried again at the next look")
+                }
                 let retired = (try? client.retireUserSeals(taken)) != nil
                 if !retired { note("lead: \(taken.count) delivered message(s) of the user's not retired in the vault yet: tried again") }
                 self.queue.async {
@@ -320,6 +351,41 @@ extension LeadEngine {
                 }
             }
         }
+    }
+
+    /// What the vault holds for each project with a lead running, looked at (the app's refresh calling
+    /// `ConfigHolds.look`, `LeadController` 671-677): the record read only (`ConfigHoldStore.held(look: false)`, never a
+    /// look that could seal), and something held that no open card shows as it's held now becomes a card (an earlier
+    /// open one closed), so `status` counts it and `questions` lists it. On `queue`, at each `look` (E7's refresh).
+    func lookAtConfig() {
+        let roots = Set(leads.leads.values.filter { $0.session != nil }.map(\.root))
+        guard !roots.isEmpty, !lookingAtConfig else { return }
+        lookingAtConfig = true
+        let (vault, home) = (cardVault, self.home)
+        work.async { [weak self] in
+            let found = roots.sorted().reduce(into: [String: ConfigHoldStore.Shown]()) { found, root in
+                if case .success(let shown) = ConfigHoldStore.held(root: root, vault: vault, home: home, look: false) { found[root] = shown }
+            }
+            guard let self else { return }
+            self.queue.async {
+                self.lookingAtConfig = false
+                for (root, shown) in found.sorted(by: { $0.key < $1.key }) { self.configLooked(shown, root: root) }
+            }
+        }
+    }
+
+    /// A look found `shown` held for `root`: a card when something is held that no open held-config card shows with
+    /// these hashes. On `queue`.
+    func configLooked(_ shown: ConfigHoldStore.Shown, root: String) {
+        let project = NodeIds.project(root: root)
+        let open = cards.list(project: project).filter { $0.kind == .configHeld }
+        guard !shown.items.isEmpty, !open.contains(where: { $0.config?.hashes == shown.hashes }) else { return }
+        for old in open { cards.change(old.id) { $0.closed = "superseded by a newer card" } }
+        var card = CardStore.Card(root: root, kind: .configHeld)
+        card.config = shown
+        cards.put(card)
+        note("lead: the vault holds \(shown.items.map { ConfigSeal.inert($0.name, limit: 80) }.joined(separator: ", ")) for "
+             + "\(LeadMail.project(of: root)): card \(card.id) (config held, config accept)")
     }
 
     /// `config accept CARD`: the seal of what the card showed, then the rails and the floor it proposed (EN-D7), and the

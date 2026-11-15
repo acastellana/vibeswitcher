@@ -25,9 +25,11 @@ extension LeadEngine {
             deliverHeld(root: root)
             wake(root: root)
         }
-        // E6: the user's messages the leads took retired in the vault, and the leads' bases looked at.
+        // E6: the user's messages the leads took retired in the vault (those still waiting renewed), the leads' bases
+        // and what the vault holds for them looked at.
         retireTaken()
         lookAtBases()
+        lookAtConfig()
     }
 
     /// Wakes `root`'s lead for the reports that wait for it, or types the user's words that wait (`flush`). On `queue`.
@@ -204,14 +206,17 @@ extension LeadEngine {
                         // Not in: what was taken waits in the inbox again (behind what came meanwhile), typed at the next look.
                         self.typedAt[agent.tty] = nil
                         let (inbox, inboxRead) = (self.root, self.inboxRead)
-                        self.reads.async({ _ -> Int in
+                        self.reads.async({ _ -> [SteerMessage] in
                             inboxRead(agent.tty)
-                            return waiting.taken.filter { message in
-                                (try? SteerInbox.post(SteerMessage(text: Self.whole(message), from: message.from, agentPid: message.agentPid),
-                                                      tty: agent.tty, root: inbox)) != nil
-                            }.count
-                        }) { [weak self] back in
+                            return waiting.taken.compactMap { message in
+                                let again = SteerMessage(text: Self.whole(message), from: message.from, agentPid: message.agentPid)
+                                return (try? SteerInbox.post(again, tty: agent.tty, root: inbox)) != nil ? again : nil
+                            }
+                        }) { [weak self] posted in
                             guard let self else { return }
+                            // The user's, posted again under a new id: renewed while it waits, retired once taken.
+                            for message in posted where message.from == .user { self.postedAsUser(message.id, tty: agent.tty) }
+                            let back = posted.count
                             self.wakeStep(.notTyped(session: id, why: Self.notTaken))
                             self.note("lead: what was typed into session \(id) didn't go in: \(back) of \(waiting.taken.count) message(s) wait in its inbox again")
                         }

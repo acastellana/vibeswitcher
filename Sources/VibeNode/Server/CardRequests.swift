@@ -51,18 +51,26 @@ extension Requests {
         case failure(NodeWire.Reply)
     }
 
-    private func namedRoot(_ request: NodeWire.Request, required: Bool) -> Named {
+    /// `then` hears the root on `queue`. A folder's repository is found by git, so off the engine's queue (as
+    /// `LeadEngine.startLead` finds it): on the engine's `work`.
+    private func namedRoot(_ request: NodeWire.Request, required: Bool, then: @escaping (Named) -> Void) {
         if let folder = request.args?["folder"]?.string {
-            guard folder.hasPrefix("/") else { return .failure(.init(re: request.id, error: .init(.badArgs, "folder is an absolute path"))) }
-            return .root(Self.repository(folder))
+            guard folder.hasPrefix("/") else { return then(.failure(.init(re: request.id, error: .init(.badArgs, "folder is an absolute path")))) }
+            guard let engine else { return then(.root(nil)) }
+            let (find, queue) = (repositoryOf, self.queue)
+            engine.work.async {
+                let root = find(folder)
+                queue.async { then(.root(root)) }
+            }
+            return
         }
         if let project = request.args?["project"]?.string {
             guard let root = engine?.leads.leads[project]?.root ?? engine?.cards.cards.values.first(where: { $0.project == project })?.root else {
-                return .failure(.init(re: request.id, error: .init(.gone, "no project \(ConfigSeal.inert(project, limit: 80)) on this node")))
+                return then(.failure(.init(re: request.id, error: .init(.gone, "no project \(ConfigSeal.inert(project, limit: 80)) on this node"))))
             }
-            return .root(root)
+            return then(.root(root))
         }
-        return required ? .failure(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs folder"))) : .root(nil)
+        then(required ? .failure(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs folder"))) : .root(nil))
     }
 
     /// The repository's top for `folder` (the lead's root), or the folder as given when it isn't in one.
@@ -76,13 +84,16 @@ extension Requests {
 
     /// `questions [FOLDER] [--all]`: the open cards (closed ones too with `all`), each as `CardStore.Card.value`.
     func questions(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
-        let project: String?
-        switch namedRoot(request, required: false) {
-        case .failure(let refusal): return reply(refusal)
-        case .root(let root): project = root.map { NodeIds.project(root: $0) }
+        namedRoot(request, required: false) { [weak self] named in
+            guard let self else { return }
+            let project: String?
+            switch named {
+            case .failure(let refusal): return reply(refusal)
+            case .root(let root): project = root.map { NodeIds.project(root: $0) }
+            }
+            let cards = self.engine?.cards.list(project: project, all: request.args?["all"]?.bool == true) ?? []
+            reply(.init(re: request.id, result: .object(["cards": .array(cards.map(\.value))])))
         }
-        let cards = engine?.cards.list(project: project, all: request.args?["all"]?.bool == true) ?? []
-        reply(.init(re: request.id, result: .object(["cards": .array(cards.map(\.value))])))
     }
 
     // MARK: answer, hold
@@ -116,16 +127,19 @@ extension Requests {
 
     func configHeld(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server keeps no cards"))) }
-        let root: String
-        switch namedRoot(request, required: true) {
-        case .failure(let refusal): return reply(refusal)
-        case .root(let given): root = given ?? ""
-        }
-        engine.configHeld(root: root, diff: request.args?["diff"]?.string) { [weak self] result in
+        namedRoot(request, required: true) { [weak self] named in
             guard let self else { return }
-            switch result {
-            case .failure(let failure): reply(self.failed(request, failure))
-            case .success(let value): reply(.init(re: request.id, result: value))
+            let root: String
+            switch named {
+            case .failure(let refusal): return reply(refusal)
+            case .root(let given): root = given ?? ""
+            }
+            engine.configHeld(root: root, diff: request.args?["diff"]?.string) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .failure(let failure): reply(self.failed(request, failure))
+                case .success(let value): reply(.init(re: request.id, result: value))
+                }
             }
         }
     }
@@ -145,16 +159,19 @@ extension Requests {
 
     func baseShow(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server keeps no cards"))) }
-        let root: String
-        switch namedRoot(request, required: true) {
-        case .failure(let refusal): return reply(refusal)
-        case .root(let given): root = given ?? ""
-        }
-        engine.baseShow(root: root, from: request.args?["from"]?.string.flatMap { $0.isEmpty ? nil : $0 }) { [weak self] result in
+        namedRoot(request, required: true) { [weak self] named in
             guard let self else { return }
-            switch result {
-            case .failure(let failure): reply(self.failed(request, failure))
-            case .success(let card): reply(.init(re: request.id, result: .object(["card": card.value])))
+            let root: String
+            switch named {
+            case .failure(let refusal): return reply(refusal)
+            case .root(let given): root = given ?? ""
+            }
+            engine.baseShow(root: root, from: request.args?["from"]?.string.flatMap { $0.isEmpty ? nil : $0 }) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .failure(let failure): reply(self.failed(request, failure))
+                case .success(let card): reply(.init(re: request.id, result: .object(["card": card.value])))
+                }
             }
         }
     }

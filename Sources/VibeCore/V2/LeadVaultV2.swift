@@ -40,6 +40,10 @@ public enum LeadVaultV2 {
         case holds(action: String, digest: String)
         /// The `.user` seals with these message ids verify false from now on (the server saw the lead take them).
         case retireUserSeals([String])
+        /// The `.user` messages with these ids still wait in their lead's inbox, untaken (the server reads it at each
+        /// look): each seal's life starts again, if it is live, not retired, and no check has passed it yet
+        /// (`Book.checked`). A message that waits while its lead's tool call runs long stays the user's when taken.
+        case renewUserSeals([String])
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -58,14 +62,26 @@ public enum LeadVaultV2 {
         public var seals: [String: Double] = [:]
         /// Each `.user` seal retired, by the message's id: when.
         public var retired: [String: Double] = [:]
+        /// Each `.user` seal a check first passed (the lead's hook taking its inbox, or a handover), by the message's
+        /// id: when. Never renewed from then on, so a copy put back after it was taken lives a seal's life at most.
+        public var checked: [String: Double] = [:]
 
         public init() {}
+
+        /// A record saved before `checked` reads with none.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            actions = try container.decodeIfPresent([UserAction].self, forKey: .actions) ?? []
+            seals = try container.decodeIfPresent([String: Double].self, forKey: .seals) ?? [:]
+            retired = try container.decodeIfPresent([String: Double].self, forKey: .retired) ?? [:]
+            checked = try container.decodeIfPresent([String: Double].self, forKey: .checked) ?? [:]
+        }
     }
 
     /// How many actions the record keeps (the oldest go first).
     public static let actionsKept = 2_000
-    /// How long a `.user` seal verifies after it was made (T41 narrowed, EN-D11), unless a scratch host's test sets
-    /// another (`--test-user-seal-life`).
+    /// How long a `.user` seal verifies after it was made or last renewed while its message waited untaken (T41
+    /// narrowed, EN-D11), unless a scratch host's test sets another (`--test-user-seal-life`).
     public static let defaultSealLife: TimeInterval = 15 * 60
 
     private static let lifeLock = NSLock()
@@ -107,6 +123,16 @@ public enum LeadVaultV2 {
             for id in ids { record.retired[id] = now }
             prune(&record, now: now)
             return .ok
+        case .renewUserSeals(let ids):
+            // Only a live seal, and once a third of its life went (so a look every few seconds writes nothing new).
+            let life = sealLife
+            for id in ids {
+                guard let made = record.seals[id], record.retired[id] == nil, record.checked[id] == nil, now - made <= life, now - made >= life / 3 else {
+                    continue
+                }
+                record.seals[id] = now
+            }
+            return .ok
         }
     }
 
@@ -121,24 +147,36 @@ public enum LeadVaultV2 {
     }
 
     /// The `.verify` hook: `valid` (each message's seal checked against the key) with every `.user` one whose seal was
-    /// retired, or made more than `sealLife` ago, false (Linux only). When the seal was made is the record's, else the
-    /// message's own time (which its seal covers).
-    public static func verified(_ messages: [SteerMessage], _ valid: [Bool], book: Book?, now: Double = Date().timeIntervalSince1970) -> [Bool] {
+    /// retired, or made (or last renewed) more than `sealLife` ago, false (Linux only). When the seal was made is the
+    /// record's, else the message's own time (which its seal covers). A recorded seal that passes is marked checked the
+    /// first time (`Book.checked`): it is renewed no more.
+    public static func verified(_ messages: [SteerMessage], _ valid: [Bool], book: inout Book?, changed: inout Bool,
+                                now: Double = Date().timeIntervalSince1970) -> [Bool] {
         guard isOn else { return valid }
         let life = sealLife
-        return zip(messages, valid).map { message, valid in
+        var record = book
+        let result = zip(messages, valid).map { message, valid -> Bool in
             guard valid, message.from == .user else { return valid }
-            if book?.retired[message.id] != nil { return false }
-            let made = book?.seals[message.id] ?? message.at
-            return now - made <= life
+            if record?.retired[message.id] != nil { return false }
+            let made = record?.seals[message.id] ?? message.at
+            guard now - made <= life else { return false }
+            if record?.seals[message.id] != nil, record?.checked[message.id] == nil {
+                record?.checked[message.id] = now
+                changed = true
+            }
+            return true
         }
+        if record != book { book = record }
+        return result
     }
 
-    /// Seals and retirements older than a seal's life verify false by their age alone: they're dropped.
+    /// Seals, retirements and checks older than a seal's life verify false by their age alone: they're dropped.
     static func prune(_ record: inout Book, now: Double) {
         let cutoff = now - max(sealLife, defaultSealLife) - 60
         record.seals = record.seals.filter { $0.value >= cutoff }
         record.retired = record.retired.filter { $0.value >= cutoff }
+        let seals = record.seals
+        record.checked = record.checked.filter { seals[$0.key] != nil || $0.value >= cutoff }
     }
 }
 
@@ -183,5 +221,11 @@ public struct LeadVaultV2Client: Sendable {
     public func retireUserSeals(_ ids: [String]) throws {
         guard !ids.isEmpty else { return }
         _ = try call(.retireUserSeals(ids))
+    }
+
+    /// The `.user` messages `ids` still wait untaken in their lead's inbox: their seals' life starts again.
+    public func renewUserSeals(_ ids: [String]) throws {
+        guard !ids.isEmpty else { return }
+        _ = try call(.renewUserSeals(ids))
     }
 }

@@ -88,8 +88,7 @@ enum StatusCommand {
         for session in sessions {
             out.append("  \(inert(session["terminal"]?.string))  \(inert(session["agent"]?.string))  \(inert(session["cwd"]?.string))  \(inert(session["status"]?.string))")
         }
-        let leads = result["leads"]?.array ?? []
-        out.append("leads: \(leads.count)")
+        out += CardText.statusLines(leads: result["leads"]?.array ?? [], cards: result["cards"])
         for accepted in result["accepted"]?.array ?? [] {
             out.append("accepted: \(inert(accepted["kind"]?.string)) at \(inert(accepted["at"]?.string)) from pid \(accepted["pid"]?.int.map(String.init) ?? "?") in \(inert(accepted["cgroup"]?.string)): \(inert(accepted["commandLine"]?.array?.compactMap(\.string).joined(separator: " ")))")
         }

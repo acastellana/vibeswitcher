@@ -75,11 +75,14 @@ public enum ConfigHoldStore {
         (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md")
     }
 
-    /// What the vault holds for `root` now, as a card shows it. `look`: the vault looks at the config first
-    /// (`checkConfig(root:)`, nothing shown, as `config held` asks), so a fresh vault's first look holds what it has
-    /// nothing recorded for; a look the vault refuses is only said. Fails when the record can't be read.
+    /// What the vault holds for `root` now, as a card shows it. `look`: the vault looks at the config first, as an
+    /// accept of a card that showed nothing (`checkConfig(root:shown: [:])`), so a fresh vault's first look holds what
+    /// it has nothing recorded for and what changed since the last look is held, while nothing is sealed: an app's look
+    /// with no card (`checkConfig(root:)`) would seal everything held that didn't move since, as an older app's Accept
+    /// does (the E6 review), and the app's `ConfigHolds.look` only reads the record. A look the vault refuses is only
+    /// said. Fails when the record can't be read.
     public static func held(root: String, vault: LeadVault, home: String, look: Bool = true) -> Result<Shown, Error> {
-        if look { _ = try? vault.checkConfig(root: root) }
+        if look { _ = try? vault.checkConfig(root: root, shown: [:]) }
         let record: [String: String]?
         do { record = try vault.guardedRecord(root: root) } catch { return .failure(error) }
         let names = ConfigSeal.held(in: record)
