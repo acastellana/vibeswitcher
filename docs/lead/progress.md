@@ -3168,3 +3168,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 11:55 Audit of the-witness-watches: complete, clean, round 2: 1 Important closed, 2 Nit closed
 - 2026-11-15 12:16 Pipeline held: a-batch-merge-s, the-witness-watches ready to merge with none landing; cause: a merge in progress
 - 2026-11-15 12:39 Merged a-batch-merge-s: A batch merge's receipts carry the merge-ready time (build 9495e6702ce2)
+- 2026-11-15 12:39 Automatically (auto_advance): Merged a-batch-merge-s (A batch merge's receipts carry the merge-ready time) into main at 9cdab7e8, on its passing audit and the full test run.
+- 2026-11-15 12:39 Automatically (auto_advance): Cleaned up a-batch-merge-s (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-15 12:54 Merged the-witness-watches: The witness watches every team member, not only the integrator (build 9495e6702ce2)
