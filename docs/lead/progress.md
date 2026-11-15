@@ -3246,3 +3246,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 22:48 Automatically (auto_advance): Started the audit of ui-journeys-a3-run at 2f4fe892 (Its review is audit).
 - 2026-11-15 22:48 Released ui-journeys-a3-run's worker (idle since its done report on 2f4fe892) while its audit runs
 - 2026-11-15 22:48 Automatically (auto_advance): Released ui-journeys-a3-run's worker, idle since its done report on 2f4fe892, while its audit runs (ended pid 98752 (Worker: UI journeys A3: Run card journey)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-15 22:51 Audit of ui-journeys-a2-select: complete, clean, round 1: 1 Pre-existing open
+- 2026-11-15 22:51 Planned ui-journeys-a-run: UI journeys: a run that draws no shots fails instead of reading "unchanged"
+- 2026-11-15 22:52 Audit of ui-journeys-a3-run: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-11-15 22:52 Audit of ui-journeys-a4-dictation: complete, clean, round 1: 1 Nit open
+- 2026-11-15 22:53 Planned dark-mode-the-code: Dark mode: the code block's Run confirmation sheet draws white on white in sandbox shots
+- 2026-11-15 22:57 Audit of ui-journeys-b-team: complete, suspect, round 1: 1 Important open, 2 Nit open
+- 2026-11-15 22:57 Exception on ui-journeys-b-team by lead of vibeswitcher: edits to Sources/VibeCore/BackgroundJobs.swift, Sources/VibeSwitcher/main.swift, scripts/temporary-folder-lint.txt accepted. Reason: Compiler- and lint-forced edits tied to the goal: the --image-diff entry point in main.swift, Durations.still (set only by the sandbox's --still) for frozen ages, and one allow line for the sandbox's …
+- 2026-11-15 23:06 The worker on ui-journeys-b-team answered findings: ui-journeys-b-team:F1 fixed at b16092e5: Commit b16092e5. Masking is now opt-in. `shot NAME --masked` paints the boxes; a plain `shot` draws as before and doesn't turn on accessibility. The help line and the sandbox-app.sh header say so. The runner's `shot` step passes `--masked`. The patterns are tighter too. pid matches only `N on tty`, `ttyNNN` and `pid N`; the bare `\b\d{4,}\b` is gone. id matches only a UUID or a cut-short id (hex with a letter and a digit, ending in …); bare 7+ hex words a…
+- 2026-11-15 23:08 Merged ui-journeys-a2-select: UI journeys A2: select and copy journey (in a batch, on a test run of its own) (build 64a972289c0f with changes not committed)

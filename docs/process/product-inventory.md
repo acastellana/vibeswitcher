@@ -329,6 +329,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `mouse on|off` — the shown session's program asks for mouse reporting (DECSET 1002 and 1006, as Claude Code's fullscreen… — `Sources/VibeSwitcher/Sandbox.swift`
 - `type TEXT` — types TEXT into the chat's composer (through its text view, as the keyboard does) — `Sources/VibeSwitcher/Sandbox.swift`
 - `send` — presses Return in the composer: the message goes to the fake session — `Sources/VibeSwitcher/Sandbox.swift`
+- `composer paste|clear|expect TEXT` — the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `runblock [yes]` — the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as… — `Sources/VibeSwitcher/Sandbox.swift`
 - `tell JSON` — hands a fake Claude (the selected one, or the one labelled "to") a FakeClaude op, e.g. '{"op": "permission"… — `Sources/VibeSwitcher/Sandbox.swift`
 - `notify prepare|allow|deny` — a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -393,7 +394,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `shot-real NAME` — draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png…… — `Sources/VibeSwitcher/Sandbox.swift`
 - `close settings|sheet` — closes Settings or the sheet — `Sources/VibeSwitcher/Sandbox.swift`
 - `shot NAME` — draws each window, light and dark, into the shots folder, its side panes out of their glass (a drawing can't… — `Sources/VibeSwitcher/Sandbox.swift`
-- `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT` — the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views… — `Sources/VibeSwitcher/Sandbox.swift`
+- `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT|menu-copy TEXT` — the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views… — `Sources/VibeSwitcher/Sandbox.swift`
 - `offline on|off` — the app loses its connection to the sandbox's own host and doesn't get it back (the host and fake sessions… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unproved` — connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions — `Sources/VibeSwitcher/Sandbox.swift`
 - `quit` — quits (the host and fake sessions end with it) — `Sources/VibeSwitcher/Sandbox.swift`
