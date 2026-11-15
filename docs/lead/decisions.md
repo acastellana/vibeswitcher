@@ -440,3 +440,7 @@ In that run a stale progress file got a healthy worker declared hung and its fin
 
 The design's pre-registered experiment. Starting both together controls for Mac load and main's state. B's lead-side steps (member starts, audit, dry run) wait on my turns, a small bias against B, which the readout will note.
 
+## 2026-11-15 22:26:29 Experiment readout rule: when the normal arm merges first, the team arm's branch conflicts with main by construction (same files). The time the team arm spends merging main and dropping the other arm's duplicate files is excluded from its merge-ready time, and so is any wait for memory or load that only one arm hit. For instance 2: audit the team arm before the normal arm's first merge lands, or keep the normal arm's merges held until the team arm's dry run is done.
+
+Instance 1: arm A's runner merged at about 21:45 and arm B's audit was then refused for conflicts in scripts/ui-journeys.sh and smoke.journey. Neither arm did anything wrong; the design (§5) didn't say how the same feature lands twice.
+
