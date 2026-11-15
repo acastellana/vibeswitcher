@@ -71,6 +71,24 @@ struct ChatExtrasTests {
                 == "claude-fable-5-2")
     }
 
+    /// Claude Code may write the command, its output and text typed after it in one user line: the text stays a prompt.
+    /// The same words quoted in a prompt (a pasted task, a log) aren't a switch, and the prompt shows.
+    @Test func modelCommandOutputInAPromptLine() {
+        let fable = assistant([["type": "text", "text": "a"]], uuid: "a1", usage: ["input_tokens": 5, "output_tokens": 1],
+                              model: "claude-fable-5-2")
+        let combined = "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>\n"
+            + "<local-command-stdout>Set model to Opus 5.5</local-command-stdout>\nnow fix the bug"
+        let both = log([fable, ["type": "user", "uuid": "u1", "message": ["role": "user", "content": combined]]])
+        #expect(both.usage?.model == "claude-opus-5-5")
+        #expect(both.prompts == ["now fix the bug"])
+        let quoted = "The chip should follow `<local-command-stdout>Set model to `Opus 5.5` and saved as your default</local-command-stdout>`"
+        let pasted = log([fable, ["type": "user", "uuid": "u1", "message": ["role": "user", "content": quoted]]])
+        #expect(pasted.usage?.model == "claude-fable-5-2")
+        #expect(pasted.prompts.count == 1)
+        let wrapped = "<pasted_content id=\"p1\">\n<local-command-stdout>Set model to Opus 5.5</local-command-stdout>\n</pasted_content id=\"p1\">"
+        #expect(log([fable, ["type": "user", "uuid": "u1", "message": ["role": "user", "content": wrapped]]]).usage?.model == "claude-fable-5-2")
+    }
+
     /// The next reply says which model really answered: if it differs from what /model said, it wins.
     @Test func aLaterReplyOnAnotherModelWins() {
         let chat = log([

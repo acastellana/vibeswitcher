@@ -320,9 +320,14 @@ public enum ChatReader {
     static func claude(_ line: [String: Any], lineID: String) -> [ChatEvent] {
         if line["isSidechain"] as? Bool == true { return [] }
         let type = line["type"] as? String
-        // `/model`'s answer: the chip shows the new model now, not only after the next reply (whose model then wins).
-        if let model = modelSwitch(line, type: type) { return [.usage(ChatUsage(model: model))] }
-        if line["isMeta"] as? Bool == true { return [] }
+        // `/model`'s answer: the chip shows the new model now, not only after the next reply (whose model then wins). In
+        // a user line it comes before what the line shows (typed text after the command is still a prompt).
+        let switched = modelSwitch(line, type: type).map { [ChatEvent.usage(ChatUsage(model: $0))] } ?? []
+        if line["isMeta"] as? Bool == true || type == "system" { return switched }
+        return switched + claudeEntries(line, type: type, lineID: lineID)
+    }
+
+    private static func claudeEntries(_ line: [String: Any], type: String?, lineID: String) -> [ChatEvent] {
         if type == "attachment", let attachment = line["attachment"] as? [String: Any] {
             // A message typed while the agent worked, taken at its next step: Claude writes it here, not as a user line.
             if attachment["type"] as? String == "queued_command", let text = attachment["prompt"] as? String,
@@ -427,6 +432,13 @@ public enum ChatReader {
         }
         guard let text, let open = text.range(of: "<local-command-stdout>"),
               let close = text.range(of: "</local-command-stdout>", range: open.upperBound..<text.endIndex) else { return nil }
+        // In a user line, only Claude Code's own record of the command: its output first in the line, or after
+        // `/model`'s name. The same words quoted in a prompt, a paste or another agent's message aren't a switch.
+        if type == "user" {
+            let before = text[..<open.lowerBound]
+            guard before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || before.contains("<command-name>/model</command-name>") else { return nil }
+        }
         var said = String(text[open.upperBound..<close.lowerBound])
         said = said.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
         guard let start = said.range(of: "Set model to ") else { return nil }
