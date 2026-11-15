@@ -14,7 +14,9 @@ enum FakeClaude {
         /// `<folder>/<terminal>/transcript.jsonl`, `control.jsonl`, `state.json`: each session's own.
         let folder: URL
 
-        /// The files of the fake running on `terminal` (`HostSession.tty`: `ttypts3` on Linux, `ttys003` on the Mac).
+        /// The files of the fake running on `terminal` (`HostSession.tty`: `ttypts3` on Linux, `ttys003` on the Mac). A
+        /// fake starts them fresh: the folder an ended fake left on that terminal (Linux hands a pty's number out again)
+        /// it moves aside first, to `<terminal>.ended-<8 hex>`, so a control line written before the fake starts isn't read.
         func files(terminal: String) -> Files {
             let own = folder.appendingPathComponent(terminal, isDirectory: true)
             return Files(transcript: own.appendingPathComponent("transcript.jsonl"), control: own.appendingPathComponent("control.jsonl"),
@@ -30,7 +32,8 @@ enum FakeClaude {
 
     /// Writes the fake into `folder` (made if missing): `fake-bin/fake_claude.py`, `fake-bin/py/claude` (a symbolic link
     /// to `/usr/bin/python3`: exec'd by that name, the process's `comm` is `claude` and its `argv[0]` ends in `claude`,
-    /// which `ProcessTable.identify` needs), the launcher `fake-bin/claude`, and the sessions' folder `fake/`.
+    /// which `ProcessTable.identify` needs), the launcher `fake-bin/claude` (copied by `/bin/cp` from `claude.sh`), and
+    /// the sessions' folder `fake/`. From a thread that may block (it waits for the copy).
     static func install(in folder: URL) throws -> Install {
         let bin = folder.appendingPathComponent("fake-bin", isDirectory: true)
         let py = bin.appendingPathComponent("py", isDirectory: true)
@@ -40,11 +43,24 @@ enum FakeClaude {
         try script.write(to: file, atomically: true, encoding: .utf8)
         try FileManager.default.createSymbolicLink(atPath: py.appendingPathComponent("claude").path, withDestinationPath: "/usr/bin/python3")
         let launcher = bin.appendingPathComponent("claude")
+        // Written here as data (`claude.sh`, never exec'd), and copied to the launcher by a child: this process never
+        // holds the launcher open for writing, so no child it starts meanwhile (another test's session, a git) can
+        // inherit that and make exec'ing the launcher fail (ETXTBSY) while it lives.
+        let text = bin.appendingPathComponent("claude.sh")
         try """
         #!/bin/sh
         exec \(quoted(py.appendingPathComponent("claude").path)) -I -u \(quoted(file.path)) --fake-folder \(quoted(sessions.path)) "$@"
 
-        """.write(to: launcher, atomically: true, encoding: .utf8)
+        """.write(to: text, atomically: true, encoding: .utf8)
+        let copy = Process()
+        copy.executableURL = URL(fileURLWithPath: "/bin/cp")
+        copy.arguments = [text.path, launcher.path]
+        copy.standardInput = FileHandle.nullDevice
+        try copy.run()
+        copy.waitUntilExit()
+        guard copy.terminationStatus == 0 else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: launcher.path])
+        }
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcher.path)
         return Install(launcher: launcher, folder: sessions)
     }
@@ -142,7 +158,10 @@ def parse(argv):
         return positional[0], positional[1], positional[2], mcp, None, None
     terminal = terminal_name()
     own = os.path.join(folder, terminal)
-    os.makedirs(own, exist_ok=True)
+    if os.path.exists(own):
+        # An ended fake's, on a pty number handed out again: this one starts fresh, its control lines unread.
+        os.rename(own, own + ".ended-" + uuid.uuid4().hex[:8])
+    os.makedirs(own)
     return (os.path.join(own, "transcript.jsonl"), os.path.join(own, "control.jsonl"), os.path.join(own, "state.json"), mcp,
             positional[-1] if positional else None, terminal)
 

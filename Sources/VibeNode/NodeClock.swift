@@ -15,7 +15,9 @@ public final class NodeClock: @unchecked Sendable {
     private let now: () -> TimeInterval
     private let schedule: Schedule
     private let lock = NSLock()
-    private var clients: [Int: (every: Int, action: () -> Void)] = [:]
+    /// Each client: its period, its action, and the second of the clock it subscribed in (it isn't due for that one
+    /// or any before it).
+    private var clients: [Int: (every: Int, since: Int, action: () -> Void)] = [:]
     private var nextID = 0
     /// The second of the clock last run, counted from `origin`.
     private var tick = 0
@@ -42,7 +44,8 @@ public final class NodeClock: @unchecked Sendable {
     public var clientCount: Int { lock.withLock { clients.count } }
 
     /// Runs `action` on the clock's queue every `seconds` (at least 1) whole seconds, until the subscription is
-    /// cancelled or released. From any thread.
+    /// cancelled or released. From any thread: a client added while a due second's wake hasn't run yet takes nothing
+    /// from the others (that second still runs, at once).
     public func every(_ seconds: Int, _ action: @escaping () -> Void) -> Subscription {
         let id = lock.withLock { () -> Int in
             nextID += 1
@@ -50,7 +53,7 @@ public final class NodeClock: @unchecked Sendable {
                 origin = now()
                 tick = 0
             }
-            clients[nextID] = (max(1, seconds), action)
+            clients[nextID] = (max(1, seconds), max(tick, Int(now() - origin)), action)
             rearm()
             return nextID
         }
@@ -68,31 +71,34 @@ public final class NodeClock: @unchecked Sendable {
         }
     }
 
-    /// Arms the wake for the first second, after the one run last and the one under way, at which a client is due.
-    /// Under the lock.
+    /// The first second after `from` at which a client every `every` s is due.
+    private static func due(after from: Int, every: Int) -> Int { (from / every + 1) * every }
+
+    /// Arms the wake for the first second after the one run last at which a client is due (a client added since, after
+    /// the second it subscribed in): at once when that second has already come. Under the lock.
     private func rearm() {
         disarm?()
         disarm = nil
         armed += 1
         guard !clients.isEmpty else { return }
-        let elapsed = now() - origin
-        let current = max(tick, Int(elapsed))
-        let next = clients.values.map { (current / $0.every + 1) * $0.every }.min() ?? current + 1
+        let next = clients.values.map { Self.due(after: max(tick, $0.since), every: $0.every) }.min() ?? tick + 1
         let arm = armed
-        disarm = schedule(max(0, origin + TimeInterval(next) - now())) { [weak self] in self?.beat(arm) }
+        disarm = schedule(max(0, origin + TimeInterval(next) - now())) { [weak self] in self?.beat(arm, second: next) }
     }
 
-    private func beat(_ arm: Int) {
+    /// The wake armed for `second`. It may come late (its queue busy): it runs each client due on any second since the
+    /// one run last up to now, once, and never one before its second (a timer can come a little early by this clock).
+    private func beat(_ arm: Int, second: Int) {
         let due = lock.withLock { () -> [() -> Void] in
             guard arm == armed, !clients.isEmpty else { return [] }
             wakeCount += 1
-            // The second it was armed for (it may come up to the leeway late).
-            tick = max(tick + 1, Int((now() - origin).rounded()))
+            let reached = max(second, Int(now() - origin))
             // In id order, so what subscribed first (the scan) runs first.
             let due = clients.keys.sorted().compactMap { id -> (() -> Void)? in
-                guard let client = clients[id], tick % client.every == 0 else { return nil }
+                guard let client = clients[id], Self.due(after: max(tick, client.since), every: client.every) <= reached else { return nil }
                 return client.action
             }
+            tick = reached
             rearm()
             return due
         }

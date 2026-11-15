@@ -21,7 +21,9 @@ struct NodeTestHostTests {
         #expect(!grant.isEmpty)
         #expect(host.book.answer(.current(role: .lead, root: repository.path, task: nil), from: .app) != .member(nil))
 
-        // The dialer's connection is the app's too: welcomed, with the vault listed.
+        // The dialer's connection is the app's too: welcomed, with the vault listed and the host's sessions shown (a
+        // client that came by the socket's path is shown none).
+        let session = try await host.spawn("sleep 600")
         let queue = DispatchQueue(label: "node-test-host-dialer")
         let events = Events()
         let connection = try host.dialer.connect(queue: queue)
@@ -29,10 +31,11 @@ struct NodeTestHostTests {
         connection.onEvent = { events.add($0) }
         let seq = try connection.send(.hello(protocolVersion: HostProtocol.version, app: "NodeTestHostTests"))
         #expect(await eventually { events.reply(to: seq) != nil })
-        guard case .welcome(_, let build, _, let capabilities, _, _)? = events.reply(to: seq) else {
+        guard case .welcome(_, let build, let sessions, let capabilities, _, _)? = events.reply(to: seq) else {
             Issue.record("no welcome: \(String(describing: events.reply(to: seq)))"); return
         }
         #expect(build == 42 && capabilities?.contains(HostProtocol.Capability.leadVault) == true)
+        #expect(sessions.map(\.id).contains(session.id), "the dialer was shown \(sessions.map(\.id)), not \(session.id)")
     }
 
     @Test func eachTestHostHasItsOwnHome() async throws {
@@ -42,6 +45,9 @@ struct NodeTestHostTests {
             second.stop()
         }
         #expect(first.root != second.root && first.home != second.home && first.socket != second.socket)
+        // Each vault reads its agents' config from, and keeps its seal copies in, its sessions' HOME.
+        #expect(first.book.configHome == first.home.path && second.book.configHome == second.home.path,
+                "\(first.book.configHome), \(second.book.configHome)")
         let ours = [VibePaths.root.standardizedFileURL.path, NSHomeDirectory(), ProcessInfo.processInfo.environment["HOME"] ?? ""]
         // What each host's sessions see: their HOME, their PATH, and where VibeSwitcher's folder is for them.
         var seen: [String] = []

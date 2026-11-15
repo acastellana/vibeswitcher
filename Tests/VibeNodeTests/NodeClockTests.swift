@@ -39,6 +39,50 @@ struct NodeClockTests {
         five.cancel()
     }
 
+    /// A wake that comes late (its queue busy) still runs the clients due on the second it was armed for, and only
+    /// those: none a second early, and none of a second it came too late for left out.
+    @Test func aLateWakeRunsTheSecondItWasArmedFor() {
+        let time = DrivenTime()
+        let clock = time.clock()
+        var twos: [Double] = [], threes: [Double] = []
+        let two = clock.every(2) { twos.append(time.elapsed) }
+        let three = clock.every(3) { threes.append(time.elapsed) }
+        // The wake for second 2 runs at 2.6 s.
+        time.hold(until: 2.6)
+        time.run(until: 6.5)
+        #expect(twos == [2.6, 4, 6] && threes == [3, 6], "every 2 s at \(twos), every 3 s at \(threes)")
+        two.cancel()
+        three.cancel()
+
+        // Later than the next due second: the wake for 2 at 3.4 s runs both, once each.
+        let late = DrivenTime()
+        let lateClock = late.clock()
+        var lateTwos: [Double] = [], lateThrees: [Double] = []
+        let lateTwo = lateClock.every(2) { lateTwos.append(late.elapsed) }
+        let lateThree = lateClock.every(3) { lateThrees.append(late.elapsed) }
+        late.hold(until: 3.4)
+        late.run(until: 6.5)
+        #expect(lateTwos == [3.4, 4, 6] && lateThrees == [3.4, 6], "every 2 s at \(lateTwos), every 3 s at \(lateThrees)")
+        lateTwo.cancel()
+        lateThree.cancel()
+    }
+
+    /// A client that subscribes after a second has come but before its wake has run takes nothing from the clients
+    /// already there: that second still runs.
+    @Test func aClientAddedWhileAWakeIsPendingLosesNoSecond() {
+        let time = DrivenTime()
+        let clock = time.clock()
+        var twos: [Double] = [], sixties = 0
+        let two = clock.every(2) { twos.append(time.elapsed) }
+        time.hold(until: 2.05)
+        let sixty = clock.every(60) { sixties += 1 }
+        time.run(until: 4.5)
+        #expect(twos == [2.05, 4], "every 2 s at \(twos)")
+        #expect(sixties == 0)
+        two.cancel()
+        sixty.cancel()
+    }
+
     /// The clock's own timer (a `DispatchSourceTimer`, no run loop) runs a client on the queue it was given.
     @Test func theRealClockRunsItsClientsOnItsQueue() async {
         let queue = DispatchQueue(label: "node-clock-test")
@@ -84,11 +128,21 @@ final class DrivenTime: @unchecked Sendable {
         }
     }
 
-    /// Moves time on to `seconds` after the start, firing each wake the clock arms on the way, at the time it was armed for.
+    /// The seconds since the start, to the hundredth (what a client late by a fraction of a second sees).
+    var elapsed: Double { ((now - start) * 100).rounded() / 100 }
+
+    /// Moves time on to `seconds` after the start without firing anything: the clock's queue is busy meanwhile, so a
+    /// wake due on the way runs late, at the next `run(until:)`.
+    func hold(until seconds: TimeInterval) {
+        now = start + seconds
+    }
+
+    /// Moves time on to `seconds` after the start, firing each wake the clock arms on the way, at the time it was armed
+    /// for (or now, for one that was due while time was held).
     func run(until seconds: TimeInterval) {
         let end = start + seconds
         while let wake = armed, wake.at <= end {
-            now = wake.at
+            now = max(now, wake.at)
             armed = nil
             wokeAt.append(second)
             wake.fire()

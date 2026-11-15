@@ -14,7 +14,7 @@ import VibeNode
 /// helper of this process takes from `VibePaths`) and its sessions' own `HOME` (`<folder>/home`), so tests that run at
 /// once never share a steer inbox, a state folder or a socket. Its sessions get that `HOME` and a `PATH` of
 /// `/usr/bin:/bin`, with no `claude` on it, as the node's unit has none (EN-D13). Its vault is a `LeadVault.Book` of
-/// its own. Stopped, its sessions ended, and its folder removed when it goes (or `stop()`).
+/// its own, whose config home is that `HOME`. Stopped, its sessions ended, and its folder removed when it goes (or `stop()`).
 final class NodeTestHost: @unchecked Sendable {
     /// The scratch folder everything of this host is in.
     let folder: URL
@@ -45,6 +45,9 @@ final class NodeTestHost: @unchecked Sendable {
         socketFolder = try scratch.shortFolder("vsn")
         socket = socketFolder.appendingPathComponent("h.sock").path
         book = LeadVault.Book()
+        // Its agents' config (a config check's hashes) and its seal copies are in its sessions' HOME, as on a node,
+        // where the two are one folder; never this process's home, which every test in it shares.
+        book.configHome = home.path
         var config = HostServer.Config(socketPath: socket, lockPath: socket + ".lock", shell: "/bin/sh", launcher: hostLauncher.path,
                                        baseEnvironment: ["HOME": home.path, "PATH": "/usr/bin:/bin"], hostBuild: 42)
         config.idleExit = nil

@@ -76,7 +76,7 @@ rows above are.
 | `LeadController.swift` `sender(_:)` | 2015-2022 | `Sources/VibeNode/Engine/Witness.swift` | E7 |
 | `HostClient.swift` `unitGap` and `pieces(of:)` | 1068; 1099 on | `Sources/VibeNode/Host/HostLink.swift` | E2 |
 | `PhoneLeads.swift` `id(root:)` | 52-55 | `Sources/VibeNode/NodeIds.swift` (`NodeIds.project(root:)`) | E0 (made 2026-11-15) |
-| `Tests/VibeSwitcherTests/FakeClaude.swift` (with a launcher so the process table sees it as Claude, Claude's own arguments taken and skipped, files per terminal, and a new `mcp` op) | 1-1070 | `Tests/VibeNodeTests/FakeClaude.swift` (the script verbatim but for those; `FakeClaude.install(in:)` writes the launcher) | E0 (made 2026-11-15) |
+| `Tests/VibeSwitcherTests/FakeClaude.swift` (with a launcher so the process table sees it as Claude, Claude's own arguments taken and skipped, files per terminal, and a new `mcp` op) | 1-1070 | `Tests/VibeNodeTests/FakeClaude.swift` (the script verbatim but for those, and a fake on a terminal an ended one used starting fresh; `FakeClaude.install(in:)` writes the launcher, through `/bin/cp` so the test process never holds it open for writing) | E0 (made 2026-11-15) |
 | `Tests/VibeSwitcherTests/ChatSyncTests.swift` `Harness`, its non-view parts (the launch, `tell`, the agent's state, `hookTakes`; not the pane, chat or sync) | 636-853 | `Tests/VibeNodeTests/NodeHarness.swift` (the screen through `HostCall.styledScreen`; `hookTakes` against the scratch host's root) | E0 (made 2026-11-15) |
 
 ## Tests the engine ports
@@ -86,7 +86,7 @@ file that tests a file in [Files the engine replaces](#files-the-engine-replaces
 
 | App test file | Ported as | Not ported, and why | Task |
 | --- | --- | --- | --- |
-| `HeartbeatTests` | `NodeClockTests`: both cases, their assertions kept, on a clock the test drives (`DrivenTime`) instead of the main run loop, so the exact wakes are asserted too (ported 2026-11-15) | | E0 |
+| `HeartbeatTests` | `NodeClockTests`: both cases, their assertions kept, on a clock the test drives (`DrivenTime`) instead of the main run loop, so the exact wakes are asserted too (ported 2026-11-15); two cases of its own besides, a late wake and a client added while a wake is pending | | E0 |
 | `HostClientReplyTimerTests` | `HostLinkTests.anOldTimerDoesntErrorTheRequestHoldingItsNumberOnTheNewConnection`, `anOldTimerDoesntEndAUnitOnTheNewConnection` (the paced-piece case, on units) | | E2 |
 | `HostClientHandoverTests` | `HostLinkTests.requestsAskedWhileTheLinkReconnectsGoOutOnTheNewConnection`, `otherRequestsKeepTheirTimersDuringAReconnect` | the handover's outcome, its logging and the probe's wait: step 8's (switching builds) | E2, step 8 |
 | `HostClientReapTests` | step 8's `StartCommandTests` (the no-systemd `stop`) | the server never starts a host | step 8 |
