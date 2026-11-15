@@ -23,7 +23,8 @@ composer expect takes its lock after it reads the sche
 shot chat-pasted-key
 composer clear
 
-# The terminal: its Ready. line, dragged across from its first line's start into its second, then ⌘C.
+# The terminal: a drag from its first line's start into its second, then ⌘C. The selection starts where the drag first
+# moves ("dy." of its "● Ready." line), as the shot shows: the pasted text must equal that.
 terminal
 drag
 shot terminal-selected

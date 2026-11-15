@@ -2712,8 +2712,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { [weak self] in reply(true, self?.lookReport() ?? "") }
         case "panes":
             panes(rest.isEmpty ? "panes" : rest, reply)
-        // Its words split again: a journey line (scripts/ui-journeys.sh) hands them over as one.
-        case "pointer": pointer(rest.split(separator: " ").map(String.init), reply)
+        // A journey line (scripts/ui-journeys.sh) hands its words over as one argument: split again then. Given
+        // separately (the shell's form), they stay as given, so a quoted FROM of several words still works.
+        case "pointer": pointer(words.count == 2 ? rest.split(separator: " ").map(String.init) : Array(words.dropFirst()), reply)
         case "offline":
             guard rest == "on" || rest == "off" else { return reply(false, "offline on|off") }
             host.reconnectDelays = rest == "on" ? [3600] : [0.2, 0.5, 1, 2, 3, 5]
