@@ -138,6 +138,13 @@ and its [attack review](reviews/v2-security-review-2026-11-13.md), fixed on Linu
   more than that process could do itself), while the socket's file keeps the umask's mode. Linux sets the socket's
   mode before the bind (`fchmod`), which the Mac's `bind` may not honour: check on a real Mac, and
   `fchmodat(…, AT_SYMLINK_NOFOLLOW)` there otherwise.
+- **`Platform.Processes.ignoredSignals` on the Mac (`779a8ac0`, unproven)**: new Darwin code, not an old body moved,
+  written on Linux and never run on a Mac: it reads `kp_proc.p_sigignore` from `sysctl` `KERN_PROC_PID`
+  (`Processes+Darwin.swift`). Only tests call it: `SessionEnvironmentTests.aSessionsProgramStartsWithSIGPIPEAtItsDefault`
+  (which read the masks with `ps -o sigignore=`, a keyword Apple's `ps` doesn't have) and
+  `ProcessesTests.theSignalsAChildIgnoresAreRead`. Its "Checked" note (`trap '' PIPE` makes the first fail) was made on
+  Linux only. The Mac CI failure it fixes doesn't count as fixed until both tests pass on the hosted Mac. Check there
+  too that a child that ignores SIGPIPE shows the bit in `p_sigignore`, and one that doesn't shows it clear.
 - **The two replaced oracles**: the raw Darwin reads `IndexLockTests` and `ProcessTableTests` checked against, now
   platform calls; restore them under `#if canImport(Darwin)`.
 
