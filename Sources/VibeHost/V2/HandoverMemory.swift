@@ -451,12 +451,23 @@ extension HostServer {
         return CarriedLockRefused(description: why)
     }
 
+    /// A handover refused in its last turn as `ServerChild.handoverRefusal` says.
+    struct ServerChildUnsettled: Error, CustomStringConvertible {
+        let description: String
+    }
+
     /// `handOver(to:)` on Linux (its one hook): the target loaded into a sealed copy before anything else, probed from
     /// that copy with a state of its own in sealed memory, then, on the queue, the secrets and the state written into
     /// sealed memory and the process replaced by the copy, keeping both, the images and every session's descriptor.
     /// No file is written. Anything failing before the exec leaves this host as it was, and closes what it made. The
-    /// lock it would carry is checked before the probe and again just before the exec (`carriedLockRefusal`).
+    /// lock it would carry is checked before the probe and again just before the exec (`carriedLockRefusal`), and so is
+    /// the server child (`ServerChild.handoverRefusal`: refused while one is being ended to start again).
     func handOverThroughMemory(to executable: String, reply: @escaping (HostEvent) -> Void) {
+        // A server child being ended to start again can't be carried (ServerChild.handoverRefusal).
+        if let why = serverChild?.handoverRefusal {
+            log("handover to \(executable) refused: \(why)")
+            return reply(.error("Couldn't hand over: \(why)."))
+        }
         let target: Platform.ProcessSelf.SealedCopy
         switch Platform.ProcessSelf.sealedCopy(of: executable, name: BuildInfo.host) {
         case .success(let copy): target = copy
@@ -507,6 +518,8 @@ extension HostServer {
                 var made: [Int32] = []
                 var parsersStopped = false
                 do {
+                    // Asked again in the turn that builds the state and executes: the child may have begun to end since.
+                    if let why = self.serverChild?.handoverRefusal { throw ServerChildUnsettled(description: why) }
                     let secrets: Data? = self.secretsForHandover?()
                     let secretFD = try secrets.map { try HandoverMemory.seal($0, name: "vibeswitcher-handover-secrets") }
                     if let secretFD { made.append(secretFD) }

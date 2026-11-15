@@ -328,6 +328,58 @@ final class ServerChildHost {
         #expect(fstat(copy.fd, &info) == 0 && info.st_mode & 0o7777 == 0o111, "mode \(String(info.st_mode & 0o7777, radix: 8))")
     }
 
+    /// A helper that shuts its connector for writing and runs on: the host's end of the connector reads that as its
+    /// end and closes, and the host then ends the helper (which could reach it no more, and would keep it from exiting
+    /// idle) and starts it again, saying why.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aServerChildWhoseConnectorClosedIsEndedAndStartedAgain() async throws {
+        let host = try await ServerChildHost(actions: ["shut-connector"])
+        defer { host.stop() }
+        let first = try #require(await host.firstHelper(), "\(host.said)")
+        #expect(await eventually { host.lines(of: first).contains("shut 0") }, "\(host.results)\n\(host.said)")
+        #expect(await eventually { host.said.contains("server child pid \(first) ended: its connector") }, "\(host.said)")
+        #expect(await eventually { kill(first, 0) != 0 && errno == ESRCH })
+        #expect(await eventually { host.started.count >= 2 }, "\(host.results)\n\(host.said)")
+        #expect(host.noted.contains("its other end has closed"), "\(host.noted)")
+    }
+
+    /// A handover asked while the server child is being ended to start again (its connector closed, as `replaceWhenIdle`
+    /// leaves it until the child's end is reaped) is refused, saying why: no record could carry that child, so the new
+    /// image would start a second one beside it and nothing would reap the first. Done in one turn of the host's queue,
+    /// so the child's end can't be handled in between; the handover's target doesn't exist, so a handover that went on
+    /// would fail on loading it, never execute anything.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aHandoverWhileTheServerChildIsReplacedIsRefused() async throws {
+        let dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let socket = dir + "/h.sock"
+        FileManager.default.createFile(atPath: dir + "/" + ServerChildHelper.actionsName, contents: Data("sleep\n".utf8))
+        var config = HostServer.Config(socketPath: socket, lockPath: dir + "/h.lock", shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 42)
+        config.idleExit = nil
+        config.logPath = dir + "/host.log"
+        let server = HostServer(config: config)
+        try server.start()
+        defer { server.stop(terminateSessions: true) }
+        let binary = try #require(Bundle.main.executablePath)
+        let child = try #require(ServerChild.start(.init(image: binary, socketPath: socket, arguments: [], environment: config.baseEnvironment),
+                                                   server: server))
+        defer { child.stop() }
+        #expect(await eventually { child.pid != nil })
+        let helper = try #require(child.pid)
+
+        var reply: HostEvent?
+        server.queue.sync {
+            child.replaceWhenIdle(helper)
+            server.handOverThroughMemory(to: dir + "/no-such-build") { reply = $0 }
+        }
+        guard case .error(let why)? = reply else { Issue.record("not refused at once: \(String(describing: reply))"); return }
+        #expect(why.contains("server child pid \(helper) is being ended"), "\(why)")
+        // The child's end, handled after that turn: started again from the copy at once.
+        #expect(await eventually { child.pid != nil && child.pid != helper }, "\(String(describing: child.pid))")
+    }
+
     /// `--server-arg` reaches a scratch host's server only: the user's host gives its server none of them (and says
     /// so, `ServerChild.adopt`), only its root and node root; without `--server`, nothing is started.
     @Test func theUsersHostGivesItsServerNoTestArguments() throws {

@@ -326,13 +326,22 @@ public final class ServerChild {
     public var restarts: Int { lock.withLock { restartCount } }
 
     /// The child running now as a handover carries it (`HostHandover.State.serverChild`): nil when none runs, or its
-    /// connector has closed. On the host's queue.
+    /// connector has closed (a handover then waits: `handoverRefusal`). On the host's queue.
     var record: HostHandover.ServerChildRecord? {
         guard let server, let running = lock.withLock({ child }), let end = server.appConnectorEnd(running.connector),
               let link = Platform.Processes.link(running.pid) else { return nil }
         let due = lock.withLock { self.due }.flatMap { $0.pid == running.pid ? $0.sha256 : nil }
         return HostHandover.ServerChildRecord(pid: running.pid, startTicks: link.startTicks, connector: end, image: copy.fd,
                                               path: launch.image, runningImageSHA256: due)
+    }
+
+    /// Why a handover can't be made now, or nil: a child runs whose connector has closed, so it is being ended to start
+    /// again (`replaceWhenIdle`, `connectorClosed`), and no record can name it (`record`): the new image would start a
+    /// second server child beside it, and nothing would watch or reap the first. Asked by a handover before anything
+    /// else and again in the turn it builds its state and executes the new image. On the host's queue.
+    var handoverRefusal: String? {
+        guard let server, let running = lock.withLock({ child }), server.appConnectorEnd(running.connector) == nil else { return nil }
+        return "the server child pid \(running.pid) is being ended, to start again; try again in a moment"
     }
 
     /// No more starts: the child running is ended (SIGKILL) and reaped, its connector closed, and the copy closed.
@@ -373,6 +382,8 @@ public final class ServerChild {
         }
         guard let connector = server.openAppConnector(expecting: nil, requireNonDumpable: true, onDumpable: { [weak self] pid in
             self?.endDumpable(pid)
+        }, onClosed: { [weak self] number in
+            self?.connectorClosed(number)
         }) else {
             Self.say(server, "no server child: no connector could be made (errno \(errno))")
             return scheduleRestart()
@@ -411,6 +422,8 @@ public final class ServerChild {
         let token = Platform.Processes.token(pid)
         guard server.adoptAppConnector(record.connector, sender: token, requireNonDumpable: true, onDumpable: { [weak self] pid in
             self?.endDumpable(pid)
+        }, onClosed: { [weak self] number in
+            self?.connectorClosed(number)
         }) else {
             Self.say(server, "server child pid \(pid) not taken again: its connector \(record.connector) couldn't be adopted; starting the server again")
             kill(pid, SIGKILL)
@@ -512,6 +525,19 @@ public final class ServerChild {
             self.lock.withLock { self.restartCount += 1 }
             self.spawn()
         }
+    }
+
+    /// The connector `number` closed on the host's side by itself (its read failed, or its other end was closed or shut
+    /// for writing: `AppConnector.onClosed`) while its child may still run: that child can't reach the host again, so
+    /// it is ended (SIGKILL), and `ended` reaps it and starts it again. Otherwise it would run on as no one's app, keep
+    /// the host from exiting idle, and be a child no handover's record can name. Nothing when it isn't the running
+    /// child's connector, or the child has ended already (a child's end closes its connector's other end too: `ended`
+    /// is on its way). On `queue`.
+    private func connectorClosed(_ number: Int32) {
+        guard let server, !lock.withLock({ stopped }), let running = lock.withLock({ child }), running.connector == number else { return }
+        if case .brief(let brief) = Platform.Processes.brief(running.pid), brief.state == .zombie || brief.exiting { return }
+        Self.say(server, "server child pid \(running.pid) ended: its connector \(number) closed while it ran")
+        kill(running.pid, SIGKILL)
     }
 
     /// The child asked for a connection while dumpable: refused already (the connector's log line says why); ended

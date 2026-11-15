@@ -24,6 +24,10 @@ final class AppConnector {
     /// A scratch host's test stand-in (see `TestAppPrincipal`): the test process's pid, which a handover carries with
     /// the descriptor. Nil for every other connector.
     var testPid: pid_t?
+    /// Called with its number when it closes by itself (its read failed, or its other end was closed or shut for
+    /// writing), never when its holder closes it (`closeAppConnector`); on the host's queue. Task 8a's server child
+    /// ends its child then (`ServerChild.connectorClosed`).
+    var onClosed: ((Int32) -> Void)?
     private var source: DispatchSourceRead?
     /// The connections made through it, ended with it.
     private var made: [Made] = []
@@ -83,13 +87,16 @@ extension HostServer {
     /// `sender`: the process whose requests are answered (nil: none yet; set it once the child is started).
     /// `requireNonDumpable`: a request is answered only while its sender is non-dumpable
     /// (`Platform.Processes.isDumpable` false), else refused, logged, and `onDumpable` called with its pid on the
-    /// host's queue (Task 8a ends the child there). Nil on the Mac, which has no connector, and when the pair can't
-    /// be made.
-    public func openAppConnector(expecting sender: Platform.PeerToken?, requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?) -> Int32? {
+    /// host's queue (Task 8a ends the child there). `onClosed`: called with the number on the host's queue when the
+    /// connector closes by itself (see `AppConnector.onClosed`). Nil on the Mac, which has no connector, and when the
+    /// pair can't be made.
+    public func openAppConnector(expecting sender: Platform.PeerToken?, requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?,
+                                 onClosed: ((Int32) -> Void)? = nil) -> Int32? {
         guard !Platform.CodeIdentity.isAvailable, let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.seqpacket) else { return nil }
         Platform.Sockets.enableCredentials(mine)
         _ = fcntl(mine, F_SETFL, fcntl(mine, F_GETFL) | O_NONBLOCK)
         let connector = AppConnector(fd: mine, sender: sender, requireNonDumpable: requireNonDumpable, onDumpable: onDumpable)
+        connector.onClosed = onClosed
         onQueue {
             // A number given out again: the caller closed the one it held, so that connector's child had its end.
             if let stale = appConnectors.removeValue(forKey: theirs) {
@@ -117,16 +124,17 @@ extension HostServer {
 
     /// Takes `fd`, the host's end of an app connector this process inherited across a handover, as `openAppConnector`'s
     /// own end: answered for `sender` alone, refused while it is dumpable where `requireNonDumpable` (`onDumpable` then
-    /// called), registered under `fd` itself, which `setAppConnectorSender` and `closeAppConnector` then name. Made
-    /// close-on-exec and nonblocking, its senders passed. False, and `fd` left alone, on the Mac (no connector there)
-    /// and when `fd` isn't open.
+    /// called), registered under `fd` itself, which `setAppConnectorSender` and `closeAppConnector` then name, and
+    /// `onClosed` called with it when it closes by itself. Made close-on-exec and nonblocking, its senders passed.
+    /// False, and `fd` left alone, on the Mac (no connector there) and when `fd` isn't open.
     func adoptAppConnector(_ fd: Int32, sender: Platform.PeerToken?, requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?,
-                           testPid: pid_t? = nil) -> Bool {
+                           onClosed: ((Int32) -> Void)? = nil, testPid: pid_t? = nil) -> Bool {
         guard !Platform.CodeIdentity.isAvailable, fcntl(fd, F_SETFD, FD_CLOEXEC) == 0 else { return false }
         Platform.Sockets.enableCredentials(fd)
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         let connector = AppConnector(fd: fd, sender: sender, requireNonDumpable: requireNonDumpable, onDumpable: onDumpable)
         connector.testPid = testPid
+        connector.onClosed = onClosed
         onQueue {
             appConnectors.removeValue(forKey: fd)?.close()
             appConnectors[fd] = connector
@@ -228,8 +236,10 @@ extension HostServer {
 
     private func closeConnector(_ connector: AppConnector, _ number: Int32, why: String) {
         note("host: app connector \(number) closed: \(why); its connections ended")
-        if appConnectors[number] === connector { appConnectors[number] = nil }
+        let registered = appConnectors[number] === connector
+        if registered { appConnectors[number] = nil }
         connector.close()
+        if registered { connector.onClosed?(number) }
     }
 
     /// `body` on `queue`: at once when called there, else waited for.

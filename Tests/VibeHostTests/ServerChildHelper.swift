@@ -32,6 +32,8 @@ import Testing
 ///   close-on-exec, asks for a census as `childVariable` below says: "child-called STATUS".
 /// - `dumpable`: makes itself dumpable again (`PR_SET_DUMPABLE 1`): "dumpable 0".
 /// - `handover PATH`: asks the host to hand over to PATH: "handover <its answer>".
+/// - `shut-connector`: shuts its connector for writing (the host's end then reads its end) and runs on, reading no more
+///   actions, until its parent is no longer the host: "shut 0", or "shut <errno>".
 /// - `sleep`: nothing more: "sleeping".
 enum ServerChildHelper {
     static let actionsName = "server-helper-actions"
@@ -170,6 +172,11 @@ enum ServerChildHelper {
                 } catch {
                     report("handover refused \(error)")
                 }
+            case ("shut-connector", 1):
+                report("shut \(shutdown(connector, Int32(SHUT_WR)) == 0 ? 0 : errno)")
+                let parent = getppid()
+                while getppid() == parent { usleep(20_000) }
+                _exit(0)
             case ("sleep", 1):
                 report("sleeping")
             default:
