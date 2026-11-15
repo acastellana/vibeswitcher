@@ -52,7 +52,8 @@ struct ChatExtrasTests {
 
     /// Claude Code's other ways of writing it: a system local_command line, the name in ANSI bold, an id in brackets.
     @Test func modelCommandOutputInItsOtherShapes() {
-        let fable = assistant([["type": "text", "text": "a"]], uuid: "a1", model: "claude-fable-5-2")
+        let fable = assistant([["type": "text", "text": "a"]], uuid: "a1", usage: ["input_tokens": 5, "output_tokens": 1],
+                              model: "claude-fable-5-2")
         func system(_ text: String) -> [String: Any] {
             ["type": "system", "subtype": "local_command", "uuid": "s1", "timestamp": "2026-10-16T10:01:00Z",
              "content": "<local-command-stdout>\(text)</local-command-stdout>"]
@@ -73,7 +74,7 @@ struct ChatExtrasTests {
     /// The next reply says which model really answered: if it differs from what /model said, it wins.
     @Test func aLaterReplyOnAnotherModelWins() {
         let chat = log([
-            assistant([["type": "text", "text": "a"]], uuid: "a1", model: "claude-fable-5-2"),
+            assistant([["type": "text", "text": "a"]], uuid: "a1", usage: ["input_tokens": 5, "output_tokens": 1], model: "claude-fable-5-2"),
             ["type": "system", "subtype": "local_command", "uuid": "s1", "timestamp": "2026-10-16T10:01:00Z",
              "content": "<local-command-stdout>Set model to Opus 5.5 and saved as your default for new sessions</local-command-stdout>"],
             assistant([["type": "text", "text": "b"]], id: "msg2", uuid: "a2", usage: ["input_tokens": 5, "output_tokens": 1],
@@ -83,7 +84,7 @@ struct ChatExtrasTests {
         // Read in two parts, the earlier part's switch doesn't replace the later reply's model either.
         var split = ChatLog()
         let all = lines([
-            assistant([["type": "text", "text": "a"]], uuid: "a1", model: "claude-fable-5-2"),
+            assistant([["type": "text", "text": "a"]], uuid: "a1", usage: ["input_tokens": 5, "output_tokens": 1], model: "claude-fable-5-2"),
             ["type": "system", "subtype": "local_command", "uuid": "s1",
              "content": "<local-command-stdout>Set model to Opus 5.5</local-command-stdout>"],
         ])
