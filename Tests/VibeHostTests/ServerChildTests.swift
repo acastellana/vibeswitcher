@@ -290,6 +290,44 @@ final class ServerChildHost {
         #expect(child.restarts == 0)
     }
 
+    /// The server's sealed copy made readable while a child runs from it (anything that reaches the copy can `chmod`
+    /// it; the seals don't stop that): the child started again after it is killed is still non-dumpable from its exec,
+    /// as the host put the copy's mode back before that start (S2-D5), and the copy is `0111` again.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aServerCopyMadeReadableIsPutBackBeforeTheNextStart() async throws {
+        let dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let socket = dir + "/h.sock"
+        FileManager.default.createFile(atPath: dir + "/" + ServerChildHelper.actionsName, contents: Data("sleep\n".utf8))
+        var config = HostServer.Config(socketPath: socket, lockPath: dir + "/h.lock", shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 42)
+        config.idleExit = nil
+        config.logPath = dir + "/host.log"
+        let server = HostServer(config: config)
+        try server.start()
+        defer { server.stop(terminateSessions: true) }
+        let binary = try #require(Bundle.main.executablePath)
+        let copy = try Platform.ProcessSelf.sealedCopy(of: binary, name: "vibeswitcher-server").get()
+        let child = try #require(ServerChild.start(.init(image: binary, socketPath: socket, arguments: [], environment: config.baseEnvironment),
+                                                   server: server, loaded: copy))
+        defer { child.stop() }
+        func started() -> [String] {
+            ((try? String(contentsOfFile: dir + "/" + ServerChildHelper.resultsName, encoding: .utf8)) ?? "")
+                .split(separator: "\n").map(String.init).filter { $0.contains(" started ") }
+        }
+        #expect(await eventually { started().count == 1 }, "\(started())")
+        let first = try #require(child.pid)
+        #expect(started().first?.contains("dumpable-at-start=false") == true, "\(started())")
+
+        #expect(fchmod(copy.fd, 0o755) == 0, "errno \(errno)")
+        kill(first, SIGKILL)
+        #expect(await eventually { started().count >= 2 }, "\(started())")
+        #expect(started().dropFirst().first?.contains("dumpable-at-start=false") == true, "\(started())")
+        var info = stat()
+        #expect(fstat(copy.fd, &info) == 0 && info.st_mode & 0o7777 == 0o111, "mode \(String(info.st_mode & 0o7777, radix: 8))")
+    }
+
     /// `--server-arg` reaches a scratch host's server only: the user's host gives its server none of them (and says
     /// so, `ServerChild.adopt`), only its root and node root; without `--server`, nothing is started.
     @Test func theUsersHostGivesItsServerNoTestArguments() throws {

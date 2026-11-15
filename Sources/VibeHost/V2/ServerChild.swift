@@ -10,7 +10,8 @@ import VibeCore
 ///   what the host runs; and the child, started from an image it can't read, is non-dumpable from its exec.
 /// - Each start opens a fresh connector (`HostServer.openAppConnector`, the child's end close-on-exec here), asking
 ///   that the child stay non-dumpable (a dumpable child is refused and ended: any process of the user could take its
-///   connections), and starts the child from `/proc/self/fd/<copy>` keeping only the copy and the connector, with
+///   connections), and starts the child from `/proc/self/fd/<copy>`, the copy's mode put back first (as every start
+///   from a sealed copy does: S2-D5), keeping only the copy and the connector, with
 ///   `--host-connector N --host-socket <the host's socket>` and the arguments `Launch` names. On the host's queue, in
 ///   the same turn as the spawn, the child's token is named as the connector's sender, then the child's end is closed
 ///   here: a request the child sends is read on that queue only after it.
@@ -359,10 +360,17 @@ public final class ServerChild {
         if DispatchQueue.getSpecific(key: HostServer.queueKey) != nil { work() } else { queue.sync(execute: work) }
     }
 
-    /// One start: a fresh connector, the child from the copy, its token named, its end closed here. On `queue`.
+    /// One start: the copy's mode put back (`Platform.ProcessSelf.restoreMode`: something that reached the copy may
+    /// have changed it, and a child started from a readable image is dumpable from its exec), a fresh connector, the
+    /// child from the copy, its token named, its end closed here. A copy whose mode can't be put back starts nothing:
+    /// tried again after the wait. On `queue`.
     private func spawn() {
         guard let server, !lock.withLock({ stopped }) else { return }
         lock.withLock { restartPending = false }
+        guard Platform.ProcessSelf.restoreMode(of: copy.fd) else {
+            Self.say(server, "server child not started: the mode of \(launch.image)'s sealed copy couldn't be put back (errno \(errno))")
+            return scheduleRestart()
+        }
         guard let connector = server.openAppConnector(expecting: nil, requireNonDumpable: true, onDumpable: { [weak self] pid in
             self?.endDumpable(pid)
         }) else {
