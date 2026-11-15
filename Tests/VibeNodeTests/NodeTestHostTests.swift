@@ -26,7 +26,7 @@ struct NodeTestHostTests {
         let session = try await host.spawn("sleep 600")
         let queue = DispatchQueue(label: "node-test-host-dialer")
         let events = Events()
-        let connection = try host.dialer.connect(queue: queue)
+        let connection = try host.dialer.connect(queue: queue, patience: 5)
         defer { connection.close() }
         connection.onEvent = { events.add($0) }
         let seq = try connection.send(.hello(protocolVersion: HostProtocol.version, app: "NodeTestHostTests"))

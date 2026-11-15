@@ -46,6 +46,9 @@ public final class HostLink: @unchecked Sendable {
         public var sweep: Later?
         /// How long to wait before each attempt to get back to a host that dropped the connection; then it's gone.
         public var reconnectDelays: [TimeInterval] = [0.2, 0.5, 1, 2, 3, 5]
+        /// How long each attempt at a connection waits for the host's answer (its connector's): the engine's queue waits
+        /// with it, so not the connector's own 30 s. A host busy longer is tried again, `reconnectDelays` apart.
+        public var connectPatience: TimeInterval = 5
 
         public init() {}
     }
@@ -87,6 +90,11 @@ public final class HostLink: @unchecked Sendable {
     public private(set) var hostStartedAt: Date?
     /// Called once, on `queue`, when the link is gone (the host went away and didn't come back, or was refused): why.
     public var onGone: ((String) -> Void)?
+    /// Called on `queue` at each welcome the link takes (the first, and the next after each reconnect; not one refused
+    /// for want of input units), once `state` is `.connected` and `sessions`, `capabilities` and `hostStartedAt` are
+    /// the welcome's, before the requests held for it go out: when the host started, and its sessions. What waits for
+    /// the host (the engine's pending starts, E4; its rebind after a host restart, E8) goes on here.
+    public var onWelcome: ((_ hostStartedAt: Date?, _ sessions: [HostSession]) -> Void)?
     /// The host's lead vault, asked on a fresh connection through the dialer for each call (as `HostCall.vault` asks
     /// by a path); its launch files under `<root>/lead`.
     public let vault: LeadVault
@@ -174,7 +182,7 @@ public final class HostLink: @unchecked Sendable {
         if connection != nil { return true }
         guard !isGone else { return false }
         let made: HostConnection
-        do { made = try dialer.connect(queue: queue) } catch {
+        do { made = try dialer.connect(queue: queue, patience: timing.connectPatience) } catch {
             note("host link: no connection: \(error)")
             return false
         }
@@ -185,6 +193,15 @@ public final class HostLink: @unchecked Sendable {
         made.onClose = { [weak self] in self?.connectionLost() }
         do { try made.send(.hello(protocolVersion: HostProtocol.version, app: "vibeswitcher-server")) } catch {
             note("host link: hello not sent: \(error)")
+        }
+        // A host that took the connection and never welcomes it (its queue stuck, or the hello lost) is one that didn't
+        // answer: the connection is dropped and the next tried, so what's held for the welcome doesn't wait for good.
+        let armedOn = connectionsMade
+        after(Self.replyWait, on: timing.reply) { [weak self] in
+            guard let self, self.connectionsMade == armedOn, self.state == .connecting, let connection = self.connection else { return }
+            self.note("host link: no welcome in \(Int(Self.replyWait)) s: the connection is dropped")
+            connection.close()
+            self.connectionLost()
         }
         return true
     }
@@ -270,6 +287,7 @@ public final class HostLink: @unchecked Sendable {
             if sweeps == nil, let clock {
                 sweeps = clock.every(SessionTemp.sweepEvery) { [weak self] in self?.perform { self?.sweepSessionFolders() } }
             }
+            onWelcome?(startedAt, list)
             resendHeld()
         case .spawned(let session), .sessionChanged(let session):
             upsert(session)
@@ -320,7 +338,14 @@ public final class HostLink: @unchecked Sendable {
     private func resendHeld() {
         let resend = held
         held = []
-        for item in resend { send(item.request, wait: item.wait, reply: item.reply) }
+        for item in resend {
+            // The notes are asked only of a host that lists them, and this one may not be the one they were asked of.
+            if case .hostNotes = item.request, !capabilities.contains(HostProtocol.Capability.hostNotes) {
+                item.reply?(.error("The session host doesn't list its notes."))
+                continue
+            }
+            send(item.request, wait: item.wait, reply: item.reply)
+        }
     }
 
     /// Sends `request`; `reply` gets the host's answer, or an error: the connection dropped, the link is gone, or
@@ -425,10 +450,12 @@ public final class HostLink: @unchecked Sendable {
     }
 
     /// What the host saw that the server should show (`HostRequest.hostNotes`): asked only of a host whose welcome lists
-    /// `HostProtocol.Capability.hostNotes`; nil from any other, or when it didn't answer.
+    /// `HostProtocol.Capability.hostNotes`; nil from any other, or when it didn't answer. Asked while the link
+    /// reconnects (or before the first welcome), it waits for the next welcome, which says whether they're listed; nil
+    /// if the link goes.
     public func notes(completion: @escaping (HostNotes?) -> Void) {
         perform { [self] in
-            guard state == .connected, capabilities.contains(HostProtocol.Capability.hostNotes) else { return completion(nil) }
+            if state == .connected, !capabilities.contains(HostProtocol.Capability.hostNotes) { return completion(nil) }
             send(.hostNotes) { event in
                 if case .hostNotes(let notes) = event { completion(notes) } else { completion(nil) }
             }
@@ -442,6 +469,9 @@ public final class HostLink: @unchecked Sendable {
         let writes: [HostInput.Write]
         let gate: Gate?
         let confirmed: (Bool) -> Void
+        /// The connection its first part went on (`connectionsMade` then): the host holds the session for the unit on
+        /// that connection only, so the rest can't go on another.
+        var connection: Int?
 
         init(writes: [HostInput.Write], gate: Gate?, confirmed: @escaping (Bool) -> Void) {
             self.writes = writes
@@ -487,6 +517,14 @@ public final class HostLink: @unchecked Sendable {
         guard units[id]?.first === unit else { return }
         let send = { [weak self] in
             guard let self, self.units[id]?.first === unit else { return }
+            if start == 0 {
+                unit.connection = self.connectionsMade
+            } else if unit.connection != self.connectionsMade {
+                // Its connection dropped between its parts (a gate answered after the reconnect): the host let the session
+                // go, and would take the rest (an Enter) for a unit of its own, after whatever went in meanwhile.
+                self.note("host link: input unit to \(id.uuidString.prefix(8)) stopped: its connection dropped between its parts")
+                return self.finishUnit(id, unit, ok: false)
+            }
             var end = start + 1, size = pieces[start].write.bytes.count
             while end < pieces.count, unit.gate == nil || pieces[end].index == nil, size + pieces[end].write.bytes.count <= Self.inputPiece {
                 size += pieces[end].write.bytes.count
@@ -507,8 +545,11 @@ public final class HostLink: @unchecked Sendable {
             self?.perform {
                 guard let self, self.units[id]?.first === unit else { return }
                 guard go else {
-                    // The host holds the session for the part that won't come: let it go now.
-                    if start > 0 { self.send(.inputUnit(id: id, writes: [], more: false), holdable: false) }
+                    // The host holds the session for the part that won't come: let it go now (on its connection only; a
+                    // dropped one let it go already).
+                    if start > 0, unit.connection == self.connectionsMade {
+                        self.send(.inputUnit(id: id, writes: [], more: false), holdable: false)
+                    }
                     return self.finishUnit(id, unit, ok: false)
                 }
                 send()
@@ -528,8 +569,8 @@ public final class HostLink: @unchecked Sendable {
     // MARK: The vault
 
     /// One vault request on a fresh connection through `dialer` (as `HostCall.vault` makes one by a path): hello, the
-    /// welcome, the request, its reply. Throws when the host can't be asked or doesn't answer in `timeout`; an error
-    /// from the host is a refusal.
+    /// welcome, the request, its reply. Throws when the host can't be asked or doesn't answer in `timeout` (the connect
+    /// given half of it, as `HostCall` gives it); an error from the host is a refusal.
     static func vault(_ request: LeadVault.Request, through dialer: HostDialer, timeout: TimeInterval) throws -> LeadVault.Reply {
         switch try exchange(.vault(request), through: dialer, timeout: timeout) {
         case .vault(let reply): return reply
@@ -552,7 +593,7 @@ public final class HostLink: @unchecked Sendable {
         let state = Exchange()
         // Made on `queue`, with its handlers, in one go: nothing it hands over comes before them.
         let connection = try queue.sync { () throws -> HostConnection in
-            let connection = try dialer.connect(queue: queue)
+            let connection = try dialer.connect(queue: queue, patience: timeout / 2)
             connection.onClose = {
                 state.closed = true
                 done.signal()

@@ -91,8 +91,8 @@ final class NodeTestHost: @unchecked Sendable {
 
     private struct Dialer: HostDialer {
         let socket: String
-        func connect(queue: DispatchQueue) throws -> HostConnection {
-            try HostConnection(path: socket, queue: queue, appKey: nil)
+        func connect(queue: DispatchQueue, patience: TimeInterval) throws -> HostConnection {
+            try HostConnection(path: socket, queue: queue, appKey: nil, patience: patience)
         }
     }
 

@@ -15,9 +15,9 @@ struct HostLinkTests {
     /// A link on `dialer` with `root` (a scratch one by default), started; returned once welcomed unless `welcomed` is
     /// false.
     private func link(_ dialer: HostDialer, root: URL? = nil, timing: HostLink.Timing = HostLink.Timing(), welcomed: Bool = true,
-                      sweep: (([HostSession]) -> Void)? = { _ in }) async throws -> HostLink {
+                      sweep: (([HostSession]) -> Void)? = { _ in }, note: @escaping (String) -> Void = { _ in }) async throws -> HostLink {
         let link = HostLink(dialer: dialer, root: root ?? scratch.url("link-root"), queue: DispatchQueue(label: "engine"), timing: timing,
-                            sweep: sweep)
+                            sweep: sweep, note: note)
         link.start()
         if welcomed { try #require(await eventually { on(link) { link.state == .connected } }, "the link was never welcomed") }
         return link
@@ -109,6 +109,38 @@ struct HostLinkTests {
         #expect(await eventually { seen.value[id].flatMap { $0 }?.exit != nil }, "\(seen.value)")
         let exit = try #require(on(link) { link.sessions.first { $0.id == session.id }?.exit })
         #expect(exit.status != -1, "\(exit)")
+    }
+
+    /// Each welcome the link takes is told (`onWelcome`), even from a host with no sessions (no change says so): the
+    /// first, and the next after a reconnect, with the host's start time; a welcome refused for want of input units
+    /// isn't.
+    @Test func eachWelcomeIsToldAndARefusedOneIsNot() async throws {
+        let stub = try StubHost(scratch)
+        defer { stub.quit() }
+        let welcomes = Locked<[(startedAt: Date?, sessions: Int, connected: Bool)]>([])
+        let link = HostLink(dialer: stub.dialer, root: scratch.url("link-root"), queue: DispatchQueue(label: "engine"), timing: Self.quick)
+        on(link) {
+            link.onWelcome = { startedAt, sessions in
+                welcomes.mutate { $0.append((startedAt, sessions.count, link.state == .connected)) }
+            }
+        }
+        link.start()
+        #expect(await eventually { welcomes.value.count == 1 })
+        on(link) { link.connectAgain() }
+        #expect(await eventually { welcomes.value.count == 2 })
+        // Read on the link's queue, behind anything a third welcome could have been handled in.
+        #expect(on(link) { welcomes.value.count } == 2)
+        #expect(welcomes.value.allSatisfy { $0.startedAt == stub.startedAt && $0.sessions == 0 && $0.connected }, "\(welcomes.value)")
+        #expect(stub.connections == 2)
+
+        let refusing = try StubHost(scratch, capabilities: [HostProtocol.Capability.handover])
+        defer { refusing.quit() }
+        let refused = Locked(0)
+        let other = HostLink(dialer: refusing.dialer, root: scratch.url("link-root"), queue: DispatchQueue(label: "engine"), timing: Self.quick)
+        on(other) { other.onWelcome = { _, _ in refused.mutate { $0 += 1 } } }
+        other.start()
+        #expect(await eventually { on(other) { if case .gone = other.state { true } else { false } } })
+        #expect(refused.value == 0)
     }
 
     // MARK: Reply timers (HostClientReplyTimerTests)
@@ -249,13 +281,15 @@ struct HostLinkTests {
         #expect(held.text == nil && held.after - sent == 15, "\(held)")
     }
 
-    /// The connection has ended on the host's side and the link hasn't been told yet: a kill asked then is held, and
-    /// sent once on the next connection.
+    /// The connection has ended on the host's side and the link hasn't been told yet: a kill and a read asked then are
+    /// held, and sent once on the next connection, the read answered; nothing is logged as not sent.
     @Test func aRequestHeldWhileTheConnectionGoesIsSentOnceOnTheNext() async throws {
         let session = StubHost.session()
         let stub = try StubHost(scratch, sessions: [session])
         defer { stub.quit() }
-        let link = try await link(stub.dialer, timing: Self.quick)
+        let log = Locked<[String]>([])
+        let link = try await link(stub.dialer, timing: Self.quick, note: { line in log.mutate { $0.append(line) } })
+        let history = Locked<Bool?>(nil)
         try on(link) {
             let connection = try #require(link.connection)
             stub.dropConnections()
@@ -265,10 +299,106 @@ struct HostLinkTests {
             // The close is on its way to this queue, behind this block.
             #expect(link.state == .connected)
             link.kill(session.id)
+            link.history(session.id, lines: 10) { history.value = ($0 != nil) }
         }
-        #expect(await eventually { on(link) { link.state == .connected } && stub.connections == 2 && stub.requests.contains(.kill(id: session.id)) })
+        #expect(await eventually {
+            on(link) { link.state == .connected } && stub.connections == 2 && stub.requests.contains(.kill(id: session.id))
+                && stub.requests.contains(.history(id: session.id, lines: 10))
+        })
         // Sent by the next connection's welcome, and only then: once.
         #expect(stub.requests.filter { $0 == .kill(id: session.id) }.count == 1, "\(stub.requests)")
+        #expect(stub.requests.filter { $0 == .history(id: session.id, lines: 10) }.count == 1, "\(stub.requests)")
+        #expect(await eventually { history.value != nil })
+        #expect(history.value == true)
+        #expect(!log.value.contains { $0.contains("host link: not sent") }, "\(log.value)")
+    }
+
+    /// A host that takes the connection and never welcomes it (its queue stuck): what's asked meanwhile doesn't wait for
+    /// good. The connection is dropped after a reply's wait, as one that didn't answer, and the next tried; when none
+    /// welcomes, the link is gone and what waits is answered as failed.
+    @Test func aHostThatNeverWelcomesIsDroppedAndWhatWaitsFails() async throws {
+        let session = StubHost.session()
+        let stub = try StubHost(scratch, sessions: [session])
+        defer { stub.quit() }
+        stub.welcomes = false
+        let clock = ManualClock()
+        var timing = HostLink.Timing()
+        timing.reply = clock.schedule
+        timing.reconnectDelays = [0.05]
+        let link = try await link(stub.dialer, timing: timing, welcomed: false)
+        let history = Locked<Bool?>(nil)
+        #expect(await eventually { stub.requests.contains { if case .hello = $0 { true } else { false } } })
+        on(link) { link.history(session.id, lines: 10) { history.value = ($0 != nil) } }
+        on(link) { clock.advance(HostLink.replyWait) }
+        #expect(await eventually { stub.connections == 2 && stub.requests.filter { if case .hello = $0 { true } else { false } }.count == 2 })
+        #expect(history.value == nil)
+        on(link) { clock.advance(HostLink.replyWait) }
+        #expect(await eventually { history.value != nil })
+        #expect(history.value == false)
+        #expect(on(link) { if case .gone = link.state { true } else { false } })
+        #expect(!stub.requests.contains { if case .history = $0 { true } else { false } }, "\(stub.requests)")
+    }
+
+    /// The host's notes asked while the link reconnects wait for the next welcome: asked then of a host that lists them,
+    /// answered nil by one that doesn't, without asking it.
+    @Test func notesAskedWhileTheLinkReconnectsWaitForTheNextWelcome() async throws {
+        let listing = try StubHost(scratch, capabilities: [HostProtocol.Capability.inputUnits, HostProtocol.Capability.hostNotes])
+        defer { listing.quit() }
+        let link = try await link(listing.dialer, timing: Self.quick)
+        let notes = Locked<HostNotes??>(nil)
+        on(link) {
+            link.connectAgain()
+            link.notes { notes.value = .some($0) }
+        }
+        #expect(await eventually { notes.value != nil })
+        #expect(notes.value == .some(listing.notes))
+        #expect(listing.requests.filter { $0 == .hostNotes }.count == 1, "\(listing.requests)")
+        #expect(listing.connections == 2)
+
+        // A host that doesn't list them: nil once it welcomed, not before, and nothing asked.
+        let silent = try StubHost(scratch, capabilities: [HostProtocol.Capability.inputUnits])
+        defer { silent.quit() }
+        silent.welcomes = false
+        let other = try await self.link(silent.dialer, timing: Self.quick, welcomed: false)
+        let none = Locked<HostNotes??>(nil)
+        #expect(await eventually { silent.requests.contains { if case .hello = $0 { true } else { false } } })
+        other.notes { none.value = .some($0) }
+        // Read on the link's queue behind the call: it waits.
+        #expect(on(other) { none.value } == nil)
+        silent.welcomes = true
+        on(other) { other.connectAgain() }
+        #expect(await eventually { none.value != nil })
+        #expect(none.value == .some(nil))
+        #expect(!silent.requests.contains(.hostNotes), "\(silent.requests)")
+    }
+
+    /// A gated unit whose connection dropped between its parts sends no more: on the next connection the host would take
+    /// its rest (an Enter) for a unit of its own, and another client's could have gone in between.
+    @Test func aGatedUnitCutByAReconnectSendsNoMore() async throws {
+        let host = try NodeTestHost(scratch)
+        defer { host.stop() }
+        let link = try await link(host.dialer, root: host.root, timing: Self.quick)
+        let (session, out, go) = try await spawnReader(host)
+        #expect(FileManager.default.createFile(atPath: go, contents: nil))
+        let text = Data("half".utf8)
+        let answer = Locked<((Bool) -> Void)?>(nil)
+        let confirmed = Locked<Bool?>(nil)
+        on(link) {
+            link.type([HostInput.Write(bytes: Array(text), delay: 0), HostInput.Write(bytes: [0x0D], delay: 0)], into: session.id, gate: { index, go in
+                if index == 0 { go(true) } else { answer.value = go }
+            }) { confirmed.value = $0 }
+        }
+        // The text went in (its part answered), and the Enter's gate is asked.
+        #expect(await eventually { answer.value != nil })
+        #expect(await Self.received(out, text) == text)
+        on(link) { link.connectAgain() }
+        #expect(await eventually { on(link) { link.state == .connected } })
+        answer.value?(true)
+        #expect(await eventually { confirmed.value != nil })
+        #expect(confirmed.value == false)
+        let end = Data("END".utf8)
+        link.type([HostInput.Write(bytes: Array(end), delay: 0)], into: session.id)
+        #expect(await Self.received(out, text + end) == text + end)
     }
 
     // MARK: Units (InputUnitDeliveryTests, ComposerDeliveryTests, PasteDeliveryTests)
@@ -585,12 +715,51 @@ struct HostLinkTests {
         #expect(throws: LeadVault.Refused.self) { try lost.issue(role: .lead, root: repository.path, task: nil) }
     }
 
+    /// Through a connector the host never answers (its queue stuck), the vault refuses within its timeout, as
+    /// `HostCall.vault` does: the connect is bounded by half of it, not the connector's own 30 s.
+    @Test func theVaultsConnectIsBoundedByItsTimeout() async throws {
+        let ends = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        let path = try scratch.shortFolder("vsc").appendingPathComponent("h.sock").path
+        HostConnection.register(connector: ends.0, for: path)
+        defer {
+            HostConnection.unregister(path: path)
+            Sys.close(ends.0)
+            Sys.close(ends.1)
+        }
+        let vault = HostLink(dialer: ConnectorDialer(path: path), root: scratch.url("link-root"), queue: DispatchQueue(label: "engine")).vault
+        let root = scratch.url("repository").path
+        let started = MacTime.real.awake()
+        let refused = await offPool { () -> Bool in
+            do {
+                _ = try vault.issue(role: .lead, root: root, task: nil)
+                return false
+            } catch { return error is LeadVault.Refused }
+        }
+        let took = MacTime.real.awake() - started
+        #expect(refused)
+        #expect(took < HostCall.vaultTimeout, "the vault took \(took) s to refuse")
+
+        // The link's own connection waits `Timing.connectPatience` each attempt (its queue waits with it), then is gone.
+        var timing = HostLink.Timing()
+        timing.connectPatience = 0.5
+        timing.reconnectDelays = [0.05]
+        let link = HostLink(dialer: ConnectorDialer(path: path), root: scratch.url("link-root"), queue: DispatchQueue(label: "engine"), timing: timing)
+        let linkStarted = MacTime.real.awake()
+        link.start()
+        #expect(await eventually { on(link) { if case .gone = link.state { true } else { false } } })
+        let tookToEnd = MacTime.real.awake() - linkStarted
+        // Two attempts, each shorter than one wait of the connector's own.
+        #expect(tookToEnd < HostConnector.patience, "the link took \(tookToEnd) s to give up")
+    }
+
     /// The server's dialer reaches only a path a connector is registered for, through it; any other path it never dials,
     /// even with a host listening there.
     @Test func theConnectorDialerNeverDialsByPath() async throws {
         let stub = try StubHost(scratch)
         defer { stub.quit() }
-        #expect(throws: ConnectorDialer.Unregistered.self) { _ = try ConnectorDialer(path: stub.path).connect(queue: DispatchQueue(label: "dial")) }
+        #expect(throws: ConnectorDialer.Unregistered.self) {
+            _ = try ConnectorDialer(path: stub.path).connect(queue: DispatchQueue(label: "dial"), patience: 1)
+        }
         #expect(stub.connections == 0)
 
         let host = try NodeTestHost(scratch)
@@ -603,8 +772,8 @@ struct HostLinkTests {
 
     private struct StubDialer: HostDialer {
         let path: String
-        func connect(queue: DispatchQueue) throws -> HostConnection {
-            try HostConnection(path: path, queue: queue, appKey: nil, viaConnector: false)
+        func connect(queue: DispatchQueue, patience: TimeInterval) throws -> HostConnection {
+            try HostConnection(path: path, queue: queue, appKey: nil, patience: patience, viaConnector: false)
         }
     }
 }

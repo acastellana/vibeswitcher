@@ -21,9 +21,10 @@ public struct ConnectorDialer: HostDialer {
         self.path = path
     }
 
-    public func connect(queue: DispatchQueue) throws -> HostConnection {
+    public func connect(queue: DispatchQueue, patience: TimeInterval) throws -> HostConnection {
         guard HostConnection.connector(for: path) != nil else { throw Unregistered(path: path) }
-        // Through the connector: the host answers with a connection it made for this process, its app (no proof asked).
-        return try HostConnection(path: path, queue: queue, appKey: nil)
+        // Through the connector: the host answers with a connection it made for this process, its app (no proof asked),
+        // within `patience` (0: the connector's own `HostConnector.patience`).
+        return try HostConnection(path: path, queue: queue, appKey: nil, patience: patience)
     }
 }

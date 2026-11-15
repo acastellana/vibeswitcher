@@ -18,6 +18,7 @@ final class StubHost: @unchecked Sendable {
     private var welcomeCapabilities: [String]
     private var listed: [HostSession]
     private var screens = true
+    private var welcoming = true
     let notes = HostNotes(startedAt: Date(timeIntervalSince1970: 1_800_000_000), serverRestarts: 2, replacedPaths: ["/x/host.sock"],
                           refusedAppConnections: 1)
     let startedAt = Date(timeIntervalSince1970: 1_800_000_000)
@@ -48,8 +49,8 @@ final class StubHost: @unchecked Sendable {
 
     private struct Dialer: HostDialer {
         let path: String
-        func connect(queue: DispatchQueue) throws -> HostConnection {
-            try HostConnection(path: path, queue: queue, appKey: nil, viaConnector: false)
+        func connect(queue: DispatchQueue, patience: TimeInterval) throws -> HostConnection {
+            try HostConnection(path: path, queue: queue, appKey: nil, patience: patience, viaConnector: false)
         }
     }
 
@@ -63,6 +64,12 @@ final class StubHost: @unchecked Sendable {
     var answersScreens: Bool {
         get { queue.sync { screens } }
         set { queue.sync { screens = newValue } }
+    }
+
+    /// Whether it welcomes a hello (false: it takes the connection and never answers, as a host whose queue is stuck).
+    var welcomes: Bool {
+        get { queue.sync { welcoming } }
+        set { queue.sync { welcoming = newValue } }
     }
 
     /// The sessions the next welcome lists.
@@ -121,6 +128,7 @@ final class StubHost: @unchecked Sendable {
         asked.append(envelope.request)
         switch envelope.request {
         case .hello:
+            guard welcoming else { return }
             send(.welcome(protocolVersion: HostProtocol.version, hostBuild: 42, sessions: listed, capabilities: welcomeCapabilities,
                           pid: 4242, startedAt: startedAt), replyTo: envelope.seq, on: fd)
         case .screen(let id):
