@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import VibePlatform
 
 /// Outside the platform layer, no file of the targets that build on every system imports the C library or an
 /// Apple-only framework, or asks which system it is on: what differs between systems is in Sources/VibePlatform, and
@@ -72,26 +73,50 @@ struct PlatformLintTests {
             .sorted { $0[0] < $1[0] }
     }
 
-    /// git's output, run in `folder`; it throws when git fails.
+    /// git's output, run in `folder`; it throws when git fails. Started by `Platform.Spawn` and collected here by its
+    /// pid, not by Foundation's `Process`: on the Mac its `waitUntilExit()` once never returned for a child that had
+    /// ended (ProcessesTests.Child).
     @discardableResult
     static func git(_ arguments: [String], in folder: URL, input: String? = nil) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", folder.path] + arguments
-        let output = Pipe(), feed = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        process.standardInput = input == nil ? FileHandle.nullDevice : feed
-        try process.run()
+        let failed = CocoaError(.executableLoad, userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) failed"])
+        // Ours: the ends this process still holds (-1 once closed), all closed at the end whatever happens.
+        var output: [Int32] = [-1, -1], feed: [Int32] = [-1, -1]
+        defer { (output + feed).filter { $0 >= 0 }.forEach { Sys.close($0) } }
+        guard Sys.pipeClosedOnExec(&output) == 0, input == nil || Sys.pipeClosedOnExec(&feed) == 0 else { throw failed }
+        var spawn = Platform.Spawn(executable: "/usr/bin/git", arguments: ["/usr/bin/git", "-C", folder.path] + arguments)
+        spawn.stdin = input == nil ? .path("/dev/null", flags: O_RDONLY) : .descriptor(feed[0])
+        spawn.stdout = .descriptor(output[1])
+        spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        guard case .success(let pid) = spawn.start() else { throw failed }
+        // Its ends are its own now: the read below ends when it does.
+        Sys.close(output[1])
+        output[1] = -1
         if let input {
-            feed.fileHandleForWriting.write(Data(input.utf8))
-            try feed.fileHandleForWriting.close()
+            Sys.close(feed[0])
+            feed[0] = -1
+            Platform.Sockets.noSigPipe(feed[1])
+            let bytes = Array(input.utf8)
+            var sent = 0
+            while sent < bytes.count {
+                let wrote = bytes[sent...].withUnsafeBytes { Sys.write(feed[1], $0.baseAddress, $0.count) }
+                if wrote < 0, errno == EINTR { continue }
+                guard wrote > 0 else { break }
+                sent += wrote
+            }
+            Sys.close(feed[1])
+            feed[1] = -1
         }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw CocoaError(.executableLoad, userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) failed"])
+        var data = [UInt8](), chunk = [UInt8](repeating: 0, count: 4_096)
+        while true {
+            let got = Sys.read(output[0], &chunk, chunk.count)
+            if got < 0, errno == EINTR { continue }
+            guard got > 0 else { break }
+            data.append(contentsOf: chunk[0..<got])
         }
+        var status: Int32 = 0
+        var found: pid_t
+        repeat { found = waitpid(pid, &status, 0) } while found < 0 && errno == EINTR
+        guard found == pid, status == 0 else { throw failed }
         return String(decoding: data, as: UTF8.self)
     }
 

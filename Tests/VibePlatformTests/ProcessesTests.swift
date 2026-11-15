@@ -49,16 +49,21 @@ struct ProcessesTests {
             self.output = output
         }
 
-        /// KILL (which a stopped one takes too), unless it has been collected: until then its pid is surely its own.
+        /// KILL (which a stopped one takes too), unless it has ended or been collected, here or by someone else: asked
+        /// first, under the same lock, so its pid is its own when the signal goes (a pid collected elsewhere may
+        /// already name another process).
         func kill() {
-            lock.withLock { if status == nil { Sys.kill(pid, SIGKILL) } }
+            lock.withLock { if !reapLocked() { Sys.kill(pid, SIGKILL) } }
         }
 
         /// Collects it if it has ended: whether it has been collected, now or before. One that is no child of this
         /// process any more (ECHILD) was collected by someone else.
         private func reap() -> Bool {
-            lock.lock()
-            defer { lock.unlock() }
+            lock.withLock { reapLocked() }
+        }
+
+        /// `reap()`, the lock held.
+        private func reapLocked() -> Bool {
             guard status == nil else { return true }
             var raw: Int32 = 0
             while true {
@@ -141,6 +146,13 @@ struct ProcessesTests {
         return spawn
     }
 
+    /// A pipe whose ends are close-on-exec (`Sys.pipeClosedOnExec`).
+    static func newPipe() throws -> (reading: Int32, writing: Int32) {
+        var ends: [Int32] = [-1, -1]
+        guard Sys.pipeClosedOnExec(&ends) == 0 else { throw Platform.Errno(code: errno) }
+        return (ends[0], ends[1])
+    }
+
     /// Starts `spawn` (with no signal blocked, whatever the task's thread blocks): its pid.
     static func run(_ spawn: Platform.Spawn) async throws -> pid_t {
         // "Text file busy": a program a test has just copied can't be run while any process still holds the copy open
@@ -171,9 +183,11 @@ struct ProcessesTests {
     /// waited for until it has said it back. It then waits for more, until the test ends it.
     static func startEchoing(_ executable: String = "/bin/cat", _ arguments: [String] = [], in directory: URL? = nil,
                              adding extra: [String: String] = [:]) async throws -> Child {
-        let input = try SpawnTests.newPipe()
+        // Close-on-exec from the call that makes them (pipe2 on Linux): no child another test starts meanwhile holds
+        // an end, which would keep the read below from ending when this child goes.
+        let input = try newPipe()
         let output: (reading: Int32, writing: Int32)
-        do { output = try SpawnTests.newPipe() } catch {
+        do { output = try newPipe() } catch {
             [input.reading, input.writing].forEach { Sys.close($0) }
             throw error
         }
