@@ -1,0 +1,40 @@
+# Select and copy: a drag selects text of a reply, in the chat and in the terminal; a Copy (the message's menu, ⌘C)
+# puts it on the sandbox's own pasteboard (never yours); ⌘V puts it in the composer, which must then hold exactly the
+# selection (`composer expect`: a difference fails the journey at that line, saying what the composer holds).
+desc Drag-select a reply in the chat and the terminal, copy it (menu, ⌘C), paste it into the composer and check it.
+chat
+# No inspector: its clock and run values would each need a mask.
+inspector hide
+
+# The chat: the menu's Copy.
+pointer drag takes schedule
+shot chat-selected
+pointer menu-copy takes
+composer paste
+composer expect takes its lock after it reads the sche
+shot chat-pasted-menu
+composer clear
+
+# The chat: ⌘C (the selection is dragged again: the composer took the keyboard from the message).
+pointer drag takes schedule
+pointer copy
+composer paste
+composer expect takes its lock after it reads the sche
+shot chat-pasted-key
+composer clear
+
+# The terminal: its Ready. line, dragged across from its first line's start into its second, then ⌘C.
+terminal
+drag
+shot terminal-selected
+copy
+chat
+composer paste
+composer expect dy.
+shot terminal-pasted
+
+# What changes from run to run on its own, in the 2560x1600 shots of the main window (inspector hidden): the
+# session's age in its sidebar row and in the header's state pill, and the clock time under the question.
+mask *-main-* 430 250 75 45
+mask *-main-* 1115 118 140 44
+mask *-main-* 2300 320 100 45

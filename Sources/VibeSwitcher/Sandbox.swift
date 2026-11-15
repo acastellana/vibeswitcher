@@ -1369,6 +1369,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("mouse on|off", "the shown session's program asks for mouse reporting (DECSET 1002 and 1006, as Claude Code's fullscreen does), or stops"),
         ("type TEXT", "types TEXT into the chat's composer (through its text view, as the keyboard does)"),
         ("send", "presses Return in the composer: the message goes to the fake session"),
+        ("composer paste|clear|expect TEXT", "the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a Copy's, never yours), and prints what it holds then; clear empties it; expect fails unless it holds exactly TEXT, saying what it holds"),
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
@@ -1434,7 +1435,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("shot-real NAME", "draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png… (`shot` sets each window to light, then dark: to see Theme, use this)"),
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder, its side panes out of their glass (a drawing can't composite glass), and fails if one comes out blank or in the wrong look's colors"),
-        ("pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT", "the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views (where, their tooltip); hover moves the pointer onto the message holding TEXT; drag presses on the message holding FROM and lets go on the one holding TO; copy is ⌘C (to a pasteboard of the sandbox's own, never the general one), printing what it copied; menu right-clicks the message holding TEXT and prints its menu"),
+        ("pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT|menu-copy TEXT", "the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views (where, their tooltip); hover moves the pointer onto the message holding TEXT; drag presses on the message holding FROM and lets go on the one holding TO; copy is ⌘C (to the sandbox's own pasteboard, never yours), printing what it copied; menu right-clicks the message holding TEXT and prints its menu; menu-copy right-clicks it and picks its menu's Copy, printing what it copied"),
         ("offline on|off", "the app loses its connection to the sandbox's own host and doesn't get it back (the host and fake sessions keep running), as while the host is unreachable; off: it connects again"),
         ("unproved", "connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions"),
         ("quit", "quits (the host and fake sessions end with it)"),
@@ -2419,6 +2420,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             composer.window?.makeFirstResponder(composer)
             composer.doCommand(by: #selector(NSResponder.insertNewline(_:)))
             reply(true, "sent")
+        case "composer": composerCommand(rest, reply)
         case "tell": tell(rest, reply)
         case "notify": notify(rest, reply)
         case "runblock": runBlock(confirmed: rest == "yes", reply)
@@ -2710,7 +2712,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { [weak self] in reply(true, self?.lookReport() ?? "") }
         case "panes":
             panes(rest.isEmpty ? "panes" : rest, reply)
-        case "pointer": pointer(Array(words.dropFirst()), reply)
+        // Its words split again: a journey line (scripts/ui-journeys.sh) hands them over as one.
+        case "pointer": pointer(rest.split(separator: " ").map(String.init), reply)
         case "offline":
             guard rest == "on" || rest == "off" else { return reply(false, "offline on|off") }
             host.reconnectDelays = rest == "on" ? [3600] : [0.2, 0.5, 1, 2, 3, 5]
@@ -2733,7 +2736,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     // MARK: The pointer over the chat
 
-    /// The shown chat's message text views, top to bottom, each writing to the sandbox's own pasteboard.
+    /// The shown chat's message text views, top to bottom. Each writes to `NSPasteboard.general`, the sandbox's own
+    /// (`redirectPasteboard`), where the composer's ⌘V reads, as in the app.
     private func chatTexts() -> [ChatTextView] {
         guard let root = window?.window?.contentView else { return [] }
         var found: [ChatTextView] = []
@@ -2742,11 +2746,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             view.subviews.forEach(walk)
         }
         walk(root)
-        for text in found where text.pasteboard == .general { text.pasteboard = sandboxPasteboard }
         return found.sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
     }
-
-    private let sandboxPasteboard = NSPasteboard(name: NSPasteboard.Name("VibeSwitcherSandbox-\(getpid())"))
 
     /// A point (in the window) on the first line of the message holding `text`: on that text when found, else its start.
     private func point(onMessage text: String) -> (ChatTextView, NSPoint)? {
@@ -2843,9 +2844,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 reply(!selected.isEmpty, "window key \(nsWindow.isKeyWindow), pressed on \(self.describe(hit)) (first mouse \(hit?.acceptsFirstMouse(for: down) ?? false)) (the message's text view: \(hit === from)), first responder \(self.describe(nsWindow.firstResponder as? NSView)); selected: “\(selected)”")
             }
         case "copy":
-            _ = chatTexts()
-            sandboxPasteboard.clearContents()
-            // Only a message's own text view: it writes to the sandbox's pasteboard, anything else to the general one.
+            NSPasteboard.general.clearContents()
             guard let focused = nsWindow.firstResponder as? ChatTextView else {
                 return reply(false, "the first responder is \(describe(nsWindow.firstResponder as? NSView)), not a message: not copied")
             }
@@ -2853,7 +2852,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             // (The sandbox puts up no menu bar: the app's own menu, as AppDelegate installs it.)
             let item = MainMenu.build().items.compactMap(\.submenu).flatMap(\.items).first { $0.keyEquivalent == "c" && $0.keyEquivalentModifierMask == .command }
             let handled = item.flatMap(\.action).map { NSApp.sendAction($0, to: focused, from: item) } ?? false
-            let copied = sandboxPasteboard.string(forType: .string)
+            let copied = NSPasteboard.general.string(forType: .string)
             reply(copied != nil, "menu item \(item?.title ?? "none"), handled \(handled), first responder \(describe(nsWindow.firstResponder as? NSView)); copied: “\(copied ?? "")”")
         case "areas":
             // The tracking areas over the message holding TEXT, from its view up to the window, and each owner's kind.
@@ -2879,8 +2878,52 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 return reply(false, "no menu on \(describe(hit))")
             }
             reply(true, "on \(describe(hit)): " + menu.items.map { $0.isSeparatorItem ? "—" : $0.title }.joined(separator: ", "))
+        case "menu-copy":
+            // The menu a right-click on the message holding TEXT opens, and its Copy picked as a click on it does.
+            guard let (_, at) = point(onMessage: rest) else { return reply(false, "no message holds \(rest)") }
+            let frame = content.superview ?? content
+            let hit = frame.hitTest(frame.convert(at, from: nil))
+            guard let event = mouseEvent(.rightMouseDown, at: at), let menu = hit?.menu(for: event) else {
+                return reply(false, "no menu on \(describe(hit))")
+            }
+            guard let index = menu.items.firstIndex(where: { $0.title == "Copy" }) else {
+                return reply(false, "no Copy in the menu on \(describe(hit)): " + menu.items.map(\.title).joined(separator: ", "))
+            }
+            NSPasteboard.general.clearContents()
+            menu.performActionForItem(at: index)
+            let copied = NSPasteboard.general.string(forType: .string)
+            reply(copied != nil, "picked Copy in the menu on \(describe(hit)); copied: “\(copied ?? "")”")
         default:
-            reply(false, "pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT")
+            reply(false, "pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT|menu-copy TEXT")
+        }
+    }
+
+    // MARK: The composer
+
+    /// `composer paste|clear|expect TEXT`.
+    private func composerCommand(_ rest: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let composer = composer() else { return reply(false, "no composer: show a fake session's chat first (chat)") }
+        let words = rest.split(separator: " ", maxSplits: 1).map(String.init)
+        func holds() -> String { "the composer holds “\(composer.string)”" }
+        switch words.first ?? "" {
+        case "paste":
+            // ⌘V as the main menu has it, sent to the composer once it has the keyboard (the window isn't key, so not
+            // through NSApp's key window): it reads NSPasteboard.general, the sandbox's own.
+            composer.window?.makeFirstResponder(composer)
+            let item = MainMenu.build().items.compactMap(\.submenu).flatMap(\.items).first { $0.keyEquivalent == "v" && $0.keyEquivalentModifierMask == .command }
+            guard let item, let action = item.action else { return reply(false, "no menu item for ⌘V") }
+            let handled = NSApp.sendAction(action, to: composer, from: item)
+            settle { reply(handled, "⌘V (\(item.title)) handled \(handled); \(holds())") }
+        case "clear":
+            composer.window?.makeFirstResponder(composer)
+            composer.selectAll(nil)
+            composer.deleteBackward(nil)
+            settle { reply(composer.string.isEmpty, holds()) }
+        case "expect":
+            let expected = words.count > 1 ? words[1] : ""
+            reply(composer.string == expected, composer.string == expected ? holds() : "\(holds()), not “\(expected)”")
+        default:
+            reply(false, "composer paste|clear|expect TEXT")
         }
     }
 
