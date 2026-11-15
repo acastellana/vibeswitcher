@@ -3270,3 +3270,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 23:17 Released ui-journeys-a4-dictation's worker (idle since its done report on d8356133) while its audit runs
 - 2026-11-15 23:17 Automatically (auto_advance): Released ui-journeys-a4-dictation's worker, idle since its done report on d8356133, while its audit runs (ended pid 62549 (Worker: UI journeys A4: dictation journey)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-15 23:18 Audit of ui-journeys-a4-dictation: complete, clean, round 2: 1 Nit open
+- 2026-11-15 23:37 Pipeline held: ui-journeys-a3-run ready to merge with none landing; cause: a merge in progress
+- 2026-11-15 23:40 Merged ui-journeys-a3-run: UI journeys A3: Run card journey (in a batch, on a test run of its own) (build 64a972289c0f with changes not committed)
+- 2026-11-15 23:40 Flaky in the batch ui-journeys-a3-run: twoEndsAtOnceCloseOnce(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun

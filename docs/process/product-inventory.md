@@ -331,6 +331,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `send` — presses Return in the composer: the message goes to the fake session — `Sources/VibeSwitcher/Sandbox.swift`
 - `composer paste|clear|expect TEXT` — the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `runblock [yes]` — the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as… — `Sources/VibeSwitcher/Sandbox.swift`
+- `lines FILE N` — waits up to 30 s for FILE (a path under the sandbox's home, e.g. projects/example-api/ran.txt) to hold N… — `Sources/VibeSwitcher/Sandbox.swift`
 - `tell JSON` — hands a fake Claude (the selected one, or the one labelled "to") a FakeClaude op, e.g. '{"op": "permission"… — `Sources/VibeSwitcher/Sandbox.swift`
 - `notify prepare|allow|deny` — a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare… — `Sources/VibeSwitcher/Sandbox.swift`
 - `new [codex|shell|zsh] [LABEL]` — starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the… — `Sources/VibeSwitcher/Sandbox.swift`
