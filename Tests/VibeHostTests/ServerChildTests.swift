@@ -326,6 +326,73 @@ final class ServerChildHost {
         #expect(!results.contains(" started "), "\(results)")
     }
 
+    /// A server child a handover carried, whose host has stopped before `restore`'s queued block takes it (the stop run
+    /// on the queue first, finding no server child to stop, as `--exit-with`'s is when its owner is gone at the start):
+    /// the carried child is ended and reaped, its connector closed, and nothing is the host's server child, so none
+    /// outlives a host that stops and waits to exit. Then no carried connector is adopted. Both of `restore`'s blocks:
+    /// the one whose next start is from this image's own copy, and the one whose next start is a switch's carried copy.
+    /// The child is a `sleep` of this test's, the host's child as a server child is.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"),
+          arguments: [false, true])
+    func aCarriedServerChildOfAHostStoppedBeforeItsRestoreIsEnded(switchCarriedACopy: Bool) async throws {
+        let dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: dir + "/" + ServerChildHelper.actionsName, contents: Data("sleep\n".utf8))
+        let host = try TestHost(log: dir + "/host.log", removing: dir, socket: dir + "/h.sock")
+        var child: pid_t = 0
+        var spawn = Platform.Spawn(executable: "/bin/sleep", arguments: ["sleep", "600"])
+        spawn.keep = []
+        if case .success(let pid) = spawn.start() { child = pid }
+        try #require(child > 0)
+        let link = try #require(Platform.Processes.link(child))
+        // Ended here only when nothing reaped it: its pid, once reaped, may be another test's process by now.
+        defer {
+            var status: Int32 = 0
+            if Platform.Processes.link(child)?.startTicks == link.startTicks, waitpid(child, &status, WNOHANG) == 0 {
+                kill(child, SIGKILL)
+                _ = waitpid(child, &status, 0)
+            }
+        }
+        let (made, othersEnd) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        defer { Sys.close(othersEnd) }
+        // As a handover's exec leaves a kept descriptor: open, not close-on-exec.
+        let connector = fcntl(made, F_DUPFD, 3)
+        Sys.close(made)
+        let binary = try #require(Bundle.main.executablePath)
+        let carried = switchCarriedACopy ? try Platform.ProcessSelf.sealedCopy(of: binary, name: "vibeswitcher-server").get() : nil
+        let record = HostHandover.ServerChildRecord(pid: child, startTicks: link.startTicks, connector: connector, image: -1, path: binary)
+        #expect(ServerChild.check(record, sessionPrograms: [], otherDescriptors: [], isParser: { _ in false }) == nil)
+
+        // The restore's block queued, then the stop run on the queue before it.
+        var restored: ServerChild?
+        host.server.queue.sync {
+            restored = ServerChild.restore(record, launch: .init(image: binary, socketPath: host.socket, arguments: [],
+                                                                 environment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()]),
+                                           sessionPrograms: [], otherDescriptors: [], server: host.server, carried: carried)
+            host.server.stop(terminateSessions: true)
+        }
+        defer { restored?.stop() }
+        host.server.queue.sync {}
+        #expect(restored != nil)
+        #expect(restored?.pid == nil && restored?.isRunning == false)
+        #expect(host.server.queue.sync { host.server.serverChild == nil })
+        // Reaped by the host (not left a zombie of this process, which `kill` would still find).
+        #expect(kill(child, 0) != 0 && errno == ESRCH, "the carried child \(child) outlived its stopped host")
+        // Its connector closed: the other end reads its end.
+        var byte: UInt8 = 0
+        var waiting = pollfd(fd: othersEnd, events: Int16(POLLIN), revents: 0)
+        #expect(poll(&waiting, 1, 0) == 1 && read(othersEnd, &byte, 1) == 0, "the carried connector is still open")
+
+        let (late, lateOthersEnd) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        defer {
+            Sys.close(late)
+            Sys.close(lateOthersEnd)
+        }
+        #expect(!host.server.adoptAppConnector(late, sender: nil, requireNonDumpable: false, onDumpable: nil))
+        #expect(host.server.queue.sync { host.server.appConnectors[late] == nil })
+        #expect(fcntl(late, F_GETFD) >= 0, "a connector refused is left to its owner")
+    }
+
     /// The server's sealed copy made readable while a child runs from it (anything that reaches the copy can `chmod`
     /// it; the seals don't stop that): the child started again after it is killed is still non-dumpable from its exec,
     /// as the host put the copy's mode back before that start (S2-D5), and the copy is `0111` again.
