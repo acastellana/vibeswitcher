@@ -216,6 +216,32 @@ extension LeadTask {
         teamMember(name)?.waits?.filter { $0.runs(at: now) }.min { $0.until < $1.until }
     }
 
+    /// Its members other than the integrator that have a worker, each with its worker's session (one that's the task's
+    /// worker is the integrator's, and left out); none for a plain task.
+    public var memberSessions: [(member: LeadTeamMember, session: String)] {
+        (team ?? []).dropFirst().compactMap { member in member.worker.flatMap { $0 == worker ? nil : (member, $0) } }
+    }
+
+    /// The sessions the witness watches for it: `members` (its worker, verifier and finders) and each other member's
+    /// worker (`memberSessions`). A member left out was never stall-checked, so one stuck went unnoticed.
+    public var watched: [String] {
+        let ids = members
+        return ids + memberSessions.map(\.session).filter { !ids.contains($0) }
+    }
+
+    /// The teammates the member `name` waits on at `now`, as its open waits name them ("ui", or "all"): those whose
+    /// deadline still runs (`LeadTeamMember.waits`), in order; empty when none runs.
+    public func waitingOn(member name: String, now: Double) -> [String] {
+        var names: [String] = []
+        for wait in teamMember(name)?.waits ?? [] where wait.runs(at: now) {
+            for word in wait.on.split(separator: " ") {
+                let who = word.hasPrefix("@") ? String(word.dropFirst()) : String(word)
+                if !who.isEmpty, !names.contains(who) { names.append(who) }
+            }
+        }
+        return names
+    }
+
     /// `peerWait` of the member run by the session `session`.
     public func peerWait(session: String, now: Double) -> LeadPeerWait? {
         teamMember(session: session).flatMap { peerWait(member: $0.name, now: now) }

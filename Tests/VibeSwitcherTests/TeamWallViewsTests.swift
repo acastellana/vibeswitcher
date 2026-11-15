@@ -25,7 +25,7 @@ struct TeamWallViewsTests {
         var task = Self.team()
         task.checkpoints = [LeadCheckpoint(text: "Split at 4f1c2a9", at: 1), LeadCheckpoint(text: "api: post() is in", at: 2),
                             LeadCheckpoint(text: "api: wall(since:) is in", at: 3), LeadCheckpoint(text: "Took api's part", at: 4)]
-        let lines = TeamMemberLine.lines(task, posts: [])
+        let lines = TeamMemberLine.lines(task)
         #expect(lines.map(\.name) == ["core", "api", "ui"])
         #expect(lines.map(\.part) == ["Shared types", "The tools", "The views"])
         #expect(lines.map(\.integrator) == [true, false, false])
@@ -35,27 +35,34 @@ struct TeamWallViewsTests {
         #expect(lines[2].spoken == "ui, part: The views, no progress yet")
     }
 
-    @Test func aMemberWaitsOnThoseItAskedUntilAReply() {
-        let task = Self.team()
-        let asked = [Self.post(1, "ui", to: .members(["api", "core"]), needsAnswer: true), Self.post(2, "api", to: .all),
-                     Self.post(3, "core", to: .all, needsAnswer: true)]
-        var lines = TeamMemberLine.lines(task, posts: asked)
+    /// The waiting line reads the board's waits (`LeadTeamMember.waits`), as status does: those whose deadline runs. A
+    /// reply takes a wait off the board; a deadline that passed clears the line at once, before the board drops it.
+    @Test func aMemberWaitsOnThoseItAskedUntilItsDeadline() {
+        var task = Self.team()
+        let now = 2_000_000_000.0
+        task.team?[2].waits = [LeadPeerWait(post: 1, on: "@api @core", until: now + 300)]
+        task.team?[0].waits = [LeadPeerWait(post: 3, on: LeadWall.everyone, until: now + 600)]
+        var lines = TeamMemberLine.lines(task, now: now)
         #expect(lines.first { $0.name == "ui" }?.waitingText == "waiting on @api and @core")
         #expect(lines.first { $0.name == "core" }?.waitingText == "waiting on @all")
         #expect(lines.first { $0.name == "api" }?.waitingOn == [])
-        // A reply to the question closes it.
-        lines = TeamMemberLine.lines(task, posts: asked + [Self.post(4, "api", to: .members(["ui"]), replyTo: 1)])
+        #expect(lines.first { $0.name == "ui" }?.spoken == "ui, part: The views, no progress yet, waiting on @api and @core")
+        // ui's deadline passed: its line clears though the wait is still on the board; core's runs on.
+        lines = TeamMemberLine.lines(task, now: now + 300)
         #expect(lines.first { $0.name == "ui" }?.waitingOn == [])
         #expect(lines.first { $0.name == "core" }?.waitingOn == ["all"])
+        // A reply took core's wait off the board.
+        task.team?[0].waits = nil
+        #expect(TeamMemberLine.lines(task, now: now).first { $0.name == "core" }?.waitingText == nil)
     }
 
     /// A plain task's lane and details are as before: no member lines, no wall.
     @Test func aPlainTaskHasNoMembersNorWall() {
         var task = Self.team()
         task.team = nil
-        #expect(TeamMemberLine.lines(task, posts: [Self.post(1, "api", to: .all)]).isEmpty)
+        #expect(TeamMemberLine.lines(task).isEmpty)
         task.team = []
-        #expect(TeamMemberLine.lines(task, posts: []).isEmpty)
+        #expect(TeamMemberLine.lines(task).isEmpty)
     }
 
     /// Only what the wall's checks pass is shown: a line written into the file by hand (an author not on the team, a

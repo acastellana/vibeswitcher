@@ -150,6 +150,19 @@ public struct LeadStall: Codable, Equatable, Sendable {
         }
     }
 
+    /// What the lead can do about a team member's stall (one other than the integrator): read_session reads only the
+    /// integrator's session, so it's told to message the member by name.
+    public func advice(slug: String, member: String) -> String {
+        let tell = "message(\(slug), …, member: \(member))"
+        switch reason {
+        case .silent: return "Ask it where it is with \(tell); it goes on from there."
+        case .idle: return "Tell it what to do next with \(tell)."
+        case .compacted: return "It lost its place after the compaction: tell it what it was doing and what's next with \(tell)."
+        case .undelivered: return "Something holds it (a draft in its box, a prompt): message again with \(tell) and clear_draft: true, or tell the user."
+        case .prompt: return "Answer it with \(tell), or ask the user if it's theirs to decide."
+        }
+    }
+
     /// Each stall is told once per episode: silent, idle and compacted are one episode per last activity (the first
     /// to fire tells it; nothing new until the worker moves again), an undelivered message one per message.
     public func key(session: String) -> String {

@@ -329,7 +329,7 @@ struct TeamTaskList: View {
         let wall = team ? walls[row.task.slug] ?? [] : nil
         return TeamRowView(row: row, now: now, summary: summary(row), isOpen: openRows.contains(row.id), canOpen: canOpen, open: open,
                     openTask: { [shown] in reveal($0, in: shown.rows, proxy) },
-                    members: team && row.group != .finished ? TeamMemberLine.lines(row.task, posts: wall ?? []) : [], wall: wall) {
+                    members: team && row.group != .finished ? TeamMemberLine.lines(row.task, now: now.timeIntervalSince1970) : [], wall: wall) {
             if openRows.contains(row.id) { openRows.remove(row.id) } else { openRows.insert(row.id) }
         }
         .equatable()

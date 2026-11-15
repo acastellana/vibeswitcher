@@ -17,16 +17,17 @@ struct TeamMemberLine: Equatable, Identifiable {
     let integrator: Bool
     /// Its last `progress`, without the "name: " the board keeps it under; nil: none yet.
     let progress: String?
-    /// The teammates it waits on ("ui", or "all"): those its open `needs_answer` posts went to; empty: none.
+    /// The teammates it waits on ("ui", or "all"): its open waits on an answer whose deadline still runs
+    /// (`LeadTeamMember.waits`, as status reads them), so the line clears once a deadline passes; empty: none.
     let waitingOn: [String]
 
     /// A team task's members, the integrator first; none for a plain task.
-    static func lines(_ task: LeadTask, posts: [LeadWall.Post]) -> [TeamMemberLine] {
+    static func lines(_ task: LeadTask, now: Double = Date().timeIntervalSince1970) -> [TeamMemberLine] {
         guard let team = task.team, task.isTeam else { return [] }
         return team.enumerated().map { index, member in
             TeamMemberLine(name: member.name, part: member.part, integrator: index == 0,
                            progress: progress(of: member.name, integrator: index == 0, team: team, checkpoints: task.checkpoints ?? []),
-                           waitingOn: waitingOn(member.name, posts: posts))
+                           waitingOn: task.waitingOn(member: member.name, now: now))
         }
     }
 
@@ -39,19 +40,6 @@ struct TeamMemberLine: Equatable, Identifiable {
             if integrator, !others.contains(where: checkpoint.text.hasPrefix) { return checkpoint.text }
         }
         return nil
-    }
-
-    /// Whom `member` waits on: the recipients of its posts that ask for an answer and have no reply yet, in order.
-    static func waitingOn(_ member: String, posts: [LeadWall.Post]) -> [String] {
-        let answered = Set(posts.compactMap(\.replyTo))
-        var names: [String] = []
-        for post in posts where post.author == member && post.needsAnswer && !answered.contains(post.id) {
-            switch post.to {
-            case .all: if !names.contains("all") { names.append("all") }
-            case .members(let to): for name in to where !names.contains(name) { names.append(name) }
-            }
-        }
-        return names
     }
 
     /// "waiting on @ui", "waiting on @ui and @api".

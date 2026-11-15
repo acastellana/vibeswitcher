@@ -1116,6 +1116,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
                     LeadCheckpoint(text: "ui: member lines drawn in the lane; the Wall section next", at: now - 600),
                     LeadCheckpoint(text: "Took api's part; its tests pass on the team branch", at: now - 240),
                 ]
+                // ui's question to @core below (post #5), its deadline running: the lane's "waiting on @core".
+                task.team?[2].waits = [LeadPeerWait(post: 5, on: "@core", until: now + 9 * 60)]
                 board.tasks.insert(task, at: 0)
             }
             // A wall of its own each time: the posts below, from the first.
