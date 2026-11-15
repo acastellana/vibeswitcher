@@ -10,7 +10,9 @@
 # scripts/ui-journeys.sh list                       names every journey with its one-line description
 #
 # Exits 0 when every shot is unchanged (within the threshold) or new; 1 when one changed or a journey failed; 64 on a
-# wrong command line.
+# wrong command line. A journey that draws no shots, or a shot that isn't written (both NAME-main-light.png and
+# NAME-main-dark.png), fails: a check that compared nothing never reads unchanged. scripts/ui-journeys-selfcheck.sh
+# --binary PATH checks that.
 #
 # Options (run): --threshold PERCENT  a shot counts as changed when more than this share of its pixels differ (0.05)
 #                --tolerance N        a pixel differs when a channel (0–255) moves by more than N (8)
@@ -120,8 +122,10 @@ quit_sandbox() { sandbox quit >/dev/null 2>&1 || true; }
 
 # Runs journey $1 in a fresh sandbox: its shots go to current/$1/. Prints what failed and returns 1 when a command did.
 run_journey() {
-    local name=$1 file number=0 line command rest output png
+    local name=$1 file number=0 line command rest output png missing shots=0
     file=$(journey_file "$name")
+    grep -qE '^[[:space:]]*shot([[:space:]]|$)' "$file" ||
+        { echo "it draws no shots: a journey needs a \`shot NAME\` line, or there is nothing to compare"; return 1; }
     rm -rf "$root/current/$name" "$root/staging"
     mkdir -p "$root/current/$name" "$root/staging"
     if ! output=$(sandbox ${binary:+--binary "$binary"} run 2>&1); then
@@ -143,6 +147,18 @@ run_journey() {
                 while IFS= read -r png; do
                     [[ $png == "$root/staging/"*.png && -f $png ]] && mv "$png" "$root/current/$name/"
                 done <<<"$output"
+                # Each shot draws at least the main window, light and dark: one not in current/ was never compared.
+                missing=""
+                for png in "$rest-main-light.png" "$rest-main-dark.png"; do
+                    [[ -f $root/current/$name/$png ]] || missing+=" $png"
+                done
+                if [[ -n $missing ]]; then
+                    echo "line $number ($line): these shots weren't written to ${root#"$repo"/}/current/$name/:$missing"
+                    echo "the sandbox answered (a shot is taken from ${root#"$repo"/}/staging/ only when its path is spelled so):"
+                    echo "$output" | sed 's/^/  /'
+                    return 1
+                fi
+                shots=$((shots + 1))
                 ;;
             *)
                 if [[ -n $rest ]]; then output=$(sandbox "$command" "$rest" 2>&1) || { echo "line $number ($line): $output"; return 1; }
@@ -150,6 +166,7 @@ run_journey() {
                 ;;
         esac
     done <"$file"
+    ((shots > 0)) || { echo "it drew no shots"; return 1; }
 }
 
 # The journey's `mask` lines that match shot $2, as image-diff's --mask arguments, one a line.
@@ -194,6 +211,8 @@ compare_journey() {
         lines+=("  $stem: MISSING, the baseline has it but this run drew no such shot")
         changed=$((changed + 1))
     done
+    # Nothing looked at is no pass: a run that left current/ empty (and no baseline to miss) fails.
+    if ((${#lines[@]} == 0)); then echo "$name: failed, no shots in ${current#"$repo"/} to compare"; return 1; fi
     if ((changed > 0)); then echo "$name: changed ($changed shots; accept them with scripts/ui-journeys.sh accept $name)"
     elif ((stored > 0)); then echo "$name: baselines stored ($stored shots, in ${baseline#"$repo"/})"
     else echo "$name: unchanged"; fi
