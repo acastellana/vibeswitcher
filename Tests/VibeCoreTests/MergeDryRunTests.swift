@@ -94,6 +94,9 @@ struct MergeDryRunTests: LeadTeamFixture {
         #expect(run.passed && run.onto == main && run.commit == head && run.tests == 3 && run.reason == nil, "\(run)")
         #expect(abs(run.at - Date().timeIntervalSince1970) < hangGuard)
         #expect(task.waits?.mergeTesting != nil, "\(String(describing: task.waits))")
+        // board(task) says it in a line of its own.
+        let shown = lead.call("board", ["task": "add-b"]).text
+        #expect(shown.contains("\nMerge dry run: " + run.text(slug: "add-b", base: "main")), "\(shown)")
         // A dry run leaves no scratch worktree behind.
         #expect(!FileManager.default.fileExists(atPath: vault.scratch(root: root, "merge-add-b").path))
 

@@ -7219,6 +7219,7 @@ public final class LeadToolset: MCPToolset {
                         + (small.restored.map { "; back to audit: \($0)" } ?? "") + ")"
                 } ?? ""))
             if let receipt = task.receipt { lines.append("\n" + receipt.line) }
+            if let run = task.dryRun { lines.append("Merge dry run: " + run.text(slug: task.slug, base: base)) }
             if let sessions, let ended = Self.endedMember(task, sessions) { lines.append("\nNow: \(ended)") }
             if let released = Self.releasedText(task, sessions) {
                 lines.append("\nNow: \(released): its worktree and branch stay; "
