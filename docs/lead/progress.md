@@ -3183,3 +3183,16 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 20:22 Planned ui-journeys-a4-dictation: UI journeys A4: dictation journey (review audit)
 - 2026-11-15 20:22 Planned ui-journeys-b-team: UI journeys B (team): runner, diff and three journeys, one team (review audit)
 - 2026-11-15 20:23 Planned a-lead-record-commit: A lead-record commit during an install's build doesn't mark the build as not matching
+- 2026-11-15 20:32 Started a worker on a-lead-record-commit
+- 2026-11-15 20:32 Automatically (auto_advance): Started a worker on a-lead-record-commit (A lead-record commit during an install's build doesn't mark the build as not matching).
+- 2026-11-15 20:32 Raised the-chat-s-model to audit (the risk check, at 8bd5a104): it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift)
+- 2026-11-15 20:32 Automatically (auto_advance): Started the audit of the-chat-s-model at 8bd5a104 (The risk check raised it to audit: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift)).
+- 2026-11-15 20:32 Released the-chat-s-model's worker (idle since its done report on 8bd5a104) while its audit runs
+- 2026-11-15 20:32 Automatically (auto_advance): Released the-chat-s-model's worker, idle since its done report on 8bd5a104, while its audit runs (ended pid 50161 (Worker: The chat's model chip follows /model at once, and its menu offers Fable)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-15 20:32 Planned return-in-the-composer: Return in the composer sends a slash command after its suggestion is taken
+- 2026-11-15 20:33 Started a worker on return-in-the-composer
+- 2026-11-15 20:33 Automatically (auto_advance): Started a worker on return-in-the-composer (Return in the composer sends a slash command after its suggestion is taken).
+- 2026-11-15 20:33 Started a worker on ui-journeys-b-team (auto → Claude: Claude weekly 21%, 27 points behind pace (limits ignored), not tight; Codex 24%)
+- 2026-11-15 20:33 Started a worker on ui-journeys-a1-the
+- 2026-11-15 20:33 Automatically (auto_advance): Started a worker on ui-journeys-a1-the (UI journeys A1: the journey runner and screenshot diff).
+- 2026-11-15 20:33 Automatically (auto_advance): Overlap for ui-journeys-a1-the's start (a warning only: nothing was refused or reordered). Sandbox.swift: ui-journeys-a2-select (planned, set to start after this one: its boundaries name it), ui-journeys-a3-run (planned, set to start after this one: its boundaries name it), ui-journeys-a4-dictation (planned, set to start after this one: its boundaries name it), ui-journeys-b-team (running: its boundaries name it); scripts/ui-journeys.sh: ui-journeys-b-team (running: its boundaries name it).
