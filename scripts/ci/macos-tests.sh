@@ -14,10 +14,10 @@
 # nothing but a listed node test failed: Swift Testing's own "Test run … passed" line, no failed test or suite, no
 # build error, no timeout, nothing left running, no preference file left, and no node test failed but listed ones.
 #
-# Beside scripts/test.sh runs scripts/ci/watchdog.sh: timestamped lines as each swift phase starts and ends, and,
-# WATCHDOG_MARGIN seconds (300) before vs-heavy's timeout, what still runs, its open descriptors, and a SIGABRT to the
-# testing helper alone, so a hung run names its test (swift test holds back its lines until it exits, and vs-heavy's
-# stop loses them) and leaves a backtrace in .build/crash-reports.
+# Beside scripts/test.sh runs scripts/ci/watchdog.sh, silent while the run is on time. WATCHDOG_MARGIN seconds (300)
+# before vs-heavy's timeout it says when each swift phase started and ended, what still runs, its open descriptors,
+# and sends a SIGABRT to the testing helper alone, so a hung run names its test (swift test holds back its lines until
+# it exits, and vs-heavy's stop loses them) and leaves a backtrace in .build/crash-reports.
 #
 # scripts/ci/macos-tests.sh --check-list: only checks the list (it runs anywhere, Linux too).
 # SKIPS=FILE: another list, for this script's own checks. JUDGE=FILE: only judges FILE as scripts/test.sh's output.

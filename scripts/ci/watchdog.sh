@@ -3,9 +3,10 @@
 # timeout still names what hung. On the Mac, swift test holds back every test line until it exits, and vs-heavy's stop
 # throws them away (v2 macos, 2026-11-14 and 15: 22 and 27 minutes of nothing, then the stop).
 #
-# Every WATCHDOG_TICK seconds (5) it looks at PID's process tree and says, timestamped, when one of its phases starts
-# and ends (swift-build, swift-test, swiftpm-testing-helper, xctest, node), so the log shows where the time went. Once
-# AFTER seconds have passed with PID still there, it says what is still running in the tree (ps) and the descriptors
+# Every WATCHDOG_TICK seconds (5) it looks at PID's process tree and notes, timestamped, when one of its phases starts
+# and ends (swift-build, swift-test, swiftpm-testing-helper, xctest, node). It says nothing while the run is on time: a
+# run that ends before AFTER leaves no line of it in the log. Once AFTER seconds have passed with PID still there, it
+# says those notes (where the time went), what is still running in the tree (ps) and the descriptors
 # each holds but its mapped files (lsof: a pipe's write end held where nothing should hold it is a read that never
 # ends), then sends SIGABRT to each swiftpm-testing-helper in it (WATCHDOG_STOP: other names, space-separated) and to
 # nothing else: swift test sees its child end and prints the lines it held (the tests that started and never
@@ -34,6 +35,8 @@ stop_names=${WATCHDOG_STOP:-swiftpm-testing-helper}
 phases="swift-build swift-test swiftpm-testing-helper xctest node"
 
 say() { echo "watchdog $(date -u +%H:%M:%SZ): $*"; }
+# Kept for the report until it comes, then said: a run on time leaves the log as it was.
+note() { if [[ -n $fired ]]; then say "$@"; else say "$@" >> "$tool_scratch/phases"; fi; }
 
 # PID's tree, PID first: "pid name" a line, the name without its folder.
 tree() {
@@ -58,10 +61,11 @@ source scripts/lib/scratch.sh
 scratch_tmpdir vs-watchdog
 # What a crash report must be newer than.
 touch "$tool_scratch/start"
+: > "$tool_scratch/phases"
 started=$(date +%s)
 known=""  # the phases running: "pid name since" a line
 fired=""
-say "watching pid $root; says what still runs there after $after s"
+note "watching pid $root; says what still runs there after $after s"
 while kill -0 "$root" 2>/dev/null; do
     now=$(date +%s)
     current=$(tree)
@@ -69,7 +73,7 @@ while kill -0 "$root" 2>/dev/null; do
         [[ -n $pid && " $phases " == *" $name "* ]] || continue
         grep -q "^$pid " <<< "$known" && continue
         known+="$pid $name $now"$'\n'
-        say "$name started (pid $pid): $(ps -o args= -p "$pid" 2>/dev/null | cut -c1-200)"
+        note "$name started (pid $pid): $(ps -o args= -p "$pid" 2>/dev/null | cut -c1-200)"
     done <<< "$current"
     still=""
     while read -r pid name since; do
@@ -77,7 +81,7 @@ while kill -0 "$root" 2>/dev/null; do
         if grep -q "^$pid $name\$" <<< "$current"; then
             still+="$pid $name $since"$'\n'
         else
-            say "$name ended (pid $pid) after $(( now - since )) s"
+            note "$name ended (pid $pid) after $(( now - since )) s"
         fi
     done <<< "$known"
     known=$still
@@ -85,7 +89,9 @@ while kill -0 "$root" 2>/dev/null; do
     if [[ -z $fired ]] && (( now - started >= after )); then
         fired=1
         pids=$(cut -d' ' -f1 <<< "$current" | paste -sd, -)
-        say "still running after $(( now - started )) s, the tree of pid $root:"
+        say "still running after $(( now - started )) s; its phases so far:"
+        cat "$tool_scratch/phases"
+        say "the tree of pid $root:"
         ps -o pid,ppid,pgid,stat,etime,time,args -p "$pids" 2>/dev/null | cut -c1-300
         if command -v lsof > /dev/null; then
             while read -r pid name; do
@@ -137,4 +143,4 @@ EOF
     fi
     sleep "$tick"
 done
-say "pid $root ended"
+[[ -z $fired ]] || say "pid $root ended"

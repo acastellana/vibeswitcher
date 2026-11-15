@@ -35,9 +35,10 @@ workflow that says otherwise, and the Ubuntu run starts with it.
 - **`v2 macos`** (GitHub's hosted Mac), four jobs, each building everything and running its part of the suite through
   `scripts/ci/macos-tests.sh`, without the tests listed, each with its reason, in `scripts/ci/macos-runner-skips.txt`:
   `platform` (`VibePlatformTests`), `core` (`VibeCoreTests|VibeNodeTests`), `host` (`VibeHostTests`) and `app`
-  (`VibeSwitcherTests`). Beside each run, `scripts/ci/watchdog.sh` says when each swift phase starts and ends and,
-  five minutes before vs-heavy's timeout, what still runs and its open descriptors; then it aborts the testing helper,
-  so swift test prints the test lines it held back and the crash reporter's backtrace lands in the job's artifact.
+  (`VibeSwitcherTests`). Beside each run, `scripts/ci/watchdog.sh` says nothing while the run is on time; five minutes
+  before vs-heavy's timeout it says when each swift phase started and ended, what still runs and its open descriptors,
+  then aborts the testing helper, so swift test prints the test lines it held back and the crash reporter's backtrace
+  lands in the job's artifact.
 
 How far the code is from compiling on Linux: [the inventory](v2-linux-inventory.md).
 
