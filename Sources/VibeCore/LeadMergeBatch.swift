@@ -80,6 +80,8 @@ extension LeadToolset {
         var plan: MergeRerun.Plan?
         /// Its paired base run's result, after a rerun that failed (`MergeRerun.redOnBase`).
         var pairing: MergeRerun.Pairing?
+        /// When its test command returned: a passing run's end is its tasks' merge-ready (`LeadReceipt.mergeReady`).
+        var ended = Date()
         var passed: Bool { if case .stopped = outcome { return false } else if case .failed = outcome { return false } else { return true } }
     }
 
@@ -192,6 +194,7 @@ extension LeadToolset {
                                        load = LoadRecorder.averages()?.first
                                        if begun == nil { begun = (at, LoadRecorder.averages() ?? []) }
                                    })
+            let ended = Date()
             if runs == 1 { firstCores = MergeSample.cores(in: check) ?? testedCores }
             // Which of the lead's records its failure named, for the next merge (`LeadRecords.commitBeforeMerge`).
             if recorded, let failing = check.failingOutputs { records.noteMergeRun(failing: failing) }
@@ -252,7 +255,7 @@ extension LeadToolset {
                 case .stopped: break
                 }
             }
-            return BatchRun(outcome: outcome, tests: tests, plan: plan, pairing: pairing)
+            return BatchRun(outcome: outcome, tests: tests, plan: plan, pairing: pairing, ended: ended)
         }
 
         /// Lands the stack's first `count` tasks (`stacked`), which `passing` passed on: false when something stopped it.
@@ -359,6 +362,8 @@ extension LeadToolset {
                                                           usage: usage[gate.task.slug] ?? LeadReceipts.Usage(),
                                                           tests: passing.tests, mergeReruns: flaked == nil && redOnBase == nil ? 0 : 1, commits: brought[gate.task.slug] ?? nil)
                     board.tasks[at].receipt?.build = build
+                    // Merge-ready: the run it landed on passed then, as merge records it for a task on its own.
+                    board.tasks[at].receipt?.mergeReady = passing.ended.timeIntervalSince1970
                 }
                 if let redOnBase {
                     redPlan = planRedOnBaseFixes(&board, tests: redOnBase.tests, rerun: redOnBase.rerun, slug: last, onto: onto, workflow: workflow)

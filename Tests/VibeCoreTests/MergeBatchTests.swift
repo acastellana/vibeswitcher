@@ -514,6 +514,83 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(landed(root) == ["add-x's work", "add-y's work"])
     }
 
+    // MARK: Merge-ready
+
+    /// The suite of `fakeSuite`, each run logged with its start and end (seconds since 1970, to the microsecond):
+    /// "start <t> <args> | <files>", then "end <t> <args> | <files>".
+    var stampedSuite: String {
+        """
+        #!/bin/bash
+        stamp() { perl -MTime::HiRes=time -e 'printf "%.6f", time'; }
+        files=$(ls *.txt | tr '\\n' ' ')
+        echo "start $(stamp) $* | $files" >> \(RecentProjects.shellQuote(runs))
+        if [[ -e break.txt ]]; then
+          printf '%s\\n' \(Self.failure.split(separator: "\n").map { RecentProjects.shellQuote(String($0)) }.joined(separator: " "))
+          echo "end $(stamp) $* | $files" >> \(RecentProjects.shellQuote(runs))
+          exit 1
+        fi
+        echo "✔ Test breaks() passed after 0.010 seconds."; echo "✔ Test run with 2 tests passed after 0.020 seconds."
+        echo "end $(stamp) $* | $files" >> \(RecentProjects.shellQuote(runs))
+        """
+    }
+
+    /// `stampedSuite`'s log, in order: each line's kind (start or end), time and files.
+    func stamped() -> [(kind: String, at: Double, files: String)] {
+        ran().compactMap { line in
+            let halves = line.components(separatedBy: " | ")
+            let words = halves[0].split(separator: " ")
+            guard halves.count == 2, words.count >= 2, let at = Double(words[1]) else { return nil }
+            return (String(words[0]), at, halves[1].trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    /// A batch of two tasks landing on one run: each one's receipt has merge-ready at that run's end (the team
+    /// experiment's endpoint, as a single merge records it), the same moment for both; a task not in the batch has none.
+    @Test func aBatchsReceiptsHaveMergeReadyAtTheEndOfItsPassingRun() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false], suite: stampedSuite)
+        try audited(lead, runtime, root: root, "add-x", ["x.txt": "x\n"])
+        try audited(lead, runtime, root: root, "add-y", ["y.txt": "y\n"])
+        try audited(lead, runtime, root: root, "add-z", ["z.txt": "z\n"])
+
+        let merged = lead.call("merge", ["tasks": ["add-x", "add-y"]])
+        let returned = Date().timeIntervalSince1970
+
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(landed(root) == ["add-x's work", "add-y's work"])
+        let log = stamped()
+        #expect(log.map(\.kind) == ["start", "end"], "one run: \(log)")
+        let ended = try #require(log.last?.at)
+        let x = try #require(board(root).task("add-x")?.receipt?.mergeReady, "add-x's receipt has no merge-ready")
+        let y = try #require(board(root).task("add-y")?.receipt?.mergeReady, "add-y's receipt has no merge-ready")
+        #expect(x == y)
+        #expect(x >= ended && x <= returned, "merge-ready \(x), the run ended at \(ended), the merge returned at \(returned)")
+        #expect(board(root).task("add-z")?.receipt?.mergeReady == nil)
+    }
+
+    /// A split: the task that lands on a prefix's passing run gets that run's end, not a later run's; the breaker,
+    /// sent back, gets no merge-ready; the task restacked after it, landing on a run of its own, gets that one's end.
+    @Test func aSplitBatchsMergeReadyIsEachLandingRunsEndAndTheBreakerHasNone() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false], suite: stampedSuite)
+        try audited(lead, runtime, root: root, "add-x", ["x.txt": "x\n"])
+        try audited(lead, runtime, root: root, "add-break", ["break.txt": "b\n"])
+        try audited(lead, runtime, root: root, "add-z", ["z.txt": "z\n"])
+
+        let merged = lead.call("merge", ["tasks": ["add-x", "add-break", "add-z"]])
+
+        #expect(landed(root) == ["add-x's work", "add-z's work"], "\(merged.text)")
+        let log = stamped()
+        // add-x alone (the split's passing prefix), the first run after it, and add-z's own run on main with add-x.
+        let alone = try #require(log.firstIndex { $0.kind == "end" && $0.files == "a.txt c.txt x.txt" }, "\(log)")
+        let next = try #require(log[(alone + 1)...].first { $0.kind == "start" }, "a run after add-x's: \(log)")
+        let zEnded = try #require(log.last { $0.kind == "end" && $0.files == "a.txt c.txt x.txt z.txt" }, "\(log)")
+        let x = try #require(board(root).task("add-x")?.receipt?.mergeReady, "add-x's receipt has no merge-ready")
+        let z = try #require(board(root).task("add-z")?.receipt?.mergeReady, "add-z's receipt has no merge-ready")
+        #expect(x >= log[alone].at && x <= next.at, "add-x merge-ready \(x), its run ended at \(log[alone].at), the next began at \(next.at): \(log)")
+        #expect(z >= zEnded.at, "add-z merge-ready \(z), its run ended at \(zEnded.at)")
+        let breaker = try #require(board(root).task("add-break"))
+        #expect(breaker.status == .failed && breaker.receipt?.mergeReady == nil, "\(breaker.status) \(String(describing: breaker.receipt))")
+    }
+
     func reports(_ runtime: FakeRuntime) -> [String] {
         runtime.calls.lock()
         defer { runtime.calls.unlock() }
