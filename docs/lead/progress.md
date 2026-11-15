@@ -3292,3 +3292,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 00:02 Automatically (auto_advance): Overlap for dark-mode-the-code's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ui-journeys-b-team (review: its branch changes it).
 - 2026-11-16 00:02 Automatically (auto_advance): Cleaned up ui-journeys-a4-dictation (freed 2.7 GB of build output and temporary folders). It stays done.
 - 2026-11-16 00:12 Planned ui-journeys-select-copy: UI journeys: select-copy reports all shots changed on a second back-to-back run
+- 2026-11-16 00:15 Automatically (auto_advance): Started the audit of dark-mode-the-code at c314e10f (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-11-16 00:15 Released dark-mode-the-code's worker (idle since its done report on c314e10f) while its audit runs
+- 2026-11-16 00:15 Automatically (auto_advance): Released dark-mode-the-code's worker, idle since its done report on c314e10f, while its audit runs (ended pid 87366 (Worker: Dark mode: the code block's Run confirmation sheet draws white on white in sandbox shots)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-16 00:18 Audit of dark-mode-the-code: complete, clean, round 1: 1 Nit open
+- 2026-11-16 00:20 Audit of ui-journeys-b-team: complete, clean, round 3: 1 Important closed, 2 Nit closed
+- 2026-11-16 00:33 Pipeline held: ui-journeys-a-run ready to merge with none landing; cause: every test slot held
+- 2026-11-16 00:33 Merged ui-journeys-a-run: UI journeys: a run that draws no shots fails instead of reading "unchanged" (no audit: review none) (build 64a972289c0f with changes not committed)
