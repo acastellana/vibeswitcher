@@ -52,7 +52,8 @@ file the Mac compiles is changed in this stage.
 - Produces: `scripts/ci/check-workflows.sh` (no arguments; exit 0 when every file in `.github/workflows/` passes the
   checks below, else 1 with one line per failure). Task 2 runs it on its own workflow.
 
-- [ ] **Step 1: Write the failing check**
+- [x] **Step 1: Write the failing check** (done: `scripts/ci/check-workflows.sh`, `ed23483c`, with each rule below
+  and more; ticked 2026-11-15 in an audit)
 
 `scripts/ci/check-workflows.sh`, bash, `set -uo pipefail`, run from the repository's root. For each
 `.github/workflows/*.yml` it fails, naming the file and the rule, unless:
@@ -66,12 +67,15 @@ file the Mac compiles is changed in this stage.
 
 With no workflow files it prints `no workflows` and exits 1.
 
-- [ ] **Step 2: Run it to see it fail**
+- [x] **Step 2: Run it to see it fail** (done: the first run isn't recorded, so shown in the audit: the script alone,
+  under an empty `.github/workflows/`, printed `no workflows` and exited 1; ticked 2026-11-15 in an audit)
 
 Run: `bash scripts/ci/check-workflows.sh`
 Expected: `no workflows`, exit 1.
 
-- [ ] **Step 3: Write `.swift-version` and the workflow**
+- [x] **Step 3: Write `.swift-version` and the workflow** (done: `.swift-version` 6.4.2 and
+  `.github/workflows/v2-linux.yml`, `ed23483c`, with `--target SwiftTerm` for `--product`; ticked 2026-11-15 in an
+  audit)
 
 `.swift-version`: the single line `6.4.2`.
 
@@ -116,12 +120,15 @@ jobs:
 The swiftly flags are as remembered, not checked: if `swiftly init --help` on this machine shows different names
 for "don't ask" and "don't install a toolchain yet", use those.
 
-- [ ] **Step 4: Run the check and the steps locally**
+- [x] **Step 4: Run the check and the steps locally** (done: the local run's output isn't recorded; the same commands
+  passed in `v2 linux` run 43205081935 on `ed23483c`, ending `web tests: 7 of 7 passed`, and the check exits 0 here at
+  `ad5e6f1a`; ticked 2026-11-15 in an audit)
 
 Run: `bash scripts/ci/check-workflows.sh && . ~/.local/share/swiftly/env.sh && swift build --build-system native --target SwiftTerm && bash scripts/test.sh --web Tests/Web`
 Expected: exit 0; the last lines include `web tests: 7 of 7 passed`.
 
-- [ ] **Step 5: Commit, push, and watch the run**
+- [x] **Step 5: Commit, push, and watch the run** (done: `ed23483c`, pushed; `v2 linux` run 43205081935 completed
+  success; ticked 2026-11-15 in an audit)
 
 ```bash
 git add .swift-version .github/workflows/v2-linux.yml scripts/ci/check-workflows.sh
@@ -145,7 +152,8 @@ nothing else in this task changes for it.
 - Produces: a job named `macos` whose last step Task 3 replaces; the step `Select Xcode`, which exports
   `DEVELOPER_DIR`.
 
-- [ ] **Step 1: Write the workflow**
+- [x] **Step 1: Write the workflow** (done: `.github/workflows/v2-macos.yml`, `ed23483c`, on `runs-on: xcode-27`;
+  ticked 2026-11-15 in an audit)
 
 ```yaml
 name: v2 macos
@@ -178,12 +186,15 @@ jobs:
         run: swift build --build-system native
 ```
 
-- [ ] **Step 2: Check it, push it, watch it**
+- [x] **Step 2: Check it, push it, watch it** (done: committed with Task 1 in `ed23483c`; `v2 macos` run 43205081873
+  completed success, the Linux run's workflow check passing; ticked 2026-11-15 in an audit)
 
 Run: `bash scripts/ci/check-workflows.sh` (expected: exit 0), then commit `.github/workflows/v2-macos.yml` as
 "v2: macOS workflow, build only", push, and watch as in Task 1 with `--workflow 'v2 macos'`.
 
-- [ ] **Step 3: Settle the Xcode**
+- [x] **Step 3: Settle the Xcode** (done: the `xcode-27` image lists `Xcode_27.2.app`; run 43205081873's Versions
+  shows Xcode 27.2 and Swift 6.4.2, and Build completes; recorded in the inventory's "The hosted runners", `0fac0884`;
+  ticked 2026-11-15 in an audit)
 
 If `Select Xcode` shows no `Xcode_27.2.app`: choose the newest Xcode the image lists whose Swift is 6.4 or later,
 write its path in the step, and add a comment line above it giving the Mac's version (27.2) and the runner's. If
@@ -207,7 +218,8 @@ Expected at the end: `Build` succeeds and `Versions` shows the Xcode written in 
 - `scripts/ci/macos-runner-skips.txt` format: one test a line as `SuiteName/testName` or `SuiteName`, then two
   spaces, then the reason. `#` starts a comment line. Sorted.
 
-- [ ] **Step 1: Write `scripts/ci/macos-tests.sh` and its self-check**
+- [x] **Step 1: Write `scripts/ci/macos-tests.sh` and its self-check** (done: `51705cb2`, with `--check-list` and
+  `SKIPS`; grown in `14018ff3` and `d91c7475`; ticked 2026-11-15 in an audit)
 
 The script, in order:
 
@@ -220,7 +232,9 @@ The script, in order:
 
 `scripts/ci/macos-tests.sh --check-list` does steps 1 to 3 only and exits 0, so the list can be checked on Linux.
 
-- [ ] **Step 2: Test the list checks on this machine**
+- [x] **Step 2: Test the list checks on this machine** (done: the first run isn't recorded, so the three were run in
+  the audit with lists in a scratch folder: `runner skips: 0`, exit 0; `stale skip: NoSuchSuiteAnywhere`, exit 2; the
+  line with no reason printed, exit 2; ticked 2026-11-15 in an audit)
 
 Run each and compare:
 
@@ -233,7 +247,9 @@ printf 'LeadBoardTests\n' > /tmp/skips-bad && SKIPS=/tmp/skips-bad bash scripts/
 
 (`SKIPS` overrides the list's path, for these checks only. Use the session's scratch folder in place of `/tmp`.)
 
-- [ ] **Step 3: Add the discovery run to the workflow and push**
+- [x] **Step 3: Add the discovery run to the workflow and push** (done: `ffe37156`, the job's shell bash; its run
+  43205610646 was cancelled in Tests, and run 43213497449 on `0fac0884` ran Tests and kept the log; ticked 2026-11-15
+  in an audit)
 
 After `Build`:
 
@@ -252,7 +268,10 @@ After `Build`:
 Add `shell: bash` with `-o pipefail` for the `Tests` step so the suite's status isn't lost to `tee`
 (`defaults: run: shell: bash` at the job level, which GitHub runs with `-eo pipefail`).
 
-- [ ] **Step 4: Find what the runner can't run**
+- [x] **Step 4: Find what the runner can't run** (done: `scripts/ci/macos-runner-skips.txt`, from `14018ff3`: 10
+  entries, each with its reason, the two CAUSE NOT FOUND owed to a real Mac in `docs/process/v2-mac-tasks.md`; `v2
+  macos` green from `47dab092` (run 43286703391), every job at `4485b65a` (43308184833); run 43735006004 on `ad5e6f1a`
+  logs `runner skips: 10`; ticked 2026-11-15 in an audit)
 
 Watch the run, download the log (`gh run download RUN -n macos-test-log`), and for each failing test decide:
 
@@ -267,7 +286,8 @@ more weight, and the user should know.
 
 Expected at the end: `v2 macos` green, the log's `runner skips: N` line matching the list.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit** (done: `51705cb2`, `ffe37156`, `14018ff3`, `d91c7475`, all pushed; ticked 2026-11-15 in an
+  audit)
 
 ```bash
 git add scripts/ci/macos-runner-skips.txt scripts/ci/macos-tests.sh .github/workflows/v2-macos.yml
@@ -312,7 +332,8 @@ The spike's measurement of 2026-11-12 (main at `f2ebe92b`, Swift 6.4.2, Ubuntu 2
   `/Applications` 7, `UserDefaults` 7).
 - From Task 2 and 3: the runner's Xcode and Swift, how long the Mac suite takes there, and the number of skips.
 
-- [ ] **Step 2: Write `docs/process/v2-branch.md`**
+- [x] **Step 2: Write `docs/process/v2-branch.md`** (done: `51705cb2`, the routine's commands and the four rules;
+  ticked 2026-11-15 in an audit)
 
 The branch's routine, as commands:
 
@@ -327,12 +348,14 @@ And the rules it serves, one line each, from the design's "The branch": main is 
 settled on `v2`; a merge that breaks a runner is fixed before new work; a stale skip is removed in the merge that
 made it stale.
 
-- [ ] **Step 3: Link them from the design**
+- [x] **Step 3: Link them from the design** (done: `51705cb2`; the design links the inventory in Stage 0 and
+  `v2-branch.md` in "The branch"; ticked 2026-11-15 in an audit)
 
 The design (revised 2026-11-12) already carries the spike's findings. Check that its Stage 0 links
 `docs/process/v2-linux-inventory.md`, and add to its "The branch" a link to `docs/process/v2-branch.md`.
 
-- [ ] **Step 4: Check the links and commit**
+- [x] **Step 4: Check the links and commit** (done: the grep finds each file linked from the design and from the
+  other; `51705cb2`, pushed; ticked 2026-11-15 in an audit)
 
 Run: `grep -n 'v2-linux-inventory\|v2-branch' docs/superpowers/specs/2026-11-12-vibeswitcher-2-design.md docs/process/*.md`
 Expected: each new file is linked from the design or from the other.
@@ -356,18 +379,22 @@ sudo), and agents install nothing by themselves.
 - [ ] **Step 1: Ask the user to install the SDK**, giving the exact `swift sdk install` command for Swift 6.4.2 from
   swift.org's static Linux SDK page, with its checksum.
 
-- [ ] **Step 2: Build a one-file probe statically, for both architectures**
+- [x] **Step 2: Build a one-file probe statically, for both architectures** (done: the probe was in a scratch folder;
+  its result is in `docs/process/v2-linux-inventory.md`, "A fully static build works", `0fac0884`: both builds
+  "statically linked", the x86_64 one run here; ticked 2026-11-15 in an audit)
 
 In the session's scratch folder, a package with one executable that prints its version, hashes a string with
 swift-crypto and starts a child with `posix_spawn`. Build it with
 `swift build --swift-sdk x86_64-swift-linux-musl -c release` and `--swift-sdk aarch64-swift-linux-musl`.
 Expected: two binaries; `file` calls each "statically linked"; the x86_64 one runs here and prints its three lines.
 
-- [ ] **Step 3: Try SwiftTerm the same way**
+- [x] **Step 3: Try SwiftTerm the same way** (done: SwiftTerm 1.19.0 in the same probe, both builds, the same record;
+  ticked 2026-11-15 in an audit)
 
 Add SwiftTerm 1.19.0 to the probe and build both again. Expected: it builds, or the error is recorded.
 
-- [ ] **Step 4: Record the result** in the inventory (sizes, what built, what didn't), commit and push.
+- [x] **Step 4: Record the result** in the inventory (sizes, what built, what didn't), commit and push. (done:
+  `0fac0884`, pushed (runs 43213497493 and 43213497449); ticked 2026-11-15 in an audit)
 
 ---
 

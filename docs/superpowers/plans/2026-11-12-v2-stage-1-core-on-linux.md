@@ -473,7 +473,9 @@ core-test fixes (2026-11-13): `b3df5134`, `6c894e43`, `11b5c945`, `51bba39e`, `1
   `totalFileAllocatedSize` and `creationDate` on Linux. Where one is nil, the code asks `stat` through the platform.
 - [ ] **Step 5: `platform-parity.md`**: the count of test files that run on both, and each Mac-only one with its
   reason.
-- [ ] **Step 6: Push; both green; commit** in slices of one suite group each.
+- [x] **Step 6: Push; both green; commit** in slices of one suite group each. (done: Task 12's commits and R1's are
+  in `4485b65a`, the first commit with every job green on both systems (`v2 linux` 43308185013, `v2 macos`
+  43308184833); sliced by cause, A to P and then R1, not by suite group; ticked 2026-11-15 in an audit)
 
 ---
 
@@ -507,7 +509,10 @@ core-test fixes (2026-11-13): `b3df5134`, `6c894e43`, `11b5c945`, `51bba39e`, `1
 - [ ] **Step 5: Measure for Decision 6.** Time to run the hook once (`vibeswitcher-hook` given one event on stdin),
   median of 200 runs: the glibc build, the static build, and a static build that is one multi-call binary. Record
   the three numbers and sizes in `docs/process/v2-linux-inventory.md`.
-- [ ] **Step 6: Push; both green; commit** ("v2: vibeswitcher status, the hook and tool server on Linux").
+- [x] **Step 6: Push; both green; commit** ("v2: vibeswitcher status, the hook and tool server on Linux"). (done:
+  Steps 1 to 4's commits (`dbbeecbe`, R5, R8a, R8b, R9, R10's `d60bdb9d` and `3cb93511`) are in `03b15058`, green on
+  both systems (`v2 linux` 43460059524, `v2 macos` 43460059661), as several commits, not one of that name; Step 5
+  is still open; ticked 2026-11-15 in an audit)
 
 ---
 
@@ -670,9 +675,12 @@ give each suite its own, so the suites are serialized against each other instead
   SIGWINCH or SIGUSR2 must mention `SignalTestLock`. `Sources/` and `Tests/Tools/*.py` aren't read: the host's
   SIGWINCH goes to its sessions, never to its own process. Shown failing by removing the lock from one test.
 - [ ] **Step 5: The same twenty runs**, with no failure and no run ending on a signal.
-- [ ] **Step 6: The Mac.** The next push runs the platform job with the lock. Each of the three SignalsTests skips
+- [x] **Step 6: The Mac.** The next push runs the platform job with the lock. Each of the three SignalsTests skips
   that passes there is removed from `macos-runner-skips.txt`; one that still fails keeps its line with what the run
-  showed. At most two pushes go to this (R3's time box).
+  showed. At most two pushes go to this (R3's time box). (done: `aa9eee06` removed the three skips, their causes read
+  from run 43249423203; the next push's platform job (`939ce080`, run 43299187464) failed
+  `aFatalHandlerIsInstalledToRunOnce` on SA_RESETHAND read back; `4485b65a` fixed the test, and its platform job (run
+  43308184833) passed `SignalsTests` with no `SignalsTests` skip listed; ticked 2026-11-15 in an audit)
 
 **Done when:** twenty Linux runs of the three suites together pass, and on the Mac the three skips are gone or each
 says what was seen.
@@ -807,8 +815,9 @@ setting or the user's everywhere) comes with `VibeNode`'s settings catalog after
   `Sources/VibeSwitcher/main.swift`, whose folders are still one on the Mac. Shown failing on a scratch tree holding
   `Sources/vibeswitcher/Run.swift`.
 - [x] **Step 3: Implement.**
-- [ ] **Step 4: The Mac.** The app job builds from a clean checkout on the commit, which shows the new targets don't
-  touch the app's build.
+- [x] **Step 4: The Mac.** The app job builds from a clean checkout on the commit, which shows the new targets don't
+  touch the app's build. (done: R8a's commits are in `4485b65a`, whose `app` job built the package from a clean
+  checkout and passed (`v2 macos` run 43308184833); ticked 2026-11-15 in an audit)
 
 **Done when:** `bash scripts/test.sh --filter VibeNodeTests` passes on Linux, the Mac's core job builds and runs it,
 and PlatformLint covers the two new folders.
