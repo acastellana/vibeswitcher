@@ -29,6 +29,8 @@ public final class NodeSessions: @unchecked Sendable {
         public var watchCoalesce: TimeInterval = 0.4
         /// The quiet Claude sessions' screens are asked at most this often (by the store's `now`).
         public var screenEvery: TimeInterval = 6
+        /// A state folder that couldn't be watched is tried again this long after (by the store's `now`), at a scan.
+        public var watchRetry: TimeInterval = 60
 
         public init() {}
     }
@@ -88,6 +90,10 @@ public final class NodeSessions: @unchecked Sendable {
     private var hostChanges: Subscription?
     private var watch: Platform.FolderWatch?
     private var watchRefreshPending = false
+    /// When the state folder last couldn't be watched (nil: since it last could, or never tried), and whether that's
+    /// been said.
+    private var watchFailedAt: Date?
+    private var watchFailureNoted = false
     /// The host's live sessions, by terminal.
     private var hosted: [String: HostSession] = [:]
     /// Each terminal's status and since when it holds.
@@ -155,7 +161,8 @@ public final class NodeSessions: @unchecked Sendable {
         }
     }
 
-    /// Stops the clock's client, the host's changes and the watch. Once; a scan under way still lands.
+    /// Stops the clock's client, the host's changes and the watch. Once; a scan under way still lands, and from then on
+    /// nothing scans (`refresh()` included) and no screen is asked.
     public func stop() {
         perform { [self] in
             stopped = true
@@ -166,7 +173,7 @@ public final class NodeSessions: @unchecked Sendable {
         }
     }
 
-    /// Scans now (after the one under way, when one is).
+    /// Scans now (after the one under way, when one is). Not once stopped.
     public func refresh() {
         perform { [self] in scan() }
     }
@@ -207,7 +214,7 @@ public final class NodeSessions: @unchecked Sendable {
         let changed = Set(fresh.keys) != Set(hosted.keys)
             || fresh.contains { tty, session in session.programStatus != hosted[tty]?.programStatus }
         hosted = fresh
-        if changed, !stopped { scan() }
+        if changed { scan() }
     }
 
     /// The host's live sessions, by terminal.
@@ -217,14 +224,17 @@ public final class NodeSessions: @unchecked Sendable {
 
     /// The scan: the quiet hosted Claude sessions' screens asked when it's time, then the process table and the state
     /// files read on the scan queue, and what they gave applied back on `queue`. One at a time: one asked while one runs
-    /// follows it. On `queue`.
+    /// follows it. None once stopped. On `queue`.
     private func scan() {
+        guard !stopped else { return }
         guard !scanning else {
             rescanRequested = true
             return
         }
         scanning = true
-        if watch == nil, started, !stopped { watchStateFolder() }
+        if watch == nil, started, watchFailedAt.map({ now().timeIntervalSince($0) >= timing.watchRetry }) ?? true {
+            watchStateFolder()
+        }
         let hosted = self.hosted
         let quiet = quietClaude.intersection(hosted.keys)
         if !quiet.isEmpty, now().timeIntervalSince(lastScreenAsk) >= timing.screenEvery {
@@ -259,7 +269,7 @@ public final class NodeSessions: @unchecked Sendable {
     /// Reads these hosted sessions' screens (by terminal) into `screens` (the app's `HostClient.refreshScreens`); a
     /// screen whose footer says something new scans again. On `queue`.
     private func askScreens(_ ttys: Set<String>) {
-        guard let link else { return }
+        guard let link, !stopped else { return }
         screens = screens.filter { ttys.contains($0.key) }
         for (tty, session) in hosted where ttys.contains(tty) {
             link.screen(session.id) { [weak self] text in
@@ -390,16 +400,23 @@ public final class NodeSessions: @unchecked Sendable {
     // MARK: The state folder
 
     /// Hook writes land as renames in the state folder: a scan for them at once (coalesced), not at the clock's next.
-    /// The folder is made (0700) when it isn't there. One that can't be watched (a 9p file system) is scanned on the
-    /// clock alone; one removed is watched again at the next scan. On `queue`.
+    /// The folder is made (0700) when it isn't there. One that can't be watched (a 9p file system, no inotify instance
+    /// left) is scanned on the clock alone, said once, and tried again at a scan `Timing.watchRetry` on; one removed is
+    /// watched again at the next scan. On `queue`.
     private func watchStateFolder() {
         let folder = stateFolder
         try? VibePaths.ensurePrivate(folder)
         guard let made = Platform.FolderWatch(path: folder.path) else {
-            note("sessions: the state folder can't be watched; hook events are seen at the next scan")
+            watchFailedAt = now()
+            if !watchFailureNoted {
+                watchFailureNoted = true
+                note("sessions: the state folder can't be watched; hook events are seen at the next scan")
+            }
             return
         }
         watch = made
+        watchFailedAt = nil
+        watchFailureNoted = false
         made.deliver(on: queue) { [weak self, weak made] change in
             guard let self else { return }
             if change.contains(.folderGone) {
@@ -411,6 +428,7 @@ public final class NodeSessions: @unchecked Sendable {
             self.queue.asyncAfter(deadline: .now() + self.timing.watchCoalesce) { [weak self] in
                 guard let self else { return }
                 self.watchRefreshPending = false
+                // `scan()` starts none once stopped.
                 self.scan()
             }
         }

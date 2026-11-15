@@ -494,6 +494,194 @@ struct NodeSessionsTests {
         #expect(await eventually { session(nodes, "ttypts970")?.hostID == nil })
     }
 
+    /// A hook-less session's program reporting a new status (OSC 7501, the host's `sessionChanged`) scans at once, with
+    /// no clock and no refresh: its status and detail follow each report.
+    @Test func aProgramReportingANewStatusScansAtOnce() async throws {
+        let (root, home) = try node()
+        let state = root.appendingPathComponent("state")
+        var hosted = StubHost.session(tty: "ttypts970")
+        hosted.agent = "claude"
+        let stub = try StubHost(scratch, sessions: [hosted])
+        defer { stub.quit() }
+        let link = HostLink(dialer: stub.dialer, root: scratch.url("link-root"), queue: DispatchQueue(label: "engine"), sweep: { _ in })
+        link.start()
+        try #require(await eventually { link.queue.sync { link.state == .connected } })
+        let table = [Int32(970): ProcInfo(pid: 970, ppid: 1, tty: "ttypts970", comm: "claude", startTime: Date().addingTimeInterval(-600),
+                                          agent: .claude)]
+        let nodes = NodeSessions(root: root, home: home.path, queue: link.queue, link: link,
+                                 scanner: SessionScanner(processes: { table }, stateDir: { state }, cwd: { _ in "/r/acme" }, arguments: { _ in [] }))
+        nodes.start()
+        defer { nodes.stop() }
+        #expect(await eventually { session(nodes, "ttypts970")?.hostID == hosted.id })
+        #expect(session(nodes, "ttypts970")?.status == .unknown)
+        var working = hosted
+        working.programStatus = ProgramStatus(state: .working, app: "claude-code", title: "Fixing the login", since: Date())
+        stub.push(.sessionChanged(working))
+        #expect(await eventually { session(nodes, "ttypts970")?.status == .working })
+        #expect(session(nodes, "ttypts970")?.detail == "Fixing the login")
+        var blocked = hosted
+        blocked.programStatus = ProgramStatus(state: .blocked, kind: "permission", app: "claude-code", message: "Bash(rm -rf build)", since: Date())
+        stub.push(.sessionChanged(blocked))
+        #expect(await eventually { session(nodes, "ttypts970")?.status == .needsInput })
+        #expect(session(nodes, "ttypts970")?.detail == "Asks permission: Bash(rm -rf build)")
+    }
+
+    /// A scan asked while one runs follows it (`refresh`'s "after the one under way"), with no clock, no watch and no
+    /// refresh more: an agent that started on another terminal while the first scan was held is in the second.
+    @Test func aScanAskedWhileOneRunsFollowsIt() async throws {
+        let (root, home) = try node()
+        let state = root.appendingPathComponent("state")
+        let started = Date().addingTimeInterval(-600)
+        let table = Locked([Int32(970): ProcInfo(pid: 970, ppid: 1, tty: "ttypts970", comm: "claude", startTime: started, agent: .claude)])
+        let reads = Locked(0)
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        // The first read holds its scan until the test lets it go, with the table as it was when it was read.
+        let scanner = SessionScanner(processes: {
+            let read = table.value
+            var first = false
+            reads.mutate { $0 += 1; first = $0 == 1 }
+            if first { release.wait() }
+            return read
+        }, stateDir: { state }, cwd: { _ in "/r/x" }, arguments: { _ in [] })
+        let nodes = NodeSessions(root: root, home: home.path, queue: DispatchQueue(label: "engine"), scanner: scanner)
+        nodes.refresh()
+        try #require(await eventually { reads.value == 1 })
+        table.mutate { $0[971] = ProcInfo(pid: 971, ppid: 1, tty: "ttypts971", comm: "claude", startTime: started, agent: .claude) }
+        nodes.refresh()
+        // That refresh is on the store's queue, the first scan still held.
+        on(nodes) {}
+        release.signal()
+        #expect(await eventually { session(nodes, "ttypts971") != nil })
+        #expect(on(nodes) { nodes.scansApplied } == 2)
+        #expect(reads.value == 2)
+    }
+
+    /// A lead whose board has a question open (`leadsAsking`, set by the engine) needs the user at once: its session is
+    /// `leadAsks`, on the list and the change stream, with no scan; the others aren't, and it's turned back as the
+    /// question closes.
+    @Test func aLeadAskingIsToldAtOnce() async throws {
+        let (root, home) = try node()
+        let state = root.appendingPathComponent("state")
+        let started = Date().addingTimeInterval(-3600)
+        func hosted(_ tty: String, _ label: String, _ cwd: String) -> HostSession {
+            HostSession(id: UUID(), tty: tty, childPID: Int32(tty.dropFirst(6))!, cwd: cwd, command: "claude", label: label, agent: "claude",
+                        title: "", startedAt: started, cols: 80, rows: 24, exit: nil)
+        }
+        let lead = hosted("ttypts990", "Lead · acme", "/r/acme")
+        let other = hosted("ttypts996", "w", "/r/acme")
+        let stub = try StubHost(scratch, sessions: [lead, other])
+        defer { stub.quit() }
+        let link = HostLink(dialer: stub.dialer, root: scratch.url("link-root"), queue: DispatchQueue(label: "engine"), sweep: { _ in })
+        link.start()
+        try #require(await eventually { link.queue.sync { link.state == .connected } })
+        let table = Dictionary(uniqueKeysWithValues: [Int32(990), 996].map {
+            ($0, ProcInfo(pid: $0, ppid: 1, tty: "ttypts\($0)", comm: "claude", startTime: started, agent: .claude))
+        })
+        let nodes = NodeSessions(root: root, home: home.path, queue: link.queue, link: link,
+                                 scanner: SessionScanner(processes: { table }, stateDir: { state }, cwd: { _ in "/r/acme" }, arguments: { _ in [] }))
+        nodes.start()
+        defer { nodes.stop() }
+        #expect(await eventually { on(nodes) { nodes.sessions.filter { $0.hostID != nil }.count == 2 } })
+        let scans = on(nodes) { nodes.scansApplied }
+        func asks() -> [String: Bool] {
+            on(nodes) { Dictionary(uniqueKeysWithValues: nodes.sessions.map { ($0.tty, $0.leadAsks) }) }
+        }
+        func streamed(_ id: UUID) -> Bool? { nodes.changes.values[NodeIds.session(host: id)]?.leadAsks }
+        #expect(asks() == ["ttypts990": false, "ttypts996": false])
+        on(nodes) { nodes.leadsAsking = ["/r/acme"] }
+        #expect(asks() == ["ttypts990": true, "ttypts996": false])
+        #expect(streamed(lead.id) == true && streamed(other.id) == false)
+        on(nodes) { nodes.leadsAsking = [] }
+        #expect(asks() == ["ttypts990": false, "ttypts996": false])
+        #expect(streamed(lead.id) == false)
+        #expect(on(nodes) { nodes.scansApplied } == scans)
+    }
+
+    /// A state folder that was removed is watched again at the next scan (made again, 0700): a hook write in it is then
+    /// seen with no clock and no refresh.
+    @Test func aRemovedStateFolderIsWatchedAgain() async throws {
+        let (root, home) = try node()
+        let state = root.appendingPathComponent("state")
+        let table = [Int32(970): ProcInfo(pid: 970, ppid: 1, tty: "ttypts970", comm: "claude", startTime: Date().addingTimeInterval(-600),
+                                          agent: .claude)]
+        func hook(_ event: String) throws {
+            var hook = HookState(agent: .claude, tty: "ttypts970", lastEvent: event, lastEventAt: Date().timeIntervalSince1970)
+            hook.agentPid = 970
+            try hook.save(to: state.appendingPathComponent("ttypts970.json"))
+        }
+        try hook("PreToolUse")
+        let nodes = NodeSessions(root: root, home: home.path, queue: DispatchQueue(label: "engine"),
+                                 scanner: SessionScanner(processes: { table }, stateDir: { state }, cwd: { _ in "/r/x" }, arguments: { _ in [] }))
+        nodes.start()
+        defer { nodes.stop() }
+        #expect(await eventually { session(nodes, "ttypts970")?.status == .working })
+        try FileManager.default.removeItem(at: state)
+        // The watch's scan finds the folder gone, makes it again and watches it.
+        #expect(await eventually { FileManager.default.fileExists(atPath: state.path) && session(nodes, "ttypts970")?.status == .unknown })
+        try hook("PermissionRequest")
+        #expect(await eventually { session(nodes, "ttypts970")?.status == .needsInput })
+    }
+
+    /// A state folder that can't be watched is said once, and tried again once a minute (by the store's `now`), not at
+    /// every scan: once it can be, a hook write in it is seen with no refresh.
+    @Test func anUnwatchableStateFolderIsSaidOnceAndTriedEveryMinute() async throws {
+        let (root, home) = try node()
+        let state = root.appendingPathComponent("state")
+        // A file where the folder should be: nothing to watch.
+        try FileManager.default.removeItem(at: state)
+        try Data().write(to: state)
+        let table = [Int32(970): ProcInfo(pid: 970, ppid: 1, tty: "ttypts970", comm: "claude", startTime: Date().addingTimeInterval(-600),
+                                          agent: .claude)]
+        let clock = Locked(Date())
+        let notes = Locked<[String]>([])
+        let nodes = NodeSessions(root: root, home: home.path, queue: DispatchQueue(label: "engine"),
+                                 scanner: SessionScanner(processes: { table }, stateDir: { state }, cwd: { _ in "/r/x" }, arguments: { _ in [] }),
+                                 now: { clock.value }, note: { line in notes.mutate { $0.append(line) } })
+        nodes.start()
+        defer { nodes.stop() }
+        #expect(await eventually { session(nodes, "ttypts970") != nil })
+        for _ in 0..<3 {
+            clock.mutate { $0 += 10 }
+            try await refreshAndSettle(nodes)
+        }
+        #expect(notes.value.filter { $0.contains("can't be watched") }.count == 1, "\(notes.value)")
+        // A minute on, the folder there: watched again.
+        try FileManager.default.removeItem(at: state)
+        try FileManager.default.createDirectory(at: state, withIntermediateDirectories: false)
+        clock.mutate { $0 += 30 }
+        try await refreshAndSettle(nodes)
+        #expect(session(nodes, "ttypts970")?.status == .unknown)
+        var hook = HookState(agent: .claude, tty: "ttypts970", lastEvent: "PermissionRequest", lastEventAt: Date().timeIntervalSince1970)
+        hook.agentPid = 970
+        try hook.save(to: state.appendingPathComponent("ttypts970.json"))
+        #expect(await eventually { session(nodes, "ttypts970")?.status == .needsInput })
+        #expect(notes.value.filter { $0.contains("can't be watched") }.count == 1, "\(notes.value)")
+    }
+
+    /// Once stopped, nothing scans: a refresh starts no scan (no process table read, no screen asked of the host).
+    @Test func nothingScansOnceStopped() async throws {
+        let (root, home) = try node()
+        let state = root.appendingPathComponent("state")
+        let reads = Locked(0)
+        let nodes = NodeSessions(root: root, home: home.path, queue: DispatchQueue(label: "engine"),
+                                 scanner: SessionScanner(processes: { reads.mutate { $0 += 1 }; return [:] }, stateDir: { state },
+                                                         cwd: { _ in nil }, arguments: { _ in [] }))
+        nodes.start()
+        #expect(await eventually { on(nodes) { nodes.scansApplied } == 1 && !nodes.hooksInstalled.isEmpty })
+        nodes.stop()
+        nodes.refresh()
+        // The refresh has run on the store's queue; a scan it started would read the table on the scan queue before
+        // the hooks' status read after it lands.
+        on(nodes) {}
+        try HookInstaller.install(agent: .claude, at: HookInstaller.configURL(for: .claude, home: home.path),
+                                  hookBinary: root.appendingPathComponent("bin/vibeswitcher-hook").path)
+        nodes.refreshHookStatus()
+        #expect(await eventually { on(nodes) { nodes.hooksInstalled[.claude] == true } })
+        #expect(reads.value == 1)
+        #expect(on(nodes) { nodes.scansApplied } == 1)
+    }
+
     /// A stand-in host listing one idle Claude session (its title's ✳) on `tty`, whose screen's footer shows a
     /// background shell; a link to it, welcomed; a store on it, started, whose table has the agent on that terminal.
     private func quietSession(now: @escaping @Sendable () -> Date = { Date() }) async throws
@@ -527,6 +715,18 @@ struct NodeSessionsTests {
         let quiet = try #require(session(nodes, "ttypts970"))
         #expect(quiet.detail == "Waiting on 1 shell")
         #expect(quiet.hostID == hosted.id)
+    }
+
+    /// A quiet session's screen read with something new in its footer scans at once: after the scan that asked it, no
+    /// refresh and no clock, it's `background`.
+    @Test func aScreenWithANewFooterScansAtOnce() async throws {
+        let (stub, _, nodes, _) = try await quietSession()
+        defer { nodes.stop(); stub.quit() }
+        // The start's scan finds it quiet (idle: ✳, never seen busy); the next asks its screen.
+        #expect(await eventually { session(nodes, "ttypts970")?.status == .idle })
+        try await refreshAndSettle(nodes)
+        #expect(await eventually { session(nodes, "ttypts970")?.status == .background })
+        #expect(session(nodes, "ttypts970")?.detail == "Waiting on 1 shell")
     }
 
     /// How many `screen` requests the stand-in has had once every request the store sent before now reached it (a
