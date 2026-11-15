@@ -421,7 +421,13 @@ own shell and Claude Code) are acceptable while the only project on the node is 
 unix_diag's);
 `SocketsTests.aListenersFileIsOwnerOnlyFromItsBindAndNoLinkIsFollowed` (its mode, before the bind);
 `HostIdentitySeamTests.theMacsAppIsStillTheCdhashCheck`, `HostIdentitySeamTests.aConnectorConnectionIsTheAppWithNoChallenge`,
-`HostIdentitySeamTests.noConnectionByPathIsTheAppOnLinux` (stage 2 Task 4b).
+`HostIdentitySeamTests.noConnectionByPathIsTheAppOnLinux` (stage 2 Task 4b);
+and from the stage 2 sweep: `ServerChildTests.aServerChildWhoseConnectorClosedIsEndedAndStartedAgain` (no child runs
+on as nobody's app), `ServerChildTests.aHandoverWhileTheServerChildIsReplacedIsRefused`,
+`ServerChildTests.aServerChildEndedDuringTheHandoversProbeIsRefusedBeforeTheExec` (no handover drops the server child),
+`ServerChildTests.aHostStoppedBeforeTheFirstStartStartsNoServerChild`,
+`ServerChildTests.aCarriedServerChildOfAHostStoppedBeforeItsRestoreIsEnded` (no server child outlives a host that
+stopped).
 
 **Tests to write:** none left: Tasks 4b's, 8a's and 8b's are under Held by.
 
@@ -809,7 +815,8 @@ parser's reply grammar in Task 9; the server's own first statements in the engin
 `ParserReplyTests.aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds`,
 `ParserReplyTests.droppedRepliesAreLoggedOnceASecond` (Task 12a and its review);
 `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`, `HandoverLinuxTests.aHandoverImageIsNotDumpableFromItsExec`
-(Task 9c; S8 names them too).
+(Task 9c; S8 names them too); `ServerChildTests.aServerCopyMadeReadableIsPutBackBeforeTheNextStart` (every start from
+a sealed copy puts its mode back, S2-D5: the server child's too, the stage 2 sweep).
 
 **Tests to write:** none left: Task 9's are under Held by.
 
@@ -1018,7 +1025,10 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `HandoverLinuxTests.aHandoverGivesTheNewImageItsBuildsFoldersAndTheFallbackItsOwn` (Task 9d);
 `ServerChildTests.aFallbackToTheSwitchedBuildStillReplacesTheOldServer`,
 `ServerChildTests.aSecondHandoverStillReplacesTheOldServer`,
-`ServerChildTests.aSwitchReplacesAServerThatHoldsAConnection` (the 9d review).
+`ServerChildTests.aSwitchReplacesAServerThatHoldsAConnection` (the 9d review);
+`ServerChildTests.aHandoverWhileTheServerChildIsReplacedIsRefused`,
+`ServerChildTests.aServerChildEndedDuringTheHandoversProbeIsRefusedBeforeTheExec` (a server child being ended, which no
+record can carry, refuses a handover before its probe and again just before the exec: the stage 2 sweep).
 
 **Tests to write:** Step 8: `aSwitchWhileAWorkerRunsIsRefused`.
 
