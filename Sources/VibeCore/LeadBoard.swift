@@ -1006,6 +1006,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// A team task's members, 2 to 4, member 1 the integrator on the task's own branch (see `LeadTeam`); nil: a plain
     /// task, one worker, as before. Not `members`: that's the sessions the witness watches.
     public var team: [LeadTeamMember]?
+    /// Its last merge dry run (merge(dry_run: true), `LeadDryRun`): the merge's rebase and test run without the
+    /// fast-forward, and when it passed or failed; nil: none ran.
+    public var dryRun: LeadDryRun?
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }

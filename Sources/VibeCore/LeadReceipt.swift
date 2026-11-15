@@ -1,13 +1,15 @@
 import Foundation
 
-/// What a task cost, kept on it once it ends (merged, folded or abandoned): its worker's working time and the wall
+/// What a task cost, kept on it once it ends (merged, folded or abandoned) or is kept unmerged (an experiment's arm): its worker's working time and the wall
 /// time from its first worker's start to its end; the tokens its workers and its verifiers spent, read from their own
 /// Claude Code transcripts, with an estimated cost (`LeadPrices`); its audit rounds, re-rolls and merge reruns; the
 /// merge's test count; the user's questions about it and the time they waited; and the commits its merge brought, with
 /// where to roll back to. Numbers only: no transcript text is kept. Tasks that ended before receipts have none, and
 /// show nothing. The lead's board(task) shows it; the scorecard and the all-done card sum a batch's (`LeadReceiptTotals`).
 public struct LeadReceipt: Codable, Equatable, Sendable {
-    public enum Ending: String, Codable, Sendable { case merged, folded, abandoned }
+    /// kept: set kept unmerged (update_task status kept), such as a team experiment's arm that ran a merge dry run
+    /// instead of merging: never counted as merged.
+    public enum Ending: String, Codable, Sendable { case merged, folded, abandoned, kept }
 
     public var ending: Ending
     /// When its first worker started (nil: never started); when it ended.
@@ -45,6 +47,10 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
     /// A team task's members (`LeadTask.team`), in its order, the integrator first: each one's working time and its
     /// worker's tokens, which `worked` and `worker` sum. nil for a plain task, and for receipts from before teams.
     public var members: [Member]?
+    /// Merge-ready: when the merge's test run passed after a passing audit (the experiment's endpoint). Merged: its
+    /// merge's test run's end; kept: its last merge dry run's, when that passed. nil otherwise, and for receipts from
+    /// before it was kept.
+    public var mergeReady: Double?
 
     /// One member of a team task, on its receipt: its name, its worker's counted working time in seconds (nil: not
     /// counted), and its worker's tokens (nil: no transcript of its worker found).
@@ -107,6 +113,11 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
                   questions: asked.count, waitingOnUser: asked.reduce(0) { $0 + $1.waitingOnUser(now: now) },
                   onto: merged?.onto, commit: merged?.commit, commits: commits)
         waits = task.waits.map { $0.closed(at: now) }
+        // Kept after a dry run that passed: that run is its merge-ready time and test count.
+        if ending == .kept, let run = task.dryRun, run.passed {
+            mergeReady = run.at
+            if self.tests == nil { self.tests = run.tests }
+        }
         if task.isTeam, let team = task.team {
             let counted = memberWorked ?? Dictionary(team.compactMap { member in member.worked.map { (member.name, $0) } }, uniquingKeysWith: { first, _ in first })
             let listed = team.map { Member(name: $0.name, worked: counted[$0.name], worker: usage.members?[$0.name]) }
@@ -167,7 +178,11 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
         if rerolls > 0 { runs.append("\(rerolls) re-roll\(rerolls == 1 ? "" : "s")") }
         if mergeReruns > 0 { runs.append("\(mergeReruns) merge rerun\(mergeReruns == 1 ? "" : "s")") }
         parts.append(runs.joined(separator: ", "))
-        if let tests { parts.append("\(tests) tests in the merge's run") }
+        if let tests { parts.append("\(tests) tests in the merge's \(ending == .kept ? "dry " : "")run") }
+        if let mergeReady {
+            parts.append("merge-ready at \(LeadBoard.clock(mergeReady))" + (startedAt.map { " (\(LeadToolset.age(max(0, mergeReady - $0))) after its start)" } ?? "")
+                         + (ending == .kept ? ", by a dry run: not merged" : ""))
+        }
         if questions > 0 {
             parts.append("\(questions) question\(questions == 1 ? "" : "s") to you, \(LeadScorecard.minutes(waitingOnUser / 60)) min waiting")
         }
@@ -727,6 +742,8 @@ public struct LeadReceiptTotals: Codable, Equatable, Sendable {
     public var topCost: Double?
     public var topTokens: Int?
     public var pricesAsOf: String
+    /// Of `tasks`, those kept unmerged (receipts ending kept, such as an experiment's arm); nil: none.
+    public var kept: Int?
 
     /// `tasks`' receipts summed; nil when none has one (tasks from before receipts show nothing, not zeros).
     public init?(_ tasks: [LeadTask]) {
@@ -746,11 +763,13 @@ public struct LeadReceiptTotals: Codable, Equatable, Sendable {
             topTokens = receipt.tokens
         }
         pricesAsOf = receipts.map(\.1.pricesAsOf).max() ?? LeadPrices.asOf
+        let kept = receipts.filter { $0.1.ending == .kept }.count
+        self.kept = kept > 0 ? kept : nil
     }
 
     /// "4 tasks, 6.2 h of worker time, 61.3M tokens, est. $38.12; most expensive: Every task gets a receipt (est. $14.80)".
     public var text: String {
-        var parts = ["\(tasks) task\(tasks == 1 ? "" : "s")", "\(LeadTeams.hours(worked)) of worker time", "\(LeadReceipt.count(tokens)) tokens"]
+        var parts = ["\(tasks) task\(tasks == 1 ? "" : "s")" + (kept.map { " (\($0) kept unmerged)" } ?? ""), "\(LeadTeams.hours(worked)) of worker time", "\(LeadReceipt.count(tokens)) tokens"]
         if unpriced == tasks {
             parts.append("cost unknown")
         } else {
@@ -766,7 +785,10 @@ public struct LeadReceiptTotals: Codable, Equatable, Sendable {
     /// The tasks whose receipts status and the scorecard sum: those finished since the last all-done card; with none
     /// since, the last card's batch. `last`: the card's time when it's the last card's.
     public static func current(_ board: LeadBoard) -> (totals: LeadReceiptTotals, last: Double?)? {
-        if let open = LeadReceiptTotals(BatchSummary.batch(board)) { return (open, nil) }
+        // Kept unmerged with a receipt (an experiment's arm) since the batch began: counted, though it's still open work.
+        let start = BatchSummary.batchStart(board)
+        let kept = board.tasks.filter { $0.status == .kept && $0.receipt?.ending == .kept && ($0.receipt?.endedAt ?? start) > start }
+        if let open = LeadReceiptTotals(BatchSummary.batch(board) + kept) { return (open, nil) }
         guard let mark = board.allDone?.last else { return nil }
         let slugs = Set(mark.tasks.map(\.slug))
         let held = board.tasks.filter { slugs.contains($0.slug) }

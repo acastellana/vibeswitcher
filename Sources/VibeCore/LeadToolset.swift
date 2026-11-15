@@ -751,7 +751,8 @@ public final class LeadToolset: MCPToolset {
                             properties: ["task": task,
                                          "tasks": P(type: "array", description: "Instead of task: two or more tasks to merge as one batch (at most \(Self.batchLimit)), each checked as merge checks it alone: their branches stacked on the base in this order, one test run on the stack, the base fast-forwarded to it when it passes (each task's merge recorded on its own). A failure is rerun as ever, then split to find the task that breaks it, which is set failed with its output; the rest merge. A task that doesn't apply on the stack is left out, failed, to merge the base",
                                                     items: "string"),
-                                         "accept_stale_verdict": P(type: "string", description: "With task: merge on a passing verdict that judged an older version of its contract than it has now (merge refuses one otherwise, and audit judges what changed since). Why that verdict covers the current version; it goes into the progress log")]),
+                                         "accept_stale_verdict": P(type: "string", description: "With task: merge on a passing verdict that judged an older version of its contract than it has now (merge refuses one otherwise, and audit judges what changed since). Why that verdict covers the current version; it goes into the progress log"),
+                                         "dry_run": P(type: "boolean", description: "With task: a dry run. The merge's own rebase and test command (same gate, load wait and Mac-wide test slot) on a scratch worktree that's removed after; nothing is fast-forwarded or committed, and the task's state, branch and worktree stay as they were. Its pass or failure and the time go on the task (merge-ready, for an experiment's arm kept unmerged: update_task(status: kept) then keeps it on its receipt). Refused while a merge of the task runs. auto_advance never starts one")]),
                 MCPToolInfo(name: "revert", description: "Undo a merged task in one step: one commit on top of the lead's branch reverts the commits its merge put there, the test command runs on it, and the branch fast-forwards to it; the task reads reverted. It only adds a commit (nothing is reset or rewritten). Refused, with the branch untouched, when the tests fail or when later commits conflict with the revert (it names the files and the tasks that touched them: plan a fix-forward task instead).",
                             properties: ["task": task, "reason": P(type: "string", description: "What the merge broke, in one line: it goes into the revert commit's message and the task's record")],
                             required: ["task", "reason"]),
@@ -877,6 +878,13 @@ public final class LeadToolset: MCPToolset {
             case "audit": return try audit(try taskSlug(arguments), restart: arguments["restart"] as? Bool ?? false,
                                            overrideUsage: arguments["override_usage"] as? Bool ?? false)
             case "merge":
+                // A dry run: merge's rebase and test run, no fast-forward, and nothing committed (`dryRunMerge`).
+                if try Self.flagArgument(arguments, "dry_run") == true {
+                    guard (arguments["tasks"] as? [String] ?? []).isEmpty else {
+                        throw Problem(text: "dry_run goes with task, one at a time, not tasks. Nothing was run.")
+                    }
+                    return withGitNotice(try dryRunMerge(try taskSlug(arguments), acceptStale: Self.staleReason(arguments)))
+                }
                 if let batch = arguments["tasks"] as? [String], !batch.isEmpty {
                     let merged = try mergeTool(batch: batch)
                     records.flush(base: base)
@@ -1563,9 +1571,12 @@ public final class LeadToolset: MCPToolset {
         var budgetCleared = false
         let appended = (arguments["append_context"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let note = appended.isEmpty ? nil : leadNote(.context, appended, on: slug)
-        // Folded or abandoned, it ends: its receipt's tokens are read before the board's lock is taken.
-        let ending: LeadReceipt.Ending? = status == .folded ? .folded : status == .abandoned ? .abandoned : nil
+        // Folded or abandoned, it ends; kept unmerged, it gets one too (an experiment's arm: `LeadReceipt.Ending.kept`):
+        // its receipt's tokens are read before the board's lock is taken.
+        let ending: LeadReceipt.Ending? = status == .folded ? .folded : status == .abandoned ? .abandoned : status == .kept ? .kept : nil
         let usage = ending == nil ? nil : store.load().task(slug).map(receiptUsage)
+        // Kept: its dry run is its merge-ready only when it tested the branch's head as it's kept (not an older commit).
+        let keptAt = ending == .kept ? branchHead(Worktrees.branch(slug)) : nil
         var changed: [String] = []
         var contractVersion: Int?
         // The audit already started when this exception or hold arrived: as the board's lock has it.
@@ -1727,6 +1738,11 @@ public final class LeadToolset: MCPToolset {
                 // of work if it ended before and was reopened. Open again: none (it's written when it ends).
                 if let ending, let usage, board.tasks[index].status != before {
                     board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: ending, questions: board.questions, usage: usage)
+                    // Kept: a dry run of an older commit than the branch's head isn't its merge-ready (nor its test count).
+                    if ending == .kept, let run = board.tasks[index].dryRun, keptAt == nil || run.commit != keptAt {
+                        board.tasks[index].receipt?.mergeReady = nil
+                        board.tasks[index].receipt?.tests = nil
+                    }
                 } else if ending == nil {
                     board.tasks[index].receipt = nil
                 }
@@ -3984,6 +4000,8 @@ public final class LeadToolset: MCPToolset {
                                                          tests: workflow.testCommand == nil ? nil : testCount, mergeReruns: flaked == nil && redOnBase == nil ? 0 : 1,
                                                          commits: brought)
                 board.tasks[index].receipt?.build = build
+                // Merge-ready: its test run passed then (the team experiment's endpoint, as a dry run records it).
+                board.tasks[index].receipt?.mergeReady = ranUntil.timeIntervalSince1970
                 if let redOnBase {
                     redPlan = planRedOnBaseFixes(&board, tests: redOnBase.tests, rerun: redOnBase.rerun, slug: slug, onto: current, workflow: workflow)
                 }
