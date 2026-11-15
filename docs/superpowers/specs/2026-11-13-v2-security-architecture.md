@@ -1665,7 +1665,7 @@ are written in the task named.
 | A handover writes no file and keeps the vault on fallback | `HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`, `aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`, `aDowngradeIsRefused`; `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`; `HostHandoverStateTests.aStateOfAnotherFormatIsRefused` (now) | Tasks 8, 9 |
 | No switch while a worker or verifier runs, until measured | `aSwitchWhileAWorkerRunsIsRefused` | step 8 |
 | A fresh memory vault takes nothing as baseline a worker could write | `ConfigSealFirstLookTests.*`; E4's `aLeadIsRefusedOnAFreshVaultUntilAccepted`; E8's `configAcceptSealsOnlyWhatItShowed`, `baseAcceptAfterARestartShowsWhatMoved` | Task 10, E4, E8 |
-| Sessions get no agent socket, interop, bus or runtime dir, and run no startup file | `SessionEnvironmentTests.*` | Task 10 |
+| Sessions get no agent socket, interop, bus or runtime dir, and their shell is `bash --noprofile --norc` (the agent's Bash tool still sources `~/.bashrc` and the login files: S10, measured in Task 12b) | `SessionEnvironmentTests.*` | Task 10 |
 | Roles on Linux, the lead included, are denied tracers, the user's manager, Windows and `gh` (slips) | `LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`, `theLeadOnLinuxGetsTheTracerRules`, `theMacsDenyRulesAreTodays` | Task 10 |
 | A role's launch settings aren't files | `LeadLaunchTests.aRolesLaunchSettingsAreInlineOnLinux` | Task 10 |
 | A spawn outside the allow-list is refused, and the check runs no git | `ProjectAllowListTests.*` | Task 10 |

@@ -2052,7 +2052,8 @@ answers are in the design. On Linux:
   hash matches;
 - a handover writes no file, and a fallback keeps every session and the vault;
 - a parser's bytes reach a session only as replies;
-- team sessions get no agent socket, runtime dir, bus or interop variable, run no shell startup file, and their roles
+- team sessions get no agent socket, runtime dir, bus or interop variable, and their shell is `bash --noprofile
+  --norc` (the agent's Bash tool still sources `~/.bashrc` and the login files: S10, measured in 12b), and their roles
   are denied tracers, the user's manager, Windows and `gh`, with launch settings inline;
 - the project allow-list holds in the user's host, and a fresh memory vault holds every record's first look;
 - the lead's tool server lists its tools under a scratch host.

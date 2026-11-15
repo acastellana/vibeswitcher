@@ -216,8 +216,9 @@ them off (decision 2), every lock the node has is a guard rail.
     bare name there removes the unit's own assignment too (`systemd.exec(5)`); the unit's `Environment=` already
     overrides the manager's value. (The security document's S9 listed it in both; corrected.)
   - `Environment=HOME=…` and `Environment="PATH=/usr/local/bin:/usr/bin:/bin:<swiftly's bin>:<node's bin>"`, quoted,
-    with no `/mnt/` folder. Team sessions get this PATH and no startup file (stage 2's S2-D12), so it must hold what
-    workers build and test with: the user's Swift toolchain (`~/.local/share/swiftly/bin`) and node (`~/.nvm/…/bin`,
+    with no `/mnt/` folder. A team session's shell gets this PATH and no startup file (stage 2's S2-D12), and its
+    agent's Bash commands this PATH too, though they still source `~/.bashrc` and the login files (S10, measured in
+    stage 2's 12b), so it must hold what workers build and test with: the user's Swift toolchain (`~/.local/share/swiftly/bin`) and node (`~/.nvm/…/bin`,
     which `scripts/test.sh` needs, `test.sh:28-29`). Both are folders the user, and so every worker, can write: they
     are named in the unit, put on the seal's list (below) and in S11 (decision 12). The host itself runs nothing found
     on PATH (its git is `Platform.Tools.git`, its `systemctl` absolute, its binaries static). `claude` is not found on
@@ -295,7 +296,8 @@ Each ends in something that runs.
      makes through its live server child's connector, never a connection by path; host, parsers, server, probe and a
      handover's new image non-dumpable from their exec (sealed copies, measured); every descriptor close-on-exec from
      its creation; nothing run from a file changed after the host loaded it; a handover writes no file and a fallback
-     keeps the vault; a parser types only replies; sessions get no agent sockets and run no shell startup file; the
+     keeps the vault; a parser types only replies; sessions get no agent sockets and their shell is `bash --noprofile
+     --norc` (the agent's Bash tool still sources `~/.bashrc` and the login files: S10, measured in 12b); the
      project allow-list holds; a fresh vault holds every record's first look.
 5. **The lead's tool server under a host** (stage 2, Task 11a; the keeper's sealed copy, Task 11b, is moved after
    the bootstrap, decision 18).
