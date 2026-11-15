@@ -74,6 +74,15 @@ func offPool<T>(_ work: @escaping () -> T) async -> T {
     }
 }
 
+/// `offPool` for a `work` that throws: what it throws, the caller's await throws.
+func offPool<T>(_ work: @escaping () throws -> T) async throws -> T {
+    try await withCheckedThrowingContinuation { (done: CheckedContinuation<T, Error>) in
+        let thread = Thread { done.resume(with: Result { try work() }) }
+        thread.name = "offPool"
+        thread.start()
+    }
+}
+
 /// Whether `process` (the test's own child) ended within `timeout`; past it, it's killed and waited for (10 s more),
 /// so that what the caller reads of it next (`terminationStatus`) is there.
 func exited(_ process: Process, within timeout: TimeInterval = hangGuard) async -> Bool {
@@ -109,6 +118,10 @@ let scratchRoot: URL = {
     return URL(fileURLWithPath: given, isDirectory: true)
 }()
 
+/// Where scratch sockets and the folders holding them go: `scratchRoot` when its path is short (scripts/test.sh's and
+/// scripts/test-under-load.sh's are), else /tmp, since a Unix socket's path is limited in length.
+let shortScratchRoot: String = scratchRoot.path.utf8.count <= 40 ? scratchRoot.path : "/tmp"
+
 /// Scratch paths under `scratchRoot` that are removed, with everything in them, when this goes. A suite keeps one as
 /// a stored property: Swift Testing makes a suite instance for each test, so what a test made goes away after it.
 final class Scratch: @unchecked Sendable {
@@ -117,7 +130,19 @@ final class Scratch: @unchecked Sendable {
 
     /// A new path `scratchRoot/<prefix>-<uuid>` (not created), removed with this.
     func url(_ prefix: String) -> URL {
-        let url = scratchRoot.appendingPathComponent("\(prefix)-\(UUID().uuidString)")
+        adopt(scratchRoot.appendingPathComponent("\(prefix)-\(UUID().uuidString)"))
+    }
+
+    /// A new folder (made, 0700) with a short path, for sockets (a Unix socket's path is limited to 108 bytes on Linux,
+    /// 104 on the Mac): `shortScratchRoot/<prefix>-<8 hex>`, removed with this.
+    func shortFolder(_ prefix: String) throws -> URL {
+        let folder = adopt(URL(fileURLWithPath: shortScratchRoot).appendingPathComponent("\(prefix)-\(UUID().uuidString.prefix(8))", isDirectory: true))
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        return folder
+    }
+
+    @discardableResult
+    private func adopt(_ url: URL) -> URL {
         lock.lock()
         paths.append(url)
         lock.unlock()

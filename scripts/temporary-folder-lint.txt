@@ -20,6 +20,7 @@ allow: Tests/VibeHostTests/TestSupport.swift | return FileManager.default.tempor
 allow: Tests/VibeSwitcherTests/TestSupport.swift | return FileManager.default.temporaryDirectory | scratchRoot's fallback when TMPDIR is unset (scripts/test.sh and the harness always set it)
 allow: Tests/VibeHostTests/TestSupport.swift | let shortScratchRoot: String = | a socket's path is limited to 104 bytes: under a long TMPDIR its folder goes in /tmp, and the test removes it
 allow: Tests/VibeSwitcherTests/TestSupport.swift | let shortScratchRoot: String = | a socket's path is limited to 104 bytes: under a long TMPDIR its folder (Scratch.shortFolder) goes in /tmp, removed with its Scratch
+allow: Tests/VibeNodeTests/TestSupport.swift | let shortScratchRoot: String = | a socket's path is limited to 108 bytes: under a long TMPDIR its folder (Scratch.shortFolder) goes in /tmp, removed with its Scratch
 #
 # Read, never written: where the temporary folder is, to tell it apart.
 allow: Tests/VibeCoreTests/TeamSummariesTests.swift | real(NSTemporaryDirectory()) | checks the headless run's folder isn't the temporary folder; reads its path only

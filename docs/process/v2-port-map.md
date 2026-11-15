@@ -51,9 +51,9 @@ row per part, so each task can mark its own; together the rows cover the file.
 | `Sources/VibeSwitcher/MainWindow/Lead/AllDoneWatch.swift` | 67 | not before the bootstrap: the mark and its summary are for display | after the bootstrap | owed |
 | `Sources/VibeSwitcher/HostClient.swift` | 1,259 | `HostLink`: connection, welcome and events (368-525), requests, held requests and spawn (652-760), input units (1046-1163), screens, history, kill and remove (1214-1250); the host's notes. Starting, replacing, handing over and reaping the host (183-221, 293-366, 527-650) are the node's `start`, `stop` and install (the bootstrap path's step 8), not the engine's; the app's proof (92-113, 244-291) has no Linux form; attach, raw and paced input, direct keys and resize (762-1045, 1166-1212) are a client's | E2 | owed |
 | `Sources/VibeSwitcher/SessionStore.swift` | 523 | `NodeSessions`, grown from stage 1's `LocalSessions`: refresh and apply (202-264, 297-450), details (481-501), the state folder's watch (503-522), the quiet sessions' screens (`HostClient` 1252-1258). Terminal.app tabs, Spaces, presence, attention, nudges, pausing, renaming and the ledger stay the Mac's | E3 | owed |
-| `Sources/VibeSwitcher/Heartbeat.swift` | 81 | `NodeClock`: the engine's 3 s refresh, the 2 s scan and the room watch's 60 s (replaced by store events in stage 3, see the design's VibeNode section) | E0 | owed |
+| `Sources/VibeSwitcher/Heartbeat.swift` | 81 | `NodeClock`: the engine's 3 s refresh, the 2 s scan and the room watch's 60 s (replaced by store events in stage 3, see the design's VibeNode section) | E0 | ported (engine E0, 2026-11-15) |
 | `Sources/VibeSwitcher/AppDelegate.swift`, `HookSetup` and `HookBinary` only (1160-1245) | 86 | `vibeswitcher hooks install|remove` (stage 1) and the install step, sealed through the server (`hooks.install`, the user's voice) | bootstrap step 8 | owed |
-| `Sources/VibeSwitcher/PhoneLeads.swift` | 177 | not before the bootstrap: the phone's leads and answers are stage 7's. `id(root:)` (52-55) is copied for project ids | E0 (the copy) | owed |
+| `Sources/VibeSwitcher/PhoneLeads.swift` | 177 | not before the bootstrap: the phone's leads and answers are stage 7's. `id(root:)` (52-55) is copied for project ids | E0 (the copy) | owed (the copy made: engine E0, 2026-11-15) |
 | `Sources/VibeSwitcher/ProjectFolderStart.swift` | | the first-commit question: `lead` refuses instead ("make a first commit") | E4 | not needed |
 | `Sources/VibeSwitcher/KeepAwake.swift`, `TeamActivity.swift` | | keep-awake is after the bootstrap (nothing to hold awake on WSL); App Nap is the Mac's | after the bootstrap | owed |
 
@@ -75,9 +75,9 @@ rows above are.
 | `LeadController.swift` `WitnessWork` | 274-338 | `Sources/VibeNode/Engine/WitnessWork.swift` | E7 |
 | `LeadController.swift` `sender(_:)` | 2015-2022 | `Sources/VibeNode/Engine/Witness.swift` | E7 |
 | `HostClient.swift` `unitGap` and `pieces(of:)` | 1068; 1099 on | `Sources/VibeNode/Host/HostLink.swift` | E2 |
-| `PhoneLeads.swift` `id(root:)` | 52-55 | `Sources/VibeNode/NodeIds.swift` | E0 |
-| `Tests/VibeSwitcherTests/FakeClaude.swift` (with a launcher so the process table sees it as Claude, Claude's own arguments taken and skipped, files per terminal, and a new `mcp` op) | 1-1070 | `Tests/VibeNodeTests/FakeClaude.swift` | E0 |
-| `Tests/VibeSwitcherTests/ChatSyncTests.swift` `Harness`, its non-view parts (the launch, `tell`, the agent's state, `hookTakes`; not the pane, chat or sync) | 636-853 | `Tests/VibeNodeTests/NodeHarness.swift` | E0 |
+| `PhoneLeads.swift` `id(root:)` | 52-55 | `Sources/VibeNode/NodeIds.swift` (`NodeIds.project(root:)`) | E0 (made 2026-11-15) |
+| `Tests/VibeSwitcherTests/FakeClaude.swift` (with a launcher so the process table sees it as Claude, Claude's own arguments taken and skipped, files per terminal, and a new `mcp` op) | 1-1070 | `Tests/VibeNodeTests/FakeClaude.swift` (the script verbatim but for those; `FakeClaude.install(in:)` writes the launcher) | E0 (made 2026-11-15) |
+| `Tests/VibeSwitcherTests/ChatSyncTests.swift` `Harness`, its non-view parts (the launch, `tell`, the agent's state, `hookTakes`; not the pane, chat or sync) | 636-853 | `Tests/VibeNodeTests/NodeHarness.swift` (the screen through `HostCall.styledScreen`; `hookTakes` against the scratch host's root) | E0 (made 2026-11-15) |
 
 ## Tests the engine ports
 
@@ -86,7 +86,7 @@ file that tests a file in [Files the engine replaces](#files-the-engine-replaces
 
 | App test file | Ported as | Not ported, and why | Task |
 | --- | --- | --- | --- |
-| `HeartbeatTests` | `NodeClockTests`: both cases | | E0 |
+| `HeartbeatTests` | `NodeClockTests`: both cases, their assertions kept, on a clock the test drives (`DrivenTime`) instead of the main run loop, so the exact wakes are asserted too (ported 2026-11-15) | | E0 |
 | `HostClientReplyTimerTests` | `HostLinkTests.anOldTimerDoesntErrorTheRequestHoldingItsNumberOnTheNewConnection`, `anOldTimerDoesntEndAUnitOnTheNewConnection` (the paced-piece case, on units) | | E2 |
 | `HostClientHandoverTests` | `HostLinkTests.requestsAskedWhileTheLinkReconnectsGoOutOnTheNewConnection`, `otherRequestsKeepTheirTimersDuringAReconnect` | the handover's outcome, its logging and the probe's wait: step 8's (switching builds) | E2, step 8 |
 | `HostClientReapTests` | step 8's `StartCommandTests` (the no-systemd `stop`) | the server never starts a host | step 8 |
@@ -196,7 +196,7 @@ numbering (its Global Constraints); calls switched to `VibePlatform` (kind 1), t
 | `Sources/vibeswitcher-mcp/main.swift` `command(_:root:)` (240-248) (planned, engine E4; kind 4) | one hook into `Sources/VibeCore/V2/RoleProgram.swift`: on Linux, with `VIBESWITCHER_CLAUDE` set, the Claude command is that path and the settings and launch presets aren't read | workers and verifiers run the `claude` the lead's start resolved, not a program a worker-writable setting names (the engine plan's EN-D13) | low |
 | `Package.swift` 43-52, Linux half (made, stage 2 Task 4c) | `VibeHost` and `vibeswitcher-host` moved from `notYetPortableTargets` (now empty) into `portableTargets` | the session host builds on Linux | low: the Mac's half is untouched |
 | `Package.swift` 47-51, and the Mac's `VibeHostTests` 103-106 (made, stage 2 Task 5a) | `VibeHostTests` into the portable targets, with its `Fixtures` and `exclude: ["MacOnlyTests.txt"]`; the Mac's target excludes the list too | the host's tests on Linux | low: main's `VibeHostTests` line gains one argument |
-| `Package.swift` (planned, engine E0 and E1) | `vibeswitcher-server` (E1); `VibeNodeTests` depends on `VibeHost`, `vibeswitcher-host` (E0), `vibeswitcher-server`, `vibeswitcher-cli`, `vibeswitcher-mcp`, `vibeswitcher-hook` (E1) | the host on Linux; the engine's scratch hosts run the built products | medium: main adds targets |
+| `Package.swift` (engine E0's part made 2026-11-15, both halves: `VibeNodeTests` depends on `VibeHost` and `vibeswitcher-host`; E1's planned) | `vibeswitcher-server` (E1); `VibeNodeTests` depends on `VibeHost`, `vibeswitcher-host` (E0), `vibeswitcher-server`, `vibeswitcher-cli`, `vibeswitcher-mcp`, `vibeswitcher-hook` (E1) | the host on Linux; the engine's scratch hosts run the built products | medium: main adds targets |
 | `Sources/VibeCore/LeadGateBuild.swift` 41-55 (planned, bootstrap step 8) | `ServerBuild` reads `build-info` where there is no app bundle | merge receipts name the build | low |
 | `Sources/VibeCore/ConfigSeal.swift` 306-315 (planned, bootstrap step 8) | one hook: the platform's extra home files, empty on the Mac | the config seal's Linux list | low |
 | `Sources/VibeCore/LeadToolset.swift` `askUser` (4494), `reviseQuestion` (4543), `withdrawQuestion` (4565) (planned, engine E6; kind 4) | one line each into `Sources/VibeCore/V2/NodeQuestionPost.swift`, which does nothing where `Platform.CodeIdentity.isAvailable` (the Mac) or where `<root>/v2/server.sock` doesn't exist | questions reach the server from the lead's tool server, never from `board.json` (the security document's S3) | low: three lines in tools main changes often |
