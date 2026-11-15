@@ -354,6 +354,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// Push to talk with no microphone and no OpenAI: a recorder that hands over a made-up recording, an HTTP client
     /// that answers a made-up transcript, a key in memory (`dictation key|nokey|press|release|note`).
     let dictationKey = AppProof.MemorySecret()
+    /// The fake session the last `dictation press` went to, and how many messages it had been sent then (`composer unsent
+    /// TEXT` fails when it was sent more since: the dictated text went out by itself, however it arrived).
+    var sentAtPress: (id: UUID, count: Int)?
     lazy var dictation: DictationController = {
         let controller = DictationController(keyStore: dictationKey, recorder: SandboxRecorder(), microphone: SandboxMicrophone(),
                                              transcription: OpenAITranscription(client: SandboxTranscriber()), findKey: { nil })
@@ -1370,6 +1373,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("type TEXT", "types TEXT into the chat's composer (through its text view, as the keyboard does)"),
         ("send", "presses Return in the composer: the message goes to the fake session"),
         ("composer paste|clear|expect TEXT", "the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a Copy's, never yours), and prints what it holds then; clear empties it; expect fails unless it holds exactly TEXT, saying what it holds"),
+        ("composer [unsent TEXT]", "prints what the shown chat's composer holds and how many messages its fake session was sent; unsent TEXT fails unless the box comes to hold exactly TEXT and nothing was sent since the last dictation press (e.g. after dictation press/release: the text lands in the box, unsent)"),
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
         ("lines FILE N", "waits up to 30 s for FILE (a path under the sandbox's home, e.g. projects/example-api/ran.txt) to hold N lines, then fails unless it holds exactly N: a command that appends a line there each time it runs ran N times (scripts/ui-journeys/run-card.journey)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
@@ -2909,7 +2913,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     // MARK: The composer
 
-    /// `composer paste|clear|expect TEXT`.
+    /// `composer [paste|clear|expect TEXT|unsent TEXT]`.
     private func composerCommand(_ rest: String, _ reply: @escaping (Bool, String) -> Void) {
         guard let composer = composer() else { return reply(false, "no composer: show a fake session's chat first (chat)") }
         let words = rest.split(separator: " ", maxSplits: 1).map(String.init)
@@ -2931,8 +2935,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "expect":
             let expected = words.count > 1 ? words[1] : ""
             reply(composer.string == expected, composer.string == expected ? holds() : "\(holds()), not “\(expected)”")
+        case "": checkComposer("", reply)
+        case "unsent":
+            guard words.count > 1 else { return reply(false, "composer unsent TEXT") }
+            checkComposer(words[1], reply)
         default:
-            reply(false, "composer paste|clear|expect TEXT")
+            reply(false, "composer [paste|clear|expect TEXT|unsent TEXT]")
         }
     }
 
@@ -3092,6 +3100,43 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// `composer [unsent TEXT]`: what the shown chat's composer holds and how many messages its fake session was sent. With TEXT,
+    /// a failure unless the box comes to hold exactly TEXT (waited for, as a dictation's text lands a beat after its run
+    /// ends) and no message holding TEXT went to the session (a ui journey's check that dictated text stays unsent).
+    private func checkComposer(_ expected: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard composer() != nil else { return reply(false, "no composer: show a fake session's chat first (chat)") }
+        let selected = model.selectedRow?.hostID
+        let fake = fakeList.first { $0.id == selected }
+        let box = { [weak self] in self?.composer()?.string ?? "" }
+        waitFor({ expected.isEmpty || box() == expected }) { [weak self] _ in
+            let sent = fake?.transcript.map(Self.userMessages) ?? []
+            let text = box()
+            let label = fake?.label ?? "the session"
+            let summary = "the box holds “\(text)”; \(label) was sent \(sent.count) message\(sent.count == 1 ? "" : "s")"
+            if expected.isEmpty { return reply(true, summary) }
+            // Since the last dictation began (as it arrived: a fake Claude's /voice may swallow its spaces), or anything
+            // holding TEXT.
+            let since = self?.sentAtPress.flatMap { $0.id == fake?.id && sent.count > $0.count ? Array(sent[$0.count...]) : nil } ?? []
+            if let message = since.last ?? sent.last(where: { $0.contains(expected) }) {
+                return reply(false, "sent, not kept in the box: \(label) got “\(message)” after the dictation began; \(summary)")
+            }
+            reply(text == expected, text == expected ? summary : "the box doesn't hold “\(expected)”: \(summary)")
+        }
+    }
+
+    /// The prompts a fake Claude's transcript holds (its user lines' text; tool results and meta lines left out).
+    private static func userMessages(_ transcript: String) -> [String] {
+        guard let text = try? String(contentsOfFile: transcript, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { line in
+            guard let object = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                  object["type"] as? String == "user", object["isMeta"] as? Bool != true,
+                  let message = object["message"] as? [String: Any] else { return nil }
+            if let content = message["content"] as? String { return content }
+            let parts = (message["content"] as? [[String: Any]] ?? []).compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
+            return parts.isEmpty ? nil : parts.joined(separator: "\n")
+        }
+    }
+
     /// `dictation key|nokey|note|ack|press|release|letgo|cancel|turnon`.
     private func dictate(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
         switch what {
@@ -3108,7 +3153,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "press", "release", "letgo":
             guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
             let (agent, key) = (row.session?.agent, row.draftKey)
-            if what == "press" { dictation.press(key, agent: agent) { "Words that may come up: sandbox." } } else { dictation.release(key) }
+            if what == "press" {
+                if let fake = fakeList.first(where: { $0.id == row.hostID }), let transcript = fake.transcript {
+                    sentAtPress = (fake.id, Self.userMessages(transcript).count)
+                }
+                dictation.press(key, agent: agent) { "Words that may come up: sandbox." }
+            } else { dictation.release(key) }
             let claude = dictation.isClaude(key)
             waitFor({ [weak self] in
                 guard let dictation = self?.dictation else { return true }
