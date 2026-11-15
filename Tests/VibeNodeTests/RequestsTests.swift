@@ -30,11 +30,11 @@ struct RequestsTests {
         return requests
     }
 
-    /// `kind` from the user, answered.
-    private func ask(_ requests: Requests, _ kind: String, timeout: TimeInterval = 60) async -> NodeWire.Reply? {
+    /// `kind` from `peer` (the user, by default), answered.
+    private func ask(_ requests: Requests, _ kind: String, from peer: PeerFacts = RequestsTests.user, timeout: TimeInterval = 60) async -> NodeWire.Reply? {
         let reply = Locked<NodeWire.Reply?>(nil)
         requests.queue.async {
-            requests.handle(NodeWire.Request(id: "r1", kind: kind, action: UUID().uuidString.lowercased()), from: Self.user) { answer in
+            requests.handle(NodeWire.Request(id: "r1", kind: kind, action: UUID().uuidString.lowercased()), from: peer) { answer in
                 reply.mutate { $0 = answer }
             }
         }
@@ -159,5 +159,35 @@ struct RequestsTests {
         #expect(asked.value == 1)
         // Each was asked to end once.
         #expect(Self.killed(stub).count == 4, "\(Self.killed(stub))")
+    }
+
+    @Test func underTheWeakerRuleAStateChangeFromAPeerWithNoTerminalIsRefused() async throws {
+        // The weaker rule has no cgroup to tell by: a session's process that double-forked out of the host's tree,
+        // dropped its terminal (`setsid`) and its marker passes the other four lines. A state change then needs the
+        // controlling terminal its typed code is asked on.
+        let stub = try StubHost(scratch)
+        defer { stub.quit() }
+        let asked = Locked(0)
+        let requests = try await requests(stub) {
+            asked.mutate { $0 += 1 }
+            return .ok
+        }
+        var escaped = Self.user
+        escaped.terminal = .none
+        let reply = try #require(await ask(requests, "stop", from: escaped))
+        #expect(reply.ok == false && reply.error?.code == NodeWire.Code.voice.rawValue, "\(reply)")
+        #expect(reply.error?.message.contains("controlling terminal") == true, "\(reply)")
+        #expect(asked.value == 0)
+        #expect(requests.queue.sync { requests.stopping } == false)
+        #expect(requests.queue.sync { requests.accepted }.isEmpty)
+        // A request that changes nothing is taken from it, as the reads are.
+        let start = try #require(await ask(requests, "start", from: escaped))
+        #expect(start.ok, "\(start)")
+        let status = try #require(await ask(requests, "status", from: escaped))
+        #expect(status.ok, "\(status)")
+        // With a terminal of its own (no session's), the stop goes.
+        let stop = try #require(await ask(requests, "stop"))
+        #expect(stop.ok, "\(stop)")
+        #expect(asked.value == 1)
     }
 }

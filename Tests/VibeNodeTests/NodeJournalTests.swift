@@ -25,10 +25,12 @@ struct NodeJournalTests {
     }
 
     /// An entry of the command line's, from `cgroup`.
-    static func own(_ event: String, kind: String? = nil, action: String? = nil, cgroup: String = "/init.scope", uid: String = "1000", at date: Date) -> String {
+    static func own(_ event: String, kind: String? = nil, action: String? = nil, epoch: String? = nil, cgroup: String = "/init.scope",
+                    uid: String = "1000", at date: Date) -> String {
         var fields: [String: Any] = ["SYSLOG_IDENTIFIER": "vibeswitcher", "VIBESWITCHER_EVENT": event, "MESSAGE": "vibeswitcher \(event)",
                                      "_UID": uid, "_SYSTEMD_CGROUP": cgroup]
         if let kind { fields["VIBESWITCHER_KIND"] = kind }
+        if let epoch { fields["VIBESWITCHER_EPOCH"] = epoch }
         if let action { fields["VIBESWITCHER_ACTION"] = action }
         return line(fields, at: date)
     }
@@ -98,8 +100,45 @@ struct NodeJournalTests {
         let entries = Self.read([Self.own("request", kind: "stop", action: "a1", at: Self.start),
                                  Self.own("request", kind: "start", action: "a2", cgroup: "/system.slice/cron.service", at: Self.start)])
         let marks = NodeJournal.marks(accepted: [("stop", "a1", Self.start), ("start", "a2", Self.start)], entries: entries, rule: Self.rule)
-        #expect(marks.count == 1, "\(marks)")
-        #expect(marks.first?.contains("/system.slice/cron.service, not a terminal's") == true, "\(marks)")
+        #expect(marks.count == 2, "\(marks)")
+        #expect(marks.contains { $0.contains("/system.slice/cron.service, not a terminal's") }, "\(marks)")
+        // And the entry from cron doesn't record the request it names: that one is marked as having none.
+        #expect(marks.contains { $0.contains("accepted start") && $0.contains("a2") && $0.contains("no entry") }, "\(marks)")
+    }
+
+    @Test func aForgedRequestEntryDoesntHideAnAcceptedRequest() {
+        // `logger -t vibeswitcher` from a session's process writes the identifier and the fields it likes; journald's
+        // `_UID` and `_SYSTEMD_CGROUP` say who sent it. An entry that doesn't pass the rule records nothing.
+        let unit = "/user.slice/user-1000.slice/user@1000.service/app.slice/vibeswitcher-node.service"
+        for (cgroup, uid) in [("/system.slice/cron.service", "1000"), (unit, "1000"), ("/init.scope", "1001")] {
+            let entries = Self.read([Self.own("request", kind: "stop", action: "a1", cgroup: cgroup, uid: uid, at: Self.start)])
+            let marks = NodeJournal.marks(accepted: [("stop", "a1", Self.start)], entries: entries, rule: Self.rule)
+            #expect(marks.contains { $0.contains("accepted stop") && $0.contains("a1") && $0.contains("no entry") }, "\(cgroup) \(uid): \(marks)")
+        }
+        // The user's own entry naming the action, but of another kind (or of none), doesn't record it either.
+        for kind in ["start", nil] as [String?] {
+            let entries = Self.read([Self.own("request", kind: kind, action: "a1", at: Self.start)])
+            let marks = NodeJournal.marks(accepted: [("stop", "a1", Self.start)], entries: entries, rule: Self.rule)
+            #expect(marks.count == 1 && marks.first?.contains("accepted stop") == true, "\(String(describing: kind)): \(marks)")
+        }
+        // Nor an event other than a request's.
+        let ack = Self.read([Self.own("ack", kind: "stop", action: "a1", at: Self.start)])
+        #expect(NodeJournal.marks(accepted: [("stop", "a1", Self.start)], entries: ack, rule: Self.rule).count == 1)
+        // The user's own entry of that kind does.
+        let recorded = Self.read([Self.own("request", kind: "stop", action: "a1", at: Self.start)])
+        #expect(NodeJournal.marks(accepted: [("stop", "a1", Self.start)], entries: recorded, rule: Self.rule).isEmpty)
+    }
+
+    @Test func aRequestEntryCountsOnlyForTheServersEpoch() {
+        // `status` gives the server's epoch: the entry the command line wrote for a request to it carries that one.
+        let mine = Self.read([Self.own("request", kind: "stop", action: "a1", epoch: "e1", at: Self.start)])
+        #expect(NodeJournal.marks(accepted: [("stop", "a1", Self.start)], epoch: "e1", entries: mine, rule: Self.rule).isEmpty)
+        // Another server's epoch, or none, doesn't record it.
+        for entry in [Self.own("request", kind: "stop", action: "a1", epoch: "e0", at: Self.start),
+                      Self.own("request", kind: "stop", action: "a1", at: Self.start)] {
+            let marks = NodeJournal.marks(accepted: [("stop", "a1", Self.start)], epoch: "e1", entries: Self.read([entry]), rule: Self.rule)
+            #expect(marks.count == 1 && marks.first?.contains("accepted stop") == true, "\(marks)")
+        }
     }
 
     @Test func anAcceptedRequestWithNoJournalEntryIsMarked() {

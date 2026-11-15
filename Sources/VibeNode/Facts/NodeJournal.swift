@@ -18,6 +18,7 @@ public struct JournalEntry: Equatable, Sendable {
     public var event: String? { fields["VIBESWITCHER_EVENT"] }
     public var action: String? { fields["VIBESWITCHER_ACTION"] }
     public var kind: String? { fields["VIBESWITCHER_KIND"] }
+    public var epoch: String? { fields["VIBESWITCHER_EPOCH"] }
 }
 
 /// The journal, read and written by the command line (the engine plan's EN-D15, the security architecture document's
@@ -145,12 +146,17 @@ public enum NodeJournal {
     }
 
     /// What `status` marks (S3): an accepted request (`status`'s list from the server: its kind, action and time) that
-    /// has no journal entry of the command line's naming its action, and an entry of the command line's whose
-    /// `_SYSTEMD_CGROUP` isn't a terminal scope (or whose user isn't the user).
-    public static func marks(accepted: [(kind: String, action: String?, at: Date?)], entries: [JournalEntry], rule: VoiceRule) -> [String] {
+    /// no journal entry records, and an entry of the command line's whose `_SYSTEMD_CGROUP` isn't a terminal scope (or
+    /// whose user isn't the user). An entry records a request when it `passes` (a session's process can write any
+    /// identifier and field with `logger -t vibeswitcher`: only journald's own fields say who sent it), its event is
+    /// `request`, and its action and kind are the request's; given the server's `epoch` (`status`'s), its epoch is
+    /// that one too (the command line writes the epoch of the server it asked).
+    public static func marks(accepted: [(kind: String, action: String?, at: Date?)], epoch: String? = nil, entries: [JournalEntry],
+                             rule: VoiceRule) -> [String] {
         var marks: [String] = []
-        let recorded = Set(entries.filter { $0.identifier == identifier && $0.event == "request" }.compactMap(\.action))
-        for request in accepted where !(request.action.map(recorded.contains) ?? false) {
+        let recording = own(entries, rule: rule) { $0.event == "request" && (epoch == nil || $0.epoch == epoch) }
+        let recorded = Set(recording.compactMap { entry in entry.action.flatMap { action in entry.kind.map { "\(action)|\($0)" } } })
+        for request in accepted where !(request.action.map { recorded.contains("\($0)|\(request.kind)") } ?? false) {
             marks.append("the server accepted \(ConfigSeal.inert(request.kind, limit: 40))"
                          + (request.at.map { " at \(NodeWire.dateText($0))" } ?? "")
                          + " (action \(ConfigSeal.inert(request.action ?? "none", limit: 40))) and the journal has no entry for it")

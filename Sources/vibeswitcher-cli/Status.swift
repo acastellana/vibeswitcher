@@ -64,7 +64,8 @@ enum StatusCommand {
             result = given
         }
         let facts = context.facts()
-        let journal = journalLines(context, accepted: result["accepted"]?.array ?? [], restart: result["restart"])
+        let journal = journalLines(context, accepted: result["accepted"]?.array ?? [], epoch: result["epoch"]?.string,
+                                   restart: result["restart"])
         if asJSON {
             var report = result.object ?? [:]
             report["format"] = .int(format)
@@ -100,8 +101,9 @@ enum StatusCommand {
 
     /// What the journal says that the user should see (EN-D15): a host restart the server saw (`restart`, E8) with how
     /// the host ended and whether a `vibeswitcher start` explains it, until acknowledged; unexplained starts, stops and
-    /// server restarts not yet acknowledged, how the unit's last process ended, and `NodeJournal.marks`.
-    static func journalLines(_ context: NodeContext, accepted: [NodeWire.Value], restart: NodeWire.Value? = nil) -> [String] {
+    /// server restarts not yet acknowledged, how the unit's last process ended, and `NodeJournal.marks` (given the
+    /// server's `epoch`).
+    static func journalLines(_ context: NodeContext, accepted: [NodeWire.Value], epoch: String?, restart: NodeWire.Value? = nil) -> [String] {
         let entries: [JournalEntry]
         let state = context.unitState()
         let ended = state?.result.map { "it last ended \(inert($0)), status \(inert(state?.execMainStatus))" }
@@ -128,7 +130,7 @@ enum StatusCommand {
             lines.append("journal: a \(event.kind.rawValue) at \(NodeWire.dateText(event.at)) that no `vibeswitcher start` or `stop` explains (`vibeswitcher status --ack` once read)")
         }
         let requests = accepted.map { ($0["kind"]?.string ?? "?", $0["action"]?.string, $0["at"]?.string.flatMap(NodeWire.date)) }
-        lines += NodeJournal.marks(accepted: requests, entries: entries, rule: rule).map { "journal: " + $0 }
+        lines += NodeJournal.marks(accepted: requests, epoch: epoch, entries: entries, rule: rule).map { "journal: " + $0 }
         return lines
     }
 

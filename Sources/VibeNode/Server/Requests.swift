@@ -126,6 +126,10 @@ public final class Requests: @unchecked Sendable {
                 note("refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, "not the user's voice: \(why)")))
             }
+            if let why = Voice.handsRefusal(facts, kind: request.kind, rule: rule) {
+                note("refused \(request.kind) from pid \(facts.pid): \(why)")
+                return reply(.init(re: request.id, error: .init(.voice, why)))
+            }
             let records = Self.recorded.contains(request.kind)
             guard !records || request.action.map({ UUID(uuidString: $0) != nil }) == true else {
                 return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))

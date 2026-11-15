@@ -42,6 +42,21 @@ public enum Voice: Equatable, Sendable {
         guard !runner else { return .notUser("it runs under a branch code runner") }
         return .user
     }
+
+    /// Why a request of `kind` from a peer the rule judged the user's is still refused, or nil: under the weaker rule
+    /// (no cgroup to tell by), a request that changes state (`NodeWire.changesState`) from a peer with no controlling
+    /// terminal. A session's process that left the host's tree (a double fork), its terminal (`setsid`) and its marker
+    /// passes the four lines; the command line asks every state change's typed code on its controlling terminal
+    /// (EN-D5), so the user's request has one. A process that makes itself one (`script`) still passes: a guard rail,
+    /// as the typed word is (S3).
+    public static func handsRefusal(_ facts: PeerFacts, kind: String, rule: VoiceRule) -> String? {
+        guard rule.mode == .weaker, NodeWire.changesState(kind) else { return nil }
+        switch facts.terminal {
+        case .named: return nil
+        case .none, .unreadable:
+            return "under the weaker rule (no systemd to tell by) \(kind) needs the controlling terminal its typed code is asked on, and this process has none"
+        }
+    }
 }
 
 /// The live sessions as the voice rule needs them: their programs (`HostSession.childPID`) and terminals, the host
@@ -72,9 +87,10 @@ public struct LiveSessions: Equatable, Sendable {
 /// from a file a worker could remove.
 public struct VoiceRule: Equatable, Sendable {
     public enum Mode: String, Sendable {
-        /// The cgroup rule: the server runs in the node's unit, under the user's systemd.
+        /// The cgroup rule: the server runs under the user's systemd (in the node's unit, or another unit there).
         case systemd
-        /// No systemd to tell by: the other four lines only, and `status` says so.
+        /// No systemd to tell by: the other four lines only, a state change only from a peer with a controlling
+        /// terminal (`Voice.handsRefusal`), and `status` says so.
         case weaker
     }
 
@@ -135,10 +151,13 @@ public struct VoiceRule: Equatable, Sendable {
         self.says = says
     }
 
-    /// The rule, fixed once at the server's start from its own cgroup lines (`ownCgroup`): inside
-    /// `…/user@<uid>.service/…/vibeswitcher-node.service`, the systemd rule with `terminalScopes`; given `testScopes`
-    /// (a scratch host's `--server-arg --test-user-scopes=…`, never the user's server's), the cgroup rule with those;
-    /// anything else, the weaker rule. No file decides it.
+    /// The rule, fixed once at the server's start from its own cgroup lines (`ownCgroup`, `/proc/self`'s: no peer,
+    /// session or file has a say): inside `…/user@<uid>.service/…/vibeswitcher-node.service`, the systemd rule with
+    /// `terminalScopes`; inside the user's manager in another unit (the unified or the systemd line: `systemd-run
+    /// --user`, a unit not the node's), the systemd rule too, since the server's sessions are in the manager with it
+    /// and the rule refuses them; given `testScopes` (a scratch host's `--server-arg --test-user-scopes=…`, never the
+    /// user's server's), the cgroup rule with those; anything else (no user manager runs the server), the weaker rule.
+    /// No file decides it, and where the user's manager runs the server it is never the weaker rule.
     public static func at(start ownCgroup: [String]?, testScopes: [String]?, uid: uid_t = getuid()) -> VoiceRule {
         if let testScopes {
             return VoiceRule(mode: .systemd, scopes: testScopes.map { Scope($0, basis: "a scratch host's test") }, uid: uid,
@@ -150,8 +169,13 @@ public struct VoiceRule: Equatable, Sendable {
             return VoiceRule(mode: .systemd, scopes: terminalScopes, uid: uid,
                              says: "the cgroup rule: the server runs in \(nodeUnit)")
         }
+        let paths = [ownCgroup.flatMap(PeerFacts.unifiedPath), ownCgroup.flatMap(PeerFacts.systemdPath)].compactMap { $0 }
+        if let managed = paths.first(where: { $0.split(separator: "/").contains("user@\(uid).service") }) {
+            return VoiceRule(mode: .systemd, scopes: terminalScopes, uid: uid,
+                             says: "the cgroup rule: the server runs in the user's systemd manager, but in \(managed), not \(nodeUnit)")
+        }
         return VoiceRule(mode: .weaker, scopes: [], uid: uid,
-                         says: "the weaker rule: no systemd unit to tell by (the server's cgroup is \(path.isEmpty ? "unknown" : path)), so a peer's cgroup isn't checked")
+                         says: "the weaker rule: no systemd unit to tell by (the server's cgroup is \(path.isEmpty ? "unknown" : path)), so a peer's cgroup isn't checked and a state change needs a controlling terminal")
     }
 
     /// Why the cgroup `lines` aren't a user's terminal's under this rule, or nil when they are: each of the unified

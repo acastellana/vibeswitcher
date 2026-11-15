@@ -135,10 +135,69 @@ struct VoiceRuleTests {
         #expect(VoiceRule.at(start: ["0::/user.slice/user-1001.slice/user@1001.service/app.slice/vibeswitcher-node.service"], testScopes: nil, uid: Self.uid).mode == .weaker)
         #expect(VoiceRule.at(start: Self.hybrid("/init.scope"), testScopes: nil, uid: Self.uid).mode == .weaker)
         #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid).mode == .weaker)
+        // Where the user's manager runs the server (another unit than the node's: `systemd-run --user`, a unit of a
+        // worker's), the cgroup tells: the systemd rule, never the weaker one. Its sessions are in the user's manager
+        // with it, so the rule refuses them.
+        for path in ["/user.slice/user-1000.slice/user@1000.service/app.slice/run-u3.service",
+                     "/user.slice/user-1000.slice/user@1000.service/init.scope"] {
+            let rule = VoiceRule.at(start: Self.hybrid(path), testScopes: nil, uid: Self.uid)
+            #expect(rule.mode == .systemd && rule.scopes == VoiceRule.terminalScopes, "\(path): \(rule)")
+            #expect(Self.refused(Self.judged(Self.peer(cgroup: Self.hybrid(path)), rule: rule)))
+            #expect(Self.judged(Self.peer(), rule: rule) == .user)
+        }
+        // On a hybrid layout either line in the user's manager is enough.
+        let mixed = ["29:name=systemd:/user.slice/user-1000.slice/user@1000.service/app.slice/run-u3.service", "0::/init.scope"]
+        #expect(VoiceRule.at(start: mixed, testScopes: nil, uid: Self.uid).mode == .systemd)
         // A scratch host's test scopes give the cgroup rule on those scopes alone.
         let test = VoiceRule.at(start: Self.hybrid("/init.scope"), testScopes: ["/test.scope"], uid: Self.uid)
         #expect(test.mode == .systemd && test.scopes.map(\.pattern) == ["/test.scope"])
         #expect(Self.judged(Self.peer(cgroup: ["0::/test.scope"]), rule: test) == .user)
         #expect(Self.refused(Self.judged(Self.peer(), rule: test)))
+    }
+
+    /// The rule is fixed once, at the server's start, from the server's own cgroup (`/proc/self`'s, by its own pid) and
+    /// its own arguments: nothing a peer sends, no file under the node's root or `/run/user/<uid>`, and no request
+    /// changes it afterwards.
+    @Test func theRuleIsFixedOnceAtTheServersStartFromItsOwnCgroup() throws {
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var calls: [String] = []
+        for folder in ["Sources/VibeNode", "Sources/vibeswitcher-server", "Sources/vibeswitcher-cli"] {
+            let base = repo.appendingPathComponent(folder)
+            guard let walker = FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil) else { continue }
+            for case let file as URL in walker where file.pathExtension == "swift" {
+                let text = ServerLintTests.code(try String(contentsOf: file, encoding: .utf8))
+                for line in text.components(separatedBy: "\n") where line.contains("VoiceRule.at(") {
+                    calls.append(file.lastPathComponent + ": " + line.trimmingCharacters(in: .whitespaces))
+                }
+            }
+        }
+        #expect(calls == ["ServerStart.swift: let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes)"], "\(calls)")
+        // `Requests` keeps the rule it was given: a constant.
+        let requests = ServerLintTests.code(try String(contentsOf: repo.appendingPathComponent("Sources/VibeNode/Server/Requests.swift"), encoding: .utf8))
+        #expect(requests.contains("public let rule: VoiceRule"))
+        #expect(!requests.contains("var rule"))
+    }
+
+    @Test func underTheWeakerRuleAStateChangeNeedsAControllingTerminal() {
+        let weaker = VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid)
+        #expect(weaker.says.contains("a state change needs a controlling terminal"), "\(weaker.says)")
+        // An escaped session's process: out of the host's tree, no terminal, no marker. The four lines pass it.
+        let escaped = Self.peer(cgroup: nil, ancestry: [.init(pid: 900, startTicks: 5), .init(pid: 1, startTicks: 1)], terminal: .none)
+        #expect(Self.judged(escaped, rule: weaker) == .user)
+        // A state change from it is refused; with a terminal (no session's) it isn't.
+        for kind in ["stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch"] {
+            let why = Voice.handsRefusal(escaped, kind: kind, rule: weaker)
+            #expect(why?.contains("controlling terminal") == true, "\(kind): \(String(describing: why))")
+            #expect(Voice.handsRefusal(Self.peer(cgroup: nil, terminal: .named("ttypts0")), kind: kind, rule: weaker) == nil, "\(kind)")
+            #expect(Voice.handsRefusal(Self.peer(cgroup: nil, terminal: .unreadable), kind: kind, rule: weaker) != nil, "\(kind)")
+        }
+        // What changes nothing (no typed word), the reads and the lead's tool server's kinds aren't asked it.
+        for kind in ["start", "config.held", "base.show", "status", "questions", "question.post", "unlisted"] {
+            #expect(Voice.handsRefusal(escaped, kind: kind, rule: weaker) == nil, "\(kind)")
+        }
+        // Every user's-voice kind is one or the other: a kind added later changes state unless listed as not.
+        #expect(NodeWire.kinds.filter { $0.value == .user }.keys.allSatisfy { NodeWire.changesState($0) != NodeWire.changesNothing.contains($0) })
+        // The cgroup rule doesn't ask it: there a peer with no terminal is the user's when its cgroup is a terminal's.
+        #expect(Voice.handsRefusal(Self.peer(terminal: .none), kind: "stop", rule: Self.systemd) == nil)
     }
 }

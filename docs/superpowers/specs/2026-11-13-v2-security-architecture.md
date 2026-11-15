@@ -467,6 +467,26 @@ The server asks the host for the live sessions' programs and terminals (it is th
 Without a user systemd (the fallback start), there is no cgroup to tell by, the rule is the weaker four lines, and
 `status` says so.
 
+**(call, 2026-11-15)** **Which rule is fixed once, at the server's start, from the server's own cgroup**
+(`/proc/self/cgroup`) and its own arguments, never from what a peer sends or a file a session can write or remove:
+inside the node's unit, the cgroup rule; inside the user's manager in another unit (`systemd-run --user`, a unit not
+the node's), the cgroup rule too, because the server's sessions are in the manager with it and the rule refuses them;
+the weaker rule only where no user manager runs the server. A session can't move the server out of the node's unit
+without restarting the node into a host of its own, which is T3's route (S11 item 3), and on the user's node the
+command line refuses a listener outside the node's unit (below) before any request.
+
+**(call, 2026-11-15)** **Under the weaker rule a state change needs a controlling terminal.** Without the cgroup line, a
+session's process that double-forks out of the host's tree, drops its terminal (`setsid`) and unsets
+`VIBESWITCHER_SESSION` passes the other four lines. The server can't check a code the command line derives from its
+own action id (`stop`, `lead`: EN-D5's "own" code), so it checks the one fact the typed code needs: under the weaker
+rule, a request that changes state (every user's-voice kind but `start`, `config held` and `base show`, which change
+nothing and ask no typed word; a kind added later counts as changing state) is refused, as `voice`, from a peer with no
+controlling terminal, or one that can't be read; the terminal must still be no session's. That was not already
+required: the command line asks the typed code on its terminal, but the server took a state change from a peer with
+none. Kept a guard rail, not a lock: a process that makes itself a terminal (`script`) passes, as it passes the typed
+word. The cgroup rule doesn't ask it: there the cgroup refuses the escaped process, and a peer with no terminal in a
+terminal's scope is the user's.
+
 **(call, new)** **A state-changing request asks for the user's hands.** The command line shows what the request will
 do (S7's lists, the answer's card) and asks for a word typed on its controlling terminal; with no terminal on stdin it
 refuses, saying why. An agent's Bash tool has none (S1); `script` gives it one, so this is a guard rail against the
@@ -507,7 +527,11 @@ itself, after its own typed code (the engine's EN-D15), so a seized server can't
 
 Each accepted user's-voice request is written to the journal by the command line (ids and hashes only: the journal is
 readable by the `adm` group, so no answer text, goal or screen content goes there) and shown by `status`, with its
-pid, cgroup and command line. A request journald saw from a cgroup that isn't a terminal's is marked.
+pid, cgroup and command line. A request journald saw from a cgroup that isn't a terminal's is marked. **(2026-11-15)**
+An entry records an accepted request only when journald's own fields pass the rule (the user's `_UID`, a terminal's
+`_SYSTEMD_CGROUP`), its event is `request`, its action and kind are the request's, and its epoch is the server's that
+`status` asked: a session's process can write any `SYSLOG_IDENTIFIER` and field (`logger -t vibeswitcher`), so a
+forged entry naming the action never hides the "accepted with no journal entry" mark.
 
 **(call)** **The command line checks the server it reached**: on Linux, the listener (`SO_PEERCRED` on the client's
 end) must be non-dumpable (`/proc/<pid>/fd` is root's), in the node's unit's cgroup (read from `/proc/<pid>/cgroup`,
@@ -534,6 +558,8 @@ process that a process of the user can't change.
 - A worker can replace the command line itself: `~/.vibeswitcher/v2/builds/<commit>/bin/vibeswitcher` is the user's
   file, and running it by absolute path (the bootstrap path's machine steps) only defeats PATH.
 - A worker that restarted the unit with its own files is the server, and the check above passes.
+- Under the weaker rule (no user systemd), a session's process that left the host's tree, unset its marker and holds
+  a terminal of its own (`script`, a pty it opened and made its controlling terminal) passes as the user's voice.
 - The text of the lead's questions: a turned lead asks what it likes. Only the card's facts are the engine's.
 
 Acceptable only on VibeSwitcher's own repository, with interop off, until stage 4's signed approvals.
@@ -561,7 +587,12 @@ Acceptable only on VibeSwitcher's own repository, with interop off, until stage 
 `VoiceRuleTests.aPeerUnderABranchCodeRunnerIsNotTheUser`, `VoiceRuleTests.withoutSystemdTheRuleIsTheOtherFourAndSaysSo`,
 `VoiceRuleTests.theWeakerRuleIsChosenOnlyFromTheServersOwnCgroup`, `StartCommandTests.aStateChangeWithNoTerminalIsRefused`,
 `NodeJournalTests.aJournalEntryFromANonTerminalCgroupIsMarkedInStatus`,
-`NodeJournalTests.anAcceptedRequestWithNoJournalEntryIsMarked`, `NodeWireTests.aLineOverOneMebibyteIsRefused`. The
+`NodeJournalTests.anAcceptedRequestWithNoJournalEntryIsMarked`, `NodeWireTests.aLineOverOneMebibyteIsRefused`; and
+from E1's security follow-ups (2026-11-15): `NodeJournalTests.aForgedRequestEntryDoesntHideAnAcceptedRequest`,
+`NodeJournalTests.aRequestEntryCountsOnlyForTheServersEpoch` (only the user's entries record a request),
+`VoiceRuleTests.theRuleIsFixedOnceAtTheServersStartFromItsOwnCgroup`,
+`VoiceRuleTests.underTheWeakerRuleAStateChangeNeedsAControllingTerminal`,
+`RequestsTests.underTheWeakerRuleAStateChangeFromAPeerWithNoTerminalIsRefused` (the weaker rule, pinned). The
 scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (a Windows
 Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. The engine's E4:
 `LeadStartTests.aSessionsProcessCannotStartALead`, `LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`,
@@ -1439,6 +1470,8 @@ against it. Each line says what reduces it now, if anything.
 13. The user's voice, after the cgroup rule (S3): ptrace of the user's shell or command line (both dumpable, in
     `/init.scope`); the user's own Claude Code turned by text the worker wrote (it passes the rule; the typed word and
     the user's deny rules are guard rails, decision 14); WSL interop while on; `ssh localhost` if an ssh server runs.
+    Without a user systemd (S3's weaker rule), also a session's process that left the host's tree and holds a terminal
+    of its own (`script`): the server takes a state change only from a peer with a controlling terminal, a guard rail.
     Each user's-voice request is in the journal and shown by `status`.
 14. The user's own processes acting for a worker: a `vibeswitcher` or `systemctl` earlier on the user's PATH, an alias
     in a shell startup file, and the user's terminal (`/dev/pts/N` is the user's: a worker can draw text the user didn't
@@ -1532,7 +1565,7 @@ sockets; the host, the server and the parsers are non-dumpable from their exec, 
 out of reach, except in the host's own start by systemd (item 4), and if Task 3's measurement holds; only the server
 child's connections are the app (S2); a connection a worker writes on stops being anyone's (S5); a handover's state
 and secrets are never on disk (S8); nothing the host starts runs a file changed after the host loaded it, or loads a
-library from a folder the user can write (S9); an escape from a session is never the user's voice (S3); a crash of
+library from a folder the user can write (S9); an escape from a session is never the user's voice under the cgroup rule (S3); a crash of
 the host or the server writes no dump. **While interop is on, none of these holds**, and plain mode on this machine
 has no lock at all.
 
