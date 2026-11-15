@@ -419,11 +419,11 @@ own shell and Claude Code) are acceptable while the only project on the node is 
 `ServerChildTests.aRebindThatLosesEveryAttemptIsTriedAgainAtTheHousekeeping` (the socket's file from the kernel);
 `HostPathDeviceTests.aSocketOnAFileSystemWhoseStatDeviceIsNotItsOwnIsTheHosts` (on an overlay whose `st_dev` isn't
 unix_diag's);
-`SocketsTests.aListenersFileIsOwnerOnlyFromItsBindAndNoLinkIsFollowed` (its mode, before the bind); planned: stage 2 plan task 4b.
+`SocketsTests.aListenersFileIsOwnerOnlyFromItsBindAndNoLinkIsFollowed` (its mode, before the bind);
+`HostIdentitySeamTests.theMacsAppIsStillTheCdhashCheck`, `HostIdentitySeamTests.aConnectorConnectionIsTheAppWithNoChallenge`,
+`HostIdentitySeamTests.noConnectionByPathIsTheAppOnLinux` (stage 2 Task 4b).
 
-**Tests to write:** Task 4b: `HostIdentitySeamTests.theMacsAppIsStillTheCdhashCheck`,
-`aConnectorConnectionIsTheAppWithNoChallenge`, `noConnectionByPathIsTheAppOnLinux` (Tasks 8a's and 8b's are under
-Held by).
+**Tests to write:** none left: Tasks 4b's, 8a's and 8b's are under Held by.
 
 ## S3. The user's voice before signed approvals
 
@@ -808,10 +808,10 @@ parser's reply grammar in Task 9; the server's own first statements in the engin
 `ParserReplyTests.aProgramTurningFocusEventsOnIsToldItHasFocus`,
 `ParserReplyTests.aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds`,
 `ParserReplyTests.droppedRepliesAreLoggedOnceASecond` (Task 12a and its review);
-planned: stage 2 plan task 9 (9c, 9d).
+`HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`, `HandoverLinuxTests.aHandoverImageIsNotDumpableFromItsExec`
+(Task 9c; S8 names them too).
 
-**Tests to write:** Task 9: `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`,
-`aHandoverImageIsNotDumpableFromItsExec`.
+**Tests to write:** none left: Task 9's are under Held by.
 
 ## S7. The vault's key per mode
 
@@ -1152,13 +1152,13 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `ServerChildTests.aSwitchBringsTheNewBuildsServer` (Task 9d); `HandoverLinuxTests.aTargetRenamedOverBeforeItsCheckIsCheckedAsLoaded`
 (the 9d review); `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`,
 `HandoverLinuxTests.aHostWithNoGitOnlyRootCanWriteDoesNotStart` (Task 10c; on Linux only), `ToolsTests.theMacsGitIsStillUsrBinGit`
-(Task 10c; on the Mac only); planned: stage 2 plan task 3, task 8, task 9 (9c).
+(Task 10c; on the Mac only); `SealedCopyTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`,
+`SealedCopyTests.aSealedCopysHashIsOfTheBytesItRuns`, `ProcessesTests.aPidsTokenIsItsPeerToken` (Task 3);
+`ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts` (Task 8; S2 names it too);
+`HandoverLinuxTests.aFailedTakeOverGoesBackThroughTheSealedCopy`,
+`HandoverLinuxTests.aFallbackImageRewrittenInPlaceIsNotWhatRuns` (Task 9c; S8 names them too).
 
-**Tests to write:** Task 3: `ProcessSelfTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`,
-`aSealedCopysHashIsOfTheBytesItRuns`, `aPidsTokenIsItsPeerToken`. Task 8:
-`ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`. Task 9:
-`HostHardeningTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`.
-E4: `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`. Step 8: `StartCommandTests` (the unit written,
+**Tests to write:** E4: `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`. Step 8: `StartCommandTests` (the unit written,
 `Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, the commit's folder), `noNameIsBothUnsetAndAssigned`, a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,
 `anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (also reads `/proc/<pid>/maps` of the installed host, server
@@ -1656,11 +1656,11 @@ are written in the task named.
 | Sessions reach only themselves, what they started and (a lead) their team | `LeadVaultHostTests.aWorkerCanReadItselfButCannotReadOrTypeIntoItsLeadOrAnotherProject`, `aLeadCanReadAndTypeIntoItsWorkerButCannotAccessAnotherProject`, `aWorkersShellCantGiveAVerdictSealAsTheUserOrTypeIntoTheLead`; `HostSecurityHardeningTests.unknownClientsCannotReadMutateOrSubscribeToSessions` (now); an unknown process's vault requests (Task 5b, new) | on Linux in Task 5b |
 | Branch code is no session's | `VerifierBranchCodeHostTests.aVerifiersBashCantSubmitItsVerdictAndItsToolServerStillDoes` (now); `anEscapedVerifierCommandWithoutSetsidIsNobodys` | Task 5b, Task 10 |
 | A session's terminal is named as the table names it, and is its own from the start | `HostedSessionTerminalTests.*` | Task 6 |
-| Host, parsers, server, probe and handover images are non-dumpable from their exec | `ProcessSelfTests.aHardenedProcesssMemoryCantBeOpened`, `aHardenedProcesssDescriptorsCantBeTaken`, `aChildStartedFromASealedCopyIsNotDumpableFromItsExec`; `HostHardeningTests.theHostIsNotDumpableAfterStartAndAfterAHandover`, `aParserIsNotDumpable`, `aHandoverImageIsNotDumpableFromItsExec`, `aTracedNewImageGoesBackWithoutTheVault`; `ServerChildTests.theServerHelperIsNotDumpable`; E1's `theServerIsNotDumpable` | Tasks 3, 8, 9; E1 |
+| Host, parsers, server, probe and handover images are non-dumpable from their exec | `ProcessSelfTests.aHardenedProcesssMemoryCantBeOpened`, `aHardenedProcesssDescriptorsCantBeTaken`; `SealedCopyTests.aChildStartedFromASealedCopyIsNotDumpableFromItsExec`; `HostHardeningTests.theHostIsNotDumpableAfterStartAndAfterAHandover`, `aParserIsNotDumpable`, `aTracedNewImageGoesBackWithoutTheVault`; `HandoverLinuxTests.aHandoverImageIsNotDumpableFromItsExec`; `ServerChildTests.theServerHelperIsNotDumpable`; E1's `theServerIsNotDumpable` | Tasks 3, 8, 9; E1 |
 | No descriptor leaks into a child | `CloseOnExecLintTests.noBareSocketAcceptOrOpen`, `HostServerTests.aSpawnDuringAnAcceptInheritsNoConnection` | Task 4a |
 | A parser types only replies | `ParserReplyTests.*` | Task 9 |
 | Nothing secret in argv or environment | `HostHardeningTests.nothingSecretIsInTheHostsArgumentsOrEnvironment` | Task 9 |
-| Nothing the host runs comes from a file changed after it loaded it, or from a folder the user can write | `ProcessSelfTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`; `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`; `HostHardeningTests.aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`, `aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`; `InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` | Tasks 3, 8, 9; step 8 |
+| Nothing the host runs comes from a file changed after it loaded it, or from a folder the user can write | `SealedCopyTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`; `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`; `HostHardeningTests.aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`; `HandoverLinuxTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`; `InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` | Tasks 3, 8, 9; step 8 |
 | The user's host hands over only to an installed build whose hash matches, and runs what it checked | `HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`, `aTargetRenamedOverAfterItsCheckIsNotWhatRuns` and the five beside them | Task 9 |
 | A handover writes no file and keeps the vault on fallback | `HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`, `aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`, `aDowngradeIsRefused`; `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`; `HostHandoverStateTests.aStateOfAnotherFormatIsRefused` (now) | Tasks 8, 9 |
 | No switch while a worker or verifier runs, until measured | `aSwitchWhileAWorkerRunsIsRefused` | step 8 |
