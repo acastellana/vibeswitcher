@@ -371,6 +371,31 @@ struct ProcessesTests {
         #expect(Processes.residentBytes(pid) == nil)
     }
 
+    /// A child that ignores USR1 (a shell's `trap ''`, kept across its exec) is read so, USR2 at its default; once it
+    /// has gone, nothing is read.
+    @Test func theSignalsAChildIgnoresAreRead() async throws {
+        let child = try await Self.startEchoing("/bin/sh", ["-c", "trap '' USR1; exec /bin/cat"])
+        let pid = child.pid
+        let ignored = Processes.ignoredSignals(pid)
+        child.end()
+        let mask = try #require(ignored)
+        #expect(mask & (UInt64(1) << UInt64(SIGUSR1 - 1)) != 0, "\(String(mask, radix: 16))")
+        #expect(mask & (UInt64(1) << UInt64(SIGUSR2 - 1)) == 0, "\(String(mask, radix: 16))")
+        #expect(Processes.ignoredSignals(pid) == nil)
+        #expect(Processes.ignoredSignals(0) == nil)
+        #expect(Processes.ignoredSignals(-1) == nil)
+    }
+
+    @Test func aStatusTextsIgnoredSignalsAreItsSigIgn() {
+        let status = "Name:\tbash\nSigQ:\t0/63360\nSigPnd:\t0000000000000000\nSigBlk:\t0000000000010000\nSigIgn:\t0000000000381004\n"
+            + "SigCgt:\t000000004b813efb\n"
+        #expect(Processes.ignoredSignals(fromStatus: status) == 0x381004)
+        #expect(Processes.ignoredSignals(fromStatus: "Name:\tbash\n") == nil)
+        #expect(Processes.ignoredSignals(fromStatus: "SigIgn:\t00zz\n") == nil)
+        #expect(Processes.ignoredSignals(fromStatus: "SigIgn:\t+1f\n") == nil)
+        #expect(Processes.ignoredSignals(fromStatus: "SigIgn:\t\n") == nil)
+    }
+
     /// Ended and not collected yet, a child is a zombie: there, with nothing left to read but its record.
     @Test func aChildThatEndedAndIsntCollectedIsAZombie() throws {
         let pid = try Self.spawnUncollected("exit 0")

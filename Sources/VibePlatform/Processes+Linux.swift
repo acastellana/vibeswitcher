@@ -418,6 +418,12 @@ extension Platform.Processes {
                   let resident = Int64(String(decoding: fields[1], as: UTF8.self)) else { return nil }
             return resident * Int64(pageSize)
         }
+
+        /// `SigIgn` in its status, which anyone may read (mode 0444), whether or not it is dumpable.
+        static func ignoredSignals(_ pid: pid_t) -> UInt64? {
+            guard case .success(let bytes) = contents("/proc/\(pid)/status") else { return nil }
+            return Platform.Processes.ignoredSignals(fromStatus: String(decoding: bytes, as: UTF8.self))
+        }
     }
 }
 #endif

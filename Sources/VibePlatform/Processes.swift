@@ -186,6 +186,20 @@ extension Platform {
         /// The memory a process holds in RAM now, in bytes; nil when it can't be read (gone, a zombie; on the Mac
         /// another user's; on Linux a kernel thread, which has none of its own).
         public static func residentBytes(_ pid: pid_t) -> Int64? { System.residentBytes(pid) }
+
+        /// The signals a process ignores now (its disposition `SIG_IGN`), any user's, one bit each: signal `n` is bit
+        /// `n - 1`, as `sigmask` and Linux's status give them. nil when it can't be read (gone). The Mac: the kernel's
+        /// record of it (sysctl KERN_PROC_PID, `p_sigignore`); Linux: `SigIgn` in /proc/<pid>/status, which anyone
+        /// may read, a non-dumpable process's too. A reader that isn't `ps`, whose Mac form has no such column.
+        public static func ignoredSignals(_ pid: pid_t) -> UInt64? { pid > 0 ? System.ignoredSignals(pid) : nil }
+
+        /// The `SigIgn` of a /proc/<pid>/status text (hex, one bit a signal); nil when it has no such field or it
+        /// isn't hex.
+        public static func ignoredSignals(fromStatus status: String) -> UInt64? {
+            guard let fields = Platform.ProcessSelf.statusFields("SigIgn", in: status), fields.count == 1,
+                  fields[0].allSatisfy(\.isHexDigit) else { return nil }
+            return UInt64(fields[0], radix: 16)
+        }
     }
 }
 

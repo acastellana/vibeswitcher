@@ -82,6 +82,15 @@ extension Platform.Processes {
             return .record(record(of: kinfo))
         }
 
+        /// The signals the kernel's record of one process (sysctl KERN_PROC_PID) says it ignores, any user's.
+        static func ignoredSignals(_ pid: pid_t) -> UInt64? {
+            var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+            var proc = kinfo_proc()
+            var size = MemoryLayout<kinfo_proc>.stride
+            guard sysctl(&mib, 4, &proc, &size, nil, 0) == 0, size > 0 else { return nil }
+            return UInt64(proc.kp_proc.p_sigignore)
+        }
+
         /// The kernel's record of one process (sysctl KERN_PROC_PID), any user's, zombies too.
         static func kernelRecord(_ pid: pid_t) -> Record? {
             var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]

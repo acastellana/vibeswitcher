@@ -182,42 +182,22 @@ struct SessionEnvironmentTests {
         for name in names where name != "PS1" { #expect(environment?[name] == refused[name], "\(name): \(String(describing: environment))") }
     }
 
-    /// The host ignores SIGPIPE; a session's program (its shell, reading its own mask through ps) starts with it at its
-    /// default. A regression test: the launcher is spawned with every signal at its default and execs before the host's
-    /// `main.swift` ignores SIGPIPE; it keeps the launcher's hooks from changing that.
+    /// The host ignores SIGPIPE; a session's program (its shell, once its command has started) has it at its default.
+    /// A regression test: the launcher is spawned with every signal at its default and execs before the host's
+    /// `main.swift` ignores SIGPIPE; it keeps the launcher's hooks from changing that. Both masks are read from outside
+    /// (`Platform.Processes.ignoredSignals`), never with `ps`, whose Mac form has no `sigignore` column.
     @Test func aSessionsProgramStartsWithSIGPIPEAtItsDefault() async throws {
         let host = try await ScratchHostProcess()
         defer { host.stop() }
         let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
-        let said = host.dir + "/ignored"
-        let session = try await client.spawn("/bin/ps -o sigignore= -p $$ > '\(said).partial' && mv '\(said).partial' '\(said)'; \(keepRunning)")
+        let ran = host.dir + "/ran"
+        let session = try await client.spawn("touch '\(ran)'; \(keepRunning)")
         defer { kill(-session.childPID, SIGKILL) }
-        #expect(await eventually { FileManager.default.fileExists(atPath: said) }, "\(host.log)")
+        #expect(await eventually { FileManager.default.fileExists(atPath: ran) }, "\(host.log)")
         let pipe = UInt64(1) << UInt64(SIGPIPE - 1)
-        let program = try #require(Self.mask((try? String(contentsOfFile: said, encoding: .utf8)) ?? ""))
+        let program = try #require(Platform.Processes.ignoredSignals(session.childPID), "\(host.log)")
         #expect(program & pipe == 0, "the session's program ignores SIGPIPE: \(String(program, radix: 16))")
-        let hostMask = try #require(Self.ignoredMask(of: host.pid))
+        let hostMask = try #require(Platform.Processes.ignoredSignals(host.pid))
         #expect(hostMask & pipe != 0, "the host doesn't ignore SIGPIPE: \(String(hostMask, radix: 16))")
-    }
-
-    /// A mask as ps prints it (hex, with or without `0x`).
-    static func mask(_ text: String) -> UInt64? {
-        var hex = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if hex.hasPrefix("0x") { hex.removeFirst(2) }
-        return UInt64(hex, radix: 16)
-    }
-
-    /// The signals `pid` ignores, as ps reads them.
-    static func ignoredMask(of pid: pid_t) -> UInt64? {
-        let ps = Process()
-        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-        ps.arguments = ["-o", "sigignore=", "-p", String(pid)]
-        let out = Pipe()
-        ps.standardOutput = out
-        ps.standardError = FileHandle.nullDevice
-        guard (try? ps.run()) != nil else { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        ps.waitUntilExit()
-        return mask(String(decoding: data, as: UTF8.self))
     }
 }
