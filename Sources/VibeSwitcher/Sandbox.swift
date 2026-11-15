@@ -1371,6 +1371,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("send", "presses Return in the composer: the message goes to the fake session"),
         ("composer paste|clear|expect TEXT", "the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a Copy's, never yours), and prints what it holds then; clear empties it; expect fails unless it holds exactly TEXT, saying what it holds"),
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
+        ("lines FILE N", "waits up to 30 s for FILE (a path under the sandbox's home, e.g. projects/example-api/ran.txt) to hold N lines, then fails unless it holds exactly N: a command that appends a line there each time it runs ran N times (scripts/ui-journeys/run-card.journey)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
         ("new [codex|shell|zsh] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the sandbox's home"),
@@ -1691,9 +1692,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { reply(true, "\(what)\(outcome): the card is now \(now.map { ShellCard.title($0.state) } ?? "gone")") }
         }
         guard action == .run else { return shellDesk.act(action, on: card.id) { said("") } }
-        shellDesk.run(card.id) { outcome in
+        shellDesk.run(card.id) { [weak self] outcome in
             switch outcome {
-            case .ran: said(" ran")
+            case .ran:
+                // The shell session it started is the selected one: waits (up to 30 s) for its command to end, as the
+                // host reports it, so what's shown next is the command's whole output.
+                guard let self, let shell = model.selectedRow?.hostID else { return said(" ran") }
+                waitFor({ [weak self] in self?.host.sessions.first { $0.id == shell }?.commandEnd != nil }) { ended in
+                    said(ended ? " ran, its command ended" : " ran, its command still running")
+                }
             case .refused(let reason): said(" (\(reason))")
             }
         }
@@ -2424,6 +2431,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "tell": tell(rest, reply)
         case "notify": notify(rest, reply)
         case "runblock": runBlock(confirmed: rest == "yes", reply)
+        case "lines": lines(rest, reply)
         case "clear":
             // Ended first, then removed (the host keeps an ended session's row until it's removed).
             let ids = host.sessions.map(\.id)
@@ -3249,27 +3257,42 @@ private final class Driver: NSObject, NSApplicationDelegate {
     }
 
     /// The shown chat's last code block that has a Run (`RunButton`): what its confirmation shows, as the sheet; once
-    /// `confirmed`, run as the button runs it after you press Run there.
+    /// `confirmed`, run as the button runs it after you press Run there. Waits up to 30 s for such a block (a reply
+    /// `tell` just handed the fake lands in the chat once its transcript is read), and once run, for the chat to have
+    /// it as recorded (not on its way).
     private func runBlock(confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
         guard let chat = window?.chat, model.showsChat else { return reply(false, "no chat: show a fake session's chat first (chat)") }
-        let replies = chat.items.compactMap { item -> String? in
-            guard case .reply(let entry) = item, case .reply(let text) = entry.kind else { return nil }
-            return text
-        }
-        let runnable = replies.reversed().lazy.compactMap { text in
-            MarkdownBlocks.parse(text).reversed().lazy.compactMap { block -> RunnableCommand.Runnable? in
-                guard case .code(let language, let code) = block else { return nil }
-                return RunnableCommand.runnable(code: code, language: language)
+        func lastRunnable() -> RunnableCommand.Runnable? {
+            let replies = chat.items.compactMap { item -> String? in
+                guard case .reply(let entry) = item, case .reply(let text) = entry.kind else { return nil }
+                return text
+            }
+            return replies.reversed().lazy.compactMap { text in
+                MarkdownBlocks.parse(text).reversed().lazy.compactMap { block -> RunnableCommand.Runnable? in
+                    guard case .code(let language, let code) = block else { return nil }
+                    return RunnableCommand.runnable(code: code, language: language)
+                }.first
             }.first
-        }.first
-        guard let runnable else { return reply(false, "no code block with a Run in the chat's replies") }
+        }
+        waitFor({ lastRunnable() != nil }) { [weak self] _ in
+            guard let self else { return }
+            guard let runnable = lastRunnable() else { return reply(false, "no code block with a Run in the chat's replies") }
+            self.runBlock(runnable, in: chat, confirmed: confirmed, reply)
+        }
+    }
+
+    private func runBlock(_ runnable: RunnableCommand.Runnable, in chat: ChatModel, confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
         closeSheet()
         guard let way = chat.runner.way else { return reply(false, "no Run shown: the selected session takes no commands") }
         if confirmed {
+            let asked = runnable.needsConfirmation ? "asked first, then " : ""
             return RunButton.run(runnable, way: way, with: chat.runner, confirm: { _ in true }) { [weak self] outcome in
                 guard let self else { return }
                 switch outcome {
-                case .ran?: self.settle { reply(true, "ran it: \(runnable.typed(way))") }
+                case .ran?:
+                    self.waitFor({ chat.pending.isEmpty }) { recorded in
+                        self.settle { reply(true, "\(asked)ran it: \(runnable.typed(way))" + (recorded ? "" : " (the chat still shows it on its way)")) }
+                    }
                 case .refused(let reason)?: self.settle { reply(false, reason) }
                 case nil: reply(false, "cancelled")
                 }
@@ -3284,6 +3307,30 @@ private final class Driver: NSObject, NSApplicationDelegate {
         shown.orderFrontRegardless()
         Sandbox.hide(shown)
         settle { reply(true, "Run's confirmation shown (sheet-runblock)") }
+    }
+
+    /// `lines FILE N`: how a journey checks that a command it ran ran N times (each run appends a line to FILE, a path
+    /// under the sandbox's home). Waits up to 30 s for FILE to hold N lines (a Run's command lands after its reply: a
+    /// shell card's in a shell session of its own), then fails unless it holds exactly N: none came, or more did.
+    private func lines(_ arguments: String, _ reply: @escaping (Bool, String) -> Void) {
+        let words = arguments.split(separator: " ").map(String.init)
+        guard words.count == 2, let expected = Int(words[1]), expected >= 0 else { return reply(false, "lines FILE N") }
+        let name = words[0]
+        guard !name.hasPrefix("/"), !name.split(separator: "/").contains("..") else {
+            return reply(false, "lines FILE N: FILE is a path under the sandbox's home, e.g. projects/example-api/ran.txt")
+        }
+        let path = (home as NSString).appendingPathComponent(name)
+        func count() -> Int {
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return 0 }
+            return text.split(separator: "\n", omittingEmptySubsequences: true).count
+        }
+        waitFor({ count() >= expected }) { _ in
+            let held = count()
+            let times = held == 1 ? "once" : "\(held) times"
+            reply(held == expected, held == expected
+                ? "\(name): \(held) line\(held == 1 ? "" : "s"), as expected"
+                : "\(name) holds \(held) line\(held == 1 ? "" : "s"), not \(expected): its command \(held == 0 ? "didn't run" : "ran " + times)")
+        }
     }
 
     func closeSheet() {
