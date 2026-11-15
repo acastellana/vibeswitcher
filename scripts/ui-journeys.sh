@@ -91,7 +91,7 @@ accept() {
     local name shots
     for name in "$@"; do journey_file "$name" >/dev/null; done
     for name in "$@"; do
-        shots=$(find "$root/current/$name" -maxdepth 1 -name '*.png' ! -name '*.diff.png' 2>/dev/null | sort)
+        shots=$(find "$root/current/$name" -maxdepth 1 -name '*.png' ! -name '*.diff.png' 2>/dev/null | sort || true)
         [[ -n $shots ]] || { echo "$name: no shots to accept (run it first: scripts/ui-journeys.sh run $name)"; exit 1; }
         rm -rf "$root/baseline/$name"
         mkdir -p "$root/baseline/$name"
