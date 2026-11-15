@@ -3200,3 +3200,11 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 20:43 Audit of the-chat-s-model: complete, clean, round 1: 1 Nit open
 - 2026-11-15 20:43 Split ui-journeys-b-team at 48965c0a: diff, select-run, dictate branched from its integrator's commit
 - 2026-11-15 20:44 Sent ui-journeys-b-team's worker contract v2 (it had v1)
+- 2026-11-15 20:50 Released a-lead-record-commit's worker (idle since its done report on 5a00d994) while its audit runs
+- 2026-11-15 20:50 Automatically (auto_advance): Started the audit of a-lead-record-commit at 5a00d994 (It touches sensitive_paths (scripts/build-app.sh), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-15 20:50 Started ui-journeys-b-team's members diff, select-run
+- 2026-11-15 20:50 Workflow: max_workers = `6`
+- 2026-11-15 20:50 Started ui-journeys-b-team's member dictate
+- 2026-11-15 20:59 Audit of a-lead-record-commit: complete, clean, round 1: 2 Nit open
+- 2026-11-15 21:03 Pipeline held: the-chat-s-model ready to merge with none landing; cause: a merge in progress
+- 2026-11-15 21:06 Merged the-chat-s-model: The chat's model chip follows /model at once, and its menu offers Fable (build 64a972289c0f with changes not committed)
