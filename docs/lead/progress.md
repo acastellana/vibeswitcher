@@ -3130,3 +3130,16 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 07:50 Planned a-batch-merge-s: A batch merge's receipts carry the merge-ready time (review audit)
 - 2026-11-15 07:50 Planned the-witness-watches: The witness watches every team member, not only the integrator (review audit)
 - 2026-11-15 08:13 Audit of merge-dry-run-and at b10b9233 tested its merged result 89acd474 onto main: the test command passed
+- 2026-11-15 08:37 Audit of merge-dry-run-and at b10b9233 tested its merged result 8cdc02ce onto main: the test command passed
+- 2026-11-15 08:38 Audit of merge-dry-run-and: complete, clean, round 2: 3 Nit open
+- 2026-11-15 08:59 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Seen again, already reported, so only counted (the daily trend has the counts): error kind app: failed ×1
+- 2026-11-15 08:59 Pipeline held: merge-dry-run-and ready to merge with none landing; cause: a merge in progress
+- 2026-11-15 09:43 Pipeline held: merge-dry-run-and ready to merge with none landing; cause: a merge in progress
+- 2026-11-15 10:19 Pipeline held: merge-dry-run-and ready to merge with none landing; cause: a merge in progress
+- 2026-11-15 10:54 Pipeline held: merge-dry-run-and ready to merge with none landing; cause: a merge in progress
+- 2026-11-15 11:14 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Error lines in app.log within 10 min, by kind: host: couldn't ×1
+Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-15 11:22 Merged merge-dry-run-and: Merge dry run and a receipt for a kept experiment arm (build c385b7943fb8)
+- 2026-11-15 11:22 Flaky in merge-dry-run-and's merge: aClientAddedLaterRunsOnItsOwnPeriod(), aRestoredSessionsEndIsLoggedWithItsSignal(), typedInTheTerminalWhileClaudeRecordsNothingIsMovedOrCleared(), aPressInAnotherSessionEndsTheRecordingAndItsTextStillLandsInItsBox(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
