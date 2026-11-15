@@ -220,8 +220,10 @@ public enum NodeWire {
         case badArgs = "bad-args"
         /// Refused for the voice or a wrong code: the message says which field failed.
         case voice
-        /// The engine's reason.
+        /// The engine's reason (the request was taken, and recorded, first).
         case refused
+        /// The node is stopping: the request wasn't taken (nor recorded).
+        case stopping
         /// The host link isn't welcomed yet: retry.
         case notYet = "not-yet"
         /// The card or session is no longer there.

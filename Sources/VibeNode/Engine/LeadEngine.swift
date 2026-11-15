@@ -63,13 +63,17 @@ public final class LeadEngine: @unchecked Sendable {
     }
     /// Each spawn request the engine makes, before it goes (for tests). On `queue`.
     public var spawning: (SpawnRequest) -> Void = { _ in }
+    /// Each look at what a start needs (`NodePreflight.check`), on the thread that looks (for tests). Set on `queue`
+    /// before the start is asked.
+    public var preflightLooked: () -> Void = {}
 
     // On `queue`.
-    /// Starts asked for before the host said which sessions run, by root: decided once it has (the app's
-    /// `pendingStarts`). Each with what waited on it.
-    var pendingStarts: [String: PendingStart] = [:]
-    /// Roots whose start is under way, with every request waiting on it: a second ask joins the first.
-    var starting: [String: [(StartOutcome) -> Void]] = [:]
+    /// Starts asked for before the host said which sessions run, by root, each as asked: decided once it has (the
+    /// app's `pendingStarts`; `startPending`).
+    var pendingStarts: [String: (program: String, starts: [PendingStart])] = [:]
+    /// Roots whose start is under way: the first request, then each that joined it (with what it asked, which
+    /// `finish` takes up once the first is over).
+    var starting: [String: [JoinedStart]] = [:]
     /// `stop` is under way: no start goes on.
     public private(set) var stopping = false
     /// The session each root's board named at the last look.
@@ -119,7 +123,9 @@ public final class LeadEngine: @unchecked Sendable {
     /// `stop` is under way: no start goes on from now, and what waits for one is refused. On `queue`.
     public func stopStarting() {
         stopping = true
-        if !pendingStarts.isEmpty { note("lead: \(pendingStarts.count) starts that waited for the host's welcome dropped: the node is stopping") }
+        if !pendingStarts.isEmpty {
+            note("lead: \(pendingStarts.values.map(\.starts.count).reduce(0, +)) starts that waited for the host's welcome dropped: the node is stopping")
+        }
         pendingStarts = [:]
     }
 

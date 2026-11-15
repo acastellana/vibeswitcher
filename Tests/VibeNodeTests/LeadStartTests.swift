@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import VibeCore
-import VibeNode
+@testable import VibeNode
 
 /// Starting a lead (the engine plan's E4), on a scratch host in the test process (`NodeTestHost`), the engine given
 /// `FakeClaude`'s launcher as its `claude` link (EN-D13), its own root and its own engine queue: the app's start cases
@@ -23,7 +23,7 @@ struct LeadStartTests {
         let key = DispatchSpecificKey<Bool>()
         let spawns = Locked<[SpawnRequest]>([])
 
-        init(host: NodeTestHost, fake: FakeClaude.Install, repo: String, options: LeadEngine.Options) throws {
+        init(host: NodeTestHost, fake: FakeClaude.Install, repo: String, options: LeadEngine.Options, timing: HostLink.Timing = HostLink.Timing()) throws {
             self.host = host
             self.fake = fake
             self.repo = repo
@@ -32,7 +32,7 @@ struct LeadStartTests {
             try FileManager.default.createDirectory(at: nodeRoot.appendingPathComponent("bin"), withIntermediateDirectories: true)
             try? FileManager.default.createSymbolicLink(atPath: nodeRoot.appendingPathComponent("bin/vibeswitcher-mcp").path,
                                                         withDestinationPath: builtProducts.appendingPathComponent("vibeswitcher-mcp").path)
-            link = HostLink(dialer: host.dialer, root: host.root, queue: queue)
+            link = HostLink(dialer: host.dialer, root: host.root, queue: queue, timing: timing)
             engine = LeadEngine(root: host.root, nodeRoot: nodeRoot, link: link, clock: nil, options: options)
             let (engine, spawns) = (engine, spawns)
             link.onWelcome = { _, _ in engine.welcomed() }
@@ -72,11 +72,38 @@ struct LeadStartTests {
         func holder() -> String? { host.vault.current(.lead, root: repo, task: nil)?.session }
 
         func stop() { host.stop() }
+
+        /// How many requests wait on the start of the repository under way (the first, and each that joined it).
+        var waitingOnTheStart: Int { queue.sync { engine.starting[repo]?.count ?? 0 } }
+
+        /// The repository's first board look (the start's, on the reads queue) waits until `gate` opens.
+        func holdTheFirstLook(at gate: Gate) {
+            let repo = self.repo
+            queue.sync { engine.boardLooked = { root in if root == repo { gate.pass() } } }
+        }
+    }
+
+    /// The first `pass` waits until `open` (at most 120 s, a guard); the others go through.
+    final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entered = false
+        private let opened = DispatchSemaphore(value: 0)
+
+        func pass() {
+            let first = lock.withLock { () -> Bool in
+                defer { entered = true }
+                return !entered
+            }
+            if first { _ = opened.wait(timeout: .now() + 120) }
+        }
+
+        var reached: Bool { lock.withLock { entered } }
+        func open() { opened.signal() }
     }
 
     /// `claudeLink`: nil for the fake's launcher through a link of its own; `connect`: welcome the link first.
     func world(holdsFirstLook: Bool = false, allowList: URL? = nil, claudeLink: String?? = nil, git: String? = nil, firstLook: Bool = false,
-               connect: Bool = true, repository: Bool = true) async throws -> World {
+               connect: Bool = true, repository: Bool = true, timing: HostLink.Timing = HostLink.Timing()) async throws -> World {
         let host = try NodeTestHost(scratch, holdsFirstLook: holdsFirstLook, projectAllowList: allowList)
         let fake = try FakeClaude.install(in: host.folder.appendingPathComponent("fake", isDirectory: true))
         let repo = host.folder.appendingPathComponent("repo", isDirectory: true)
@@ -94,7 +121,7 @@ struct LeadStartTests {
         options.firstLook = firstLook
         options.answersTrust = false
         options.home = host.home.path
-        let world = try World(host: host, fake: fake, repo: repo.resolvingSymlinksInPath().path, options: options)
+        let world = try World(host: host, fake: fake, repo: repo.resolvingSymlinksInPath().path, options: options, timing: timing)
         if connect { await world.connect() }
         return world
     }
@@ -147,11 +174,17 @@ struct LeadStartTests {
         async let second = world.start(goal: "a goal asked meanwhile")
         #expect(await first == .waiting)
         #expect(await second == .waiting)
+        // A second goal, asked after (the order the goals were asked in is the order they're taken in).
+        #expect(await world.start(goal: "and another goal") == .waiting)
         await world.connect()
-        #expect(await eventually(timeout: 120) { world.stored?.lastStart?.hasPrefix("started") == true }, "\(String(describing: world.stored))")
+        #expect(await eventually(timeout: 120) { world.stored?.lastStart?.hasPrefix("started") == true || !world.held().isEmpty },
+                "\(String(describing: world.stored))")
+        // Neither goal is lost: the first is in the new lead's first prompt, the other held for it.
+        #expect(await eventually(timeout: 120) { world.held().map(\.text) == ["New goal: and another goal"] }, "\(world.held())")
         #expect(world.stored?.starting == false)
         #expect(world.leads().count == 1)
         #expect(world.spawns.value.count == 1)
+        #expect(world.spawns.value.first?.command?.contains("a goal asked meanwhile") == true, "\(world.spawns.value.first?.command ?? "")")
     }
 
     // MARK: A running lead
@@ -226,18 +259,87 @@ struct LeadStartTests {
         #expect(value["replaced"]?.array == [.string(NodeIds.session(host: old))])
     }
 
-    /// ReplacedLeadRoutingTests' `startsAndTheNoticesReadWhichLeadHoldsTheRoleOffTheMainThread`, the start's half: a
-    /// start finds which lead holds the role off the engine's queue.
+    /// ReplacedLeadRoutingTests' `startsAndTheNoticesReadWhichLeadHoldsTheRoleOffTheMainThread`, the start's half: of
+    /// two leads sharing the root (the replaced one and the one holding the role), a start finds the one holding the
+    /// role off the engine's queue, shows it and starts nothing.
     @Test func aStartReadsWhichLeadHoldsTheRoleOffTheEngineQueue() async throws {
         let world = try await world()
         defer { world.stop() }
-        let lead = try started(await world.start())
+        let old = try started(await world.start())
+        try world.host.vault.revoke(try #require(world.host.vault.current(.lead, root: world.repo, task: nil)?.id), root: world.repo)
+        let new = try started(await world.start(replace: true))
+        #expect(await eventually(timeout: 60) { world.leads().count == 2 })
+        #expect(await eventually(timeout: 30) { world.stored?.replaced[old] == new }, "\(String(describing: world.stored))")
         let looks = Locked<[(root: String, onEngine: Bool)]>([])
         world.queue.sync { world.engine.boardLooked = { root in looks.mutate { $0.append((root, world.onEngine)) } } }
-        #expect(await world.start() == .shown(session: lead, notes: []))
+        #expect(await world.start() == .shown(session: new, notes: []))
         #expect(looks.value.contains { $0.root == world.repo && !$0.onEngine }, "\(looks.value)")
         #expect(!looks.value.contains { $0.onEngine }, "\(looks.value)")
+        #expect(Set(world.leads().map(\.id)) == [old, new])
+        #expect(world.spawns.value.count == 2)
+    }
+
+    /// A start asked while another of the same root is under way waits for it, then goes on with what it asked: its
+    /// goal is held for the lead the first started (never dropped), and one lead starts.
+    @Test func aStartAskedWhileOneIsUnderWayKeepsItsGoal() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let gate = Gate()
+        world.holdTheFirstLook(at: gate)
+        async let first = world.start()
+        try #require(await eventually(timeout: 60) { gate.reached })
+        async let second = world.start(goal: "make the parser streaming")
+        // Joined while the first still looks at the board.
+        try #require(await eventually(timeout: 60) { world.waitingOnTheStart == 2 })
+        gate.open()
+        let lead = try started(await first)
+        let joined = await second
+        guard case .shown(let shown, let notes) = joined else { Issue.record("not shown: \(joined)"); return }
+        #expect(shown == lead)
+        #expect(notes.contains { $0.contains("held") }, "\(notes)")
+        #expect(world.held().map(\.text) == ["New goal: make the parser streaming"])
+        #expect(world.spawns.value.count == 1)
         #expect(world.leads().count == 1)
+    }
+
+    /// The link drops after the request was taken and before the lead is prepared (the welcome's capabilities are
+    /// empty meanwhile): the start waits for the next welcome, not refused as from an older host, and goes on then.
+    @Test func aStartWhoseLinkDropsWaitsForTheNextWelcome() async throws {
+        let reconnects = Locked<[() -> Void]>([])
+        var timing = HostLink.Timing()
+        timing.reconnect = { _, fire in reconnects.mutate { $0.append(fire) } }
+        let world = try await world(timing: timing)
+        defer { world.stop() }
+        let gate = Gate()
+        world.holdTheFirstLook(at: gate)
+        async let first = world.start()
+        try #require(await eventually(timeout: 60) { gate.reached })
+        world.queue.sync { world.link.connectAgain() }
+        #expect(world.queue.sync { world.link.state } == .connecting)
+        gate.open()
+        #expect(await first == .waiting)
+        #expect(world.spawns.value.isEmpty)
+        // The next welcome: the start goes on.
+        try #require(await eventually(timeout: 30) { !reconnects.value.isEmpty })
+        reconnects.value.forEach { $0() }
+        #expect(await eventually(timeout: 120) { world.stored?.lastStart?.hasPrefix("started") == true }, "\(String(describing: world.stored))")
+        #expect(world.leads().count == 1)
+    }
+
+    /// `stop` under way when the lead is prepared: it isn't spawned, and the grant its start issued is revoked.
+    @Test func aStopWhileALeadIsPreparedSpawnsNothingAndRevokesItsGrant() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let gate = Gate()
+        world.holdTheFirstLook(at: gate)
+        async let first = world.start()
+        try #require(await eventually(timeout: 60) { gate.reached })
+        world.queue.sync { world.engine.stopStarting() }
+        gate.open()
+        #expect(await first == .refused(LeadEngine.stoppingRefusal))
+        #expect(world.spawns.value.isEmpty)
+        #expect(await eventually(timeout: 30) { world.host.vault.current(.lead, root: world.repo, task: nil) == nil })
+        #expect(world.leads().isEmpty)
     }
 
     @Test func aLeadAskedForTwiceAtOnceStartsOnce() async throws {
@@ -276,16 +378,28 @@ struct LeadStartTests {
     }
 
     /// ProjectFolderStartTests' `theControllersStartSaysWhatsMissingAndStartsNoLead`: a git path that doesn't exist and
-    /// a `claude` link that names nothing are each named, and nothing starts.
+    /// a `claude` link that names nothing are each named, and nothing starts. The look runs off the engine's queue and
+    /// before git is asked about the folder (a repository with no commit, which git would have named).
     @Test func aMissingClaudeOrGitIsNamed() async throws {
         let missingLink = scratch.url("no-claude").path
         let missingGit = scratch.url("no-git").path
-        let world = try await world(claudeLink: .some(missingLink), git: missingGit)
+        let world = try await world(claudeLink: .some(missingLink), git: missingGit, repository: false)
         defer { world.stop() }
+        let gitEnvironment = ["HOME": world.repo, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"]
+        let made = try await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", world.repo, "init", "-q", "-b", "main"], environment: gitEnvironment)
+        try #require(made.status == 0, "\(made.errors)")
+        let looks = Locked<[Bool]>([])
+        world.queue.sync { world.engine.preflightLooked = { looks.mutate { $0.append(world.onEngine) } } }
         let outcome = await world.start()
         guard case .refused(let why) = outcome else { Issue.record("not refused: \(outcome)"); return }
+        #expect(looks.value == [false], "the look ran on the engine's queue: \(looks.value)")
         #expect(why.contains("claude: \(missingLink) names nothing"), "\(why)")
         #expect(why.contains("git: nothing runnable at \(missingGit)"), "\(why)")
+        // Not refused for the folder: git wasn't asked about it (and still no commit there).
+        #expect(!why.contains("no commits"), "\(why)")
+        let head = try await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", world.repo, "rev-parse", "--verify", "--quiet", "HEAD"],
+                                 environment: gitEnvironment)
+        #expect(head.status != 0)
         #expect(world.spawns.value.isEmpty)
         #expect(world.leads().isEmpty)
         #expect(world.holder() == nil)
@@ -430,6 +544,16 @@ struct LeadStartTests {
         #expect(command.contains(world.host.folder.appendingPathComponent("build/bin/vibeswitcher-mcp").path))
     }
 
+    /// The lead's session gets its TMPDIR under the scratch node's root (`<root>/tmp`, as `HostLink`'s sweep reads it),
+    /// never the shared temporary folder the user's node uses.
+    @Test func theLeadsTemporaryFolderIsUnderTheScratchRoot() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        _ = try started(await world.start())
+        let temporary = try #require(world.spawns.value.first?.env["TMPDIR"])
+        #expect(temporary.hasPrefix(world.host.root.appendingPathComponent("tmp").path + "/"), "\(temporary)")
+    }
+
     /// The security document's decision 15: the lead's tool server starts no Codex worker.
     @Test func theLeadGetsNoCodexWorkers() async throws {
         let world = try await world()
@@ -473,13 +597,13 @@ struct LeadStartTests {
 
     /// S7: a vault that holds its first look refuses the lead, naming `config held` and `base accept`, until the held
     /// config is accepted (`checkConfig(root:shown:)` with the card's hashes, as `config accept` will) and the head
-    /// recorded (`setHead`, as `base accept` will); then it starts. E6 repeats the order through the command line.
+    /// recorded (`setHead`, as `base accept` will); then it starts. The vault had never looked at the config: the
+    /// start's own look holds it. E6 repeats the order through the command line.
     @Test func aLeadIsRefusedOnAFreshVaultUntilAccepted() async throws {
         let world = try await world(holdsFirstLook: true, firstLook: true)
         defer { world.stop() }
         let vault = world.host.vault
-        // The first look made (as `config held` will), so the config is held.
-        _ = try vault.checkConfig(root: world.repo)
+        #expect(ConfigSeal.held(in: try vault.guardedRecord(root: world.repo)).isEmpty, "looked at before the start")
         let refused = await world.start()
         guard case .refused(let why) = refused else { Issue.record("not refused: \(refused)"); return }
         #expect(why.contains("config held") && why.contains("base accept"), "\(why)")

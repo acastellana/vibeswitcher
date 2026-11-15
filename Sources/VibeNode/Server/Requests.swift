@@ -109,7 +109,7 @@ public final class Requests: @unchecked Sendable {
             guard request.action.map({ UUID(uuidString: $0) != nil }) == true else {
                 return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
             }
-            guard !stopping else { return reply(.init(re: request.id, error: .init(.refused, "the node is stopping"))) }
+            guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
             // Before the host's welcome (and while the link reconnects) its session list isn't known: a state change
             // judged on it could be wrong (a `stop` would find nothing live). The command line asks again.
             guard link.state == .connected else {

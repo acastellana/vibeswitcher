@@ -33,16 +33,28 @@ struct LaunchPreflightTests {
 
     /// Written as data (`<path>.txt`, never run) and copied into place by `/bin/cp`: this process never holds a script
     /// open for writing, so no child another test starts meanwhile inherits that descriptor and makes running the
-    /// script fail with ETXTBSY (as `FakeClaude.install` does; seen 2026-11-15 under load).
+    /// script fail with ETXTBSY (as `FakeClaude.install` does; seen 2026-11-15 under load). `cp` is started with
+    /// `Platform.Spawn` and reaped by a bounded `waitpid(WNOHANG)`, never Foundation's `waitUntilExit`, which hung for
+    /// good on the Mac's CI after its child was gone.
     func script(_ path: String, _ body: String) throws {
         try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try ("#!/bin/sh\n" + body + "\n").write(toFile: path + ".txt", atomically: true, encoding: .utf8)
-        let copy = Process()
-        copy.executableURL = URL(fileURLWithPath: "/bin/cp")
-        copy.arguments = [path + ".txt", path]
-        try copy.run()
-        copy.waitUntilExit()
-        guard copy.terminationStatus == 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: path]) }
+        var copy = Platform.Spawn(executable: "/bin/cp", arguments: ["/bin/cp", path + ".txt", path])
+        copy.stdin = .path("/dev/null", flags: O_RDONLY)
+        guard case .success(let pid) = copy.start() else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: path]) }
+        var status: Int32 = 0
+        var reaped: pid_t = 0
+        let deadline = Date() + hangGuard
+        repeat {
+            reaped = waitpid(pid, &status, WNOHANG)
+            if reaped == 0 { usleep(1_000) }
+        } while (reaped == 0 || (reaped < 0 && errno == EINTR)) && Date() < deadline
+        if reaped == 0 {
+            kill(pid, SIGKILL)
+            _ = waitpid(pid, &status, 0)
+        }
+        // Exited 0: no signal, no status.
+        guard reaped == pid, status == 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: path]) }
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
     }
 

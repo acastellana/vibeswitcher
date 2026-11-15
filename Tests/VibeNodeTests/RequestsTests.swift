@@ -94,6 +94,31 @@ struct RequestsTests {
         #expect(silent.ok == false && silent.error?.code == NodeWire.Code.refused.rawValue, "\(silent)")
     }
 
+    /// A user's-voice request while `stop` goes on is refused before it is recorded, with its own code (`stopping`),
+    /// never `refused`, which says the server took the request first (the command line journals those).
+    @Test func aRequestWhileTheNodeStopsIsRefusedBeforeItIsRecorded() async throws {
+        let stub = try StubHost(scratch)
+        defer { stub.quit() }
+        let answer = DispatchSemaphore(value: 0)
+        let requests = try await requests(stub) {
+            _ = answer.wait(timeout: .now() + 120)
+            return .error("Sessions are running.")
+        }
+        defer { answer.signal() }
+        let stop = Locked<NodeWire.Reply?>(nil)
+        requests.queue.async {
+            requests.handle(NodeWire.Request(id: "stop", kind: "stop", action: UUID().uuidString.lowercased()), from: Self.user) { stop.value = $0 }
+        }
+        try #require(await eventually(timeout: 60) { requests.queue.sync { requests.stopping } })
+        let lead = try #require(await ask(requests, "lead"))
+        #expect(lead.ok == false && lead.error?.code == NodeWire.Code.stopping.rawValue, "\(lead)")
+        let accepted = requests.queue.sync { requests.statusValue()["accepted"]?.array ?? [] }
+        #expect(accepted.count == 1, "\(accepted)")
+        #expect(accepted.first?["kind"]?.string == "stop", "\(accepted)")
+        answer.signal()
+        #expect(await eventually(timeout: 60) { stop.value != nil })
+    }
+
     @Test func aStopEndsTheLeadsFirstThenEveryOtherAndAnyThatAppears() async throws {
         let lead = Self.session("Lead · project", tty: "ttypts1")
         let worker = Self.session("Worker: one", tty: "ttypts2")

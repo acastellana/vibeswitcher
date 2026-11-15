@@ -8,6 +8,14 @@ struct PendingStart {
     var replace: Bool
 }
 
+/// A request waiting on a start under way (`LeadEngine.starting`): what it asked, the program found for it, and who
+/// hears what became of it.
+struct JoinedStart {
+    var start: PendingStart
+    var program: String
+    var completion: (LeadEngine.StartOutcome) -> Void
+}
+
 /// Starting a project's lead (the engine plan's E4; the app's `LeadController.startLead` and its neighbours,
 /// `LeadController.swift` 801-1116, without their dialogs): what the app asks in a modal dialog is a flag here.
 /// `takeHead` (`askToTakeHead`): without it a moved base stays checked, and merges stay refused until `base accept`.
@@ -47,11 +55,11 @@ extension LeadEngine {
     /// (on `queue`) hears what it did. A `goal` goes into a new lead's first prompt, or is held for the running one (E5
     /// delivers it). From any thread.
     public func startLead(folder: String, goal: String?, takeHead: Bool, replace: Bool, completion: @escaping (StartOutcome) -> Void) {
-        let preflight = self.preflight
+        let (preflight, looked) = (self.preflight, preflightLooked)
         // git can be slow: the repository is found off the engine's queue, and first what's missing (without git, git
         // below would only say the folder isn't a repository).
         work.async { [weak self] in
-            let found = Self.repository(folder, preflight: preflight)
+            let found = Self.repository(folder, preflight: preflight, looked: looked)
             guard let self else { return }
             self.queue.async {
                 guard let root = found.root, let program = found.program else {
@@ -67,8 +75,9 @@ extension LeadEngine {
 
     /// The program the lead runs and the top of the repository holding `folder`, or why there's none: what's missing
     /// first, then a folder in no repository, then one with no commit (workers branch from one).
-    static func repository(_ folder: String, preflight: NodePreflight) -> (root: String?, program: String?, why: String?) {
+    static func repository(_ folder: String, preflight: NodePreflight, looked: () -> Void = {}) -> (root: String?, program: String?, why: String?) {
         let program: String
+        looked()
         switch preflight.check() {
         case .failure(let refusal): return (nil, nil, refusal.description)
         case .success(let path): program = path
@@ -84,29 +93,26 @@ extension LeadEngine {
         return (root, program, nil)
     }
 
-    /// The start for `root`, on `queue`: joined to one under way; held until the host's welcome; else the running lead
-    /// read (off the queue) and the plan made.
+    /// The start for `root`, on `queue`: joined to one under way (and taken up, as asked, once that one is over);
+    /// held until the host's welcome; else the running lead read (off the queue) and the plan made.
     func begin(root: String, program: String, start: PendingStart, completion: @escaping (StartOutcome) -> Void) {
         guard !stopping else { return completion(.refused(Self.stoppingRefusal)) }
         if case .gone(let why) = link.state { return completion(.refused("the session host is gone (\(why))")) }
-        // One start per root at a time: a second ask hears what the first did.
+        // One start per root at a time: a second ask waits for the first, then goes on with what it asked (`finish`).
         if starting[root] != nil {
-            starting[root]?.append(completion)
+            starting[root]?.append(JoinedStart(start: start, program: program, completion: completion))
+            note("lead: a start of \(LeadMail.project(of: root)) waits for the one under way")
             return
         }
         // Before the welcome the host's sessions aren't known: no sign no lead runs. Held until then (the app's
-        // pendingStarts); the request hears it waits.
+        // pendingStarts), each as asked; the request hears it waits.
         if link.state == .connecting {
-            var pending = pendingStarts[root] ?? start
-            pending.goal = start.goal ?? pending.goal
-            pending.takeHead = pending.takeHead || start.takeHead
-            pending.replace = pending.replace || start.replace
-            pendingStarts[root] = pending
+            pendingStarts[root, default: (program, [])].starts.append(start)
             leads.lead(root: root) { $0.lastStart = "waiting for the host's welcome"; $0.lastStartAt = Date() }
             note("lead: the start of \(LeadMail.project(of: root)) waits for the host's welcome")
             return completion(.waiting)
         }
-        starting[root] = [completion]
+        starting[root] = [JoinedStart(start: start, program: program, completion: completion)]
         leads.lead(root: root) { $0.starting = true }
         // Which lead runs for the root, the board read on the reads queue (even its stat waited seconds on a busy disk).
         let sessions = link.sessions
@@ -126,11 +132,26 @@ extension LeadEngine {
         guard link.state == .connected, !pendingStarts.isEmpty else { return }
         let pending = pendingStarts
         pendingStarts = [:]
-        for (root, start) in pending {
-            startLead(folder: root, goal: start.goal, takeHead: start.takeHead, replace: start.replace) { [weak self] outcome in
-                self?.note("lead: the start of \(LeadMail.project(of: root)) that waited for the welcome: \(Self.word(outcome))")
+        for (root, waited) in pending {
+            // One start with every flag asked and the first goal (a new lead's first prompt says it); each other goal
+            // a start of its own, which joins that one and then is held for the lead it leaves (`finish`). In the
+            // order asked, here on the queue.
+            let goals = waited.starts.compactMap(\.goal)
+            let first = PendingStart(goal: goals.first, takeHead: waited.starts.contains { $0.takeHead },
+                                     replace: waited.starts.contains { $0.replace })
+            for start in [first] + goals.dropFirst().map({ PendingStart(goal: $0, takeHead: false, replace: false) }) {
+                begin(root: root, program: waited.program, start: start) { [weak self] outcome in
+                    self?.note("lead: the start of \(LeadMail.project(of: root)) that waited for the welcome: \(Self.word(outcome))")
+                }
             }
         }
+    }
+
+    /// The link dropped while the start of `root` went on: it waits for the next welcome again, ahead of what joined
+    /// it, and the request hears it waits. On `queue`.
+    private func waitAgain(root: String, program: String, start: PendingStart) {
+        pendingStarts[root, default: (program, [])].starts.insert(start, at: 0)
+        finish(root: root, .waiting)
     }
 
     /// `running`: the project's live lead session. Whether it holds its role, the vault says (off the queue: a call to
@@ -148,8 +169,7 @@ extension LeadEngine {
                 self.leads.lead(root: root) { $0.bound = holds == true ? running.id.uuidString : $0.bound }
                 switch Self.plan(hostState: self.link.state, running: running.id, holdsRole: holds, fromUser: true) {
                 case .wait:
-                    self.finish(root: root, .waiting)
-                    self.begin(root: root, program: program, start: start) { _ in }
+                    self.waitAgain(root: root, program: program, start: start)
                 case .start:
                     self.prepare(root: root, program: program, start: start, running: running)
                 case .show(let id):
@@ -158,14 +178,20 @@ extension LeadEngine {
                         self.leads.hold(.init(text: "New goal: \(goal)", from: Self.goalSender), root: root)
                         notes.append("the goal is held for the running lead until it can be delivered")
                     }
+                    if start.takeHead {
+                        notes.append("--take-head takes the base branch as it is only when a lead starts: the running lead's stays as recorded "
+                            + "(`vibeswitcher base accept` takes it)")
+                    }
                     self.finish(root: root, .shown(session: id, notes: notes))
                 case .askToReplace(let id):
                     guard start.replace else {
-                        return self.finish(root: root, .shown(session: id, notes: [
+                        var notes = [
                             "the lead of \(LeadMail.project(of: root)) runs (session \(id.uuidString.prefix(8))) without its role, so its tools are off: "
                                 + "nothing was started; `vibeswitcher lead \(root) --replace` starts a new lead, which takes the role, reads its last "
                                 + "turns and gets what waited for it",
-                        ]))
+                        ]
+                        if start.goal != nil { notes.append("the goal wasn't held: a lead without its role gets nothing; give it again with --replace") }
+                        return self.finish(root: root, .shown(session: id, notes: notes))
                     }
                     self.prepare(root: root, program: program, start: start, running: running)
                 }
@@ -176,6 +202,13 @@ extension LeadEngine {
     /// Prepares the lead (off the queue: git, the board's folder, the vault) and spawns it. `running`: the lead this
     /// start may replace.
     private func prepare(root: String, program: String, start: PendingStart, running: HostSession?) {
+        // The welcome's capabilities are known only while the link is welcomed: one that dropped since the request
+        // was taken waits for the next welcome (its capabilities are empty meanwhile), one that's gone is refused.
+        switch link.state {
+        case .gone(let why): return finish(root: root, .refused("the session host is gone (\(why))"))
+        case .connecting: return waitAgain(root: root, program: program, start: start)
+        case .connected: break
+        }
         // The lead's vault lives in the session host: one too old to hold it is a build switch away (host and server
         // are one build on Linux).
         guard link.capabilities.contains(HostProtocol.Capability.leadVault) else {
@@ -257,9 +290,13 @@ extension LeadEngine {
     }
 
     /// Why a vault that holds its first look doesn't start `root`'s lead yet (S7): config held from it, or no head
-    /// recorded for `branch`; nil once both are done. Throws when the vault can't be asked.
+    /// recorded for `branch`; nil once both are done. The look is made here first, as `config held` makes it (nothing
+    /// shown, so nothing sealed): the vault holds what it has nothing recorded for only once something looked, so a
+    /// config never looked at isn't taken as accepted. Throws when the vault can't be asked.
     static func firstLookRefusal(vault: LeadVault, root: String, branch: String) throws -> String? {
-        let held = ConfigSeal.held(in: try vault.guardedRecord(root: root))
+        let check = try vault.checkConfig(root: root)
+        var held = ConfigSeal.held(in: try vault.guardedRecord(root: root))
+        for name in check.held where !held.contains(name) { held.append(name) }
         let head = try vault.head(root: root, branch: branch)
         guard !held.isEmpty || head == nil else { return nil }
         var missing: [String] = []
@@ -342,21 +379,25 @@ extension LeadEngine {
         }
     }
 
-    /// The start of `root` is over: every request waiting on it hears (the first what it did; one that joined it the
-    /// lead it now has), and the store says so. On `queue`.
+    /// The start of `root` is over: the request that made it hears what it did, and the store says so. Each request
+    /// that joined it is taken up now with what it asked (so its goal is held for the lead this start left, its
+    /// `--replace` applies to a lead still without its role): the first of them starts again and the rest join it. A
+    /// refusal is theirs too. On `queue`.
     func finish(root: String, _ outcome: StartOutcome) {
-        let waiting = starting.removeValue(forKey: root) ?? []
+        var waiting = starting.removeValue(forKey: root) ?? []
         note("lead: \(LeadMail.project(of: root)): \(Self.word(outcome))")
         leads.lead(root: root) {
             $0.starting = false
             $0.lastStart = Self.word(outcome)
             $0.lastStartAt = Date()
         }
-        for (index, completion) in waiting.enumerated() {
-            guard index > 0 else { completion(outcome); continue }
-            switch outcome {
-            case .started(let session, _, _), .shown(let session, _): completion(.shown(session: session, notes: ["a start asked at the same time started it"]))
-            default: completion(outcome)
+        guard !waiting.isEmpty else { return }
+        waiting.removeFirst().completion(outcome)
+        for joined in waiting {
+            if case .refused = outcome {
+                joined.completion(outcome)
+            } else {
+                begin(root: root, program: joined.program, start: joined.start, completion: joined.completion)
             }
         }
     }

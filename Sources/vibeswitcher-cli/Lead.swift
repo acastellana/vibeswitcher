@@ -70,7 +70,8 @@ enum LeadCommand {
         switch client.request("lead", args: args, action: action, timeout: 180) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            // Accepted (the voice passed): the engine's refusal comes after the server recorded it.
+            // Accepted (the voice passed and the server recorded it): the engine's refusal (`refused`) comes after that;
+            // the server's own before it (`voice`, `stopping`, `not-yet`) isn't an accepted request.
             if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
                 context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "lead", epoch: client.hello.epoch))
             }

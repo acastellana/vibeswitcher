@@ -76,12 +76,12 @@ enum Say {
         return failure.exitCode
     }
 
-    /// A reply with an error: `voice` and `refused` exit 77, `bad-args` 65, the rest 1.
+    /// A reply with an error: `voice`, `refused` and `stopping` exit 77, `bad-args` 65, the rest 1.
     static func replyError(_ reply: NodeWire.Reply) -> Int32 {
         let code = reply.error?.code ?? "internal"
         err("vibeswitcher: \(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))")
         switch code {
-        case NodeWire.Code.voice.rawValue, NodeWire.Code.refused.rawValue: return 77
+        case NodeWire.Code.voice.rawValue, NodeWire.Code.refused.rawValue, NodeWire.Code.stopping.rawValue: return 77
         case NodeWire.Code.badArgs.rawValue: return 65
         default: return 1
         }
