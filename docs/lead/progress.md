@@ -3277,3 +3277,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 23:40 Automatically (auto_advance): Merge of ui-journeys-a4-dictation failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
 - 2026-11-15 23:40 Automatically (auto_advance): Merged ui-journeys-a3-run at 550126bb (its passing audit) into main as one batch, on 1 test run for 2 tasks.
 - 2026-11-15 23:41 Automatically (auto_advance): Cleaned up ui-journeys-a3-run (freed 2.7 GB of build output and temporary folders). It stays done.
+- 2026-11-15 23:49 Automatically (auto_advance): Started the audit of ui-journeys-a4-dictation at ce2bf8d5 (Its review is audit).
+- 2026-11-15 23:49 Released ui-journeys-a4-dictation's worker (idle since its done report on ce2bf8d5) while its audit runs
+- 2026-11-15 23:49 Automatically (auto_advance): Released ui-journeys-a4-dictation's worker, idle since its done report on ce2bf8d5, while its audit runs (ended pid 12558 (Worker: UI journeys A4: dictation journey)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-15 23:49 Audit of ui-journeys-a4-dictation: complete, clean, round 3: 1 Nit open
