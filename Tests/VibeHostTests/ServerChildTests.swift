@@ -483,6 +483,66 @@ final class ServerChildHost {
         #expect(await eventually { child.pid != nil && child.pid != helper }, "\(String(describing: child.pid))")
     }
 
+    /// The same, the server child beginning to be ended after the handover's first check, while its probe runs: the
+    /// handover is refused in the turn that builds its state and executes, saying why, as no record could carry that
+    /// child. The helper ignores SIGTERM (`linger`), so it is still the child running, its connector closed, when that
+    /// turn comes, until the host's SIGKILL `ServerChild.replaceLimit` later; it is then started again, once. The target
+    /// is the host's own image, whose probe answers. Were that turn's check missing, the handover would go on to its
+    /// exec: the host's lock rule refuses the lock from the moment that turn asks for the secrets, so it fails there
+    /// instead, never replacing this test process.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aServerChildEndedDuringTheHandoversProbeIsRefusedBeforeTheExec() async throws {
+        let dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let socket = dir + "/h.sock"
+        FileManager.default.createFile(atPath: dir + "/" + ServerChildHelper.actionsName, contents: Data("linger\n".utf8))
+        let lastTurn = NSLock()
+        nonisolated(unsafe) var reachedSecrets = false
+        var config = HostServer.Config(socketPath: socket, lockPath: dir + "/h.lock", shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 42)
+        config.idleExit = nil
+        config.logPath = dir + "/host.log"
+        config.heldLockIsAllowed = { _ in lastTurn.withLock { !reachedSecrets } }
+        let server = HostServer(config: config)
+        server.secretsForHandover = {
+            lastTurn.withLock { reachedSecrets = true }
+            return Data()
+        }
+        try server.start()
+        defer { server.stop(terminateSessions: true) }
+        let binary = try #require(Bundle.main.executablePath)
+        let child = try #require(ServerChild.start(.init(image: binary, socketPath: socket, arguments: [], environment: config.baseEnvironment),
+                                                   server: server))
+        defer { child.stop() }
+        func results() -> [String] {
+            ((try? String(contentsOfFile: dir + "/" + ServerChildHelper.resultsName, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        }
+        #expect(await eventually { child.pid != nil })
+        let helper = try #require(child.pid)
+        #expect(await eventually { results().contains("\(helper) lingering") }, "\(results())")
+
+        let answered = NSLock()
+        nonisolated(unsafe) var reply: HostEvent?
+        server.queue.sync {
+            // The first check passes (the child runs, its connector open), and the probe goes off the queue; then, in
+            // the same turn, the child begins to be ended: its connector closed, SIGTERM, which it ignores.
+            server.handOverThroughMemory(to: hostLauncher) { event in answered.withLock { reply = event } }
+            child.replaceWhenIdle(helper)
+        }
+        #expect(await eventually { answered.withLock { reply } != nil }, "\((try? String(contentsOfFile: dir + "/host.log", encoding: .utf8)) ?? "")")
+        let answer = answered.withLock { reply }
+        guard case .error(let why)? = answer else { Issue.record("not refused: \(String(describing: answer))"); return }
+        #expect(why.contains("server child pid \(helper) is being ended"), "\(why)")
+        #expect(!lastTurn.withLock { reachedSecrets }, "the last turn went past its check")
+        #expect(server.queue.sync { !server.handingOver })
+        // The host's SIGKILL, then one start again, at once.
+        #expect(await eventually { child.pid != nil && child.pid != helper }, "\(String(describing: child.pid))")
+        #expect(await eventually { kill(helper, 0) != 0 && errno == ESRCH })
+        #expect(await eventually { results().filter { $0.contains(" started ") }.count >= 2 }, "\(results())")
+        #expect(results().filter { $0.contains(" started ") }.count == 2, "\(results())")
+    }
+
     /// `--server-arg` reaches a scratch host's server only: the user's host gives its server none of them (and says
     /// so, `ServerChild.adopt`), only its root and node root; without `--server`, nothing is started.
     @Test func theUsersHostGivesItsServerNoTestArguments() throws {

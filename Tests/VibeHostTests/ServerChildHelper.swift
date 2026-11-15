@@ -34,6 +34,9 @@ import Testing
 /// - `handover PATH`: asks the host to hand over to PATH: "handover <its answer>".
 /// - `shut-connector`: shuts its connector for writing (the host's end then reads its end) and runs on, reading no more
 ///   actions, until its parent is no longer the host: "shut 0", or "shut <errno>".
+/// - `linger`: ignores SIGTERM and runs on, reading no more actions and not watching its connector, until its parent is
+///   no longer the host or it is killed (a server slow to end, which the host SIGKILLs `ServerChild.replaceLimit` after
+///   its SIGTERM): "lingering".
 /// - `sleep`: nothing more: "sleeping".
 enum ServerChildHelper {
     static let actionsName = "server-helper-actions"
@@ -174,6 +177,12 @@ enum ServerChildHelper {
                 }
             case ("shut-connector", 1):
                 report("shut \(shutdown(connector, Int32(SHUT_WR)) == 0 ? 0 : errno)")
+                let parent = getppid()
+                while getppid() == parent { usleep(20_000) }
+                _exit(0)
+            case ("linger", 1):
+                signal(SIGTERM, SIG_IGN)
+                report("lingering")
                 let parent = getppid()
                 while getppid() == parent { usleep(20_000) }
                 _exit(0)
