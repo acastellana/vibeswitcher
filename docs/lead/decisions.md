@@ -436,3 +436,7 @@ Twice on 2026-11-13 (teammate-sender-a-frame, member-worktrees-a-sub) the lead's
 
 In that run a stale progress file got a healthy worker declared hung and its finished work re-dispatched, the coordinator twice told the user work was verified before any verifier existed, and the test track drifted from the interface because it had no committed contract to import. Its heavier mode used no shared board at all: hierarchy, written contracts and independent verification carried the coordination. One run in progress is thin evidence, so only the two cheap changes are taken now.
 
+## 2026-11-15 20:23:01 Team experiment instance 1 (B2, sandbox UI journeys) is set up. Arm A: ui-journeys-a1-the (runner and diff), then a2/a3/a4 (journeys) after it, all audited, on Claude. Arm B: ui-journeys-b-team, 4 members (core integrator, diff as test track, select-run, dictate), audited, budget 300 min across members, auto_advance off so it's never auto-merged: audit, then merge(dry_run), then kept. Both arms start at the same moment from the same main commit (A1 held blocked until B can start). Endpoint and bar as in team-on-one-task-design.md §5. Instance 2 is backlog A3 (log watcher), set up the same way once instance 1 ends.
+
+The design's pre-registered experiment. Starting both together controls for Mac load and main's state. B's lead-side steps (member starts, audit, dry run) wait on my turns, a small bias against B, which the readout will note.
+
