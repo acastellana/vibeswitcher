@@ -154,7 +154,7 @@ run_journey() {
                 done
                 if [[ -n $missing ]]; then
                     echo "line $number ($line): these shots weren't written to ${root#"$repo"/}/current/$name/:$missing"
-                    echo "the sandbox answered (a shot is taken from ${root#"$repo"/}/staging/ only when its path is spelled so):"
+                    echo "the sandbox answered (a shot is taken only from a path spelled $root/staging/…):"
                     echo "$output" | sed 's/^/  /'
                     return 1
                 fi
