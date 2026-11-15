@@ -18,6 +18,7 @@ final class StubHost: @unchecked Sendable {
     private var welcomeCapabilities: [String]
     private var listed: [HostSession]
     private var screens = true
+    private var shown = "stub screen"
     private var welcoming = true
     let notes = HostNotes(startedAt: Date(timeIntervalSince1970: 1_800_000_000), serverRestarts: 2, replacedPaths: ["/x/host.sock"],
                           refusedAppConnections: 1)
@@ -64,6 +65,12 @@ final class StubHost: @unchecked Sendable {
     var answersScreens: Bool {
         get { queue.sync { screens } }
         set { queue.sync { screens = newValue } }
+    }
+
+    /// The text it answers `screen` with.
+    var screenText: String {
+        get { queue.sync { shown } }
+        set { queue.sync { shown = newValue } }
     }
 
     /// Whether it welcomes a hello (false: it takes the connection and never answers, as a host whose queue is stuck).
@@ -132,7 +139,7 @@ final class StubHost: @unchecked Sendable {
             send(.welcome(protocolVersion: HostProtocol.version, hostBuild: 42, sessions: listed, capabilities: welcomeCapabilities,
                           pid: 4242, startedAt: startedAt), replyTo: envelope.seq, on: fd)
         case .screen(let id):
-            if screens { send(.screenText(id: id, text: "stub screen"), replyTo: envelope.seq, on: fd) }
+            if screens { send(.screenText(id: id, text: shown), replyTo: envelope.seq, on: fd) }
         case .history(let id, _):
             send(.historyText(id: id, history: "stub history", screen: "stub screen"), replyTo: envelope.seq, on: fd)
         case .hostNotes:

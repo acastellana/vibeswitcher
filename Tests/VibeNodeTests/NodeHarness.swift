@@ -24,12 +24,13 @@ final class NodeHarness: @unchecked Sendable {
 
     /// Installs the fake in the host's folder (once per host: `fake` given, it is reused), starts it in a new session
     /// with `arguments` (Claude's, as the engine would pass them), and waits until it has drawn its prompt box and
-    /// written its state.
+    /// written its state. `keepShell`: the session's shell runs the fake and stays once it exits (the agent's quit is
+    /// told then); without, the shell execs it in its place, as a team session's `claude` is.
     static func start(on host: NodeTestHost, fake: FakeClaude.Install? = nil, arguments: [String] = [], cwd: String? = nil,
-                      label: String = "Fake Claude") async throws -> NodeHarness {
+                      label: String = "Fake Claude", keepShell: Bool = false) async throws -> NodeHarness {
         let fake = try fake ?? FakeClaude.install(in: host.folder)
-        let command = "exec " + ([fake.launcher.path] + arguments).map(FakeClaude.quoted).joined(separator: " ")
-        let session = try await host.spawn(command, cwd: cwd, label: label, agent: "claude")
+        let command = (keepShell ? "" : "exec ") + ([fake.launcher.path] + arguments).map(FakeClaude.quoted).joined(separator: " ")
+        let session = try await host.spawn(command, cwd: cwd, label: label, agent: "claude", keepShell: keepShell)
         let h = NodeHarness(found: session, on: host, fake: fake)
         try await h.screenShows { $0.contains("? for shortcuts") }
         // It draws before it writes its state: its first screen can be up while `agent` is still empty.

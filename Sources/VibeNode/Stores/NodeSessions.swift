@@ -1,0 +1,418 @@
+import Foundation
+import VibeCore
+
+/// The node's one session list (the engine plan's E3), rebuilt from the app's `SessionStore`
+/// (`Sources/VibeSwitcher/SessionStore.swift`: refresh and apply, the details, the state folder's watch; the quiet
+/// sessions' screens, `HostClient.refreshScreens`; the port map's row) and grown from stage 1's `LocalSessions`: every
+/// `claude` or `codex` on a terminal (the app's scan, `SessionScanner`), joined with what the hooks wrote for its
+/// terminal under the node's root, with the host's session on that terminal (its `hostID`, `startFolder` and team role),
+/// and with what its program reports (OSC 7501) or its title shows, resolved by `StatusRules`. Each a `VibeCore`
+/// `Session`, as the witness reads it, keyed by the node's ids (`NodeIds.session(host:)` for a hosted one, else
+/// `NodeIds.session(terminal:)`), on a change stream.
+///
+/// What scans: the 2 s client on the engine's `NodeClock`; the host's sessions changing (one starting or ending, or its
+/// program reporting a new status: `HostLink.changes`); the state folder's watch (`Platform.FolderWatch`, which the
+/// hook's renames wake, coalesced 0.4 s); a quiet Claude session's screen read with something new in its footer
+/// (`HostLink.screen`, every 6 s at most). Not Terminal.app's tabs, Spaces, presence, attention, nudges, names, pauses
+/// or the ledger: those are the Mac's (the port map says so). Nobody looks at a node, so nothing acknowledges a finished
+/// turn: a session whose turn is over stays `done`.
+///
+/// Its state is on `queue` (the engine's, and its link's): read there, and its calls may be made from any thread. Each
+/// scan reads the process table and the state files on a serial queue of its own, never `queue` (the app's "off the
+/// main thread", EN-D1). It takes its root as a parameter and never reads this process's `VibePaths`.
+public final class NodeSessions: @unchecked Sendable {
+    /// How often it scans and looks.
+    public struct Timing {
+        /// The scan's period on the clock, in seconds.
+        public var scanEvery = 2
+        /// How long after a change in the state folder it scans: a busy session's hook writes several events a second.
+        public var watchCoalesce: TimeInterval = 0.4
+        /// The quiet Claude sessions' screens are asked at most this often (by the store's `now`).
+        public var screenEvery: TimeInterval = 6
+
+        public init() {}
+    }
+
+    public let queue: DispatchQueue
+    /// The node's root: the hooks' state files are in its `state` folder.
+    public let root: URL
+    /// Where the hooks write: `<root>/state`.
+    public var stateFolder: URL { root.appendingPathComponent("state", isDirectory: true) }
+
+    /// The sessions as the last scan found them, ordered by terminal. On `queue`.
+    public private(set) var sessions: [Session] = []
+    /// Every change to `sessions`, by the node's id for each (`NodeSessions.id(of:)`): its new value, or nil once it's
+    /// gone.
+    public let changes = Changes<Session>()
+    /// The process table `sessions` come from: when it was read and the terminals it couldn't tell an agent on or not.
+    /// Set after `sessions`, so a reader never pairs a newer table with older sessions (an agent the newer table finds
+    /// would read as quit). On `queue`.
+    public private(set) var tableRead = TableRead()
+    /// Whether each agent's hooks are installed in the node's home (`HookInstaller`), read at `start()` and at
+    /// `refreshHookStatus()`. On `queue`.
+    public private(set) var hooksInstalled: [Agent: Bool] = [:]
+    /// Scans that have landed, for tests to wait on one (`refresh` returns before its scan runs). On `queue`.
+    public private(set) var scansApplied = 0
+
+    /// The roots of the leads' boards with a question for the user open (`LeadTeams.asking`, set by the engine as it
+    /// reads them, E6): those leads' sessions need the user (`Session.leadAsks`), told at once, not at the next scan. On
+    /// `queue`.
+    public var leadsAsking: Set<String> = [] {
+        didSet {
+            guard leadsAsking != oldValue else { return }
+            let marked = sessions.map { session in
+                var session = session
+                session.leadAsks = LeadTeams.asks(session, asking: leadsAsking)
+                return session
+            }
+            if marked != sessions { publish(marked) }
+        }
+    }
+
+    private let home: String
+    private let link: HostLink?
+    private let clock: NodeClock?
+    private let timing: Timing
+    private let now: @Sendable () -> Date
+    private let note: (String) -> Void
+    private let scanner: SessionScanner
+    private let scanQueue = DispatchQueue(label: "vibenode.sessions.scan", qos: .utility)
+    private let onQueue = DispatchSpecificKey<ObjectIdentifier>()
+
+    // On `queue`.
+    private var started = false
+    private var stopped = false
+    private var scanning = false
+    private var rescanRequested = false
+    private var ticks: Subscription?
+    private var hostChanges: Subscription?
+    private var watch: Platform.FolderWatch?
+    private var watchRefreshPending = false
+    /// The host's live sessions, by terminal.
+    private var hosted: [String: HostSession] = [:]
+    /// Each terminal's status and since when it holds.
+    private var observed: [String: (status: SessionStatus, since: Date)] = [:]
+    /// Hook-less sessions seen mid-turn: only those can be "done" off the title alone.
+    private var turns = TurnWitness()
+    /// Claude sessions whose turn looks finished; only their screens are read for background work.
+    private var quietClaude: Set<String> = []
+    /// The quiet hosted sessions' screens, by terminal, as last read.
+    private var screens: [String: String] = [:]
+    private var lastScreenAsk = Date.distantPast
+
+    /// `root`: the node's root (the hooks' state folder is in it). `home`: the node's home, where the agents' own config
+    /// (their hooks) and transcripts are. `queue`: the engine's; with a `link`, the link's. `clock`: the engine's, whose
+    /// client scans every `Timing.scanEvery` s (none: only on `refresh()`, the host's changes and the watch). `scanner`:
+    /// this machine's processes and `<root>/state` by default; tests give a fake process table. `now`: the scan's time
+    /// and the screens' (tests give their own, so ages don't depend on how long a loaded machine takes). `note`: the
+    /// server's log.
+    public init(root: URL, home: String, queue: DispatchQueue, link: HostLink? = nil, clock: NodeClock? = nil, timing: Timing = Timing(),
+                scanner: SessionScanner? = nil, now: @escaping @Sendable () -> Date = { Date() }, note: @escaping (String) -> Void = { _ in }) {
+        self.root = root
+        self.home = home
+        self.queue = queue
+        self.link = link
+        self.clock = clock
+        self.timing = timing
+        self.now = now
+        self.note = note
+        let state = root.appendingPathComponent("state", isDirectory: true)
+        self.scanner = scanner ?? SessionScanner(stateDir: { state })
+        queue.setSpecific(key: onQueue, value: ObjectIdentifier(self))
+    }
+
+    deinit {
+        ticks?.cancel()
+        hostChanges?.cancel()
+        watch?.stop()
+    }
+
+    /// This node's id for `session`: its host session's (`NodeIds.session(host:)`) when the host runs it, else its
+    /// terminal's (`NodeIds.session(terminal:)`).
+    public static func id(of session: Session) -> String {
+        session.hostID.map(NodeIds.session(host:)) ?? NodeIds.session(terminal: session.tty)
+    }
+
+    /// Reads the hooks' status, scans, and from then on scans on the clock, the host's changes and the state folder's
+    /// watch. Once.
+    public func start() {
+        perform { [self] in
+            guard !started, !stopped else { return }
+            started = true
+            refreshHookStatus()
+            if let link {
+                hosted = Self.live(link.changes.values.values)
+                hostChanges = link.changes.subscribe(on: queue) { [weak self] _ in
+                    guard let self, let link = self.link else { return }
+                    self.updateHosted(Array(link.changes.values.values))
+                }
+            }
+            watchStateFolder()
+            scan()
+            if let clock {
+                ticks = clock.every(timing.scanEvery) { [weak self] in self?.refresh() }
+            }
+        }
+    }
+
+    /// Stops the clock's client, the host's changes and the watch. Once; a scan under way still lands.
+    public func stop() {
+        perform { [self] in
+            stopped = true
+            ticks = nil
+            hostChanges = nil
+            watch?.stop()
+            watch = nil
+        }
+    }
+
+    /// Scans now (after the one under way, when one is).
+    public func refresh() {
+        perform { [self] in scan() }
+    }
+
+    /// Reads again whether each agent's hooks are installed in the node's home, off `queue`.
+    public func refreshHookStatus() {
+        let home = self.home
+        scanQueue.async { [weak self] in
+            let installed = Dictionary(uniqueKeysWithValues: Agent.allCases.map { agent -> (Agent, Bool) in
+                let url = HookInstaller.configURL(for: agent, home: home)
+                let config = (try? Data(contentsOf: url)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                return (agent, HookInstaller.isComplete(in: config ?? [:], agent: agent))
+            })
+            self?.perform { self?.hooksInstalled = installed }
+        }
+    }
+
+    /// Whether the agent of a hosted session started for one has quit, leaving its shell: the scan has no agent on its
+    /// terminal, and the table it read (a minute after the session started, and able to tell what runs on that
+    /// terminal) says so (`TableRead.agentQuit`, the rule the app's rows and witness use). A session whose agent the
+    /// scan has is never quit. On `queue`.
+    public func agentQuit(_ hosted: HostSession) -> Bool {
+        !sessions.contains { $0.tty == hosted.tty } && tableRead.agentQuit(hosted)
+    }
+
+    // MARK: Scans
+
+    /// `work` on `queue`: now when called there, else after what's queued.
+    private func perform(_ work: @escaping () -> Void) {
+        if DispatchQueue.getSpecific(key: onQueue) == ObjectIdentifier(self) { work() } else { queue.async(execute: work) }
+    }
+
+    /// The host's sessions changed. Titles change many times a second while an agent works (its spinner); the regular
+    /// scan picks them up, so only a session starting or ending, or its program reporting a new status (OSC 7501),
+    /// scans here. On `queue`.
+    private func updateHosted(_ sessions: [HostSession]) {
+        let fresh = Self.live(sessions)
+        let changed = Set(fresh.keys) != Set(hosted.keys)
+            || fresh.contains { tty, session in session.programStatus != hosted[tty]?.programStatus }
+        hosted = fresh
+        if changed, !stopped { scan() }
+    }
+
+    /// The host's live sessions, by terminal.
+    private static func live<S: Sequence>(_ sessions: S) -> [String: HostSession] where S.Element == HostSession {
+        Dictionary(sessions.filter(\.isLive).map { ($0.tty, $0) }, uniquingKeysWith: { $1 })
+    }
+
+    /// The scan: the quiet hosted Claude sessions' screens asked when it's time, then the process table and the state
+    /// files read on the scan queue, and what they gave applied back on `queue`. One at a time: one asked while one runs
+    /// follows it. On `queue`.
+    private func scan() {
+        guard !scanning else {
+            rescanRequested = true
+            return
+        }
+        scanning = true
+        if watch == nil, started, !stopped { watchStateFolder() }
+        let hosted = self.hosted
+        let quiet = quietClaude.intersection(hosted.keys)
+        if !quiet.isEmpty, now().timeIntervalSince(lastScreenAsk) >= timing.screenEvery {
+            lastScreenAsk = now()
+            askScreens(quiet)
+        }
+        let screens = self.screens
+        let (scanner, now, home) = (self.scanner, self.now, self.home)
+        scanQueue.async { [weak self] in
+            let time = now()
+            let raw = scanner.scan(now: time)
+            let read = TableRead(at: scanner.readAt, undecided: scanner.undecided)
+            let transcripts = Self.transcripts(for: raw, home: home)
+            var background: [String: String] = [:]
+            for (tty, screen) in screens where hosted[tty] != nil {
+                background[tty] = BackgroundWork.summary(fromScreen: screen)
+            }
+            self?.perform {
+                guard let self else { return }
+                self.apply(raw: raw, hosted: hosted, background: background, transcripts: transcripts, now: time)
+                if read != self.tableRead { self.tableRead = read }
+                self.scansApplied += 1
+                self.scanning = false
+                if self.rescanRequested {
+                    self.rescanRequested = false
+                    self.scan()
+                }
+            }
+        }
+    }
+
+    /// Reads these hosted sessions' screens (by terminal) into `screens` (the app's `HostClient.refreshScreens`); a
+    /// screen whose footer says something new scans again. On `queue`.
+    private func askScreens(_ ttys: Set<String>) {
+        guard let link else { return }
+        screens = screens.filter { ttys.contains($0.key) }
+        for (tty, session) in hosted where ttys.contains(tty) {
+            link.screen(session.id) { [weak self] text in
+                self?.perform {
+                    guard let self, !self.stopped else { return }
+                    let before = self.screens[tty].flatMap { BackgroundWork.summary(fromScreen: $0) }
+                    self.screens[tty] = text
+                    if text.flatMap({ BackgroundWork.summary(fromScreen: $0) }) != before { self.scan() }
+                }
+            }
+        }
+    }
+
+    /// Off `queue`: each session's transcript, if its hook named one inside the agents' folders in `home`.
+    private static func transcripts(for raw: [RawSession], home: String) -> [String: String] {
+        var paths: [String: String] = [:]
+        for item in raw {
+            if let path = item.hook?.transcriptPath, let checked = TranscriptReader.checkedURL(path, home: home) {
+                paths[item.tty] = checked.0.path
+            }
+        }
+        return paths
+    }
+
+    /// The app's `SessionStore.apply`, its node part: each session's status (hooks, else its program's report, else its
+    /// title) and since when, its background work, its detail, and the fields of `Session` the engine reads. On
+    /// `queue`.
+    private func apply(raw: [RawSession], hosted: [String: HostSession], background: [String: String], transcripts: [String: String],
+                       now: Date) {
+        var quiet: Set<String> = []
+        var result: [Session] = []
+        for item in raw {
+            let window = hosted[item.tty]
+            let parsed = window.map { StatusRules.parseTitle($0.title) }
+            // Claude uses ✳ (idle) and spinners (busy); Codex only shows a braille spinner while busy.
+            let activity: TitleActivity = item.agent == .claude ? (parsed?.activity ?? .none)
+                : (parsed?.activity == .busy ? .busy : .none)
+            let seenBusy = turns.observe(tty: item.tty, pid: item.pid, title: activity)
+            // Hooks, else what the program reports over OSC 7501, else the title (`StatusRules.resolve`).
+            let program = item.hook == nil ? window?.liveProgramStatus : nil
+            var status = StatusRules.resolve(hook: item.hook, program: program, title: activity, now: now.timeIntervalSince1970,
+                                             seenBusy: seenBusy)
+
+            let since: Date
+            if let previous = observed[item.tty], previous.status == status {
+                since = previous.since
+            } else if observed[item.tty] == nil {
+                // First sighting: since its last hook event, or its program's report, else since ever.
+                since = item.hook.map { Date(timeIntervalSince1970: $0.lastEventAt) } ?? program?.since ?? .distantPast
+            } else {
+                since = now
+            }
+            observed[item.tty] = (status, since)
+
+            var waitingOn: String?
+            if item.agent == .claude, status == .done || status == .idle {
+                quiet.insert(item.tty)
+                // Turn over but background work still running. Prefer the real processes (what and how long); fall
+                // back to Claude's footer for background agents and tasks that aren't processes.
+                if let jobs = BackgroundJobs.summary(item.backgroundJobs, now: now) ?? background[item.tty] {
+                    status = .background
+                    waitingOn = jobs
+                }
+            }
+
+            var session = Session(
+                tty: item.tty, agent: item.agent, pid: item.pid, startedAt: item.startedAt, cwd: item.cwd, project: item.project,
+                task: SessionNaming.task(fromTitle: parsed?.text, project: item.project, firstPrompt: item.hook?.firstPrompt),
+                status: status, statusSince: since,
+                detail: waitingOn.map { "Waiting on \($0)" } ?? program.flatMap(StatusRules.detail(for:))
+                    ?? Self.detail(for: status, hook: item.hook, agent: item.agent),
+                hasHooks: item.hook != nil, inTerminalApp: false)
+            session.eventAt = item.hook?.lastEventAt
+            session.hookEvent = item.hook?.lastEvent
+            session.transcriptPath = transcripts[item.tty]
+            session.hostID = window?.id
+            session.startFolder = window?.cwd
+            session.teamRole = LeadTeams.role(label: window?.label)
+            session.leadAsks = LeadTeams.asks(session, asking: leadsAsking)
+            session.agentSessionID = item.hook?.sessionId
+            session.backgroundJobs = item.backgroundJobs
+            if status == .working, let hook = item.hook, hook.lastEvent == "PreToolUse", let started = hook.toolStartedAt {
+                session.activity = hook.toolDetail
+                session.activitySince = Date(timeIntervalSince1970: started)
+            }
+            result.append(session)
+        }
+        let live = Set(raw.map(\.tty))
+        observed = observed.filter { live.contains($0.key) }
+        turns.prune(liveTTYs: live)
+        quietClaude = quiet
+        let ordered = result.sorted { ($0.tty, $0.pid) < ($1.tty, $1.pid) }
+        if ordered != sessions { publish(ordered) }
+    }
+
+    /// `sessions` is now `fresh`: each changed one sent by its id, each gone sent as removed. On `queue`.
+    private func publish(_ fresh: [Session]) {
+        let gone = Set(sessions.map(Self.id(of:))).subtracting(fresh.map(Self.id(of:)))
+        sessions = fresh
+        for id in gone.sorted() { changes.send(id, nil) }
+        for session in fresh { changes.send(Self.id(of: session), session) }
+    }
+
+    /// What a session waits on or works at, by its status and its hook (the app's `SessionStore.detail(for:hook:agent:)`,
+    /// copied).
+    public static func detail(for status: SessionStatus, hook: HookState?, agent: Agent) -> String? {
+        switch status {
+        case .needsInput:
+            if let request = hook?.request { return request }
+            if let notice = hook?.notice { return notice }
+            switch hook?.toolName {
+            case "AskUserQuestion", "request_user_input": return "Asking you a question"
+            case "ExitPlanMode": return "Plan ready for review"
+            default: return "Waiting for you"
+            }
+        case .working:
+            if let prompt = hook?.lastPrompt, !SessionNaming.isSystemPrompt(prompt) { return "› " + prompt }
+            return hook?.toolName.map { "Running \($0)" }
+        case .done, .idle, .background:
+            return hook?.lastMessage
+        case .unknown:
+            guard hook == nil else { return nil }
+            return agent == .codex ? "No live status: this Codex session started before the hooks; restart it"
+                                   : "No live status yet: waiting for this session's first hook event"
+        }
+    }
+
+    // MARK: The state folder
+
+    /// Hook writes land as renames in the state folder: a scan for them at once (coalesced), not at the clock's next.
+    /// The folder is made (0700) when it isn't there. One that can't be watched (a 9p file system) is scanned on the
+    /// clock alone; one removed is watched again at the next scan. On `queue`.
+    private func watchStateFolder() {
+        let folder = stateFolder
+        try? VibePaths.ensurePrivate(folder)
+        guard let made = Platform.FolderWatch(path: folder.path) else {
+            note("sessions: the state folder can't be watched; hook events are seen at the next scan")
+            return
+        }
+        watch = made
+        made.deliver(on: queue) { [weak self, weak made] change in
+            guard let self else { return }
+            if change.contains(.folderGone) {
+                made?.stop()
+                if self.watch === made { self.watch = nil }
+            }
+            guard !self.watchRefreshPending, !self.stopped else { return }
+            self.watchRefreshPending = true
+            self.queue.asyncAfter(deadline: .now() + self.timing.watchCoalesce) { [weak self] in
+                guard let self else { return }
+                self.watchRefreshPending = false
+                self.scan()
+            }
+        }
+    }
+}

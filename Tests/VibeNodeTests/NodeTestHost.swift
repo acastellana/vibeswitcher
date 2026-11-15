@@ -101,10 +101,11 @@ final class NodeTestHost: @unchecked Sendable {
         LeadVault(folder: root.appendingPathComponent("lead", isDirectory: true)) { [socket] in try HostCall.vault($0, socket: socket) }
     }
 
-    /// Starts `command` (a bash line) in a new session, as the app does, and returns it.
+    /// Starts `command` (a bash line) in a new session, as the app does, and returns it. `keepShell`: the session keeps
+    /// a shell open once `command` ends (`SpawnRequest.keepShell`).
     func spawn(_ command: String, cwd: String? = nil, label: String = "Test", agent: String? = nil, cols: Int = 100,
-               rows: Int = 40) async throws -> HostSession {
-        let request = SpawnRequest(cwd: cwd ?? home.path, command: command, env: [:], cols: cols, rows: rows, keepShell: false,
+               rows: Int = 40, keepShell: Bool = false) async throws -> HostSession {
+        let request = SpawnRequest(cwd: cwd ?? home.path, command: command, env: [:], cols: cols, rows: rows, keepShell: keepShell,
                                    label: label, agent: agent)
         let reply = try await offPool { [socket] in try HostCall.request(.spawn(request), socket: socket, appKey: nil, timeout: 60) }
         guard case .spawned(let session) = reply else {
