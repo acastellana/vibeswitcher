@@ -431,6 +431,14 @@ final class ServerChildHost {
         #expect(fstat(copy.fd, &info) == 0 && info.st_mode & 0o7777 == 0o111, "mode \(String(info.st_mode & 0o7777, radix: 8))")
     }
 
+    /// The log line of a copy whose mode couldn't be put back names an errno only when one of `restoreMode`'s calls
+    /// failed; its refusals that fail no call (the copy not fully sealed, or not a regular file) say so instead of an
+    /// older call's errno. `spawn` clears errno before it asks.
+    @Test func aModeNotPutBackNamesAnErrnoOnlyWhenACallFailed() {
+        #expect(ServerChild.whyModeWasntPutBack(errno: 0) == "it isn't a fully sealed regular file")
+        #expect(ServerChild.whyModeWasntPutBack(errno: EPERM) == "errno \(EPERM)")
+    }
+
     /// A helper that shuts its connector for writing and runs on: the host's end of the connector reads that as its
     /// end and closes, and the host then ends the helper (which could reach it no more, and would keep it from exiting
     /// idle) and starts it again, saying why.

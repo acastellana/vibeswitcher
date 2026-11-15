@@ -399,8 +399,11 @@ public final class ServerChild {
     private func spawn() {
         guard let server, !server.stopped, !lock.withLock({ stopped }) else { return }
         lock.withLock { restartPending = false }
+        // Cleared first: restoreMode's refusals of a copy not fully sealed, or not a regular file, fail no call.
+        errno = 0
         guard Platform.ProcessSelf.restoreMode(of: copy.fd) else {
-            Self.say(server, "server child not started: the mode of \(launch.image)'s sealed copy couldn't be put back (errno \(errno))")
+            Self.say(server, "server child not started: the mode of \(launch.image)'s sealed copy couldn't be put back ("
+                      + Self.whyModeWasntPutBack(errno: errno) + ")")
             return scheduleRestart()
         }
         guard let connector = server.openAppConnector(expecting: nil, requireNonDumpable: true, onDumpable: { [weak self] pid in
@@ -434,6 +437,13 @@ public final class ServerChild {
             lock.withLock { child = (pid, token, connector, Date(), watch) }
             Self.say(server, "server child pid \(pid) started from \(launch.image)'s sealed copy, connector \(connector)")
         }
+    }
+
+    /// Why `Platform.ProcessSelf.restoreMode` gave false, from the errno it left after `spawn` cleared it: a call's
+    /// errno (getting the seals, `fstat`, `pread` or `fchmod` failed), or, when none failed, that the copy isn't a fully
+    /// sealed regular file (its refusals that fail no call, where an errno shown would be an older call's).
+    static func whyModeWasntPutBack(errno code: Int32) -> String {
+        code == 0 ? "it isn't a fully sealed regular file" : "errno \(code)"
     }
 
     /// The child a handover carried (`restore` checked it), taken again: its connector's end the app's, its sender its
