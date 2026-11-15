@@ -114,13 +114,28 @@ struct LeadMemberWatchTests {
         var quit = Self.idle
         quit.agentQuit = true
         let told = Self.events(task, ["w1": Self.busy, "m2": quit, "m3": Self.busy])
-        #expect(told.map(\.key) == ["m2|ended"], "\(told)")
+        #expect(told.map(\.key) == ["m2|member-ended"], "\(told)")
         #expect(told.first?.text.hasPrefix("Member ui of build-it's team ended without saying its part is done: its agent quit and left the session's shell open.") == true, "\(told)")
         #expect(told.first?.text.contains("start_worker(build-it)") == true)
         // Not once its part is done.
         var done = task
         done.team?[1].handoff = LeadPartHandoff(commit: "abc", changed: "views", caveats: "none", verify: "test", at: Self.at - 20 * 60)
         #expect(Self.events(done, ["w1": Self.busy, "m2": quit, "m3": Self.busy]).isEmpty)
+    }
+
+    /// Two members whose agents quit in the same look, beside the integrator's: each told, none lost in the message
+    /// that gathers the sessions that ended (`LeadWitness.messages`).
+    @Test func membersWhoseAgentsQuitTogetherAreEachTold() throws {
+        let task = try Self.task()
+        var quit = Self.idle
+        quit.agentQuit = true
+        var board = LeadBoard()
+        board.tasks = [task]
+        let messages = LeadWitness.messages(board: board, seen: ["w1": quit, "m2": quit, "m3": quit], now: Self.now) { _ in false }
+        let keys = messages.flatMap(\.keys)
+        #expect(keys.contains("m2|member-ended") && keys.contains("m3|member-ended") && keys.contains("w1|ended"), "\(messages)")
+        #expect(messages.contains { $0.text.hasPrefix("Member ui of build-it's team ended") })
+        #expect(messages.contains { $0.text.hasPrefix("Member docs of build-it's team ended") })
     }
 
     @Test func aPlainTaskIsToldAsBefore() throws {

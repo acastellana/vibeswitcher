@@ -334,9 +334,10 @@ public enum LeadWitness {
             let who = "Member \(name) of \(slug)'s team"
             let tell = "message(\(slug), …, member: \(name))"
             // Its shell still open, its session counts as live, so `endedMembers` doesn't see it and start_worker
-            // doesn't start it again: told here.
+            // doesn't start it again: told here. Its own key, not "|ended": `unbuiltMessages` gathers those into one
+            // message from `endings`, which has no line for a member, so two members quitting at once were told by no one.
             if info.agentQuit {
-                add("\(session)|ended", "\(who) ended without saying its part is done: its agent quit and left the session's shell open. "
+                add("\(session)|member-ended", "\(who) ended without saying its part is done: its agent quit and left the session's shell open. "
                     + "Its commits are on \(branch). Ask the user to close that session, then start_worker(\(slug)) starts the member again where it was; "
                     + "or stop_worker(\(slug)) ends the whole team and start_worker(\(slug)) starts it again.")
                 continue
