@@ -54,6 +54,8 @@ public final class Requests: @unchecked Sendable {
     public private(set) var stopping = false
     /// The host's shutdown, as `stop` asks it; a test gives its own.
     var shutdown: () -> HostEvent? = { nil }
+    /// The lead engine `lead` starts leads through, and whose leads `status` lists (E4); none: `lead` is refused.
+    public var engine: LeadEngine?
 
     public init(link: HostLink, sessions: NodeSessions?, rule: VoiceRule, root: URL, hostSocket: String, commit: String,
                 hostPID: pid_t = getppid(), note: @escaping (String) -> Void = { _ in }) {
@@ -119,6 +121,7 @@ public final class Requests: @unchecked Sendable {
         case "status": status(request, reply: reply)
         case "start": start(request, reply: reply)
         case "stop": stop(request, reply: reply)
+        case "lead": lead(request, reply: reply)
         default: reply(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)")))
         }
     }
@@ -164,7 +167,7 @@ public final class Requests: @unchecked Sendable {
             "rule": .object(["mode": .string(rule.mode.rawValue), "says": .string(rule.says),
                              "scopes": .array(rule.scopes.map { .string($0.pattern) })]),
             "sessions": .array(list.map(Self.value)),
-            "leads": .array([]),
+            "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(\.value)),
             "cards": .object(["questions": .int(0), "approvals": .int(0), "config": .int(0), "base": .int(0)]),
             "accepted": .array(accepted.map(\.value)),
             "notices": .array(stopping ? [.string("the node is stopping")] : []),
@@ -219,6 +222,7 @@ public final class Requests: @unchecked Sendable {
     /// answered (the host ends this server a moment after it accepts).
     private func stop(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         stopping = true
+        engine?.stopStarting()
         let live = link.sessions.filter(\.isLive)
         let leadCount = live.filter(Self.isLead).count
         note("stop: ending \(leadCount) leads and \(live.count - leadCount) other sessions")
@@ -244,12 +248,48 @@ public final class Requests: @unchecked Sendable {
             waiting.watch = nil
             let remaining = self.link.sessions.filter(\.isLive).map { "\($0.tty) (\(ConfigSeal.inert($0.label, limit: 80)))" }
             self.stopping = false
+            self.engine?.startAgain()
             reply(.init(re: request.id, error: .init(.refused, "sessions still live after \(Int(Self.stopWait)) s: \(remaining.joined(separator: ", "))")))
         }
         look()
     }
 
     private static func isLead(_ session: HostSession) -> Bool { LeadTeams.role(label: session.label) == .lead }
+
+    // MARK: lead
+
+    /// `lead FOLDER [--goal TEXT] [--take-head] [--replace]` (E4): the engine's start, its outcome as the result:
+    /// the project's id, the lead's session, what happened (`started`, `shown`, `waiting`), the program's absolute path
+    /// (EN-D13), and notes; a refusal is `refused` with the engine's reason.
+    private func lead(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let folder = request.args?["folder"]?.string, folder.hasPrefix("/") else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "lead needs folder, an absolute path")))
+        }
+        let goal = request.args?["goal"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server starts no leads"))) }
+        engine.startLead(folder: folder, goal: goal, takeHead: request.args?["takeHead"]?.bool == true,
+                         replace: request.args?["replace"]?.bool == true) { outcome in
+            reply(Self.reply(request.id, folder: folder, outcome))
+        }
+    }
+
+    /// A start's outcome as `lead`'s reply.
+    static func reply(_ id: String, folder: String, _ outcome: LeadEngine.StartOutcome) -> NodeWire.Reply {
+        func result(_ happened: String, session: UUID?, program: String?, notes: [String]) -> NodeWire.Reply {
+            .init(re: id, result: .object([
+                "happened": .string(happened),
+                "session": session.map { .string(NodeIds.session(host: $0)) } ?? .null,
+                "program": program.map(NodeWire.Value.string) ?? .null,
+                "notes": .array(notes.map(NodeWire.Value.string)),
+            ]))
+        }
+        switch outcome {
+        case .started(let session, let program, let notes): return result("started", session: session, program: program, notes: notes)
+        case .shown(let session, let notes): return result("shown", session: session, program: nil, notes: notes)
+        case .waiting: return result("waiting", session: nil, program: nil, notes: ["the start goes on once the server's link to its host is welcomed"])
+        case .refused(let why): return .init(re: id, error: .init(.refused, why))
+        }
+    }
 
     /// One wait of `stop`'s, on `queue`: whether it was answered, its watch of the link's changes, and the sessions
     /// it asked to end.
@@ -272,6 +312,7 @@ public final class Requests: @unchecked Sendable {
             self.queue.async {
                 guard case .ok? = answer else {
                     self.stopping = false
+                    self.engine?.startAgain()
                     let why: String = { if case .error(let message)? = answer { return message } else { return "it didn't answer" } }()
                     self.note("stop: the host refused to shut down: \(why)")
                     return reply(.init(re: request.id, error: .init(.refused, "\(ended) sessions ended, but the host refused to shut down: \(ConfigSeal.inert(why, limit: .max))")))

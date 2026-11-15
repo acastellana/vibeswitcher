@@ -563,11 +563,11 @@ Acceptable only on VibeSwitcher's own repository, with interop off, until stage 
 `NodeJournalTests.aJournalEntryFromANonTerminalCgroupIsMarkedInStatus`,
 `NodeJournalTests.anAcceptedRequestWithNoJournalEntryIsMarked`, `NodeWireTests.aLineOverOneMebibyteIsRefused`. The
 scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (a Windows
-Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. Planned: the engine plan task
-E4, E6.
+Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. The engine's E4:
+`LeadStartTests.aSessionsProcessCannotStartALead`, `LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`,
+`ServerTests.aStopWhileALeadSpawnsStillEndsTheHost`. Planned: the engine plan task E6.
 
-**Tests to write:** E4:
-`aSessionsProcessCannotStartALead`, `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E6:
+**Tests to write:** E6:
 `anAnswerFromASessionsProcessIsRefused`, `anAnswerFromAProcessCarryingASessionMarkerIsRefused`,
 `anAnswerFromBranchCodeIsRefused`, `anApprovalCardIsBuiltFromGitAndTheVault`, `aQuestionWrittenToTheBoardIsNotShown`.
 E8: `anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`. Step 8: `aSessionsProcessCannotInstallHooks`.
@@ -924,9 +924,11 @@ before starting the lead again.
 `ConfigSealFirstLookTests.aRootsAcceptLetsItsFloorBeRecordedAndHoldsTheNext`,
 `ConfigSealFirstLookTests.aHomeFileUnreadAtTheAcceptIsStillHeldWhenItFirstReads`,
 `VaultFirstLookTests.onlyAFreshNodeVaultOrAScratchHostAskedHoldsItsFirstLook`,
-`VaultFirstLookHostTests.aScratchHostAskedHoldsItsVaultsFirstLook` (Task 10e: the extended first look).
+`VaultFirstLookHostTests.aScratchHostAskedHoldsItsVaultsFirstLook` (Task 10e: the extended first look);
+`LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`, `LeadStartTests.noFloorIsSeededFromWorkflowOnLinux` (the
+engine's E4: `lead` refused, no floor seeded).
 
-**Tests to write:** E4: `aLeadIsRefusedOnAFreshVaultUntilAccepted`. E8:
+**Tests to write:** E8:
 `aHostRestartSaysTheTeamIsGone`, `aHostRestartHoldsWorkersUntilTheConfigIsAccepted`,
 `aStartTheUserDidntMakeIsShownUntilAcknowledged`, `configAcceptSealsOnlyWhatItShowed`,
 `configHeldShowsChangeTimesSizesAndHashes`, `baseAcceptAfterARestartShowsWhatMoved`,
@@ -1193,9 +1195,10 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `SealedCopyTests.aSealedCopysHashIsOfTheBytesItRuns`, `ProcessesTests.aPidsTokenIsItsPeerToken` (Task 3);
 `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts` (Task 8; S2 names it too);
 `HandoverLinuxTests.aFailedTakeOverGoesBackThroughTheSealedCopy`,
-`HandoverLinuxTests.aFallbackImageRewrittenInPlaceIsNotWhatRuns` (Task 9c; S8 names them too).
+`HandoverLinuxTests.aFallbackImageRewrittenInPlaceIsNotWhatRuns` (Task 9c; S8 names them too);
+`LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath` (the engine's E4: `claude` by its resolved path).
 
-**Tests to write:** E4: `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`. Step 8: `StartCommandTests` (the unit written,
+**Tests to write:** Step 8: `StartCommandTests` (the unit written,
 `Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, the commit's folder), `noNameIsBothUnsetAndAssigned`, a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,
 `anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (also reads `/proc/<pid>/maps` of the installed host, server
@@ -1313,12 +1316,12 @@ bootstrap (S12 item 15).
 command in a session of its own); `RealClaudeTests.whatClaudesBashToolSourcesIsMeasured`,
 `RealClaudeTests.aVerifierCommandInItsOwnSessionStillTimesOut` (Task 12b: gated measurements, run 2026-11-14, the
 snapshot's in a home shaped like the node's too), `RealClaudeTests.theStartupFilesBashReadsInClaudeCodesShapesAreMeasured`
-(bash's own rules in Claude Code's shapes, ungated).
+(bash's own rules in Claude Code's shapes, ungated); the engine's E4: `LeadStartTests.theLeadGetsNoCodexWorkers`,
+`LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`, `LeadStartTests.aClaudeFoundOnlyThroughALoginShellIsRefused`,
+`LeadStartTests.theLeadsLaunchSettingsAreInline`, `RoleProgramTests.aWorkersProgramIsTheLeadsResolvedClaudeNotTheSettings`,
+`LaunchPreflightTests.aProgramFoundOnlyThroughALoginShellIsMissingOnLinux` (the tool server's probe as sessions start).
 
-**Tests to write:** The engine's
-E4: `LeadStartTests.theLeadGetsNoCodexWorkers`, `aLeadIsLaunchedByClaudesResolvedPath`,
-`aClaudeFoundOnlyThroughALoginShellIsRefused`, `RoleProgramTests.aWorkersProgramIsTheLeadsResolvedClaudeNotTheSettings`.
-After the bootstrap:
+**Tests to write:** After the bootstrap:
 `GitGuardTests.aChangedHooksCopyIsRefused`.
 
 ## S11. What plain mode doesn't promise on Linux

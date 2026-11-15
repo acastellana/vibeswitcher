@@ -31,9 +31,18 @@ struct LaunchPreflightTests {
         }
     }
 
+    /// Written as data (`<path>.txt`, never run) and copied into place by `/bin/cp`: this process never holds a script
+    /// open for writing, so no child another test starts meanwhile inherits that descriptor and makes running the
+    /// script fail with ETXTBSY (as `FakeClaude.install` does; seen 2026-11-15 under load).
     func script(_ path: String, _ body: String) throws {
         try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try ("#!/bin/sh\n" + body + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        try ("#!/bin/sh\n" + body + "\n").write(toFile: path + ".txt", atomically: true, encoding: .utf8)
+        let copy = Process()
+        copy.executableURL = URL(fileURLWithPath: "/bin/cp")
+        copy.arguments = [path + ".txt", path]
+        try copy.run()
+        copy.waitUntilExit()
+        guard copy.terminationStatus == 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: path]) }
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
     }
 
@@ -42,10 +51,13 @@ struct LaunchPreflightTests {
         let bin = folder + "/bin", log = folder + "/runs.log"
         try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
         if mac.claude { try script(bin + "/claude", "echo claude") }
-        // The session's `-l -i -c COMMAND $0 NAME`, run by sh with PATH only the scratch bin (and sh's own builtins).
+        // The session's `-l -i -c COMMAND $0 NAME` (the Mac's login shell), or on Linux `--noprofile --norc -c COMMAND
+        // $0 NAME` (as sessions start there, `SessionShellProbe`), run by sh with PATH only the scratch bin (and sh's own
+        // builtins): the session's PATH.
         let shell = folder + "/fakesh"
         try script(shell, """
-            [ "$1" = -l ] && [ "$2" = -i ] && [ "$3" = -c ] || exit 64
+            { [ "$1" = -l ] && [ "$2" = -i ]; } || { [ "$1" = --noprofile ] && [ "$2" = --norc ]; } || exit 64
+            [ "$3" = -c ] || exit 64
             echo shell >> '\(log)'
             shift 2
             PATH='\(bin)'; export PATH
@@ -109,6 +121,47 @@ struct LaunchPreflightTests {
         #expect(mac.runs("git") == 1)
     }
     #endif
+
+    #if !canImport(Darwin)
+    /// S10: on Linux the look runs as sessions start (`bash --noprofile --norc`, the session's PATH), never through a
+    /// login shell: a program found only through the user's startup files (here a scratch `HOME` whose `.bashrc`,
+    /// `.profile` and `.bash_profile` add a folder holding it to PATH) passes a login shell's look and is missing to
+    /// the session, so it's said missing. The shell is the real /bin/bash, given that `HOME`.
+    @Test func aProgramFoundOnlyThroughALoginShellIsMissingOnLinux() throws {
+        let folder = scratch.url("login-only").path
+        let (bin, home) = (folder + "/bin", folder + "/home")
+        try script(bin + "/vs-login-only-agent", "echo agent")
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        for startup in [".bashrc", ".profile", ".bash_profile"] {
+            try "export PATH='\(bin)':\"$PATH\"\n".write(toFile: home + "/" + startup, atomically: true, encoding: .utf8)
+        }
+        let bash = folder + "/bash"
+        try script(bash, "HOME='\(home)'; export HOME; exec /bin/bash \"$@\"")
+        try script(folder + "/git", "echo 'git version 2.43.0'")
+        // A login shell finds it.
+        #expect(LoginShellCommand.resolve("vs-login-only-agent", shell: bash, timeout: Self.budget) == .found(bin + "/vs-login-only-agent"))
+        // The look doesn't.
+        let preflight = LaunchPreflight(shell: bash, xcodeSelect: folder + "/no-xcode-select", git: folder + "/git", timeout: Self.budget, keep: 60)
+        let problem = try #require(preflight.check(command: "vs-login-only-agent --model sonnet"))
+        #expect(problem.missing == [.agent(program: "vs-login-only-agent", shell: bash)])
+        // A program on the session's PATH is found.
+        #expect(preflight.check(command: "sh -c true") == nil)
+        // And by default the look's shell is the session's.
+        #expect(LaunchPreflight().shell == "/bin/bash")
+    }
+    #endif
+
+    /// The Mac's look is today's: through the user's login shell (`SessionShellProbe` answers nothing there).
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's"))
+    func theMacsLookIsThroughTheLoginShellAsToday() {
+        #expect(LaunchPreflight().shell == LoginShellVariable.userShell)
+        #expect(SessionShellProbe.resolve("sh", shell: "/bin/sh", timeout: Self.budget) == nil)
+    }
+
+    /// Switched off (the Mac's form) the session's probe answers nothing, so the login shell looks.
+    @Test func switchedOffTheSessionsProbeAnswersNothing() {
+        #expect(SessionShellProbe.resolve("sh", shell: "/bin/bash", timeout: Self.budget, enabled: false) == nil)
+    }
 
     @Test func aGitThatDoesntRunSaysWhatItSaid() throws {
         let mac = try make(Mac(gitVersion: "You have not agreed to the Xcode license agreements.", gitStatus: 69))

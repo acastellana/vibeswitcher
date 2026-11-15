@@ -238,6 +238,7 @@ final class HostRuntime: LeadRuntime {
     /// The same command the app starts `agent` with (its preferences and launch presets), so workers run like your own
     /// sessions.
     private func command(_ agent: Agent, root: String) -> String? {
+        if let program = RoleProgram.claude(for: agent) { return program }  // Linux: the lead's resolved claude (EN-D13), no setting.
         let preferences = Platform.settings()
         let presets = LaunchPresets.load(from: VibePaths.presetsFile,
                                          claudeCommand: preferences?.string(forKey: "claudeCommand") ?? "claude",

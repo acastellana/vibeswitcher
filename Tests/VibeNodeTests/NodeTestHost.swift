@@ -15,6 +15,9 @@ import VibeNode
 /// once never share a steer inbox, a state folder or a socket. Its sessions get that `HOME` and a `PATH` of
 /// `/usr/bin:/bin`, with no `claude` on it, as the node's unit has none (EN-D13). Its vault is a `LeadVault.Book` of
 /// its own, whose config home is that `HOME`. Stopped, its sessions ended, and its folder removed when it goes (or `stop()`).
+///
+/// `holdsFirstLook`: its vault holds its first look, as a fresh node's does (stage 2's Task 10e, S7). `projectAllowList`:
+/// its spawns are refused outside the repositories that file names (stage 2's Task 10d), as the node's host's are.
 final class NodeTestHost: @unchecked Sendable {
     /// The scratch folder everything of this host is in.
     let folder: URL
@@ -37,7 +40,7 @@ final class NodeTestHost: @unchecked Sendable {
     /// What every session gets besides what the host adds (`HostedSession.environment`).
     var baseEnvironment: [String: String] { ["HOME": home.path, "PATH": "/usr/bin:/bin"] }
 
-    init(_ scratch: Scratch) throws {
+    init(_ scratch: Scratch, holdsFirstLook: Bool = false, projectAllowList: URL? = nil) throws {
         folder = scratch.url("node-host")
         home = folder.appendingPathComponent("home", isDirectory: true)
         root = home.appendingPathComponent(".vibeswitcher", isDirectory: true)
@@ -48,10 +51,12 @@ final class NodeTestHost: @unchecked Sendable {
         // Its agents' config (a config check's hashes) and its seal copies are in its sessions' HOME, as on a node,
         // where the two are one folder; never this process's home, which every test in it shares.
         book.configHome = home.path
+        if holdsFirstLook { book.holdsFirstLook = true }
         var config = HostServer.Config(socketPath: socket, lockPath: socket + ".lock", shell: "/bin/sh", launcher: hostLauncher.path,
                                        baseEnvironment: ["HOME": home.path, "PATH": "/usr/bin:/bin"], hostBuild: 42)
         config.idleExit = nil
         config.vault = book
+        config.projectAllowList = projectAllowList
         config.appExecutable = HostServer.executable(of: getpid())
         config.ringCapacity = 1 << 20
         config.logPath = folder.appendingPathComponent("host.log").path

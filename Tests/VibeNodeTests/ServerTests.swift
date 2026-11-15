@@ -108,12 +108,12 @@ struct ServerTests {
     @Test func anUnlistedRequestIsRefused() async throws {
         let node = try await ScratchNode(scratch)
         let client = try WireClient(node)
-        // Kinds the protocol names that this server doesn't take yet, and kinds no list names.
-        for kind in ["lead", "answer", "hold", "config.accept", "base.accept", "hooks.install", "build.switch", "question.post", "shell", "exec", ""] {
+        // Kinds the protocol names that this server doesn't take yet, and kinds no list names (`lead` is taken from E4).
+        for kind in ["answer", "hold", "config.accept", "base.accept", "hooks.install", "build.switch", "question.post", "shell", "exec", ""] {
             let reply = try #require(WireClient.reply(client.request(kind, args: ["folder": .string("/")])), "\(kind)")
             #expect(reply.ok == false && reply.error?.code == "unknown-kind", "\(kind): \(reply)")
         }
-        #expect(client.hello.kinds == ["status", "start", "stop"])
+        #expect(client.hello.kinds == ["status", "start", "stop", "lead"])
         let status = try #require(WireClient.reply(client.request("status", action: nil))?.result)
         #expect(status["accepted"]?.array?.isEmpty == true, "\(status)")
     }
@@ -299,6 +299,75 @@ struct ServerTests {
             return restarts == 1
         }
         #expect(counted, "restarts \(String(describing: restarts))")
+    }
+
+    /// EN-D6 with a lead (the engine plan's E4): a lead started from the command line whose fake keeps asking its tool
+    /// server for workers (`start_worker`, through the fake's `mcp` op) while `stop` runs: `stop` still ends with every
+    /// session and the host gone. On the way: the command line printed the program the lead runs before its code
+    /// (EN-D13), the lead's tool server holds the lead's role in its session, and a worker it starts runs the lead's
+    /// resolved `claude`, not what a presets file under the node's root names.
+    @Test func aStopWhileALeadSpawnsStillEndsTheHost() async throws {
+        let node = try await ScratchNode(scratch)
+        let repo = node.root.appendingPathComponent("repo")
+        try await scratchRepository(repo)
+        // A presets file a worker could write, naming another Claude command: never read on Linux.
+        try Data(#"{"presets":[{"agent":"claude","place":"window","command":"/bin/false planted"}]}"#.utf8)
+            .write(to: node.root.appendingPathComponent("presets.json"))
+        let program = node.fake.launcher.resolvingSymlinksInPath().path
+        let started = try await node.runOnTerminal(["lead", repo.path, "--goal", "plan the work"])
+        #expect(started.status == 0, "\(started.output)\n\(node.said)")
+        let shown = started.output.range(of: "The lead runs \(program)")
+        let asked = started.output.range(of: "Type ")
+        #expect(shown != nil && asked != nil && shown!.lowerBound < asked!.lowerBound, "\(started.output)")
+        #expect(started.output.contains("the lead started"), "\(started.output)")
+        let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") }, "\(node.said)")
+        #expect(lead.command?.hasPrefix(RecentProjects.shellQuote(program) + " ") == true, "\(String(describing: lead.command?.prefix(200)))")
+
+        let files = node.fake.files(terminal: lead.tty)
+        func tell(_ command: [String: Any]) throws {
+            let line = try JSONSerialization.data(withJSONObject: command) + Data("\n".utf8)
+            let handle = try FileHandle(forWritingTo: files.control)
+            handle.seekToEndOfFile()
+            handle.write(line)
+            try handle.close()
+        }
+        func calls() -> [[String: Any]] {
+            let state = (try? JSONSerialization.jsonObject(with: Data(contentsOf: files.state))) as? [String: Any]
+            return state?["mcp"] as? [[String: Any]] ?? []
+        }
+        #expect(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: files.control.path) })
+        // Its tool server holds the lead's role in its session: status is one of its tools, and answers.
+        try tell(["op": "mcp", "tool": "status", "arguments": [:] as [String: Any]])
+        #expect(await eventually(timeout: 120) { calls().count == 1 }, "\(node.said)")
+        let status = try #require(calls().first)
+        let statusReply = status["reply"] as? [String: Any]
+        #expect(statusReply?["result"] != nil && (statusReply?["result"] as? [String: Any])?["isError"] as? Bool != true, "\(status)")
+
+        // A task, its worker asked for (its session starts at once; the call then waits for its tools, which the fake
+        // never starts), then workers asked for again and again while stop runs.
+        try tell(["op": "mcp", "tool": "add_task", "arguments": ["title": "Write the parser", "goal": "A parser.",
+                                                                 "acceptance": ["swift test passes"]] as [String: Any]])
+        #expect(await eventually(timeout: 120) { calls().count == 2 }, "\(calls())")
+        try tell(["op": "mcp", "tool": "start_worker", "arguments": ["task": "write-the-parser"] as [String: Any]])
+        let worker = Locked<HostSession?>(nil)
+        let appeared = await eventually(timeout: 120) {
+            worker.value = (try? node.sessions())?.first { $0.isLive && $0.label.hasPrefix("Worker") }
+            return worker.value != nil
+        }
+        #expect(appeared, "\(calls())\n\(node.said)")
+        if let worker = worker.value {
+            #expect(worker.command?.hasPrefix(RecentProjects.shellQuote(program) + " ") == true, "\(String(describing: worker.command?.prefix(200)))")
+        }
+        for _ in 0..<5 { try tell(["op": "mcp", "tool": "start_worker", "arguments": ["task": "write-the-parser"] as [String: Any]]) }
+        let pids = try node.sessions().filter(\.isLive).map(\.childPID) + [try #require(node.serverPID)]
+
+        let stopped = try await node.runOnTerminal(["stop"])
+        #expect(stopped.status == 0, "\(stopped.output)\n\(node.said)")
+        #expect(await exited(node.process, within: 120), "\(node.said)")
+        for pid in pids {
+            #expect(await eventually(timeout: 30) { kill(pid, 0) != 0 && errno == ESRCH }, "pid \(pid) still runs")
+        }
+        #expect(node.said.contains("stop: ending 1 leads"), "\(node.said)")
     }
 
     @Test func theServerExitsWhenTheHostIsGone() async throws {

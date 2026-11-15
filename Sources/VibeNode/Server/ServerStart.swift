@@ -81,9 +81,17 @@ public enum ServerStart {
         } ?? "unknown"
         let requests = Requests(link: link, sessions: sessions, rule: rule, root: root, hostSocket: parsed.hostSocket,
                                 commit: commit, note: say)
+        var options = LeadEngine.Options()
+        options.firstLook = parsed.node || parsed.testFirstLook
+        let engine = LeadEngine(root: root, nodeRoot: parsed.nodeRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, link: link,
+                                clock: clock, sessions: sessions, options: options, note: say)
+        requests.engine = engine
         let server = NodeServer(root: root, requests: requests, housekeeping: parsed.testHousekeeping ?? ServerArguments.housekeeping,
                                 clock: clock, note: say)
-        link.onWelcome = { _, _ in requests.refreshNotes() }
+        link.onWelcome = { _, _ in
+            requests.refreshNotes()
+            engine.welcomed()
+        }
         link.start()
         sessions.start()
         do {
@@ -93,7 +101,7 @@ public enum ServerStart {
             exit(1)
         }
         say("started, pid \(getpid()), root \(root.path), socket \(server.socketPath)")
-        Retained.keep([link, sessions, requests, server, clock])
+        Retained.keep([link, sessions, requests, server, clock, engine])
         dispatchMain()
     }
 

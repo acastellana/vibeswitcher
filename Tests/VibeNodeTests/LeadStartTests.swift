@@ -1,0 +1,540 @@
+import Foundation
+import Testing
+import VibeCore
+import VibeNode
+
+/// Starting a lead (the engine plan's E4), on a scratch host in the test process (`NodeTestHost`), the engine given
+/// `FakeClaude`'s launcher as its `claude` link (EN-D13), its own root and its own engine queue: the app's start cases
+/// (`LeadRelaunchTests`, `LeadStartsHostTests`, `ReplacedLeadRoutingTests`, `ProjectFolderStartTests`) restated on the
+/// engine, where a dialog is a flag and an alert a refusal, and the security cases of S3 and S7.
+@Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(10)))
+struct LeadStartTests {
+    private let scratch = Scratch()
+
+    /// A host, a repository with one commit, the fake as `claude`, a build folder holding the tool server, and the
+    /// engine on a link to the host (welcomed unless `connect` is false).
+    final class World: @unchecked Sendable {
+        let host: NodeTestHost
+        let fake: FakeClaude.Install
+        let repo: String
+        let link: HostLink
+        let engine: LeadEngine
+        let queue = DispatchQueue(label: "lead-start-tests.engine")
+        let key = DispatchSpecificKey<Bool>()
+        let spawns = Locked<[SpawnRequest]>([])
+
+        init(host: NodeTestHost, fake: FakeClaude.Install, repo: String, options: LeadEngine.Options) throws {
+            self.host = host
+            self.fake = fake
+            self.repo = repo
+            queue.setSpecific(key: key, value: true)
+            let nodeRoot = host.folder.appendingPathComponent("build", isDirectory: true)
+            try FileManager.default.createDirectory(at: nodeRoot.appendingPathComponent("bin"), withIntermediateDirectories: true)
+            try? FileManager.default.createSymbolicLink(atPath: nodeRoot.appendingPathComponent("bin/vibeswitcher-mcp").path,
+                                                        withDestinationPath: builtProducts.appendingPathComponent("vibeswitcher-mcp").path)
+            link = HostLink(dialer: host.dialer, root: host.root, queue: queue)
+            engine = LeadEngine(root: host.root, nodeRoot: nodeRoot, link: link, clock: nil, options: options)
+            let (engine, spawns) = (engine, spawns)
+            link.onWelcome = { _, _ in engine.welcomed() }
+            queue.sync { engine.spawning = { request in spawns.mutate { $0.append(request) } } }
+        }
+
+        var project: String { NodeIds.project(root: repo) }
+        var name: String { (repo as NSString).lastPathComponent }
+
+        /// Whether the calling code runs on the engine's queue.
+        var onEngine: Bool { DispatchQueue.getSpecific(key: key) == true }
+
+        func connect() async {
+            link.start()
+            _ = await eventually(timeout: 60) { self.queue.sync { self.link.state == .connected } }
+        }
+
+        func start(_ folder: String? = nil, goal: String? = nil, takeHead: Bool = false, replace: Bool = false) async -> LeadEngine.StartOutcome {
+            // Waited on, not awaited as a continuation: a start that never answers fails the test, it doesn't hang it.
+            let answer = Locked<LeadEngine.StartOutcome?>(nil)
+            engine.startLead(folder: folder ?? repo, goal: goal, takeHead: takeHead, replace: replace) { answer.value = $0 }
+            _ = await eventually(timeout: 180) { answer.value != nil }
+            return answer.value ?? .refused("the test: no answer to the start in 180 s")
+        }
+
+        /// The host's live lead sessions for the repository.
+        func leads() -> [HostSession] {
+            ((try? host.sessions()) ?? []).filter { $0.isLive && $0.label == "Lead · \(name)" }
+        }
+
+        /// The project's lead as the engine's store has it now.
+        var stored: LeadStore.Lead? { queue.sync { engine.leads.leads[project] } }
+
+        func held() -> [LeadStore.Held] { queue.sync { engine.leads.held[project] ?? [] } }
+
+        /// The session the vault binds the lead's role to.
+        func holder() -> String? { host.vault.current(.lead, root: repo, task: nil)?.session }
+
+        func stop() { host.stop() }
+    }
+
+    /// `claudeLink`: nil for the fake's launcher through a link of its own; `connect`: welcome the link first.
+    func world(holdsFirstLook: Bool = false, allowList: URL? = nil, claudeLink: String?? = nil, git: String? = nil, firstLook: Bool = false,
+               connect: Bool = true, repository: Bool = true) async throws -> World {
+        let host = try NodeTestHost(scratch, holdsFirstLook: holdsFirstLook, projectAllowList: allowList)
+        let fake = try FakeClaude.install(in: host.folder.appendingPathComponent("fake", isDirectory: true))
+        let repo = host.folder.appendingPathComponent("repo", isDirectory: true)
+        if repository { try await scratchRepository(repo) } else { try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true) }
+        var options = LeadEngine.Options()
+        switch claudeLink {
+        case .none:
+            let link = host.folder.appendingPathComponent("claude-link").path
+            try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: fake.launcher.path)
+            options.claudeLink = link
+        case .some(let given):
+            options.claudeLink = given
+        }
+        if let git { options.git = git }
+        options.firstLook = firstLook
+        options.answersTrust = false
+        options.home = host.home.path
+        let world = try World(host: host, fake: fake, repo: repo.resolvingSymlinksInPath().path, options: options)
+        if connect { await world.connect() }
+        return world
+    }
+
+    private func session(_ outcome: LeadEngine.StartOutcome) -> UUID? {
+        switch outcome {
+        case .started(let session, _, _), .shown(let session, _): return session
+        default: return nil
+        }
+    }
+
+    private func started(_ outcome: LeadEngine.StartOutcome, sourceLocation: SourceLocation = #_sourceLocation) throws -> UUID {
+        guard case .started(let session, _, _) = outcome else {
+            Issue.record("not started: \(outcome)", sourceLocation: sourceLocation)
+            throw HarnessError.timedOut
+        }
+        return session
+    }
+
+    // MARK: The plan and the host's welcome
+
+    /// LeadRelaunchTests' first case: the plan is `.wait` before the host's welcome; then the start goes on after it.
+    @Test func aStartAskedBeforeTheHostsWelcomeWaitsForItsSessions() async throws {
+        let running = UUID()
+        // Before the link's welcome the session list is empty: no lead start is decided on it.
+        #expect(LeadEngine.plan(hostState: .connecting, running: nil, holdsRole: nil, fromUser: true) == .wait)
+        #expect(LeadEngine.plan(hostState: .connected, running: nil, holdsRole: nil, fromUser: true) == .start)
+        #expect(LeadEngine.plan(hostState: .connected, running: running, holdsRole: true, fromUser: true) == .show(running))
+        // Without its role: replaced only when asked; never by a start not from the user, nor while the vault can't
+        // be asked.
+        #expect(LeadEngine.plan(hostState: .connected, running: running, holdsRole: false, fromUser: true) == .askToReplace(running))
+        #expect(LeadEngine.plan(hostState: .connected, running: running, holdsRole: false, fromUser: false) == .show(running))
+        #expect(LeadEngine.plan(hostState: .connected, running: running, holdsRole: nil, fromUser: true) == .show(running))
+
+        let world = try await world(connect: false)
+        defer { world.stop() }
+        #expect(await world.start() == .waiting)
+        #expect(world.leads().isEmpty)
+        await world.connect()
+        #expect(await eventually(timeout: 120) { world.leads().count == 1 }, "\(String(describing: world.stored))")
+        #expect(await eventually(timeout: 60) { world.stored?.lastStart?.hasPrefix("started") == true }, "\(String(describing: world.stored))")
+    }
+
+    /// LeadStartsHostTests' `aStartWhileTheHostStartsWaitsForIt`, for the link: a second start asked while the link
+    /// connects waits too, and one lead starts, not two.
+    @Test func aStartWhileTheLinkConnectsWaitsForIt() async throws {
+        let world = try await world(connect: false)
+        defer { world.stop() }
+        async let first = world.start()
+        async let second = world.start(goal: "a goal asked meanwhile")
+        #expect(await first == .waiting)
+        #expect(await second == .waiting)
+        await world.connect()
+        #expect(await eventually(timeout: 120) { world.stored?.lastStart?.hasPrefix("started") == true }, "\(String(describing: world.stored))")
+        #expect(world.stored?.starting == false)
+        #expect(world.leads().count == 1)
+        #expect(world.spawns.value.count == 1)
+    }
+
+    // MARK: A running lead
+
+    @Test func aRunningLeadWithItsRoleIsShownAndGetsTheGoal() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let lead = try started(await world.start())
+        #expect(world.holder() == lead.uuidString)
+        let again = await world.start(goal: "make the parser streaming")
+        guard case .shown(let shown, let notes) = again else { Issue.record("not shown: \(again)"); return }
+        #expect(shown == lead)
+        #expect(notes.contains { $0.contains("held") }, "\(notes)")
+        #expect(world.leads().map(\.id) == [lead])
+        #expect(world.spawns.value.count == 1)
+        // The goal is held for it (E5 delivers what's held), as from the command line, never as the user's.
+        let held = world.held()
+        #expect(held.map(\.text) == ["New goal: make the parser streaming"])
+        #expect(held.first?.from != .user)
+        #expect(world.stored?.held == 1)
+    }
+
+    /// LeadRelaunchTests' `aNewLeadWhileOneRunsIsAskedForAndTheOldOneIsSentToIt`: without `--replace` nothing starts;
+    /// with it the new lead holds the role, the old one's waiting messages go to it, and the old session is marked
+    /// replaced in `status`.
+    @Test func aNewLeadWhileOneRunsIsRefusedWithoutReplaceAndTheOldOneIsSentToTheNewOne() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let old = try started(await world.start())
+        let oldSession = try #require(world.leads().first { $0.id == old })
+        // The old lead named on its board (its tool server does that as it starts), and a message waiting for it.
+        let harness = NodeHarness(found: oldSession, on: world.host, fake: world.fake)
+        try await harness.waitFor { harness.agentPid != nil }
+        let pid = try #require(harness.agentPid)
+        try BoardStore(root: world.repo).update { board in
+            board.leadPid = pid
+            board.leadTTY = oldSession.tty
+            board.leadSession = old.uuidString
+        }
+        try SteerInbox.post(SteerMessage(text: "a report for the lead", from: .system("worker a"), agentPid: pid), tty: oldSession.tty,
+                            root: world.host.root)
+        // Then the host's vault lost its grant: the session runs on without its role.
+        let grant = try #require(world.host.vault.current(.lead, root: world.repo, task: nil)?.id)
+        try world.host.vault.revoke(grant, root: world.repo)
+        #expect(world.holder() == nil)
+
+        // Without --replace: shown, nothing started, and the reply says how to replace it.
+        let shown = await world.start()
+        guard case .shown(let id, let notes) = shown else { Issue.record("not shown: \(shown)"); return }
+        #expect(id == old)
+        #expect(notes.contains { $0.contains("without its role") && $0.contains("--replace") }, "\(notes)")
+        #expect(world.leads().count == 1)
+        #expect(SteerInbox.pending(tty: oldSession.tty, root: world.host.root).count == 1)
+
+        // With it: a new lead, which holds the role.
+        let new = try started(await world.start(replace: true))
+        #expect(new != old)
+        #expect(await eventually(timeout: 60) { world.leads().count == 2 })
+        #expect(world.holder() == new.uuidString)
+        // The old lead is sent to the new one: its tools name the session that holds the role now.
+        let asOld = world.host.book.answer(.whoami(root: world.repo), from: .session(old.uuidString))
+        #expect(asOld == .member(nil), "\(asOld)")
+        #expect(world.host.book.answer(.current(role: .lead, root: world.repo, task: nil), from: .session(old.uuidString))
+                .member?.session == new.uuidString)
+        // What waited for it went to the new one (held until E5 delivers it), out of the old one's inbox.
+        #expect(SteerInbox.pending(tty: oldSession.tty, root: world.host.root).isEmpty)
+        #expect(world.held().map(\.text) == ["a report for the lead"])
+        // Marked replaced in what `status` shows.
+        #expect(await eventually(timeout: 30) { world.stored?.replaced[old] == new }, "\(String(describing: world.stored))")
+        #expect(world.stored?.session == new)
+        let value = try #require(world.stored?.value)
+        #expect(value["replaced"]?.array == [.string(NodeIds.session(host: old))])
+    }
+
+    /// ReplacedLeadRoutingTests' `startsAndTheNoticesReadWhichLeadHoldsTheRoleOffTheMainThread`, the start's half: a
+    /// start finds which lead holds the role off the engine's queue.
+    @Test func aStartReadsWhichLeadHoldsTheRoleOffTheEngineQueue() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let lead = try started(await world.start())
+        let looks = Locked<[(root: String, onEngine: Bool)]>([])
+        world.queue.sync { world.engine.boardLooked = { root in looks.mutate { $0.append((root, world.onEngine)) } } }
+        #expect(await world.start() == .shown(session: lead, notes: []))
+        #expect(looks.value.contains { $0.root == world.repo && !$0.onEngine }, "\(looks.value)")
+        #expect(!looks.value.contains { $0.onEngine }, "\(looks.value)")
+        #expect(world.leads().count == 1)
+    }
+
+    @Test func aLeadAskedForTwiceAtOnceStartsOnce() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        async let first = world.start()
+        async let second = world.start()
+        let outcomes = await [first, second]
+        #expect(outcomes.filter { if case .started = $0 { return true } else { return false } }.count == 1, "\(outcomes)")
+        #expect(Set(outcomes.compactMap(session)).count == 1, "\(outcomes)")
+        #expect(world.leads().count == 1)
+        #expect(world.spawns.value.count == 1)
+    }
+
+    // MARK: Refusals
+
+    @Test func aFolderInNoRepositoryIsRefused() async throws {
+        let world = try await world(repository: false)
+        defer { world.stop() }
+        let outcome = await world.start()
+        guard case .refused(let why) = outcome else { Issue.record("not refused: \(outcome)"); return }
+        #expect(why.contains("isn't in a git repository"), "\(why)")
+        #expect(world.spawns.value.isEmpty)
+    }
+
+    /// The app's first-commit offer (`offerFirstCommit`) is a refusal.
+    @Test func aRepositoryWithNoCommitsIsRefusedSayingItNeedsOne() async throws {
+        let world = try await world(repository: false)
+        defer { world.stop() }
+        let ran = try await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", world.repo, "init", "-q", "-b", "main"],
+                                environment: ["HOME": world.repo, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"])
+        try #require(ran.status == 0, "\(ran.errors)")
+        let outcome = await world.start()
+        #expect(outcome == .refused("\(world.repo) has no commits yet: workers branch from a commit; make one, then start the lead"))
+        #expect(world.spawns.value.isEmpty)
+    }
+
+    /// ProjectFolderStartTests' `theControllersStartSaysWhatsMissingAndStartsNoLead`: a git path that doesn't exist and
+    /// a `claude` link that names nothing are each named, and nothing starts.
+    @Test func aMissingClaudeOrGitIsNamed() async throws {
+        let missingLink = scratch.url("no-claude").path
+        let missingGit = scratch.url("no-git").path
+        let world = try await world(claudeLink: .some(missingLink), git: missingGit)
+        defer { world.stop() }
+        let outcome = await world.start()
+        guard case .refused(let why) = outcome else { Issue.record("not refused: \(outcome)"); return }
+        #expect(why.contains("claude: \(missingLink) names nothing"), "\(why)")
+        #expect(why.contains("git: nothing runnable at \(missingGit)"), "\(why)")
+        #expect(world.spawns.value.isEmpty)
+        #expect(world.leads().isEmpty)
+        #expect(world.holder() == nil)
+    }
+
+    /// A `claude` the user's shell finds through `~/.bashrc`, with no link where the node reads it: refused, naming the
+    /// link it read (the link a scratch node reads is `<root>/v2/test/claude`, which isn't there).
+    @Test func aClaudeFoundOnlyThroughALoginShellIsRefused() async throws {
+        let world = try await world(claudeLink: .some(nil))
+        defer { world.stop() }
+        let bin = world.host.folder.appendingPathComponent("login-bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let copied = try await run(URL(fileURLWithPath: "/bin/cp"), [world.fake.launcher.path, bin.appendingPathComponent("claude").path],
+                                   environment: ["PATH": "/usr/bin:/bin"])
+        try #require(copied.status == 0)
+        for startup in [".bashrc", ".profile", ".bash_profile"] {
+            try "export PATH='\(bin.path)':\"$PATH\"\n".write(to: world.host.home.appendingPathComponent(startup), atomically: true, encoding: .utf8)
+        }
+        // Found through a login shell there.
+        let login = try await run(URL(fileURLWithPath: "/bin/bash"), ["-l", "-i", "-c", "command -v claude"],
+                                  environment: ["HOME": world.host.home.path, "PATH": "/usr/bin:/bin"])
+        #expect(login.output.contains(bin.path), "\(login.output) \(login.errors)")
+        let outcome = await world.start()
+        guard case .refused(let why) = outcome else { Issue.record("not refused: \(outcome)"); return }
+        let link = world.host.root.appendingPathComponent("v2/test/claude").path
+        #expect(why.contains("claude: \(link) names nothing"), "\(why)")
+        #expect(world.spawns.value.isEmpty)
+    }
+
+    /// EN-D13: the link points into a `versions/` folder holding only a file named `9.9.9`: the spawn's program is that
+    /// file's absolute path, and the lead's `VIBESWITCHER_CLAUDE` is the same.
+    @Test func aLeadIsLaunchedByClaudesResolvedPath() async throws {
+        let folder = scratch.url("claude-install")
+        let versions = folder.appendingPathComponent("share/claude/versions")
+        try FileManager.default.createDirectory(at: versions, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("bin"), withIntermediateDirectories: true)
+        let version = versions.appendingPathComponent("9.9.9")
+        let link = folder.appendingPathComponent("bin/claude").path
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "../share/claude/versions/9.9.9")
+        let world = try await world(claudeLink: .some(link))
+        defer { world.stop() }
+        let made = try await run(URL(fileURLWithPath: "/bin/cp"), [world.fake.launcher.path, version.path], environment: ["PATH": "/usr/bin:/bin"])
+        try #require(made.status == 0, "\(made.errors)")
+        let resolved = version.resolvingSymlinksInPath().path
+        let outcome = await world.start()
+        guard case .started(let id, let program, _) = outcome else { Issue.record("not started: \(outcome)"); return }
+        #expect(program == resolved)
+        let request = try #require(world.spawns.value.first)
+        let command = request.command ?? ""
+        #expect(command.hasPrefix(RecentProjects.shellQuote(resolved) + " "), "\(command.prefix(200))")
+        #expect(request.env[RoleProgram.variable] == resolved)
+        // The session's own environment says so.
+        let session = try #require(world.leads().first { $0.id == id })
+        let harness = NodeHarness(found: session, on: world.host, fake: world.fake)
+        try await harness.waitFor { harness.agentPid != nil }
+        let pid = try #require(harness.agentPid)
+        let environment = try #require(Self.environment(of: pid))
+        #expect(environment[RoleProgram.variable] == resolved)
+    }
+
+    /// A process's environment, from `/proc/<pid>/environ`.
+    static func environment(of pid: Int32) -> [String: String]? {
+        guard let data = FileManager.default.contents(atPath: "/proc/\(pid)/environ") else { return nil }
+        var environment: [String: String] = [:]
+        for entry in data.split(separator: 0) {
+            let text = String(decoding: entry, as: UTF8.self)
+            guard let equals = text.firstIndex(of: "=") else { continue }
+            environment[String(text[..<equals])] = String(text[text.index(after: equals)...])
+        }
+        return environment
+    }
+
+    /// `--take-head` (the app's `askToTakeHead`): without it a base moved since the lead last left it stays checked
+    /// (the head the vault records stays where it was); with it the head is taken as it is.
+    @Test func aMovedBaseIsKeptCheckedUnlessTakeHeadIsGiven() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let git = { (arguments: [String]) async throws -> String in
+            let ran = try await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", world.repo] + arguments,
+                                    environment: ["HOME": world.repo, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+                                                  "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                                                  "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@example.invalid"])
+            try #require(ran.status == 0, "\(arguments): \(ran.errors)")
+            return ran.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let left = try await git(["rev-parse", "main"])
+        try world.host.vault.setHead(left, root: world.repo, branch: "main")
+        _ = try await git(["commit", "-q", "--allow-empty", "-m", "moved by hand"])
+        let moved = try await git(["rev-parse", "main"])
+
+        let outcome = await world.start()
+        guard case .started(let lead, _, let notes) = outcome else { Issue.record("not started: \(outcome)"); return }
+        #expect(try world.host.vault.head(root: world.repo, branch: "main") == left)
+        #expect(notes.contains { $0.contains("main moved since the lead last left it") && $0.contains("base accept") }, "\(notes)")
+
+        // The lead ended; started again with --take-head, the branch is taken as it is.
+        world.link.kill(lead)
+        #expect(await eventually(timeout: 60) { world.leads().isEmpty })
+        _ = try started(await world.start(takeHead: true))
+        #expect(try world.host.vault.head(root: world.repo, branch: "main") == moved)
+    }
+
+    @Test func aFailedSpawnRevokesTheGrant() async throws {
+        // A list that names nothing refuses every spawn.
+        let list = scratch.url("allow-nothing")
+        try "# nothing allowed\n".write(to: list, atomically: true, encoding: .utf8)
+        let world = try await world(allowList: list)
+        defer { world.stop() }
+        let outcome = await world.start()
+        guard case .refused = outcome else { Issue.record("not refused: \(outcome)"); return }
+        #expect(world.spawns.value.count == 1)
+        // The grant the start issued is withdrawn: the role is no session's, and none waits to be bound.
+        #expect(await eventually(timeout: 30) { world.host.vault.current(.lead, root: world.repo, task: nil) == nil })
+        #expect(world.leads().isEmpty)
+    }
+
+    /// The vault binds the lead's role to its session: `whoami` asked as that session is the lead.
+    @Test func theLeadsRoleIsBoundToItsSession() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let lead = try started(await world.start())
+        let answer = world.host.book.answer(.whoami(root: world.repo), from: .session(lead.uuidString))
+        #expect(answer.member?.role == .lead, "\(answer)")
+        #expect(answer.member?.session == lead.uuidString)
+        #expect(world.stored?.bound == lead.uuidString)
+    }
+
+    /// S10: on Linux the lead's settings and MCP configuration are on its command line as JSON, and no file of them is
+    /// left in its run folder.
+    @Test func theLeadsLaunchSettingsAreInline() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        _ = try started(await world.start())
+        let command = try #require(world.spawns.value.first?.command ?? nil)
+        #expect(command.contains("--settings '{"), "\(command.prefix(300))")
+        #expect(command.contains("--mcp-config '{"), "\(command.prefix(300))")
+        let run = world.host.vault.runFolder(root: world.repo, name: "lead-\(Slug.make(world.name, taken: []))")
+        for file in ["settings.json", "mcp.json"] {
+            #expect(!FileManager.default.fileExists(atPath: run.appendingPathComponent(file).path), "\(file) in \(run.path)")
+        }
+        // Its tool server is the build folder's.
+        #expect(command.contains(world.host.folder.appendingPathComponent("build/bin/vibeswitcher-mcp").path))
+    }
+
+    /// The security document's decision 15: the lead's tool server starts no Codex worker.
+    @Test func theLeadGetsNoCodexWorkers() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let lead = try started(await world.start())
+        #expect(world.spawns.value.first?.env["VIBESWITCHER_CODEX_WORKERS"] == "0")
+        let session = try #require(world.leads().first { $0.id == lead })
+        let harness = NodeHarness(found: session, on: world.host, fake: world.fake)
+        try await harness.waitFor { harness.agentPid != nil }
+        let pid = try #require(harness.agentPid)
+        #expect(Self.environment(of: pid)?["VIBESWITCHER_CODEX_WORKERS"] == "0")
+    }
+
+    /// EN-D7: on a vault that doesn't hold its first look (so only the engine's leaving out `floor:` keeps it unset), no
+    /// floor is seeded from workflow.md, where the app would have seeded one.
+    @Test func noFloorIsSeededFromWorkflowOnLinux() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        _ = try started(await world.start())
+        // The app would have recorded `LeadReviewFloor.starting(from: workflow)`; the engine records none.
+        #expect(try world.host.vault.reviewFloor(root: world.repo) == nil)
+    }
+
+    /// Stage 2's Task 10d: a host whose allow-list doesn't hold the repository refuses the spawn, and the start says
+    /// the host's reason.
+    @Test func aSpawnOutsideTheAllowListIsRefusedWithTheHostsReason() async throws {
+        let list = scratch.url("allow-other")
+        let other = scratch.url("other-repository")
+        try await scratchRepository(other)
+        try (other.path + "\n").write(to: list, atomically: true, encoding: .utf8)
+        let world = try await world(allowList: list)
+        defer { world.stop() }
+        let outcome = await world.start()
+        guard case .refused(let why) = outcome else { Issue.record("not refused: \(outcome)"); return }
+        #expect(why.contains("the session host didn't start the lead"), "\(why)")
+        #expect(why.contains("isn't inside a repository on the project allow-list"), "\(why)")
+        #expect(world.leads().isEmpty)
+    }
+
+    // MARK: Security (S3, S7)
+
+    /// S7: a vault that holds its first look refuses the lead, naming `config held` and `base accept`, until the held
+    /// config is accepted (`checkConfig(root:shown:)` with the card's hashes, as `config accept` will) and the head
+    /// recorded (`setHead`, as `base accept` will); then it starts. E6 repeats the order through the command line.
+    @Test func aLeadIsRefusedOnAFreshVaultUntilAccepted() async throws {
+        let world = try await world(holdsFirstLook: true, firstLook: true)
+        defer { world.stop() }
+        let vault = world.host.vault
+        // The first look made (as `config held` will), so the config is held.
+        _ = try vault.checkConfig(root: world.repo)
+        let refused = await world.start()
+        guard case .refused(let why) = refused else { Issue.record("not refused: \(refused)"); return }
+        #expect(why.contains("config held") && why.contains("base accept"), "\(why)")
+        #expect(world.spawns.value.isEmpty)
+        #expect(world.holder() == nil)
+
+        // Accepted: the held hashes as shown, then the head.
+        let shown = ConfigSeal.heldHashes(in: try vault.guardedRecord(root: world.repo))
+        #expect(!shown.isEmpty)
+        let check = try vault.checkConfig(root: world.repo, shown: shown)
+        #expect(check.held.isEmpty, "\(check.held)")
+        let stillHeadless = await world.start()
+        guard case .refused(let headless) = stillHeadless else { Issue.record("not refused: \(stillHeadless)"); return }
+        #expect(headless.contains("base accept") && !headless.contains("config held"), "\(headless)")
+        let head = try await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", world.repo, "rev-parse", "main"], environment: ["PATH": "/usr/bin:/bin"])
+        try vault.setHead(head.output.trimmingCharacters(in: .whitespacesAndNewlines), root: world.repo, branch: "main")
+        _ = try started(await world.start())
+    }
+
+    /// S3: a session's process can't start a lead: the command line run in a scratch node's session, the code typed
+    /// into its terminal, is refused for its voice by the server, and nothing starts.
+    @Test func aSessionsProcessCannotStartALead() async throws {
+        let node = try await ScratchNode(scratch)
+        let repo = node.root.appendingPathComponent("repo")
+        try await scratchRepository(repo)
+        let out = node.root.appendingPathComponent("lead.out").path
+        let command = "VIBESWITCHER_HOME='\(node.root.path)' '\(commandLine.path)' lead '\(repo.path)' >'\(out)' 2>&1; echo \"exit $?\" >>'\(out)'"
+        let session = try await node.spawn(command)
+        var code = ""
+        let asked = await eventually(timeout: 60) {
+            guard let screen = HostCall.styledScreen(session.id, socket: node.socket, appKey: nil)?.text,
+                  let range = screen.range(of: #"Type ([A-Z]{4}) and Enter"#, options: .regularExpression) else { return false }
+            code = String(screen[range].dropFirst(5).prefix(4))
+            return true
+        }
+        try #require(asked, "the command line never asked: \(String(describing: HostCall.styledScreen(session.id, socket: node.socket, appKey: nil)?.text))")
+        try HostCall.send(.input(id: session.id, bytes: Data((code + "\r").utf8), reply: false), socket: node.socket, appKey: nil)
+        let ended = await eventually(timeout: 60) { ((try? String(contentsOfFile: out, encoding: .utf8)) ?? "").contains("exit ") }
+        let said = (try? String(contentsOfFile: out, encoding: .utf8)) ?? ""
+        #expect(ended, "\(said)")
+        #expect(said.contains("exit 77"), "\(said)")
+        #expect(said.contains("voice: not the user's voice"), "\(said)")
+        let sessions = try node.sessions()
+        #expect(!sessions.contains { $0.label.hasPrefix("Lead · ") }, "\(sessions.map(\.label))")
+        let client = try WireClient(node)
+        let status = try #require(WireClient.reply(client.request("status", action: nil))?.result)
+        #expect(status["accepted"]?.array?.isEmpty == true)
+        #expect(status["leads"]?.array?.isEmpty == true)
+    }
+}
+
+extension LeadVault.Reply {
+    /// The member a `.member` reply names.
+    var member: LeadVault.Member? {
+        if case .member(let member) = self { return member }
+        return nil
+    }
+}

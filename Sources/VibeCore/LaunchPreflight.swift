@@ -50,7 +50,7 @@ public struct LaunchPreflight: Sendable {
     var now: @Sendable () -> Date
     private let passed = Passes()
 
-    public init(shell: String = LoginShellVariable.userShell, xcodeSelect: String = "/usr/bin/xcode-select", git: String = Platform.Tools.git,
+    public init(shell: String = SessionShellProbe.shell, xcodeSelect: String = "/usr/bin/xcode-select", git: String = Platform.Tools.git,
                 timeout: TimeInterval = 10, keep: TimeInterval = 60) {
         self.init(shell: shell, xcodeSelect: xcodeSelect, git: git, timeout: timeout, keep: keep, now: { Date() })
     }
@@ -90,7 +90,8 @@ public struct LaunchPreflight: Sendable {
             if program.contains("/") {
                 let path = (program as NSString).expandingTildeInPath
                 if !files.isExecutableFile(atPath: path) { missing.append(.agent(program: program, shell: shell)) }
-            } else if LoginShellCommand.resolve(program, shell: shell, timeout: timeout) == .missing {
+            } else if (SessionShellProbe.resolve(program, shell: shell, timeout: timeout)  // Linux: as sessions start (S10).
+                        ?? LoginShellCommand.resolve(program, shell: shell, timeout: timeout)) == .missing {
                 missing.append(.agent(program: program, shell: shell))
             }
         }

@@ -14,6 +14,7 @@ let usage = """
     usage: vibeswitcher status [--json] | status --probe [--json] | status --ack
            vibeswitcher start [--interop-is-on]
            vibeswitcher stop
+           vibeswitcher lead FOLDER [--goal TEXT] [--take-head] [--replace]
            vibeswitcher hooks install|remove [--agent claude|codex]
     """
 
@@ -25,6 +26,8 @@ case "start":
     exit(StartCommand.run(Array(words.dropFirst())))
 case "stop":
     exit(StopCommand.run(Array(words.dropFirst())))
+case "lead":
+    exit(LeadCommand.run(Array(words.dropFirst())))
 case "hooks":
     exit(HooksCommand.run(Array(words.dropFirst())))
 case "help", "-h", "--help":

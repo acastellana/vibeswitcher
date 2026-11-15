@@ -17,7 +17,8 @@ import VibeNode
 ///   `user-scopes`, the test's scopes for the command line's journal check.
 /// - `userScopes` (by default this process's own cgroup) goes to the server as `--server-arg --test-user-scopes=…`;
 ///   nil leaves the server on the weaker rule. `housekeeping`: `--server-arg --test-housekeeping=…`. `testChild`:
-///   `--server-arg --test-child=…`. `path`: the host's PATH. `holdFirstLook`: `--hold-first-look`. `socketName`: the
+///   `--server-arg --test-child=…`. `path`: the host's PATH. `holdFirstLook`: `--hold-first-look`, and
+///   `--server-arg --test-first-look` so the server's engine knows (E4). `socketName`: the
 ///   host's socket in the root (another than `host.sock` isn't the root's: its server refuses it). `waitForServer`:
 ///   returns once the server answers, its link to the host welcomed.
 ///
@@ -32,6 +33,8 @@ final class ScratchNode: @unchecked Sendable {
     let testFolder: URL
     let process = Process()
     let recorder: JournalRecorder?
+    /// The fake Claude its `claude` link names (EN-D13): a lead the server starts runs it.
+    let fake: FakeClaude.Install
     private var testEnd: Int32 = -1
     private var stopped = false
     private let lockForStop = NSLock()
@@ -56,7 +59,7 @@ final class ScratchNode: @unchecked Sendable {
         try Self.install(into: nodeRoot)
         try Self.standIns(in: testFolder, scopes: userScopes)
         // The node's `claude` (EN-D13): a link a test puts there, to the fake's launcher.
-        let fake = try FakeClaude.install(in: testFolder.appendingPathComponent("fake-claude", isDirectory: true))
+        fake = try FakeClaude.install(in: testFolder.appendingPathComponent("fake-claude", isDirectory: true))
         try files.createSymbolicLink(atPath: testFolder.appendingPathComponent("claude").path, withDestinationPath: fake.launcher.path)
         recorder = try JournalRecorder(folder: testFolder)
         files.createFile(atPath: output, contents: nil)
@@ -66,7 +69,8 @@ final class ScratchNode: @unchecked Sendable {
         if let userScopes { arguments += ["--server-arg", ServerArguments.testUserScopesFlag + userScopes.joined(separator: ",")] }
         if let housekeeping { arguments += ["--server-arg", ServerArguments.testHousekeepingFlag + String(housekeeping)] }
         if let testChild { arguments += ["--server-arg", ServerArguments.testChildFlag + testChild] }
-        if holdFirstLook { arguments.append("--hold-first-look") }
+        // The vault holds its first look, and the server knows it (its engine refuses `lead` until the accepts, S7).
+        if holdFirstLook { arguments += ["--hold-first-look", "--server-arg", ServerArguments.testFirstLookFlag] }
         process.executableURL = nodeRoot.appendingPathComponent("bin/vibeswitcher-host")
         process.environment = ["HOME": home.path, "CFFIXED_USER_HOME": home.path, "VIBESWITCHER_HOME": root.path, "SHELL": "/bin/sh",
                                "PATH": path, "TMPDIR": root.appendingPathComponent("tmp").path + "/"]
