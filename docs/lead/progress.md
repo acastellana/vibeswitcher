@@ -3208,3 +3208,14 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 20:59 Audit of a-lead-record-commit: complete, clean, round 1: 2 Nit open
 - 2026-11-15 21:03 Pipeline held: the-chat-s-model ready to merge with none landing; cause: a merge in progress
 - 2026-11-15 21:06 Merged the-chat-s-model: The chat's model chip follows /model at once, and its menu offers Fable (build 64a972289c0f with changes not committed)
+- 2026-11-15 21:06 Automatically (auto_advance): Merged the-chat-s-model (The chat's model chip follows /model at once, and its menu offers Fable) into main at 73bbffc6, on its passing audit and the full test run.
+- 2026-11-15 21:06 Automatically (auto_advance): Cleaned up the-chat-s-model (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-15 21:06 Update: The model chip follows /model at once, and its menu offers Fable — **What changed:** after `/model …` (typed, or chosen from the chip's menu), the chip under the message box shows the new model as soon as Claude Code confirms the switch, instead of after the next rep…
+- 2026-11-15 21:10 Released ui-journeys-a1-the's worker (idle since its done report on ef2d6d18) while its audit runs
+- 2026-11-15 21:10 Automatically (auto_advance): Started the audit of ui-journeys-a1-the at ef2d6d18 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-15 21:16 ui-journeys-b-team's member select-run reported its part done at e5056725
+- 2026-11-15 21:17 ui-journeys-b-team's integrator took select-run's part (e5056725) into agent/ui-journeys-b-team at 2c236ff4
+- 2026-11-15 21:19 Audit of ui-journeys-a1-the: complete, clean, round 1: 1 Nit open
+- 2026-11-15 21:21 ui-journeys-b-team's member dictate reported its part done at e01841d2
+- 2026-11-15 21:21 ui-journeys-b-team's integrator took dictate's part (e01841d2) into agent/ui-journeys-b-team at 6a0647a2
+- 2026-11-15 21:24 Merged a-lead-record-commit: A lead-record commit during an install's build doesn't mark the build as not matching (build 64a972289c0f with changes not committed)
