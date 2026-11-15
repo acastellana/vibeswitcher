@@ -8,9 +8,7 @@ import VibeCore
 public final class HostedSession {
     public enum Failure: Error, Equatable {
         case noSuchFolder(String)
-        /// The terminal couldn't be made: the errno of the call that failed (`Platform.Terminals.open`'s; on the
-        /// Mac openpty's or ptsname_r's).
-        case spawnFailed(code: Int32)
+        case spawnFailed
         /// The launcher couldn't be started: what posix_spawn's errno says of it (see `LaunchPreflight.couldntStart`).
         case couldntStart(String)
     }
@@ -161,11 +159,10 @@ public final class HostedSession {
         var size = winsize(ws_row: UInt16(rows), ws_col: UInt16(cols), ws_xpixel: 0, ws_ypixel: 0)
         let args = arguments(shell: shell, command: request.command, keepShell: request.keepShell)
         let env = environment(base: baseEnvironment, extra: request.env, id: id)
-        var code: Int32 = 0, terminalCode: Int32 = 0
+        var code: Int32 = 0
         guard let child = PTYSpawn.spawn(launcher: launcher, executable: args[0], args: args, env: env, directory: request.cwd, size: &size,
-                                         failure: &code, terminalFailure: &terminalCode,
-                                         launcherFlags: SessionIdentityChecks.launcherFlags(testDelay: launcherTestDelay)) else {
-            throw code == 0 ? Failure.spawnFailed(code: terminalCode) : Failure.couldntStart(LaunchPreflight.couldntStart(launcher, in: request.cwd, code: code))
+                                         failure: &code, launcherFlags: SessionIdentityChecks.launcherFlags(testDelay: launcherTestDelay)) else {
+            throw code == 0 ? Failure.spawnFailed : Failure.couldntStart(LaunchPreflight.couldntStart(launcher, in: request.cwd, code: code))
         }
         // ptsname_r: ptsname's buffer is shared between threads, and sessions start from several at once.
         let name = Platform.Terminals.devicePath(master: child.masterFD) ?? ""

@@ -29,16 +29,12 @@ public enum PTYSpawn {
     }
 
     /// `failure`: posix_spawn's errno when it couldn't start the launcher (0 when the terminal couldn't be made).
-    /// `terminalFailure`: the errno of the call that couldn't make the terminal (`Platform.Terminals.open`).
     /// `launcherFlags`: before the program, for the launcher (`SessionIdentityChecks.launcherFlags`).
     static func spawn(launcher: String, executable: String, args: [String], env: [String], directory: String,
-                      size: inout winsize, failure: inout Int32, terminalFailure: inout Int32,
-                      launcherFlags: [String] = []) -> (pid: pid_t, masterFD: Int32)? {
+                      size: inout winsize, failure: inout Int32, launcherFlags: [String] = []) -> (pid: pid_t, masterFD: Int32)? {
         // Both ends close-on-exec (from their making on Linux), the slave's path named from the master: see
         // `Platform.Terminals.open`.
-        let opened = Platform.Terminals.open(rows: size.ws_row, cols: size.ws_col)
-        if case .failure(let error) = opened { terminalFailure = error.code }
-        guard case .success(let terminal) = opened else { return nil }
+        guard case .success(let terminal) = Platform.Terminals.open(rows: size.ws_row, cols: size.ws_col) else { return nil }
         let master = terminal.master
         // Held open until the program has opened the terminal (posix_spawn returns once it has): macOS clears a
         // terminal's window size when its last slave descriptor closes, and a program that started on a 0×0 terminal
