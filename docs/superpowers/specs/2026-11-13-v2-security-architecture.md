@@ -134,10 +134,12 @@ attack checks it.
 
 **The user confirms:** decision 2 (interop off, automount off, no `sudo` here while a team runs).
 
-**Held by:** planned: stage 2 plan task 1.
+**Held by:** `SecurityDocumentLintTests.everyNamedTestExists`,
+`SecurityDocumentLintTests.everySectionSaysWhatItDoesNotPromise`,
+`SecurityDocumentLintTests.everySectionSaysWhenItIsNeeded` (stage 2 Task 1: the document's shape, not its promises);
+planned: the engine plan task E1.
 
-**Tests to write:** `SecurityDocumentLintTests.everyNamedTestExists`, `everySectionSaysWhatItDoesNotPromise`,
-`everySectionSaysWhenItIsNeeded` (Task 1). E1: `StartCommandTests.startRefusesWhileInteropIsOnUnlessTold`,
+**Tests to write:** E1: `StartCommandTests.startRefusesWhileInteropIsOnUnlessTold`,
 `NodeFactsTests.statusSaysPlainModeAndInterop`.
 
 ## Principals: who may do what, and how the host knows
@@ -1001,9 +1003,11 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 (Task 8b's review); `ServerChildTests.aHandoverWhoseLockIsNoLongerAtThePathIsRefused`,
 `ServerChildTests.theNewImageRecordsTheCarriedLockAsTheOneAtThePath` (the carried lock and the lock path);
 `HostHardeningTests.theUsersHostIgnoresTestSecretFlags` (Task 9a);
-`HostHardeningTests.aHandoverNeverMakesTheUsersHostAScratchHost`, `theCarriedOwnershipIsReadOnlyByAnImageThatReadsTheState`,
-`aNewImageWhoseProbeSaysScratchIsStillTheUsersHost` (which host it is, carried), `aStateFileSayingTheUsersHostIsIgnored`
-(carried only in sealed memory), `theUsersHostCarriedOrProbedNeedsNodeOnTheAccountsHome` (the user's host's start checks);
+`HostHardeningTests.aHandoverNeverMakesTheUsersHostAScratchHost`,
+`HostHardeningTests.theCarriedOwnershipIsReadOnlyByAnImageThatReadsTheState`,
+`HostHardeningTests.aNewImageWhoseProbeSaysScratchIsStillTheUsersHost` (which host it is, carried),
+`HostHardeningTests.aStateFileSayingTheUsersHostIsIgnored` (carried only in sealed memory),
+`HostHardeningTests.theUsersHostCarriedOrProbedNeedsNodeOnTheAccountsHome` (the user's host's start checks);
 `HandoverLinuxTests.aHandoverWritesNoFile`, `HandoverLinuxTests.theStateAndSecretsAreSealed`,
 `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsTheVault`, `HandoverLinuxTests.aFallbackAfterAFailedRestoreKeepsEverySession`,
 `HandoverLinuxTests.aMegabyteOfSecretsIsHandedOver`, `HandoverLinuxTests.aDowngradeIsRefused`,
@@ -1012,8 +1016,9 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `HandoverLinuxTests.aFallbackImageRewrittenInPlaceIsNotWhatRuns`, `HostHardeningTests.aTracedNewImageGoesBackWithoutTheVault`
 (Task 9c); `ServerChildTests.aSwitchBringsTheNewBuildsServer`, `ServerChildTests.aFallbackGetsTheOldBuildsFolders`,
 `HandoverLinuxTests.aHandoverGivesTheNewImageItsBuildsFoldersAndTheFallbackItsOwn` (Task 9d);
-`ServerChildTests.aFallbackToTheSwitchedBuildStillReplacesTheOldServer`, `aSecondHandoverStillReplacesTheOldServer`,
-`aSwitchReplacesAServerThatHoldsAConnection` (the 9d review).
+`ServerChildTests.aFallbackToTheSwitchedBuildStillReplacesTheOldServer`,
+`ServerChildTests.aSecondHandoverStillReplacesTheOldServer`,
+`ServerChildTests.aSwitchReplacesAServerThatHoldsAConnection` (the 9d review).
 
 **Tests to write:** Step 8: `aSwitchWhileAWorkerRunsIsRefused`.
 
@@ -1138,10 +1143,12 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `SealedCopyTests.aCopyFromADescriptorIsOfTheFileItWasOpenedOn`,
 `HandoverLinuxTests.aHostWhoseImageDiffersFromItsBuildInfoDoesNotStart`, `HandoverLinuxTests.aNewerBuildInfoFormatIsRefused`,
 `HandoverLinuxTests.aHostWhoseImagesMatchItsBuildInfoStartsAndTellsItsServerTheFolder`;
-`HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`, `aHandoverToABuildOutsideTheInstallFolderIsRefused`,
-`aHandoverWhoseHashDiffersFromTheRecordIsRefused`, `aHandoverToAnInstalledBuildIsAllowed`,
-`aTargetRenamedOverAfterItsCheckIsNotWhatRuns`, `aScriptTargetIsRefusedByTheUsersHost`,
-`aScratchHostWithNoInstallRootHandsOverAsToday`, `theInstallRootIsTheNodesOrAScratchHostsFlag`,
+`HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`,
+`HandoverLinuxTests.aHandoverToABuildOutsideTheInstallFolderIsRefused`,
+`HandoverLinuxTests.aHandoverWhoseHashDiffersFromTheRecordIsRefused`, `HandoverLinuxTests.aHandoverToAnInstalledBuildIsAllowed`,
+`HandoverLinuxTests.aTargetRenamedOverAfterItsCheckIsNotWhatRuns`, `HandoverLinuxTests.aScriptTargetIsRefusedByTheUsersHost`,
+`HandoverLinuxTests.aScratchHostWithNoInstallRootHandsOverAsToday`,
+`HandoverLinuxTests.theInstallRootIsTheNodesOrAScratchHostsFlag`,
 `ServerChildTests.aSwitchBringsTheNewBuildsServer` (Task 9d); `HandoverLinuxTests.aTargetRenamedOverBeforeItsCheckIsCheckedAsLoaded`
 (the 9d review); `ToolsTests.theNodesGitIsNeverFromAFolderTheUserCanWrite`,
 `HandoverLinuxTests.aHostWithNoGitOnlyRootCanWriteDoesNotStart` (Task 10c; on Linux only), `ToolsTests.theMacsGitIsStillUsrBinGit`
@@ -1819,5 +1826,5 @@ root's folders only (the unit's PATH is what `start` captures, which is why S9 w
    path take theirs.
 4. The user's answers to [the decisions](#awaiting-the-user) are recorded in the design's Decided section (Step
    5).
-5. `SecurityDocumentLintTests` passes (Step 5).
+5. `SecurityDocumentLintTests` passes (Steps 1 and 6).
 6. Only then does Task 2 start. A finding or an answer that changes a decision changes the stage 2 plan first.

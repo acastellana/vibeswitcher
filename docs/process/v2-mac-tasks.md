@@ -63,6 +63,44 @@ that two pushes haven't explained comes here too, with the experiment that will 
 - **`a5499162`**: the config seal hashes a big named file's contents too where ctime is coarse: Linux only
   (`Platform.Files.changeTimeIsCoarse` is false on the Mac). Check: a seal written by main still verifies.
 
+## What `v2` found on the Mac and doesn't change
+
+Found by [the security architecture document](../superpowers/specs/2026-11-13-v2-security-architecture.md#the-mac-and-linux)
+and its [attack review](reviews/v2-security-review-2026-11-13.md), fixed on Linux, and left as they are on the Mac
+(no behaviour change there on `v2`). Each is for main once a real Mac can check it.
+
+- **The app trusts any host at the socket's path** (`HostConnection.answer`, `HostServer.enroll`): the app talks to
+  whatever listens at `~/.vibeswitcher/host.sock`, shows the sessions it reports and sends it what the user types, and
+  a host that answers with a keyless challenge is sent the app's key (`enrollApp`). So a same-user process that puts
+  its own socket at the path while the host is down or restarting is the app's host, and holds the app's key. The key
+  alone doesn't make that process the app to the real host, which also requires the app's code (`runsAppCode`). On
+  Linux the app is the connections the host makes through its server child's connector, and no key is sent (S2).
+  Check on a real Mac: with a scratch host stopped and a test's own listener at its path sending a keyless challenge,
+  that the app sends `enrollApp` to it (expected today); then whether the app should check the host it connects to
+  (the pid it launched, or the peer's code signature) before it shows anything or sends its key, and port that to main.
+- **`BranchCode.runPrefix` doesn't put a verifier's commands in a POSIX session of their own**
+  (`Worktrees.swift`, `runPrefix`: it execs the wrapper, no `setsid`). A command run under it that double-forks without
+  `setsid` leaves the wrapper's ancestry but keeps the verifier's controlling terminal, and the host's terminal
+  fallback (`HostServer.session(of:)`) then names it the verifier's. On Linux the branch's code runs as a new child in
+  a session of its own, waited for (`BranchCodeSession`, `Platform.Tools.branchCodeGetsOwnSession`; S4). Check on a
+  real Mac: whether a verifier's Bash commands under Claude Code have a controlling terminal at all (`tty`, `ps -o
+  tty`); if they do, that `VerifierBranchCodeHostTests.anEscapedVerifierCommandWithoutSetsidIsNobodys`' scenario is
+  the verifier's there, and whether to port `BranchCodeSession` to main.
+- **The Mac's user's host honours `--handover-test-secret`**, and which host is the user's (stage 2 Task 9a):
+  unchanged on the Mac, and wrong there as the security document found it on Linux. `ownsLaunchers` is still
+  `lockPath == VibePaths.hostLock.path` (`vibeswitcher-host/main.swift`), a comparison of strings, so `--lock ~/.vibeswitcher//host.lock`, a `..` or a symlink
+  to the user's lock takes the user's lock and yet makes a host that honours every test-only flag; and any host, the
+  user's included, takes `--handover-test-secret` and carries it across a handover (`config.arguments`), the secret
+  becoming the next image's vault. On Linux both are decided by `HostHardening` (the lock by its device and inode, a
+  link refused; the flags a scratch host's only, and not carried). Check on a real Mac whether to port both to main.
+  The plan's Mac test `HostHardeningTests.theMacsUsersHostKeepsTodaysTestSecret` was to start the user's host by
+  `TestHosts.authorize`; as built it checks only the Mac's forms of `HostHardening`'s decisions (strings compared, every
+  flag taken and carried, nothing hardened, no lock checked), because a user's host on the Mac reads its vault's key
+  from the real Keychain (`VaultStorage.keychainKey()`), which `KeychainLintTests` forbids a test
+  (`ServerChildHost(usersHost:)` throws there). A scratch host's test secret across a handover on the Mac stays
+  `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`'s. A process test of the Mac's user's host needs a
+  Keychain stand-in first.
+
 ## Also to check
 
 - **`Package.resolved`** pins swift-crypto 3.15.1 and swift-asn1 1.7.4 for the Mac too (`923a43b9`), though only Linux
@@ -83,20 +121,6 @@ that two pushes haven't explained comes here too, with the experiment that will 
   that the four session-based `PeerPerMessageTests` start their lead at all there: the helper runs through the
   session's `/bin/sh`, which SIP keeps DYLD_ variables from, so the test sets `DYLD_FRAMEWORK_PATH` and
   `DYLD_LIBRARY_PATH` on its command line (the hosted runner, SIP off, doesn't show this).
-- **Which host is the user's, and its test-only flags (stage 2 Task 9a)**: unchanged on the Mac, and wrong there as
-  the security document found it on Linux. `ownsLaunchers` is still `lockPath == VibePaths.hostLock.path`
-  (`vibeswitcher-host/main.swift`), a comparison of strings, so `--lock ~/.vibeswitcher//host.lock`, a `..` or a symlink
-  to the user's lock takes the user's lock and yet makes a host that honours every test-only flag; and any host, the
-  user's included, takes `--handover-test-secret` and carries it across a handover (`config.arguments`), the secret
-  becoming the next image's vault. On Linux both are decided by `HostHardening` (the lock by its device and inode, a
-  link refused; the flags a scratch host's only, and not carried). Check on a real Mac whether to port both to main.
-  The plan's Mac test `HostHardeningTests.theMacsUsersHostKeepsTodaysTestSecret` was to start the user's host by
-  `TestHosts.authorize`; as built it checks only the Mac's forms of `HostHardening`'s decisions (strings compared, every
-  flag taken and carried, nothing hardened, no lock checked), because a user's host on the Mac reads its vault's key
-  from the real Keychain (`VaultStorage.keychainKey()`), which `KeychainLintTests` forbids a test
-  (`ServerChildHost(usersHost:)` throws there). A scratch host's test secret across a handover on the Mac stays
-  `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`'s. A process test of the Mac's user's host needs a
-  Keychain stand-in first.
 - **A listener's file mode through its path (stage 2, the host's socket)**: `UnixSocket.listen` on the Mac still binds
   and then chmods the path to 0600 (`Platform.Sockets.bindOwnerOnly`'s Darwin form, the old body), so a link a
   same-user process renames over the path between the two is followed, and the file the link names becomes 0600 (no

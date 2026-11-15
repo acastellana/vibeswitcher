@@ -86,7 +86,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|ServerLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|TemporaryFolderLint'
 ```
 
 | Lint | What it catches |
@@ -106,6 +106,7 @@ bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint
 | `PrivateWriteLint` | A file under `~/.vibeswitcher` or a project's `.vibeswitcher/` written without `VibePaths.writePrivate` (0600). |
 | `ScriptScratchLint` | A script that runs `swift build`, `swift test` or `swift run` with the TMPDIR it was given. |
 | `SecretShapeLint` | Text in the repository shaped like a vendor's credential. |
+| `SecurityDocumentLint` | A numbered section of the [security architecture document](../superpowers/specs/2026-11-13-v2-security-architecture.md) whose `Held by:` line names a test (`Suite.test`) that no type or extension under `Tests/` declares, or puts a path in backticks; or a section with no `Doesn't promise` part, or no `Before the bootstrap:` line answering `yes` or `no`. |
 | `ServerLint` | An exec in the server (`Sources/vibeswitcher-server`, `Sources/VibeNode`): `execve` or `execv`, `Platform.Spawn(…).replaceProcess`, `HostHandover.exec`, `BinaryWatch`, or a connection to the host by its path (`viaConnector: false`). |
 | `TemporaryFolderLint` | A test using the system temporary folder instead of its scratch folder; allowed uses are listed in `scripts/temporary-folder-lint.txt`. |
 

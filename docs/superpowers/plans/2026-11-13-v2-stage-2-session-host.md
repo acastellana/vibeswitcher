@@ -480,12 +480,14 @@ Written, attacked and revised before Task 2 starts.
   token of the form `Identifier.identifier` with no `/` in it; paths stay out of backticks in `Held by:` lines. The
   unnumbered sections are reference and aren't linted.
 
-- [ ] **Step 1: The failing lint.** `SecurityDocumentLintTests.everyNamedTestExists`: each name token in a `Held by:`
+- [x] **Step 1: The failing lint.** `SecurityDocumentLintTests.everyNamedTestExists`: each name token in a `Held by:`
   line of a numbered section names a function declared in a type or extension of that name under `Tests/`
   (`@Test func name(` or `func name(`); a `planned:` part is skipped. `everySectionSaysWhatItDoesNotPromise` (a
   `**Doesn't promise.**` part) and `everySectionSaysWhenItIsNeeded` (`**Before the bootstrap:**` then `yes` or `no`).
   Shown failing on a copy of the document naming a test that doesn't exist, on one whose section lacks its
   `Doesn't promise` part, and on one whose `Held by:` line puts a path in backticks.
+  Done 2026-11-15: each test checks its doctored copies in itself as well; the document's bare names in `Held by:`
+  lines were qualified (`Suite.test`) so the lint reads them, and S1's `Held by:` names the three.
 - [x] **Step 2: Write it** (`e0bc9642`; attacked by four reviewers on 2026-11-13 and revised). As written:
 
   | § | Subject | Decision, in short | Before the bootstrap | Built in |
@@ -503,12 +505,13 @@ Written, attacked and revised before Task 2 starts.
   | S11 | What plain mode doesn't promise | the list of 31, and the allow-list (S2-D11) | yes | 10d; engine E1 |
   | S12 | After the bootstrap | seventeen items, in order | no | [After the bootstrap](#after-the-bootstrap-from-this-stage) |
 
-- [ ] **Step 3: The review record.** `docs/process/reviews/v2-security-review-2026-11-13.md` carries the four
+- [x] **Step 3: The review record.** `docs/process/reviews/v2-security-review-2026-11-13.md` carries the four
   reviewers' findings as they gave them, each with its answer: the section of the document that took it (the
   document's [Answers to the attack review](../specs/2026-11-13-v2-security-architecture.md#answers-to-the-attack-review)),
   or, for a finding taken in part or found narrower, why. A finding the document doesn't answer is answered there
-  first.
-- [ ] **Step 4: The plans take the changes.** This plan and the bootstrap path take the document's
+  first. Done 2026-11-15: the 61 findings from the reviewers' own outputs (the draft they read was never committed),
+  each answered from the document as it stands.
+- [x] **Step 4: The plans take the changes.** This plan and the bootstrap path take the document's
   [Changes](../specs/2026-11-13-v2-security-architecture.md#changes-the-stage-2-plan-needs) (this revision,
   2026-11-13), and the bootstrap path's engine outline (E1 to E8) takes the engine's list. The port map's *planned*
   Non-seam rows are rewritten to match this plan: `appPrincipal` gives way to the connector (`HostServer`'s connector
@@ -540,7 +543,9 @@ Written, attacked and revised before Task 2 starts.
   bootstrap path's step 8 corrections to S9, the engine plan's six changes, the keeper and GitGuard as decisions 18 and
   19, the restart routine, the deny list, the floor, the unit's PATH), the design's body was brought in line as above,
   and the port map's planned rows were redone from this plan. This step checks they still agree when Task 1 is
-  committed, and writes the `v2-mac-tasks.md` lines.
+  committed, and writes the `v2-mac-tasks.md` lines. Done 2026-11-15: the port map's rows named above are there
+  (`UnixSocket`'s calls are seam edits, so it has none); the three lines are under "What `v2` found on the Mac and
+  doesn't change".
 - [ ] **Step 5: The user's answers.** The bootstrap path's
   [Decisions awaiting the user](2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user) (decisions 1 to 20 and
   the machine steps) are put to the user in one message, and the answers go into the design's Decided section. An answer other than the recommendation is applied to this
