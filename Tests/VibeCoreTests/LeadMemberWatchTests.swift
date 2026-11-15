@@ -87,14 +87,40 @@ struct LeadMemberWatchTests {
                 && $0.text.contains("message(build-it, …, member: docs)") }, "\(told)")
     }
 
-    /// A member is watched only while its task runs and its session lives: one that ended is `endedMembers`' to tell.
-    @Test func aMemberIsWatchedOnlyWhileItsTaskRunsAndItLives() throws {
+    /// A member is watched while its members are at work (`LeadTask.deadlinesRun`) and its session lives: one whose
+    /// session ended is `endedMembers`' to tell.
+    @Test func aMemberIsWatchedWhileTheTeamIsAtWorkAndItLives() throws {
         var task = try Self.task()
         var gone = Self.idle
         gone.live = false
         #expect(Self.events(task, ["w1": Self.busy, "m2": gone]).isEmpty)
+        // Blocked on the lead (its integrator reported blocked), its members still at work: watched as when running.
         task.status = .blocked
+        let told = Self.events(task, ["w1": Self.busy, "m2": Self.idle]).map(\.text)
+        #expect(told.contains { $0.hasPrefix("Member ui of build-it's team is stalled") }, "\(told)")
+        #expect(told.contains { $0.hasPrefix("Member ui of build-it's team stopped without saying its part is done") }, "\(told)")
+        // Stopped by the lead (stop_worker ends its members too), or under audit: not.
+        task.stopped = "w1"
         #expect(!Self.events(task, ["m2": Self.idle]).contains { $0.text.hasPrefix("Member") })
+        task.stopped = nil
+        task.status = .review
+        #expect(!Self.events(task, ["m2": Self.idle]).contains { $0.text.hasPrefix("Member") })
+    }
+
+    /// A member whose agent quit, its shell left open, still counts as live (so `endedMembers` passes it over and
+    /// start_worker won't start it again): it's told here, once, by name.
+    @Test func aMemberWhoseAgentQuitIsToldEnded() throws {
+        let task = try Self.task()
+        var quit = Self.idle
+        quit.agentQuit = true
+        let told = Self.events(task, ["w1": Self.busy, "m2": quit, "m3": Self.busy])
+        #expect(told.map(\.key) == ["m2|ended"], "\(told)")
+        #expect(told.first?.text.hasPrefix("Member ui of build-it's team ended without saying its part is done: its agent quit and left the session's shell open.") == true, "\(told)")
+        #expect(told.first?.text.contains("start_worker(build-it)") == true)
+        // Not once its part is done.
+        var done = task
+        done.team?[1].handoff = LeadPartHandoff(commit: "abc", changed: "views", caveats: "none", verify: "test", at: Self.at - 20 * 60)
+        #expect(Self.events(done, ["w1": Self.busy, "m2": quit, "m3": Self.busy]).isEmpty)
     }
 
     @Test func aPlainTaskIsToldAsBefore() throws {
