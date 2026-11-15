@@ -304,7 +304,10 @@ git push
 - Create: `docs/process/v2-branch.md`
 - Modify: `docs/superpowers/specs/2026-11-12-vibeswitcher-2-design.md` (one link)
 
-- [ ] **Step 1: Write `docs/process/v2-linux-inventory.md`**
+- [x] **Step 1: Write `docs/process/v2-linux-inventory.md`** (done: the spike's measurement and the runners' Xcode
+  and Swift from `51705cb2` on; the Mac suite's time on the runner filled in 2026-11-15 from the job times of the last
+  eight green `v2 macos` runs, 43308184833 to 43735006004, 43730429307 among them: core 47 to 54 minutes, platform 8 to
+  22, host 10 to 16, app 12 to 19, each run's in the inventory's table; 10 skips at `8f87b8f0`; ticked 2026-11-15)
 
 The spike's measurement of 2026-11-12 (main at `f2ebe92b`, Swift 6.4.2, Ubuntu 24.04), as measured:
 

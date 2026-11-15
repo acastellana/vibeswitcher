@@ -653,8 +653,17 @@ default back (lines 93-96): a real-time signal, SIGXCPU or SIGXFSZ there would e
 too few default-ignored signals on Linux (SIGURG, SIGWINCH, SIGCHLD, SIGCONT, and SIGCHLD arrives from every child) to
 give each suite its own, so the suites are serialized against each other instead.
 
-- [ ] **Step 1: Show it.** Run `bash scripts/test.sh --filter 'SignalsTests|PipeCommandTests|MCPLogTests'` twenty
+- [x] **Step 1: Show it.** Run `bash scripts/test.sh --filter 'SignalsTests|PipeCommandTests|MCPLogTests'` twenty
   times on Linux and record the failures and any run that ends on a signal. This is the "without the fix" evidence.
+  (done 2026-11-15, after the fact, at `8f87b8f0` on this 24-core machine, under `vs-heavy`: the fix undone with
+  `git diff aa9eee06^ HEAD -- <the six files above> | git apply -R`, which applied cleanly and also undid the three
+  later changes to those files (`939ce080`'s five skip lines, `4485b65a`'s five lines in the run-once test,
+  `017920b1`'s FIFO poll), none of which a Linux run of these suites depends on; undoing only the fix's own diff
+  (`aa9eee06^..b8911886`) no longer applies to `SignalsTests.swift`. **It didn't show on Linux:** 20 of 20 runs
+  passed, 18 tests in 3 suites each, no failure and no run ending on a signal (logs `r2-without-fix-run01.log` to
+  `-run20.log`, summary `r2-without-fix-summary.txt`), nor 3 more at once under
+  `scripts/test-under-load.sh --load 24`. The collision stays shown by the Mac's run 43249423203 (Step 6). Re-applied
+  with the same command without `-R`; `git status` showed the six files at `HEAD`'s again.)
 - [x] **Step 2: The lock.** `SignalTestLock.held(_ body: () async throws -> T) async rethrows -> T` in each target's
   `TestSupport.swift`: `flock(LOCK_EX)` on `<scratch home>/signal-tests.lock`, opened anew for each use. A flock
   belongs to the open file description, so two opens in one process exclude each other, and the two test targets
@@ -674,7 +683,9 @@ give each suite its own, so the suites are serialized against each other instead
   `stopSignals:`) or sends a signal to its own process (`raise(`, `pthread_kill`, `kill -… $PPID`) for SIGURG,
   SIGWINCH or SIGUSR2 must mention `SignalTestLock`. `Sources/` and `Tests/Tools/*.py` aren't read: the host's
   SIGWINCH goes to its sessions, never to its own process. Shown failing by removing the lock from one test.
-- [ ] **Step 5: The same twenty runs**, with no failure and no run ending on a signal.
+- [x] **Step 5: The same twenty runs**, with no failure and no run ending on a signal. (done 2026-11-15 at
+  `8f87b8f0`, under `vs-heavy`: 20 of 20 passed, 20 tests in 3 suites each, no failure and no run ending on a signal
+  (logs `r2-with-fix-run01.log` to `-run20.log`, summary `r2-with-fix-summary.txt`); ticked 2026-11-15)
 - [x] **Step 6: The Mac.** The next push runs the platform job with the lock. Each of the three SignalsTests skips
   that passes there is removed from `macos-runner-skips.txt`; one that still fails keeps its line with what the run
   showed. At most two pushes go to this (R3's time box). (done: `aa9eee06` removed the three skips, their causes read

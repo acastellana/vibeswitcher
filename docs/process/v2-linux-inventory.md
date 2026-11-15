@@ -93,8 +93,27 @@ hosted runner. What it asks of the code:
 - **macOS**: the `xcode-27` image (macOS 27.0.1, arm64) has Xcode 27.2 and Swift 6.4.2, the Xcode the Mac that builds
   main uses. `macos-26` stops at Xcode 26.6. The whole package builds there in about 3 minutes.
 - **Ubuntu 24.04**: the image's own Swift is used when it is `.swift-version`'s, else swiftly installs that version.
-- The Mac suite on the runner: how long it takes and what it can't run are in
-  [the skip list](../../scripts/ci/macos-runner-skips.txt) and below, once the first runs are in.
+- The Mac suite on the runner: what it can't run is in [the skip list](../../scripts/ci/macos-runner-skips.txt) (10
+  entries at `8f87b8f0`, each with its reason), and how long it takes is below.
+
+**The Mac suite's time on the runner** (read 2026-11-15 from `gh run view <id> --json jobs`). `v2 macos` runs one job a
+test target, side by side, since `47636aaf`; a job's time is from its start to its end, the build included
+(`scripts/test.sh` builds everything before it tests). The last eight green runs on `v2`:
+
+| Run | Commit | platform | core | host | app |
+| --- | --- | --- | --- | --- | --- |
+| 43735006004 | `ad5e6f1a` | 9m30s | 53m59s | 16m10s | 18m09s |
+| 43730429307 | `584220b8` | 8m15s | 48m17s | 9m37s | 13m14s |
+| 43587007568 | `07c17611` | 21m52s (a re-run, attempt 2) | 47m07s | 13m07s | 17m56s |
+| 43524475145 | `d44a29e2` | 12m32s | 48m43s | 13m17s | 12m32s |
+| 43460059661 | `03b15058` | 16m01s | 51m25s | 13m45s | 13m31s |
+| 43419880736 | `065b943c` | 16m40s | 48m31s | 12m02s | 12m26s |
+| 43320958043 | `ca5c1a93` | 16m49s | 50m29s | 10m40s | 14m42s |
+| 43308184833 | `4485b65a` | 13m26s | 49m07s | 10m11s | 18m45s |
+
+So the core job sets the run's length, 47 to 54 minutes inside its `timeout-minutes: 90`; platform takes 8 to 22
+minutes (its limit is 45), host 10 to 16 and app 12 to 19 (90 each). Run one after another, the four would take about
+an hour and a half, which is why they are split.
 
 ## State at the end of stage 1 (2026-11-13)
 
@@ -106,9 +125,17 @@ hosted runner. What it asks of the code:
   ([its plan](../superpowers/plans/2026-11-13-v2-stage-2-session-host.md)). `scripts/ci/linux-core-errors.sh` counts
   its errors (142 in 8 files at `dbbeecbe`).
 - **What remains of stage 1** ([its plan](../superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md#remaining-work-revised-2026-11-13)):
-  nothing. R3 was met at `4485b65a`, the first commit with every `v2 linux` and `v2 macos` job green
+  nothing in stage 1 itself. R3 was met at `4485b65a`, the first commit with every `v2 linux` and `v2 macos` job green
   ([the plan's done-when](../superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md#done-when-revised-2026-11-13)),
-  and R10, a real Claude Code session from working to needs-you to done, passed here on 2026-11-13 (below).
+  and R10, a real Claude Code session from working to needs-you to done, passed here on 2026-11-13 (below). R2's
+  twenty Linux runs of the three signal suites were recorded on 2026-11-15 at `8f87b8f0`: with the fix undone, 20 of
+  20 passed (the collision didn't show on Linux; the Mac's run 43249423203 is what showed it); with the fix, 20 of 20
+  passed, no failure and no run ending on a signal. Three of the plan's steps stay open, each moved to the plan's R13
+  (after the bootstrap): Task 10 Step 3 (the developer-tools callers through `Platform.Tools.hasDeveloperTools()` and
+  the three hard-coded tools: "Task 10's leftovers"), Task 12 Step 5 (`platform-parity.md` and its lint) and Task 13
+  Step 5 (the hook's start-up time, static and glibc, for the binary decision: "The static build, the hook's start-up
+  time and the binary decision"), which waits for a pinned `swift sdk install` step in CI: the musl SDK is only on this
+  machine.
 
 ## A real Claude Code session on Linux (2026-11-13)
 
