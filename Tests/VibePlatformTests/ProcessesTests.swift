@@ -371,8 +371,9 @@ struct ProcessesTests {
         #expect(Processes.residentBytes(pid) == nil)
     }
 
-    /// A child that ignores USR1 (a shell's `trap ''`, kept across its exec) is read so, USR2 at its default; once it
-    /// has gone, nothing is read.
+    /// A child that ignores USR1 (a shell's `trap ''`, kept across its exec) is read so, TERM at its default; once it
+    /// has gone, nothing is read. TERM, not USR2: a child keeps what this process ignores, and the signal tests change
+    /// USR2 here (only under `SignalTestLock`); no test ignores TERM.
     @Test func theSignalsAChildIgnoresAreRead() async throws {
         let child = try await Self.startEchoing("/bin/sh", ["-c", "trap '' USR1; exec /bin/cat"])
         let pid = child.pid
@@ -380,7 +381,7 @@ struct ProcessesTests {
         child.end()
         let mask = try #require(ignored)
         #expect(mask & (UInt64(1) << UInt64(SIGUSR1 - 1)) != 0, "\(String(mask, radix: 16))")
-        #expect(mask & (UInt64(1) << UInt64(SIGUSR2 - 1)) == 0, "\(String(mask, radix: 16))")
+        #expect(mask & (UInt64(1) << UInt64(SIGTERM - 1)) == 0, "\(String(mask, radix: 16))")
         #expect(Processes.ignoredSignals(pid) == nil)
         #expect(Processes.ignoredSignals(0) == nil)
         #expect(Processes.ignoredSignals(-1) == nil)
