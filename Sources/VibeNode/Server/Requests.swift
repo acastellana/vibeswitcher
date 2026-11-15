@@ -42,7 +42,7 @@ public final class Requests: @unchecked Sendable {
     public let epoch = UUID().uuidString.lowercased()
     public let startedAt = Date()
     public let commit: String
-    private let note: (String) -> Void
+    let note: (String) -> Void
     /// The host and the server, for the voice rule's ancestry.
     private let hostPID: pid_t
     private let serverPID = getpid()
@@ -56,6 +56,11 @@ public final class Requests: @unchecked Sendable {
     var shutdown: () -> HostEvent? = { nil }
     /// The lead engine `lead` starts leads through, and whose leads `status` lists (E4); none: `lead` is refused.
     public var engine: LeadEngine?
+    /// The reply each recorded action got, by action id, the newest `repliesKept` (a retry is answered so).
+    private var replies: [String: NodeWire.Reply] = [:]
+    private var replyOrder: [String] = []
+    /// Each request as it is acted on, after the voice, the code and the vault's record (for tests). On `queue`.
+    public var acting: (NodeWire.Request) -> Void = { _ in }
 
     public init(link: HostLink, sessions: NodeSessions?, rule: VoiceRule, root: URL, hostSocket: String, commit: String,
                 hostPID: pid_t = getppid(), note: @escaping (String) -> Void = { _ in }) {
@@ -97,16 +102,30 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
+    /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
+    public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep"]
+    /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
+    public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
+    /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
+    static let repliesKept = 200
+
     /// Answers `request` from the process `facts` reads (whose kind this server takes: `NodeServer` answers the
     /// rest), through `reply`, once. On `queue`.
+    ///
+    /// A user's-voice request passes the voice, then (one on a card) its card's code, then, when it changes state, is
+    /// recorded in the host's vault with its action id and digest (`LeadVaultV2Client.recordUserAction`) before it is
+    /// acted on: one the vault doesn't take is refused, and an action the vault holds already (a retry) is answered as
+    /// it was, not done again.
     public func handle(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
         let needs = NodeWire.kinds[request.kind] ?? .user
+        if needs == .leadToolServer { return questionPost(request, from: facts, reply: reply) }
         if needs == .user {
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
                 note("refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, "not the user's voice: \(why)")))
             }
-            guard request.action.map({ UUID(uuidString: $0) != nil }) == true else {
+            let records = Self.recorded.contains(request.kind)
+            guard !records || request.action.map({ UUID(uuidString: $0) != nil }) == true else {
                 return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
             }
             guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
@@ -115,25 +134,86 @@ public final class Requests: @unchecked Sendable {
             guard link.state == .connected else {
                 return reply(.init(re: request.id, error: .init(.notYet, "the server's link to its host isn't welcomed yet: retry")))
             }
-            record(request, from: facts)
+            if Self.carded.contains(request.kind), let refusal = cardRefusal(request) { return reply(refusal) }
+            if records, let action = request.action?.lowercased() {
+                return record(request, action: action, from: facts) { [weak self] recorded in
+                    guard let self else { return }
+                    switch recorded {
+                    case .failure(let why):
+                        self.note("refused \(request.kind) (action \(action)): not recorded in the vault: \(why)")
+                        reply(.init(re: request.id, error: .init(.internal, "not recorded in the host's vault, so not done: \(ConfigSeal.inert(why.description, limit: .max))")))
+                    case .success(false):
+                        self.note("\(request.kind) (action \(action)) was recorded already: answered as before, not done again")
+                        var again = self.replies[action] ?? .init(re: request.id, result: .object(["again": .bool(true), "said": .string("this action was done already")]))
+                        again.re = request.id
+                        reply(again)
+                    case .success(true):
+                        self.act(request) { [weak self] answer in
+                            self?.keep(answer, for: action)
+                            reply(answer)
+                        }
+                    }
+                }
+            }
         }
+        act(request, reply: reply)
+    }
+
+    /// What `request` does, once it passed.
+    private func act(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        acting(request)
         switch request.kind {
         case "status": status(request, reply: reply)
         case "start": start(request, reply: reply)
         case "stop": stop(request, reply: reply)
         case "lead": lead(request, reply: reply)
+        case "questions": questions(request, reply: reply)
+        case "answer": answer(request, reply: reply)
+        case "hold": hold(request, reply: reply)
+        case "config.held": configHeld(request, reply: reply)
+        case "config.accept": configAccept(request, reply: reply)
+        case "base.show": baseShow(request, reply: reply)
+        case "base.accept", "base.keep": baseAnswer(request, reply: reply)
         default: reply(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)")))
         }
     }
 
-    /// A user's-voice request, kept for `status` before it is acted on.
-    private func record(_ request: NodeWire.Request, from facts: PeerFacts) {
-        let subject = request.args?["card"]?.string ?? request.args?["project"]?.string ?? request.args?["folder"]?.string
-        accepted.append(Accepted(kind: request.kind, action: request.action, subject: subject, at: Date(), pid: facts.pid,
-                                 cgroup: facts.cgroup.flatMap { PeerFacts.unifiedPath($0) ?? PeerFacts.systemdPath($0) },
-                                 commandLine: facts.commandLine))
-        if accepted.count > Self.acceptedKept { accepted.removeFirst(accepted.count - Self.acceptedKept) }
-        note("accepted \(request.kind) (action \(request.action ?? "none")) from pid \(facts.pid)")
+    private func keep(_ reply: NodeWire.Reply, for action: String) {
+        replies[action] = reply
+        replyOrder.append(action)
+        if replyOrder.count > Self.repliesKept { replies[replyOrder.removeFirst()] = nil }
+    }
+
+    /// A user's-voice request, recorded in the vault (`done` on `queue` with whether it is the action's first record,
+    /// or why it wasn't recorded), then kept for `status`.
+    private func record(_ request: NodeWire.Request, action: String, from facts: PeerFacts, done: @escaping (Result<Bool, RecordFailure>) -> Void) {
+        let subject = Self.subject(request)
+        let digest = LeadVaultV2.digest(String(decoding: NodeWire.line(request.args ?? [:]), as: UTF8.self))
+        let (client, kind) = (link.vaultV2, request.kind)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let recorded = Result { try client.recordUserAction(action, kind: kind, subject: subject, digest: digest) }.mapError { RecordFailure("\($0)") }
+            guard let self else { return }
+            self.queue.async {
+                if case .success = recorded {
+                    self.accepted.append(Accepted(kind: request.kind, action: action, subject: subject, at: Date(), pid: facts.pid,
+                                                  cgroup: facts.cgroup.flatMap { PeerFacts.unifiedPath($0) ?? PeerFacts.systemdPath($0) },
+                                                  commandLine: facts.commandLine))
+                    if self.accepted.count > Self.acceptedKept { self.accepted.removeFirst(self.accepted.count - Self.acceptedKept) }
+                    self.note("accepted \(request.kind) (action \(action)) from pid \(facts.pid), recorded in the vault")
+                }
+                done(recorded)
+            }
+        }
+    }
+
+    struct RecordFailure: Error, CustomStringConvertible {
+        var description: String
+        init(_ description: String) { self.description = description }
+    }
+
+    /// The card or project a request names, as recorded and shown.
+    static func subject(_ request: NodeWire.Request) -> String? {
+        request.args?["card"]?.string ?? request.args?["project"]?.string ?? request.args?["folder"]?.string
     }
 
     // MARK: status
@@ -168,12 +248,28 @@ public final class Requests: @unchecked Sendable {
             "rule": .object(["mode": .string(rule.mode.rawValue), "says": .string(rule.says),
                              "scopes": .array(rule.scopes.map { .string($0.pattern) })]),
             "sessions": .array(list.map(Self.value)),
-            "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(\.value)),
-            "cards": .object(["questions": .int(0), "approvals": .int(0), "config": .int(0), "base": .int(0)]),
+            "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
+            "cards": Self.counts(engine?.cards.counts() ?? [:]),
             "accepted": .array(accepted.map(\.value)),
             "notices": .array((stopping ? ["the node is stopping"] : []).map(NodeWire.Value.string)
                 + (engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []).map(NodeWire.Value.string)),
         ])
+    }
+
+    /// A lead as `status` lists it: the store's, with its open and blocking questions and its open cards (E6).
+    private func leadValue(_ lead: LeadStore.Lead) -> NodeWire.Value {
+        guard case .object(var fields) = lead.value else { return lead.value }
+        let open = engine?.cards.list(project: lead.project) ?? []
+        let questions = open.filter { $0.kind == .question || $0.kind == .approval }
+        fields["questions"] = .object(["open": .int(questions.count), "blocking": .int(questions.filter(\.isBlocking).count)])
+        fields["cards"] = .array(open.map { .string($0.id) })
+        return .object(fields)
+    }
+
+    /// Open cards counted by kind, as `status` gives them.
+    static func counts(_ counts: [CardStore.Kind: Int]) -> NodeWire.Value {
+        .object(["questions": .int(counts[.question] ?? 0), "approvals": .int(counts[.approval] ?? 0),
+                 "config": .int(counts[.configHeld] ?? 0), "base": .int(counts[.baseMove] ?? 0)])
     }
 
     static func word(_ state: HostLink.State) -> String {

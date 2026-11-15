@@ -4515,6 +4515,7 @@ public final class LeadToolset: MCPToolset {
         let asked = try store.update { board in
             board.ask(question, options: options, priority: priority, whyNow: whyNow, proposal: proposal, decideIn: decideIn, task: about)
         }
+        NodeQuestionPost.post(asked, op: .post, root: root, vault: vault)
         let timer = asked.proposal.map { proposal in
             " You proposed ‘\(proposal)’: unless the user answers or holds it, a message at \(LeadBoard.clock(asked.decideBy ?? 0)) (in \(asked.decideInText)) "
                 + "tells you to go ahead with it. Until then, don't act on it."
@@ -4550,6 +4551,7 @@ public final class LeadToolset: MCPToolset {
         let board = try store.read()
         let before = (try? board.questionIndex(id)).map { board.questions[$0] }
         let revised = try boardChange { board in try board.revise(id, text: text, options: options, note: note) }
+        NodeQuestionPost.post(revised, op: .revise, root: root, vault: vault)
         var timer = ""
         if revised.isCounting {
             timer = " Its timer starts again: you go ahead with ‘\(revised.proposal ?? "")’ at \(LeadBoard.clock(revised.decideBy ?? 0)) unless the user answers."
@@ -4567,6 +4569,7 @@ public final class LeadToolset: MCPToolset {
         let reason = (arguments["reason"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reason.isEmpty else { throw Problem(text: "Say why (reason): the user sees it.") }
         let withdrawn = try boardChange { board in try board.withdraw(id, reason: reason) }
+        NodeQuestionPost.post(withdrawn, op: .withdraw, root: root, vault: vault)
         return MCPToolResult(text: "Withdrew \(withdrawn.short) “\(withdrawn.text)”. It no longer waits on the user.")
     }
 

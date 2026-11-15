@@ -150,7 +150,7 @@ public final class HostServer {
     public static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover,
                                       HostProtocol.Capability.leadVault, HostProtocol.Capability.appProof, HostProtocol.Capability.inputUnits,
                                       HostProtocol.Capability.census]
-        + (Platform.CodeIdentity.isAvailable ? [] : [HostProtocol.Capability.hostNotes])
+        + (Platform.CodeIdentity.isAvailable ? [] : [HostProtocol.Capability.hostNotes, HostProtocol.Capability.vaultV2])
     /// Per session, its input from every client in order (see `InputOrder`).
     private var inputOrders: [UUID: InputOrder] = [:]
     var handingOver = false
@@ -439,7 +439,7 @@ public final class HostServer {
             // Where only leads may: the session the vault binds to a team's lead role (`leads` of itself).
             if case .spawn = request, config.spawnNeedsLead { return config.vault?.leads(id.uuidString, caller: caller) == true }
             return true
-        case .shutdown, .handover, .hostNotes:
+        case .shutdown, .handover, .hostNotes, .vaultV2:
             return caller == .app
         case .attach(let id, _, _), .detach(let id), .input(let id, _, _), .inputUnit(let id, _, _),
              .resize(let id, _, _), .screen(let id), .styledScreen(let id), .history(let id, _),
@@ -483,6 +483,8 @@ public final class HostServer {
             reply(.census(HostCensus.count(allInfo.map { ($0.label, $0.cwd, $0.isLive) })))
         case .hostNotes:
             reply(.hostNotes(hostNotes(startedAt: startedAt)))
+        case .vaultV2(let request):
+            reply(.vaultV2(VaultV2Handler.answer(request, from: caller(of: client), vault: config.vault)))
         case .spawn(let request):
             // Started now, it would be torn down with the host a moment later.
             guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }

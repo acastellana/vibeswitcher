@@ -24,8 +24,13 @@ final class StubHost: @unchecked Sendable {
                           refusedAppConnections: 1)
     let startedAt = Date(timeIntervalSince1970: 1_800_000_000)
 
-    /// The capabilities a host on Linux lists that the link needs (input units) by default.
-    init(_ scratch: Scratch, capabilities: [String] = [HostProtocol.Capability.inputUnits], sessions: [HostSession] = []) throws {
+    /// The node's record of the user's actions (`HostRequest.vaultV2`), kept as a host's vault keeps it.
+    private var record: LeadVaultV2.Book?
+
+    /// The capabilities a host on Linux lists that the link needs (input units) and the server's record (`vaultV2`) by
+    /// default.
+    init(_ scratch: Scratch, capabilities: [String] = [HostProtocol.Capability.inputUnits, HostProtocol.Capability.vaultV2],
+         sessions: [HostSession] = []) throws {
         welcomeCapabilities = capabilities
         listed = sessions
         path = try scratch.shortFolder("vss").appendingPathComponent("h.sock").path
@@ -144,6 +149,8 @@ final class StubHost: @unchecked Sendable {
             send(.historyText(id: id, history: "stub history", screen: "stub screen"), replyTo: envelope.seq, on: fd)
         case .hostNotes:
             send(.hostNotes(notes), replyTo: envelope.seq, on: fd)
+        case .vaultV2(let request):
+            send(.vaultV2(LeadVaultV2.answer(request, from: .app, book: &record)), replyTo: envelope.seq, on: fd)
         default:
             send(.ok, replyTo: envelope.seq, on: fd)
         }

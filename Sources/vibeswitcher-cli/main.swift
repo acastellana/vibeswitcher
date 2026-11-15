@@ -15,6 +15,10 @@ let usage = """
            vibeswitcher start [--interop-is-on]
            vibeswitcher stop
            vibeswitcher lead FOLDER [--goal TEXT] [--take-head] [--replace]
+           vibeswitcher questions [FOLDER] [--all] [--json]
+           vibeswitcher answer CARD TEXT | hold CARD
+           vibeswitcher config held [FOLDER] [--diff NAME] | config accept CARD
+           vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher hooks install|remove [--agent claude|codex]
     """
 
@@ -28,6 +32,16 @@ case "stop":
     exit(StopCommand.run(Array(words.dropFirst())))
 case "lead":
     exit(LeadCommand.run(Array(words.dropFirst())))
+case "questions":
+    exit(QuestionsCommand.run(Array(words.dropFirst())))
+case "answer":
+    exit(AnswerCommand.run(Array(words.dropFirst())))
+case "hold":
+    exit(HoldCommand.run(Array(words.dropFirst())))
+case "config":
+    exit(ConfigCommand.run(Array(words.dropFirst())))
+case "base":
+    exit(BaseCommand.run(Array(words.dropFirst())))
 case "hooks":
     exit(HooksCommand.run(Array(words.dropFirst())))
 case "help", "-h", "--help":

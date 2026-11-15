@@ -622,6 +622,9 @@ extension LeadVault {
             var holdsFirstLook: Bool?
             /// The roots (`LeadVault.key`) the app's accept let record their floor and rails (`Book.holdsFirstLook`).
             var firstLookAccepted: Set<String>?
+            /// The node's record of the user's actions and `.user` seals (V2/LeadVaultV2.swift; optional: older vaults,
+            /// and the Mac's, have none).
+            var v2: LeadVaultV2.Book?
         }
 
         /// The Mac-wide seal of your home's agents' config (`ConfigSeal.isHome`): its hashes (with their per-key
@@ -724,6 +727,17 @@ extension LeadVault {
             lock.unlock()
             if let data { onChange?(data) }
             return adopted
+        }
+
+        /// The node's record (`HostRequest.vaultV2`, V2/LeadVaultV2.swift): `body` on it under the vault's lock, saved
+        /// when it changed.
+        public func v2<T>(_ body: (inout LeadVaultV2.Book?) -> T) -> T {
+            lock.lock()
+            defer { lock.unlock() }
+            let before = state.v2
+            let result = body(&state.v2)
+            if state.v2 != before, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
+            return result
         }
 
         /// Whether `caller` is the lead of a team `session` holds a role in, or held one in as a worker or verifier.
@@ -1014,10 +1028,12 @@ extension LeadVault {
                 return .ok
             case .seal(let message):
                 if let refusal = maySeal(message, caller: caller, agentSession: agentSession) { return .refused(refusal) }
+                LeadVaultV2.sealed(message, book: &state.v2, changed: &changed)
                 return .seal(SteerInbox.seal(message, key: SymmetricKey(data: state.senderKey)))
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)
-                return .verified(messages.map { message in message.seal.map { $0 == SteerInbox.seal(message, key: key) } ?? false })
+                let valid = messages.map { message in message.seal.map { $0 == SteerInbox.seal(message, key: key) } ?? false }
+                return .verified(LeadVaultV2.verified(messages, valid, book: state.v2))
             case .walletSession:
                 guard case .session(let session) = caller else {
                     return .refused("This process isn't in any session VibeSwitcher's session host runs.")

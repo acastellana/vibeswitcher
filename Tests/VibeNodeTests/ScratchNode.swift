@@ -44,7 +44,7 @@ final class ScratchNode: @unchecked Sendable {
 
     init(_ scratch: Scratch, userScopes: [String]? = ScratchNode.ownScope.map { [$0] }, housekeeping: Int? = nil,
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, testChild: String? = nil, socketName: String = "host.sock",
-         waitForServer: Bool = true) async throws {
+         sealLife: Int? = nil, waitForServer: Bool = true) async throws {
         root = try scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
         nodeRoot = root.appendingPathComponent("build", isDirectory: true)
@@ -71,6 +71,8 @@ final class ScratchNode: @unchecked Sendable {
         if let testChild { arguments += ["--server-arg", ServerArguments.testChildFlag + testChild] }
         // The vault holds its first look, and the server knows it (its engine refuses `lead` until the accepts, S7).
         if holdFirstLook { arguments += ["--hold-first-look", "--server-arg", ServerArguments.testFirstLookFlag] }
+        // How long the vault's `.user` seals verify (the engine plan's EN-D11), for a test that waits one out.
+        if let sealLife { arguments += ["--test-user-seal-life", String(sealLife)] }
         process.executableURL = nodeRoot.appendingPathComponent("bin/vibeswitcher-host")
         process.environment = ["HOME": home.path, "CFFIXED_USER_HOME": home.path, "VIBESWITCHER_HOME": root.path, "SHELL": "/bin/sh",
                                "PATH": path, "TMPDIR": root.appendingPathComponent("tmp").path + "/"]

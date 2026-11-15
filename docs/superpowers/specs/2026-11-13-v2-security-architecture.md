@@ -565,12 +565,20 @@ Acceptable only on VibeSwitcher's own repository, with interop off, until stage 
 scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (a Windows
 Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. The engine's E4:
 `LeadStartTests.aSessionsProcessCannotStartALead`, `LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`,
-`ServerTests.aStopWhileALeadSpawnsStillEndsTheHost`. Planned: the engine plan task E6.
+`ServerTests.aStopWhileALeadSpawnsStillEndsTheHost`. The engine's E6: `AnswerVoiceTests.anAnswerFromASessionsProcessIsRefused`,
+`AnswerVoiceTests.anAnswerFromAProcessCarryingASessionMarkerIsRefused`, `AnswerVoiceTests.anAnswerFromBranchCodeIsRefused`,
+`ApprovalCardTests.anApprovalCardIsBuiltFromGitAndTheVault`, `QuestionCardTests.aQuestionWrittenToTheBoardIsNotShown`,
+`QuestionCardTests.aPostFromAWorkersSessionIsRefused`, `QuestionCardTests.aPostFromBranchCodeUnderTheLeadIsRefused`,
+`QuestionCardTests.aPostFromAnotherProjectsLeadIsRefused`, `QuestionCardTests.untrustedTextIsPrintedInert`,
+`AnswerTests.anAnswerIsRecordedInTheVaultBeforeTheLeadIsTold`, `AnswerTests.everyAcceptedRequestIsInTheVaultBeforeItActs`,
+`AnswerTests.aRepeatedActionIsDoneOnce`, `AnswerTests.aWrongCodeIsRefused`, `ConfigHoldStoreTests.heldTextIsPrintedInert`,
+`ConfigHoldStoreTests.acceptOnAListDrawnBeforeAChangeSealsNothing`, `UserSealTests.aReplayedUserMessageIsNotDeliveredTwice`,
+`UserSealTests.aReplayIsRefusedEvenWithTheDeliveredRecordRemoved`, `LeadVaultV2Tests.onlyTheAppRecordsAUserAction`,
+`LeadVaultV2Tests.aRetiredUserSealVerifiesFalse`, `LeadVaultV2Tests.aUserSealExpiresAfterItsTime`,
+`VaultV2HostTests.theHostListsV2AndAnswersTheAppAlone`, `ServerTests.theFreshVaultOrderAcceptsThenStartsTheLead`, and the
+answer in `ServerTests.anAcceptedRequestIsShownByStatus` and `ServerTests.everyHostCallInTheServerGoesThroughTheConnector`.
 
-**Tests to write:** E6:
-`anAnswerFromASessionsProcessIsRefused`, `anAnswerFromAProcessCarryingASessionMarkerIsRefused`,
-`anAnswerFromBranchCodeIsRefused`, `anApprovalCardIsBuiltFromGitAndTheVault`, `aQuestionWrittenToTheBoardIsNotShown`.
-E8: `anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`. Step 8: `aSessionsProcessCannotInstallHooks`.
+**Tests to write:** E8: `anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`. Step 8: `aSessionsProcessCannotInstallHooks`.
 
 ## S4. Session identity
 

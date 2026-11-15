@@ -1,0 +1,67 @@
+import Foundation
+import VibeCore
+import VibeNode
+
+/// `vibeswitcher config held [FOLDER] [--diff NAME]` and `vibeswitcher config accept CARD` (the engine plan's E6, E8;
+/// S7): what the host's vault holds of the agents' config for a project, as a card bound to exactly the hashes it
+/// shows, with the floor workflow.md proposes; then the user's accept of that card, which seals exactly those and then
+/// records the floor (EN-D7). `config held` changes nothing and asks no code; `config accept` asks the card's.
+enum ConfigCommand {
+    static let usage = "usage: vibeswitcher config held [FOLDER] [--diff NAME] | config accept CARD"
+
+    static func run(_ arguments: [String]) -> Int32 {
+        switch arguments.first {
+        case "held": return held(Array(arguments.dropFirst()))
+        case "accept":
+            guard arguments.count == 2 else { return Say.usage(usage) }
+            return CardCommand.act("config.accept", card: arguments[1], what: { card in
+                "This accepts the agents' config card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) showed, sealing exactly that, "
+                    + "then records the floor and guard rails workflow.md proposes."
+            }) { result in
+                let sealed = result["sealed"]?.array?.compactMap(\.string) ?? []
+                Say.out("accepted" + (sealed.isEmpty ? "" : ": " + sealed.map { ConfigSeal.inert($0, limit: 200) }.joined(separator: ", ")))
+                Say.out(result["floorRecorded"]?.bool == true ? "  the review floor is recorded" : "  no review floor recorded")
+            }
+        default: return Say.usage(usage)
+        }
+    }
+
+    static func held(_ arguments: [String]) -> Int32 {
+        var folder: String?
+        var diff: String?
+        var index = 0
+        while index < arguments.count {
+            let word = arguments[index]
+            if word == "--diff" {
+                guard index + 1 < arguments.count else { return Say.usage(usage) }
+                index += 1
+                diff = arguments[index]
+            } else {
+                guard folder == nil, !word.hasPrefix("--") else { return Say.usage(usage) }
+                folder = CardCommand.absolute(word)
+            }
+            index += 1
+        }
+        let context = NodeContext.current()
+        context.sayScratch()
+        let client: NodeClient
+        switch NodeClient.connect(context) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let connected): client = connected
+        }
+        var args: [String: NodeWire.Value] = ["folder": .string(folder ?? FileManager.default.currentDirectoryPath)]
+        if let diff { args["diff"] = .string(diff) }
+        switch client.request("config.held", args: args, timeout: 60) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let reply):
+            guard reply.ok, let result = reply.result, let card = result["card"] else { return Say.replyError(reply) }
+            CardText.lines(card).forEach(Say.out)
+            if let difference = result["difference"] {
+                if let lines = difference.array { lines.compactMap(\.string).forEach { Say.out(ConfigSeal.inert($0, limit: .max)) } }
+                else { Say.out(ConfigSeal.inert(difference.string ?? "", limit: .max)) }
+            }
+            Say.out("accept it with: vibeswitcher config accept \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80))")
+            return 0
+        }
+    }
+}

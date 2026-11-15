@@ -25,6 +25,9 @@ extension LeadEngine {
             deliverHeld(root: root)
             wake(root: root)
         }
+        // E6: the user's messages the leads took retired in the vault, and the leads' bases looked at.
+        retireTaken()
+        lookAtBases()
     }
 
     /// Wakes `root`'s lead for the reports that wait for it, or types the user's words that wait (`flush`). On `queue`.

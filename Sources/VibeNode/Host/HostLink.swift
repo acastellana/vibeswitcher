@@ -98,6 +98,9 @@ public final class HostLink: @unchecked Sendable {
     /// The host's lead vault, asked on a fresh connection through the dialer for each call (as `HostCall.vault` asks
     /// by a path); its launch files under `<root>/lead`.
     public let vault: LeadVault
+    /// The node's record of the user's actions in the host's vault (`HostRequest.vaultV2`, EN-D11), asked the same way,
+    /// and only of a host whose welcome lists `HostProtocol.Capability.vaultV2` (another refuses it, saying so).
+    public let vaultV2: LeadVaultV2Client
 
     private let dialer: HostDialer
     private let timing: Timing
@@ -134,6 +137,7 @@ public final class HostLink: @unchecked Sendable {
         vault = LeadVault(folder: root.appendingPathComponent("lead", isDirectory: true)) { [dialer] request in
             try Self.vault(request, through: dialer, timeout: HostCall.vaultTimeout)
         }
+        vaultV2 = LeadVaultV2Client { [dialer] request in try Self.vaultV2(request, through: dialer, timeout: HostCall.vaultTimeout) }
         queue.setSpecific(key: onQueue, value: ObjectIdentifier(self))
     }
 
@@ -579,6 +583,19 @@ public final class HostLink: @unchecked Sendable {
         }
     }
 
+    /// One request of the node's record (`HostRequest.vaultV2`) the same way, refused by a host whose welcome doesn't
+    /// list `HostProtocol.Capability.vaultV2` without being sent.
+    static func vaultV2(_ request: LeadVaultV2.Request, through dialer: HostDialer, timeout: TimeInterval) throws -> LeadVaultV2.Reply {
+        switch try exchange(.vaultV2(request), through: dialer, timeout: timeout, requires: HostProtocol.Capability.vaultV2) {
+        case .vaultV2(let reply): return reply
+        case .error(let message): return .refused(message)
+        default: return .refused("The session host answered something else.")
+        }
+    }
+
+    /// What `exchange` answers for a host whose welcome lacks the capability the request needs.
+    static let notListed = "The session host doesn't keep the node's record of the user's actions (its welcome doesn't list it)."
+
     private final class Exchange: @unchecked Sendable {
         var welcomed = false
         var seq: Int?
@@ -587,7 +604,7 @@ public final class HostLink: @unchecked Sendable {
         var unsent: Error?
     }
 
-    private static func exchange(_ request: HostRequest, through dialer: HostDialer, timeout: TimeInterval) throws -> HostEvent {
+    private static func exchange(_ request: HostRequest, through dialer: HostDialer, timeout: TimeInterval, requires: String? = nil) throws -> HostEvent {
         let queue = DispatchQueue(label: "vibenode.host-link.call")
         let done = DispatchSemaphore(value: 0)
         let state = Exchange()
@@ -599,8 +616,13 @@ public final class HostLink: @unchecked Sendable {
                 done.signal()
             }
             connection.onEvent = { [weak connection] envelope in
-                if case .welcome = envelope.event, !state.welcomed {
+                if case .welcome(_, _, _, let capabilities, _, _) = envelope.event, !state.welcomed {
                     state.welcomed = true
+                    if let requires, capabilities?.contains(requires) != true {
+                        state.reply = .error(Self.notListed)
+                        done.signal()
+                        return
+                    }
                     do { state.seq = try connection?.send(request) } catch {
                         state.unsent = error
                         done.signal()

@@ -27,6 +27,9 @@ public enum HostProtocol {
         /// Answers `HostRequest.hostNotes`, the app's alone: what the host saw that its server child should know
         /// (`HostNotes`). Listed only on Linux, where the app is the server child.
         public static let hostNotes = "hostNotes"
+        /// Answers `HostRequest.vaultV2`, the app's alone: the node's record of the user's actions in the vault
+        /// (`LeadVaultV2`). Listed only on Linux, where the app is the server child.
+        public static let vaultV2 = "vaultV2"
     }
 
     /// The error a spawn gets once the host agreed to shut down.
@@ -295,6 +298,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// What the host saw that the app should know (see `HostNotes`): answered `hostNotes` to the app alone. Sent only to
     /// a host whose welcome lists `HostProtocol.Capability.hostNotes`.
     case hostNotes
+    /// The node's record of the user's actions in the vault (see `LeadVaultV2`): answered `vaultV2` to the app alone.
+    /// Sent only to a host whose welcome lists `HostProtocol.Capability.vaultV2`.
+    case vaultV2(LeadVaultV2.Request)
 }
 
 public enum HostEvent: Codable, Equatable, Sendable {
@@ -324,6 +330,8 @@ public enum HostEvent: Codable, Equatable, Sendable {
     case census([HostCensus])
     /// The answer to `HostRequest.hostNotes`.
     case hostNotes(HostNotes)
+    /// The answer to `HostRequest.vaultV2`.
+    case vaultV2(LeadVaultV2.Reply)
 }
 
 /// What the host saw that its server child should know and show (the security architecture document's S2): the

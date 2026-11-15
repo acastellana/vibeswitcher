@@ -1,0 +1,178 @@
+import Foundation
+import VibeCore
+
+/// The agents' config each project's vault holds (`ConfigSeal`; the app's `ConfigHolds`, rebuilt without its view, the
+/// engine plan's E6): changed while its workers or verifiers ran, or never sealed on a fresh vault that holds its first
+/// look (S7), which holds new workers, verifiers and merges until the user accepts it. `config held` makes a card bound
+/// to exactly the hashes it showed (`Shown.hashes`, the app's `shownHashes`); `config accept CARD` seals those and no
+/// others (`checkConfig(root:shown:)`, which ends a root's first-look hold), **then** records the floor and the guard
+/// rails `workflow.md` proposes, as the card showed them (EN-D7: the vault refuses the floor while the first look holds).
+/// Names, times, sizes and hashes only: never a file's contents, but for the difference asked of one held thing
+/// (`difference`), which reads the text the seal kept. Everything here reads the vault or the disk: never on the engine's
+/// queue.
+public enum ConfigHoldStore {
+    /// One held thing as the card shows it.
+    public struct Item: Equatable, Sendable {
+        public var name: String
+        /// When it last changed: a file's own time, a folder's newest changed file's (what the vault holds), none for a
+        /// plugin or a settings file's scripts (`changedAt`).
+        public var changedAt: Date?
+        /// A file's size now; none for anything else.
+        public var size: Int?
+        /// The hash the card shows and the accept seals, its first 12 characters.
+        public var hash: String
+        /// What changed (its keys, "hooks.SessionStart added"; never a value), when the vault says.
+        public var change: String?
+        /// Changed outside a team session (code that runs: only the user's accept seals it).
+        public var outside: Bool
+        /// A held folder's files that changed.
+        public var files: [ConfigSeal.HeldFile]
+
+        public init(name: String, changedAt: Date? = nil, size: Int? = nil, hash: String = "", change: String? = nil, outside: Bool = false,
+                    files: [ConfigSeal.HeldFile] = []) {
+            self.name = name
+            self.changedAt = changedAt
+            self.size = size
+            self.hash = hash
+            self.change = change
+            self.outside = outside
+            self.files = files
+        }
+    }
+
+    /// What a held-config card showed: the items, the hashes the accept seals, and what `workflow.md` proposes (the
+    /// floor, and the guard rails' hashes with its `base_branch`'s, `recordedHashes`), recorded at the accept.
+    public struct Shown: Equatable, Sendable {
+        public var items: [Item]
+        public var hashes: [String: String]
+        public var floor: LeadReviewFloor?
+        public var rails: [String: String]
+        /// The base branch `workflow.md` names, as the card showed it.
+        public var baseBranch: String?
+
+        public init(items: [Item] = [], hashes: [String: String] = [:], floor: LeadReviewFloor? = nil, rails: [String: String] = [:],
+                    baseBranch: String? = nil) {
+            self.items = items
+            self.hashes = hashes
+            self.floor = floor
+            self.rails = rails
+            self.baseBranch = baseBranch
+        }
+    }
+
+    /// The key `base_branch`'s hash is recorded under beside the guard rails: `base show` takes `workflow.md`'s base
+    /// only while it is what the user accepted.
+    public static let baseBranchKey = "base_branch"
+
+    /// What `config accept` records of `workflow`: its guard rails' hashes (`LeadVault.guardedHashes`) and its base
+    /// branch's.
+    public static func recordedHashes(_ workflow: LeadWorkflow) -> [String: String] {
+        LeadVault.guardedHashes(workflow).merging([baseBranchKey: LeadVault.hash(workflow.baseBranch ?? "")]) { $1 }
+    }
+
+    /// `root`'s workflow.md.
+    public static func workflowPath(root: String) -> String {
+        (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md")
+    }
+
+    /// What the vault holds for `root` now, as a card shows it. `look`: the vault looks at the config first
+    /// (`checkConfig(root:)`, nothing shown, as `config held` asks), so a fresh vault's first look holds what it has
+    /// nothing recorded for; a look the vault refuses is only said. Fails when the record can't be read.
+    public static func held(root: String, vault: LeadVault, home: String, look: Bool = true) -> Result<Shown, Error> {
+        if look { _ = try? vault.checkConfig(root: root) }
+        let record: [String: String]?
+        do { record = try vault.guardedRecord(root: root) } catch { return .failure(error) }
+        let names = ConfigSeal.held(in: record)
+        let outside = Set(ConfigSeal.heldOutside(in: record))
+        let changes = ConfigSeal.heldChanges(in: record)
+        let times = changedAt(names, root: root, home: home).merging(ConfigSeal.heldTimes(in: record)) { $1 }
+        let sizes = sizes(names, root: root, home: home)
+        let details = ConfigSeal.heldDetails(in: record)
+        // By the record's key, as the accept seals them (`checkConfig(root:shown:)`); the card shows each by its name.
+        let hashes = ConfigSeal.heldHashes(in: record)
+        let byName = Dictionary(hashes.map { (ConfigSeal.name(ofKey: $0.key), $0.value) }) { first, _ in first }
+        let items = names.map { name in
+            Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name] ?? "").prefix(12)), change: changes[name],
+                 outside: outside.contains(name), files: details[name]?.files ?? [])
+        }
+        let workflow = LeadWorkflow.load(from: workflowPath(root: root))
+        return .success(Shown(items: items, hashes: hashes, floor: LeadReviewFloor.starting(from: workflow), rails: recordedHashes(workflow),
+                              baseBranch: workflow.baseBranch))
+    }
+
+    /// What an accept did.
+    public enum Accepted: Equatable, Sendable {
+        /// Sealed what the card showed (the names the vault sealed anew, else the card's), then recorded the floor (the
+        /// floor in force after) and the rails.
+        case sealed(names: [String], floor: LeadReviewFloor?)
+        /// The config moved past what the card showed: nothing was sealed, it's held again.
+        case changedSince(held: [String])
+    }
+
+    /// The user's accept of the card that showed `shown`, in EN-D7's order: the seal of exactly those hashes first
+    /// (`checkConfig(root:shown:)`, which ends the root's first-look hold), then the rails and the floor `workflow.md`
+    /// proposed as the card showed them (`setReviewFloor(onlyIfUnset: true)`, which the vault refuses while the first
+    /// look still holds). Fails when the vault can't be asked.
+    public static func accept(_ shown: Shown, root: String, vault: LeadVault) -> Result<Accepted, Error> {
+        do {
+            let check = try vault.checkConfig(root: root, shown: shown.hashes)
+            guard check.held.isEmpty else { return .success(.changedSince(held: check.held)) }
+            if !shown.rails.isEmpty { try vault.setGuardedSettings(shown.rails, root: root) }
+            var floor: LeadReviewFloor?
+            if let proposed = shown.floor { floor = try vault.setReviewFloor(proposed, root: root, onlyIfUnset: true) }
+            return .success(.sealed(names: check.resealed.isEmpty ? shown.items.map(\.name) : check.resealed, floor: floor))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// The difference of each changed file of the held thing `name` in `shown`, as lines (`ConfigSeal.difference`:
+    /// the text the seal kept against the text now), each untrusted line made inert. Reads the disk.
+    public static func difference(_ shown: Shown, name: String, home: String) -> [String]? {
+        guard let item = shown.items.first(where: { $0.name == name }) else { return nil }
+        guard !item.files.isEmpty else { return ["(no file of \(ConfigSeal.inert(name, limit: 200)) to compare)"] }
+        var lines: [String] = []
+        for file in item.files {
+            lines.append("── " + ConfigSeal.fileLabel(file, in: name))
+            switch ConfigSeal.difference(of: file, in: name, home: home) {
+            case .lines(let changed, let more, let masked):
+                for line in changed {
+                    let marker: String
+                    switch line.kind {
+                    case .added: marker = "+ "
+                    case .removed: marker = "- "
+                    case .gap: marker = "… "
+                    case .same: marker = "  "
+                    }
+                    lines.append(marker + ConfigSeal.inert(line.text, limit: .max))
+                }
+                if more > 0 { lines.append("  … \(more) more changed lines") }
+                if masked { lines.append("  (a value masked as secret changed too)") }
+            case .unavailable(let why), .sameText(let why):
+                lines.append("  " + ConfigSeal.inert(why, limit: .max))
+            }
+        }
+        return lines
+    }
+
+    /// When each of `names` was last changed (the app's `ConfigHolds.changedAt`, copied): nothing for a missing file, a
+    /// folder (its own time moves with whatever is written in it), a plugin or a settings file's scripts. Reads the disk.
+    public static func changedAt(_ names: [String], root: String, home: String) -> [String: Date] {
+        guard !names.isEmpty else { return [:] }
+        var times: [String: Date] = [:]
+        for watched in ConfigSeal.watched(home: home, root: root) where names.contains(watched.name) && (watched.kind == .file || watched.kind == .mcpServers) {
+            times[watched.name] = (try? FileManager.default.attributesOfItem(atPath: watched.path))?[.modificationDate] as? Date
+        }
+        return times
+    }
+
+    /// Each held file's size now, by name (files only, as `changedAt`). Reads the disk.
+    static func sizes(_ names: [String], root: String, home: String) -> [String: Int] {
+        guard !names.isEmpty else { return [:] }
+        var sizes: [String: Int] = [:]
+        for watched in ConfigSeal.watched(home: home, root: root) where names.contains(watched.name) && (watched.kind == .file || watched.kind == .mcpServers) {
+            if let size = (try? FileManager.default.attributesOfItem(atPath: watched.path))?[.size] as? NSNumber { sizes[watched.name] = size.intValue }
+        }
+        return sizes
+    }
+}

@@ -252,8 +252,9 @@ public enum NodeWire {
         "question.post": .leadToolServer, "question.revise": .leadToolServer, "question.withdraw": .leadToolServer,
     ]
 
-    /// The kinds this build's server takes (E1's; `lead` from E4).
-    public static let taken = ["status", "start", "stop", "lead"]
+    /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6).
+    public static let taken = ["status", "start", "stop", "lead", "questions", "answer", "hold", "config.held", "config.accept",
+                               "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw"]
 
     // MARK: Lines
 

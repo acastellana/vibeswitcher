@@ -35,9 +35,11 @@ public final class LeadEngine: @unchecked Sendable {
         /// The node's home: the agents' transcripts (the replaced lead's last turns, what a lead is doing). `VibePaths.home`
         /// by default.
         public var home: String?
-        /// The vault's record of the user's actions, which a held `.user` message passes after a restart (EN-D9): none
-        /// until E6 gives the vault's, so none passes.
+        /// The vault's record of the user's actions, which a held `.user` message passes after a restart (EN-D9): the
+        /// server gives the vault's (`VaultUserActions`); none by default, so none passes.
         public var userActions: UserActions = NoUserActions()
+        /// The vault the cards are built from and the answers recorded in (E6): the link's (`HostLink.vault`) by default.
+        public var vault: LeadVault?
 
         public init() {}
     }
@@ -117,6 +119,16 @@ public final class LeadEngine: @unchecked Sendable {
     /// The engine's look every 3 s on its clock (`look`), which E7's refresh takes over.
     private var refresh: Subscription?
 
+    // Cards, answers and holds (E6), on `queue`.
+    /// Every card the user answers: the lead's questions and approvals, held config, base moves.
+    public let cards = CardStore()
+    /// Each lead's base, watched (`BaseMoveStore`): a move nobody accounts for becomes a card.
+    public private(set) lazy var baseMoves: BaseMoveStore = makeBaseMoves()
+    /// The `.user` messages posted to a lead's inbox, by id, with the terminal: retired in the vault (`retireUserSeals`)
+    /// once its delivered record shows them.
+    var postedUser: [String: String] = [:]
+    var retiring = false
+
     /// `root`: the node's root (its policy, limits, sessions' temporary folders; a scratch node's lead gets it as
     /// `VIBESWITCHER_HOME`). `nodeRoot`: the build's folder. `link`: the host. `clock`: the engine's clock.
     /// `sessions`: the node's session list (the replaced lead's transcript), when there is one.
@@ -142,6 +154,9 @@ public final class LeadEngine: @unchecked Sendable {
             engine.queue.async { engine.look() }
         }
     }
+
+    /// The vault the cards are built from and the user's answers recorded in: the link's, or a test's.
+    var cardVault: LeadVault { options.vault ?? link.vault }
 
     /// The hooks' state file of `tty` under this root.
     func stateFile(_ tty: String) -> URL { observer.stateFile(tty) }

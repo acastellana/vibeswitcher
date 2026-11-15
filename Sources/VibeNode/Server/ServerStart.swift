@@ -83,6 +83,8 @@ public enum ServerStart {
                                 commit: commit, note: say)
         var options = LeadEngine.Options()
         options.firstLook = parsed.node || parsed.testFirstLook
+        // A held `.user` message is the user's after a restart only when the vault's record holds its action (EN-D9, E6).
+        options.userActions = VaultUserActions(client: link.vaultV2)
         let engine = LeadEngine(root: root, nodeRoot: parsed.nodeRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, link: link,
                                 clock: clock, sessions: sessions, options: options, note: say)
         requests.engine = engine

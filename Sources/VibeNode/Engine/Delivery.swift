@@ -137,6 +137,7 @@ extension LeadEngine {
         }) { [weak self] target, posted, text in
             guard let self else { return }
             self.noted(target, root: root)
+            if posted, sender == .user, case .lead(let lead) = target { self.postedAsUser(id, tty: lead.tty) }
             if posted { self.wake(root: root) }
             then(posted, text)
         }

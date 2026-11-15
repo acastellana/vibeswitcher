@@ -196,6 +196,8 @@ config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.k
     : LeadVault.Book(restoring: restoredSecrets)
 // On Linux a fresh vault holds its first look for the user's accept; a restored one keeps its own (V2/VaultFirstLook.swift).
 if VaultFirstLook.holds(arguments: arguments, ownsLaunchers: ownsLaunchers, restored: restoredSecrets.map(LeadVault.Book.reads) ?? false) { config.vault?.holdsFirstLook = true }
+// A scratch host's test sets how long a `.user` seal verifies (V2/LeadVaultV2.swift); the user's host refuses the flag.
+if HostHardening.takesTestFlags(ownsLaunchers: ownsLaunchers), let life = value(after: "--test-user-seal-life").flatMap(Double.init) { LeadVaultV2.sealLife = life }
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
 // holds none.
 if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {

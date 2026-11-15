@@ -108,12 +108,14 @@ struct ServerTests {
     @Test func anUnlistedRequestIsRefused() async throws {
         let node = try await ScratchNode(scratch)
         let client = try WireClient(node)
-        // Kinds the protocol names that this server doesn't take yet, and kinds no list names (`lead` is taken from E4).
-        for kind in ["answer", "hold", "config.accept", "base.accept", "hooks.install", "build.switch", "question.post", "shell", "exec", ""] {
+        // Kinds the protocol names that this server doesn't take yet, and kinds no list names (`lead` is taken from E4,
+        // the cards and the lead's questions from E6).
+        for kind in ["hooks.install", "hooks.remove", "build.switch", "shell", "exec", ""] {
             let reply = try #require(WireClient.reply(client.request(kind, args: ["folder": .string("/")])), "\(kind)")
             #expect(reply.ok == false && reply.error?.code == "unknown-kind", "\(kind): \(reply)")
         }
-        #expect(client.hello.kinds == ["status", "start", "stop", "lead"])
+        #expect(client.hello.kinds == NodeWire.taken)
+        #expect(Set(NodeWire.taken) == Set(NodeWire.kinds.keys).subtracting(["hooks.install", "hooks.remove", "build.switch"]))
         let status = try #require(WireClient.reply(client.request("status", action: nil))?.result)
         #expect(status["accepted"]?.array?.isEmpty == true, "\(status)")
     }
@@ -255,11 +257,25 @@ struct ServerTests {
         #expect(node.recorder?.entries.contains { $0.event == "request" && $0.kind == "start" && $0.action == first["action"] as? String } == true)
         let plain = try await node.run(["status"])
         #expect(plain.output.contains("accepted: start"), "\(plain.output)")
+
+        // E6: an answer, recorded in the vault before it acts, is shown too (after the lead's start).
+        let lead = try await node.askingLead("Name the parser?", options: ["Parser", "Reader"])
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Reader"])
+        #expect(answered.status == 0, "\(answered.output)\n\(node.said)")
+        let after = try await node.run(["status", "--json"])
+        let again = try #require(try JSONSerialization.jsonObject(with: Data(after.output.utf8)) as? [String: Any])
+        let kinds = (again["accepted"] as? [[String: Any]] ?? []).compactMap { $0["kind"] as? String }
+        #expect(kinds == ["start", "lead", "answer"], "\(kinds)")
+        let answer = try #require((again["accepted"] as? [[String: Any]])?.last)
+        #expect(answer["subject"] as? String == lead.card)
+        #expect(node.recorder?.entries.contains { $0.event == "request" && $0.kind == "answer" && $0.action == answer["action"] as? String } == true)
     }
 
     @Test func everyHostCallInTheServerGoesThroughTheConnector() async throws {
         let node = try await ScratchNode(scratch, housekeeping: 1)
         _ = try WireClient(node)
+        // E6: a card to answer once the path is taken (its lead's tool server reaches the host by the path, as sessions do).
+        let lead = try await node.askingLead("Name the parser?", options: ["Parser", "Reader"])
         // The host's socket moved aside, a recording listener put at its path.
         try #require(rename(node.socket, node.socket + ".aside") == 0)
         let listener = try UnixSocket.listen(path: node.socket)
@@ -276,10 +292,54 @@ struct ServerTests {
             return at.map { $0 > moved.addingTimeInterval(1) } == true
         }
         #expect(fresh, "notes at \(String(describing: at)), moved at \(moved): \(node.said)")
+        // E6: the answer is recorded in the vault and its `.user` message sealed by the host, through the connector.
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Parser"])
+        #expect(answered.status == 0, "\(answered.output)\n\(node.said)")
+        let inbox = node.root.appendingPathComponent("steer/\(lead.session.tty).jsonl")
+        let message = Locked<SteerMessage?>(nil)
+        #expect(await eventually(timeout: 60) {
+            let lines = ((try? Data(contentsOf: inbox)) ?? Data()).split(separator: 0x0A)
+            message.value = lines.compactMap { try? JSONDecoder().decode(SteerMessage.self, from: Data($0)) }.first { $0.from == .user }
+            return message.value != nil
+        }, "\(node.said)")
+        if let message = message.value {
+            let verified = try? HostCall.vault(.verify([message]), socket: node.socket + ".aside")
+            #expect(verified == .verified([true]), "\(String(describing: verified))")
+        }
         // Nothing came to the path.
         var connections = 0
         while Platform.Sockets.accept(listener) >= 0 { connections += 1 }
         #expect(connections == 0)
+    }
+
+    /// S7 on a fresh vault (its first look held): `config held`, `config accept CARD`, `base show REPO --from COMMIT`,
+    /// `base accept CARD`, then `lead`, each through the built command line on a pty.
+    @Test func theFreshVaultOrderAcceptsThenStartsTheLead() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        let repo = node.root.appendingPathComponent("repo")
+        try await scratchRepository(repo)
+        let first = Git.run(["rev-parse", "main"], in: repo.path).output
+        func card(_ output: String, _ command: String) -> String? {
+            output.components(separatedBy: "\n").first { $0.hasPrefix("accept it with: vibeswitcher \(command) ") }
+                .map { String($0.dropFirst("accept it with: vibeswitcher \(command) ".count)) }
+        }
+        let refused = try await node.runOnTerminal(["lead", repo.path])
+        #expect(refused.status == 77 && refused.output.contains("config"), "\(refused.output)")
+
+        let held = try await node.run(["config", "held", repo.path])
+        #expect(held.status == 0, "\(held.output)\(held.errors)")
+        let configCard = try #require(card(held.output, "config accept"), "\(held.output)")
+        let accepted = try await node.runOnTerminal(["config", "accept", configCard])
+        #expect(accepted.status == 0 && accepted.output.contains("accepted"), "\(accepted.output)\n\(node.said)")
+
+        let shown = try await node.run(["base", "show", repo.path, "--from", first])
+        #expect(shown.status == 0, "\(shown.output)\(shown.errors)")
+        let baseCard = try #require(card(shown.output, "base accept"), "\(shown.output)")
+        let recorded = try await node.runOnTerminal(["base", "accept", baseCard])
+        #expect(recorded.status == 0 && recorded.output.contains("recorded: main at \(first)"), "\(recorded.output)\n\(node.said)")
+
+        let started = try await node.runOnTerminal(["lead", repo.path, "--goal", "plan the work"])
+        #expect(started.status == 0 && started.output.contains("the lead started"), "\(started.output)\n\(node.said)")
     }
 
     @Test func aServerRestartIsCountedInStatus() async throws {
