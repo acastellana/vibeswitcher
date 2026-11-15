@@ -1973,7 +1973,7 @@ After the bootstrap it is built with the sandbox (install folder read-only there
     host quitting) was never logged. `ParserReplies.flushDropped` logs what was held back, naming the first four, from
     `HostedSession.stopParser` (a seventh hook, kind 4, in the port map); step 6 waits for the session's parser to
     stop and accepts a line only if every drop it counts is named and is a kitty graphics reply
-    (`aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds`, `RealClaudeHostTests.onlyKittyGraphicsDropsPass`).
+    (`aDropTheOnceASecondLineHeldBackIsLoggedWhenTheSessionEnds`, `RealClaudeHostTests.onlyTheKittyGraphicsDropsAreCounted`).
   - **The gated test does not pass with that fix.** Its run on 2026-11-14 16:25 (the slice's fourth, its last) failed
     step 6 only: one more drop, held back within a second of the kitty probe's, logged when the first host image's
     parser stopped for the handover, by a build that counted it without naming it. Unidentified; the next gated run
