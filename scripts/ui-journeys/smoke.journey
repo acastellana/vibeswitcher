@@ -1,0 +1,5 @@
+# The smallest journey: the runner, the sandbox and the comparer working end to end.
+desc Open a fake session's chat, type into its composer, and shoot it.
+chat
+type hello from the smoke journey
+shot chat
