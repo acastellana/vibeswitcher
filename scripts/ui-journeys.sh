@@ -43,6 +43,7 @@
 # them, run a journey twice and look at the red in its .diff.png files.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/scratch.sh
 
 repo=$(pwd -P)
 root=$repo/.build/ui-journeys
@@ -107,7 +108,7 @@ build_image_diff() {
     for source in "${sources[@]}"; do
         [[ -x $image_diff && ! $source -nt $image_diff ]] && continue
         echo "compiling the image comparer"
-        TMPDIR=$root swiftc -O -parse-as-library -module-name ImageDiffTool "${sources[@]}" -o "$image_diff.new" </dev/null
+        swiftc -O -parse-as-library -module-name ImageDiffTool "${sources[@]}" -o "$image_diff.new" </dev/null
         mv "$image_diff.new" "$image_diff"
         return
     done
@@ -205,8 +206,10 @@ run() {
     ((${#names[@]} > 0)) || names=($(all_journeys))
     ((${#names[@]} > 0)) || { echo "no journeys in scripts/ui-journeys/"; exit 64; }
     for name in "${names[@]}"; do journey_file "$name" >/dev/null; done
+    # swiftc and the sandbox's build leave folders in TMPDIR: a scratch one, removed on exit after the sandbox is quit.
+    scratch_tmpdir vs-ui-journeys
+    on_exit quit_sandbox
     build_image_diff
-    trap quit_sandbox EXIT
     mkdir -p "$root"
     : >"$root/report.txt"
     for name in "${names[@]}"; do
