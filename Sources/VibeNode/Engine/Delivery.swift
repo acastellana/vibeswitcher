@@ -13,12 +13,14 @@ public enum SessionDelivery: Equatable, Sendable {
 }
 
 /// Delivering to a project's lead (the engine plan's E5; the app's `LeadController.deliver`, `next` and `hold`,
-/// `LeadController.swift` 1203-1251, and `tell`, 1984-2013). A message goes to the lead the vault binds the project's
-/// lead role to (EN-D14), when the board names that session and its agent runs on its terminal: posted into its steer
-/// inbox under the engine's root (`LeadDelivery.deliver`), steered in at its next step, or typed in between turns by the
-/// wake (`Wake.swift`). Otherwise it's held, in the order sent, and kept at rest in `engine.json` (EN-D9) with the action
-/// id of the user's request that made it; a board naming a session the vault doesn't bind gets nothing, and `status`
-/// carries a notice. The board, the vault and the inbox are read on `reads`, never the engine's queue.
+/// `LeadController.swift` 1203-1251, and `tell`, 1984-2013). A message goes to the session the vault binds the project's
+/// lead role to (EN-D14), on the terminal the session host runs that session on, when the board names that session on
+/// that terminal and its agent runs there: posted into its steer inbox under the engine's root (as `LeadDelivery.deliver`
+/// posts, with the message's own id), steered in at its next step, or typed in between turns by the wake (`Wake.swift`).
+/// Otherwise it's held, in the order sent, and kept at rest in `engine.json` (EN-D9) with its id and the action id of
+/// the user's request that made it; a board naming a session the vault doesn't bind, or the bound one on another
+/// terminal, gets nothing, and `status` carries a notice. The board, the vault and the inbox are read on `reads`, never
+/// the engine's queue.
 extension LeadEngine {
     /// Sends `text` from `sender` to `project`'s lead (`NodeIds.project`), or holds it until that lead can take it.
     /// `action`: the action id of the user's request that made it (a `.user` message's, EN-D9). `then` hears on `queue`
@@ -40,27 +42,33 @@ extension LeadEngine {
         }
     }
 
-    /// On `queue`. Behind what's held already for `root`'s lead (so messages keep the order they were sent in), or sent.
+    /// On `queue`. Behind what's held already for `root`'s lead, what of it is being sent, and a message whose post is
+    /// still under way (a lead that became able to take the next one before that post came back would get them out of
+    /// order), or sent.
     func deliver(built: @escaping @Sendable () -> String, from sender: SteerMessage.Sender, root: String, action: String?,
                  then: @escaping (Bool) -> Void = { _ in }) {
         let project = NodeIds.project(root: root)
-        let order = leads.next()
-        if leads.held[project]?.isEmpty == false || sendingHeld.contains(root) {
+        let (order, id) = (leads.next(), UUID().uuidString)
+        if leads.held[project]?.isEmpty == false || sendingHeld.contains(root) || posting.contains(root) {
             reads.async({ _ in built() }) { [weak self] text in
                 guard let self else { return }
-                self.leads.hold(.init(text: text, from: sender, order: order, action: action), root: root)
+                self.leads.hold(.init(id: id, text: text, from: sender, order: order, action: action), root: root)
                 self.deliverHeld(root: root)
                 then(false)
             }
             return
         }
-        post(built: built, from: sender, root: root) { [weak self] went, text in
+        posting.insert(root)
+        post(id: id, built: built, from: sender, root: root) { [weak self] went, text in
             guard let self else { return }
+            self.posting.remove(root)
             if !went {
-                self.leads.hold(.init(text: text, from: sender, order: order, action: action), root: root)
+                self.leads.hold(.init(id: id, text: text, from: sender, order: order, action: action), root: root)
                 self.note("lead: holding a message for \(LeadMail.project(of: root)) (no lead the vault binds runs there)")
             }
             then(went)
+            // What was sent meanwhile waited behind it.
+            self.deliverHeld(root: root)
         }
     }
 
@@ -68,9 +76,9 @@ extension LeadEngine {
     /// held (and at rest) until it went. On `queue`.
     func deliverHeld(root: String) {
         let project = NodeIds.project(root: root)
-        guard !sendingHeld.contains(root), let first = leads.held[project]?.first else { return }
+        guard !sendingHeld.contains(root), !posting.contains(root), let first = leads.held[project]?.first else { return }
         sendingHeld.insert(root)
-        post(built: { first.text }, from: first.from, root: root) { [weak self] went, _ in
+        post(id: first.id, built: { first.text }, from: first.from, root: root) { [weak self] went, _ in
             guard let self else { return }
             self.sendingHeld.remove(root)
             guard went else { return }
@@ -79,38 +87,52 @@ extension LeadEngine {
         }
     }
 
-    /// Where a message for `root`'s lead goes, read on `reads`: the lead the board names, when the vault binds the lead's
-    /// role to its session and its agent runs on its terminal; else why not.
+    /// Where a message for `root`'s lead goes, read on `reads` (EN-D14): the session the vault binds the lead's role to,
+    /// on the terminal the session host runs it on (`hosted`, the link's list), with the agent the board names there
+    /// while it runs on that terminal (`ProcessTable`: only a process of that session has it as its terminal). The board
+    /// is a cross-check: it must name that session on that terminal. Else why not.
     enum Target {
         case lead(LeadAgent)
         /// The board names no lead (one starts, or none ran yet).
         case noLead
         /// The board names `named`, but the vault binds the role to `bound` (none: to no session, or it couldn't be asked).
         case notBound(named: String?, bound: String?)
-        /// The lead the board names, bound, doesn't run on its terminal.
+        /// The board names the session the vault binds on terminal `named`, but the session host runs it on `runs`.
+        case otherTerminal(named: String, runs: String)
+        /// The lead the vault binds and the board names isn't live in the host's list, or its agent doesn't run on its
+        /// terminal.
         case notRunning
     }
 
     /// The target, on `reads`.
-    static func target(root: String, board: LeadBoard, vault: LeadVault, runs: (LeadAgent) -> Bool) -> Target {
+    static func target(root: String, board: LeadBoard, vault: LeadVault, hosted: [HostSession], runs: (LeadAgent) -> Bool) -> Target {
         guard let named = LeadHandover.named(board) else { return .noLead }
         let bound = vault.current(.lead, root: root, task: nil)?.session
         guard let session = named.session, session == bound else { return .notBound(named: named.session, bound: bound) }
-        return runs(named) ? .lead(named) : .notRunning
+        guard let id = UUID(uuidString: session), let host = hosted.first(where: { $0.id == id && $0.isLive }) else { return .notRunning }
+        guard host.tty == named.tty else { return .otherTerminal(named: named.tty, runs: host.tty) }
+        let lead = LeadAgent(pid: named.pid, tty: host.tty, session: session)
+        return runs(lead) ? .lead(lead) : .notRunning
     }
 
-    /// Posts the message into the inbox of `root`'s lead if it has one now (`went`), and wakes it; else sets or clears the
-    /// project's notice. On `queue`; `then` too, with the text as built.
-    private func post(built: @escaping @Sendable () -> String, from sender: SteerMessage.Sender, root: String,
+    /// Posts the message, as `id`, into the inbox of `root`'s lead if it has one now (`went`), and wakes it; else sets or
+    /// clears the project's notice. One already in that inbox, or taken from it, under `id` went already: a held message
+    /// the server posted before it stopped, `engine.json` still holding it, isn't posted again. On `queue`; `then` too,
+    /// with the text as built.
+    private func post(id: String, built: @escaping @Sendable () -> String, from sender: SteerMessage.Sender, root: String,
                       then: @escaping (_ went: Bool, _ text: String) -> Void) {
-        let (vault, runs, inbox, stateFile, inboxRead) = (link.vault, leadRuns, self.root, observer.stateFile, self.inboxRead)
+        let (vault, runs, inbox, inboxRead, hosted) = (link.vault, leadRuns, self.root, self.inboxRead, link.sessions)
         reads.async({ files -> (target: Target, posted: Bool, text: String) in
             let text = built()
-            let target = Self.target(root: root, board: files.names.board(root), vault: vault, runs: runs)
+            let target = Self.target(root: root, board: files.names.board(root), vault: vault, hosted: hosted, runs: runs)
             guard case .lead(let lead) = target else { return (target, false, text) }
             inboxRead(lead.tty)
-            let posted = (try? LeadDelivery.deliver(text, from: sender, to: lead, state: HookState.load(from: stateFile(lead.tty)),
-                                                    inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil
+            if SteerInbox.pending(tty: lead.tty, root: inbox).contains(where: { $0.id == id && $0.agentPid == lead.pid })
+                || SteerInbox.delivered(tty: lead.tty, root: inbox).contains(id) {
+                return (target, true, text)
+            }
+            // `LeadDelivery.deliver` without a way to type posts just this, under a new id.
+            let posted = (try? SteerInbox.post(SteerMessage(id: id, text: text, from: sender, agentPid: lead.pid), tty: lead.tty, root: inbox)) != nil
             return (target, posted, text)
         }) { [weak self] target, posted, text in
             guard let self else { return }
@@ -131,6 +153,9 @@ extension LeadEngine {
             bound = binds
             notice = "the board of \(LeadMail.project(of: root)) names session \(ConfigSeal.inert(named ?? "none", limit: 40)) as its lead, but the "
                 + "vault binds the lead's role to " + (binds.map { "session \($0)" } ?? "no session") + ": what's sent to the lead is held"
+        case .otherTerminal(let named, let runs):
+            notice = "the board of \(LeadMail.project(of: root)) names the session the vault binds as its lead on terminal "
+                + "\(ConfigSeal.inert(named, limit: 40)), but the session host runs that session on \(runs): what's sent to the lead is held"
         case .noLead, .notRunning: break
         }
         guard leads.leads[project]?.notice != notice || leads.leads[project]?.bound != bound else { return }
@@ -179,10 +204,15 @@ extension LeadEngine {
         let restored = EngineState.restored(loaded.state.held, actions: options.userActions)
         if restored.notVouched > 0 {
             note("engine state: \(restored.notVouched) held message(s) marked as the user's weren't vouched for by the vault's record of "
-                 + "the user's actions: they go as VibeSwitcher's, not the user's")
+                 + "the user's actions: they go as from an unverified sender, not the user's")
+        }
+        if restored.unvouchedSenders > 0 {
+            note("engine state: \(restored.unvouchedSenders) held message(s) marked as the lead's or VibeSwitcher's go as from an unverified "
+                 + "sender: nothing vouches for a sender at rest")
         }
         for message in restored.held {
-            leads.hold(.init(text: message.text, from: message.from, order: message.order, action: message.action), root: message.root)
+            leads.hold(.init(id: message.id ?? UUID().uuidString, text: message.text, from: message.from, order: message.order, action: message.action),
+                       root: message.root)
         }
     }
 
@@ -191,7 +221,8 @@ extension LeadEngine {
         let held = leads.held.flatMap { project, messages in
             messages.compactMap { message -> EngineState.Held? in
                 guard let root = leads.leads[project]?.root else { return nil }
-                return EngineState.Held(root: root, order: message.order ?? 0, text: message.text, from: message.from, action: message.action)
+                return EngineState.Held(id: message.id, root: root, order: message.order ?? 0, text: message.text, from: message.from,
+                                        action: message.action)
             }
         }.sorted { $0.order < $1.order }
         let (state, root) = (EngineState(held: held), self.root)

@@ -55,12 +55,16 @@ public final class LeadStore: @unchecked Sendable {
     /// A message held for a project's lead until it can be delivered (E5's): its text and sender, its place among what
     /// was sent (held messages go in that order), and the action id of the user's request that made it (EN-D9).
     public struct Held: Equatable, Sendable {
+        /// Its id in the lead's inbox once posted, the same at rest and after a restart: one already there isn't posted
+        /// again.
+        public var id: String
         public var text: String
         public var from: SteerMessage.Sender
         /// Nil until it's held: `hold` gives it the next place.
         public var order: Int?
         public var action: String?
-        public init(text: String, from: SteerMessage.Sender, order: Int? = nil, action: String? = nil) {
+        public init(id: String = UUID().uuidString, text: String, from: SteerMessage.Sender, order: Int? = nil, action: String? = nil) {
+            self.id = id
             self.text = text
             self.from = from
             self.order = order

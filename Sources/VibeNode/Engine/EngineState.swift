@@ -17,14 +17,17 @@ public struct NoUserActions: UserActions {
 
 /// The engine's own state file, `<root>/v2/engine.json` (format 1; the engine plan's EN-D9): what isn't the user's and
 /// what a restarted server needs not to repeat itself. E5 keeps the held messages there; E8 adds the rest. Nothing in it
-/// is taken as the user's: a worker of the user's uid can write it, so a held `.user` message goes as the user's after a
-/// restart only when the vault's record of the user's actions holds the action id it carries with the digest of its
-/// text as it is now (`restored`); otherwise it goes as VibeSwitcher's, saying it couldn't be vouched for.
+/// is taken as its sender's: a worker of the user's uid can write it, so a held `.user` message goes as the user's after
+/// a restart only when the vault's record of the user's actions holds the action id it carries with the digest of its
+/// text as it is now (`restored`); any other goes as from an unverified sender (`SteerInbox.unverified`), saying so,
+/// never sealed as the user's, the lead's or VibeSwitcher's.
 public struct EngineState: Codable, Equatable, Sendable {
     public static let currentFormat = 1
 
     /// A message held for a project's lead (`LeadStore.Held`), with the root it is for.
     public struct Held: Codable, Equatable, Sendable {
+        /// Its id in the lead's inbox once posted (`LeadStore.Held.id`; nil from a file that has none: a new one).
+        public var id: String?
         public var root: String
         /// Its place among what was sent: held messages go in this order.
         public var order: Int
@@ -33,7 +36,8 @@ public struct EngineState: Codable, Equatable, Sendable {
         /// The action id of the user's request that made it (a `.user` message's), as the command line sent it.
         public var action: String?
 
-        public init(root: String, order: Int, text: String, from: SteerMessage.Sender, action: String? = nil) {
+        public init(id: String? = nil, root: String, order: Int, text: String, from: SteerMessage.Sender, action: String? = nil) {
+            self.id = id
             self.root = root
             self.order = order
             self.text = text
@@ -87,24 +91,40 @@ public struct EngineState: Codable, Equatable, Sendable {
     /// A message's digest, as the vault's record of user actions keeps it: SHA-256 of its text, in hex.
     public static func digest(_ text: String) -> String { BuildInfo.sha256(of: Data(text.utf8)) }
 
-    /// Who a held message that was marked as the user's but can't be vouched for goes as.
-    public static let notVouchedSender = SteerMessage.Sender.system("vibeswitcher")
+    /// Who a held message that was marked as the user's but can't be vouched for goes as: an unverified sender, never
+    /// the user nor VibeSwitcher (`SteerInbox.unverified`'s words).
+    public static let notVouchedSender = SteerMessage.Sender.system(SteerInbox.unverifiedSender + ", marked as the user's; not the user's word")
 
     /// What such a message says before its text.
     public static let notVouchedPrefix = "Held for you before this node's server restarted, marked as the user's, but it couldn't be "
         + "vouched for (no record of the user's request with this text), so it is not the user's word: "
 
-    /// The held messages as they may go after a restart, in order: each `.user` one stays the user's only when
-    /// `actions` holds its action with its text's digest now; any other goes as VibeSwitcher's (`notVouchedSender`),
-    /// saying so, its action dropped. `notVouched`: how many went that way.
-    public static func restored(_ held: [Held], actions: UserActions) -> (held: [Held], notVouched: Int) {
-        var notVouched = 0
+    /// What a held message not marked as the user's says before its text after a restart: nothing vouches for the sender
+    /// the file names.
+    public static let restartedPrefix = "Held for you before this node's server restarted; nothing vouches for its sender since: "
+
+    /// The held messages as they may go after a restart, in order, each with its id: a `.user` one stays the user's
+    /// only when `actions` holds its action with its text's digest now; else it goes from `notVouchedSender`, saying
+    /// so, its action dropped (`notVouched`: how many). Any other (marked as the lead's or VibeSwitcher's) goes from the
+    /// unverified sender `SteerInbox.unverified` names for it, saying so (`unvouchedSenders`: how many): the file is
+    /// no seal, and a planted entry would otherwise be posted sealed as VibeSwitcher's.
+    public static func restored(_ held: [Held], actions: UserActions) -> (held: [Held], notVouched: Int, unvouchedSenders: Int) {
+        var (notVouched, unvouchedSenders) = (0, 0)
         let restored = held.sorted { $0.order < $1.order }.map { message -> Held in
-            guard message.from == .user else { return message }
+            guard message.from == .user else {
+                unvouchedSenders += 1
+                let sender = SteerInbox.unverified(SteerMessage(text: message.text, from: message.from, agentPid: 0)).from
+                return Held(id: message.id, root: message.root, order: message.order, text: prefixed(restartedPrefix, message.text), from: sender)
+            }
             if let action = message.action, actions.holds(action: action, digest: digest(message.text)) == true { return message }
             notVouched += 1
-            return Held(root: message.root, order: message.order, text: notVouchedPrefix + message.text, from: notVouchedSender)
+            return Held(id: message.id, root: message.root, order: message.order, text: prefixed(notVouchedPrefix, message.text), from: notVouchedSender)
         }
-        return (restored, notVouched)
+        return (restored, notVouched, unvouchedSenders)
+    }
+
+    /// `text` saying `prefix` first, once: one held again across a second restart doesn't say it twice.
+    static func prefixed(_ prefix: String, _ text: String) -> String {
+        text.hasPrefix(restartedPrefix) || text.hasPrefix(notVouchedPrefix) ? text : prefix + text
     }
 }

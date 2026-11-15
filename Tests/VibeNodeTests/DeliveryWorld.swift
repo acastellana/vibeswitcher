@@ -55,6 +55,14 @@ final class DeliveryWorld: @unchecked Sendable {
         return world
     }
 
+    /// Another engine on the same link and root, as a restarted server's: it takes back what `engine.json` holds.
+    func restarted() -> LeadEngine {
+        var options = LeadEngine.Options()
+        options.answersTrust = false
+        options.home = host.home.path
+        return LeadEngine(root: host.root, nodeRoot: nil, link: link, clock: nil, options: options)
+    }
+
     func connect() async {
         link.start()
         _ = await eventually(timeout: 60) { self.queue.sync { self.link.state == .connected } }

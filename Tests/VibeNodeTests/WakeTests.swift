@@ -186,6 +186,73 @@ struct WakeTests {
         #expect(!world.prompts(lead).contains { $0.contains("new report") })
     }
 
+    /// EN-D14 at the moment of typing: between the look that decides and the type, the vault binds the lead's role to
+    /// another session while the board still names the lead: neither the wake-up (a report) nor the user's words go
+    /// in, and what waits isn't marked or taken.
+    @Test(arguments: [false, true]) func aLeadTheVaultNoLongerBindsWhenItsTypedGetsNothing(usersWords: Bool) async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead()
+        let text = usersWords ? "make the films page" : "The worker on parser says it's done."
+        try world.post(text, from: usersWords ? .user : .system("witness"), to: lead)
+        let (vault, repo) = (world.host.vault, world.repo)
+        world.onStep.value = { step in
+            guard case .screenRead = step else { return }
+            world.onStep.value = { _ in }
+            do {
+                let grant = try vault.startLead(root: repo, branch: "main")
+                try vault.bind(grant, root: repo, session: UUID().uuidString)
+            } catch {
+                Issue.record("the vault didn't move the role: \(error)")
+            }
+        }
+        let before = world.steps.value.count
+        world.look()
+        let refused = await world.step(after: before) { DeliveryWorld.refused($0) != nil || DeliveryWorld.typed($0) != nil }
+        #expect(refused.flatMap(DeliveryWorld.refused)?.contains("vault binds") == true, "\(String(describing: refused))")
+        await world.drained()
+        #expect(world.typed.value.isEmpty)
+        #expect(world.pending(lead).map(\.text) == [text])
+        #expect(world.pending(lead).map(\.wokenAt) == [nil])
+        #expect(!world.prompts(lead).contains { $0.contains(text) || $0.contains("new report") })
+    }
+
+    /// What the session host didn't take (its input unit failed: the session went, the connection closed) isn't lost:
+    /// the user's words wait in the inbox again, a wake-up's reports are woken for again, and the next look types them.
+    @Test(arguments: [false, true]) func whatTheHostDidntTakeIsTypedAgainAtTheNextLook(usersWords: Bool) async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead()
+        let text = usersWords ? "make the films page" : "The worker on parser says it's done."
+        try world.post(text, from: usersWords ? .user : .system("witness"), to: lead)
+        let failed = Locked(false)
+        world.queue.sync {
+            let link = world.link
+            world.engine.typeUnit = { writes, id, confirmed in
+                guard failed.value else {
+                    failed.value = true
+                    return confirmed(false)
+                }
+                link.type(writes, into: id, confirmed: confirmed)
+            }
+        }
+        var before = world.steps.value.count
+        world.look()
+        let first = await world.step(after: before) { DeliveryWorld.typed($0) != nil }
+        #expect(first != nil)
+        let refused = await world.step(after: before) { DeliveryWorld.refused($0) != nil }
+        #expect(refused.flatMap(DeliveryWorld.refused)?.contains("didn't take") == true, "\(String(describing: refused))")
+        if usersWords {
+            #expect(await eventually(timeout: 60) { world.pending(lead).contains { $0.text == text && $0.from == .user } }, "\(world.pending(lead))")
+        }
+        before = world.steps.value.count
+        world.look()
+        let again = await world.step(after: before) { DeliveryWorld.typed($0) != nil }
+        #expect(again.flatMap(DeliveryWorld.typed).map { usersWords ? $0 == text : $0.contains("1 new report") } == true,
+                "\(String(describing: again))")
+        try await lead.waitFor { world.prompts(lead).contains { usersWords ? $0 == text : $0.contains("1 new report") } }
+    }
+
     /// ReplacedLeadRoutingTests' `aWakeUpReadsTheBoardOffTheMainThread`: waking an idle lead for its reports reads the
     /// board off the engine's queue, the lead it names before the wait and again once its screen is read.
     @Test func aWakeReadsTheBoardOffTheEngineQueue() async throws {

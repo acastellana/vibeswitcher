@@ -93,8 +93,9 @@ public final class LeadEngine: @unchecked Sendable {
     }
     /// What an agent is doing, from its hooks' state under `root` and its transcript under the node's home.
     let observer: LeadObserver
-    /// Roots whose held messages are being sent, one after another.
+    /// Roots whose held messages are being sent, one after another, and roots with a message's post under way.
     var sendingHeld: Set<String> = []
+    var posting: Set<String> = []
     /// Each lead's wake-ups (`LeadWake`), by terminal and agent, with the one each root's lead has now, and the ones with
     /// a look again scheduled.
     var wakes: [String: LeadWake] = [:]
@@ -110,6 +111,9 @@ public final class LeadEngine: @unchecked Sendable {
     public var wakeStep: (WakeStep) -> Void = { _ in }
     /// What's typed into each session, as the writes sent (for tests). On `queue`.
     public var typing: (UUID, [HostInput.Write]) -> Void = { _, _ in }
+    /// Sends what's typed as one unit and tells whether the host took all of it, on `queue` (for tests: nil, the link's
+    /// `type`).
+    var typeUnit: ((_ writes: [HostInput.Write], _ id: UUID, _ confirmed: @escaping (Bool) -> Void) -> Void)?
     /// The engine's look every 3 s on its clock (`look`), which E7's refresh takes over.
     private var refresh: Subscription?
 
