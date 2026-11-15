@@ -287,7 +287,9 @@ final class HostPathWatch {
 
     /// Whether a connection made through `path` now (not waiting: a full backlog is a no) reaches a listener of this
     /// process (`verifiedIdentity`'s fallback): the connecting end's `SO_PEERCRED` names the process that listened. The
-    /// connection is closed at once; the host's listener, when it was that, accepts it and sees it end.
+    /// connection is closed at once; the host's listener, when it was that, accepts it and sees it end. A listener this
+    /// process has just closed still counts while another descriptor table holds it (a spawn in flight, until its exec
+    /// closes the copy); the next housekeeping's check asks again.
     static func leadsHere(_ path: String) -> Bool {
         guard var address = Platform.Sockets.unixAddress(path) else { return false }
         let fd = Platform.Sockets.makeSocket(type: Platform.Sockets.stream)

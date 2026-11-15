@@ -168,3 +168,24 @@ at `47636aaf` (`aa9eee06` removed the three `SignalsTests`, `939ce080` three `Bo
 
 On a real Mac every entry is run: the two not found are owed an answer, and a found one that fails there isn't the
 runner's.
+
+## Main's known flakes on the runner
+
+Failures of main's own tests, in code `v2` leaves as main has it, seen on the hosted Mac. They aren't skipped: each is
+re-run, and fixed on main.
+
+- **`ComposerDeliveryTests/pastedImagesAndTheirTextArriveOnce` (app)**: a pasted image goes to the fake unbracketed,
+  as its path. Seen twice in about 21 `v2 macos` app jobs, in different cases: run 43451992452 (`1fc49ad7`, "an image
+  alone, the Send button": the input was the quoted `.png` path, `0 image(s)`, where `[Image #1] | 1 image(s)` was
+  expected) and run 43724075229 (`0e6067e5`, "busy: an image then text, ⌥↩": queued `look at this  '….png'`, the
+  message's `\n\n` turned into two spaces, `images` 0, `enters` 1). The cause, from the code: `FakeClaude` turns
+  bracketed paste on once, as it starts (`ESC[?2004h`), and begins each redraw with `ESC[2J`; a view attaching is
+  replayed only from the last screen wipe (`OutputRing.replay`), and `Harness.start` attaches after the spawn's
+  reply. When the fake draws first (a loaded runner), the pane's terminal never sees `?2004h`,
+  `TerminalPane.bracketedPaste` is false, and `ComposerText.writes(_, bracketed: false)` types the text as keys,
+  newlines as spaces, so the fake never takes a paste. Nothing on that path differs from main (`OutputRing`,
+  `ChatTimeline`, `HostInput`, `Sources/VibeSwitcher`, `Tests/VibeSwitcherTests`; `HostedSession` keeps spawn, reply,
+  then attach and replay). The fix is main's: `Harness.start` waits for `h.pane.bracketedPaste(h.session.id)`, or
+  `FakeClaude.draw()` sends `ESC[?2004h` before each `ESC[2J`. The real app has the same gap when its pane attaches
+  to an agent after the agent's first screen; tracking DECSET 2004 in the host and putting it before a replay (as
+  `FocusEvents` does for 1004) would close both, and is a decision for main.
