@@ -54,7 +54,9 @@ public enum NodeCheck {
         if mode == .node {
             let path = listener.cgroup.flatMap { PeerFacts.unifiedPath($0) ?? PeerFacts.systemdPath($0) }
             guard let path, path.split(separator: "/").last.map(String.init) == VoiceRule.nodeUnit else {
-                return "the process listening on the server's socket (pid \(listener.pid)) isn't in \(VoiceRule.nodeUnit) (its cgroup is \(path ?? "unreadable"))"
+                // The cgroup's name is the listener's to choose (any process of the user's can make one under its
+                // manager): shown inert.
+                return "the process listening on the server's socket (pid \(listener.pid)) isn't in \(VoiceRule.nodeUnit) (its cgroup is \(path.map { ConfigSeal.inert($0, limit: .max) } ?? "unreadable"))"
             }
         }
         guard let expectedParent else {

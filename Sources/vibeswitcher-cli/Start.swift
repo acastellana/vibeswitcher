@@ -69,8 +69,10 @@ enum Say {
     static func err(_ line: String) { try? FileHandle.standardError.write(contentsOf: Data((line + "\n").utf8)) }
     static func usage(_ text: String) -> Int32 { err(text); return 64 }
     static func refused(_ why: String) -> Int32 { err("vibeswitcher: refused: \(why)"); return 77 }
+    /// A failure's message, inert as a whole too (each untrusted field in it already is): a refusal can carry what
+    /// the listener chose.
     static func failed(_ failure: NodeClient.Failure) -> Int32 {
-        err("vibeswitcher: \(failure.message)")
+        err("vibeswitcher: \(ConfigSeal.inert(failure.message, limit: .max))")
         return failure.exitCode
     }
 

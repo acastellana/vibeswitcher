@@ -416,6 +416,16 @@ host took from the Mac:
   it, 0777 under umask 0. `glibc`'s `fchmodat(…, AT_SYMLINK_NOFOLLOW)` refuses a link (`EOPNOTSUPP`; this kernel has no
   `fchmodat2`, ENOSYS, so glibc 2.39 goes through `O_PATH`).
 
+## WSL interop's binfmt_misc entries (the engine's E1 review, 2026-11-15, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+`ls /proc/sys/fs/binfmt_misc/` here gives `WSLInterop WSLInterop-late register status`: WSL with systemd registers a
+second entry, `WSLInterop-late`, and both say `enabled` / `interpreter /init` (flags `PF` and `P`); `status` says
+`enabled`. Either entry runs Windows programs, so turning `WSLInterop` off alone (`echo 0 >`, or `-1` to remove it)
+leaves interop on. `NodeFacts` reads every entry of the folder: interop is on when any entry named `WSLInterop…`, or
+any entry whose interpreter is `/init`, is enabled while `status` isn't `disabled`; one that can't be read makes it
+"can't be told". Decision 2's step that turns interop off must leave both off (or set `[interop] enabled=false` in
+`/etc/wsl.conf`, which registers neither); `vibeswitcher status` says whether interop is still on.
+
 ## The voice rule's scopes (the engine's E1, 2026-11-15, Linux 5.15.167.4-microsoft-standard-WSL2)
 
 What `/proc/<pid>/cgroup` says for each process the voice rule (`VoiceRule`, the security architecture document's S3)

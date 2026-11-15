@@ -15,7 +15,8 @@ public struct NodeFacts: Equatable, Sendable {
         case unknown(String)
     }
 
-    /// Whether WSL interop is on (`/proc/sys/fs/binfmt_misc/WSLInterop` says `enabled`); nil: it can't be told.
+    /// Whether WSL interop is on (an interop entry in `/proc/sys/fs/binfmt_misc` says `enabled`, binfmt_misc itself on:
+    /// `interop(binfmt:)`); nil: it can't be told.
     public var interop: Bool?
     /// The automounted Windows drives (`9p` or `drvfs` mounts under `/mnt`), by mount point.
     public var automounts: [String]
@@ -32,8 +33,9 @@ public struct NodeFacts: Equatable, Sendable {
 
     /// How each fact is read.
     public struct Readers {
-        /// The text of `/proc/sys/fs/binfmt_misc/WSLInterop`; nil when it isn't there (no interop registered).
-        public var interop: () -> String?
+        /// The entries of `/proc/sys/fs/binfmt_misc` by name (`status` among them), each one's text, or "" when it
+        /// can't be read; nil when the folder can't be listed (binfmt_misc isn't mounted: nothing registered).
+        public var binfmt: () -> [String: String]?
         /// The text of `/proc/mounts`; nil when it can't be read.
         public var mounts: () -> String?
         /// The text of a file; nil when it can't be read.
@@ -43,9 +45,9 @@ public struct NodeFacts: Equatable, Sendable {
         /// `systemctl --user show-environment`'s output, or why it can't be had.
         public var managerEnvironment: () -> Result<String, Failure>
 
-        public init(interop: @escaping () -> String?, mounts: @escaping () -> String?, file: @escaping (String) -> String?,
+        public init(binfmt: @escaping () -> [String: String]?, mounts: @escaping () -> String?, file: @escaping (String) -> String?,
                     folder: @escaping (String) -> [String]?, managerEnvironment: @escaping () -> Result<String, Failure>) {
-            self.interop = interop
+            self.binfmt = binfmt
             self.mounts = mounts
             self.file = file
             self.folder = folder
@@ -53,10 +55,18 @@ public struct NodeFacts: Equatable, Sendable {
         }
 
         /// This machine's: the files where Linux keeps them, and `managerEnvironment` as given.
-        public static func machine(interopFile: String = "/proc/sys/fs/binfmt_misc/WSLInterop", mountsFile: String = "/proc/mounts",
+        public static func machine(binfmtFolder: String = "/proc/sys/fs/binfmt_misc", mountsFile: String = "/proc/mounts",
                                    managerEnvironment: @escaping () -> Result<String, Failure>) -> Readers {
-            Readers(interop: { read(interopFile) }, mounts: { read(mountsFile) }, file: read,
+            Readers(binfmt: { entries(binfmtFolder) }, mounts: { read(mountsFile) }, file: read,
                     folder: { try? FileManager.default.contentsOfDirectory(atPath: $0) }, managerEnvironment: managerEnvironment)
+        }
+
+        /// Each entry of `folder` but `register` (write only), with its text ("" when it can't be read).
+        private static func entries(_ folder: String) -> [String: String]? {
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else { return nil }
+            var entries: [String: String] = [:]
+            for name in names where name != "register" { entries[name] = read((folder as NSString).appendingPathComponent(name)) ?? "" }
+            return entries
         }
 
         private static func read(_ path: String) -> String? {
@@ -85,11 +95,31 @@ public struct NodeFacts: Equatable, Sendable {
         case .success(let text): manager = .extra(extraVariables(showEnvironment: text))
         case .failure(let failure): manager = .unknown(failure.reason)
         }
-        return NodeFacts(interop: interop(fromBinfmt: readers.interop()), automounts: mounts, kernelLines: kernels.sorted(), manager: manager)
+        return NodeFacts(interop: interop(binfmt: readers.binfmt()), automounts: mounts, kernelLines: kernels.sorted(), manager: manager)
     }
 
-    /// Interop from `WSLInterop`'s text: on when its first line is `enabled`, off when `disabled` or when there is no
-    /// such file (nothing registered), nil for anything else.
+    /// Interop from binfmt_misc's entries (`Readers.binfmt`): WSL registers `WSLInterop`, and with systemd
+    /// `WSLInterop-late` too, either of which runs Windows programs; an entry of another name whose interpreter is
+    /// WSL's `/init` does the same. On when any of them is `enabled` and binfmt_misc's `status` isn't `disabled`; off
+    /// when none is registered or every one is off; nil when one can't be read and none is on.
+    public static func interop(binfmt entries: [String: String]?) -> Bool? {
+        guard let entries else { return false }
+        if let status = entries["status"], interop(fromBinfmt: status) == false { return false }
+        var answer: Bool? = false
+        for (name, text) in entries where name != "status" && name != "register" {
+            let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard name.hasPrefix("WSLInterop") || lines.contains("interpreter /init") else { continue }
+            switch interop(fromBinfmt: text) {
+            case true?: return true
+            case nil: answer = nil
+            case false?: break
+            }
+        }
+        return answer
+    }
+
+    /// One binfmt_misc entry's text (or `status`'s): on when its first line is `enabled`, off when `disabled` or when
+    /// there is no such file (nothing registered), nil for anything else.
     public static func interop(fromBinfmt text: String?) -> Bool? {
         guard let text else { return false }
         switch text.split(separator: "\n").first.map({ $0.trimmingCharacters(in: .whitespaces) }) {

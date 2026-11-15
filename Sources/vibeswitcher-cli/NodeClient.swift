@@ -48,15 +48,15 @@ struct NodeContext {
         return VoiceRule(mode: .systemd, scopes: VoiceRule.terminalScopes, uid: getuid(), says: "the terminal scopes")
     }
 
-    /// What the machine says (`NodeFacts`); a scratch node's test may stand in for interop and the mounts with
-    /// `<root>/v2/test/WSLInterop` and `<root>/v2/test/mounts`.
+    /// What the machine says (`NodeFacts`); a scratch node's test may stand in for binfmt_misc and the mounts with
+    /// the folder `<root>/v2/test/binfmt_misc` and `<root>/v2/test/mounts`.
     func facts() -> NodeFacts {
         func standIn(_ name: String, _ system: String) -> String {
             let path = testFolder.appendingPathComponent(name).path
             return isScratch && FileManager.default.fileExists(atPath: path) ? path : system
         }
         let systemctl = self.systemctl
-        return NodeFacts.read(.machine(interopFile: standIn("WSLInterop", "/proc/sys/fs/binfmt_misc/WSLInterop"),
+        return NodeFacts.read(.machine(binfmtFolder: standIn("binfmt_misc", "/proc/sys/fs/binfmt_misc"),
                                        mountsFile: standIn("mounts", "/proc/mounts"),
                                        managerEnvironment: {
             guard let systemctl else { return .failure(.init(Self.noStandIn)) }
@@ -191,9 +191,22 @@ final class NodeClient {
         return .success(NodeClient(fd: fd, hello: hello, lines: lines, ready: ready))
     }
 
-    /// Sends one request and waits for its reply (a `bye` instead, or the time passing, fails).
+    /// How long a request answered `not-yet` (the server's link to its host isn't welcomed yet) is asked again for.
+    static let notYetPatience: TimeInterval = 15
+
+    /// Sends one request and waits for its reply (a `bye` instead, or the time passing, fails). Answered `not-yet`, it
+    /// is asked again, a quarter second apart, for up to `notYetPatience`; then the last answer is the reply.
     func request(_ kind: String, args: [String: NodeWire.Value]? = nil, action: String? = nil,
                  timeout: TimeInterval = 30) -> Result<NodeWire.Reply, Failure> {
+        let patience = Date().addingTimeInterval(Self.notYetPatience)
+        while true {
+            let answer = ask(kind, args: args, action: action, timeout: timeout)
+            guard case .success(let reply) = answer, reply.error?.code == NodeWire.Code.notYet.rawValue, Date() < patience else { return answer }
+            usleep(250_000)
+        }
+    }
+
+    private func ask(_ kind: String, args: [String: NodeWire.Value]?, action: String?, timeout: TimeInterval) -> Result<NodeWire.Reply, Failure> {
         counter += 1
         let id = "\(getpid())-\(counter)"
         let line = NodeWire.line(NodeWire.Request(id: id, kind: kind, args: args, action: action))

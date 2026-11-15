@@ -21,12 +21,20 @@ enum StopCommand {
         let outcome = TypedWord.ask(code: NodeIds.code(action: action),
                                     what: "This ends every session on the node (the leads first), then stops its host.")
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        let record = { context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "stop", epoch: client.hello.epoch)) }
         switch client.request("stop", action: action, timeout: Requests.stopWait + 30) {
+        case .failure(.broken(let why)):
+            // The host ends the server a moment after it accepts the shutdown: a reply that didn't get out in time
+            // leaves the connection closed with none. The node gone is the answer then; anything else is a failure.
+            guard case .failure(.notRunning) = NodeClient.connect(context, timeout: 5) else { return Say.failed(.broken(why)) }
+            record()
+            Say.out("the node stopped (its server ended before it answered)")
+            return 0
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
             guard reply.ok else { return Say.replyError(reply) }
-            context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "stop", epoch: client.hello.epoch))
-            Say.out("\(reply.result?["sessionsEnded"]?.int ?? 0) sessions ended; the host was asked to shut down")
+            record()
+            Say.out("\(reply.result?["sessionsEnded"]?.int ?? 0) sessions ended; the host accepted to shut down")
             return 0
         }
     }

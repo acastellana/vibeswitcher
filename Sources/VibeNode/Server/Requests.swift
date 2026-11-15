@@ -108,6 +108,11 @@ public final class Requests: @unchecked Sendable {
                 return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
             }
             guard !stopping else { return reply(.init(re: request.id, error: .init(.refused, "the node is stopping"))) }
+            // Before the host's welcome (and while the link reconnects) its session list isn't known: a state change
+            // judged on it could be wrong (a `stop` would find nothing live). The command line asks again.
+            guard link.state == .connected else {
+                return reply(.init(re: request.id, error: .init(.notYet, "the server's link to its host isn't welcomed yet: retry")))
+            }
             record(request, from: facts)
         }
         switch request.kind {
@@ -207,22 +212,30 @@ public final class Requests: @unchecked Sendable {
 
     // MARK: stop
 
-    /// EN-D6: no other state-changing request from now on; the leads ended first, then every other session; once
-    /// nothing is live (at most `stopWait`, then it says which remain), the host is asked to shut down, and the reply
-    /// goes as soon as it accepted (the host ends this server a moment after).
+    /// EN-D6: no other state-changing request from now on; the leads ended first, and once none is live every other
+    /// session; at each change of the link's list until nothing is live, any live session not yet asked to end is (a
+    /// worker a lead's tool server started meanwhile, a lead that came), the leads still first. Once nothing is live
+    /// (at most `stopWait`, then it says which remain) the host is asked to shut down, and the reply says what it
+    /// answered (the host ends this server a moment after it accepts).
     private func stop(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         stopping = true
         let live = link.sessions.filter(\.isLive)
-        let leads = live.filter { LeadTeams.role(label: $0.label) == .lead }
-        for session in leads + live.filter({ LeadTeams.role(label: $0.label) != .lead }) { link.kill(session.id) }
-        note("stop: ending \(leads.count) leads and \(live.count - leads.count) other sessions")
-        let ended = live.count
+        let leadCount = live.filter(Self.isLead).count
+        note("stop: ending \(leadCount) leads and \(live.count - leadCount) other sessions")
         let waiting = Waiting()
         func look() {
-            guard !waiting.answered, link.sessions.filter(\.isLive).isEmpty else { return }
-            waiting.answered = true
-            waiting.watch = nil
-            shutDown(request, ended: ended, reply: reply)
+            guard !waiting.answered else { return }
+            let now = link.sessions.filter(\.isLive)
+            guard !now.isEmpty else {
+                waiting.answered = true
+                waiting.watch = nil
+                return shutDown(request, ended: waiting.ended.count, reply: reply)
+            }
+            let leads = now.filter(Self.isLead)
+            for session in leads.isEmpty ? now : leads where !waiting.ended.contains(session.id) {
+                waiting.ended.insert(session.id)
+                link.kill(session.id)
+            }
         }
         waiting.watch = link.changes.subscribe(on: queue) { _ in look() }
         queue.asyncAfter(deadline: .now() + Self.stopWait) { [weak self] in
@@ -236,17 +249,22 @@ public final class Requests: @unchecked Sendable {
         look()
     }
 
-    /// One wait of `stop`'s, on `queue`: whether it was answered, and its watch of the link's changes.
+    private static func isLead(_ session: HostSession) -> Bool { LeadTeams.role(label: session.label) == .lead }
+
+    /// One wait of `stop`'s, on `queue`: whether it was answered, its watch of the link's changes, and the sessions
+    /// it asked to end.
     private final class Waiting: @unchecked Sendable {
         var answered = false
         var watch: Subscription?
+        var ended: Set<UUID> = []
     }
 
-    /// Nothing is live: the reply goes first (the host ends this server a moment after it accepts), then the host is
-    /// asked to shut down; should it refuse (a session started meanwhile), the log says so and requests are taken again.
+    /// Nothing is live: the host is asked to shut down, and the reply says what it answered. Accepted, the host ends
+    /// this server 0.1 s later, so the reply goes at once (should it not get out in time, the command line finds the
+    /// node gone and says so). Refused (a session started meanwhile) or unanswered, `stop` is refused with the host's
+    /// reason and requests are taken again.
     private func shutDown(_ request: NodeWire.Request, ended: Int, reply: @escaping (NodeWire.Reply) -> Void) {
         note("stop: \(ended) sessions ended; asking the host to shut down")
-        reply(.init(re: request.id, result: .object(["sessionsEnded": .int(ended), "host": .string("asked to shut down")])))
         let ask = shutdown
         DispatchQueue.global().async { [weak self] in
             let answer = ask()
@@ -255,8 +273,10 @@ public final class Requests: @unchecked Sendable {
                 guard case .ok? = answer else {
                     self.stopping = false
                     let why: String = { if case .error(let message)? = answer { return message } else { return "it didn't answer" } }()
-                    return self.note("stop: the host refused to shut down: \(why)")
+                    self.note("stop: the host refused to shut down: \(why)")
+                    return reply(.init(re: request.id, error: .init(.refused, "\(ended) sessions ended, but the host refused to shut down: \(ConfigSeal.inert(why, limit: .max))")))
                 }
+                reply(.init(re: request.id, result: .object(["sessionsEnded": .int(ended), "host": .string("shutting down")])))
                 self.note("stop: the host accepted; it ends this server")
             }
         }

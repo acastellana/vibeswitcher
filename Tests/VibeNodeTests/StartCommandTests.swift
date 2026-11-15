@@ -4,7 +4,7 @@ import VibeCore
 import VibeNode
 
 /// `vibeswitcher start` and the typed word (the engine plan's E1, EN-D5; the security architecture document's S1, S3
-/// and S11), run as built against a scratch node, whose interop the test sets (`<root>/v2/test/WSLInterop`) and whose
+/// and S11), run as built against a scratch node, whose interop the test sets (`<root>/v2/test/binfmt_misc/`) and whose
 /// journal is the recording stand-in.
 @Suite(NodeTraits.linuxOnly)
 struct StartCommandTests {
@@ -12,7 +12,9 @@ struct StartCommandTests {
 
     @Test func startRefusesWhileInteropIsOnUnlessTold() async throws {
         let node = try await ScratchNode(scratch)
-        try "enabled\ninterpreter /init\n".write(to: node.testFolder.appendingPathComponent("WSLInterop"), atomically: true, encoding: .utf8)
+        // `WSLInterop` off, as `echo 0 >` leaves it; `WSLInterop-late`, which WSL with systemd registers too, still on.
+        try "enabled\ninterpreter /init\nflags: P\n".write(to: node.testFolder.appendingPathComponent("binfmt_misc/WSLInterop-late"),
+                                                          atomically: true, encoding: .utf8)
         let refused = try await node.run(["start"])
         #expect(refused.status == 77, "\(refused.errors)")
         #expect(refused.errors.contains("WSL interop is on") && refused.errors.contains("--interop-is-on"), "\(refused.errors)")

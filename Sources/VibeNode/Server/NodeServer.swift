@@ -11,7 +11,8 @@ import VibeCore
 /// The socket keeps its path as the host keeps its own: the folder is watched, and at each housekeeping (30 s, or a
 /// scratch host's `--test-housekeeping`) the path is checked against the file the listener is bound to
 /// (`Platform.Sockets.boundFile(of:at:)`, or the file's device and inode recorded at the bind where the kernel can't
-/// say); on a mismatch a fresh listener is bound at the path, with a log line. Each housekeeping asks the host's notes
+/// say); on a mismatch a fresh listener is bound at the path, with a log line, the folder made again first (0700) when
+/// it was removed or renamed, and watched again when it is another folder than the one watched. Each housekeeping asks the host's notes
 /// too (`Requests.refreshNotes`), until E7's refresh does. On the engine's queue (`requests.queue`).
 public final class NodeServer: @unchecked Sendable {
     public let queue: DispatchQueue
@@ -27,6 +28,8 @@ public final class NodeServer: @unchecked Sendable {
     /// The file `bind` made, as `lstat` saw it then: the check where the kernel can't say.
     private var bound: (device: UInt64, inode: UInt64)?
     private var watch: Platform.FolderWatch?
+    /// The folder `watch` watches, by device and inode.
+    private var watched: (device: UInt64, inode: UInt64)?
     private var ticks: Subscription?
     private var connections: [ObjectIdentifier: Connection] = [:]
 
@@ -50,10 +53,9 @@ public final class NodeServer: @unchecked Sendable {
     /// notes at each housekeeping. Throws when the socket can't be made.
     public func start() throws {
         try VibePaths.ensurePrivate(folder)
-        try queue.sync { try bind() }
-        if let watch = Platform.FolderWatch(path: folder.path) {
-            watch.deliver(on: queue) { [weak self] _ in self?.checkPath() }
-            self.watch = watch
+        try queue.sync {
+            try bind()
+            watchFolder()
         }
         ticks = clock?.every(housekeeping) { [weak self] in
             guard let self else { return }
@@ -78,7 +80,23 @@ public final class NodeServer: @unchecked Sendable {
         source.resume()
     }
 
-    /// Whether the path still names the listener's file; if not, a fresh listener there, said in the log. On `queue`.
+    /// The folder watched from now on, unless the folder at its path is the one watched already. On `queue`.
+    private func watchFolder() {
+        var info = stat()
+        guard lstat(folder.path, &info) == 0 else { return }
+        let now = (UInt64(truncatingIfNeeded: info.st_dev), UInt64(truncatingIfNeeded: info.st_ino))
+        if let watched, watched == now, watch != nil { return }
+        watch?.stop()
+        watch = nil
+        watched = now
+        if let made = Platform.FolderWatch(path: folder.path) {
+            made.deliver(on: queue) { [weak self] _ in self?.checkPath() }
+            watch = made
+        }
+    }
+
+    /// Whether the path still names the listener's file; if not, a fresh listener there (in the folder made again
+    /// when it went, and watched again), said in the log. On `queue`.
     func checkPath() {
         guard listener >= 0 else { return }
         let ours: Bool
@@ -91,7 +109,13 @@ public final class NodeServer: @unchecked Sendable {
         }
         guard !ours else { return }
         note("the server's socket \(socketPath) named another file: bound again")
-        do { try bind() } catch { note("the server's socket couldn't be bound again: \(error)") }
+        do {
+            try VibePaths.ensurePrivate(folder)
+            try bind()
+        } catch {
+            note("the server's socket couldn't be bound again: \(error)")
+        }
+        watchFolder()
     }
 
     // MARK: Connections

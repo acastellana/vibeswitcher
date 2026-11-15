@@ -95,7 +95,7 @@ mode a node is in on a standing line (`doctor` after the bootstrap). Before the 
 | Kernel | 5.15.167.4-microsoft-standard-WSL2 | No `SO_PEERPIDFD` or `SCM_PIDFD` (6.5+): a peer is a pid number, not a handle (S5). `memfd_create` with sealing exists (S6, S8, S9) |
 | Yama | absent (`/proc/sys/kernel/yama` doesn't exist; not built into this kernel) | Any process of the user may ptrace, `process_vm_readv` and `pidfd_getfd` any dumpable process of the user (S6) |
 | Pid space | `pid_max` 4,194,304; `ns_last_pid` 3,983,868 | The pid space wraps in ordinary use here; a pid number names a process only while it lives (S5) |
-| WSL interop | `binfmt_misc/WSLInterop` enabled; `/etc/wsl.conf` has no `[interop]` section; `/run/WSL/*_interop` are mode 0777, and `/run/WSL/1_interop` is the fallback when `WSL_INTEROP` is unset | Any process of **any** Linux user can run Windows programs as the Windows user, and `wsl.exe -u root` gives root without a password. Leaving `WSL_INTEROP` out of an environment stops nothing. Decision 2 turns it off |
+| WSL interop | `binfmt_misc/WSLInterop` enabled (and `WSLInterop-late`, which WSL with systemd registers too: either runs Windows programs); `/etc/wsl.conf` has no `[interop]` section; `/run/WSL/*_interop` are mode 0777, and `/run/WSL/1_interop` is the fallback when `WSL_INTEROP` is unset | Any process of **any** Linux user can run Windows programs as the Windows user, and `wsl.exe -u root` gives root without a password. Leaving `WSL_INTEROP` out of an environment stops nothing. Decision 2 turns it off |
 | `/mnt/c` | 9p, read-write, owned by uid 1000, mode 0777 | The Windows user's files are the worker's, including `C:\Users\<user>\.wslconfig` (0777 here; its `kernel=` picks the kernel WSL boots next) and the Startup folder (0777 here; runs programs at the next Windows login). Decision 2 recommends automount off |
 | `.wslconfig` | `networkingMode=mirrored` | Linux and Windows share loopback: every session reaches every Windows-side localhost service, and a later loopback listener of the node is reachable from Windows (S11) |
 | WSLg | `/tmp/.X11-unix/X0` (0777), `/run/user/1000/wayland-0`, `/mnt/wslg` (PulseAudio) | A session can open windows on the Windows desktop (a channel for deceiving the user) and use the audio source, by fixed paths (S10, S11) |
@@ -138,8 +138,9 @@ attack checks it.
 `SecurityDocumentLintTests.everySectionSaysWhatItDoesNotPromise`,
 `SecurityDocumentLintTests.everySectionSaysWhenItIsNeeded` (stage 2 Task 1: the document's shape, not its promises);
 `StartCommandTests.startRefusesWhileInteropIsOnUnlessTold`, `NodeFactsTests.statusSaysPlainModeAndInterop`,
-`NodeFactsTests.statusSaysWhenAutomountIsOnAndAKernelLineIsSet` (the engine's E1: `start` refuses with interop on
-unless told, `status` says interop, automount and a `kernel=` line).
+`NodeFactsTests.statusSaysWhenAutomountIsOnAndAKernelLineIsSet`, `NodeFactsTests.interopIsOnWhileAnyOfItsEntriesIsEnabled`
+(the engine's E1: `start` refuses with interop on unless told, `WSLInterop-late` counting as `WSLInterop` does,
+`status` says interop, automount and a `kernel=` line).
 
 **Tests to write:** none left: E1's are under Held by.
 
@@ -431,7 +432,8 @@ on as nobody's app), `ServerChildTests.aHandoverWhileTheServerChildIsReplacedIsR
 stopped); and the server's half from the engine's E1: `ServerTests.everyHostCallInTheServerGoesThroughTheConnector`,
 `ServerTests.theServersChildrenInheritNoConnector`, `ServerTests.theServerExitsWhenTheHostIsGone`,
 `ServerTests.theServerRefusesAHostSocketOtherThanItsRoots`, `ServerTests.theServerRefusesToStartWithoutRootsGit`,
-`ServerTests.theServersSocketIsBoundAgainWhenReplaced` (the server keeps its own path),
+`ServerTests.theServersSocketIsBoundAgainWhenReplaced`, `ServerTests.theServersSocketIsBoundAgainWhenItsFolderIsMoved`
+(the server keeps its own path),
 `ServerTests.aServerRestartIsCountedInStatus`, `ServerLintTests.theServerIsThere`,
 `PlatformLintTests.theServersHardeningStatementsComeFirstInTheirOrder` (its first statements); the journal the command
 line reads and writes: `NodeJournalTests.aStartTheJournalDoesntExplainIsMarkedUntilAcknowledged`,
@@ -549,7 +551,9 @@ Acceptable only on VibeSwitcher's own repository, with interop off, until stage 
 `ServerTests.aStopFromTheUserEndsEverySessionThenTheHost`, `ServerTests.twoScratchNodesInOneRunUseTheirOwnSockets`,
 `ServerCheckTests.theCommandLineRefusesAServerThatIsntTheHostsChild`, `ServerCheckTests.theCommandLineRefusesADumpableListener`,
 `ServerCheckTests.theCommandLineWithNoNodeSaysSoNotConnectionRefused`, `ServerCheckTests.aScratchNodeIsNamedOnStderr`,
-`ServerCheckTests.aScratchHomeThatIsTheAccountsOwnGetsTheNodesCheck`, `VoiceRuleTests.aTerminalScopeIsTheUser`,
+`ServerCheckTests.aScratchHomeThatIsTheAccountsOwnGetsTheNodesCheck`, `ServerCheckTests.aListenersCgroupIsPrintedInert`,
+`RequestsTests.aStateChangeBeforeTheWelcomeIsAnsweredNotYet`, `RequestsTests.aStopTheHostRefusesIsRefusedAndRequestsAreTakenAgain`,
+`RequestsTests.aStopEndsTheLeadsFirstThenEveryOtherAndAnyThatAppears`, `VoiceRuleTests.aTerminalScopeIsTheUser`,
 `VoiceRuleTests.anAnswerFromTheNodesCgroupIsRefused`, `VoiceRuleTests.anAnswerFromATransientUserUnitIsRefused`,
 `VoiceRuleTests.atAndCronAreRefused`, `VoiceRuleTests.aPeerWhoseCgroupCantBeReadIsNotTheUser`,
 `VoiceRuleTests.aPeerWhoseEnvironmentCantBeReadIsNotTheUser`, `VoiceRuleTests.aPeerUnderALiveSessionIsNotTheUser`,

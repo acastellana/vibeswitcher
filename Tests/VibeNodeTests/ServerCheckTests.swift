@@ -123,4 +123,16 @@ struct ServerCheckTests {
         dumpable.dumpable = nil
         #expect(NodeCheck.refusal(dumpable, mode: .node, expectedParent: 40) != nil)
     }
+
+    @Test func aListenersCgroupIsPrintedInert() {
+        // Any process of the user's can make a cgroup under its manager named as it likes and move into it: the name
+        // the refusal prints is the listener's, so it acts on no terminal.
+        let named = "/user.slice/user-1000.slice/user@1000.service/app.slice/\u{1B}]0;owned\u{07}\u{1B}[2J\u{202E}x.scope"
+        let listener = NodeCheck.Listener(pid: 50, dumpable: false, parent: 40, cgroup: ["0::" + named])
+        let refusal = NodeCheck.refusal(listener, mode: .node, expectedParent: 40)
+        #expect(refusal?.contains("isn't in vibeswitcher-node.service") == true, "\(String(describing: refusal))")
+        #expect(refusal?.unicodeScalars.contains { $0 == "\u{1B}" || $0 == "\u{07}" || $0 == "\u{202E}" } == false,
+                "\(String(describing: refusal?.debugDescription))")
+        #expect(refusal?.contains(ConfigSeal.inert(named, limit: .max)) == true)
+    }
 }

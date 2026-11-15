@@ -19,7 +19,7 @@ import VibeNode
 ///   nil leaves the server on the weaker rule. `housekeeping`: `--server-arg --test-housekeeping=…`. `testChild`:
 ///   `--server-arg --test-child=…`. `path`: the host's PATH. `holdFirstLook`: `--hold-first-look`. `socketName`: the
 ///   host's socket in the root (another than `host.sock` isn't the root's: its server refuses it). `waitForServer`:
-///   returns once the server answers.
+///   returns once the server answers, its link to the host welcomed.
 ///
 /// Ended, with its server, sessions and files, by `stop()` or when it goes.
 final class ScratchNode: @unchecked Sendable {
@@ -85,7 +85,8 @@ final class ScratchNode: @unchecked Sendable {
         try process.run()
         ScratchNodes.started(process.processIdentifier)
         if waitForServer {
-            let up = await eventually(timeout: 120) { [self] in (try? WireClient(self)) != nil }
+            // Its link welcomed (the hello carries the host's start): before, a state change is answered `not-yet`.
+            let up = await eventually(timeout: 120) { [self] in (try? WireClient(self))?.hello.host.startedAt != nil }
             if !up { stop() }
             try #require(up, "the scratch node's server never answered: \(self.said)")
         }
@@ -121,6 +122,12 @@ final class ScratchNode: @unchecked Sendable {
     /// The built command line on this node, stdin /dev/null.
     func run(_ arguments: [String], _ extra: [String: String] = [:]) async throws -> CommandRun {
         try await VibeNodeTests.run(commandLine, arguments, environment: environment(extra))
+    }
+
+    /// The built command line, on a pty of its own (`runOnTerminal`, the code shown typed) when `tty`, else with stdin
+    /// /dev/null (`run(_:_:)`): the plan's form.
+    func run(_ arguments: [String], tty: Bool) async throws -> CommandRun {
+        tty ? try await runOnTerminal(arguments) : try await run(arguments)
     }
 
     /// The built command line on a pty of its own (`script`), answering a typed word with `answer` (the code shown, by
@@ -211,8 +218,14 @@ final class ScratchNode: @unchecked Sendable {
 
             """, at: folder.appendingPathComponent("systemctl"))
         if let scopes { try (scopes.joined(separator: "\n") + "\n").write(to: folder.appendingPathComponent("user-scopes"), atomically: true, encoding: .utf8) }
-        // The interop and mounts the command line reads on this node: off, unless a test says otherwise.
-        try "disabled\n".write(to: folder.appendingPathComponent("WSLInterop"), atomically: true, encoding: .utf8)
+        // The binfmt_misc entries and mounts the command line reads on this node: interop off (both of WSL's entries,
+        // as a machine with systemd has them), unless a test says otherwise.
+        let binfmt = folder.appendingPathComponent("binfmt_misc", isDirectory: true)
+        try FileManager.default.createDirectory(at: binfmt, withIntermediateDirectories: true)
+        for (name, text) in ["WSLInterop": "disabled\ninterpreter /init\nflags: PF\n", "WSLInterop-late": "disabled\ninterpreter /init\nflags: P\n",
+                             "status": "enabled\n"] {
+            try text.write(to: binfmt.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
         try "".write(to: folder.appendingPathComponent("mounts"), atomically: true, encoding: .utf8)
     }
 

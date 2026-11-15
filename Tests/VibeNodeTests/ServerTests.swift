@@ -167,6 +167,28 @@ struct ServerTests {
         #expect(node.said.contains("named another file: bound again"), "\(node.said)")
     }
 
+    @Test func theServersSocketIsBoundAgainWhenItsFolderIsMoved() async throws {
+        let node = try await ScratchNode(scratch, housekeeping: 1)
+        let epoch = try WireClient(node).hello.epoch
+        let folder = node.root.appendingPathComponent("v2")
+        try FileManager.default.moveItem(at: folder, to: node.root.appendingPathComponent("v2-aside"))
+        // The folder made again (0700) and the socket bound in it, by the same server.
+        let back = await eventually(timeout: 60) { (try? WireClient(node))?.hello.epoch == epoch }
+        #expect(back, "\(node.said)")
+        var info = stat()
+        #expect(lstat(folder.path, &info) == 0 && info.st_mode & 0o777 == 0o700)
+        // And the new folder is the one watched: a file renamed over the path there is replaced too.
+        let impostor = folder.appendingPathComponent("impostor").path
+        try #require(FileManager.default.createFile(atPath: impostor, contents: Data("not a socket".utf8)))
+        try #require(rename(impostor, node.serverSocket) == 0)
+        let again = await eventually(timeout: 60) {
+            var info = stat()
+            guard lstat(node.serverSocket, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK else { return false }
+            return (try? WireClient(node))?.hello.epoch == epoch
+        }
+        #expect(again, "\(node.said)")
+    }
+
     @Test func aSessionsProcessCannotStopTheNode() async throws {
         let node = try await ScratchNode(scratch)
         let out = node.root.appendingPathComponent("stop.out").path
