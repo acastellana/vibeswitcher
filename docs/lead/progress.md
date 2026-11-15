@@ -3157,3 +3157,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 11:40 Released the-witness-watches's worker (idle since its done report on a02ec497) while its audit runs
 - 2026-11-15 11:40 Automatically (auto_advance): Released the-witness-watches's worker, idle since its done report on a02ec497, while its audit runs (ended pid 94202 (Worker: The witness watches every team member, not only the integrator)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-15 11:42 Audit of a-batch-merge-s: complete, clean
+- 2026-11-15 11:43 Audit of the-witness-watches: incomplete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-11-15 11:44 Started a worker on the-witness-watches
+- 2026-11-15 11:44 Automatically (auto_advance): Sent the-witness-watches's worker the open Important findings the-witness-watches:F1 from its audit at a02ec497 (in a new worker: its last one was released during the audit).
