@@ -447,9 +447,11 @@ final class ServerChildHost {
         let host = try await ServerChildHost(actions: ["shut-connector"])
         defer { host.stop() }
         let first = try #require(await host.firstHelper(), "\(host.said)")
-        #expect(await eventually { host.lines(of: first).contains("shut 0") }, "\(host.results)\n\(host.said)")
+        #expect(await eventually { host.lines(of: first).contains("shutting") }, "\(host.results)\n\(host.said)")
         #expect(await eventually { host.said.contains("server child pid \(first) ended: its connector") }, "\(host.said)")
         #expect(await eventually { kill(first, 0) != 0 && errno == ESRCH })
+        // Its end read only once the helper had shut it: no failed call said after it, the helper long gone.
+        #expect(!host.lines(of: first).contains { $0.hasPrefix("shut ") }, "\(host.results)")
         #expect(await eventually { host.started.count >= 2 }, "\(host.results)\n\(host.said)")
         #expect(host.noted.contains("its other end has closed"), "\(host.noted)")
     }
