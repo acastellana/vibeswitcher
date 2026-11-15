@@ -3151,3 +3151,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 11:22 Automatically (auto_advance): Cleaned up merge-dry-run-and (freed 4.0 GB of build output and temporary folders). It stays done.
 - 2026-11-15 11:22 Automatically (auto_advance): Cleaned up an-animated-explainer (freed 0 MB of build output and temporary folders). It stays done.
 - 2026-11-15 11:38 Automatically (auto_advance): Started the audit of a-batch-merge-s at 5167a2ed (Its review is audit).
+- 2026-11-15 11:38 Released a-batch-merge-s's worker (idle since its done report on 5167a2ed) while its audit runs
+- 2026-11-15 11:38 Automatically (auto_advance): Released a-batch-merge-s's worker, idle since its done report on 5167a2ed, while its audit runs (ended pid 94077 (Worker: A batch merge's receipts carry the merge-ready time)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-15 11:40 Automatically (auto_advance): Started the audit of the-witness-watches at a02ec497 (Its review is audit).
+- 2026-11-15 11:40 Released the-witness-watches's worker (idle since its done report on a02ec497) while its audit runs
+- 2026-11-15 11:40 Automatically (auto_advance): Released the-witness-watches's worker, idle since its done report on a02ec497, while its audit runs (ended pid 94202 (Worker: The witness watches every team member, not only the integrator)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-15 11:42 Audit of a-batch-merge-s: complete, clean
