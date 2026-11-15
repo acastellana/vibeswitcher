@@ -546,12 +546,17 @@ Written, attacked and revised before Task 2 starts.
   committed, and writes the `v2-mac-tasks.md` lines. Done 2026-11-15: the port map's rows named above are there
   (`UnixSocket`'s calls are seam edits, so it has none); the three lines are under "What `v2` found on the Mac and
   doesn't change".
-- [ ] **Step 5: The user's answers.** The bootstrap path's
+- [x] **Step 5: The user's answers.** The bootstrap path's
   [Decisions awaiting the user](2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user) (decisions 1 to 20 and
   the machine steps) are put to the user in one message, and the answers go into the design's Decided section. An answer other than the recommendation is applied to this
-  plan ([the table](#the-users-decisions-this-plan-assumes)) and to the document before Task 2.
+  plan ([the table](#the-users-decisions-this-plan-assumes)) and to the document before Task 2. Done 2026-11-13:
+  every recommendation accepted, D1 to D20 ([the design's Decided section](../specs/2026-11-12-vibeswitcher-2-design.md#decided)),
+  so nothing here or in the document changed.
 - [ ] **Step 6:** `bash scripts/test.sh --filter 'DocLinksLintTests|SecurityDocumentLintTests'`; push; both workflows
-  green; commit ("v2: the security architecture document, its review and the user's answers").
+  green; commit ("v2: the security architecture document, its review and the user's answers"). The lint and the
+  review record were committed late, in `03d54a68` (2026-11-15), after Tasks 2 to 12b, against the order above; both
+  suites pass at the stage 2 sweep (8 tests). The push and both workflows are still owed. (`scripts/test.sh` exits 0
+  when a filter matches no test, so this command shows the suite ran only by its lines in the log.)
 
 **Done when:** the document, its review record and the plans' changes are committed, the lint passes, and the user's
 answers are recorded.
