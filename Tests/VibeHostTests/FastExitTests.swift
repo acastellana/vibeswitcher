@@ -42,21 +42,27 @@ struct FastExitTests {
         for _ in 0..<5 {
             let probes = (0..<40).map { _ in SessionProbe() }
             var sessions: [HostedSession?] = Array(repeating: nil, count: probes.count)
+            // Why each session that didn't start didn't (the call that failed and its errno), so a failure says its cause.
+            var failures: [Int: String] = [:]
             let lock = NSLock()
             DispatchQueue.concurrentPerform(iterations: probes.count) { i in
                 // Running until the test ends it: every session holds its terminal while the names are compared.
                 let request = SpawnRequest(cwd: "/tmp", command: "echo mine-\(i).; \(keepRunning)", env: [:], cols: 80, rows: 24,
                                            keepShell: false, label: "T", agent: nil)
-                let session = try? probes[i].queue.sync {
-                    let session = try HostedSession.spawn(request, shell: "/bin/sh", launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin"],
-                                                          ringCapacity: 1 << 16, queue: probes[i].queue)
-                    probes[i].attach(session)
-                    return session
+                do {
+                    let session = try probes[i].queue.sync {
+                        let session = try HostedSession.spawn(request, shell: "/bin/sh", launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin"],
+                                                              ringCapacity: 1 << 16, queue: probes[i].queue)
+                        probes[i].attach(session)
+                        return session
+                    }
+                    lock.lock(); sessions[i] = session; lock.unlock()
+                } catch {
+                    lock.lock(); failures[i] = "\(error)"; lock.unlock()
                 }
-                lock.lock(); sessions[i] = session; lock.unlock()
             }
             let started = probes.indices.filter { sessions[$0] != nil }
-            #expect(started.count == probes.count, "didn't start: \(probes.indices.filter { sessions[$0] == nil })")
+            #expect(started.count == probes.count, "didn't start: \(failures.sorted { $0.key < $1.key }.map { "session \($0.key): \($0.value)" })")
             _ = await eventually { started.allSatisfy { probes[$0].text.contains("mine-\($0).") } }
             let elsewhere = started.filter { i in
                 probes[i].text.components(separatedBy: "mine-").dropFirst().contains { !$0.hasPrefix("\(i).") }
