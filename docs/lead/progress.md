@@ -3143,3 +3143,10 @@ Error lines in app.log within 10 min, by kind: host: couldn't ×1
 Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
 - 2026-11-15 11:22 Merged merge-dry-run-and: Merge dry run and a receipt for a kept experiment arm (build c385b7943fb8)
 - 2026-11-15 11:22 Flaky in merge-dry-run-and's merge: aClientAddedLaterRunsOnItsOwnPeriod(), aRestoredSessionsEndIsLoggedWithItsSignal(), typedInTheTerminalWhileClaudeRecordsNothingIsMovedOrCleared(), aPressInAnotherSessionEndsTheRecordingAndItsTextStillLandsInItsBox(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-15 11:22 Automatically (auto_advance): Merged merge-dry-run-and (Merge dry run and a receipt for a kept experiment arm) into main at 9ee1c37d, on its passing audit and the full test run. (Its first test run failed on aClientAddedLaterRunsOnItsOwnPeriod(), aRestoredSessionsEndIsLoggedWithItsSignal(), typedInTheTerminalWhileClaudeRecordsNothingIsMovedOrCleared(), aPressInAnotherSessionEndsTheRecordingAndItsTextStillLandsInItsBox(), (the test command, naming no test) and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status ….)
+- 2026-11-15 11:22 Started a worker on a-batch-merge-s
+- 2026-11-15 11:22 Automatically (auto_advance): Started a worker on a-batch-merge-s (A batch merge's receipts carry the merge-ready time), its after tasks done (merge-dry-run-and).
+- 2026-11-15 11:22 Started a worker on the-witness-watches
+- 2026-11-15 11:22 Automatically (auto_advance): Started a worker on the-witness-watches (The witness watches every team member, not only the integrator), its after tasks done (merge-dry-run-and).
+- 2026-11-15 11:22 Automatically (auto_advance): Cleaned up merge-dry-run-and (freed 4.0 GB of build output and temporary folders). It stays done.
+- 2026-11-15 11:22 Automatically (auto_advance): Cleaned up an-animated-explainer (freed 0 MB of build output and temporary folders). It stays done.
