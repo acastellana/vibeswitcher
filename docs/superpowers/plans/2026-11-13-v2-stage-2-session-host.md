@@ -552,11 +552,14 @@ Written, attacked and revised before Task 2 starts.
   plan ([the table](#the-users-decisions-this-plan-assumes)) and to the document before Task 2. Done 2026-11-13:
   every recommendation accepted, D1 to D20 ([the design's Decided section](../specs/2026-11-12-vibeswitcher-2-design.md#decided)),
   so nothing here or in the document changed.
-- [ ] **Step 6:** `bash scripts/test.sh --filter 'DocLinksLintTests|SecurityDocumentLintTests'`; push; both workflows
+- [x] **Step 6:** `bash scripts/test.sh --filter 'DocLinksLintTests|SecurityDocumentLintTests'`; push; both workflows
   green; commit ("v2: the security architecture document, its review and the user's answers"). The lint and the
   review record were committed late, in `03d54a68` (2026-11-15), after Tasks 2 to 12b, against the order above; both
-  suites pass at the stage 2 sweep (8 tests). The push and both workflows are still owed. (`scripts/test.sh` exits 0
-  when a filter matches no test, so this command shows the suite ran only by its lines in the log.)
+  suites pass at the stage 2 sweep (8 tests). Pushed with the sweep; after three CI fixes (the shut-connector helper's
+  order, Foundation's `waitUntilExit` hang in `ProcessesTests` on the Mac, a closed listener held by a spawn in
+  `HostPathLowBitsTests`) both workflows passed on `584220b8` (2026-11-15: `v2 linux` 43730429292, `v2 macos`
+  43730429307). (`scripts/test.sh` exits 0 when a filter matches no test, so this command shows the suite ran only by
+  its lines in the log.)
 
 **Done when:** the document, its review record and the plans' changes are committed, the lint passes, and the user's
 answers are recorded.
