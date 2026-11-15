@@ -324,7 +324,7 @@ private struct ComposerChips: View {
                 if let model = usage.model {
                     Menu {
                         if agent == .claude {
-                            ForEach(["opus", "sonnet", "haiku"], id: \.self) { alias in
+                            ForEach(["fable", "opus", "sonnet", "haiku"], id: \.self) { alias in
                                 Button(alias.capitalized) { command("/model \(alias)") }
                             }
                             Divider()
