@@ -290,6 +290,42 @@ final class ServerChildHost {
         #expect(child.restarts == 0)
     }
 
+    /// A host that has stopped before the server child's first start comes up on its queue (as `--exit-with`'s does
+    /// when its owner is gone at the start, `HostServer.stop` then finding no server child to stop) starts none, and
+    /// makes no app connector after that.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func aHostStoppedBeforeTheFirstStartStartsNoServerChild() async throws {
+        let dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let socket = dir + "/h.sock"
+        FileManager.default.createFile(atPath: dir + "/" + ServerChildHelper.actionsName, contents: Data("sleep\n".utf8))
+        var config = HostServer.Config(socketPath: socket, lockPath: dir + "/h.lock", shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 42)
+        config.idleExit = nil
+        config.logPath = dir + "/host.log"
+        let server = HostServer(config: config)
+        try server.start()
+        defer { server.stop(terminateSessions: true) }
+        let binary = try #require(Bundle.main.executablePath)
+        // The first start queued, then the stop run on the queue before it.
+        var child: ServerChild?
+        server.queue.sync {
+            child = ServerChild.start(.init(image: binary, socketPath: socket, arguments: [], environment: config.baseEnvironment),
+                                      server: server)
+            server.stop(terminateSessions: true)
+        }
+        defer { child?.stop() }
+        server.queue.sync {}
+        #expect(child != nil)
+        #expect(child?.pid == nil)
+        #expect(child?.isRunning == false)
+        #expect(server.serverChild == nil)
+        #expect(server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil) == nil)
+        let results = (try? String(contentsOfFile: dir + "/" + ServerChildHelper.resultsName, encoding: .utf8)) ?? ""
+        #expect(!results.contains(" started "), "\(results)")
+    }
+
     /// The server's sealed copy made readable while a child runs from it (anything that reaches the copy can `chmod`
     /// it; the seals don't stop that): the child started again after it is killed is still non-dumpable from its exec,
     /// as the host put the copy's mode back before that start (S2-D5), and the copy is `0111` again.

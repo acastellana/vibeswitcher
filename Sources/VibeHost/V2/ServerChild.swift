@@ -191,6 +191,9 @@ public final class ServerChild {
                 + (differs ? ", and it starts again from it once idle (another build's bytes)" : " (the same bytes)"))
             let child = ServerChild(server: server, copy: carried, launch: launch)
             server.queue.async {
+                guard !server.stopped else {
+                    return child.dropUnstarted(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors)
+                }
                 server.serverChild = child
                 child.resume(record, due: differs ? running : nil)
             }
@@ -222,6 +225,9 @@ public final class ServerChild {
         }
         let child = ServerChild(server: server, copy: copy, launch: launch)
         server.queue.async {
+            guard !server.stopped else {
+                return child.dropUnstarted(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors)
+            }
             server.serverChild = child
             child.resume(record, due: due)
         }
@@ -294,8 +300,8 @@ public final class ServerChild {
     }
 
     /// Loads `launch.image` into a sealed copy (or takes `loaded`, the host's checked copy of it) and starts the child
-    /// from it on the host's queue (the host started already). Nil, said on stderr, when the copy can't be made (the
-    /// Mac has none: ENOTSUP), and on the Mac.
+    /// from it on the host's queue (the host started already), unless the host has stopped by then. Nil, said on
+    /// stderr, when the copy can't be made (the Mac has none: ENOTSUP), and on the Mac.
     public static func start(_ launch: Launch, server: HostServer, loaded: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
         guard !Platform.CodeIdentity.isAvailable else { return nil }
         switch loaded.map({ .success($0) }) ?? Platform.ProcessSelf.sealedCopy(of: launch.image, name: "vibeswitcher-server") {
@@ -305,6 +311,7 @@ public final class ServerChild {
         case .success(let copy):
             let child = ServerChild(server: server, copy: copy, launch: launch)
             server.queue.async {
+                guard !server.stopped else { return child.dropUnstarted() }
                 server.serverChild = child
                 child.spawn()
             }
@@ -369,12 +376,22 @@ public final class ServerChild {
         if DispatchQueue.getSpecific(key: HostServer.queueKey) != nil { work() } else { queue.sync(execute: work) }
     }
 
+    /// A server child the host stopped before it took it (`HostServer.stop` ran on the queue first, finding no
+    /// `serverChild` to stop): started never, its copy closed (`stop`), and the carried child of `record`, when there is
+    /// one, ended and reaped with its connector closed (`release`), so a host that stops and waits to exit
+    /// (`--exit-with`'s, for its sessions' end) leaves no server child behind. On `queue`.
+    private func dropUnstarted(_ record: HostHandover.ServerChildRecord? = nil, sessionPrograms: [pid_t] = [], otherDescriptors: Set<Int32> = []) {
+        if let server { Self.say(server, "no server child: the host stopped before it was started" + (record.map { "; pid \($0.pid) ended" } ?? "")) }
+        if let record { Self.release(record, sessionPrograms: sessionPrograms, otherDescriptors: otherDescriptors) }
+        stop()
+    }
+
     /// One start: the copy's mode put back (`Platform.ProcessSelf.restoreMode`: something that reached the copy may
     /// have changed it, and a child started from a readable image is dumpable from its exec), a fresh connector, the
     /// child from the copy, its token named, its end closed here. A copy whose mode can't be put back starts nothing:
     /// tried again after the wait. On `queue`.
     private func spawn() {
-        guard let server, !lock.withLock({ stopped }) else { return }
+        guard let server, !server.stopped, !lock.withLock({ stopped }) else { return }
         lock.withLock { restartPending = false }
         guard Platform.ProcessSelf.restoreMode(of: copy.fd) else {
             Self.say(server, "server child not started: the mode of \(launch.image)'s sealed copy couldn't be put back (errno \(errno))")
@@ -417,7 +434,7 @@ public final class ServerChild {
     /// token, its end watched. `due`: the SHA-256 of what it runs when that isn't `copy`'s bytes (empty when not known):
     /// it is then started again from `copy` once idle (`replaceWhenIdle`). On `queue`.
     private func resume(_ record: HostHandover.ServerChildRecord, due: String? = nil) {
-        guard let server, !lock.withLock({ stopped }) else { return }
+        guard let server, !server.stopped, !lock.withLock({ stopped }) else { return }
         let pid = record.pid
         let token = Platform.Processes.token(pid)
         guard server.adoptAppConnector(record.connector, sender: token, requireNonDumpable: true, onDumpable: { [weak self] pid in

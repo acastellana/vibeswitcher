@@ -142,7 +142,7 @@ public final class HostServer {
     /// The watch on `Config.owner`.
     private var ownerWatch: (any Platform.Cancellable)?
     private var lastBusy = Date()
-    private var stopped = false
+    private(set) var stopped = false
     /// A `shutdown` was accepted: the host stops in a moment and starts nothing more.
     private var shuttingDown = false
     /// When this host started: a build it hands over to is the same host, started then.

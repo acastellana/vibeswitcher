@@ -88,8 +88,8 @@ extension HostServer {
     /// `requireNonDumpable`: a request is answered only while its sender is non-dumpable
     /// (`Platform.Processes.isDumpable` false), else refused, logged, and `onDumpable` called with its pid on the
     /// host's queue (Task 8a ends the child there). `onClosed`: called with the number on the host's queue when the
-    /// connector closes by itself (see `AppConnector.onClosed`). Nil on the Mac, which has no connector, and when the
-    /// pair can't be made.
+    /// connector closes by itself (see `AppConnector.onClosed`). Nil on the Mac, which has no connector, when the pair
+    /// can't be made, and once the host has stopped (nothing registered after `closeAppConnectors`).
     public func openAppConnector(expecting sender: Platform.PeerToken?, requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?,
                                  onClosed: ((Int32) -> Void)? = nil) -> Int32? {
         guard !Platform.CodeIdentity.isAvailable, let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.seqpacket) else { return nil }
@@ -97,7 +97,10 @@ extension HostServer {
         _ = fcntl(mine, F_SETFL, fcntl(mine, F_GETFL) | O_NONBLOCK)
         let connector = AppConnector(fd: mine, sender: sender, requireNonDumpable: requireNonDumpable, onDumpable: onDumpable)
         connector.onClosed = onClosed
+        var registered = false
         onQueue {
+            guard !stopped else { return }
+            registered = true
             // A number given out again: the caller closed the one it held, so that connector's child had its end.
             if let stale = appConnectors.removeValue(forKey: theirs) {
                 note("host: app connector \(theirs) replaced by a new one under its number")
@@ -108,6 +111,11 @@ extension HostServer {
                 guard let self, let connector else { return }
                 self.answer(connector, theirs)
             }
+        }
+        guard registered else {
+            Sys.close(mine)
+            Sys.close(theirs)
+            return nil
         }
         return theirs
     }
@@ -126,16 +134,23 @@ extension HostServer {
     /// own end: answered for `sender` alone, refused while it is dumpable where `requireNonDumpable` (`onDumpable` then
     /// called), registered under `fd` itself, which `setAppConnectorSender` and `closeAppConnector` then name, and
     /// `onClosed` called with it when it closes by itself. Made close-on-exec and nonblocking, its senders passed.
-    /// False, and `fd` left alone, on the Mac (no connector there) and when `fd` isn't open.
+    /// False, and `fd` left alone, on the Mac (no connector there), when `fd` isn't open, and once the host has stopped.
     func adoptAppConnector(_ fd: Int32, sender: Platform.PeerToken?, requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?,
                            onClosed: ((Int32) -> Void)? = nil, testPid: pid_t? = nil) -> Bool {
-        guard !Platform.CodeIdentity.isAvailable, fcntl(fd, F_SETFD, FD_CLOEXEC) == 0 else { return false }
+        guard !Platform.CodeIdentity.isAvailable else { return false }
+        var stopped = false
+        onQueue { stopped = self.stopped }
+        guard !stopped, fcntl(fd, F_SETFD, FD_CLOEXEC) == 0 else { return false }
         Platform.Sockets.enableCredentials(fd)
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         let connector = AppConnector(fd: fd, sender: sender, requireNonDumpable: requireNonDumpable, onDumpable: onDumpable)
         connector.testPid = testPid
         connector.onClosed = onClosed
+        var registered = false
         onQueue {
+            // Asked again in this turn: a stop from another thread may have come in between.
+            guard !self.stopped else { return }
+            registered = true
             appConnectors.removeValue(forKey: fd)?.close()
             appConnectors[fd] = connector
             connector.start(on: queue) { [weak self, weak connector] in
@@ -143,7 +158,7 @@ extension HostServer {
                 self.answer(connector, fd)
             }
         }
-        return true
+        return registered
     }
 
     /// The host's end of the connector `number` names (the number `openAppConnector` gave out), for a handover's
