@@ -3150,3 +3150,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-15 11:22 Automatically (auto_advance): Started a worker on the-witness-watches (The witness watches every team member, not only the integrator), its after tasks done (merge-dry-run-and).
 - 2026-11-15 11:22 Automatically (auto_advance): Cleaned up merge-dry-run-and (freed 4.0 GB of build output and temporary folders). It stays done.
 - 2026-11-15 11:22 Automatically (auto_advance): Cleaned up an-animated-explainer (freed 0 MB of build output and temporary folders). It stays done.
+- 2026-11-15 11:38 Automatically (auto_advance): Started the audit of a-batch-merge-s at 5167a2ed (Its review is audit).
