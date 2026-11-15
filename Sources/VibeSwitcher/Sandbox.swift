@@ -193,12 +193,28 @@ enum Sandbox {
     }
 
     /// `window` drawn as it is, its frame included, and the view that was drawn. Nil when it couldn't be drawn.
-    static func bitmap(of window: NSWindow) -> (view: NSView, image: NSBitmapImageRep)? {
+    /// With `windowBackground`, what's left transparent shows the window's background, as on screen (`underlayWindowBackground`).
+    static func bitmap(of window: NSWindow, windowBackground: Bool = false) -> (view: NSView, image: NSBitmapImageRep)? {
         guard let view = window.contentView?.superview ?? window.contentView,
               let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         underlayTerminalBackgrounds(in: view, bitmap)
+        if windowBackground { underlayWindowBackground(of: window, bitmap) }
         return (view, bitmap)
+    }
+
+    /// An alert's panel draws its background as a material that only the window server composites: `cacheDisplay`
+    /// leaves it transparent, so in dark its white title and buttons came out on a viewer's white. The window's
+    /// background colour, in the window's own look, goes behind what was drawn, where it is transparent.
+    static func underlayWindowBackground(of window: NSWindow, _ bitmap: NSBitmapImageRep) {
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        window.effectiveAppearance.performAsCurrentDrawingAppearance {
+            NSColor.windowBackgroundColor.setFill()
+            NSRect(origin: .zero, size: bitmap.size).fill(using: .destinationOver)
+        }
     }
 
     /// A terminal leaves its default background transparent for the layer's colour to show through, which a drawing of
@@ -3514,7 +3530,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// Draws `lift`'s window into `file`, then checks its panes. What went wrong, or nil. A file with a bad pane is still
     /// written, to be looked at.
     private func drawChecked(_ lift: LiftedGlass, label: String, to file: URL) -> String? {
-        guard let drawn = Sandbox.bitmap(of: lift.window), Sandbox.write(drawn.image, to: file) else { return "couldn't draw \(file.lastPathComponent)" }
+        // A sheet (the Run confirmation's alert among them) on its window's background, as it shows on screen.
+        guard let drawn = Sandbox.bitmap(of: lift.window, windowBackground: label.hasPrefix("sheet-")), Sandbox.write(drawn.image, to: file) else { return "couldn't draw \(file.lastPathComponent)" }
         let problems = lift.problems(view: drawn.view, image: drawn.image, sidebarHasRows: label == "main" && !store.sessions.isEmpty)
         return problems.isEmpty ? nil : "bad panes in \(file.lastPathComponent): " + problems.joined(separator: "; ")
     }

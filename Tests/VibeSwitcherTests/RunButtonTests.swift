@@ -34,6 +34,32 @@ struct RunButtonTests {
         #expect(Self.shown(RunButton.confirmation(command)) == "! git push origin main")
     }
 
+    /// The sandbox's `shot` of the confirmation in dark, drawn as its sheet is (`Sandbox.bitmap`, the window's
+    /// background under it): its panel's background is a material only the window server composites, which a drawing
+    /// left transparent, so its white title and buttons came out on a viewer's white. Now a dark panel with light text.
+    @Test func aDarkShotOfTheConfirmationIsLightOnDark() throws {
+        let command = try #require(RunnableCommand.runnable(code: "echo one\necho two", language: "bash"))
+        let alert = RunButton.confirmation(command)
+        alert.window.appearance = NSAppearance(named: .darkAqua)
+        alert.layout()
+        let image = try #require(Sandbox.bitmap(of: alert.window, windowBackground: true)?.image)
+        var transparent = 0, light = 0, total = 0, luminance = 0.0
+        for y in stride(from: 0, to: image.pixelsHigh, by: 2) {
+            for x in stride(from: 0, to: image.pixelsWide, by: 2) {
+                guard let color = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                total += 1
+                if color.alphaComponent < 0.05 { transparent += 1; continue }
+                let lum = 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
+                luminance += lum
+                if lum > 0.8 { light += 1 }
+            }
+        }
+        #expect(total > 0)
+        #expect(transparent == 0, "\(transparent) of \(total) pixels left transparent")
+        #expect(luminance / Double(max(total - transparent, 1)) < 0.35, "not a dark panel")
+        #expect(light > 50, "no light text: the title and buttons didn't draw")
+    }
+
     /// A runner whose session is `id`, taking commands `way`, keeping what it's asked to type and answering `answer`.
     static func runner(way: RunnableCommand.Way? = .bang, id: UUID? = UUID(), answer: RunOutcome = .ran,
                        typed: @escaping (String) -> Void = { _ in }) -> ChatRunner {
