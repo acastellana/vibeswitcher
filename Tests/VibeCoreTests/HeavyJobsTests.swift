@@ -217,19 +217,25 @@ struct HeavyJobsTests {
         let folder = temp.url("heavy-jobs-cwd")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let secret = "sk-ant-api03-REALSECRETREALSECRET"
-        // A shell that waits on its stdin, a secret-looking argument as its $0.
+        // A shell that says it started and waits on its stdin, a secret-looking argument as its $0.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "cat >/dev/null; exit 0", secret]
+        process.arguments = ["-c", "echo started; cat >/dev/null; exit 0", secret]
         process.currentDirectoryURL = folder
-        let input = Pipe()
+        let input = Pipe(), output = Pipe()
         process.standardInput = input
+        process.standardOutput = output
         try process.run()
         defer {
             try? input.fileHandleForWriting.close()
             #expect(await exited(process), "pid \(process.processIdentifier) still running")
         }
         let pid = process.processIdentifier
+        // Read once it runs the shell: `run` returns while the exec may still be under way, its name already the
+        // shell's and its argv not yet there (/proc/<pid>/cmdline empty: 59 of 2,000 spawns on an idle machine; a run
+        // under load read nil here).
+        let said = await offPool { output.fileHandleForReading.availableData }
+        #expect(String(decoding: said, as: UTF8.self) == "started\n")
         let usage = try #require(ProcessTable.usage(of: pid))
         #expect(usage.pid == pid && usage.ppid == getpid() && usage.uid == getuid() && usage.cpu >= 0)
         #expect(usage.name == "sh" || usage.name == "bash")
