@@ -297,7 +297,10 @@ delivering messages and reports, watching for stalls, the limits, the questions.
 seam (rule 4). Its outline, the app code each part is rebuilt from, and the order are in
 [the bootstrap path](../plans/2026-11-13-v2-bootstrap-path.md#the-engine), and it gets a plan of its own. **(call)**
 Until the bootstrap the engine refreshes on a 3 s timer, as the app does; that is the one exception to "never from a
-timer", and stage 3's stores remove it after the bootstrap.
+timer", and stage 3's stores remove it after the bootstrap. The exception covers the few other timers the engine
+plan's Global Constraints list with it (the session scan, the room watch, the server's housekeeping, the TMPDIR sweep,
+a declined prompt's bounded screen read, the host link's bounded reconnect); none of them is a store learning of a
+change.
 
 ### The node's processes
 
