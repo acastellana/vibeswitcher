@@ -102,7 +102,8 @@ struct EngineEndToEndTests {
         // 5. The limits raised: one message from the room watch (its look is once a minute), one wake prompt for it.
         try Self.limits(node, maxSessions: 10)
         let room = "room again for what was refused: start_worker(write-the-lexer)"
-        _ = try await Self.prompt(tools, timeout: 180) { $0.contains("1 new report") && $0.contains("witness") }
+        let roomWoken = { (prompt: String) in prompt.contains("1 new report (witness: The Mac has room again") }
+        _ = try await Self.prompt(tools, timeout: 180, roomWoken)
         let roomHanded = promptHookTakes(node, tty: lead.tty, pid: pid)
         #expect(roomHanded.contains(room), "\(roomHanded)")
         handedAll += roomHanded
@@ -136,6 +137,7 @@ struct EngineEndToEndTests {
         let prompts = Self.prompts(tools)
         #expect(prompts.filter { $0.hasSuffix("the second") }.count == 1, "\(prompts)")
         #expect(prompts.filter { $0.contains("worker write-the-parser blocked") }.count == 1, "\(prompts)")
+        #expect(prompts.filter(roomWoken).count == 1, "\(prompts)")
         #expect(prompts.filter { $0.contains("had a prompt declined") }.count == 1, "\(prompts)")
         // What the prompts' hooks handed over, each once, and nothing of it waits still.
         handedAll += promptHookTakes(node, tty: lead.tty, pid: pid)
@@ -167,6 +169,18 @@ struct EngineEndToEndTests {
         let claude = try #require(RealClaudeStatusTests.claudeExecutable(), "no claude on PATH")
         let node = try await ScratchNode(scratch, holdFirstLook: true)
         let repo = node.root.appendingPathComponent("repo")
+        // What the case writes into the user's folder, undone on every way out once it may have been written: the hooks
+        // (`hooks install` may write before it fails) and the project's trust entry.
+        var hooksWritten = false, trustWritten = false
+        defer {
+            node.stop()
+            if trustWritten {
+                do { try RealClaudeStatusTests.trust(repo.resolvingSymlinksInPath().path, in: config, false) } catch { Issue.record("the trust entry stayed: \(error)") }
+            }
+            if hooksWritten, (try? ScratchNodes.removeHooks(node, config: config)) != true {
+                Issue.record("the hooks stayed in \(config.path)/settings.json: run hooks remove --agent claude with CLAUDE_CONFIG_DIR set")
+            }
+        }
         try await scratchRepository(repo)
         try Self.workflow(repo)
         let project = repo.resolvingSymlinksInPath().path
@@ -189,15 +203,11 @@ struct EngineEndToEndTests {
         // Its status hooks (the user's settings' on the user's node, `hooks install`): in the config folder, running this
         // node's copy of the hook, which writes the lead's state under the node's root (the lead has its
         // `VIBESWITCHER_HOME`). Without them the engine never sees the lead between turns, and types nothing into it.
+        hooksWritten = true
         let install = try await node.run(["hooks", "install", "--agent", "claude"], ["CLAUDE_CONFIG_DIR": config.path])
         try #require(install.status == 0, "hooks install: \(install.output)\(install.errors)")
+        trustWritten = true
         try RealClaudeStatusTests.trust(project, in: config, true)
-        defer {
-            node.stop()
-            do { try RealClaudeStatusTests.trust(project, in: config, false) } catch { Issue.record("the trust entry stayed: \(error)") }
-            let removed = (try? ScratchNodes.removeHooks(node, config: config)) ?? false
-            if !removed { Issue.record("the hooks stayed in \(config.path)/settings.json: run hooks remove --agent claude with CLAUDE_CONFIG_DIR set") }
-        }
 
         let began = MacTime.real.awake()
         var mark = began

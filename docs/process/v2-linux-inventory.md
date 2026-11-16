@@ -514,9 +514,10 @@ What run 3's screen showed besides:
 - **Claude Code 2.1.325 warns that eight of the lead's deny rules never match**: `Write(~/.vibeswitcher/mac-limits.json)`,
   `Write(~/.vibeswitcher/boost.json)`, `Write(~/.vibeswitcher/policy.md)`, `Write(~/.config/systemd/**)`,
   `Write(~/.config/environment.d/**)`, `Write(~/.vibeswitcher/v2/**)`, `Write(~/.vibeswitcher/lead/**)` and
-  `Write(//mnt/c/**)`, each "never matches · use Edit(…)". So in 2.1.325 those `Write(…)` rules guard nothing, and only
-  an `Edit(…)` rule for the same path would (stage 2's Task 10b's Linux rules and `LeadLaunch`'s lists): for the lead
-  to decide; not changed here.
+  `Write(//mnt/c/**)`, each "never matches · use Edit(…)". No path is left open: each of the eight has its `Edit(…)`
+  rule beside it (stage 2's Task 10b's Linux rules in `Platform.Tools.roleDenyRules`, `LeadLaunch.userSettings`), and an
+  `Edit(…)` rule binds every built-in tool that edits a file, Write too. The `Write(…)` rules are only redundant; the
+  follow-up, for the lead to decide, is to drop them so the warning goes. Not changed here.
 - **No status hook ran for the lead** (no state file under the node's root): the role's settings hold only the
   read-only PermissionRequest hook, and the status hooks are the user's settings' (`hooks install`), which the config
   folder didn't have. Without them the engine never sees the lead between turns and would type nothing into it. The
