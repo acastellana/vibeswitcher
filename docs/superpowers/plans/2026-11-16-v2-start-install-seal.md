@@ -408,6 +408,13 @@ accepted every recommendation so far. Each can be overruled before its task star
       (`ConfigHoldStore.held` calls `retrySealingAppWrites`, as the app's `ConfigHolds.look` does).
     - Harnesses that prepare a real-agent folder (E9 Step 2, S10) write its hooks with
       `HookInstaller.install(agent:at:hookBinary:)` directly.
+    - *2026-11-16, the `appWrite` race (the S6 review's note above), judged at the lead's request:* checked against
+      the port map's kinds and left. Closing it changes `appWrite`'s contract (each item's expected result, one read that both
+      matches and fingerprints) and `HookInstaller.edit`'s (refusing bytes that differ from `before`), in
+      `ConfigSeal.swift` and `HookInstaller.swift`: not a hook line into `V2/`, and a variant in `V2/` would copy
+      `appWrite`, the seal's file and folder reads and the config edit, a cost at every merge. The Mac's hook install
+      and update have the same window. Recorded as a known residual in the security document's S11 item 8 with what
+      would close it, and in `docs/process/v2-mac-tasks.md` (Owed on the Mac) as main's change.
 18. **ST-D18: The seal reads large folders by their metadata.**
     - A new `Watched.Kind.listing` hashes each entry's relative name, type, mode, size, inode, `ctime` with
       nanoseconds, and a link's target. It never reads contents. A write changes `ctime`, which the user can't set.
@@ -417,6 +424,11 @@ accepted every recommendation so far. Each can be overruled before its task star
       `~/.local/share/swiftly/bin`, node's version folder, `~/.local/bin`, `~/.config/gh` (its token file is never
       read) and `~/.vibeswitcher/v2/builds`. Reading their contents would be about 3.5 GB at every look.
     - The case and its one read branch are an edit outside the eight kinds, **approved by the lead** (port-map row).
+    - *2026-11-16, the lead's call (a known gap, recorded only):* a `.folder` item (`ConfigSeal.readFolder`, the
+      Mac's kind too) doesn't see a subfolder's mode changed in place: its walk's `d` line has no mode (a folder that
+      can't be listed is held already; `.entries` and `.listing` read folder modes, the security follow-ups' item
+      24). Adding it changes every Mac seal's hash for such an item once, so it is left: the security document's S11
+      item 8, and `docs/process/v2-mac-tasks.md` (Owed on the Mac) as a main-side follow-up.
 19. **ST-D19: Folders that change with every session.**
     - A role's start writes `~/.vibeswitcher/lead/run/<key>/<name>`. Each Claude Code session writes a shell snapshot
       into `<config>/shell-snapshots`. Watched as plain folders, either could hold every team at each worker's start.
@@ -463,6 +475,15 @@ accepted every recommendation so far. Each can be overruled before its task star
       card runs `config held`/`accept` after each.
     - The command line's writes can't be sealed as the app's: only the server is the vault's app, and the follow-up
       runs after the server's reply.
+    - *2026-11-16, the lead's call on the S8c review's finding 5:* the server **refuses** `build.switch` (a switch or
+      a rollback) while the seal holds a change nobody accepted under the builds folder (`~/.vibeswitcher/v2/builds`)
+      or the unit's folder (`~/.config/systemd/user`), or one since the vault recorded it, saying "accept the held
+      config first (vibeswitcher config held / config accept)" (`HeldChange`, which `hooks.install`'s builds-folder
+      check now shares; asked by `SwitchRequest` only before a handover, so `already`, the way an unfinished
+      follow-up is finished, isn't refused). S9's card runs `config held`/`accept` **before** each switch and
+      rollback (and once after the last). Held by `SwitchTests.aSwitchWhileABuildsFolderChangeIsHeldIsRefused`,
+      shown failing without the server's check. The security document's S9 says it in its Decision, out of "Doesn't
+      promise".
 24. **ST-D24: The host's start line counts only from the host.** Every session is in the unit's cgroup, so `logger -t
     vibeswitcher-host …` from a worker lands under `-u vibeswitcher-node` too. `NodeJournal` takes a start line only
     when journald's trusted `_PID` equals the unit's `ExecMainPID` (`systemctl --user show -p ExecMainPID`) and
@@ -2255,6 +2276,9 @@ inventory. The Mac runs `theMacsListIsEmpty`.
 - Not changed, the lead's call: `build.switch` isn't gated on the seal's unaccepted change under the builds folder
   (`hooks install` is), and the rollback's target comes from `installs`, which any worker can write. Gating it would
   reorder S9 (install, `vs config accept`, then switch); recorded in the security document's S9, Doesn't promise.
+  *Superseded 2026-11-16 by the lead's call (ST-D23's note):* `build.switch` is refused while the builds folder or
+  the unit's folder holds a change not accepted, and S9's card is reordered. The rollback's target from `installs`
+  stays as it was (shown with its line in the confirmation).
 - The security document's S3 and S9 `Held by` lines name S8c's cases.
 
 - [x] **Step 1: Failing tests:**
@@ -2322,10 +2346,15 @@ user's present `gh` login is expected to read Actions, and the first install's C
      window for 10 minutes; reopen one; run `vs status`. If the times changed, the user decides how to keep the node
      up: a terminal left open, or a Windows-side keep-alive of the user's own;
   7. **the agent installs C2 now** (an agent step; the second install runs
-     `<prefix>/current/Resources/install-node.sh`, ST-D9), then `vs config held` / `accept` (the builds folder);
-  8. `vs switch C2` (the confirmation says the seal's hold), then `vs status`, then `vs config held` / `accept`;
-  9. `vs rollback` (the confirmation names C1 and its `installs` line), then `vs status`, then `vs config held` /
-     `accept`.
+     `<prefix>/current/Resources/install-node.sh`, ST-D9);
+  8. `vs config held` / `accept` (the builds folder: the install's change; the server refuses a switch until it is
+     accepted, ST-D23's note), then `vs switch C2` (the confirmation says the seal's hold), then `vs status`;
+  9. `vs config held` / `accept` (the builds folder's `current` and the unit's folder: the switch's change), then
+     `vs rollback` (the confirmation names C1 and its `installs` line), then `vs status`;
+  10. `vs config held` / `accept` (the rollback's change), so no team is held after the card.
+
+  *2026-11-16, the lead's call (ST-D23's note):* `config held` / `accept` comes before each switch and rollback, since
+  the server refuses `build.switch` while the builds folder or the unit's folder holds a change not accepted.
 
   The card says to type `vs` as `~/.vibeswitcher/v2/builds/current/bin/vibeswitcher` or an alias the user writes.
 - [ ] **Step 4: Record** in the inventory, with the date and kernel:
@@ -2522,7 +2551,9 @@ decision. S4c and S8b write them into those documents.
 - `hooks.install`'s argument is a list of agents, and it installs only bytes the host's `build-info` names (ST-D17).
 - The rule on switches stays after Task 3b's measurement, until the in-flight count (ST-D15).
 - A team keeps its build until its lead restarts (ST-D16).
-- A switch, a rollback and an install leave the seal holding every team until `config accept` (ST-D23).
+- A switch, a rollback and an install leave the seal holding every team until `config accept` (ST-D23). *2026-11-16:*
+  and a switch or rollback is refused while the builds folder or the unit's folder holds a change not accepted (ST-D23's
+  note, the lead's call).
 - The host's start line counts only from the unit's main pid on stdout (ST-D24). *2026-11-16: also only from the
   user, the unit, its start's boot and from its start on; S5's review wrote it into the security document's S2.*
 - The seal's list adds what this machine's startup files source (`.bash_aliases`, nvm's scripts, rally's aliases),

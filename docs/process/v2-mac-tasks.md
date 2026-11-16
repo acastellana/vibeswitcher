@@ -178,6 +178,23 @@ it. Each is done once the Mac work begins.
   `LeadLaunchTests.noRoleMayWriteTheUsersMacWideSettings`' list. The same holds for the workers' and verifiers'
   `Write(~/.claude/**)` (`claudeHome`) and `Write(<records>/**)` (`deny`'s worker case), which the lead doesn't carry.
 
+- **The app's own writes seal what changed between their reads** (the security document's S11 item 8; the start
+  plan's ST-D17, the review of its S6; recorded 2026-11-16). `LeadVault.appWrite` (`Sources/VibeCore/ConfigSeal.swift`)
+  fingerprints each watched thing before the write and after it, and the vault seals the chain to what it reads
+  itself, so a change another process of the user's makes between those two reads is sealed with the app's write: on
+  the Mac, `HookSetup`'s and `HookBinary`'s hook install and update; on the node, `hooks install`'s renames and config
+  edits. What closes it: `appWrite` (or a variant) told each item's expected result, recording a line only when one
+  read of the item both matches it and gives the fingerprint, and `HookInstaller.edit` refusing bytes that differ from
+  the `before` fingerprint. A change to `appWrite`'s and `HookInstaller.edit`'s contracts, shared with main, so main's.
+  Check on a real Mac (a scratch home and vault): a hook added to `settings.json` between the app's two reads (a test
+  hook in `HookInstaller.replace`'s `beforeRename`, or in `appWrite`) is held at the next look, not sealed.
+- **A `.folder` item doesn't see a folder's mode** (the security document's S11 item 8; the lead's call, 2026-11-16).
+  `ConfigSeal.readFolder`'s walk hashes a subfolder as `d <path>` with no mode, so a mode changed in place is no change
+  (a folder that can't be listed is held; a file's mode is read; Linux's `.entries` and `.listing` items read folder
+  modes). Adding `st_mode & 0o7777` to the `d` line, as `LinuxSealList`'s walks do, changes every Mac seal's hash for
+  each `.folder` item with a subfolder once, so each user's next look after the update holds them (one accept). A
+  main-side change, with that one-time hold said in its release notes; then `v2`'s `.folder` items get it at the merge.
+
 ## Also to check
 
 - **`Package.resolved`** pins swift-crypto 3.15.1 and swift-asn1 1.7.4 for the Mac too (`923a43b9`), though only Linux
@@ -255,3 +272,9 @@ re-run, and fixed on main.
   `FakeClaude.draw()` sends `ESC[?2004h` before each `ESC[2J`. The real app has the same gap when its pane attaches
   to an agent after the agent's first screen; tracking DECSET 2004 in the host and putting it before a replay (as
   `FocusEvents` does for 1004) would close both, and is a decision for main.
+- **`ShellDeskTests/declineStartsNothingAndUnansweredExpires` (app)**: seen once, in the app job of run 43864397210
+  (attempt 1, on `4c50afbf`): `ShellDeskTests.swift:220`, the count of told texts with "expired after 30 minutes" and
+  the ignored card's id wasn't 1, after the clock was moved 30 minutes and the desk refreshed. It passed on the rerun.
+  The desk and its test are in `Sources/VibeSwitcher/Shell/ShellDesk.swift` and `Tests/VibeSwitcherTests`, which
+  `v2` doesn't edit; the cause isn't found yet (what the desk shares with `VibeCore` wasn't checked against main), and
+  the fix is main's.

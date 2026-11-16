@@ -1356,6 +1356,16 @@ differ replies before the server is replaced).
   switches no worker runs at a switch, but the lead may stay, and a worker it starts after the switch runs the old
   commit's tool server. `switch`'s confirmation says so (`NodeTexts.switch`; held by
   `SwitchTests.aSwitchSaysItKeepsSessions`, the start plan's S8a).
+- **A switch waits for the user's accept** (the lead's call, 2026-11-16, on the review of the start plan's S8c,
+  finding 5; it was in "Doesn't promise"). The server refuses `build.switch` (a switch or a rollback) while the seal
+  holds a change under `~/.vibeswitcher/v2/builds` or the unit's folder `~/.config/systemd/user` that nobody accepted,
+  or one since the vault recorded it (a change no look has held yet), saying "accept the held config first
+  (vibeswitcher config held / config accept)" (`HeldChange`, asked by `SwitchRequest` before a handover, never for the
+  build that runs already, so a follow-up the command line didn't finish is finished; `hooks install` has the same
+  check for the builds folder). So a build folder a worker changed is shown to the user before the host runs it, and
+  each switch and rollback in the start plan's S9 card comes after a `config held` / `accept`. Before the vault has
+  recorded either folder (a fresh vault before its first accept) there is nothing to compare, and the first accept
+  shows them as they are.
 - **The install** (the bootstrap path's steps 8 and 10) builds from a clean, detached `git worktree add` of a commit on
   `origin/v2` that both CI runners passed (it refuses a dirty tree), with a toolchain the user installed outside
   `$HOME` (root's, decision 12) and a fresh package cache, records `swift --version` and `Package.resolved`'s hash in
@@ -1425,21 +1435,23 @@ what it needs.
   by a host restart. In the folders every session's start writes into (`.entries`), an entry added or removed alone is
   no change, but in `~/.vibeswitcher/lead/run` only a launch the vault recorded comes so (its repository's key, the
   launcher's name for a member or former member, the files a launcher writes); anything else there holds the team.
-  A folder in a watched folder that can't be listed is held as a cut read is, and a folder's mode is part of what's
-  read, so a `chmod 000` that hides what's under it, or a mode changed in place, holds the team (2026-11-16, the
-  security follow-ups' items 23 and 24). A detached node's record and log (`~/.vibeswitcher/v2/node.pid`, `host.log`) aren't on the list:
+  A folder in a watched folder that can't be listed is held as a cut read is, and in an `.entries` or `.listing`
+  item a folder's mode is part of what's read, so a `chmod 000` that hides what's under it, or a mode changed in
+  place there, holds the team (2026-11-16, the security follow-ups' items 23 and 24); a `.folder` item's subfolder
+  mode isn't read (S11 item 8, the lead's call). A detached node's record and log (`~/.vibeswitcher/v2/node.pid`, `host.log`) aren't on the list:
   each detached start rewrites them, and the record's readers check the process it names instead (S3; 2026-11-16, the
   review of the start plan's S3).
-- What a switch or rollback goes to (the review of the start plan's S8c, 2026-11-16). `build.switch` isn't refused
-  while the seal holds a change under `~/.vibeswitcher/v2/builds` that nobody accepted (`hooks install` is), so a
-  switch can make a build whose folder a worker changed the user's host: the seal holds every team after it, not the
-  switch. The command line checks the target's `bin/` against its `build-info` before the code is asked, and the host
-  checks its own and its server's images at the handover, so only an inconsistent change is refused: a worker that
-  rewrites `build-info` with the binaries passes both. The rollback's target comes from `<prefix>/installs`, which
-  any worker can write (a self-consistent folder planted with a line for it is offered); the confirmation shows the
-  line and asks the user to check it. Whether a switch waits for `vs config accept` is the lead's call (it changes the
-  order S9 of the start plan runs). A detached host's start line, which `switch` shows, is read from its log
-  (`host.log`), which any worker can write.
+- What a switch or rollback goes to, beyond the user's look (the review of the start plan's S8c, 2026-11-16). A
+  switch's refusal while the seal holds a change (above) is a detector at the request: a change a worker makes after
+  the server asked the seal and before the host executes the target isn't refused (the next look holds it), and an
+  accept seals what the user looked at, which the card shows by name and changed path, not by whether a build's bytes
+  are the ones released. The command line
+  checks the target's `bin/` against its `build-info` before the code is asked, and the host checks its own and its
+  server's images at the handover, so only an inconsistent change is refused there: a worker that rewrites
+  `build-info` with the binaries passes both, and only the seal's hold before the switch shows it. The rollback's
+  target comes from `<prefix>/installs`, which any worker can write (a self-consistent folder planted with a line for
+  it is offered); the confirmation shows the line and asks the user to check it. A detached host's start line, which
+  `switch` shows, is read from its log (`host.log`), which any worker can write.
 - Signed releases (stage 8) are what make "what is installed is what was released" a lock.
 
 **Before the bootstrap:** yes (sealed copies, the static build, the unit as above).
@@ -1504,6 +1516,9 @@ its `build-info` before the code is asked, so a rewritten tool server or command
 switched; 2026-11-16);
 `SwitchTests.aSwitchSaysItKeepsSessions` (the start plan's S8a: `switch`'s confirmation says a running team keeps its
 build until its lead restarts, ST-D16; 2026-11-16, with the review of S8b);
+`SwitchTests.aSwitchWhileABuildsFolderChangeIsHeldIsRefused` (the lead's call on the S8c review's finding 5: a switch
+while the seal holds a change under the builds folder, or the unit's folder, is refused with the host left on its
+build, and goes on once accepted; 2026-11-16);
 `InstallTests.aRecordNamesItsToolchainAndResolvedFile`, `InstallTests.aRecordHashesEveryProgramAndRefusesALink`,
 `InstallTests.aRecordForAFolderNamedOtherThanItsCommitIsRefused`, `InstallTests.theCommandLineWritesTheRecord` (the start
 plan's S4a: build-info records the toolchain's swift --version text and Package.resolved's hash, and hashes only
@@ -1777,7 +1792,28 @@ against it. Each line says what reduces it now, if anything.
    S10). The seal detects it at its next look and holds
    workers and merges; a change swapped in and restored between two looks is missed; a host restart resets the seal to
    "held until accepted". The Linux list (`~/.local/share/claude/versions` and the rest) arrives with the bootstrap
-   path's step 8. S7, S9.
+   path's step 8. S7, S9. Two known residuals in what the seal reads, recorded 2026-11-16 and left as they are (the
+   first judged at the lead's request not to fit the port map's kinds, the second the lead's call):
+   - **The app's own writes seal what changed between their reads** (the start plan's ST-D17, the review of its S6).
+     `LeadVault.appWrite` fingerprints each watched thing before the write and again after it, and the vault seals the
+     chain from its sealed hash to what it reads itself, so a change another process of the user's makes between
+     `appWrite`'s two reads is sealed with the write. In `hooks install` that window is the programs' renames and the
+     config edits (the programs are written, flushed and checked before it, the security follow-ups' item 29): a
+     program renamed over or rewritten in `~/.vibeswitcher/bin` after its re-hash, a writer that kept the staged
+     file open (item 30), or a hook added to `settings.json` before the edit reads it (and merged in) is sealed as the
+     app's. What would close it: `appWrite` (or a variant) told each item's expected result (the bytes each program
+     and config edit wrote), recording a line only when one read of the item both matches that result and gives the
+     fingerprint, and the config edit refusing bytes that differ from the `before` fingerprint. That changes
+     `appWrite`'s contract and `HookInstaller.edit`'s, in `ConfigSeal.swift` and `HookInstaller.swift`; it isn't a
+     hook line into `V2/` (a variant in `V2/` would copy `appWrite`, the seal's file and folder reads and the config
+     edit, each a merge's cost), and the Mac's hook install and update (`HookSetup`, `HookBinary`) have the same
+     window, so it is main's change (`docs/process/v2-mac-tasks.md`).
+   - **A `.folder` item doesn't see a folder's mode** (`ConfigSeal.readFolder`, the Mac's kind too). Its walk hashes a
+     subfolder as `d <path>`, with no mode, so a subfolder's mode changed in place is no change; a folder that can't
+     be listed is held (its `unreadable` line), a file's mode is read, and `.entries` and `.listing` items read every
+     folder's mode (the security follow-ups' item 24). Adding the mode to `readFolder`'s lines changes the hash of
+     every Mac seal's `.folder` item with a subfolder once, so every Mac user's next look would hold them: left to a
+     main-side change (`docs/process/v2-mac-tasks.md`).
 9. A worker can move the lead's base branch through the main checkout's shared `.git` (worktrees, not clones, until
    S2-D10's clones). The vault's head record and `judge` catch it; after a host restart `base accept` shows the
    commits since the last accepted head. S7.
