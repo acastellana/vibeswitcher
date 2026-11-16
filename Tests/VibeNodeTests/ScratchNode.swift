@@ -31,7 +31,8 @@ import VibeNode
 /// `reusing`: the root of a node stopped before (its host ended), for a host restart (E8): its files are kept (its
 /// `engine.json`, its snapshot, its journal's record, its repositories), its links and stand-ins made again where missing.
 ///
-/// Ended, with its server, sessions and files, by `stop()` or when it goes.
+/// Ended, with its server, sessions and files, by `stop()` or when it goes; with every process whose environment names
+/// a path in its root too, the ones that left the host's tree included (`stop()`).
 final class ScratchNode: @unchecked Sendable {
     let root: URL
     let home: URL
@@ -174,6 +175,11 @@ final class ScratchNode: @unchecked Sendable {
 
     /// Ends the host (SIGTERM, then SIGKILL), waits for its server to go, ends what is left of it, and removes the
     /// registration. Once.
+    ///
+    /// What was under the host before its SIGTERM is waited for, then killed; then every process still naming a path in
+    /// the root in its environment (`endStrays`): one that was never in the host's tree when it was listed (started
+    /// meanwhile, as a lead's fake starts tool servers while a stop runs, or with the host gone before this), or one
+    /// that left it (an orphaned tool server whose keeper was killed) would write into the root once it is removed.
     func stop() {
         let first = lockForStop.withLock { () -> Bool in
             defer { stopped = true }
@@ -200,6 +206,7 @@ final class ScratchNode: @unchecked Sendable {
             if kill(server, 0) == 0 { kill(server, SIGKILL) }
         }
         Self.waitForEnd(under)
+        Self.endStrays(of: root.path)
         ScratchNodes.ended(host)
         recorder?.stop()
         if HostConnection.connector(for: socket) == testEnd { HostConnection.unregister(path: socket) }
@@ -238,6 +245,37 @@ final class ScratchNode: @unchecked Sendable {
             }
             guard index == 0 else { break }
             for link in running where runs(link) { kill(link.pid, SIGKILL) }
+        }
+    }
+
+    /// This user's processes (this one aside) whose environment names `root` or a path in it (HOME, VIBESWITCHER_HOME,
+    /// TMPDIR, PWD: every process of a node's has some), each with its start.
+    static func strays(of root: String) -> [Platform.Processes.Link] {
+        let me = getpid(), inside = root + "/"
+        return (Platform.Processes.allPids() ?? []).compactMap { pid in
+            guard pid != me, let environment = Platform.Processes.environment(pid) else { return nil }
+            let names = environment.contains { entry in
+                guard let equals = entry.firstIndex(of: "=") else { return false }
+                let value = entry[entry.index(after: equals)...]
+                return value == root || value.hasPrefix(inside)
+            }
+            return names ? Platform.Processes.link(pid) : nil
+        }.filter(runs)
+    }
+
+    /// Kills `root`'s strays (SIGKILL, each checked by its start first) and waits for them to end, again until a look
+    /// finds none (one may start another meanwhile), for 30 s at most.
+    static func endStrays(of root: String) {
+        let deadline = MacTime.real.awake() + 30
+        while MacTime.real.awake() < deadline {
+            var found = strays(of: root)
+            if found.isEmpty { return }
+            for link in found where runs(link) { kill(link.pid, SIGKILL) }
+            let killed = MacTime.real.awake() + 10
+            while !found.isEmpty, MacTime.real.awake() < killed {
+                Thread.sleep(forTimeInterval: 0.02)
+                found = found.filter(runs)
+            }
         }
     }
 

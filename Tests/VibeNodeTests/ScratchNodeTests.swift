@@ -26,6 +26,25 @@ struct ScratchNodeTests {
         #expect(await eventually(timeout: 30) { !ScratchNode.runs(program) }, "its session's program outlived its owner")
     }
 
+    /// `stop()` ends what left the host's tree (here a program its session started in a session of its own, whose
+    /// parent ended: init's now, as a tool server whose keeper was killed is) before the root is removed.
+    @Test func aStopEndsWhatLeftTheHostsTree() async throws {
+        let node = try await ScratchNode(scratch)
+        let mark = node.root.appendingPathComponent("stray.pid")
+        let line = "/usr/bin/setsid -f /bin/sh -c 'echo $$ > \(mark.path).part && mv \(mark.path).part \(mark.path) && exec sleep 600'; exec sleep 600"
+        _ = try await node.spawn(line)
+        try #require(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: mark.path) }, "\(node.said)")
+        let written = try String(contentsOf: mark, encoding: .utf8)
+        let pid = try #require(pid_t(written.trimmingCharacters(in: .whitespacesAndNewlines)), "\(written)")
+        let stray = try #require(Platform.Processes.link(pid))
+        defer { if ScratchNode.runs(stray) { kill(stray.pid, SIGKILL) } }
+        // Out of the host's tree before the stop lists it.
+        try #require(await eventually(timeout: 30) { !ScratchNode.descendants(of: node.hostPID).contains { $0.pid == pid } })
+
+        await offPool { node.stop() }
+        #expect(!ScratchNode.runs(stray), "pid \(pid), out of the host's tree, outlived the stop")
+    }
+
     /// A scratch root too long for sockets gives a short folder of the run's own, linked from it, not the shared /tmp:
     /// removed with its link when empty, both kept (the link for the run's leftover check to find) when not.
     @Test func aLongScratchRootGivesAShortFolderOfTheRunsOwn() throws {
