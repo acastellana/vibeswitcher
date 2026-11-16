@@ -517,6 +517,8 @@ extension Platform.Processes.System {
                                              inode: UInt64(info.st_ino))
     }
 
+    static let hasCgroups = true
+
     static func cgroup(_ pid: pid_t) -> [String]? {
         guard case .success(let bytes) = contents("/proc/\(pid)/cgroup"), !bytes.isEmpty else { return nil }
         return String(decoding: bytes, as: UTF8.self).split(separator: "\n").map(String.init)

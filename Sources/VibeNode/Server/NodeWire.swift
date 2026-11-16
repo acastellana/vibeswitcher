@@ -177,7 +177,8 @@ public enum NodeWire {
         /// The request kinds this server takes.
         public var kinds: [String]
         public var peer: Peer
-        /// `systemd` (the cgroup rule) or `weaker` (no cgroup to tell by: the other four lines).
+        /// `systemd` (the cgroup rule), `weaker` (no cgroup to tell by: the other four lines, and a state change only
+        /// from a peer with a controlling terminal) or `closed` (the server's own cgroup unread: no peer is the user's).
         public var rule: String
 
         public init(node: String, epoch: String, server: Server, host: Host, kinds: [String], peer: Peer, rule: String) {

@@ -192,6 +192,20 @@ struct RequestsTests {
         #expect(asked.value == 1)
     }
 
+    @Test func everyKindIsClassifiedAsAReadOrAStateChange() {
+        // The weaker rule's terminal check (`Voice.handsRefusal`) reads `changesState`: each kind the protocol names is
+        // one or the other, every kind recorded in the vault but `start` (a running node's start says when it started)
+        // changes state, and a kind no table lists is a state change.
+        let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "question.post", "question.revise", "question.withdraw"]
+        let changes: Set<String> = ["stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch"]
+        #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
+        for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
+        for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }
+        for kind in Requests.recorded where kind != "start" { #expect(NodeWire.changesState(kind), "\(kind)") }
+        for kind in Requests.carded { #expect(NodeWire.changesState(kind), "\(kind)") }
+        #expect(NodeWire.changesState("a.kind.added.later"))
+    }
+
     @Test func underTheClosedRuleNoStateChangeIsTakenAndStatusSaysWhy() async throws {
         // The server's own cgroup unread at its start (a session can make it so): no peer is the user's, not even one
         // with a terminal of its own; the reads are still answered and say why.

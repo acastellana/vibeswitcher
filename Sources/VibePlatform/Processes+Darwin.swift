@@ -311,5 +311,7 @@ extension Platform.Processes.System {
 
     /// nil: the Mac has no cgroups.
     static func cgroup(_ pid: pid_t) -> [String]? { nil }
+
+    static let hasCgroups = false
 }
 #endif

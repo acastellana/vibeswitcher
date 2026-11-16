@@ -106,11 +106,7 @@ public struct VoiceRule: Equatable, Sendable {
 
     /// Whether this system has cgroups (Linux): there an unread own cgroup is the closed rule, not the weaker one. The
     /// Mac has none, so its server (a scratch node's) is on the weaker rule.
-    #if os(Linux)
-    public static let systemHasCgroups = true
-    #else
-    public static let systemHasCgroups = false
-    #endif
+    public static var systemHasCgroups: Bool { Platform.Processes.hasCgroups }
 
     /// A cgroup a user's terminal runs in: a path, `*` standing for one path component's characters (no `/`), `{uid}`
     /// for the user's id; and where the row comes from.

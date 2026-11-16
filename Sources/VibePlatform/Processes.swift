@@ -287,4 +287,7 @@ extension Platform.Processes {
     /// Mac, which has no cgroups. The engine plan's voice rule (E1) reads them; a process of the user can't move
     /// itself out of the user's manager's tree.
     public static func cgroup(_ pid: pid_t) -> [String]? { pid > 0 ? System.cgroup(pid) : nil }
+
+    /// Whether this system has cgroups: Linux does, the Mac doesn't (`cgroup` is nil there for every process).
+    public static var hasCgroups: Bool { System.hasCgroups }
 }
