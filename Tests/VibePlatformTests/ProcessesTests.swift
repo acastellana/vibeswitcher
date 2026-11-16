@@ -1074,48 +1074,75 @@ extension ProcessesTests {
 
     /// `/proc/locks` prints the device of the file system a file is on (its superblock's), which `stat`'s `st_dev`
     /// isn't on btrfs (a subvolume's own device) or on an overlay over several file systems (a layer's): a holder there
-    /// is found all the same (none was). Run where such a mount is found (WSL's `/mnt/wslg/versions.txt`, an overlay; Fedora's
-    /// btrfs `/home`): its mount point is taken with a shared lock for the look, and let go.
-    @Test(.enabled(if: ProcessesTests.mountWithAnotherStatDevice() != nil, "no mount here whose stat device is another"))
+    /// is found all the same (none was). Run where the run's own scratch folder is on such a file system (Fedora's btrfs
+    /// `/home`): a file of the test's own is taken with a lock for the look. A mount point outside the scratch folder
+    /// (WSL's `/mnt/wslg/versions.txt`, an overlay) is looked for only when `VIBESWITCHER_TEST_MOUNT_POINTS=1` asks: it
+    /// is then taken with a shared lock for the look, and let go.
+    @Test(.enabled(if: ProcessesTests.lockedWhereStatsDeviceIsAnother != nil, "no file here whose stat device is another"))
     func theLockHolderIsFoundWhereStatsDeviceIsAnother() throws {
-        let path = try #require(Self.mountWithAnotherStatDevice())
+        let (path, own) = try #require(Self.lockedWhereStatsDeviceIsAnother)
         let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
         try #require(fd >= 0)
         defer { close(fd) }
-        try #require(flock(fd, LOCK_SH | LOCK_NB) == 0)
+        try #require(flock(fd, (own ? LOCK_EX : LOCK_SH) | LOCK_NB) == 0)
         defer { _ = flock(fd, LOCK_UN) }
-        // A holder, found by the file system's device: another run beside this one may hold its own shared lock on
-        // the same mount point and be named first, so any holder is the answer (with `stat`'s device, none ever is).
-        #expect(Platform.Processes.lockHolder(path: path) != nil, "\(path)")
+        // A holder, found by the file system's device: on a mount point, another run beside this one may hold its own
+        // shared lock and be named first, so any holder is the answer (with `stat`'s device, none ever is).
+        let holder = Platform.Processes.lockHolder(path: path)
+        #expect(own ? holder == getpid() : holder != nil, "\(path)")
     }
 
-    /// A mount point, a folder or a file, this process can open (no link followed) whose `st_dev` isn't the device `/proc/self/mountinfo`
-    /// gives its mount, the mount being the one the path reaches (fdinfo's `mnt_id`, not one mounted over). Nil on the
-    /// Mac (no mountinfo) and where there is none.
-    static func mountWithAnotherStatDevice() -> String? {
+    /// Where the case runs: a file in a scratch folder of its own whose file system's device isn't `stat`'s (own: true),
+    /// else, asked for (`VIBESWITCHER_TEST_MOUNT_POINTS=1`), a mount point (`mountWithAnotherStatDevice`).
+    static let lockedWhereStatsDeviceIsAnother: (path: String, own: Bool)? = {
         guard let mounts = try? String(contentsOfFile: "/proc/self/mountinfo", encoding: .utf8) else { return nil }
+        if let folder = try? TestScriptLinuxTests.scratch("stat-device") {
+            let file = folder.appendingPathComponent("locked")
+            if FileManager.default.createFile(atPath: file.path, contents: nil), anotherStatDevice(file.path, mounts: mounts, mount: nil) {
+                return (file.path, true)
+            }
+            try? FileManager.default.removeItem(at: folder)
+        }
+        guard ProcessInfo.processInfo.environment["VIBESWITCHER_TEST_MOUNT_POINTS"] == "1" else { return nil }
+        return mountWithAnotherStatDevice(mounts).map { ($0, false) }
+    }()
+
+    /// A mount point, a folder or a file, this process can open (no link followed) whose `st_dev` isn't the device
+    /// `/proc/self/mountinfo` gives its mount, the mount being the one the path reaches (fdinfo's `mnt_id`, not one
+    /// mounted over). Never an automount point (`autofs`: opening it mounts what's behind it). Nil where there is none.
+    static func mountWithAnotherStatDevice(_ mounts: String) -> String? {
         for line in mounts.split(separator: "\n") {
             let fields = line.split(separator: " ").map(String.init)
-            guard fields.count > 4, let id = Int(fields[0]) else { continue }
-            let numbers = fields[2].split(separator: ":").compactMap { UInt64($0) }
-            guard numbers.count == 2 else { continue }
+            guard fields.count > 4, let id = Int(fields[0]), let dash = fields.firstIndex(of: "-"), dash + 1 < fields.count,
+                  fields[dash + 1] != "autofs" else { continue }
             let path = fields[4].replacingOccurrences(of: "\\040", with: " ")
             var named = stat()
             guard lstat(path, &named) == 0, (named.st_mode & S_IFMT) == S_IFDIR || (named.st_mode & S_IFMT) == S_IFREG else { continue }
-            let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK | O_NOCTTY)
-            guard fd >= 0 else { continue }
-            defer { close(fd) }
-            var info = stat()
-            guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR || (info.st_mode & S_IFMT) == S_IFREG else { continue }
-            let device = UInt64(info.st_dev)
-            let major = ((device >> 8) & 0xfff) | ((device >> 32) & ~UInt64(0xfff))
-            let minor = (device & 0xff) | ((device >> 12) & ~UInt64(0xff))
-            guard major != numbers[0] || minor != numbers[1],
-                  let fdinfo = try? String(contentsOfFile: "/proc/self/fdinfo/\(fd)", encoding: .utf8),
-                  fdinfo.split(separator: "\n").contains("mnt_id:\t\(id)") else { continue }
-            return path
+            if anotherStatDevice(path, mounts: mounts, mount: id) { return path }
         }
         return nil
+    }
+
+    /// Whether `path` (a folder or a file, opened without following a link) has a `st_dev` that isn't the device
+    /// mountinfo gives the mount it's on (fdinfo's `mnt_id`; `mount`: only when that's this one).
+    static func anotherStatDevice(_ path: String, mounts: String, mount: Int?) -> Bool {
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK | O_NOCTTY)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR || (info.st_mode & S_IFMT) == S_IFREG,
+              let fdinfo = try? String(contentsOfFile: "/proc/self/fdinfo/\(fd)", encoding: .utf8),
+              let id = fdinfo.split(separator: "\n").first(where: { $0.hasPrefix("mnt_id:") }).flatMap({ Int($0.dropFirst("mnt_id:".count).trimmingCharacters(in: .whitespaces)) }),
+              mount == nil || mount == id,
+              let line = mounts.split(separator: "\n").first(where: { $0.split(separator: " ").first.flatMap { Int($0) } == id }) else { return false }
+        let fields = line.split(separator: " ")
+        guard fields.count > 2 else { return false }
+        let numbers = fields[2].split(separator: ":").compactMap { UInt64($0) }
+        guard numbers.count == 2 else { return false }
+        let device = UInt64(info.st_dev)
+        let major = ((device >> 8) & 0xfff) | ((device >> 32) & ~UInt64(0xfff))
+        let minor = (device & 0xff) | ((device >> 12) & ~UInt64(0xff))
+        return major != numbers[0] || minor != numbers[1]
     }
 
     @Test func theLocksListIsReadByDeviceAndInode() {
