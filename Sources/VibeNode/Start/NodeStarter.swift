@@ -2,9 +2,9 @@ import Foundation
 import VibeCore
 
 /// Starts the node as the user's systemd unit (the start plan's S2; the bootstrap path's "Who starts the node"): the
-/// unit written whole, `daemon-reload`, what the manager then shows of it checked against what was written (ST-D2), the
-/// manager's environment read again, `enable` only for `start --at-login`, `start`, then a wait for the node's server
-/// to answer. Every tool and folder is a parameter (`Tools`, ST-D1), and so are the probe and the clock: the installed
+/// unit's state read (a running unit isn't started again), the unit written whole, `daemon-reload`, what the manager
+/// then shows of it checked against what was written (ST-D2), the manager's environment read again, the caller's
+/// journal entry, `enable` only for `start --at-login`, `start`, then a wait for the node's server to answer. Every tool and folder is a parameter (`Tools`, ST-D1), and so are the probe and the clock: the installed
 /// command line passes `node(accountHome:uid:)`, tests a scratch folder and a recording `systemctl`.
 ///
 /// Each `systemctl` runs by its absolute path through `Platform.Spawn`, waited for with a bound (`run`), never
@@ -88,32 +88,53 @@ public struct NodeStarter {
     /// The unit file: `<unitFolder>/vibeswitcher-node.service`.
     public var unitFile: String { NodeFolders.join(tools.unitFolder, NodeUnit.fileName) }
 
-    /// Writes the unit for `unit`, then `daemon-reload`, the show check, the manager's environment again, `enable`
-    /// (only `atLogin`), `start`, and the wait (`awaitListening`). Each refusal names what failed; nothing after it is
-    /// asked.
-    public func startUnit(_ unit: NodeUnit.Inputs, atLogin: Bool) -> Result<Started, StartRefusal> {
+    /// The unit's `ActiveState`s from which `start` goes on: anything else (`active`, `activating`, `reloading`,
+    /// `deactivating`, `refreshing`) runs a host whose server didn't answer, and `systemctl start` on it does nothing
+    /// (the review of S2).
+    public static let stoppedStates: Set<String> = ["inactive", "failed"]
+
+    /// Reads the unit's `ActiveState` and refuses unless it is stopped (`stoppedStates`); writes the unit for `unit`,
+    /// then `daemon-reload`, the show check (`NodeUnit.showMismatch`, `NodeUnit.defaultsMismatch`), the manager's
+    /// environment again, `beforeStart` (the command line's journal entry for the start: written only once every check
+    /// passed, so a refused start leaves no entry that explains a later job, the review of S2), `enable` (only
+    /// `atLogin`), `start`, and the wait (`awaitListening`). Each refusal names what failed; nothing after it is asked.
+    /// A refusal after `enable` says that the unit stays enabled, and one at the wait's limit that it may still run.
+    public func startUnit(_ unit: NodeUnit.Inputs, atLogin: Bool, beforeStart: () -> StartRefusal? = { nil }) -> Result<Started, StartRefusal> {
         let text: String
         switch NodeUnit.text(unit) {
         case .failure(let refused): return .failure(refused)
         case .success(let made): text = made
         }
+        let state = ask(["--user", "show", "-p", "ActiveState", Self.unitName])
+        if let refused = state.refusal { return .failure(refused) }
+        let active = NodeUnit.values(state.output)["ActiveState"]?.last ?? ""
+        guard Self.stoppedStates.contains(active) else {
+            return .failure(StartRefusal("the unit \(Self.unitName) is \(ConfigSeal.inert(active.isEmpty ? "of a state the manager didn't say" : active, limit: 64)) but its server didn't answer: `systemctl start` would leave what runs as it is, and start won't say it started a build. `systemctl --user stop \(Self.unitName)` stops it (every session in it ends with it), then run start again; see journalctl --user -u \(Self.unitName)", exitCode: 1))
+        }
         if let refused = write(text) { return .failure(refused) }
         if let refused = ask(["--user", "daemon-reload"]).refusal { return .failure(refused) }
         let shown = ask(["--user", "show", Self.unitName, "-p", NodeUnit.showProperties.joined(separator: ",")])
         if let refused = shown.refusal { return .failure(refused) }
-        if let mismatch = NodeUnit.showMismatch(shown.output, expected: NodeUnit.expectedShow(unit, unitFile: unitFile)) {
-            return .failure(StartRefusal("the manager doesn't run the unit start wrote: \(mismatch). A drop-in (in \(ConfigSeal.inert(unitFile, limit: .max)).d/, a service.d/ folder, ~/.local/share/systemd/user, ~/.config/systemd/user.control or /run/user/<uid>/systemd/) or another unit file of the same name changes it; remove it, and nothing was started"))
+        if let mismatch = NodeUnit.showMismatch(shown.output, expected: NodeUnit.expectedShow(unit, unitFile: unitFile))
+            ?? NodeUnit.defaultsMismatch(shown.output, home: unit.home) {
+            return .failure(StartRefusal("the manager doesn't run the unit start wrote: \(mismatch). A drop-in (in \(ConfigSeal.inert(unitFile, limit: .max)).d/, a service.d/ folder, ~/.local/share/systemd/user, ~/.config/systemd/user.control or /run/user/<uid>/systemd/), a link in a vibeswitcher-node.service.wants/, .requires/ or .upholds/ folder, another unit file of the same name, or a unit file put in place of start's before the reload changes it; remove it, and nothing was started"))
         }
         // A `daemon-reload` applies `user.conf`'s `DefaultEnvironment=` and the `environment.d` generators: a name
         // written after the facts were read shows only now (the review of S1).
         let environment = ask(["--user", "show-environment"])
         if let refused = environment.refusal { return .failure(refused) }
         if let refused = NodeFolders.managerRefusal(showEnvironment: environment.output) { return .failure(refused) }
+        if let refused = beforeStart() { return .failure(refused) }
         if atLogin, let refused = ask(["--user", "enable", Self.unitName]).refusal { return .failure(refused) }
-        if let refused = ask(["--user", "start", Self.unitName]).refusal {
-            return .failure(StartRefusal("\(refused.text); see journalctl --user -u \(Self.unitName)", exitCode: 1))
+        // Past `enable`, a refusal says the unit stays enabled: the next login starts it, with no start check.
+        func enabled(_ refused: StartRefusal) -> StartRefusal {
+            guard atLogin else { return refused }
+            return StartRefusal("\(refused.text). The unit stays enabled at login: `systemctl --user disable \(Self.unitName)` undoes that", exitCode: refused.exitCode)
         }
-        if let refused = awaitListening() { return .failure(refused) }
+        if let refused = ask(["--user", "start", Self.unitName]).refusal {
+            return .failure(enabled(StartRefusal("\(refused.text); see journalctl --user -u \(Self.unitName)", exitCode: 1)))
+        }
+        if let refused = awaitListening() { return .failure(enabled(refused)) }
         return .success(Started(commit: unit.commit, enabledAtLogin: isEnabled))
     }
 
@@ -133,18 +154,32 @@ public struct NodeStarter {
             }
             guard now() < deadline else {
                 let limit = Int(Self.listenLimit)
+                // The unit ended would have been seen: at the limit it may still run (a host still starting, or one
+                // whose socket another process holds), and start doesn't stop it (the review of S2).
+                let still = "; the unit may still run: `systemctl --user stop \(Self.unitName)` stops it; see journalctl --user -u \(Self.unitName)"
                 if let check {
-                    return StartRefusal("the node's server didn't answer within \(limit) s: what listens on its socket fails the server check (\(ConfigSeal.inert(check, limit: .max))); see journalctl --user -u \(Self.unitName)", exitCode: 1)
+                    return StartRefusal("the node's server didn't answer within \(limit) s: what listens on its socket fails the server check (\(ConfigSeal.inert(check, limit: .max)))\(still)", exitCode: 1)
                 }
-                return StartRefusal("the node's server didn't answer within \(limit) s; see journalctl --user -u \(Self.unitName)", exitCode: 1)
+                return StartRefusal("the node's server didn't answer within \(limit) s\(still)", exitCode: 1)
             }
             pause(Self.probeInterval)
         }
     }
 
-    /// Whether the unit is enabled at login: its link in `default.target.wants`, a read, no call.
-    public var isEnabled: Bool {
-        NodeFolders.fileStatus(NodeFolders.join(tools.unitFolder, "default.target.wants/\(NodeUnit.fileName)")) != nil
+    /// Whether the unit is enabled at login: a link to it in any `.wants`, `.requires` or `.upholds` folder of the unit
+    /// folder (`enabledBy`), a read, no call.
+    public var isEnabled: Bool { !Self.enabledBy(unitFolder: tools.unitFolder).isEmpty }
+
+    /// The folders of `unitFolder` that start the unit when their unit starts (`default.target.wants`, and any other
+    /// `*.wants`, `*.requires` or `*.upholds`): each that holds an entry named `vibeswitcher-node.service`, sorted. A
+    /// plain start says them before its code (ST-D4's "says when the unit is found enabled", the review of S2). Another
+    /// unit file's own `Wants=` isn't read.
+    public static func enabledBy(unitFolder: String) -> [String] {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: unitFolder) else { return [] }
+        return names.filter { name in
+            [".wants", ".requires", ".upholds"].contains { name.hasSuffix($0) }
+                && NodeFolders.fileStatus(NodeFolders.join(NodeFolders.join(unitFolder, name), NodeUnit.fileName)) != nil
+        }.sorted()
     }
 
     // MARK: - The unit file and systemctl

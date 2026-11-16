@@ -666,7 +666,11 @@ from E1's security follow-ups (2026-11-15): `NodeJournalTests.aForgedRequestEntr
 `RequestsTests.underTheWeakerRuleAStateChangeFromAPeerWithNoTerminalIsRefused` (the weaker rule, pinned); and from
 their review: `VoiceRuleTests.anUnreadOwnCgroupClosesTheRule`,
 `RequestsTests.underTheClosedRuleNoStateChangeIsTakenAndStatusSaysWhy`,
-`StartCommandTests.aTerminalOnStdinThatIsntTheControllingOneIsNotAskedOn`. The
+`StartCommandTests.aTerminalOnStdinThatIsntTheControllingOneIsNotAskedOn`. The start plan's S2 (the start of a
+stopped node behind the typed code, and its journal entry, written only once the starter's checks pass):
+`StartCommandTests.aStartWithNoTerminalIsRefused`, `StartCommandTests.startJournalsItsOwnStartBeforeTheManagerIsAsked`,
+`StartCommandTests.aRefusedStartLeavesNoEntryThatExplainsALaterJob`,
+`StartCommandTests.theStartEntryIsWrittenOnlyOnceTheChecksPass` (the review of S2). The
 scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (a Windows
 Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. The engine's E4:
 `LeadStartTests.aSessionsProcessCannotStartALead`, `LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`,
@@ -1296,7 +1300,11 @@ what it needs.
 
 - The install folder, `build-info`, the unit and its drop-ins, `environment.d` and the manager's environment are the
   user's to write before the sandbox; a host start a worker causes runs what they name (S2), and anything else the
-  manager starts gets the manager's environment.
+  manager starts gets the manager's environment. `start` refuses what the manager shows after its `daemon-reload`
+  (a drop-in, a `vibeswitcher-node.service.wants/`, `.requires/` or `.upholds/` link, a directive start didn't
+  write, a variable: the start plan's ST-D2 and the review of its S2), but a `set-environment` after its last read, or
+  a unit file put in place of start's before the reload with a directive the check doesn't read, still reaches a start
+  the user typed, until the host checks its own environment.
 - What the install builds with, if the user keeps the toolchain in `$HOME`, and the package caches
   (`~/.cache/org.swift.swiftpm`, `~/.swiftpm`): a worker that patches the compiler, `swift-test` or a cached
   dependency makes every audit's and merge's tests pass and the next install build its code, which `build-info` then
@@ -1354,7 +1362,14 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `StartCommandTests.aManagerXdgConfigHomeDoesntMoveTheUnit`,
 `StartCommandTests.aManagerVariableThatShowsAfterTheReloadRefusesStart`,
 `StartCommandTests.theInstalledCommandLineRunsUsrBinSystemctl`, `StartCommandTests.aScratchNodeIsNotStartedByTheCommandLine`
-(the start plan's S2: the manager runs the unit start wrote, asked by the absolute systemctl with an environment of its own).
+(the start plan's S2: the manager runs the unit start wrote, asked by the absolute systemctl with an environment of its own);
+`StartCommandTests.aCommandLineBuiltInDotBuildRefusesNodeModeBeforeAnyWrite` (the start plan's S2: ST-D3's installed-build
+check before any call); `StartCommandTests.aDependencyOrDirectiveStartDidntWriteMakesStartRefuse` (a link in the
+unit's wants, requires or upholds folder, or a directive start didn't write, refuses),
+`StartCommandTests.aUnitThatAlreadyRunsIsNotStartedAgainOrClaimed`,
+`StartCommandTests.aPlainStartOfAnEnabledUnitSaysSoBeforeItsCode`, `StartCommandTests.theEnabledLinksAreFoundInEveryWantsFolder`,
+`StartCommandTests.aFailedStartAfterEnableSaysTheUnitStaysEnabled`, `StartCommandTests.theBoundedRunKillsWhatOutlivesItsTimeout`
+(the review of S2).
 
 **Tests to write:** Step 8: a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,
@@ -1723,7 +1738,8 @@ close-out review: an ended lead's inbox goes on only when the vault binds the ro
 (Task 10d: the allow-list); `NodeFactsTests.statusSaysPlainModeAndInterop`,
 `ServerTests.statusThroughTheServerListsWhatTheProbeLists` (`status`'s standing plain-mode line),
 `StartCommandTests.startPrintsTheNotPromisedListOnceAndRecordsTheAck` (`start` prints the list once and records the
-acknowledgment in the journal; the engine's E1); `LeadVaultV2Tests.aLeadTakesOnlyTheMessagesSealedForIt` (item 29: a
+acknowledgment in the journal; the engine's E1), `StartCommandTests.theS11ListComesBeforeAnythingIsStarted` (the first
+time, before anything is started: the start plan's S2); `LeadVaultV2Tests.aLeadTakesOnlyTheMessagesSealedForIt` (item 29: a
 replay window's renewal ends only by the message's own lead's taking, the security follow-ups' item 19).
 
 ## S12. After the bootstrap

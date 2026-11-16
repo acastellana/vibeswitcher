@@ -130,6 +130,20 @@ accepted every recommendation so far. Each can be overruled before its task star
      value matches `NodeUnit`. Drop-ins anywhere (the unit's `.d/`, the top-level `service.d/`,
      `~/.local/share/systemd/user`, `~/.config/systemd/user.control`, `/run/user/<uid>/systemd/{transient,user.control}`)
      show in `DropInPaths`. A unit file that shadows ours shows in `FragmentPath`.
+     - *2026-11-16, the review of S2:* a `vibeswitcher-node.service.wants/`, `.requires/` or `.upholds/` link in any of
+       those folders adds a dependency, not a drop-in: `DropInPaths` stays empty, and the linked unit starts with the
+       node's, between start's last check and the host's exec. And a unit file put in place of start's between its
+       rename and the reload passes the eleven properties with a directive they don't hold. So the `-p` list is
+       `NodeUnit.showProperties`: the eleven, then `Type`, `StandardInput`, `EnvironmentFiles`, `PassEnvironment`,
+       `ExecCondition`, `ExecStop`, `ExecReload`, `RootDirectory`, `RootImage`, `BindPaths`, `BindReadOnlyPaths`,
+       `ExecSearchPath`, `WorkingDirectory`, `UMask`, and the dependencies that start another unit (`Wants`,
+       `Requires`, `Requisite`, `BindsTo`, `Upholds`, `OnSuccess`, `OnFailure`), each empty or start's value, except
+       `Requires` (only the slice and `basic.target`), `WorkingDirectory` (the home, `!<home>` as a user unit's
+       default) and `UMask` (other users' write masked): `NodeUnit.defaultsMismatch`, from a read of
+       `systemctl --user show dbus.service` (2026-11-16). `LoadCredential` and `SetCredential` print `[unprintable]`
+       whether empty or not, so they aren't asked. A unit replaced with a directive outside the list still passes: only
+       the host's own check of its environment, the item for the lead under S2, closes that. *For S9:* the real unit's
+       `show` is the first measurement of these defaults on the user's node; a refusal there names the property.
    - `start` refuses while the manager's environment holds any name outside `NodeFacts.expectedManagerEnvironment`
      (`NodeFacts.extraVariables`). Today `start` only names them. `GIT_CONFIG_*`, `GIT_EXEC_PATH` and the like aren't
      in `UnsetEnvironment=`, and the host runs git. The refusal names each variable and says how to clear it:
@@ -193,6 +207,8 @@ accepted every recommendation so far. Each can be overruled before its task star
    8. The command line's own code (EN-D5 "own").
    9. The journal entry `NodeJournal.entry(event: "start", action:)`, so `status` doesn't show the user's own start as
       unexplained (`NodeJournal.unexplained`: an own `start` event at most 120 s before the job's).
+      *2026-11-16, the review of S2:* written by the starter, after its checks in step 10 and before `enable` and
+      `start`, so a refused start leaves no entry.
    10. Write the unit, `daemon-reload`, the `show` check (ST-D2), `enable` (only with `--at-login`), `start`, then wait
        for the server.
 
@@ -815,6 +831,40 @@ manager refusal).
     `VibeNodeTests|VibeCoreTests|VibePlatformTests` under `vs-heavy`. That run's other failures,
     `LoginShellVariableTests` (two cases, timing under the full run's load), passed alone; S2 touches nothing they run.
     `aScratchNodeIsNotStartedByTheCommandLine` fails with `Start.swift` reverted.
+
+  *2026-11-16, the review of S2 (committed as "v2 step 8: S2 review fixes"):*
+  - **The show check reads more** (ST-D2's note of this date): the dependencies that start another unit, so a
+    `vibeswitcher-node.service.wants/` link refuses, and the directives a unit put in place of start's before the
+    reload could add. `NodeUnit.pulls`, `defaultRequires` and `defaultsMismatch(_:home:)` are new.
+  - **The unit's state first.** `startUnit` reads `show -p ActiveState` before it writes anything and refuses unless
+    the unit is `inactive` or `failed` (`NodeStarter.stoppedStates`): `systemctl start` on a running unit does nothing,
+    and start would say it started a build that may not be what runs. Every call list in the cases begins with it.
+  - **The `start` entry moves into the starter** (ST-D5's step 9 comes after the starter's checks now):
+    `startUnit(_:atLogin:beforeStart:)` runs `beforeStart` after the manager's environment is read again and before
+    `enable` and `start`, and `StartSequence` passes the journal write as it, so a start the checks refuse leaves no
+    entry that explains a job someone else starts within its 120 s. `Steps.starter` takes the closure as a third
+    argument. `startJournalsItsOwnStartBeforeTheManagerIsAsked` asserts the entry after the starter is reached and
+    before `unit:start`.
+  - **Enabled, before the code.** `Steps.enabledBy` (`NodeStarter.enabledBy(unitFolder:)`: every `*.wants`,
+    `*.requires` and `*.upholds` folder of the unit folder holding the unit, a dangling link included) is read before
+    the confirmation, and `NodeTexts.start(unit:current:previousCommit:atLogin:enabledBy:)` says "It is enabled already
+    (…): the manager starts it at login, without start's checks" (ST-D4's "says when the unit is found enabled"). Another
+    unit file's own `Wants=` isn't read. `isEnabled`, and so `Started.enabledAtLogin`, is the same read.
+  - **Failures after `enable`** say the unit stays enabled and how to undo it; the wait's limit says the unit may still
+    run and how to stop it. Start doesn't undo either itself.
+  - **Scratch wiring.** On a scratch node `Start.swift` builds no `NodeStarter.Tools`: its starter refuses (69,
+    `StartSequence.scratchNotStarted`) and it reads no unit, so a regression in the sequence's branches still can't
+    reach the account's manager or unit folder. No case reaches the command line's wiring past the sequence: the
+    guard is read, not tested.
+  - **`NodeStarter.run`** has its own case (`theBoundedRunKillsWhatOutlivesItsTimeout`: an exit's status and output; a
+    program in the foreground past its timeout, and one leaving a child that holds its stdout, come back nil in time
+    with both pids ended). It fails with the timeout's group kill made a kill of the pid alone.
+  - The security document's S3, S9 and S11 `Held by:` lines name S2's cases and the review's.
+  - New cases: `aRefusedStartLeavesNoEntryThatExplainsALaterJob`, `aPlainStartOfAnEnabledUnitSaysSoBeforeItsCode`,
+    `aDependencyOrDirectiveStartDidntWriteMakesStartRefuse`, `theStartEntryIsWrittenOnlyOnceTheChecksPass`,
+    `aUnitThatAlreadyRunsIsNotStartedAgainOrClaimed`, `aFailedStartAfterEnableSaysTheUnitStaysEnabled`,
+    `theEnabledLinksAreFoundInEveryWantsFolder`, `theBoundedRunKillsWhatOutlivesItsTimeout`. Each of the fixes'
+    cases fails with its fix's behaviour taken out (the API kept).
 
 **Done when:** the cases pass on Linux. The port map's `HostClientSlowStartTests` row is `ported`. The Mac runs
 `NodeTexts`' and `StartSequence`'s cases.

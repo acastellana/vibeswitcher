@@ -49,9 +49,27 @@ public enum NodeUnit {
     public static let killModeConsequence = "when the host exits for any reason (a crash, an OOM kill, an idle exit, a failed fallback, `stop`), every session, the server and every process left in the unit's cgroup end with it, as the vault's loss already ends every team"
 
     /// The properties `start` asks of the manager after `daemon-reload` (`systemctl --user show -p …`, ST-D2), in this
-    /// order.
+    /// order: ST-D2's eleven; then what a unit file replaced between start's rename and the reload could add that
+    /// changes what the host runs, reads or inherits (the review of S2: a directive start didn't write passes no
+    /// longer); then `pulls`. `LoadCredential` and `SetCredential` aren't asked: systemd 255 prints `[unprintable]` for
+    /// both, empty or not (measured with `systemctl --user show dbus.service`, a read, 2026-11-16).
     public static let showProperties = ["FragmentPath", "DropInPaths", "ExecStart", "ExecStartPre", "ExecStartPost", "ExecStopPost",
-                                        "Environment", "UnsetEnvironment", "Restart", "KillMode", "NeedDaemonReload"]
+                                        "Environment", "UnsetEnvironment", "Restart", "KillMode", "NeedDaemonReload",
+                                        "Type", "StandardInput", "EnvironmentFiles", "PassEnvironment", "ExecCondition", "ExecStop",
+                                        "ExecReload", "RootDirectory", "RootImage", "BindPaths", "BindReadOnlyPaths", "ExecSearchPath",
+                                        "WorkingDirectory", "UMask"] + pulls
+
+    /// The dependencies through which starting the unit also starts another unit (`systemd.unit(5)`): a
+    /// `vibeswitcher-node.service.wants/` or `.requires/` link in any unit folder adds one without a drop-in, so
+    /// `DropInPaths` stays empty (the review of S2). Each must be empty but `Requires`, which holds only
+    /// `defaultRequires`.
+    public static let pulls = ["Wants", "Requires", "Requisite", "BindsTo", "Upholds", "OnSuccess", "OnFailure"]
+
+    /// What a user service with `DefaultDependencies=yes` requires: its slice (`app.slice`; `-.slice` where the manager
+    /// has no `app.slice`) and `basic.target` (`sysinit.target` in a system manager). Measured here: a user unit's
+    /// `Requires=` is its slice and `basic.target` beside what its file names (2026-11-16). Both are active while the
+    /// manager runs, so what they want is no part of the start's transaction.
+    public static let defaultRequires: Set<String> = ["app.slice", "-.slice", "basic.target", "sysinit.target"]
 
     /// The unit's PATH: root's folders first, then swiftly's and node's (S9, S10).
     public static func path(swiftBin: String, nodeBin: String) -> String {
@@ -193,7 +211,58 @@ public enum NodeUnit {
             "Restart": "no",
             "KillMode": "control-group",
             "NeedDaemonReload": "no",
+            "Type": "simple",
+            "StandardInput": "null",
+            "EnvironmentFiles": "",
+            "PassEnvironment": "",
+            "ExecCondition": "",
+            "ExecStop": "",
+            "ExecReload": "",
+            "RootDirectory": "",
+            "RootImage": "",
+            "BindPaths": "",
+            "BindReadOnlyPaths": "",
+            "ExecSearchPath": "",
+            "Wants": "",
+            "Requisite": "",
+            "BindsTo": "",
+            "Upholds": "",
+            "OnSuccess": "",
+            "OnFailure": "",
         ]
+    }
+
+    /// The properties `expectedShow` can't hold as one value, judged from `shown` (`systemctl show`'s lines): nil when
+    /// `Requires` names only `defaultRequires` (in any order), `WorkingDirectory` is a user unit's default (`!<home>`,
+    /// the manager's own home: measured, 2026-11-16) or `home`, empty or `~`, and `UMask` is printed and masks other
+    /// users' write (the user manager's umask is the user's, `0002` here); else the first that isn't, said with its
+    /// value.
+    public static func defaultsMismatch(_ shown: String, home: String) -> String? {
+        let printed = values(shown)
+        let required = (printed["Requires"] ?? []).flatMap { $0.split(separator: " ").map(String.init) }
+        if let extra = required.first(where: { !defaultRequires.contains($0) }) {
+            return "the manager shows Requires=\(ConfigSeal.inert(required.joined(separator: " "), limit: .max)): \(ConfigSeal.inert(extra, limit: .max)) is none of a unit's default dependencies (\(defaultRequires.sorted().joined(separator: " ")))"
+        }
+        let directory = (printed["WorkingDirectory"] ?? []).joined(separator: "\n")
+        let folder = directory.hasPrefix("!") ? String(directory.dropFirst()) : directory
+        if !["", "~", home].contains(folder) {
+            return "the manager shows WorkingDirectory=\(ConfigSeal.inert(directory, limit: .max)) where start wrote none (a user unit's default is the home, \(ConfigSeal.inert(home, limit: .max)))"
+        }
+        let umask = (printed["UMask"] ?? []).joined(separator: "\n")
+        guard let mask = Int(umask, radix: 8), umask.utf8.count <= 4, mask & 0o002 != 0 else {
+            return "the manager shows UMask=\(ConfigSeal.inert(umask, limit: .max)): files the host makes would be writable by other users, or the mask can't be read"
+        }
+        return nil
+    }
+
+    /// `systemctl show`'s `Key=value` lines: key to its values, in order.
+    static func values(_ shown: String) -> [String: [String]] {
+        var printed: [String: [String]] = [:]
+        for line in shown.split(whereSeparator: \.isNewline) {
+            guard let equals = line.firstIndex(of: "=") else { continue }
+            printed[String(line[..<equals]), default: []].append(String(line[line.index(after: equals)...]))
+        }
+        return printed
     }
 
     /// The first of `expected`'s properties (in `showProperties`' order) that `shown` (`systemctl show`'s
@@ -201,11 +270,7 @@ public enum NodeUnit {
     /// empty (`show` leaves out an empty command list); a command list printed on several lines is all of them;
     /// `ExecStart` must be one line beginning with its expected value.
     public static func showMismatch(_ shown: String, expected: [String: String]) -> String? {
-        var printed: [String: [String]] = [:]
-        for line in shown.split(whereSeparator: \.isNewline) {
-            guard let equals = line.firstIndex(of: "=") else { continue }
-            printed[String(line[..<equals]), default: []].append(String(line[line.index(after: equals)...]))
-        }
+        let printed = values(shown)
         let order = showProperties.filter { expected[$0] != nil } + expected.keys.filter { !showProperties.contains($0) }.sorted()
         for key in order {
             guard let want = expected[key] else { continue }

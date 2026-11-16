@@ -75,10 +75,14 @@ public struct StartArguments: Equatable, Sendable {
 /// 7. The build: the unit's commit when there is a unit file (`unitBuild`), else the command line's own; the swift and
 ///    node folders (`toolFolders`); the preflight. The unit's `Inputs` are made from the account's home, those folders
 ///    and the commit, never from the unit's own `HOME` or swift folder (the review of S1).
-/// 8. The confirmation (`NodeTexts.start`), the command line's own code, then the journal entry
-///    `NodeJournal.entry(event: "start", action:)`, so `status` doesn't show the user's own start as unexplained.
-/// 9. The starter (`NodeStarter.startUnit`: the unit written, `daemon-reload`, the show check, the manager's
-///    environment again, `enable` with `--at-login`, `start`, the wait).
+/// 8. Whether the unit is enabled already (`enabledBy`, a read), then the confirmation (`NodeTexts.start`), which says
+///    so, and the command line's own code.
+/// 9. The starter (`NodeStarter.startUnit`: the unit's state, the unit written, `daemon-reload`, the show check, the
+///    manager's environment again, then `beforeStart`, `enable` with `--at-login`, `start`, the wait). `beforeStart`
+///    writes the journal entry `NodeJournal.entry(event: "start", action:)`, so `status` doesn't show the user's own
+///    start as unexplained; it runs only once the starter's checks passed, so a start they refuse leaves no entry
+///    that explains a job someone else starts within its window (the review of S2; ST-D5 put the entry before the
+///    starter, noted 2026-11-16).
 public struct StartSequence {
     /// Which node the command line is on.
     public enum Kind: Equatable, Sendable {
@@ -141,12 +145,14 @@ public struct StartSequence {
         public var unitBuild: (String) -> Result<NodeUnit.Inputs, StartRefusal>
         /// The commit `<prefix>/current` names, nil when none.
         public var current: () -> String?
+        /// The unit folder's folders that hold a link to the unit (`NodeStarter.enabledBy`), read before the code.
+        public var enabledBy: () -> [String]
         /// `NodeFolders.toolFolders` for `--node-version` and the existing unit.
         public var toolFolders: (_ nodeVersion: String?, _ existingUnit: NodeUnit.Inputs?) -> Result<(swiftBin: String, nodeBin: String), StartRefusal>
         /// `StartPreflight.check` with those folders.
         public var preflight: (_ swiftBin: String, _ nodeBin: String) -> Result<StartPreflight.Found, StartRefusal>
-        /// `NodeStarter.startUnit`.
-        public var starter: (_ unit: NodeUnit.Inputs, _ atLogin: Bool) -> Result<NodeStarter.Started, StartRefusal>
+        /// `NodeStarter.startUnit`, given `beforeStart` (the journal entry for the start) to run once its checks pass.
+        public var starter: (_ unit: NodeUnit.Inputs, _ atLogin: Bool, _ beforeStart: @escaping () -> StartRefusal?) -> Result<NodeStarter.Started, StartRefusal>
         /// A new action id (a UUID's text), from which each typed code comes (`NodeIds.code(action:)`).
         public var newAction: () -> String
 
@@ -158,9 +164,10 @@ public struct StartSequence {
                     typed: @escaping (_ code: String, _ what: String) -> TypedOutcome, say: @escaping (String) -> Void,
                     journal: @escaping ([(name: String, value: String)]) -> Bool, existingUnit: @escaping () -> String?,
                     unitBuild: @escaping (String) -> Result<NodeUnit.Inputs, StartRefusal>, current: @escaping () -> String?,
+                    enabledBy: @escaping () -> [String],
                     toolFolders: @escaping (_ nodeVersion: String?, _ existingUnit: NodeUnit.Inputs?) -> Result<(swiftBin: String, nodeBin: String), StartRefusal>,
                     preflight: @escaping (_ swiftBin: String, _ nodeBin: String) -> Result<StartPreflight.Found, StartRefusal>,
-                    starter: @escaping (_ unit: NodeUnit.Inputs, _ atLogin: Bool) -> Result<NodeStarter.Started, StartRefusal>,
+                    starter: @escaping (_ unit: NodeUnit.Inputs, _ atLogin: Bool, _ beforeStart: @escaping () -> StartRefusal?) -> Result<NodeStarter.Started, StartRefusal>,
                     newAction: @escaping () -> String = { UUID().uuidString.lowercased() }) {
             self.home = home
             self.prefix = prefix
@@ -178,6 +185,7 @@ public struct StartSequence {
             self.existingUnit = existingUnit
             self.unitBuild = unitBuild
             self.current = current
+            self.enabledBy = enabledBy
             self.toolFolders = toolFolders
             self.preflight = preflight
             self.starter = starter
@@ -264,15 +272,18 @@ public struct StartSequence {
         let inputs = NodeUnit.Inputs(prefix: steps.prefix, commit: commit, home: steps.home, swiftBin: folders.swiftBin, nodeBin: folders.nodeBin)
         if case .failure(let refused) = NodeUnit.text(inputs) { return .failure(refused) }
 
-        steps.say(NodeTexts.start(unit: inputs, current: steps.current(), previousCommit: unitInputs?.commit, atLogin: arguments.atLogin))
+        let enabledBy = steps.enabledBy()
+        steps.say(NodeTexts.start(unit: inputs, current: steps.current(), previousCommit: unitInputs?.commit, atLogin: arguments.atLogin, enabledBy: enabledBy))
         steps.say("claude: \(ConfigSeal.inert(found.claude, limit: .max)); git: \(ConfigSeal.inert(found.git, limit: .max))")
         let action = steps.newAction()
         let outcome = steps.typed(NodeIds.code(action: action), "This starts the node from the build above.")
         guard outcome == .typed else { return .failure(StartRefusal(outcome.refusal)) }
-        guard steps.journal(NodeJournal.entry(event: "start", action: action)) else {
-            return .failure(StartRefusal("the start couldn't be written to the journal: nothing was started", exitCode: 1))
+        let journal = steps.journal
+        let entry = {
+            journal(NodeJournal.entry(event: "start", action: action))
+                ? nil : StartRefusal("the start couldn't be written to the journal: nothing was started", exitCode: 1)
         }
-        switch steps.starter(inputs, arguments.atLogin) {
+        switch steps.starter(inputs, arguments.atLogin, entry) {
         case .failure(let refused): return .failure(refused)
         case .success(let started):
             steps.say("the node started from \(started.commit); its server answers" + (started.enabledAtLogin ? " (enabled: it starts at your login)" : ""))

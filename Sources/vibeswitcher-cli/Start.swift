@@ -7,7 +7,8 @@ import VibeNode
 /// facts and the interop refusal, the manager's environment, then a running node's answer, or, for a stopped node,
 /// S11's acknowledgment, the build, the confirmation, the typed code, the journal entry and `NodeStarter`'s start of
 /// the unit. On the user's node every tool and folder is a constant or comes from `getpwuid` (`NodeStarter.node`); a
-/// scratch node is never started here (69: its harness starts it).
+/// scratch node is never started here (69: its harness starts it), and its command line never builds those tools: its
+/// starter refuses at the wiring too, and it reads no unit (the review of S2).
 enum StartCommand {
     static func run(_ arguments: [String]) -> Int32 {
         guard let parsed = StartArguments.parse(arguments) else { return Say.usage(StartArguments.usage) }
@@ -15,11 +16,11 @@ enum StartCommand {
         context.sayScratch()
         let home = VibePaths.accountHome
         let prefix = NodeFolders.defaultPrefix(accountHome: home)
-        let tools = NodeStarter.node(accountHome: home, uid: getuid())
+        let tools: NodeStarter.Tools? = context.isScratch ? nil : NodeStarter.node(accountHome: home, uid: getuid())
         let manager = Once { context.managerEnvironment() }
         let steps = StartSequence.Steps(
             home: home, prefix: prefix,
-            kind: { context.isScratch ? .scratch : .node(NodeFolders.mode(runtimeFolder: tools.runtimeFolder)) },
+            kind: { tools.map { .node(NodeFolders.mode(runtimeFolder: $0.runtimeFolder)) } ?? .scratch },
             installedBuild: { NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: prefix) },
             facts: { context.facts(managerEnvironment: manager.value) },
             managerEnvironment: { manager.value },
@@ -31,15 +32,17 @@ enum StartCommand {
             say: { Say.out($0) },
             journal: { context.writeJournal($0) },
             existingUnit: {
-                guard let data = FileManager.default.contents(atPath: (tools.unitFolder as NSString).appendingPathComponent(NodeUnit.fileName)) else { return nil }
+                guard let tools, let data = FileManager.default.contents(atPath: (tools.unitFolder as NSString).appendingPathComponent(NodeUnit.fileName)) else { return nil }
                 return String(decoding: data, as: UTF8.self)
             },
             unitBuild: { NodeFolders.unitBuild(unitText: $0, prefix: prefix) },
             current: { currentCommit(prefix: prefix) },
+            enabledBy: { tools.map { NodeStarter.enabledBy(unitFolder: $0.unitFolder) } ?? [] },
             toolFolders: { NodeFolders.toolFolders(accountHome: home, nodeVersion: $0, existingUnit: $1) },
             preflight: { StartPreflight(claudeLink: NodePreflight.claudeLink(root: context.root, accountHome: home), swiftBin: $0, nodeBin: $1).check() },
-            starter: { unit, atLogin in
-                NodeStarter(tools: tools, listen: { probe(context, tools: tools) }).startUnit(unit, atLogin: atLogin)
+            starter: { unit, atLogin, beforeStart in
+                guard let tools else { return .failure(StartRefusal(StartSequence.scratchNotStarted, exitCode: 69)) }
+                return NodeStarter(tools: tools, listen: { probe(context, tools: tools) }).startUnit(unit, atLogin: atLogin, beforeStart: beforeStart)
             })
         switch StartSequence(steps: steps).run(parsed) {
         case .success: return 0
