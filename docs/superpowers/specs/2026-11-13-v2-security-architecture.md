@@ -505,13 +505,29 @@ line shows is made by the engine from facts it derives: the task, the full commi
 the verdict from the vault, the sensitive paths touched. The answer is bound to that card's id, held in the server's
 memory, never to text in `board.json` (which any session can write, `LeadVaultApprovals.swift:5`). Questions come to
 the server from the lead's tool server through the server's own socket, not by reading the board back. The lead's
-question text is still the lead's (S1, item 3).
+question text is still the lead's (S1, item 3). **(2026-11-16)** What an answer or a hold tells the lead, sealed as the
+user's, and which kind of answer it counts as (answered, after a withdrawal, after the timer), are the card's: the
+question as the tool server posted it, never as `board.json` holds it now. The board is still written, as the lead's
+record, but a worker that rewrites it can't attach the user's "Yes" to a question the user never saw, turn the answer
+into a note, or keep it from being sent (the close-out review).
+
+**(call, 2026-11-16)** **Only a posted question's timer runs out, as posted.** A question's timer runs on its card,
+with the deadline and proposal the lead's tool server posted, never on `board.json`, where any session can add a
+question or give one a deadline and a proposal of its own: otherwise VibeSwitcher's own `timer` sender would tell the
+lead to go ahead with what a worker wrote, and close the user's card as decided. The board records the decision for
+the lead's record. A server restart forgets the cards (they are memory only), so no timer runs out for a question the
+user no longer sees (the close-out review).
 
 **(call, 2026-11-16)** **The diff's base is the one the user accepted.** The files and diffstat are git's of
-`<base>...<commit>`, and the base is `workflow.md`'s `base_branch` (the main branch when it names none) only while its
-hash is the one `config accept` recorded (`ConfigHoldStore.baseBranchKey`, `base show`'s gate), never the board's
-`baseBranch`: both files are any session's to write, and a base moved onto the task's own branch would show the user
-an approval with nothing changed. Otherwise the card says why and shows no files. The base is resolved to its commit
+`<base>...<commit>`, and the base is `workflow.md`'s `base_branch` only while its hash is the one `config accept`
+recorded (`ConfigHoldStore.baseBranchKey`, `base show`'s gate), never the board's `baseBranch` alone: both files are any
+session's to write, and a base moved onto the task's own branch would show the user an approval with nothing changed.
+Otherwise the card says why and shows no files. When `base_branch` names none (the template's), the base is the branch
+the lead merges into: the board's `baseBranch` only while the vault records a head for it (the lead's start recorded
+the branch it started on), else the main branch. **(2026-11-16)** The diff starts at the head the vault records for
+the base (where the lead last left it), never where `refs/heads/<base>` points now, which any session can move through
+the shared `.git`; a move since is a problem on the card, naming the recorded head, and with no head recorded the card
+says its diff starts where the branch points now (the close-out review). The base is resolved to its commit
 as `refs/heads/<base>^{commit}` and the range follows `--end-of-options`, so no name is read as an option (git's
 `--output` writes a file). A revised question that offers another commit's approval rebuilds the facts for that
 commit, and an answer approving a commit the card doesn't show is refused (the E6 review, verified 2026-11-16). The
@@ -530,6 +546,12 @@ answer's renewal and let it arrive unverified. The security follow-ups' items 16
 **(call, new)** **Answers at rest.** A user's-voice request the server accepts is recorded in the host's vault (an
 app-only write) before it is acted on, and a restarted server takes answers and holds only from there, asking again
 for anything it can't find. Nothing in a file the server or the engine keeps is taken as the user's answer.
+**(2026-11-16)** A held `.user` message in `engine.json` goes as the user's after a restart only while the vault holds
+its action as a message of that text for the project it is held for, and none of that action's messages was posted
+since (the vault spends the action when it is): a past answer put back in the file (action ids are in `status`), for
+its lead or another project's, goes as not vouched for, and of two entries with one action only the first is the
+user's. A message held in the server's own life is posted whatever the lead's inbox records say (they are any
+process's to write), and a `.user` seal is retired only once its line is out of the inbox (the close-out review).
 
 Every request the socket takes, with the voice it needs; anything not listed is refused. The engine plan's
 [protocol](../plans/2026-11-13-v2-engine.md#the-protocol) has the same list with each request's arguments. "Typed" is
@@ -645,7 +667,12 @@ The engine's E8: `RestartTests.anAnswerWrittenToTheServersFilesIsNotTakenAfterAR
 `ApprovalCardTests.anApprovalCardTakesOnlyTheBaseTheUserAccepted` (item 14),
 `ApprovalCardTests.aRevisedApprovalShowsTheNewCommitsFactsAndApprovesOnlyThat` (item 15, verified),
 `UserSealTests.aLineRewrittenUnderAPostedIdKeepsNoSealAlive`, `LeadVaultV2Tests.aUserSealIsRenewedNoLongerThanItsCap`
-(item 16), `LeadVaultV2Tests.onlyATakingMarksAUserSealChecked` (item 17).
+(item 16), `LeadVaultV2Tests.onlyATakingMarksAUserSealChecked` (item 17). The close-out review (2026-11-16):
+`AnswerTests.anAnswerGoesToTheLeadAsTheCardShowedTheQuestionNeverAsTheBoardSays`, `AnswerTests.aHoldQuotesTheCardsQuestionAndProposal`,
+`AnswerTests.onlyAPostedQuestionsOwnTimerRunsOut`, `ApprovalCardTests.anApprovalCardDiffsAgainstTheHeadTheVaultRecords`,
+`ApprovalCardTests.anEmptyBaseBranchTakesTheBranchTheLeadStartedOn`,
+`DeliveryTests.aUsersMessageAtRestIsVouchedForOnceAndOnlyForItsOwnProject`,
+`DeliveryTests.aHeldMessagesIdInTheDeliveredRecordDoesntDropIt`.
 
 **Tests to write:** Step 8: `aSessionsProcessCannotInstallHooks`.
 
@@ -971,7 +998,9 @@ the branch is at. So on Linux, **(call, extended)**:
   hashes and the rails' values), and a held thing or a rail is said to be "the same as at your last accept" only while
   that seal checks with the host's vault now; rewritten, or after a host restart (a vault with another key), it is
   said to have changed, to be new, or not to be known to be the same, never the same: no reassuring mark from data
-  nothing vouches for (the security follow-ups' item 18). So after a host restart, when the snapshot matters, the
+  nothing vouches for (the security follow-ups' item 18). The seal carries no counter, so it is also checked against
+  the vault's record now: each watched thing and rail the record holds must be what the snapshot says the accept left,
+  so an earlier accept's sealed snapshot, kept and put back, doesn't speak for a later accept (the close-out review). So after a host restart, when the snapshot matters, the
   user reads every value the list shows; the app has no snapshot (its vault survives on the Mac).
 - Workers, verifiers and merges wait until the accept, as the plan says.
 
@@ -1016,7 +1045,8 @@ engine's E4: `lead` refused, no floor seeded); `RestartTests.aHostRestartSaysThe
 `RestartTests.theSnapshotTurnsEverythingNewIntoWhatChanged`, `RestartTests.theRestartNoticeSaysWhatWasResetAndHowTheHostEnded`,
 `RestartTests.aHandoverKeepsTheServerAndItsLeads`, `EngineStateTests.theSnapshotSaysOfEachThingWhetherItsTheSameChangedOrNew`
 (the engine's E8: the restart path, the two-step accept, the snapshot); `ConfigHoldStoreTests.aSnapshotThisHostsVaultDidntSealNeverSaysTheSame`
-(the security follow-ups' item 18, 2026-11-16: "the same" only from a snapshot the host's vault sealed).
+(the security follow-ups' item 18, 2026-11-16: "the same" only from a snapshot the host's vault sealed);
+`ConfigHoldStoreTests.anEarlierSealedSnapshotDoesntSpeakForALaterAccept` (the close-out review: only the last accept's).
 
 **Tests to write:** none left: E8's are under Held by.
 
@@ -1634,7 +1664,8 @@ plan's E1; `doctor`'s summary after the bootstrap.
 clone.
 
 **Held by:** `LeadStartTests.aBoardNamingAnotherProjectsSessionHandsTheNewLeadNothingOfIt` (item 7: the security
-follow-ups' item 11, 2026-11-16), `DeliveryTests.aBoardNamingTheBoundSessionOnAWorkersTerminalGetsNothing`,
+follow-ups' item 11, 2026-11-16), `LeadStartTests.anEndedLeadTheVaultBindsHandsItsInboxToTheNextOne` (item 7, the
+close-out review: an ended lead's inbox goes on only when the vault binds the role to it), `DeliveryTests.aBoardNamingTheBoundSessionOnAWorkersTerminalGetsNothing`,
 `DeliveryTests.aBoardNamingTheBoundSessionWithAnotherAgentsPidGetsNothing` (item 12, verified),
 `EngineStateTests.noHeldMessagesSenderIsTakenFromTheFile`, `DeliveryTests.aHeldMessageForAFolderThatIsNoRepositoryIsDroppedAtARestart`
 (item 13); `ProjectAllowListTests.aSpawnOutsideTheListIsRefusedWithItsReason`,

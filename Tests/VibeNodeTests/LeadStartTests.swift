@@ -288,6 +288,35 @@ struct LeadStartTests {
         #expect(world.holder() == new.uuidString)
     }
 
+    /// The close-out review of item 11: a lead whose session ended (a crash) still hands what waits in its inbox to the
+    /// next lead, when the vault binds this root's lead role to that session and the host listed it in this root on the
+    /// board's terminal: the user's answer it never took isn't left behind.
+    @Test func anEndedLeadTheVaultBindsHandsItsInboxToTheNextOne() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let old = try started(await world.start())
+        let oldSession = try #require(world.leads().first { $0.id == old })
+        let harness = NodeHarness(found: oldSession, on: world.host, fake: world.fake)
+        try await harness.waitFor { harness.agentPid != nil }
+        let pid = try #require(harness.agentPid)
+        try BoardStore(root: world.repo).update { board in
+            board.leadPid = pid
+            board.leadTTY = oldSession.tty
+            board.leadSession = old.uuidString
+        }
+        try SteerInbox.post(SteerMessage(text: "a report for the lead", from: .system("worker a"), agentPid: pid), tty: oldSession.tty,
+                            root: world.host.root)
+        // Its agent ends; the host lists the session, ended.
+        harness.tell(["op": "exit"])
+        #expect(await eventually(timeout: 120) { world.queue.sync { world.link.sessions.first { $0.id == old }?.isLive == false } })
+        #expect(world.holder() == old.uuidString)
+
+        let new = try started(await world.start())
+        #expect(new != old)
+        #expect(SteerInbox.pending(tty: oldSession.tty, root: world.host.root).isEmpty)
+        #expect(world.held().map(\.text) == ["a report for the lead"], "\(world.held())")
+    }
+
     /// ReplacedLeadRoutingTests' `startsAndTheNoticesReadWhichLeadHoldsTheRoleOffTheMainThread`, the start's half: of
     /// two leads sharing the root (the replaced one and the one holding the role), a start finds the one holding the
     /// role off the engine's queue, shows it and starts nothing.
@@ -526,7 +555,10 @@ struct LeadStartTests {
 
         // The lead ended; started again with --take-head, the branch is taken as it is.
         world.link.kill(lead)
-        #expect(await eventually(timeout: 60) { world.leads().isEmpty })
+        // Ended in the host's list and in the link's, which the start decides from.
+        #expect(await eventually(timeout: 60) {
+            world.leads().isEmpty && !world.queue.sync { world.link.sessions.contains { $0.id == lead && $0.isLive } }
+        })
         _ = try started(await world.start(takeHead: true))
         #expect(try world.host.vault.head(root: world.repo, branch: "main") == moved)
     }

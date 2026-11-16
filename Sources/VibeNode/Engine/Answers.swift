@@ -2,11 +2,14 @@ import Foundation
 import VibeCore
 
 /// The vault's record of the user's actions as the check a held `.user` message passes after a restart (EN-D9, E5's
-/// `UserActions`): it holds the action with the message's digest. Nil when the host can't be asked.
+/// `UserActions`): it holds the action as a message with its digest for that project, unspent (`LeadVaultV2Client.vouches`).
+/// Nil when the host can't be asked.
 public struct VaultUserActions: UserActions {
     let client: LeadVaultV2Client
     public init(client: LeadVaultV2Client) { self.client = client }
-    public func holds(action: String, digest: String) -> Bool? { try? client.holds(action: action, digest: digest) }
+    public func vouches(action: String, digest: String, project: String) -> Bool? {
+        try? client.vouches(action: action, digest: digest, subject: project)
+    }
 }
 
 /// A `.user` message the server posted into a lead's inbox (`LeadEngine.postedUser`): the terminal, its text's digest
@@ -99,8 +102,8 @@ extension LeadEngine {
         let existing = cards.card(question: question.id, root: root)
         guard existing != nil || op == .post else { return nil }
         var card = existing ?? CardStore.Card(root: root, kind: .question)
-        card.question = question
-        card.closed = Self.closed(question)
+        card.question = Self.keepingTheUsers(question, from: existing?.question)
+        card.closed = Self.closed(card.question ?? question)
         // The commit the options approve now: a revision that names another commit (or adds or drops "Approve") makes
         // the card show that one's facts, built anew, never the earlier commit's beside the new wording.
         let commit = Self.approvalCommit(question)
@@ -111,6 +114,23 @@ extension LeadEngine {
         cardsChanged()
         if rebuild, let commit { buildApproval(card: card.id, commit: commit, root: root) }
         return card
+    }
+
+    /// `posted` as the card keeps it: what the user did on the card (a hold, an answer) and what its timer decided stand,
+    /// whatever the post says (a revision's post is built from the board, which any session can write, so a hold or an
+    /// answer cleared there would otherwise come back to the card, and a timer the user stopped would run again).
+    static func keepingTheUsers(_ posted: LeadQuestion, from card: LeadQuestion?) -> LeadQuestion {
+        guard let card else { return posted }
+        var question = posted
+        if question.heldAt == nil { question.heldAt = card.heldAt }
+        if question.answer == nil, card.answer != nil {
+            question.answer = card.answer
+            question.answeredAt = card.answeredAt
+            question.answeredVersion = card.answeredVersion
+            question.answeredFrom = card.answeredFrom
+        }
+        if question.autoDecidedAt == nil { question.autoDecidedAt = card.autoDecidedAt }
+        return question
     }
 
     /// An approval card's facts, from git and the vault (S3): the tasks whose branch points at `commit`, the files and
@@ -154,11 +174,12 @@ extension LeadEngine {
         if subject.ok { facts.subject = subject.output } else { facts.problems.append("\(commit.prefix(8)) isn't a commit of the repository") }
         let workflow = LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: root))
         let record = (try? vault.guardedRecord(root: root)) ?? nil
-        switch Self.acceptedBase(workflow: workflow, record: record, root: root) {
+        switch Self.acceptedBase(workflow: workflow, record: record, root: root, vault: vault) {
         case .failure(let why):
             facts.problems.append(why.description)
         case .success(let base):
             facts.base = base.branch
+            if let problem = base.problem { facts.problems.append(problem) }
             let files = Git.run(["diff", "--name-only", "--end-of-options", "\(base.head)...\(commit)"], in: root)
             if files.ok { facts.files = files.output.split(whereSeparator: \.isNewline).map(String.init) }
             let stat = Git.run(["diff", "--shortstat", "--end-of-options", "\(base.head)...\(commit)"], in: root)
@@ -179,11 +200,15 @@ extension LeadEngine {
     }
 
     /// The base an approval card's files and diffstat are taken against (the security follow-ups' item 14): workflow.md's
-    /// `base_branch` (the main branch when it names none) only while its hash is the one the user's `config accept`
-    /// recorded (`ConfigHoldStore.baseBranchKey`, `BaseMoveStore.show`'s gate), never the board's (a worker can write
-    /// both files; the vault's record it can't), and resolved to the commit its branch is at (`refs/heads/<branch>`: a
-    /// name is never read as an option). Else why not, said on the card.
-    static func acceptedBase(workflow: LeadWorkflow, record: [String: String]?, root: String) -> Result<(branch: String, head: String), Refused> {
+    /// `base_branch` only while its hash is the one the user's `config accept` recorded (`ConfigHoldStore.baseBranchKey`,
+    /// `BaseMoveStore.show`'s gate), never the board's (a worker can write both files; the vault's record it can't); when
+    /// it names none, the branch the lead merges into (`leadBranch`). Taken at the head the vault records for that branch
+    /// (where the lead last left it), never where `refs/heads/<branch>` points now, which any session can move through
+    /// the shared .git (the close-out review): a move since is said (`problem`), and with no head recorded the branch's
+    /// commit now is taken, saying so. The branch must be one (`refs/heads/<branch>`: a name is never read as an
+    /// option). Else why not, said on the card.
+    static func acceptedBase(workflow: LeadWorkflow, record: [String: String]?, root: String,
+                             vault: LeadVault) -> Result<(branch: String, head: String, problem: String?), Refused> {
         let named = workflow.baseBranch ?? ""
         guard let recorded = record?[ConfigHoldStore.baseBranchKey] else {
             return .failure(Refused("workflow.md's base branch isn't accepted yet (`vibeswitcher config held`, then `config accept`), so the files "
@@ -193,21 +218,47 @@ extension LeadEngine {
             return .failure(Refused("workflow.md's base_branch isn't the one the user accepted (`config held`, then `config accept` again), so the "
                 + "files and diffstat aren't shown"))
         }
-        let branch = named.isEmpty ? Worktrees.mainBranch(root: root) : named
+        let branch = named.isEmpty ? leadBranch(root: root, vault: vault) : named
         let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)^{commit}"], in: root)
         guard head.ok, !head.output.isEmpty else {
             return .failure(Refused("the base branch \(ConfigSeal.inert(branch, limit: 80)) isn't a branch of the repository, so the files and "
                 + "diffstat aren't shown"))
         }
-        return .success((branch, head.output))
+        let shown = ConfigSeal.inert(branch, limit: 80)
+        let leftAt: String?
+        do { leftAt = try vault.head(root: root, branch: branch) } catch {
+            return .success((branch, head.output, "the vault can't be asked where the lead left \(shown) (\(error)), so the files and diffstat "
+                + "are taken against where it points now (\(head.output.prefix(8))), which any session can move"))
+        }
+        guard let leftAt, Git.run(["rev-parse", "--verify", "--quiet", "\(leftAt)^{commit}"], in: root).ok else {
+            return .success((branch, head.output, "the vault records no head for \(shown), so the files and diffstat are taken against where it "
+                + "points now (\(head.output.prefix(8))), which any session can move"))
+        }
+        guard leftAt.lowercased() != head.output.lowercased() else { return .success((branch, leftAt, nil)) }
+        return .success((branch, leftAt, "\(shown) moved since the lead last left it at \(leftAt.prefix(8)) (it points at "
+            + "\(head.output.prefix(8)) now, not through the lead's merges): the files and diffstat are taken against \(leftAt.prefix(8)); "
+            + "`vibeswitcher base show` lists what moved"))
+    }
+
+    /// The branch the lead merges into when workflow.md names none (the close-out review): the board's `baseBranch`, the
+    /// branch checked out when the lead first started (as `LeadStart` and the lead's tools take it), only while the vault
+    /// records a head for it (the lead's start recorded it; the board alone is any session's to write); else the main
+    /// branch.
+    static func leadBranch(root: String, vault: LeadVault) -> String {
+        if let started = BoardStore(root: root).load().baseBranch, !started.isEmpty, (try? vault.head(root: root, branch: started)) != nil {
+            return started
+        }
+        return Worktrees.mainBranch(root: root)
     }
 
     // MARK: answer, hold, timers
 
-    /// The user's answer to the card `id` (`LeadController.answer`): bound to the card and the version it showed; on the
-    /// board for the lead's record (`LeadBoard.answer`), an approval recorded in the vault (`recordApproval`), and the
-    /// lead told as the user's, its message's digest recorded under `action` first. `then` hears on `queue` the outcome
-    /// and its notice. From any thread.
+    /// The user's answer to the card `id` (`LeadController.answer`): bound to the card and the version it showed; what
+    /// kind of answer it is and what the lead is told are the card's, the question as the lead's tool server posted it
+    /// (S3: never the board's, which any session can write: `LeadBoard.answer` run on the card's question alone). Then on
+    /// the board for the lead's record, an approval recorded in the vault (`recordApproval`), and the lead told as the
+    /// user's, its message's digest recorded under `action` first. `then` hears on `queue` the outcome and its notice.
+    /// From any thread.
     /// `version`: the wording the user was shown (the card's now when nil): a revision after it is said to the lead.
     public func answer(card id: String, text: String, version: Int? = nil, action: String?,
                        then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
@@ -216,17 +267,37 @@ extension LeadEngine {
                 return then(.failure(.gone("no question card \(id)")))
             }
             if let why = Self.approvalRefusal(text, card: card) { return then(.failure(.refused(why))) }
-            let (root, vault, seen) = (card.root, cardVault, min(version ?? question.version, question.version))
-            reads.async({ _ -> (LeadAnswerOutcome, String?) in
-                let outcome = (try? BoardStore(root: root).update { board in board.answer(question.id, with: text, saw: seen) }) ?? .missing
-                guard case .answered(let answered, _) = outcome else { return (outcome, nil) }
-                do {
-                    guard let tasks = try vault.recordApproval(text, of: answered, root: root) else { return (outcome, nil) }
-                    return (outcome, tasks.isEmpty ? "No task's branch is at that commit now, so the approval wasn't recorded: merge won't take it." : nil)
-                } catch {
-                    return (outcome, "Your approval wasn't recorded, so merge won't take it: \(error)")
+            let (root, vault, seen, note) = (card.root, cardVault, min(version ?? question.version, question.version), self.note)
+            var shown = LeadBoard()
+            shown.questions = [question]
+            let outcome = shown.answer(question.id, with: text, saw: seen)
+            // The card takes it now: a second answer meanwhile finds it answered.
+            let recorded: LeadQuestion? = {
+                switch outcome {
+                case .answered(let q, _), .withdrawn(let q), .afterAutoDecision(let q): return q
+                case .alreadyAnswered, .notOpen, .missing: return nil
                 }
-            }) { [weak self] outcome, approval in
+            }()
+            if let recorded {
+                cards.change(id) { card in
+                    card.question = recorded
+                    card.closed = Self.closed(recorded) ?? card.closed
+                }
+            }
+            reads.async({ _ -> String? in
+                guard recorded != nil else { return nil }
+                // The board is the lead's record of it, as before; what it holds is neither shown nor sent.
+                do { _ = try BoardStore(root: root).update { board in board.answer(question.id, with: text, saw: seen) } } catch {
+                    note("lead: the user's answer to question \(question.short) wasn't written to the board of \(LeadMail.project(of: root)) (\(error)); the lead is told it")
+                }
+                guard case .answered(let answered, _) = outcome else { return nil }
+                do {
+                    guard let tasks = try vault.recordApproval(text, of: answered, root: root) else { return nil }
+                    return tasks.isEmpty ? "No task's branch is at that commit now, so the approval wasn't recorded: merge won't take it." : nil
+                } catch {
+                    return "Your approval wasn't recorded, so merge won't take it: \(error)"
+                }
+            }) { [weak self] approval in
                 guard let self else { return }
                 let notice = approval ?? Self.notice(outcome)
                 self.cards.change(id) { card in
@@ -249,55 +320,91 @@ extension LeadEngine {
         }
     }
 
-    /// The user holds the card `id`'s question with a timer (`LeadController.hold`): the timer stops, it waits for an
-    /// answer like any other, and the lead is told not to go ahead, as the user's. From any thread.
+    /// The user holds the card `id`'s question with a timer (`LeadController.hold`): the card's timer stops, it waits
+    /// for an answer like any other, and the lead is told not to go ahead, as the user's, with the question and the
+    /// proposal the card showed (never the board's). The board records the hold for the lead's record. From any thread.
     public func hold(card id: String, action: String?, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
         queue.async { [self] in
             guard let card = cards.cards[id], let question = card.question else { return then(.failure(.gone("no question card \(id)"))) }
-            let root = card.root
-            reads.async({ _ in Result { try BoardStore(root: root).update { board in try board.hold(question.id) } } }) { [weak self] result in
-                guard let self else { return }
-                switch result {
-                case .success(let held):
-                    self.cards.change(id) {
-                        $0.question = held
-                        $0.notice = nil
-                    }
-                    self.tellAsUser("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with "
-                                    + "‘\(held.proposal ?? "")’; wait for their answer.", root: root, action: action)
-                    then(.success(.object(["held": .bool(true), "card": self.cards.cards[id]?.value ?? .null])))
-                    self.refresh()
-                case .failure(let error):
-                    self.cards.change(id) { $0.notice = "\(error)" }
-                    then(.failure(.refused("\(error)")))
+            let refusal = question.isOpen
+                ? question.isCounting ? nil : "Question \(question.short) has no timer running."
+                : "Question \(question.short) is closed (\(Self.closed(question) ?? "")): there's nothing to hold."
+            if let refusal {
+                cards.change(id) { $0.notice = refusal }
+                return then(.failure(.refused(refusal)))
+            }
+            let (root, note) = (card.root, self.note)
+            var held = question
+            held.heldAt = Date().timeIntervalSince1970
+            cards.change(id) {
+                $0.question = held
+                $0.notice = nil
+            }
+            tellAsUser("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with "
+                       + "‘\(held.proposal ?? "")’; wait for their answer.", root: root, action: action)
+            // Answered once the board has it too (the lead's record), as `answer` is.
+            reads.async({ _ -> Void in
+                do { try BoardStore(root: root).update { board in _ = try board.hold(question.id) } } catch {
+                    note("lead: the user's hold of question \(question.short) wasn't written to the board of \(LeadMail.project(of: root)) (\(error)); the lead is told it")
                 }
+            }) { [weak self] _ in
+                guard let self else { return }
+                then(.success(.object(["held": .bool(true), "card": self.cards.cards[id]?.value ?? .null])))
+                self.refresh()
             }
         }
     }
 
-    /// Runs out the timers of the leads' questions (`BoardStore.runTimers`, on `reads`): the lead is told to go ahead
-    /// with each proposal no one answered, once, and the card says it was decided. From any thread (E7's refresh runs
-    /// the same read in its own, `fireTimers`, and tells them with `tell(timers:)`).
+    /// Runs out the timers of the questions the lead's tool server posted (on `queue`, from each card's question as the
+    /// post left it: never the board's, where any session can write a question, a deadline or a proposal): the lead is
+    /// told to go ahead with each proposal no one answered, once, as VibeSwitcher's timer, and the card says it was
+    /// decided; the board records it for the lead's record (`recordTimer`, on `reads`). From any thread (E7's refresh
+    /// calls `fireTimers` on the engine's queue).
     public func runTimers(now: Double = Date().timeIntervalSince1970) {
-        queue.async { [self] in
-            let roots = timerRoots
-            reads.async({ files in Self.fireTimers(roots, files: &files, now: now) }) { [weak self] fired in self?.tell(timers: fired) }
-        }
+        queue.async { [self] in fireTimers(now: now) }
     }
 
-    /// The roots whose boards' timers run: every lead's, and every root a question card was posted for. On `queue`.
+    /// The roots whose boards a refresh keeps read: every lead's, and every root a question card was posted for. On
+    /// `queue`.
     var timerRoots: Set<String> {
         Set(leads.leads.values.map(\.root)).union(cards.list().filter { $0.question != nil }.map(\.root))
     }
 
-    /// The questions whose timer ran out on `roots`' boards, each decided on its board now, with what the lead is told
-    /// (`BoardStore.runTimers`). On `reads`.
-    static func fireTimers(_ roots: Set<String>, files: inout BoardFiles, now: Double) -> [String: [(question: LeadQuestion, message: String)]] {
+    /// Each open question or approval card whose question's timer ran out by `now`: decided on the card, recorded on its
+    /// board, and the lead told (`tell(timers:)`). On `queue`.
+    func fireTimers(now: Double) {
         var fired: [String: [(question: LeadQuestion, message: String)]] = [:]
-        for root in roots where files.board(root).hasExpired(now: now) {
-            if let expired = try? BoardStore(root: root).runTimers(now: now), !expired.isEmpty { fired[root] = expired }
+        for card in cards.list() where card.closed == nil && (card.kind == .question || card.kind == .approval) {
+            guard var question = card.question, question.isCounting, (question.decideBy ?? .infinity) <= now else { continue }
+            question.autoDecidedAt = now
+            fired[card.root, default: []].append((question, question.autoDecisionMessage))
         }
-        return fired
+        guard !fired.isEmpty else { return }
+        let note = self.note
+        reads.async { _ in
+            for (root, decided) in fired { Self.recordTimer(decided.map(\.question), root: root, now: now, note: note) }
+        }
+        tell(timers: fired)
+    }
+
+    /// The board's record of questions their timer decided (as `BoardStore.runTimers` writes it): each question marked
+    /// decided there while it's open, the decision appended to decisions.md, and the lead's reports. On `reads`.
+    static func recordTimer(_ decided: [LeadQuestion], root: String, now: Double, note: (String) -> Void) {
+        let store = BoardStore(root: root)
+        do {
+            try store.update { board in
+                for question in decided {
+                    if let index = board.questions.firstIndex(where: { $0.id == question.id }), board.questions[index].isOpen {
+                        board.questions[index].autoDecidedAt = now
+                    }
+                    board.reports = Array(((board.reports ?? []) + [LeadReport(about: "timer", text: question.autoDecisionMessage, at: now)])
+                        .suffix(LeadBoard.keptReports))
+                }
+            }
+            for question in decided { try store.appendDecision(question.autoDecision.decision, why: question.autoDecision.why) }
+        } catch {
+            note("lead: the timer's decision wasn't written to the board of \(LeadMail.project(of: root)) (\(error)); the lead is told it")
+        }
     }
 
     /// The lead told of each question its timer decided (`tell(timers:)`, `LeadController` 1187-1201), once, and its
@@ -325,7 +432,7 @@ extension LeadEngine {
         let (client, project, note, order) = (link.vaultV2, NodeIds.project(root: root), self.note, leads.next())
         recordingUser[root, default: 0] += 1
         work.async { [weak self] in
-            do { try client.recordUserAction(action, kind: "message", subject: project, digest: LeadVaultV2.digest(text)) } catch {
+            do { try client.recordUserAction(action, kind: LeadVaultV2.messageKind, subject: project, digest: LeadVaultV2.digest(text)) } catch {
                 note("lead: the user's message for \(LeadMail.project(of: root)) wasn't recorded in the vault (\(error)): after a restart it isn't vouched for")
             }
             guard let self else { return }
@@ -343,10 +450,10 @@ extension LeadEngine {
         postedUser[id] = PostedUser(tty: tty, digest: LeadVaultV2.digest(text), agentPid: agentPid)
     }
 
-    /// Retires in the vault each `.user` message the lead took (its inbox's delivered record shows it): its seal verifies
-    /// false from then on, so a copy put back in the inbox arrives as unverified (T41). Each one still waiting in the
-    /// inbox has its seal renewed (`renewUserSeals`: its life counts from now), so an answer that waits while the lead's
-    /// tool call runs long (a merge's tests) is still the user's when the lead takes it; the vault renews none a check
+    /// Retires in the vault each `.user` message the lead took (its inbox's delivered record shows it, and the line is out
+    /// of the inbox): its seal verifies false from then on, so a copy put back in the inbox arrives as unverified (T41).
+    /// Each one still waiting in the inbox has its seal renewed (`renewUserSeals`: its life counts from now), so an answer
+    /// that waits while the lead's tool call runs long (a merge's tests) is still the user's when the lead takes it; the vault renews none a check
     /// has passed nor any past `LeadVaultV2.renewedLifeCap` from its first seal, and the server none it no longer sees
     /// waiting as it posted it (`PostedUser.isPosted`: the inbox is a file any process of the user's can rewrite, and a
     /// line rewritten under a posted id keeps no seal alive). On `queue`, at each `look`.
@@ -359,8 +466,14 @@ extension LeadEngine {
             for (tty, entries) in Dictionary(grouping: posted, by: \.value.tty) {
                 let delivered = SteerInbox.delivered(tty: tty, root: inbox)
                 let pending = Dictionary(SteerInbox.pending(tty: tty, root: inbox).map { ($0.id, $0) }) { first, _ in first }
+                // Taken: in the delivered record and out of the inbox, as the lead's hook leaves it (the record alone is any
+                // process's to write: an id put there while the line waits doesn't retire its seal).
                 for (id, was) in entries.sorted(by: { $0.key < $1.key }) {
-                    if delivered.contains(id) { taken.append(id) } else if let line = pending[id], was.isPosted(line) { waiting.append(id) }
+                    if let line = pending[id] {
+                        if was.isPosted(line) { waiting.append(id) }
+                    } else if delivered.contains(id) {
+                        taken.append(id)
+                    }
                 }
             }
             return (taken, waiting)

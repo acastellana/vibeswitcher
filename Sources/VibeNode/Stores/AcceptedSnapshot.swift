@@ -100,11 +100,24 @@ public struct AcceptedSnapshot: Codable, Equatable, Sendable {
         return message
     }
 
-    /// Whether `vault` (this host's) sealed `project`'s config part as it reads now: false for a rewritten one, one
-    /// with no seal, and after a host restart (another vault's key). Reads the vault.
-    public static func vouches(_ project: Project?, root: String, vault: LeadVault) -> Bool {
-        guard let project, project.seal != nil else { return false }
+    /// Whether `vault` (this host's) sealed `project`'s config part as it reads now, and it is the last accept's: every
+    /// watched thing and guard rail the vault's record (`record`, `guardedRecord`) holds now is what the snapshot says
+    /// was accepted (the close-out review: the seal carries no counter, so a snapshot sealed at an earlier accept, kept
+    /// and put back, still checks; the record has moved on to the later accept's). False for a rewritten one, one with no
+    /// seal, an earlier accept's, and after a host restart (another vault's key). Reads the vault.
+    public static func vouches(_ project: Project?, root: String, vault: LeadVault, record: [String: String]?) -> Bool {
+        guard let project, project.seal != nil, let record, isLast(project, record: record) else { return false }
         return (try? vault.verify([sealMessage(project, root: root)])) == [true]
+    }
+
+    /// Whether `record` (the vault's) holds what `project` says the last accept left: each watched thing at the hash
+    /// the snapshot has, and each guard rail at the hash of the snapshot's value (none set: the empty value's).
+    static func isLast(_ project: Project, record: [String: String]) -> Bool {
+        for (key, hash) in record where ConfigSeal.isWatchedKey(key) && project.hashes[key] != hash { return false }
+        for key in LeadVault.guardedKeys {
+            if let hash = record[key], hash != LeadVault.hash(project.guarded[key] ?? "") { return false }
+        }
+        return true
     }
 
     /// What a held thing (`key`, the vault's, with the `hash` it's held at) is against the last accept, in words: the

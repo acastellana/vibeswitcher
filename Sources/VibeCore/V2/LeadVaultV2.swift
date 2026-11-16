@@ -38,6 +38,12 @@ public enum LeadVaultV2 {
         case userActions(since: Double)
         /// Whether an action `action` was recorded with `digest`.
         case holds(action: String, digest: String)
+        /// Whether a held `.user` message may go as the user's after a server restart (the close-out review): an action
+        /// `action` of kind `message` was recorded with `digest` for the project `subject`, and no message of it was
+        /// posted since (`spendUserActions`). Answered `holds`.
+        case vouches(action: String, digest: String, subject: String)
+        /// The `.user` messages these actions made were posted to their lead: none vouches after a restart from now on.
+        case spendUserActions([String])
         /// The `.user` seals with these message ids verify false from now on (the server saw the lead take them).
         case retireUserSeals([String])
         /// The `.user` messages with these ids still wait in their lead's inbox, untaken (the server reads it at each
@@ -69,10 +75,13 @@ public enum LeadVaultV2 {
         /// Each `.user` seal's first making, by the message's id (the security follow-ups' item 16): no renewal takes it
         /// past `renewedLifeCap` from then, so a seal lives `renewedLifeCap` plus one life at most.
         public var first: [String: Double] = [:]
+        /// Each action whose `.user` message was posted to its lead, by action id: when (the close-out review). A copy
+        /// `engine.json` still holds after a restart is vouched for no more.
+        public var spent: [String: Double] = [:]
 
         public init() {}
 
-        /// A record saved before `checked` or `first` reads with none.
+        /// A record saved before `checked`, `first` or `spent` reads with none.
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             actions = try container.decodeIfPresent([UserAction].self, forKey: .actions) ?? []
@@ -80,8 +89,12 @@ public enum LeadVaultV2 {
             retired = try container.decodeIfPresent([String: Double].self, forKey: .retired) ?? [:]
             checked = try container.decodeIfPresent([String: Double].self, forKey: .checked) ?? [:]
             first = try container.decodeIfPresent([String: Double].self, forKey: .first) ?? [:]
+            spent = try container.decodeIfPresent([String: Double].self, forKey: .spent) ?? [:]
         }
     }
+
+    /// The kind the server records a `.user` message's digest under (beside its request's own kind).
+    public static let messageKind = "message"
 
     /// How many actions the record keeps (the oldest go first).
     public static let actionsKept = 2_000
@@ -121,12 +134,23 @@ public enum LeadVaultV2 {
             guard !action.isEmpty, !kind.isEmpty else { return .refused("A user's action has an id and a kind.") }
             if record.actions.contains(where: { $0.action == action && $0.kind == kind }) { return .recorded(first: false) }
             record.actions.append(UserAction(action: action, kind: kind, subject: subject, digest: digest, at: now))
-            if record.actions.count > actionsKept { record.actions.removeFirst(record.actions.count - actionsKept) }
+            if record.actions.count > actionsKept {
+                record.actions.removeFirst(record.actions.count - actionsKept)
+                let kept = Set(record.actions.map(\.action))
+                record.spent = record.spent.filter { kept.contains($0.key) }
+            }
             return .recorded(first: true)
         case .userActions(let since):
             return .actions(record.actions.filter { $0.at >= since })
         case .holds(let action, let digest):
             return .holds(record.actions.contains { $0.action == action && $0.digest == digest })
+        case .vouches(let action, let digest, let subject):
+            guard record.spent[action] == nil else { return .holds(false) }
+            return .holds(record.actions.contains { $0.action == action && $0.kind == messageKind && $0.subject == subject && $0.digest == digest })
+        case .spendUserActions(let actions):
+            let recorded = Set(record.actions.map(\.action))
+            for action in actions where recorded.contains(action) && record.spent[action] == nil { record.spent[action] = now }
+            return .ok
         case .retireUserSeals(let ids):
             for id in ids { record.retired[id] = now }
             prune(&record, now: now)
@@ -185,6 +209,18 @@ public enum LeadVaultV2 {
         return result
     }
 
+    /// The `.verify` hook as the book calls it: a check by `caller` is a taking (`takes`) when it is the app's (a
+    /// handover) or a session's that holds a lead's role among `members` (every team's), the lead's
+    /// own hook taking its inbox (the security follow-ups' item 17). Who takes is decided here, not in the book's handler
+    /// (the close-out review: the port map's kinds keep that hook to a line).
+    public static func verified(_ messages: [SteerMessage], _ valid: [Bool], book: inout Book?, changed: inout Bool,
+                                caller: LeadVault.Caller, members: [LeadVault.Member],
+                                now: Double = Date().timeIntervalSince1970) -> [Bool] {
+        guard isOn else { return valid }
+        let takes = caller == .app || members.contains { $0.role == .lead && $0.session.map { .session($0) } == caller }
+        return verified(messages, valid, book: &book, changed: &changed, takes: takes, now: now)
+    }
+
     /// Seals, retirements and checks older than a seal's life verify false by their age alone: they're dropped.
     static func prune(_ record: inout Book, now: Double) {
         let cutoff = now - max(sealLife, defaultSealLife) - 60
@@ -232,6 +268,21 @@ public struct LeadVaultV2Client: Sendable {
     public func holds(action: String, digest: String) throws -> Bool {
         guard case .holds(let holds) = try call(.holds(action: action, digest: digest)) else { throw Refused("The session host answered something else.") }
         return holds
+    }
+
+    /// Whether a held `.user` message, `digest` of its text, may go as the user's to the lead of project `subject` after a
+    /// restart: recorded for that project as a message of `action`, and none of it posted since.
+    public func vouches(action: String, digest: String, subject: String) throws -> Bool {
+        guard case .holds(let holds) = try call(.vouches(action: action, digest: digest, subject: subject)) else {
+            throw Refused("The session host answered something else.")
+        }
+        return holds
+    }
+
+    /// The `.user` messages of these actions were posted: none of them vouches after a restart any more.
+    public func spendUserActions(_ actions: [String]) throws {
+        guard !actions.isEmpty else { return }
+        _ = try call(.spendUserActions(actions))
     }
 
     public func retireUserSeals(_ ids: [String]) throws {

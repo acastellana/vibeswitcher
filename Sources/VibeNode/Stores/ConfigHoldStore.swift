@@ -120,8 +120,9 @@ public enum ConfigHoldStore {
         // By the record's key, as the accept seals them (`checkConfig(root:shown:)`); the card shows each by its name.
         let hashes = ConfigSeal.heldHashes(in: record)
         let byName = Dictionary(hashes.map { (ConfigSeal.name(ofKey: $0.key), (key: $0.key, hash: $0.value)) }) { first, _ in first }
-        // "The same" only from a snapshot this host's vault sealed at the accept (the security follow-ups' item 18).
-        let vouched = AcceptedSnapshot.vouches(snapshot, root: root, vault: vault)
+        // "The same" only from a snapshot this host's vault sealed at the last accept (the security follow-ups' item 18;
+        // the close-out review: the record now is that accept's).
+        let vouched = AcceptedSnapshot.vouches(snapshot, root: root, vault: vault, record: record)
         let items = names.map { name in
             Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name]?.hash ?? "").prefix(12)), change: changes[name],
                  outside: outside.contains(name), files: details[name]?.files ?? [],

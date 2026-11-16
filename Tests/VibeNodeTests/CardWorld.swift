@@ -87,12 +87,13 @@ final class CardWorld: @unchecked Sendable {
 
     /// A lead session for `root` (this world's repository by default) that runs nothing but `sleep`: labelled as its lead
     /// and bound to its lead role in the host's vault (enough to post as its tool server).
-    func sleepingLead(root: String? = nil) async throws -> HostSession {
+    /// `branch`: the branch it starts on (the vault records its head then).
+    func sleepingLead(root: String? = nil, branch: String = "main") async throws -> HostSession {
         let root = root ?? repo
         let session = try await host.spawn("exec /bin/sleep 600", cwd: root, label: "Lead · \((root as NSString).lastPathComponent)")
         let vault = host.vault
         try await offPool {
-            try vault.bind(try vault.startLead(root: root, branch: "main"), root: root, session: session.id.uuidString)
+            try vault.bind(try vault.startLead(root: root, branch: branch), root: root, session: session.id.uuidString)
             try BoardStore(root: root).prepare()
         }
         return session
@@ -172,14 +173,7 @@ final class CardWorld: @unchecked Sendable {
 /// `name` changed), back on `main`: the branch's commit.
 @discardableResult
 func taskBranch(_ folder: String, task: String, file name: String = "a.txt", subject: String = "change") async throws -> String {
-    let environment = ["HOME": folder, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
-                       "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
-                       "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.invalid"]
-    func git(_ arguments: [String]) async throws -> String {
-        let ran = try await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", folder] + arguments, environment: environment)
-        guard ran.status == 0 else { throw HostCall.Failure(description: "git \(arguments.joined(separator: " ")): \(ran.errors)") }
-        return ran.output.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    func git(_ arguments: [String]) async throws -> String { try await scratchGit(folder, arguments) }
     _ = try await git(["checkout", "-q", "-b", "agent/\(task)"])
     try "\(task)\n".write(toFile: (folder as NSString).appendingPathComponent(name), atomically: true, encoding: .utf8)
     _ = try await git(["add", "--", name])
@@ -187,4 +181,15 @@ func taskBranch(_ folder: String, task: String, file name: String = "a.txt", sub
     let commit = try await git(["rev-parse", "HEAD"])
     _ = try await git(["checkout", "-q", "main"])
     return commit
+}
+
+/// `git -C folder arguments…` on a scratch repository, with no user or system config: its output, trimmed.
+@discardableResult
+func scratchGit(_ folder: String, _ arguments: [String]) async throws -> String {
+    let environment = ["HOME": folder, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+                       "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                       "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.invalid"]
+    let ran = try await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", folder] + arguments, environment: environment)
+    guard ran.status == 0 else { throw HostCall.Failure(description: "git \(arguments.joined(separator: " ")): \(ran.errors)") }
+    return ran.output.trimmingCharacters(in: .whitespacesAndNewlines)
 }

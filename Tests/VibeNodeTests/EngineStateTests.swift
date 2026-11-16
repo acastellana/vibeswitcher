@@ -8,10 +8,10 @@ import VibeCore
 @Suite struct EngineStateTests {
     private let scratch = Scratch()
 
-    /// A stand-in record of the user's actions: the action ids it holds, each with its digest.
+    /// A stand-in record of the user's actions: the action ids it holds, each with its digest (for any project).
     struct Actions: UserActions {
         let held: [String: String]
-        func holds(action: String, digest: String) -> Bool? { held[action] == digest }
+        func vouches(action: String, digest: String, project: String) -> Bool? { held[action] == digest }
     }
 
     @Test func aHeldUserMessageAtRestIsTheUsersOnlyWhenTheVaultHoldsItsAction() throws {

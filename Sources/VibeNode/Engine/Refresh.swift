@@ -4,11 +4,11 @@ import VibeCore
 /// The engine's refresh (the engine plan's E7; the app's `LeadController.refresh`, `refreshed` and `sweepRoles`,
 /// `LeadController.swift` 1469-1582): every 3 s on the engine's clock (the design's recorded exception to "never from a
 /// timer", which stage 3's stores remove) and after each answer. The starts that waited go on and the role sweep looks
-/// (every 6 s at most); then, on `reads`, the questions' timers, the boards, which lead each board names, the base
-/// moves' refusals, the team readings and the finished tasks' ended sessions are read; then `refreshed`, on the engine's
-/// queue, tells the timers, keeps the boards, marks the replaced leads, looks at the two card stores, keeps the notices
-/// for `status` (`Requests.statusValue`), runs the witness for each lead, drops the finished tasks' ended sessions and
-/// the wakes and waiting counts of leads that ended. Nothing the refresh reads is read on the engine's queue.
+/// (every 6 s at most), and the posted questions' timers run from their cards (`fireTimers`, never the boards'); then,
+/// on `reads`, the boards, which lead each board names, the base moves' refusals, the team readings and the finished
+/// tasks' ended sessions are read; then `refreshed`, on the engine's queue, keeps the boards, marks the replaced leads,
+/// looks at the two card stores, keeps the notices for `status` (`Requests.statusValue`), runs the witness for each
+/// lead, drops the finished tasks' ended sessions and the wakes and waiting counts of leads that ended. Nothing the refresh reads is read on the engine's queue.
 ///
 /// Not here, as the app has it: team activity and keep-awake (the Mac's, and after the bootstrap); `rotateIfDue` and
 /// the all-done watch (after the bootstrap); the account watch (after the bootstrap). `keepRunningLeads` (E8's) runs at
@@ -46,10 +46,11 @@ extension LeadEngine {
         let hosted = Dictionary(link.sessions.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
         let scanned = Dictionary((sessions?.sessions ?? []).compactMap { session in session.hostID.map { ($0.uuidString, session) } },
                                  uniquingKeysWith: { first, _ in first })
-        let (observer, inbox, lock, now) = (observer, root, options.lock, timersNow())
+        let (observer, inbox, lock) = (observer, root, options.lock)
+        // The posted questions' timers, from their cards (never the boards': S3).
+        fireTimers(now: timersNow())
         reads.async({ files -> Refreshed in
             var read = Refreshed()
-            read.fired = Self.fireTimers(timerRoots, files: &files, now: now)
             for root in roots { read.loaded[root] = files.board(root) }
             // Which lead each board names, through the names' own read (the replaced leads' marks).
             for root in roots { read.named[root] = files.names.board(root).leadSession.flatMap(UUID.init(uuidString:)) }
@@ -62,7 +63,6 @@ extension LeadEngine {
             return read
         }) { [weak self] read in
             guard let self else { return }
-            self.tell(timers: read.fired)
             self.markReplaced(read.named, roots: roots)
             self.refreshed(roots: roots, loaded: read.loaded, teams: read.teams, refusals: read.refusals, finished: read.finished)
             self.refreshing = false
@@ -75,7 +75,6 @@ extension LeadEngine {
 
     /// What a refresh's reads found.
     struct Refreshed {
-        var fired: [String: [(question: LeadQuestion, message: String)]] = [:]
         var loaded: [String: LeadBoard] = [:]
         var named: [String: UUID?] = [:]
         var refusals: [String: LeadVault.BaseMoveRefusal] = [:]

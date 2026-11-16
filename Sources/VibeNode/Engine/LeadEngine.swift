@@ -106,6 +106,9 @@ public final class LeadEngine: @unchecked Sendable {
     /// Roots whose held messages are being sent, one after another, and roots with a message's post under way.
     var sendingHeld: Set<String> = []
     var posting: Set<String> = []
+    /// The ids of the held messages taken back from `engine.json` at the start and not posted yet: only those may have
+    /// gone already (posted before the server stopped), found in the lead's inbox records (`post`).
+    var restoredHeld: Set<String> = []
     /// Each lead's wake-ups (`LeadWake`), by terminal and agent, with the one each root's lead has now, and the ones with
     /// a look again scheduled.
     var wakes: [String: LeadWake] = [:]

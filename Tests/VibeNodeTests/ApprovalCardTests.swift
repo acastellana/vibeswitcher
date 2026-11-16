@@ -152,6 +152,46 @@ struct ApprovalCardTests {
         #expect(written.isEmpty, "\(written)")
     }
 
+    /// The close-out review of item 14: the card's files and diffstat are taken against the head the vault records for
+    /// the base, never wherever `refs/heads/<base>` points now (any process of the user's can move it through the shared
+    /// .git). A base moved onto the task's own commit still shows what the task changes, and the card says it moved.
+    @Test func anApprovalCardDiffsAgainstTheHeadTheVaultRecords() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let commit = try await taskBranch(world.repo, task: "change", file: "parser.swift", subject: "Add the parser")
+        let lead = try await world.sleepingLead()
+        try await world.acceptBase()
+        let recorded = try await scratchGit(world.repo, ["rev-parse", "refs/heads/main"])
+        // A worker moves main onto the task's commit.
+        try await scratchGit(world.repo, ["update-ref", "refs/heads/main", commit])
+        let asked = try await world.asked("Merge change?", options: [LeadWorkflow.approval(of: commit), "Not yet"], priority: .blocking, lead: lead)
+        #expect(await eventually(timeout: 60) { world.card(asked.card.id)?.approval?.subject != nil })
+        let facts = try #require(world.card(asked.card.id)?.approval)
+        #expect(facts.base == "main" && facts.files == ["parser.swift"] && facts.diffstat.contains("1 file changed"), "\(facts)")
+        #expect(facts.problems.contains { $0.contains("moved") && $0.contains(String(recorded.prefix(8))) }, "\(facts.problems)")
+    }
+
+    /// The close-out review of item 14: with workflow.md naming no base (the template's), the card takes the branch the
+    /// lead merges into, the one it started on, which the vault records a head for (here develop), not the main
+    /// branch: develop's own commits aren't shown as part of this merge.
+    @Test func anEmptyBaseBranchTakesTheBranchTheLeadStartedOn() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        try await scratchGit(world.repo, ["checkout", "-q", "-b", "develop"])
+        try "develop's own\n".write(toFile: (world.repo as NSString).appendingPathComponent("develop.txt"), atomically: true, encoding: .utf8)
+        try await scratchGit(world.repo, ["add", "--", "develop.txt"])
+        try await scratchGit(world.repo, ["commit", "-q", "-m", "On develop"])
+        // The task branches from develop (`taskBranch` goes back to main after).
+        let commit = try await taskBranch(world.repo, task: "change", file: "parser.swift", subject: "Add the parser")
+        let lead = try await world.sleepingLead(branch: "develop")
+        try BoardStore(root: world.repo).update { $0.baseBranch = "develop" }
+        try await world.acceptBase()
+        let asked = try await world.asked("Merge change?", options: [LeadWorkflow.approval(of: commit), "Not yet"], priority: .blocking, lead: lead)
+        #expect(await eventually(timeout: 60) { world.card(asked.card.id)?.approval?.subject != nil })
+        let facts = try #require(world.card(asked.card.id)?.approval)
+        #expect(facts.base == "develop" && facts.files == ["parser.swift"], "\(facts)")
+    }
+
     /// S3: a board whose task title, commit and files were rewritten after the post shows git's and the vault's facts,
     /// never the board's.
     @Test func anApprovalCardIsBuiltFromGitAndTheVault() async throws {

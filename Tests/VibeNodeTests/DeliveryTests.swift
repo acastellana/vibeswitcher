@@ -219,6 +219,80 @@ struct DeliveryTests {
         #expect(held[world.project]?.map(\.id) == ["kept"])
     }
 
+    /// The close-out review: after a restart, a `.user` message `engine.json` holds is the user's only for the project its
+    /// action was recorded for, and only while the vault hasn't seen it go: one already posted (its action spent) or
+    /// put in for another project's lead arrives as not vouched for, and of two entries with one action only the first
+    /// is the user's (any process of the user's writes the file, and the action ids are in `status`).
+    @Test func aUsersMessageAtRestIsVouchedForOnceAndOnlyForItsOwnProject() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        let other = world.host.folder.appendingPathComponent("other", isDirectory: true)
+        try await scratchRepository(other)
+        let otherRoot = other.resolvingSymlinksInPath().path
+        let client = world.link.vaultV2
+        // The user's answer, recorded in the vault and posted to the lead.
+        let (sent, answer) = (UUID().uuidString.lowercased(), "Answer to your question Q3 “Keep it?”: Yes")
+        world.queue.async { world.engine.tellAsUser(answer, root: world.repo, action: sent) }
+        #expect(await eventually(timeout: 60) { world.pending(lead).contains { $0.text == answer && $0.from == .user } }, "\(world.pending(lead))")
+        await world.drained()
+        await offPool { world.engine.work.sync(flags: .barrier) {} }
+        // One recorded for this project and never posted (the server stopped first).
+        let (waiting, words) = (UUID().uuidString.lowercased(), "Hold on: don't merge yet.")
+        try await offPool {
+            try client.recordUserAction(waiting, kind: "message", subject: NodeIds.project(root: world.repo), digest: LeadVaultV2.digest(words))
+        }
+        try EngineState(held: [
+            .init(id: "to-another-project", root: otherRoot, order: 1, text: answer, from: .user, action: sent),
+            .init(id: "again-to-this-lead", root: world.repo, order: 2, text: answer, from: .user, action: sent),
+            .init(id: "waiting", root: world.repo, order: 3, text: words, from: .user, action: waiting),
+            .init(id: "waiting-again", root: world.repo, order: 4, text: words, from: .user, action: waiting),
+        ]).save(root: world.host.root)
+        let engine = await offPool { world.restarted(userActions: VaultUserActions(client: client)) }
+        let held = world.queue.sync { engine.leads.held.values.flatMap { $0 } }
+        let from = Dictionary(held.map { ($0.id, $0.from) }) { first, _ in first }
+        #expect(from.count == 4, "\(held)")
+        #expect(from["waiting"] == .user, "\(held)")
+        for id in ["to-another-project", "again-to-this-lead", "waiting-again"] {
+            #expect(from[id] == EngineState.notVouchedSender, "\(id): \(String(describing: from[id]))")
+        }
+    }
+
+    /// The close-out review: a message held in this server's life is never taken as posted because its id shows in the
+    /// lead's inbox records (any process of the user's writes them, and the held ids are in `engine.json`): the user's
+    /// hold, its id put in the delivered record while it waited, still reaches the lead, as the user's.
+    @Test func aHeldMessagesIdInTheDeliveredRecordDoesntDropIt() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        let runs = world.queue.sync { world.engine.leadRuns }
+        world.queue.sync { world.engine.leadRuns = { _ in false } }
+        let words = "The user is holding your question: don't go ahead with ‘P’."
+        #expect(await world.deliver(words, from: .user, action: UUID().uuidString.lowercased()) == false)
+        let id = try #require(world.held().first?.id)
+        let delivered = world.host.root.appendingPathComponent("steer/\(lead.session.tty).delivered")
+        try FileManager.default.createDirectory(at: delivered.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let before = (try? String(contentsOf: delivered, encoding: .utf8)) ?? ""
+        try (before + id + "\n").write(to: delivered, atomically: true, encoding: .utf8)
+        world.queue.sync { world.engine.leadRuns = runs }
+        // Looked at until it goes (a send of what's held may still be under way from before, with the lead not running).
+        #expect(await eventually(timeout: 120) {
+            world.look()
+            return world.pending(lead).contains { $0.text == words }
+        }, "\(world.pending(lead)), held \(world.held())")
+        // Its seal isn't retired for the id in the delivered record while the line still waits (the vault's record:
+        // this world's inbox seals with a scratch key, not the host's).
+        for _ in 0..<2 {
+            world.look()
+            await world.drained()
+            await offPool { world.engine.work.sync(flags: .barrier) {} }
+        }
+        #expect(world.pending(lead).contains { $0.text == words })
+        #expect(world.queue.sync { world.engine.postedUser[id] } != nil)
+        let retired = world.host.book.v2 { $0?.retired[id] }
+        #expect(retired == nil)
+    }
+
     /// Two messages sent back to back while the lead becomes able to take them between the two: the second waits
     /// behind the first's post, and they reach the lead in the order sent.
     @Test func backToBackMessagesKeepTheirOrderWhenTheLeadCanTakeThemBetween() async throws {

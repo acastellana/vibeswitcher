@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import VibeCore
 import VibeNode
 
 /// The user's voice as a pure function (`Voice.judge`) on the fixtures E1's Step 1 recorded
@@ -194,11 +195,12 @@ struct VoiceRuleTests {
             #expect(Self.judged(Self.peer(), rule: closed) == .notUser(VoiceRule.closedRefusal))
             #expect(Self.judged(Self.peer(cgroup: nil, terminal: .none), rule: closed) == .notUser(VoiceRule.closedRefusal))
         }
-        // On Linux the server's own read decides it (the default): an unread cgroup there is closed.
-        #if os(Linux)
-        #expect(VoiceRule.systemHasCgroups)
-        #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid).mode == .closed)
-        #endif
+        // Where the system has cgroups (Linux), the server's own read decides it (the default): an unread cgroup there
+        // is closed.
+        if Platform.Processes.hasCgroups {
+            #expect(VoiceRule.systemHasCgroups)
+            #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid).mode == .closed)
+        }
         // A system with no cgroups at all (the Mac's scratch nodes) has no user manager to tell by: the weaker rule.
         #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid, cgroups: false).mode == .weaker)
         // A scratch host's test scopes still give their cgroup rule.

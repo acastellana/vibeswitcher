@@ -66,10 +66,13 @@ final class DeliveryWorld: @unchecked Sendable {
     }
 
     /// Another engine on the same link and root, as a restarted server's: it takes back what `engine.json` holds.
-    func restarted() -> LeadEngine {
+    /// `userActions`: the record a held `.user` message is vouched for by (none passes by default; the server gives the
+    /// vault's, `VaultUserActions`).
+    func restarted(userActions: UserActions? = nil) -> LeadEngine {
         var options = LeadEngine.Options()
         options.answersTrust = false
         options.home = host.home.path
+        if let userActions { options.userActions = userActions }
         return LeadEngine(root: host.root, nodeRoot: nil, link: link, clock: nil, options: options)
     }
 

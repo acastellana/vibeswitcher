@@ -248,16 +248,24 @@ extension LeadEngine {
                     notes.append("\(branch) moved since the lead last left it (\(moved.recorded.prefix(8)) to \(moved.now.prefix(8))), not through "
                         + "its merges: kept checked, so merges stay refused until `vibeswitcher base accept`; `--take-head` takes it as it is")
                 }
+                // The session the vault binds this root's lead role to until the new lead's is bound: a lead that ended
+                // is the one replaced only when it's that one (`replacedLead`).
+                let bound = vault.current(.lead, root: root, task: nil)?.session
                 // EN-D7: no floor: on Linux `config accept` records the one workflow.md proposes.
                 let grant = try vault.startLead(root: root, branch: branch, takeHead: start.takeHead)
                 issued = grant
                 // The role is the new session's from now on: the lead it replaces gets nothing more, and what waited
                 // for it goes to the new one (`LeadHandover`). The board is the repository's, which any process of the
-                // user's can write: the lead it named is the one replaced only while the host runs it as this root's
-                // lead on that terminal (`replacedLead`), else its inbox and its turns stay where they are.
+                // user's can write: the lead it named is the one replaced only when the host runs (or ran) it as this
+                // root's lead on that terminal (`replacedLead`), else its inbox and its turns stay where they are, said.
                 let named = try boardStore.update { LeadHandover.release(&$0) }
-                let verified = Self.replacedLead(named, root: root, hosted: hosted)
+                let verified = Self.replacedLead(named, root: root, hosted: hosted, bound: bound)
                 waiting = verified.map { LeadHandover.takeWaiting(for: $0, root: nodeRoot) } ?? []
+                if verified == nil, let named, let left = Self.leftWaiting(named, root: nodeRoot) {
+                    notes.append("the board named session \(ConfigSeal.inert(named.session ?? "none", limit: 40)) on "
+                        + "\(ConfigSeal.inert(named.tty, limit: 40)) as the lead, which isn't known to be this project's lead (not live here, nor the "
+                        + "ended session the vault binds the role to): the \(left) message(s) waiting in its inbox stay there")
+                }
                 let name = "lead-\(Slug.make(project, taken: []))"
                 var handed: (tty: String, turnsFile: String)?
                 let old = verified.flatMap { $0.session.flatMap(UUID.init(uuidString:)) } ?? running?.id
@@ -286,7 +294,7 @@ extension LeadEngine {
                 case .failure(let error):
                     self.finish(root: root, .refused("\(error)"))
                 case .success(let (grant, launch)):
-                    // The board names no lead now (`LeadHandover.begin`); one replaced is so from now, no board read waited for.
+                    // The board names no lead now (`LeadHandover.release`); one replaced is so from now, no board read waited for.
                     self.holders[root] = nil
                     self.leads.lead(root: root) { $0.named = nil }
                     if let replacedLead { self.leads.replacing(replacedLead, root: root) }
@@ -297,14 +305,26 @@ extension LeadEngine {
     }
 
     /// The lead the board named (`named`, as `LeadHandover.release` took it off) as the lead a start of `root` replaces:
-    /// only a session the host runs live (`hosted`), labelled as a lead, started in `root`, on the terminal the board
-    /// names. A board naming another project's session, or this one's on another terminal, replaces nothing: its inbox
-    /// isn't emptied into this lead and its conversation isn't read into this lead's first prompt.
-    static func replacedLead(_ named: LeadAgent?, root: String, hosted: [HostSession]) -> LeadAgent? {
+    /// only a session the host lists (`hosted`), labelled as a lead, started in `root`, on the terminal the board names,
+    /// and either live or, ended (a crash, the close-out review), the session the vault binds this root's lead role to
+    /// (`bound`), its terminal taken by no live session since (whose messages its inbox would hold). A board naming
+    /// another project's session, or this one's on another terminal, replaces nothing: its inbox isn't emptied into this
+    /// lead and its conversation isn't read into this lead's first prompt.
+    static func replacedLead(_ named: LeadAgent?, root: String, hosted: [HostSession], bound: String?) -> LeadAgent? {
         guard let named, let id = named.session.flatMap(UUID.init(uuidString:)),
-              let session = hosted.first(where: { $0.id == id && $0.isLive }), LeadTeams.role(label: session.label) == .lead,
+              let session = hosted.first(where: { $0.id == id }), LeadTeams.role(label: session.label) == .lead,
               (session.cwd as NSString).standardizingPath == root, session.tty == named.tty else { return nil }
+        if !session.isLive {
+            guard bound?.lowercased() == id.uuidString.lowercased(), !hosted.contains(where: { $0.isLive && $0.tty == session.tty }) else { return nil }
+        }
         return LeadAgent(pid: named.pid, tty: session.tty, session: session.id.uuidString)
+    }
+
+    /// How many messages wait for the lead the board named in its inbox (`named`'s terminal, for its agent), when the
+    /// start leaves them there: said, never read out.
+    static func leftWaiting(_ named: LeadAgent, root: URL) -> Int? {
+        let waiting = SteerInbox.pending(tty: named.tty, root: root).filter { $0.agentPid == named.pid }
+        return waiting.isEmpty ? nil : waiting.count
     }
 
     /// Why a vault that holds its first look doesn't start `root`'s lead yet (S7): config held from it, or no head

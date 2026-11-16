@@ -1033,8 +1033,7 @@ extension LeadVault {
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)
                 let valid = messages.map { message in message.seal.map { $0 == SteerInbox.seal(message, key: key) } ?? false }
-                let takes = caller == .app || state.teams.values.contains { $0.members.contains { $0.role == .lead && $0.session.map { .session($0) } == caller } }
-                return .verified(LeadVaultV2.verified(messages, valid, book: &state.v2, changed: &changed, takes: takes))
+                return .verified(LeadVaultV2.verified(messages, valid, book: &state.v2, changed: &changed, caller: caller, members: state.teams.values.flatMap(\.members)))
             case .walletSession:
                 guard case .session(let session) = caller else {
                     return .refused("This process isn't in any session VibeSwitcher's session host runs.")

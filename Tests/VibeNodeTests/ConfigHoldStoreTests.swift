@@ -215,6 +215,35 @@ struct ConfigHoldStoreTests {
         #expect(afterRestart != nil && afterRestart?.hasPrefix("the same") == false, "\(String(describing: afterRestart))")
     }
 
+    /// The close-out review of item 18: a snapshot this host's vault sealed at an earlier accept doesn't speak for a later
+    /// one. A worker that kept it, put it back, and set a guard rail back to what it was then gets no "the same as at
+    /// your last accept" for a value the user has since replaced.
+    @Test func anEarlierSealedSnapshotDoesntSpeakForALaterAccept() throws {
+        let team = try team()
+        let workflow = ConfigHoldStore.workflowPath(root: team.root)
+        try FileManager.default.createDirectory(atPath: (workflow as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        let node = scratch.url("node")
+        try FileManager.default.createDirectory(at: node, withIntermediateDirectories: true)
+        func accept(_ command: String) throws -> AcceptedSnapshot.Project? {
+            try "---\ntest_command: \(command)\n---\n".write(toFile: workflow, atomically: true, encoding: .utf8)
+            let card = try ConfigHoldStore.held(root: team.root, vault: team.app, home: team.home, look: false).get()
+            guard case .sealed = try ConfigHoldStore.accept(card, root: team.root, vault: team.app, snapshotRoot: node).get() else { return nil }
+            return AcceptedSnapshot.load(root: node).projects[team.root]
+        }
+        let first = try #require(try accept("make check"))
+        let second = try #require(try accept("make test"))
+        func rail(_ project: AcceptedSnapshot.Project) throws -> String? {
+            try ConfigHoldStore.held(root: team.root, vault: team.app, home: team.home, look: false, snapshot: project).get()
+                .guarded.first { $0.key == "test_command" }?.sinceAccept
+        }
+        // The last accept's snapshot, as it is: the same.
+        #expect(try rail(second)?.hasPrefix("the same as at your last accept") == true)
+        // The first accept's, put back, with the rail set back to its value then: not the same.
+        try "---\ntest_command: make check\n---\n".write(toFile: workflow, atomically: true, encoding: .utf8)
+        let said = try rail(first)
+        #expect(said != nil && said?.hasPrefix("the same") == false, "\(String(describing: said))")
+    }
+
     /// The app's `theCardDrawsChangedFileTextVerbatim`: what the card shows of a changed file (its name, what changed,
     /// its files) reaches the terminal with control and bidirectional characters stripped (`ConfigSeal.inert`).
     @Test func heldTextIsPrintedInert() throws {

@@ -2,17 +2,19 @@ import Foundation
 import VibeCore
 
 /// The check a held `.user` message passes after a server restart (the engine plan's EN-D9): whether the vault's record
-/// of the user's actions (EN-D11) holds the action that made it with the message's digest. E6 gives the vault's; until
-/// then nothing passes it (`NoUserActions`).
+/// of the user's actions (EN-D11) holds the action that made it as a message with the message's digest, for the project
+/// it's held for, and none of it was posted since (the close-out review: `LeadVaultV2.Request.vouches`). E6 gives the
+/// vault's; until then nothing passes it (`NoUserActions`).
 public protocol UserActions: Sendable {
-    /// Whether the record holds `action` with `digest` (`EngineState.digest`); nil when it can't be asked.
-    func holds(action: String, digest: String) -> Bool?
+    /// Whether the record vouches for a message of `action` with `digest` (`EngineState.digest`) to the lead of
+    /// `project` (`NodeIds.project`); nil when it can't be asked.
+    func vouches(action: String, digest: String, project: String) -> Bool?
 }
 
 /// No record of the user's actions: no held `.user` message is vouched for after a restart.
 public struct NoUserActions: UserActions {
     public init() {}
-    public func holds(action: String, digest: String) -> Bool? { nil }
+    public func vouches(action: String, digest: String, project: String) -> Bool? { nil }
 }
 
 /// The engine's own state file, `<root>/v2/engine.json` (format 1; the engine plan's EN-D9): what isn't the user's and
@@ -22,7 +24,9 @@ public struct NoUserActions: UserActions {
 /// is taken as its sender's: a worker of the user's uid can write it, so a held `.user` message goes as the user's after
 /// a restart only when the vault's record of the user's actions holds the action id it carries with the digest of its
 /// text as it is now (`restored`); any other goes as from an unverified sender (`SteerInbox.unverified`), saying so,
-/// never sealed as the user's, the lead's or VibeSwitcher's.
+/// never sealed as the user's, the lead's or VibeSwitcher's. The record binds the action to the project it was recorded
+/// for and spends it once its message was posted, so a past message of the user's (its action id is in `status`) put
+/// back in the file, for its lead or another project's, isn't the user's again.
 public struct EngineState: Codable, Equatable, Sendable {
     public static let currentFormat = 1
 
@@ -141,19 +145,25 @@ public struct EngineState: Codable, Equatable, Sendable {
     public static let restartedPrefix = "Held for you before this node's server restarted; nothing vouches for its sender since: "
 
     /// The held messages as they may go after a restart, in order, each with its id: a `.user` one stays the user's
-    /// only when `actions` holds its action with its text's digest now; else it goes from `notVouchedSender`, saying
-    /// so, its action dropped (`notVouched`: how many). Any other (marked as the lead's or VibeSwitcher's) goes from the
+    /// only when `actions` vouches for its action with its text's digest for its root's project now, and only the first
+    /// held with that action (a copy beside it is a replay); else it goes from `notVouchedSender`, saying so, its action
+    /// dropped (`notVouched`: how many). Any other (marked as the lead's or VibeSwitcher's) goes from the
     /// unverified sender `SteerInbox.unverified` names for it, saying so (`unvouchedSenders`: how many): the file is
     /// no seal, and a planted entry would otherwise be posted sealed as VibeSwitcher's.
     public static func restored(_ held: [Held], actions: UserActions) -> (held: [Held], notVouched: Int, unvouchedSenders: Int) {
         var (notVouched, unvouchedSenders) = (0, 0)
+        var vouched: Set<String> = []
         let restored = held.sorted { $0.order < $1.order }.map { message -> Held in
             guard message.from == .user else {
                 unvouchedSenders += 1
                 let sender = SteerInbox.unverified(SteerMessage(text: message.text, from: message.from, agentPid: 0)).from
                 return Held(id: message.id, root: message.root, order: message.order, text: prefixed(restartedPrefix, message.text), from: sender)
             }
-            if let action = message.action, actions.holds(action: action, digest: digest(message.text)) == true { return message }
+            if let action = message.action, !vouched.contains(action),
+               actions.vouches(action: action, digest: digest(message.text), project: NodeIds.project(root: message.root)) == true {
+                vouched.insert(action)
+                return message
+            }
             notVouched += 1
             return Held(id: message.id, root: message.root, order: message.order, text: prefixed(notVouchedPrefix, message.text), from: notVouchedSender)
         }

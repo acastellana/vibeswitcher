@@ -66,6 +66,8 @@ extension LeadEngine {
             if !went {
                 self.leads.hold(.init(id: id, text: text, from: sender, order: order, action: action), root: root)
                 self.note("lead: holding a message for \(LeadMail.project(of: root)) (no lead the vault binds runs there)")
+            } else if sender == .user, let action {
+                self.spend(action, root: root)
             }
             then(went)
             // What was sent meanwhile waited behind it.
@@ -79,12 +81,26 @@ extension LeadEngine {
         let project = NodeIds.project(root: root)
         guard !sendingHeld.contains(root), !posting.contains(root), recordingUser[root] == nil, let first = leads.held[project]?.first else { return }
         sendingHeld.insert(root)
-        post(id: first.id, built: { first.text }, from: first.from, root: root) { [weak self] went, _ in
+        post(id: first.id, built: { first.text }, from: first.from, root: root, restored: restoredHeld.contains(first.id)) { [weak self] went, _ in
             guard let self else { return }
             self.sendingHeld.remove(root)
             guard went else { return }
+            self.restoredHeld.remove(first.id)
+            if first.from == .user, let action = first.action { self.spend(action, root: root) }
             self.leads.delivered(project: project, order: first.order)
             self.deliverHeld(root: root)
+        }
+    }
+
+    /// The user's message of `action` was posted to its lead: the vault vouches for it no more after a restart (the
+    /// close-out review: `engine.json` is any process's to write, and a copy put back there would go as the user's
+    /// again). On `queue`; the vault asked on `work`.
+    func spend(_ action: String, root: String) {
+        let (client, note) = (link.vaultV2, self.note)
+        work.async {
+            do { try client.spendUserActions([action]) } catch {
+                note("lead: the vault didn't record that the user's message for \(LeadMail.project(of: root)) went (\(error)): a copy held at rest could still be vouched for after a restart")
+            }
         }
     }
 
@@ -117,19 +133,21 @@ extension LeadEngine {
     }
 
     /// Posts the message, as `id`, into the inbox of `root`'s lead if it has one now (`went`), and wakes it; else sets or
-    /// clears the project's notice. One already in that inbox, or taken from it, under `id` went already: a held message
-    /// the server posted before it stopped, `engine.json` still holding it, isn't posted again. On `queue`; `then` too,
-    /// with the text as built.
+    /// clears the project's notice. A message `restored` from `engine.json` already in that inbox, or taken from it,
+    /// under `id` went already: one the server posted before it stopped, the file still holding it, isn't posted again.
+    /// Only those: a message held in this server's life never went (the close-out review: the inbox records are any
+    /// process's to write, and the held ids are in `engine.json`, so a worker could have one dropped unposted). On
+    /// `queue`; `then` too, with the text as built.
     private func post(id: String, built: @escaping @Sendable () -> String, from sender: SteerMessage.Sender, root: String,
-                      then: @escaping (_ went: Bool, _ text: String) -> Void) {
+                      restored: Bool = false, then: @escaping (_ went: Bool, _ text: String) -> Void) {
         let (vault, runs, inbox, inboxRead, hosted) = (link.vault, leadRuns, self.root, self.inboxRead, link.sessions)
         reads.async({ files -> (target: Target, posted: Bool, text: String) in
             let text = built()
             let target = Self.target(root: root, board: files.names.board(root), vault: vault, hosted: hosted, runs: runs)
             guard case .lead(let lead) = target else { return (target, false, text) }
             inboxRead(lead.tty)
-            if SteerInbox.pending(tty: lead.tty, root: inbox).contains(where: { $0.id == id && $0.agentPid == lead.pid })
-                || SteerInbox.delivered(tty: lead.tty, root: inbox).contains(id) {
+            if restored, (SteerInbox.pending(tty: lead.tty, root: inbox).contains(where: { $0.id == id && $0.agentPid == lead.pid })
+                || SteerInbox.delivered(tty: lead.tty, root: inbox).contains(id)) {
                 return (target, true, text)
             }
             // `LeadDelivery.deliver` without a way to type posts just this, under a new id.
@@ -218,8 +236,9 @@ extension LeadEngine {
                  + "sender: nothing vouches for a sender at rest")
         }
         for message in restored.held {
-            leads.hold(.init(id: message.id ?? UUID().uuidString, text: message.text, from: message.from, order: message.order, action: message.action),
-                       root: message.root)
+            let id = message.id ?? UUID().uuidString
+            restoredHeld.insert(id)
+            leads.hold(.init(id: id, text: message.text, from: message.from, order: message.order, action: message.action), root: message.root)
         }
     }
 
