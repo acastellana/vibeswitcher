@@ -230,14 +230,19 @@ func scratchEnvironment(_ folder: URL, _ extra: [String: String] = [:]) -> [Stri
     return environment.merging(extra) { $1 }
 }
 
-/// Runs `executable` with `arguments` in `environment`, to its end (a hang guard of 120 s), off the pool: its exit
-/// status (the signal's number when one ended it, as Foundation's `terminationStatus`) and what it wrote.
+/// Runs `executable` with `arguments` in `environment`, to its end (a hang guard of `limit`, 120 s by default), off the
+/// pool: its exit status (the signal's number when one ended it, as Foundation's `terminationStatus`) and what it wrote.
+///
+/// Past the guard the child is killed (SIGKILL). With `ownGroup` it starts in a process group of its own, and the guard
+/// ends that group instead: SIGTERM (a script's traps run, and a `vs-heavy` in it ends its COMMAND's group, as its
+/// supervisor does on a stop), then SIGKILL to what's left after 15 s; so what the child started doesn't run on.
 ///
 /// Started by `Platform.Spawn` (posix_spawn; stdin /dev/null, no other descriptor of this process, no signal blocked)
 /// and collected here by its pid, each wait bounded, on a thread of its own: not Foundation's `Process`, whose `run()`
 /// crashed the test process (SIGSEGV) under load while a test started one every 200 ms, and whose waits the repo
 /// doesn't trust unbounded (VibePlatformTests' `ProcessesTests.Child`).
-func run(_ executable: URL, _ arguments: [String], environment: [String: String]) async throws -> CommandRun {
+func run(_ executable: URL, _ arguments: [String], environment: [String: String], limit: TimeInterval = 120,
+         ownGroup: Bool = false) async throws -> CommandRun {
     let command = "\(executable.lastPathComponent) \(arguments.joined(separator: " "))"
     // Close-on-exec from the call that makes them: no child another test starts meanwhile holds a writing end, which
     // would keep the reads below from ending when this child goes.
@@ -253,6 +258,7 @@ func run(_ executable: URL, _ arguments: [String], environment: [String: String]
     spawn.stdin = .path("/dev/null", flags: O_RDONLY)
     spawn.stdout = .descriptor(output[1])
     spawn.stderr = .descriptor(errors[1])
+    if ownGroup { spawn.group = .ownGroup }
     let pid: pid_t
     do { pid = try await startRetrying(spawn) } catch {
         (output + errors).forEach { Sys.close($0) }
@@ -268,16 +274,23 @@ func run(_ executable: URL, _ arguments: [String], environment: [String: String]
             Sys.close(readingErrors)
         }
         // Both read at once, as they come: a child that fills one pipe while this waits on the other would never end.
-        // Past the guard the child is killed, and what it wrote is read for 10 s more at most.
-        let guardEnd = MacTime.real.awake() + 120
-        var deadline = guardEnd, killed = false
+        // Past the guard the child is killed (its group: asked first, then killed), and what it wrote is read for 10 s
+        // more at most.
+        let guardEnd = MacTime.real.awake() + limit
+        var deadline = guardEnd, killed = false, asked = false
         var out = Data(), err = Data(), open: [Int32] = [reading, readingErrors]
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         while !open.isEmpty {
             let now = MacTime.real.awake()
             if now >= deadline {
                 guard !killed else { break }
-                Sys.kill(pid, SIGKILL)
+                if ownGroup, !asked {
+                    Sys.kill(-pid, SIGTERM)
+                    asked = true
+                    deadline = now + 15
+                    continue
+                }
+                Sys.kill(ownGroup ? -pid : pid, SIGKILL)
                 killed = true
                 deadline = now + 10
             }
@@ -294,6 +307,12 @@ func run(_ executable: URL, _ arguments: [String], environment: [String: String]
                     err.append(contentsOf: chunk[0..<count])
                 }
             }
+        }
+        // Asked to end, its pipes closed: what its group left (one that ignored SIGTERM) is killed before the child is
+        // collected, while its pid, a zombie's at worst, still names that group.
+        if asked, !killed {
+            Sys.kill(-pid, SIGKILL)
+            killed = true
         }
         return (out, err, collected(pid, by: killed ? MacTime.real.awake() : guardEnd))
     }

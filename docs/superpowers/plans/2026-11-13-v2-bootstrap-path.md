@@ -121,22 +121,40 @@ place first (that defeats PATH only: the binary is still your file, S11 item 15)
   requiring a pull request, with you as bypass [D11]. The token's repository permissions: **Contents: read** (the
   install fetches the commit with it) and **Actions: read** (the install asks GitHub's API whether both CI runners
   passed the commit: the start plan's ST-D10), and nothing else.
-- **M3. Before step 8's first install:** Swift 6.4.2 owned by root, from swift.org's Ubuntu 24.04 x86_64 tarball with
-  its signature checked: `sudo mkdir -p /opt/swift-6.4.2 && sudo tar -xzf swift-6.4.2-RELEASE-ubuntu24.04.tar.gz -C
-  /opt/swift-6.4.2 --strip-components=1`; tell the agent the path [D12]. In full (the start plan's S4c, 2026-11-16),
-  in a terminal of your own, in a scratch folder:
+- **M3. Before step 8's first install:** Swift 6.4.2 owned by root under `/opt/swift-6.4.2`, from swift.org's Ubuntu
+  24.04 x86_64 tarball, its signature checked by root against the key fingerprint swift.org publishes; tell the agent
+  the path [D12]. In full (the start plan's S4c, 2026-11-16; rewritten with its review the same day, so that nothing of
+  your account plays a part: no file it can write, no shell, startup file, PATH folder or keyring of yours, no `sudo` in
+  a shell a worker of your uid could stand in the way of, S11 items 1 and 3):
+
+  1. On Windows, read the fingerprint of the key that signs Swift 6 releases on swift.org's install page for Linux
+     (its list of active keys), in a browser there: 40 hexadecimal digits, spaces left out. The agent never gives it.
+  2. Open a root shell from Windows' Run dialog (Win+R), not from a Linux terminal:
+     `wsl.exe -u root -e /usr/bin/env -i HOME=/root TERM=xterm-256color PATH=/usr/sbin:/usr/bin:/sbin:/bin /bin/bash --noprofile --norc`.
+  3. In it, with that fingerprint in place of `FINGERPRINT`:
 
   ```sh
-  cd "$(mktemp -d)"
-  curl -fLO https://download.swift.org/swift-6.4.2-release/ubuntu2404/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-ubuntu24.04.tar.gz
-  curl -fLO https://download.swift.org/swift-6.4.2-release/ubuntu2404/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-ubuntu24.04.tar.gz.sig
-  export GNUPGHOME="$PWD/gnupg" && mkdir -m 700 "$GNUPGHOME"   # a keyring of its own, not yours
-  curl -fsSL https://www.swift.org/keys/all-keys.asc | gpg --import -
-  gpg --verify swift-6.4.2-RELEASE-ubuntu24.04.tar.gz.sig swift-6.4.2-RELEASE-ubuntu24.04.tar.gz
-  # "Good signature from Swift Automatic Signing Key #…": go on; anything else: stop.
-  sudo mkdir -p /opt/swift-6.4.2
-  sudo tar -xzf swift-6.4.2-RELEASE-ubuntu24.04.tar.gz -C /opt/swift-6.4.2 --strip-components=1 --no-same-owner
-  sudo chown -R root:root /opt/swift-6.4.2 && sudo chmod -R go-w /opt/swift-6.4.2
+  umask 022
+  /usr/bin/install -d -m 700 -o root -g root /root/swift-dl && cd /root/swift-dl || exit
+  url=https://download.swift.org/swift-6.4.2-release/ubuntu2404/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-ubuntu24.04.tar.gz
+  /usr/bin/curl -fLo swift.tar.gz "$url" && /usr/bin/curl -fLo swift.tar.gz.sig "$url.sig"
+  /usr/bin/curl -fsSLo keys.asc https://www.swift.org/keys/all-keys.asc
+  export GNUPGHOME=/root/swift-dl/gnupg && /usr/bin/install -d -m 700 "$GNUPGHOME"
+  /usr/bin/gpg --batch --import keys.asc
+  # Only a good signature whose key (or its primary) has exactly that fingerprint passes: not the name gpg prints.
+  /usr/bin/gpg --batch --status-fd 1 --verify swift.tar.gz.sig swift.tar.gz 2> /dev/null \
+    | /usr/bin/awk -v want=FINGERPRINT '$1 == "[GNUPG:]" && $2 == "VALIDSIG" && ($3 == want || $NF == want) { ok = 1 } END { exit !ok }' \
+    && echo "VERIFIED" || echo "NOT VERIFIED: stop here"
+  ```
+
+  On "VERIFIED" only, the same copy, still in root's folder:
+
+  ```sh
+  /usr/bin/install -d -m 755 -o root -g root /opt/swift-6.4.2
+  /usr/bin/tar -xzf swift.tar.gz -C /opt/swift-6.4.2 --strip-components=1 --no-same-owner
+  /usr/bin/chown -R root:root /opt/swift-6.4.2 && /usr/bin/chmod -R go-w /opt/swift-6.4.2
+  cd / && /usr/bin/rm -rf /root/swift-dl
+  exit
   ```
 
   The URLs are those swift.org's install page gives for Ubuntu 24.04 x86_64; check them there if they fail. The
@@ -144,7 +162,8 @@ place first (that defeats PATH only: the binary is still your file, S11 item 15)
   read-only: `/opt/swift-6.4.2/usr/bin/swift --version` says 6.4.2; `find /opt/swift-6.4.2 \( ! -user root -o \(
   ! -type l -perm /022 \) \) -print -quit` prints nothing; `/opt` and `/` are root's and writable by nobody else; and
   runs the gated build, `VIBESWITCHER_INSTALL_TOOLCHAIN=/opt/swift-6.4.2 vs-heavy bash scripts/test.sh --filter
-  InstallTests/anInstallBuildsWithTheRootToolchain`.
+  InstallTests/anInstallBuildsWithTheRootToolchain`. Those checks find a toolchain that isn't root's or that its user
+  can write, not one swapped before root extracted it: that is what the steps above close.
 - **M4. During the engine's E1, before its voice rule** (E1 Step 1): give the agent the output of `cat
   /proc/self/cgroup` in a new Windows Terminal tab; the same run by the Bash tool of a `claude` started in that tab;
   `systemd-run --user --wait --pipe cat /proc/self/cgroup`; and `logger -t vibeswitcher-probe hello; journalctl --user

@@ -1462,7 +1462,13 @@ commit is refused; 2026-11-16, with the review of S4a);
 `InstallTests.aFirstInstallRunsOnlyTheCommitsOwnScript`, `InstallTests.theNextInstallRunsThePreviousBuildsScript`,
 `InstallTests.aSecondInstallOnTheSamePrefixIsRefused`, `InstallTests.anInstalledCommitIsRefusedBeforeAnyFetch`,
 `InstallTests.theTestFlagsNeedAScratchPrefix`, `InstallTests.nothingInTheUsersCloneOrConfigShapesTheBuild`,
-`InstallTests.aBinaryWithARunpathIsRefused`, `InstallTests.aBinaryWhoseNeededSetIsntExactIsRefused`,
+`InstallTests.aBinaryWithARunpathIsRefused`, `InstallTests.aBinaryWhoseNeededSetIsntExactIsRefused` (the start plan's
+S4b: the install refuses a dirty checkout, a commit not on v2 or that both runners didn't pass, a toolchain the user
+can write, a script or library that isn't the expected commit's (the commit's on a first install, the installed
+build's after it, whichever branch holds it), a second install on the same builds folder and a commit installed
+already; git and gh run with nothing of the user's environment or configuration, gh's configuration folder one the
+user can't make; a binary with a RUNPATH, or a NEEDED set other than exactly the decided one, is refused; 2026-11-16,
+with the review of S4b);
 `InstallTests.aScratchInstallLaysOutTheBuildAndItsRecord`, `InstallTests.aHostStartsFromAnInstalledFolder`,
 `InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite`, `InstallTests.theMapsCheckNamesAFileTheUserCanWrite`
 (the start plan's S4c, run with `VIBESWITCHER_STATIC_PRODUCTS` naming the spike's static products and skipped
@@ -1470,13 +1476,6 @@ otherwise: an install lays out the five programs, `build-info`, `current` and `i
 from the installed folder passes its `build-info` check and refuses a server one byte off; the installed host, a held
 launcher and the tool server map only root's files, their own installed file and sealed copies, and the server's maps
 are refused, 2026-11-16; planned: `InstallTests.anInstallBuildsWithTheRootToolchain`, written and skipped until M3);
-(the start plan's
-S4b: the install refuses a dirty checkout, a commit not on v2 or that both runners didn't pass, a toolchain the user
-can write, a script or library that isn't the expected commit's (the commit's on a first install, the installed
-build's after it, whichever branch holds it), a second install on the same builds folder and a commit installed
-already; git and gh run with nothing of the user's environment or configuration, gh's configuration folder one the
-user can't make; a binary with a RUNPATH, or a NEEDED set other than exactly the decided one, is refused; 2026-11-16,
-with the review of S4b);
 `LinuxSealListTests.aWriteToEachItemOfTheLinuxListIsHeld`, `LinuxSealListTests.aSourcedFileIsWatched`,
 `LinuxSealListTests.aListingNeverReadsContents`, `LinuxSealListTests.aListingIsNotCut`,
 `LinuxSealListTests.theWindowsFilesAreWatchedOnlyWhileMounted`,
@@ -1646,7 +1645,12 @@ against it. Each line says what reduces it now, if anything.
    runs; `build-info` then vouches for the result, and the CI check still passes, since it checked the commit, not the
    build. And a first install (no `current` yet) run from a working copy a worker changed runs that worker's script,
    which can skip any check (the start plan's ST-D9): before step 10 no team runs, and after the first install the
-   installed copy runs the next. Reduced by `UnsetEnvironment=` (the manager's environment no longer reaches the host), the commit-folder
+   installed copy runs the next. The root toolchain's own install (the bootstrap path's M3, 2026-11-16, with the
+   review of S4c) is done by root from end to end: a root shell from Windows' Run dialog (`wsl.exe -u root`, nothing
+   of the user's account: no shell, startup file, PATH folder, keyring or `sudo` of the user's), the download, the
+   signature checked against the fingerprint swift.org publishes (gpg's `VALIDSIG`, not the name it prints) and the
+   extraction all in a folder only root can write. What remains is the Windows side (item 2, while `/mnt/c` is
+   mounted), and that M3 runs once, before step 8, while no team runs. Reduced by `UnsetEnvironment=` (the manager's environment no longer reaches the host), the commit-folder
    `ExecStart`, the start check (a slip caught), the seal (a detector) and the journal's record of starts no
    `vibeswitcher start` explains, which the command line reads itself. Starting the host's image itself with a
    handover's state of its own gives no more on the account's home: a state file gives no word on which host it is,

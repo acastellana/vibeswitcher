@@ -794,7 +794,7 @@ extension InstallTests {
         #expect(chmod(server.path, 0o755) == 0)
         let refused = try await InstalledHost(scratch, build: build, server: server)
         defer { refused.end() }
-        let status = await offPool { collected(refused.pid, by: MacTime.real.awake() + 120) }
+        let status = await offPool { refused.collected(by: MacTime.real.awake() + 120) }
         let raw = try #require(status, "the host with a changed server never ended: \(refused.said)")
         #expect(raw & 0x7f == 0 && (raw >> 8) & 0xff == 1, "status \(raw): \(refused.said)")
         #expect(refused.said.contains("not started: \(BuildInfo.server): its sha256"), "\(refused.said)")
@@ -879,13 +879,47 @@ extension InstallTests {
     func anInstallBuildsWithTheRootToolchain() async throws {
         let toolchain = try #require(Self.rootToolchain)
         let world = try await world(repository: InstallScript.workingCopy)
-        let ran = try await world.install(try world.arguments(world.base) + ["--toolchain", toolchain])
+        // A cold release build of 406 steps (the spike's second run, 138 of them kept, took 236 s): 55 minutes, inside
+        // the case's 60.
+        let ran = try await world.install(try world.arguments(world.base) + ["--toolchain", toolchain], limit: 55 * 60)
         #expect(ran.status == 0, "\(ran.status) \(ran.errors)")
         // What install-record was given: the toolchain's `swift --version`, as the script runs it.
         let version = try await run(URL(fileURLWithPath: toolchain + "/usr/bin/swift"), ["--version"],
                                     environment: ["HOME": world.home.path, "PATH": "\(toolchain)/usr/bin:/usr/bin:/bin"])
         let versionText = version.output
         try expectLaidOut(world, build: world.prefix.appendingPathComponent(world.base, isDirectory: true), versionText: versionText, products: nil)
+    }
+
+    /// An install's run past its limit ends what the script started, not the script alone: the gated build's
+    /// `vs-heavy` and `swift-build` (here a `sleep` the script left in the background) don't run on in a scratch
+    /// folder the case removes. The limit is the caller's: the gated build's is minutes, not the default 120 s.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2)))
+    func anInstallPastItsLimitEndsWhatItStarted() async throws {
+        let folder = scratch.url("past-limit")
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("home"), withIntermediateDirectories: true)
+        let recorded = folder.appendingPathComponent("background")
+        let started = MacTime.real.awake()
+        let ran = try await run(URL(fileURLWithPath: "/bin/bash"),
+                                ["-c", "sleep 600 & echo $! > \(recorded.path); wait"],
+                                environment: scratchEnvironment(folder), limit: 5, ownGroup: true)
+        #expect(MacTime.real.awake() - started < 60, "the limit wasn't the caller's")
+        #expect(ran.status != 0, "\(ran.status)")
+        let text = try String(contentsOf: recorded, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let background = try #require(pid_t(text), "\(text)")
+        #expect(Self.ended(background), "the script's background child \(background) runs on")
+        if !Self.ended(background) { kill(background, SIGKILL) }
+    }
+
+    /// Whether `pid` has ended (gone, or a zombie its new parent hasn't collected yet), waiting up to 10 s.
+    static func ended(_ pid: pid_t) -> Bool {
+        let deadline = MacTime.real.awake() + 10
+        while true {
+            guard let stat = try? String(contentsOfFile: "/proc/\(pid)/stat", encoding: .utf8),
+                  let close = stat.lastIndex(of: ")") else { return true }
+            if stat[stat.index(after: close)...].trimmingCharacters(in: .whitespaces).hasPrefix("Z") { return true }
+            guard MacTime.real.awake() < deadline else { return false }
+            usleep(20_000)
+        }
     }
 
     /// The maps check names a file the user can write (a scratch file, a deleted file that isn't a sealed copy) and
@@ -950,9 +984,12 @@ extension InstallTests {
 /// line (a short root whose `home/.vibeswitcher` links to it, `--lock` in it, `--exit-with` this process, no `--node`)
 /// with the installed folder as `--node-root` and `server` (its own server by default) as `--server`; HOME, PATH and
 /// `SWIFT_BACKTRACE` as the unit gives them; what it says in `<root>/host.out`.
-private struct InstalledHost {
+private final class InstalledHost: @unchecked Sendable {
     let root: URL
     let pid: pid_t
+    private let lock = NSLock()
+    /// Whether `collected(by:)` collected it: its pid is the kernel's again, so `end()` signals nothing.
+    private var reaped = false
 
     init(_ scratch: Scratch, build: URL, server: URL? = nil) async throws {
         root = try scratch.shortFolder("vsih")
@@ -977,8 +1014,20 @@ private struct InstalledHost {
 
     var said: String { (try? String(contentsOf: root.appendingPathComponent("host.out"), encoding: .utf8)) ?? "" }
 
-    /// Ends it and what it started, whatever a case left (a host that ended already is only collected).
-    func end() { DetachedScratch.end(pid) }
+    /// Its status once it ends, by `deadline` (killed then, as `collected` does); nil if it never ended. Once collected
+    /// its pid may name another process, so `end()` does nothing after.
+    func collected(by deadline: TimeInterval) -> Int32? {
+        let status = VibeNodeTests.collected(pid, by: deadline)
+        if status != nil { lock.withLock { reaped = true } }
+        return status
+    }
+
+    /// Ends it and what it started, whatever a case left; nothing once `collected(by:)` collected it (its pid released,
+    /// what it started was reparented, so no signal here could still be sure of reaching its own).
+    func end() {
+        guard !lock.withLock({ reaped }) else { return }
+        DetachedScratch.end(pid)
+    }
 }
 
 /// `InstallTests`' fixture for `scripts/install-node.sh`: the synthetic repository, its origin, the clone and the
@@ -1088,10 +1137,13 @@ private enum InstallScript {
             return arguments
         }
 
-        /// Runs `script` (the clone's by default) with `arguments` under bash, HOME the test's own home.
-        func install(_ arguments: [String], script: URL? = nil, environment extra: [String: String] = [:]) async throws -> CommandRun {
+        /// Runs `script` (the clone's by default) with `arguments` under bash, HOME the test's own home, in a process
+        /// group of its own: past `limit` (120 s by default; the real build's are minutes) the group is ended, so a
+        /// build's `vs-heavy` and `swift-build` don't run on after the script.
+        func install(_ arguments: [String], script: URL? = nil, environment extra: [String: String] = [:],
+                     limit: TimeInterval = 120) async throws -> CommandRun {
             try await run(URL(fileURLWithPath: "/bin/bash"), [(script ?? self.script).path] + arguments,
-                          environment: scratchEnvironment(root, extra))
+                          environment: scratchEnvironment(root, extra), limit: limit, ownGroup: true)
         }
 
         /// What the stand-in `gh` was called with: each call's arguments and environment.

@@ -1437,6 +1437,23 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
 - Beside the plan: `world(repository:)` clones a real repository for the gated case, and the fixture's commits pass
   `--allow-empty` (the gated case's files may equal the clone's).
 
+*Notes, 2026-11-16 (the review of S4c):*
+- The gated case couldn't have passed: `World.install` ran through `run(_:_:environment:)`, whose fixed 120 s guard
+  SIGKILLed bash alone, mid-build (the spike's incremental build took 236 s), leaving `vs-heavy` and `swift-build`
+  running. `run` gained `limit:` (default 120 s) and `ownGroup:` (the child in a group of its own; past the limit the
+  group gets SIGTERM, so the script's traps run and `vs-heavy` ends its COMMAND's group, then SIGKILL after 15 s).
+  `World.install` always runs in its own group and takes `limit:`; the gated case passes 55 minutes, inside its 60.
+  `anInstallPastItsLimitEndsWhatItStarted` (linuxOnly) holds it: failed with the limit alone (the script's background
+  child ran on), passes with the group.
+- `InstalledHost` is a class that records `collected(by:)`; `end()` does nothing once its pid was collected (it
+  signalled a released pid before).
+- M3 rewritten: root does it all from a shell opened by Windows' Run dialog (`wsl.exe -u root -e /usr/bin/env -i …
+  /bin/bash --noprofile --norc`), downloads into a 0700 root folder, checks gpg's `VALIDSIG` fingerprint against the
+  one the user reads on swift.org (not the name gpg prints), and extracts that copy; every tool by its absolute path.
+  The fingerprint check was tried on a scratch keyring: a key of the same name but another fingerprint, and a changed
+  file, both fail. S11 item 3 names M3's remaining window. S9's Held-by list has S4b's description back after its own
+  tests.
+
 **User step, M3:** before the gated case and before S9. The agent prepares the exact commands from the bootstrap path's
 M3, and how to check the tarball's signature (swift.org's key and the `.sig`). Afterwards it checks, read-only, that
 `/opt/swift-6.4.2/usr/bin/swift --version` says 6.4.2, and that ST-D12's `find` over the tree prints nothing.
