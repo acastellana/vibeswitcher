@@ -24,6 +24,10 @@ import VibeNode
 ///   host's socket in the root (another than `host.sock` isn't the root's: its server refuses it). `waitForServer`:
 ///   returns once the server answers, its link to the host welcomed.
 ///
+/// `owner`: the process the host ends with (`--exit-with`; this test process by default), sessions and server and all,
+/// however it goes: a runner killed or crashed leaves no node running (a host with a live session is never idle, so its
+/// `--idle-exit` never comes, and `ScratchNodes`' end at exit never runs then).
+///
 /// `reusing`: the root of a node stopped before (its host ended), for a host restart (E8): its files are kept (its
 /// `engine.json`, its snapshot, its journal's record, its repositories), its links and stand-ins made again where missing.
 ///
@@ -52,7 +56,7 @@ final class ScratchNode: @unchecked Sendable {
 
     init(_ scratch: Scratch, userScopes: [String]? = ScratchNode.ownScope.map { [$0] }, housekeeping: Int? = nil,
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
-         socketName: String = "host.sock", sealLife: Int? = nil, reusing: URL? = nil, waitForServer: Bool = true) async throws {
+         socketName: String = "host.sock", sealLife: Int? = nil, owner: pid_t = getpid(), reusing: URL? = nil, waitForServer: Bool = true) async throws {
         root = try reusing ?? scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
         nodeRoot = root.appendingPathComponent("build", isDirectory: true)
@@ -87,7 +91,8 @@ final class ScratchNode: @unchecked Sendable {
         files.createFile(atPath: output, contents: nil)
 
         var arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", root.appendingPathComponent("host.log").path,
-                         "--server", nodeRoot.appendingPathComponent("bin/vibeswitcher-server").path, "--node-root", nodeRoot.path]
+                         "--server", nodeRoot.appendingPathComponent("bin/vibeswitcher-server").path, "--node-root", nodeRoot.path,
+                         "--exit-with", String(owner)]
         if let userScopes { arguments += ["--server-arg", ServerArguments.testUserScopesFlag + userScopes.joined(separator: ",")] }
         if let housekeeping { arguments += ["--server-arg", ServerArguments.testHousekeepingFlag + String(housekeeping)] }
         if let testChild { arguments += ["--server-arg", ServerArguments.testChildFlag + testChild] }

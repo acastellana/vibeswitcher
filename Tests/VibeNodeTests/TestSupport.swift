@@ -119,8 +119,53 @@ let scratchRoot: URL = {
 }()
 
 /// Where scratch sockets and the folders holding them go: `scratchRoot` when its path is short (scripts/test.sh's and
-/// scripts/test-under-load.sh's are), else /tmp, since a Unix socket's path is limited in length.
-let shortScratchRoot: String = scratchRoot.path.utf8.count <= 40 ? scratchRoot.path : "/tmp"
+/// scripts/test-under-load.sh's short runs' are), else a short folder of this run's own (`ShortScratch`), since a
+/// Unix socket's path is limited in length.
+let shortScratchRoot: String = scratchRoot.path.utf8.count <= 40 ? scratchRoot.path : ShortScratch.forThisRun()
+
+/// The short folder of a run whose `scratchRoot` is too long for sockets (test-under-load.sh's first run's): never the
+/// shared /tmp itself, where what a run leaves is nobody's to find. `/tmp/vst-<pid>-XXXXXX`, made once, with a link to
+/// it in `scratchRoot` (`short-scratch-<pid>-XXXXXX`, the run's own folder, the one its leftover check lists). At exit both
+/// go when the folder is empty; when a test left something there (a node's root, a socket's folder), both stay, and
+/// the link is what the check finds.
+enum ShortScratch {
+    nonisolated(unsafe) private static var made: (folder: String, link: String)?
+
+    /// This run's folder, made once, removed at exit when empty; /tmp itself only when none can be made.
+    static func forThisRun() -> String {
+        guard let pair = make(linkedFrom: scratchRoot) else { return "/tmp" }
+        made = pair
+        atexit {
+            guard let made = ShortScratch.made else { return }
+            if !ShortScratch.removeIfEmpty(made) {
+                FileHandle.standardError.write(Data("tests left files in \(made.folder) (linked from \(made.link))\n".utf8))
+            }
+        }
+        return pair.folder
+    }
+
+    /// A new folder `/tmp/vst-<pid>-XXXXXX` (0700), and a link to it in `scratch` (made when missing).
+    static func make(linkedFrom scratch: URL) -> (folder: String, link: String)? {
+        var template = Array("/tmp/vst-\(getpid())-XXXXXX".utf8CString)
+        guard let made = template.withUnsafeMutableBufferPointer({ mkdtemp($0.baseAddress!) }) else { return nil }
+        let folder = String(cString: made)
+        let link = scratch.appendingPathComponent("short-scratch-\(getpid())-\(folder.suffix(6))").path
+        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        guard (try? FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: folder)) != nil else {
+            rmdir(folder)
+            return nil
+        }
+        return (folder, link)
+    }
+
+    /// Removes `made`'s folder and its link when the folder is empty: whether it did.
+    @discardableResult
+    static func removeIfEmpty(_ made: (folder: String, link: String)) -> Bool {
+        guard rmdir(made.folder) == 0 || errno == ENOENT else { return false }
+        unlink(made.link)
+        return true
+    }
+}
 
 /// Scratch paths under `scratchRoot` that are removed, with everything in them, when this goes. A suite keeps one as
 /// a stored property: Swift Testing makes a suite instance for each test, so what a test made goes away after it.
