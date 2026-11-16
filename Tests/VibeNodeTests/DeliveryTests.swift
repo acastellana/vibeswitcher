@@ -142,8 +142,12 @@ struct DeliveryTests {
             board.leadPid = leadPid
             board.leadTTY = lead.session.tty
         }
-        world.look()
-        #expect(await eventually(timeout: 120) { world.pending(lead).map(\.text) == ["yes, merge it"] }, "\(world.pending(lead))")
+        // Looked at until it goes, as the engine's clock looks: a look while the held message's send from before is
+        // still under way (`sendingHeld`, a loaded machine) leaves it for the next.
+        #expect(await eventually(timeout: 120) {
+            world.look()
+            return world.pending(lead).map(\.text) == ["yes, merge it"]
+        }, "\(world.pending(lead))")
         #expect(world.pending(worker).isEmpty)
         #expect(await eventually(timeout: 60) { world.stored?.notice == nil })
     }
