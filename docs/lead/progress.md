@@ -3331,3 +3331,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 07:55 Automatically (auto_advance): Started the audit of merges-are-held-doesn at 473ced2a (It touches sensitive_paths (Sources/VibeCore/LeadToolset.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-16 08:01 Audit of merges-are-held-doesn: complete, clean, round 1: 2 Nit open
 - 2026-11-16 08:02 Audit of ui-journeys-select-copy: complete, clean, round 1: 2 Nit open
+- 2026-11-16 08:04 Committed the records at e94c85e1 before merging ui-journeys-select-copy, merges-are-held-doesn: the last merge failed on docs/lead/decisions.md, docs/lead/progress.md
+- 2026-11-16 08:21 Pipeline held: merges-are-held-doesn ready to merge with none landing; cause: a merge in progress
+- 2026-11-16 08:24 Merged ui-journeys-select-copy: UI journeys: select-copy reports all shots changed on a second back-to-back run (in a batch: ui-journeys-select-copy, merges-are-held-doesn landed on one test run) (build 64a972289c0f with changes not committed)
+- 2026-11-16 08:24 Merged merges-are-held-doesn: "Merges are held" doesn't count sleep and doesn't repeat while the Mac sleeps (in a batch: ui-journeys-select-copy, merges-are-held-doesn landed on one test run) (build 64a972289c0f with changes not committed)
+- 2026-11-16 08:24 Flaky in the batch ui-journeys-select-copy, merges-are-held-doesn: escAndTheCrossCancelWhileHeldWaitingAndProcessing(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
