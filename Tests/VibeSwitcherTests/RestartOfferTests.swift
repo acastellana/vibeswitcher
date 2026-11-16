@@ -178,6 +178,70 @@ import Testing
         #expect(offer.offered.isEmpty)
     }
 
+    /// A relaunch onto the running host that doesn't take this app's proof (its Keychain key denied or replaced): the
+    /// host lists none of its sessions to the app, which is no restart. No card, and the record isn't emptied.
+    @Test func aHostThatRefusesTheAppsProofShowsNoCardAndKeepsTheRecord() async throws {
+        let host = try host()
+        try host.start()
+        defer { host.stop() }
+        let folder = temp.url("project").path
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let before = host.client()
+        before.connectIfRunning()
+        #expect(await until { before.state == .connected })
+        let running = try await spawn(before, label: "Claude", cwd: folder)
+        let (offer, shown) = try offer([entry("mine", folder: folder, id: running.id)])
+        // The relaunched app with another key.
+        let client = HostClient(socketPath: host.socket, appKey: { SymmetricKey(size: .bits256) }, reconnectDelays: [0.05], note: { _ in })
+        client.confirmKeyReset = { _, _ in false }
+        offer.watchRecord(client, sessions: Just([]).eraseToAnyPublisher())
+        client.connectIfRunning()
+        offer.watchLaunch(client)
+        #expect(await until { offer.decided })
+        #expect(client.proofRefusal != nil)
+        #expect(shown() == 0)
+        #expect(offer.offered.isEmpty)
+        // Its (empty) list doesn't reach the record.
+        #expect(await until { client.state == .connected })
+        // What the record's watch was handed by then (on the main queue, in order) has landed.
+        await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+        #expect(RestartReopen.load(from: offer.file).map(\.id) == [running.id])
+    }
+
+    /// Asked once: answered (here dismissed) with no session opened since, a relaunch doesn't ask again.
+    @Test func anAnsweredCardDoesntComeBackAtTheNextLaunch() throws {
+        let (offer, shown) = try offer([entry("mine", folder: "/f"), entry("acme", role: .lead, folder: "/r")])
+        offer.decide(hostSessions: nil)
+        #expect(shown() == 1)
+        offer.dismiss()
+        // The app relaunched, still no host running.
+        let relaunched = RestartOffer(file: offer.file)
+        var shownAgain = 0
+        relaunched.show = { shownAgain += 1 }
+        relaunched.decide(hostSessions: nil)
+        #expect(shownAgain == 0)
+        #expect(relaunched.offered.isEmpty)
+    }
+
+    /// A shutdown that's cancelled (an app with unsaved work said no): the record follows the sessions again, from
+    /// what they are by then.
+    @Test func aCancelledShutdownThawsTheRecord() throws {
+        let kept = entry("kept", folder: "/f")
+        let (offer, _) = try offer([kept])
+        var waits: [() -> Void] = []
+        offer.later = { _, run in waits.append(run) }
+        offer.decide(hostSessions: [])
+        offer.freeze()
+        // Closed while frozen: not recorded yet.
+        offer.record(hosted: [], sessions: [])
+        #expect(RestartReopen.load(from: offer.file).map(\.id) == [kept.id])
+        // The shutdown never came.
+        #expect(waits.count == 1)
+        waits.forEach { $0() }
+        #expect(!offer.frozen)
+        #expect(RestartReopen.load(from: offer.file).isEmpty)
+    }
+
     @Test func anEmptyRecordShowsNoCard() async throws {
         let host = try host()
         let (offer, shown) = try offer([])

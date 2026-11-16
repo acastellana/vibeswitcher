@@ -29,8 +29,15 @@ final class RestartOffer: ObservableObject {
     /// Launch's decision is made: from then on the record follows the live sessions.
     private(set) var decided = false
     /// The Mac is shutting down or logging out: the sessions ending now are the restart's, not yours, so the record
-    /// keeps them.
+    /// keeps them. Until `freezeLimit` has passed with the app still running (the shutdown was cancelled).
     private(set) var frozen = false
+    /// How long a shutdown may take to end the app before it's taken as cancelled; how that wait runs (a test's own).
+    var freezeLimit: TimeInterval = 180
+    var later: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
+    /// Each freeze counts up: a cancelled shutdown's wait says nothing about a later one.
+    private var freezes = 0
+    /// The live sessions as last seen from a host that welcomed this app (frozen or not): what a thaw records.
+    private var lastSeen: (hosted: [HostSession], sessions: [Session])?
     private var watching: Set<AnyCancellable> = []
 
     init(file: URL = RestartReopen.file) {
@@ -44,7 +51,10 @@ final class RestartOffer: ObservableObject {
         host.$state.sink { [weak self, weak host] state in
             guard let self, let host, !self.decided else { return }
             switch state {
-            case .connected, .outdated: self.decide(hostSessions: host.sessions)
+            // A host that didn't take this app's proof (`HostClient.proofRefusal`, told before its welcome) lists none
+            // of its sessions to it: that's no sign they're gone, so no card, and the record stays as it is.
+            case .connected, .outdated:
+                if host.proofRefusal != nil { self.decideUnknown() } else { self.decide(hostSessions: host.sessions) }
             case .notRunning, .failed: self.decide(hostSessions: nil)
             case .connecting: break
             }
@@ -54,9 +64,11 @@ final class RestartOffer: ObservableObject {
     /// The record kept up to date from the host's live sessions and the store's (`sessions`), written as they change,
     /// only while the host has welcomed this app: a host that's gone (or not yet answered) says nothing about them.
     func watchRecord(_ host: HostClient, sessions: AnyPublisher<[Session], Never>) {
-        host.$sessions.combineLatest(sessions, host.$state)
+        host.$sessions.combineLatest(sessions, host.$state, host.$proofRefusal)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] hosted, sessions, state in
+            .sink { [weak self] hosted, sessions, state, refusal in
+                // Nor a host that didn't take this app's proof: it shows the app none of its sessions.
+                guard refusal == nil else { return }
                 switch state {
                 case .connected, .outdated: self?.record(hosted: hosted, sessions: sessions)
                 case .notRunning, .connecting, .failed: break
@@ -80,7 +92,16 @@ final class RestartOffer: ObservableObject {
         }
     }
 
+    /// Launch's decision when the host's sessions can't be known: no card.
+    func decideUnknown() {
+        guard !decided else { return }
+        decided = true
+        Breadcrumbs.shared.note("restart: the session host didn't take this app's proof; no restart card, the record kept")
+    }
+
+    /// The live sessions from a host that welcomed this app.
     func record(hosted: [HostSession], sessions: [Session]) {
+        lastSeen = (hosted, sessions)
         guard decided, !frozen else { return }
         let fresh = RestartReopen.entries(hosted: hosted, sessions: sessions, previous: recorded)
         guard fresh != recorded else { return }
@@ -93,7 +114,21 @@ final class RestartOffer: ObservableObject {
     func freeze() {
         guard !frozen else { return }
         frozen = true
+        freezes += 1
+        let freeze = freezes
         Breadcrumbs.shared.note("restart: the Mac is shutting down; the open sessions' record is kept as it is")
+        later(freezeLimit) { [weak self] in
+            guard let self, self.frozen, self.freezes == freeze else { return }
+            self.thaw()
+        }
+    }
+
+    /// The shutdown didn't come (cancelled): the record follows the live sessions again, from what they are now.
+    func thaw() {
+        guard frozen else { return }
+        frozen = false
+        Breadcrumbs.shared.note("restart: the shutdown was cancelled; the open sessions' record follows them again")
+        if let lastSeen { record(hosted: lastSeen.hosted, sessions: lastSeen.sessions) }
     }
 
     func blocker(_ entry: RestartReopen.Entry) -> RestartReopen.Blocker? {
@@ -122,9 +157,17 @@ final class RestartOffer: ObservableObject {
         finish()
     }
 
+    /// Answered: asked once. A record no welcoming host has rewritten since launch still names the sessions offered;
+    /// emptied, so a relaunch before any session opens doesn't ask again (the reopened ones are recorded as they start).
     private func finish() {
         offered = []
         choosing = false
+        if lastSeen == nil, !recorded.isEmpty {
+            recorded = []
+            do { try RestartReopen.save([], to: file) } catch {
+                Breadcrumbs.shared.note("restart: the open sessions' record wasn't emptied: \(error)")
+            }
+        }
         close()
     }
 }
