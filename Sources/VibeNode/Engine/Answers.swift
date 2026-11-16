@@ -97,21 +97,40 @@ extension LeadEngine {
     // MARK: The lead's questions
 
     /// The lead's tool server posted `question` (the server checked its seal, its session and its runner): a new card
-    /// for a post, the card brought up to date for a revision or a withdrawal. Nil for a revision or withdrawal of a
-    /// question never posted (one written to the board alone is never shown). On `queue`.
+    /// for a post, the card brought up to date for a withdrawal (a revision is `questionRevised`). Nil for a withdrawal
+    /// of a question never posted (one written to the board alone is never shown), or for a revision posted this way. On
+    /// `queue`.
     @discardableResult
     func questionPosted(_ op: NodeQuestionPost.Op, question: LeadQuestion, root: String) -> CardStore.Card? {
+        guard op != .revise else { return nil }
         let root = (root as NSString).standardizingPath
         leads.lead(root: root)
         let existing = cards.card(question: question.id, root: root)
         guard existing != nil || op == .post else { return nil }
-        var card = existing ?? CardStore.Card(root: root, kind: .question)
-        let taken = op == .revise ? Self.revision(question, of: existing?.question) : question
-        card.question = Self.keepingTheUsers(taken, from: existing?.question)
-        card.closed = Self.closed(card.question ?? taken)
+        return show(Self.keepingTheUsers(question, from: existing?.question), on: existing ?? CardStore.Card(root: root, kind: .question), root: root)
+    }
+
+    /// The lead's tool server posted its revision of a question (`NodeQuestionPost.Revision`: what the lead gave, the
+    /// server having checked its seal, its session and its runner): the card's own question reworded with it
+    /// (`revision`). Nil when no card shows that question. On `queue`.
+    @discardableResult
+    func questionRevised(_ revision: NodeQuestionPost.Revision, root: String, now: Double = Date().timeIntervalSince1970) -> CardStore.Card? {
+        let root = (root as NSString).standardizingPath
+        leads.lead(root: root)
+        guard let card = cards.card(question: revision.id, root: root), let question = card.question else { return nil }
+        guard let reworded = Self.revision(revision, of: question, now: now) else { return card }
+        return show(reworded, on: card, root: root)
+    }
+
+    /// `card` showing `question` now: closed as the question is, and an approval card of the commit its options approve,
+    /// whose facts are built anew when that commit changed. On `queue`.
+    private func show(_ question: LeadQuestion, on card: CardStore.Card, root: String) -> CardStore.Card {
+        var card = card
+        card.question = question
+        card.closed = Self.closed(question)
         // The commit the options approve now: a revision that names another commit (or adds or drops "Approve") makes
         // the card show that one's facts, built anew, never the earlier commit's beside the new wording.
-        let commit = Self.approvalCommit(taken)
+        let commit = Self.approvalCommit(question)
         let rebuild = commit != nil && commit != card.approval?.commit
         card.kind = commit == nil ? .question : .approval
         if commit == nil { card.approval = nil } else if rebuild, let commit { card.approval = CardStore.ApprovalFacts(commit: commit) }
@@ -121,17 +140,21 @@ extension LeadEngine {
         return card
     }
 
-    /// The card's question `card` reworded as the revision `posted` says: its text, its options and its revisions (so its
-    /// version) alone. A revision's post is built from the board, which any session can write, so its proposal, minutes,
-    /// deadline, reason, priority and task are the board's, never taken (S3: only a posted question's timer runs out, as
-    /// posted): the card keeps its own. Its timer, when it runs, starts again from `now` (its own minutes), as
-    /// `LeadBoard.revise` does, and stops when its proposal is no longer an option or the new wording is one no timer may
-    /// carry (`timerRefusal`). `posted` itself when there's no card question.
-    static func revision(_ posted: LeadQuestion, of card: LeadQuestion?, now: Double = Date().timeIntervalSince1970) -> LeadQuestion {
-        guard var question = card else { return posted }
-        question.text = posted.text
-        question.options = posted.options
-        question.revisions = posted.revisions
+    /// The card's question `card` reworded as the lead's revision `change` says, as `LeadBoard.revise` rewords the
+    /// board's: the new text (when given and not blank) and the new options (when given), the card's own text and options
+    /// kept as the revision's earlier wording with the lead's note (so its version). Everything else is the card's: a
+    /// revision's post carries what the lead gave, never the board's question (any session writes `board.json`: S3, T38;
+    /// only a posted question's timer runs out, as posted). Its timer, when it runs, starts again from `now` (its own
+    /// minutes), and stops when its proposal is no longer an option or the new wording is one no timer may carry
+    /// (`timerRefusal`). Nil when it changes nothing.
+    static func revision(_ change: NodeQuestionPost.Revision, of card: LeadQuestion, now: Double = Date().timeIntervalSince1970) -> LeadQuestion? {
+        let text = change.text.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 } ?? card.text
+        let options = change.options ?? card.options
+        guard text != card.text || options != card.options else { return nil }
+        var question = card
+        question.revisions = (card.revisions ?? []) + [LeadQuestion.Revision(text: card.text, options: card.options, note: change.note, at: now)]
+        question.text = text
+        question.options = options
         if question.isCounting {
             if let proposal = question.proposal, question.options.contains(proposal),
                LeadQuestion.timerRefusal(text: question.text, options: question.options, whyNow: question.whyNow, priority: question.priority) == nil {

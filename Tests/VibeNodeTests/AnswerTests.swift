@@ -289,10 +289,10 @@ struct AnswerTests {
         #expect(world.card(asked.card.id)?.closed == "decided by its timer: Parser")
     }
 
-    /// The engine sweep: a revision's post is built from the board, so a proposal and a deadline written there before
+    /// The engine sweep: a revision's post was built from the board, so a proposal and a deadline written there before
     /// the lead revises came to the card under the lead's seal, and its timer told the lead to go ahead with them. The
-    /// card takes the revision's wording alone: a timed question keeps its own proposal and minutes (started again), and
-    /// one posted with no timer gets none.
+    /// post carries what the lead gave alone: a timed question keeps its own proposal and minutes (started again), one
+    /// posted with no timer gets none, and an option written to the board never reaches the card.
     @Test func aRevisionCarriesNoTimerWrittenToTheBoard() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
@@ -309,14 +309,16 @@ struct AnswerTests {
                 board.questions[index].decideBy = now + 60
             }
         }
-        // The lead rewords each, as revise_question does: the board's question after the revision, posted.
+        // The lead rewords each, as revise_question does: the board revised (keeping what was written there), what the
+        // lead gave posted.
         for asked in [timed, plain] {
-            let revised = try BoardStore(root: world.repo).update { try $0.revise(asked.question.id, text: asked.question.text + " (reworded)", options: nil, note: "clearer") }
-            #expect(revised.proposal == worker, "the post carries the board's proposal: \(revised)")
-            #expect(try #require(await world.post(revised, op: .revise, lead: lead)).ok)
+            let revised = try await world.revise(asked.question.id, text: asked.question.text + " (reworded)", options: nil, note: "clearer", lead: lead)
+            #expect(revised.board.proposal == worker, "the board keeps its proposal: \(revised.board)")
+            #expect(try #require(revised.reply).ok)
         }
         let timedCard = try #require(world.card(timed.card.id)?.question)
         #expect(timedCard.text == "Name it Parser? (reworded)" && timedCard.version == 2)
+        #expect(timedCard.options == ["Parser", "Reader"], "\(timedCard)")
         #expect(timedCard.proposal == "Parser" && timedCard.decideIn == 10, "\(timedCard)")
         #expect((timedCard.decideBy ?? 0) >= now + 9 * 60, "\(timedCard)")
         let plainCard = try #require(world.card(plain.card.id)?.question)
@@ -338,22 +340,17 @@ struct AnswerTests {
 
     /// A revision that drops the card's proposal from the options, or words it as no timer may carry, stops the card's
     /// timer; one that keeps it starts it again from the revision with the card's own minutes.
-    @Test func aRevisionRestartsOrStopsTheCardsOwnTimer() {
+    @Test func aRevisionRestartsOrStopsTheCardsOwnTimer() throws {
         let card = LeadQuestion(text: "Name it Parser?", options: ["Parser", "Reader"], proposal: "Parser", decideIn: 10, at: 1_000)
-        var board = card
-        board.proposal = "Reader"
-        board.decideIn = 1
-        board.revisions = [LeadQuestion.Revision(text: card.text, options: card.options, note: "n", at: 2_000)]
-        board.text = "Name it Parser, or Reader?"
-        let kept = LeadEngine.revision(board, of: card, now: 2_000)
+        let reworded = NodeQuestionPost.Revision(id: card.id, text: "Name it Parser, or Reader?", options: nil, note: "n")
+        let kept = try #require(LeadEngine.revision(reworded, of: card, now: 2_000))
         #expect(kept.proposal == "Parser" && kept.decideIn == 10 && kept.decideBy == 2_000 + 600 && kept.version == 2, "\(kept)")
-        board.options = ["Reader", "Lexer"]
-        let dropped = LeadEngine.revision(board, of: card, now: 2_000)
+        let dropped = try #require(LeadEngine.revision(.init(id: card.id, text: nil, options: ["Reader", "Lexer"], note: "n"), of: card, now: 2_000))
         #expect(dropped.proposal == nil && dropped.decideBy == nil && dropped.options == ["Reader", "Lexer"], "\(dropped)")
-        board.options = card.options
-        board.text = "Delete the old parser, or keep it?"
-        let refused = LeadEngine.revision(board, of: card, now: 2_000)
+        let refused = try #require(LeadEngine.revision(.init(id: card.id, text: "Delete the old parser, or keep it?", options: nil, note: "n"), of: card, now: 2_000))
         #expect(refused.proposal == nil && refused.decideBy == nil, "\(refused)")
+        // The same wording again changes nothing.
+        #expect(LeadEngine.revision(.init(id: card.id, text: " \(card.text) ", options: card.options, note: "n"), of: card, now: 2_000) == nil)
     }
 
     @Test func aWrongCodeIsRefused() async throws {

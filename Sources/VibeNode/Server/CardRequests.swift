@@ -200,11 +200,18 @@ extension Requests {
             reply(.init(re: request.id, error: .init(code, why)))
         }
         guard let op = NodeQuestionPost.Op(rawValue: request.kind), let engine else { return refuse(.refused, "this server keeps no cards") }
+        // A revision carries what the lead gave (`NodeQuestionPost.Revision`), never the board's question.
+        enum Posted { case question(LeadQuestion), revision(NodeQuestionPost.Revision) }
+        let decoded = { (text: String) -> Posted? in
+            let data = Data(text.utf8)
+            if op == .revise { return (try? JSONDecoder().decode(NodeQuestionPost.Revision.self, from: data)).map(Posted.revision) }
+            return (try? JSONDecoder().decode(LeadQuestion.self, from: data)).map(Posted.question)
+        }
         guard let args = request.args, let root = args["root"]?.string, root.hasPrefix("/"), let text = args["question"]?.string,
-              let question = try? JSONDecoder().decode(LeadQuestion.self, from: Data(text.utf8)),
+              let posted = decoded(text),
               let seal = args["seal"], let id = seal["id"]?.string, let at = seal["at"]?.string.flatMap(Double.init),
               let name = seal["name"]?.string, let sealed = seal["seal"]?.string else {
-            return refuse(.badArgs, "\(request.kind) needs root, question (its JSON) and seal (id, at, name, seal)")
+            return refuse(.badArgs, "\(request.kind) needs root, question (its JSON: a revision's, what the lead gave) and seal (id, at, name, seal)")
         }
         guard name == NodeQuestionPost.leadName(root: root) else { return refuse(.voice, "seal: it names \(ConfigSeal.inert(name, limit: 80)), not this project's lead") }
         guard let runner = facts.underRunner else { return refuse(.voice, "whether the poster runs under branch code can't be read") }
@@ -228,9 +235,12 @@ extension Requests {
             self.queue.async {
                 guard valid else { return refuse(.voice, "seal: the post's seal isn't the host's for \(LeadMail.project(of: root))'s lead") }
                 guard bound else { return refuse(.voice, "the poster's session isn't the one the vault binds to \(LeadMail.project(of: root))'s lead role") }
-                guard let card = engine.questionPosted(op, question: question, root: root) else {
-                    return refuse(.gone, "no card for question \(question.short): it was never posted")
+                let card: CardStore.Card?, short: String
+                switch posted {
+                case .question(let question): (card, short) = (engine.questionPosted(op, question: question, root: root), question.short)
+                case .revision(let revision): (card, short) = (engine.questionRevised(revision, root: root), String(revision.id.prefix(8)))
                 }
+                guard let card else { return refuse(.gone, "no card for question \(ConfigSeal.inert(short, limit: 40)): it was never posted") }
                 reply(.init(re: request.id, result: .object(["card": .string(card.id)])))
             }
         }

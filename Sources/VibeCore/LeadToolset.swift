@@ -4551,7 +4551,7 @@ public final class LeadToolset: MCPToolset {
         let board = try store.read()
         let before = (try? board.questionIndex(id)).map { board.questions[$0] }
         let revised = try boardChange { board in try board.revise(id, text: text, options: options, note: note) }
-        NodeQuestionPost.post(revised, op: .revise, root: root, vault: vault)
+        NodeQuestionPost.revise(revised.id, text: text, options: options, note: note, root: root, vault: vault)
         var timer = ""
         if revised.isCounting {
             timer = " Its timer starts again: you go ahead with ‘\(revised.proposal ?? "")’ at \(LeadBoard.clock(revised.decideBy ?? 0)) unless the user answers."

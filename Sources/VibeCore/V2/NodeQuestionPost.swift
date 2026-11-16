@@ -2,8 +2,9 @@ import Foundation
 
 /// The lead's question, as its tool server posts it to the node's server (the engine plan's EN-D10, the security
 /// architecture document's S3): `ask_user`, `revise_question` and `withdraw_question` each write the board, as before,
-/// and post the question as the board now stores it on `<root>/v2/server.sock`, so the server makes the user's card
-/// from what the lead's tool server said, never from `board.json` (which any session can write). A post carries the
+/// and post the question as the board now stores it on `<root>/v2/server.sock` (a revision: what the lead gave, `Revision`),
+/// so the server makes the user's card from what the lead's tool server said, never from `board.json` (which any session
+/// can write). A post carries the
 /// host's seal of a `.lead` message over the post's digest (`LeadVault.seal`, which the host makes only for the lead's
 /// own callers); the server takes it only when the seal verifies, the poster isn't under branch code, and its session
 /// is the one the vault binds to the project's lead role.
@@ -28,11 +29,35 @@ public enum NodeQuestionPost {
     /// The name a lead's own lines carry for `root` (`LeadVault.Book.leadNames`): what the seal is made as.
     public static func leadName(root: String) -> String { "lead of " + LeadMail.project(of: root) }
 
+    /// What `revise_question` was given, as its post carries it: the question's id, the new text and the new options
+    /// (nil: unchanged) and the note, never the question as the board stores it after the revision. The board is
+    /// `board.json`, which any session can write: a worker's options (an "Approve <its commit>"), text or revisions there
+    /// would otherwise reach the card under the lead's seal at the lead's next revise (S3, T38). The server rewords the
+    /// card's own question with these alone (`LeadEngine.questionRevised`).
+    public struct Revision: Codable, Equatable, Sendable {
+        public var id: String
+        public var text: String?
+        public var options: [String]?
+        public var note: String
+
+        public init(id: String, text: String?, options: [String]?, note: String) {
+            self.id = id
+            self.text = text
+            self.options = options
+            self.note = note
+        }
+    }
+
     /// The question as the post carries it and its digest covers: JSON with sorted keys.
-    public static func encoded(_ question: LeadQuestion) -> Data {
+    public static func encoded(_ question: LeadQuestion) -> Data { encodedSorted(question) }
+
+    /// A revision as its post carries it and its digest covers: JSON with sorted keys.
+    public static func encoded(_ revision: Revision) -> Data { encodedSorted(revision) }
+
+    static func encodedSorted<T: Encodable>(_ value: T) -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return (try? encoder.encode(question)) ?? Data()
+        return (try? encoder.encode(value)) ?? Data()
     }
 
     /// The post's digest: SHA-256 of the kind, the root and the question's text exactly as the post carries it, so
@@ -51,12 +76,28 @@ public enum NodeQuestionPost {
     /// Posts `question` (as the board stores it after `op`) for the lead of `root`: the seal asked of `vault` first, then
     /// one request on `socket` if it exists, waiting at most `limit` for the reply. Nothing on the Mac (`enabled`), with
     /// no socket, or when the seal is refused. Whether the server took it (for tests).
+    /// A revision is posted with `revise` (what the lead gave), never as a question.
     @discardableResult
     public static func post(_ question: LeadQuestion, op: Op, root: String, vault: LeadVault = .standard,
                             socket: String = NodeQuestionPost.socket(), enabled: Bool = !Platform.CodeIdentity.isAvailable,
                             limit: TimeInterval = NodeQuestionPost.limit) -> Bool {
+        guard op != .revise else { return false }
+        return send(encoded(question), op: op, root: root, vault: vault, socket: socket, enabled: enabled, limit: limit)
+    }
+
+    /// Posts `revise_question`'s revision of question `id` as the lead gave it (`Revision`: the text and options it
+    /// passed, nil when unchanged, and its note), as `post` does.
+    @discardableResult
+    public static func revise(_ id: String, text: String?, options: [String]?, note: String, root: String, vault: LeadVault = .standard,
+                              socket: String = NodeQuestionPost.socket(), enabled: Bool = !Platform.CodeIdentity.isAvailable,
+                              limit: TimeInterval = NodeQuestionPost.limit) -> Bool {
+        send(encoded(Revision(id: id, text: text, options: options, note: note)), op: .revise, root: root, vault: vault, socket: socket,
+             enabled: enabled, limit: limit)
+    }
+
+    /// The post of `text` (the question's or the revision's JSON) as `op`.
+    static func send(_ text: Data, op: Op, root: String, vault: LeadVault, socket: String, enabled: Bool, limit: TimeInterval) -> Bool {
         guard enabled, FileManager.default.fileExists(atPath: socket) else { return false }
-        let text = encoded(question)
         let message = sealed(digest: digest(op: op, root: root, question: text), root: root, id: UUID().uuidString.lowercased(),
                              at: Date().timeIntervalSince1970)
         guard let seal = try? vault.seal(message) else { return false }

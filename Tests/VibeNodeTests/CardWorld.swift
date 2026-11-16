@@ -118,8 +118,13 @@ final class CardWorld: @unchecked Sendable {
     /// `sealer`'s session (the lead's by default), sent from `facts` (the lead's tool server by default).
     func post(_ question: LeadQuestion, op: NodeQuestionPost.Op = .post, lead: HostSession, root: String? = nil, name: String? = nil,
               sealer: HostSession? = nil, facts: PeerFacts? = nil) async throws -> NodeWire.Reply? {
+        try await post(text: NodeQuestionPost.encoded(question), op: op, lead: lead, root: root, name: name, sealer: sealer, facts: facts)
+    }
+
+    /// `post` of the JSON `text` (a question's, or a revision's for `.revise`).
+    func post(text: Data, op: NodeQuestionPost.Op, lead: HostSession, root: String? = nil, name: String? = nil,
+              sealer: HostSession? = nil, facts: PeerFacts? = nil) async throws -> NodeWire.Reply? {
         let root = root ?? repo
-        let text = NodeQuestionPost.encoded(question)
         let message = NodeQuestionPost.sealed(digest: NodeQuestionPost.digest(op: op, root: root, question: text), root: root,
                                               id: UUID().uuidString.lowercased(), at: Date().timeIntervalSince1970)
         var named = message
@@ -133,6 +138,15 @@ final class CardWorld: @unchecked Sendable {
                              "seal": .string(seal)]),
         ]
         return await ask(op.rawValue, args, action: nil, from: facts ?? Self.toolServer(of: lead))
+    }
+
+    /// The lead's `revise_question` of question `id`: the board revised (`LeadBoard.revise`), then what the lead gave
+    /// posted (`NodeQuestionPost.Revision`), as the tool posts it. The board's question after the revision, and the
+    /// server's reply.
+    func revise(_ id: String, text: String?, options: [String]?, note: String, lead: HostSession) async throws -> (board: LeadQuestion, reply: NodeWire.Reply?) {
+        let revised = try BoardStore(root: repo).update { try $0.revise(id, text: text, options: options, note: note) }
+        let revision = NodeQuestionPost.Revision(id: revised.id, text: text, options: options, note: note)
+        return (revised, try await post(text: NodeQuestionPost.encoded(revision), op: .revise, lead: lead))
     }
 
     /// The board asks `text` and the lead's tool server posts it: its card.

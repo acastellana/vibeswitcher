@@ -90,10 +90,10 @@ struct NodeQuestionPostTests {
         defer { listener.stop() }
         let counting = Counting()
         let question = question
-        #expect(NodeQuestionPost.post(question, op: .revise, root: "/r/proj", vault: counting.vault(folder), socket: socket, limit: 5))
+        #expect(NodeQuestionPost.post(question, op: .withdraw, root: "/r/proj", vault: counting.vault(folder), socket: socket, limit: 5))
         let line = try #require(listener.lines.first)
         let object = try #require(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
-        #expect(object["kind"] as? String == "question.revise")
+        #expect(object["kind"] as? String == "question.withdraw")
         let args = try #require(object["args"] as? [String: Any])
         #expect(args["root"] as? String == "/r/proj")
         let text = try #require(args["question"] as? String)
@@ -103,8 +103,31 @@ struct NodeQuestionPostTests {
         // What the vault sealed: a `.lead` line for no agent whose text is the post's digest.
         guard case .seal(let message)? = counting.requests.first else { Issue.record("no seal asked: \(counting.requests)"); return }
         #expect(message.from == .lead("lead of proj") && message.agentPid == 0 && message.id == seal["id"] as? String)
-        #expect(message.text == "question post " + NodeQuestionPost.digest(op: .revise, root: "/r/proj", question: Data(text.utf8)))
+        #expect(message.text == "question post " + NodeQuestionPost.digest(op: .withdraw, root: "/r/proj", question: Data(text.utf8)))
         #expect(String(message.at) == seal["at"] as? String)
+    }
+
+    /// The engine sweep's review: a revision's post carries what `revise_question` was given (the text, the options,
+    /// nil when unchanged, and the note), never the board's question, which any session can write; posting one as a
+    /// question sends nothing.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux: the post's wire")) func aRevisionCarriesWhatTheLeadGaveAlone() throws {
+        let folder = try shortFolder()
+        let socket = folder.appendingPathComponent("s.sock").path
+        let listener = try Listener(path: socket)
+        defer { listener.stop() }
+        let counting = Counting()
+        #expect(!NodeQuestionPost.post(question, op: .revise, root: "/r/proj", vault: counting.vault(folder), socket: socket, limit: 5))
+        #expect(counting.requests.isEmpty)
+        #expect(NodeQuestionPost.revise("q1", text: "Blue, red or green?", options: nil, note: "green too", root: "/r/proj",
+                                        vault: counting.vault(folder), socket: socket, limit: 5))
+        let line = try #require(listener.lines.first)
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+        #expect(object["kind"] as? String == "question.revise")
+        let text = try #require((object["args"] as? [String: Any])?["question"] as? String)
+        #expect(try JSONDecoder().decode(NodeQuestionPost.Revision.self, from: Data(text.utf8))
+                == NodeQuestionPost.Revision(id: "q1", text: "Blue, red or green?", options: nil, note: "green too"))
+        guard case .seal(let message)? = counting.requests.first else { Issue.record("no seal asked: \(counting.requests)"); return }
+        #expect(message.text == "question post " + NodeQuestionPost.digest(op: .revise, root: "/r/proj", question: Data(text.utf8)))
     }
 
     @Test func switchedOffItPostsNothing() throws {

@@ -158,8 +158,8 @@ struct QuestionCardTests {
         let asked = try await world.asked("Use SQLite?", options: ["Yes", "No"], lead: lead)
         #expect(asked.card.question?.version == 1)
         // The user saw version 1; the lead revises before the answer comes.
-        let revised = try BoardStore(root: world.repo).update { try $0.revise(asked.question.id, text: "Use SQLite or Postgres?", options: ["SQLite", "Postgres"], note: "Postgres is on the table now") }
-        #expect(try #require(await world.post(revised, op: .revise, lead: lead)).ok)
+        let revised = try await world.revise(asked.question.id, text: "Use SQLite or Postgres?", options: ["SQLite", "Postgres"], note: "Postgres is on the table now", lead: lead)
+        #expect(try #require(revised.reply).ok)
         let card = try #require(world.card(asked.card.id))
         #expect(card.question?.text == "Use SQLite or Postgres?" && card.question?.version == 2)
         let shown = CardText.lines(card.value).joined(separator: "\n")
@@ -175,8 +175,8 @@ struct QuestionCardTests {
         #expect(told.text.contains("version 1 of 2") && told.text.contains("the user saw “Use SQLite?”"), "\(told.text)")
         // A revision of a question never posted makes no card.
         let stray = try world.boardAsks("Stray?")
-        let strayRevised = try BoardStore(root: world.repo).update { try $0.revise(stray.id, text: "Stray, really?", options: nil, note: "n") }
-        #expect(try #require(await world.post(strayRevised, op: .revise, lead: lead)).error?.code == NodeWire.Code.gone.rawValue)
+        let strayRevised = try await world.revise(stray.id, text: "Stray, really?", options: nil, note: "n", lead: lead)
+        #expect(try #require(strayRevised.reply).error?.code == NodeWire.Code.gone.rawValue)
     }
 
     /// A question, a commit's subject and a file name holding escape sequences and bidirectional characters reach

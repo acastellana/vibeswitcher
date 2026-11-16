@@ -79,10 +79,8 @@ struct ApprovalCardTests {
 
         let asked = try await world.asked("Merge?", options: [LeadWorkflow.approval(of: first), "Not yet"], priority: .blocking, lead: lead)
         #expect(await eventually(timeout: 60) { world.card(asked.card.id)?.approval?.tasks == ["first"] })
-        let revised = try BoardStore(root: world.repo).update {
-            try $0.revise(asked.question.id, text: "Merge?", options: [LeadWorkflow.approval(of: second), "Not yet"], note: "the other one")
-        }
-        #expect(try #require(await world.post(revised, op: .revise, lead: lead)).ok)
+        let revised = try await world.revise(asked.question.id, text: "Merge?", options: [LeadWorkflow.approval(of: second), "Not yet"], note: "the other one", lead: lead)
+        #expect(try #require(revised.reply).ok)
         #expect(world.card(asked.card.id)?.approval?.commit == second)
         #expect(await eventually(timeout: 60) { world.card(asked.card.id)?.approval?.tasks == ["second"] }, "\(String(describing: world.card(asked.card.id)?.approval))")
         let facts = try #require(world.card(asked.card.id)?.approval)
@@ -101,16 +99,58 @@ struct ApprovalCardTests {
         // A question first posted with no approval, revised to offer one: an approval card with that commit's facts.
         let plain = try await world.asked("Anything else?", options: ["No"], lead: lead)
         #expect(plain.card.kind == .question)
-        let offered = try BoardStore(root: world.repo).update {
-            try $0.revise(plain.question.id, text: "Merge the first?", options: [LeadWorkflow.approval(of: first), "No"], note: "ready")
-        }
-        #expect(try #require(await world.post(offered, op: .revise, lead: lead)).ok)
+        let offered = try await world.revise(plain.question.id, text: "Merge the first?", options: [LeadWorkflow.approval(of: first), "No"], note: "ready", lead: lead)
+        #expect(try #require(offered.reply).ok)
         #expect(world.card(plain.card.id)?.kind == .approval)
         #expect(await eventually(timeout: 60) { world.card(plain.card.id)?.approval?.tasks == ["first"] })
         // An approval typed on a question card that shows no commit is refused too.
         let other = try await world.asked("Which name?", options: ["A", "B"], lead: lead)
         let typed = try #require(await world.answer(other.card, LeadWorkflow.approval(of: second)))
         #expect(typed.error?.code == NodeWire.Code.refused.rawValue, "\(typed)")
+    }
+
+    /// The engine sweep's review: a revision's post carries what the lead gave, never the board's question. A worker
+    /// that writes an "Approve <its commit>" option, its own text and revisions into the open question in `board.json`
+    /// before the lead's text-only (then options-only) revise gets none of it onto the card: the card keeps its own
+    /// options (then text), its kind and its versions, and the user's approval of that commit is refused, recording
+    /// nothing in the vault.
+    @Test func aRevisionTakesNoOptionTextOrRevisionsFromTheBoard() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let commit = try await taskBranch(world.repo, task: "sneak", file: "hook.sh", subject: "Add a hook")
+        let lead = try await world.sleepingLead()
+        try await world.acceptBase()
+        let vault = world.host.vault
+        let asked = try await world.asked("Name it Parser?", options: ["Parser", "Reader"], lead: lead)
+        let approve = LeadWorkflow.approval(of: commit)
+        try BoardStore(root: world.repo).update { board in
+            let index = try board.questionIndex(asked.question.id)
+            board.questions[index].options.append(approve)
+            board.questions[index].text = "Merge the hook now?"
+            board.questions[index].revisions = Array(repeating: LeadQuestion.Revision(text: "x", options: [], note: "y"), count: 5)
+        }
+        let byText = try await world.revise(asked.question.id, text: "Name it Parser, or Reader?", options: nil, note: "clearer", lead: lead)
+        #expect(byText.board.options.contains(approve), "the board keeps the worker's option: \(byText.board)")
+        #expect(try #require(byText.reply).ok)
+        var card = try #require(world.card(asked.card.id))
+        #expect(card.kind == .question && card.approval == nil, "\(card)")
+        #expect(card.question?.options == ["Parser", "Reader"] && card.question?.text == "Name it Parser, or Reader?", "\(String(describing: card.question))")
+        #expect(card.question?.version == 2 && card.question?.revisions?.first?.text == "Name it Parser?", "\(String(describing: card.question))")
+
+        // Options alone: the card's own text stays, whatever the board says.
+        try BoardStore(root: world.repo).update { board in
+            board.questions[try board.questionIndex(asked.question.id)].text = "Merge the hook now?"
+        }
+        let byOptions = try await world.revise(asked.question.id, text: nil, options: ["Parser", "Lexer"], note: "Reader is taken", lead: lead)
+        #expect(try #require(byOptions.reply).ok)
+        card = try #require(world.card(asked.card.id))
+        #expect(card.kind == .question && card.question?.text == "Name it Parser, or Reader?" && card.question?.options == ["Parser", "Lexer"],
+                "\(String(describing: card.question))")
+        #expect(card.question?.version == 3)
+
+        let typed = try #require(await world.answer(card, approve))
+        #expect(typed.error?.code == NodeWire.Code.refused.rawValue, "\(typed)")
+        #expect(try await offPool { try vault.approved(root: world.repo, task: "sneak", commit: commit) } == false)
     }
 
     /// The security follow-ups' item 14: the base an approval card's files and diffstat are taken against is workflow.md's
