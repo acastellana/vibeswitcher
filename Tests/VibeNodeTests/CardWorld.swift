@@ -17,9 +17,15 @@ final class CardWorld: @unchecked Sendable {
     var repo: String { world.repo }
     var queue: DispatchQueue { world.queue }
 
-    /// A peer that is the user's voice under the weaker rule (no cgroup read).
-    static let user = PeerFacts(pid: 900, uid: getuid(), cgroup: nil, ancestry: [.init(pid: 900, startTicks: 5)],
-                                terminal: .named("ttypts0"), sessionMarker: false, underRunner: false)
+    /// A peer that is the user's voice under the weaker rule (no cgroup read). Its pid and terminal are no real
+    /// process's or terminal's: the voice rule refuses a peer on a live session's terminal or under its program, and a
+    /// scratch host's sessions get real pseudo-terminals, numbered from 0 on a machine where nothing else holds one (a
+    /// CI runner, where a lead on "ttypts0" made every answer from a user on "ttypts0" not the user's). Above the
+    /// highest pid either system gives (Linux's `PID_MAX_LIMIT`, 4194304), and a name no pseudo-terminal has.
+    static let user = PeerFacts(pid: userPID, uid: getuid(), cgroup: nil, ancestry: [.init(pid: userPID, startTicks: 5)],
+                                terminal: .named(userTerminal), sessionMarker: false, underRunner: false)
+    static let userPID: pid_t = 9_000_900
+    static let userTerminal = "ttytest-user"
     static let rule = VoiceRule(mode: .weaker, scopes: [], uid: getuid(), says: "a test's")
 
     private init(world: DeliveryWorld, engine: LeadEngine) {
