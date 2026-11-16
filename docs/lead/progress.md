@@ -3457,3 +3457,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 Seen again, already reported, so only counted (the daily trend has the counts): error kind app: failed ×1
 - 2026-11-16 20:55 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
 Seen again, already reported, so only counted (the daily trend has the counts): error kind app: failed ×1
+- 2026-11-16 23:38 Automatically (auto_advance): Fable held back until Nov 17, 01:00: workers and audits on Opus. Claude refused Fable at its usage limit, so new workers and audits that would run on Fable start on Opus (audits under a floor that keeps them off the workers' model, on the next one down), and a worker Fable's refusal halted starts again on Opus in its worktree. At the reset they're back on Fable by themselves; nothing for you to set.
