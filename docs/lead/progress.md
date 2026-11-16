@@ -3345,3 +3345,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 09:31 Automatically (auto_advance): Overlap for after-a-mac-restart's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ui-journeys-b-team (kept: its branch changes it).
 - 2026-11-16 09:37 Exception on after-a-mac-restart by lead of vibeswitcher: edits to Sources/VibeCore/LeadLaunch.swift, Sources/VibeSwitcher/LeadController*.swift, Sources/VibeCore/LeadController*.swift accepted. Reason: A reopened lead must go through the lead start (a fresh vault grant bound to the new session, same prompt, MCP config and environment) with a new resume option adding --resume <agentSessionID>. The si…
 - 2026-11-16 09:53 Automatically (auto_advance): Resumed after sleep: sent after-a-mac-restart's worker one go-on message.
+- 2026-11-16 10:10 Automatically (auto_advance): Started the audit of after-a-mac-restart at 879fc6c5 (Its review is audit).
+- 2026-11-16 10:10 Released after-a-mac-restart's worker (idle since its done report on 879fc6c5) while its audit runs
+- 2026-11-16 10:10 Automatically (auto_advance): Released after-a-mac-restart's worker, idle since its done report on 879fc6c5, while its audit runs (ended pid 36014 (Worker: After a Mac restart, a card offers to reopen the sessions that were open)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-16 10:13 Audit of after-a-mac-restart: complete, clean, round 1: 1 Important open, 3 Nit open
+- 2026-11-16 10:13 Started a worker on after-a-mac-restart
+- 2026-11-16 10:13 Automatically (auto_advance): Sent after-a-mac-restart's worker the open Important findings after-a-mac-restart:F1 from its audit at 879fc6c5 (in a new worker: its last one was released during the audit).
