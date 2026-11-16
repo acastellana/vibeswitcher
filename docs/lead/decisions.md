@@ -452,3 +452,7 @@ Every normal-arm merge (A2 at about 23:05, A3 and A4 next) re-breaks the team br
 
 The pre-registered rule (team-on-one-task-design.md §5) drops on more Important findings in either instance; the team arm also misses the ≤1.5× token bar (2.0×) and is only borderline on speed. Its real gains were quality ones the bar doesn't count: no hot-file conflicts, stable back-to-back journeys, and it found the inspector root cause that left the normal arm's select-copy flaky. It also cost about 8 extra lead turns (member starts, false stall alarms). Revisit if a task has 3+ parts that must share one hot file and conflicts cost more than the token overhead.
 
+## 2026-11-16 09:31:56 After a Mac restart, VibeSwitcher offers one card at launch that lists the sessions live at shutdown, with "Reopen all" and "Choose". Nothing reopens without the user's click. Leads reopen first and are told to restart their workers; workers and verifiers aren't listed.
+
+The user's answer to 9B2720A6 (2026-11-16). Reopening everything automatically would spend tokens and load the Mac without the user choosing to.
+

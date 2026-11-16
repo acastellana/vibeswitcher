@@ -3339,3 +3339,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 08:24 Automatically (auto_advance): Merged ui-journeys-select-copy at 7b7763a2 (its passing audit), merges-are-held-doesn at 268df9cb (its passing audit) into main as one batch, on 1 test run for 2 tasks.
 - 2026-11-16 08:24 Automatically (auto_advance): Cleaned up ui-journeys-select-copy (freed 2.7 GB of build output and temporary folders). It stays done.
 - 2026-11-16 08:24 Automatically (auto_advance): Cleaned up merges-are-held-doesn (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-16 09:31 Planned after-a-mac-restart: After a Mac restart, a card offers to reopen the sessions that were open (review audit)
+- 2026-11-16 09:31 Started a worker on after-a-mac-restart
+- 2026-11-16 09:31 Automatically (auto_advance): Started a worker on after-a-mac-restart (After a Mac restart, a card offers to reopen the sessions that were open).
+- 2026-11-16 09:31 Automatically (auto_advance): Overlap for after-a-mac-restart's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ui-journeys-b-team (kept: its branch changes it).
