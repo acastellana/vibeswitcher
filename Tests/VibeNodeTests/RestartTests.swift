@@ -299,6 +299,75 @@ struct RestartTests {
         #expect(world.queue.sync { again.advanceSeen[key].map { abs($0.timeIntervalSince(sighted)) < 0.001 } } == true)
     }
 
+    /// The witness's told keys and first sightings kept at rest don't grow forever: once a session is neither on the
+    /// board nor in the host's list (its task finished and forgotten), what was told and seen of it is forgotten, in
+    /// `engine.json` too; what's kept for a session still on the board stays. Nothing is forgotten from a look whose
+    /// host list is empty (the link down).
+    @Test func theWitnessForgetsWhatItToldOfSessionsThatAreGone() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        let root = world.repo
+        let now = Date()
+        let slug = "gone-\(UUID().uuidString.prefix(8).lowercased())"
+        let (worker, verifier, stays) = (UUID(), UUID(), UUID())
+        let contract = LeadContract(goal: "g", acceptance: [], boundaries: [], context: "")
+        try BoardStore(root: root).update { board in
+            var running = LeadTask(slug: slug, title: "Ended", contract: contract, status: .running)
+            running.worker = worker.uuidString
+            board.tasks.append(running)
+            var audited = LeadTask(slug: slug + "-audited", title: "Audited", contract: contract, status: .review)
+            audited.verifier = verifier.uuidString
+            board.tasks.append(audited)
+        }
+        var team = TeamReading()
+        team.advancing = true
+        let cwd = (root as NSString).appendingPathComponent(".vibeswitcher/worktrees/\(slug)")
+        team.hosted[worker.uuidString] = HostSession(id: worker, tty: "ttypts\(Int.random(in: 700..<800))", childPID: 63_000, cwd: cwd,
+                                                     command: "claude", label: "Worker: Ended", agent: "claude", title: "Claude",
+                                                     startedAt: now - 7_200, cols: 120, rows: 40, exit: .init(status: 1, at: now - 60))
+        team.hosted[verifier.uuidString] = HostSession(id: verifier, tty: "ttypts\(Int.random(in: 800..<900))", childPID: 63_001, cwd: cwd,
+                                                       command: "claude", label: "Verifier: Audited", agent: "claude", title: "Claude",
+                                                       startedAt: now - 600, cols: 120, rows: 40, exit: .init(status: 0, at: now - 30))
+        let board = BoardStore(root: root).load()
+        let applied = Locked(0)
+        world.queue.sync {
+            world.engine.witnessStep = { if $0 == "applied" { applied.mutate { $0 += 1 } } }
+            // Another root's: kept.
+            world.engine.told.insert("/elsewhere|\(worker.uuidString)|ended")
+            world.engine.refreshed(roots: [root], loaded: [root: board], teams: [root: team], refusals: [:])
+        }
+        #expect(await eventually(timeout: 120) { applied.value == 1 })
+        await world.drained()
+        let workerKey = "\(root)|\(worker.uuidString)|ended", verifierKey = "\(root)|\(verifier.uuidString)"
+        #expect(world.queue.sync { world.engine.told.contains(workerKey) && world.engine.advanceSeen[verifierKey] != nil },
+                "\(world.queue.sync { (world.engine.told, world.engine.advanceSeen) })")
+
+        // The tasks finished and gone from the board, a new one's worker on it; the host lists the lead alone. First
+        // with the link down (no session listed): nothing forgotten.
+        var later = board
+        later.tasks = [LeadTask(slug: "next", title: "Next", contract: contract, status: .running)]
+        later.tasks[0].worker = stays.uuidString
+        world.queue.sync {
+            // Kept: for a session on the board.
+            world.engine.told.insert("\(root)|\(stays.uuidString)|ended")
+            world.engine.refreshed(roots: [root], loaded: [root: later], teams: [root: TeamReading()], refusals: [:])
+        }
+        #expect(await eventually(timeout: 120) { applied.value == 2 })
+        #expect(world.queue.sync { world.engine.told.contains(workerKey) && world.engine.advanceSeen[verifierKey] != nil })
+        var leadOnly = TeamReading()
+        leadOnly.hosted[lead.session.id.uuidString] = lead.session
+        world.queue.sync { world.engine.refreshed(roots: [root], loaded: [root: later], teams: [root: leadOnly], refusals: [:]) }
+        #expect(await eventually(timeout: 120) { applied.value == 3 })
+        let (told, seen) = world.queue.sync { (world.engine.told, world.engine.advanceSeen) }
+        #expect(!told.contains(workerKey) && seen[verifierKey] == nil, "\(told) \(seen)")
+        #expect(told.contains("\(root)|\(stays.uuidString)|ended") && told.contains("/elsewhere|\(worker.uuidString)|ended"), "\(told)")
+        #expect(await eventually(timeout: 60) {
+            let state = EngineState.load(root: world.host.root).state
+            return state.told?.contains(workerKey) == false && state.firstSightings?[verifierKey] == nil
+        })
+    }
+
     /// The rebind of the running leads at the server's start isn't lost to a link that drops under it: a pass whose
     /// board read comes back with the link reconnecting runs again (at the refresh or the welcome after), and the lead's
     /// role is bound to its session. Against a `DeliveryWorld`, whose lead starts after the engine's first welcome.

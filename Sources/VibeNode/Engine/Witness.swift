@@ -71,6 +71,24 @@ extension LeadEngine {
         }
     }
 
+    /// The told keys and auto_advance's sightings of `root` that name no session on its board or in the host's list
+    /// (`hosted`), forgotten: none can come up again (the witness looks only at the board's members the host lists, and
+    /// each session's id is new), and kept at rest (E8) they would grow `engine.json` with every session the project ever
+    /// had. Each key names its session among its `|`-separated parts after the root (`<session>|ended`,
+    /// `<session>|input-<time>`, `<verifier>`, `release|<worker>`). Not while the host lists nothing (its link down,
+    /// not yet welcomed): a board read alone doesn't forget what a live session was told. On `queue`.
+    func forgetGone(root: String, board: LeadBoard, hosted: [String: HostSession]) {
+        guard !hosted.isEmpty else { return }
+        let known = Set(board.tasks.flatMap(\.members).map { $0.lowercased() } + hosted.keys.map { $0.lowercased() })
+        let prefix = root + "|"
+        func gone(_ key: String) -> Bool {
+            guard key.hasPrefix(prefix) else { return false }
+            return !key.dropFirst(prefix.count).split(separator: "|").contains { known.contains($0.lowercased()) }
+        }
+        told = told.filter { !gone($0) }
+        advanceSeen = advanceSeen.filter { !gone($0.key) }
+    }
+
     /// What the witness worked out of a look (`WitnessWork`), applied on the engine's queue: sessions without tools end,
     /// the auto_advance loop is nudged, the lead is told what it wasn't yet, the board keeps the working time and the
     /// stalls, held messages go, and the lead is woken.
@@ -79,6 +97,7 @@ extension LeadEngine {
         // What's told and nudged is kept at rest too (E8): a restarted server doesn't tell or nudge it again.
         let (toldBefore, seenBefore) = (told.count, advanceSeen.count)
         defer { if told.count != toldBefore || advanceSeen.count != seenBefore { saveState() } }
+        forgetGone(root: root, board: board, hosted: team.hosted)
         // A worker or verifier whose tools never connected only holds a slot: it ends (`events` tells the lead).
         for id in work.withoutTools {
             guard let uuid = UUID(uuidString: id), endingNoTools[id].map({ now.timeIntervalSince($0) >= 60 }) ?? true else { continue }
