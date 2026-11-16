@@ -74,7 +74,15 @@ final class NodeTestHost: @unchecked Sendable {
 
     deinit { stop() }
 
-    /// Ends its sessions, stops it, ends the connector's registration and removes its socket's folder. Once.
+    /// Ends its sessions, stops it, waits for its sessions' processes to be gone, ends the connector's registration and
+    /// removes its socket's folder. Once.
+    ///
+    /// `HostServer.stop(terminateSessions:)` only signals the sessions (SIGHUP, then SIGKILL 5 s on): a session still
+    /// ending writes into its `HOME` while the scratch removes the folder, which then stays (a `node-host-*` folder
+    /// left by a load run). So what was under each session's program before the stop (the program too, each known by
+    /// its start, as `ScratchNode.stop` knows them) is waited for, bounded (`ScratchNode.waitForEnd`), then anything
+    /// still naming the sessions' `HOME` in its environment (started meanwhile, or detached before the listing) is
+    /// ended (`ScratchNode.endStrays`).
     func stop() {
         let first = lock.withLock { () -> Bool in
             defer { stopped = true }
@@ -86,7 +94,14 @@ final class NodeTestHost: @unchecked Sendable {
             server.closeAppConnector(appConnector)
             Sys.close(appConnector)
         }
+        let list = { [server] in server.sessions.values.filter { $0.info.isLive }.map(\.info.childPID) }
+        let programs = DispatchQueue.getSpecific(key: HostServer.queueKey) != nil ? list() : server.queue.sync(execute: list)
+        let under = programs.flatMap { pid in
+            (Platform.Processes.link(pid).map { [$0] } ?? []) + ScratchNode.descendants(of: pid)
+        }
         server.stop(terminateSessions: true)
+        ScratchNode.waitForEnd(under)
+        ScratchNode.endStrays(of: home.path)
         try? FileManager.default.removeItem(at: socketFolder)
     }
 
