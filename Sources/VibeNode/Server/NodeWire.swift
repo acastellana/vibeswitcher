@@ -266,10 +266,10 @@ public enum NodeWire {
     public static func changesState(_ kind: String) -> Bool { (kinds[kind] ?? .user) == .user && !changesNothing.contains(kind) }
 
     /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6; the hooks
-    /// from the start plan's S6).
+    /// from the start plan's S6; `build.switch` from its S8b): every kind `kinds` names.
     public static let taken = ["status", "start", "stop", "lead", "questions", "answer", "hold", "config.held", "config.accept",
                                "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
-                               "hooks.install", "hooks.remove"]
+                               "hooks.install", "hooks.remove", "build.switch"]
 
     // MARK: Lines
 

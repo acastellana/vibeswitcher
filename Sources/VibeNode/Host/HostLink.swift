@@ -105,7 +105,8 @@ public final class HostLink: @unchecked Sendable {
     /// and only of a host whose welcome lists `HostProtocol.Capability.vaultV2` (another refuses it, saying so).
     public let vaultV2: LeadVaultV2Client
 
-    private let dialer: HostDialer
+    /// How the link reaches its host: a `build.switch` asks its handover on a connection of its own the same way.
+    let dialer: HostDialer
     private let timing: Timing
     private let sweeper: ([HostSession]) -> Void
     private let note: (String) -> Void
@@ -123,6 +124,10 @@ public final class HostLink: @unchecked Sendable {
     private var units: [UUID: [Unit]] = [:]
     private var sweeps: Subscription?
     private var started = false
+    /// How many welcomes the link has had (a handover's new image welcomes the link again): on `queue`.
+    public private(set) var welcomes = 0
+    /// What waits for a welcome past a count (`welcomed(after:_:)`), told true at it or false once the link is gone.
+    private var welcomeWaiters: [(after: Int, done: (Bool) -> Void)] = []
 
     /// `root`: the node's root, whose `lead` folder the vault's launch files go in and whose sessions' TMPDIRs are swept
     /// (`SessionTemp`), never this process's `VibePaths.root` unless given. `clock`: the engine's, which sweeps every
@@ -271,6 +276,9 @@ public final class HostLink: @unchecked Sendable {
         let waiting = units
         units = [:]
         waiting.values.flatMap { $0 }.forEach { $0.confirmed(false) }
+        let waiters = welcomeWaiters
+        welcomeWaiters = []
+        waiters.forEach { $0.done(false) }
         onGone?(reason)
     }
 
@@ -295,7 +303,11 @@ public final class HostLink: @unchecked Sendable {
             if sweeps == nil, let clock {
                 sweeps = clock.every(SessionTemp.sweepEvery) { [weak self] in self?.perform { self?.sweepSessionFolders() } }
             }
+            welcomes += 1
+            let due = welcomeWaiters.filter { welcomes > $0.after }
+            welcomeWaiters.removeAll { welcomes > $0.after }
             onWelcome?(startedAt, list)
+            due.forEach { $0.done(true) }
             resendHeld()
         case .spawned(let session), .sessionChanged(let session):
             upsert(session)
@@ -467,6 +479,16 @@ public final class HostLink: @unchecked Sendable {
             send(.hostNotes) { event in
                 if case .hostNotes(let notes) = event { completion(notes) } else { completion(nil) }
             }
+        }
+    }
+
+    /// `done(true)` (on `queue`) once the link has had more than `count` welcomes (at once when it has), or
+    /// `done(false)` once the link is gone: how a `build.switch` waits for the host that answers after its handover.
+    public func welcomed(after count: Int, _ done: @escaping (Bool) -> Void) {
+        perform { [self] in
+            if welcomes > count { return done(true) }
+            if isGone { return done(false) }
+            welcomeWaiters.append((count, done))
         }
     }
 

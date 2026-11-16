@@ -110,16 +110,30 @@ struct ServerTests {
     @Test func anUnlistedRequestIsRefused() async throws {
         let node = try await ScratchNode(scratch)
         let client = try WireClient(node)
-        // Kinds the protocol names that this server doesn't take yet, and kinds no list names (`lead` is taken from E4,
-        // the cards and the lead's questions from E6, the hooks from the start plan's S6).
-        for kind in ["build.switch", "shell", "exec", ""] {
+        // Kinds no list names (`lead` is taken from E4, the cards and the lead's questions from E6, the hooks from the
+        // start plan's S6, `build.switch` from its S8b: no kind the protocol names is left unanswered).
+        for kind in ["shell", "exec", ""] {
             let reply = try #require(WireClient.reply(client.request(kind, args: ["folder": .string("/")])), "\(kind)")
             #expect(reply.ok == false && reply.error?.code == "unknown-kind", "\(kind): \(reply)")
         }
         #expect(client.hello.kinds == NodeWire.taken)
-        #expect(Set(NodeWire.taken) == Set(NodeWire.kinds.keys).subtracting(["build.switch"]))
+        #expect(Set(NodeWire.taken) == Set(NodeWire.kinds.keys))
         let status = try #require(WireClient.reply(client.request("status", action: nil))?.result)
         #expect(status["accepted"]?.array?.isEmpty == true, "\(status)")
+        // `build.switch` on a scratch node given no install root: taken (recorded), and refused for that.
+        let switched = try #require(WireClient.reply(client.request("build.switch", args: ["commit": .string(String(repeating: "b", count: 40))])))
+        #expect(switched.ok == false && switched.error?.code == "refused" && switched.error?.message.contains("no install root") == true, "\(switched)")
+    }
+
+    /// `--test-install-root=` (the start plan's S8b) is a scratch host's test flag: a server with `--node` refuses it
+    /// and takes the account's own install folder; without `--node` it is parsed, an absolute path only.
+    @Test func theTestInstallRootIsRefusedUnderNode() throws {
+        let base = ["vibeswitcher-server", "--host-connector", "3", "--host-socket", "/x/host.sock"]
+        let node = try ServerArguments.parse(base + ["--node", "--node-root", "/x/b", "--test-install-root=/x"]).get()
+        #expect(node.refused == ["--test-install-root=/x"] && node.testInstallRoot == nil, "\(node)")
+        let scratch = try ServerArguments.parse(base + ["--root", "/x", "--test-install-root=/x/builds"]).get()
+        #expect(scratch.refused.isEmpty && scratch.testInstallRoot == "/x/builds", "\(scratch)")
+        #expect(throws: ServerArguments.Usage.self) { try ServerArguments.parse(base + ["--root", "/x", "--test-install-root=builds"]).get() }
     }
 
     @Test func aRequestFromAnotherSenderOnTheServersSocketIsRefused() async throws {

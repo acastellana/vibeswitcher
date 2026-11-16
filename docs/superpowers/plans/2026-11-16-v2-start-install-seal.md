@@ -1989,7 +1989,33 @@ inventory. The Mac runs `theMacsListIsEmpty`.
       refused(String) }`.
   - The wire: `build.switch`, args `commit` (40 hex); voice the user's; code "own".
 
-- [ ] **Step 1: Failing tests** (`SwitchTests`, linuxOnly unless pure):
+*2026-11-16, as built:*
+- `SwitchRequest.outcome(before:target:after:refusal:afterTheWait:)`: `target:` added (the app's `asked` build), and
+  the cases carry what their text names: `handedOver(commit:pid:afterTheWait:)`, `oldBuildAnswered(pid:build:asked:)`,
+  `otherHostAnswered(pid:build:was:)`, `hostGone(pid:)`, `refused(String)`, with `text` (the app's log lines, `host: `
+  dropped; the server notes them as `build.switch: …`). `run(commit:reply:)` answers `SwitchRequest.Answer`
+  (`.done(value)`, `.refused(code, text)`), which `Requests` turns into the reply. The result of a handover:
+  `outcome: handed-over`, `commit`, `from`, `pid`, `afterTheWait`, `said`; `already` is `outcome: already`; every
+  other plan or outcome is a `refused` error with its text (decision 6 and each live worker or verifier named).
+- The handover isn't asked with `HostCall.request` but on a connection of its own through the link's dialer
+  (`HostLink.dialer`, made internal: the server's `ConnectorDialer`, so the same registered connector), so it can stay
+  open past `replyWait`: `lateWait` (60 s) more, an answer then counting "after the wait", as the app's connection
+  stayed open. The connection closing without an answer is the host executing the target. The link's next welcome is
+  waited for at most `welcomeWait` (60 s) through `HostLink.welcomes` and `welcomed(after:_:)` (new), then the notes.
+  `SwitchRequest.longestWait` is what S8c's command line waits at least. The waits are `SwitchRequest.Timing`
+  (`Requests.switchTiming`), armed on a clock a test moves (`later`).
+- `ScratchNode(installRoot:)` gives the host `--install-root` too, so the host checks each target as the node's host
+  does (`HandoverTarget`). `ScratchBuilds.install(commit:into:replacing:)`: `replacing` takes a product from another
+  path. `statusGivesTheRollbackTarget` runs on `Requests` against a `StubHost` (the install root a scratch folder).
+- `aRollbackTheHostRefusesSaysWhy`: no build of another state format can be made here, so `A`'s host is `/bin/false`
+  (an ELF recorded in its `build-info`, so the target check passes and its probe refuses the state, as a newer
+  format's would); the reply names the host's words, "Couldn't hand over: the new build can't take over: it exited
+  with status 256".
+- *For S8c:* `ScratchBuilds` copies the same built products into every build, so after a switch the server child's
+  bytes are the target's and `ServerChild` keeps it running (it is replaced only when the bytes differ): its
+  `server.commit` stays `A`. "server build `B` once the server is restarted" needs builds whose server bytes differ.
+
+- [x] **Step 1: Failing tests** (`SwitchTests`, linuxOnly unless pure):
   - `aSwitchWhileAWorkerRunsIsRefused` (S8): on a `ScratchNode` with a fake lead and worker, `build.switch` is
     refused, naming decision 6 and the worker. The host's pid and build are unchanged. With only the lead live, it
     hands over.
@@ -2017,16 +2043,17 @@ inventory. The Mac runs `theMacsListIsEmpty`.
     lead is kept.
   - `aRollbackTheHostRefusesSaysWhy`: a target the host refuses (its state format) leaves `A` running, and the reply
     names the host's reason.
-- [ ] **Step 2: Implement.**
+- [x] **Step 2: Implement.**
   - The server sends the handover through the connector with the target
     `<installRoot>/<commit>/bin/vibeswitcher-host`. Its install root is `NodeFolders.defaultPrefix` from `getpwuid` on
     the node, or `--test-install-root` on a scratch node.
   - It reads the host's notes after the reply to decide the outcome, and replies before its own replacement.
-- [ ] **Step 3: Verify.**
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter 'SwitchTests|ServerTests|HostLinkTests'`
   - the lints
   - under load (`SwitchTests`)
-- [ ] **Step 4:** commit ("v2: build.switch in the server"). Push, both green.
+- [ ] **Step 4:** commit ("v2: build.switch in the server"). Push, both green. *2026-11-16:* committed on `v2-step8` as
+  "v2 step 8: S8b, build.switch in the server"; the push and both jobs are the lead's.
 
 **Done when:** the cases pass on Linux. Row 97 is `ported`. No kind in `NodeWire.kinds` is left answering
 `unknown-kind`.

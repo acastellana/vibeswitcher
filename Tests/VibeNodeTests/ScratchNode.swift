@@ -30,6 +30,9 @@ import VibeNode
 ///
 /// `build`: an installed build folder (`<prefix>/<commit>`, the start plan's S4c) to run instead of `<root>/build`, as
 /// `--node-root` and the `--server` and host it names. `hostArguments`: more of the host's arguments (its test flags).
+/// `installRoot`: the install folder `build.switch` switches in (S8b): the server's `--server-arg --test-install-root=`,
+/// and the host's `--install-root`, so the host checks each handover's target as the node's host does
+/// (`HandoverTarget`); builds go there with `ScratchBuilds.install(commit:into:)`.
 ///
 /// `reusing`: the root of a node stopped before (its host ended), for a host restart (E8): its files are kept (its
 /// `engine.json`, its snapshot, its journal's record, its repositories), its links and stand-ins made again where missing.
@@ -61,7 +64,7 @@ final class ScratchNode: @unchecked Sendable {
     init(_ scratch: Scratch, userScopes: [String]? = ScratchNode.ownScope.map { [$0] }, housekeeping: Int? = nil,
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
          socketName: String = "host.sock", sealLife: Int? = nil, owner: pid_t = getpid(), reusing: URL? = nil, waitForServer: Bool = true,
-         build: URL? = nil, hostArguments: [String] = []) async throws {
+         build: URL? = nil, hostArguments: [String] = [], installRoot: URL? = nil) async throws {
         root = try reusing ?? scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
         nodeRoot = build ?? root.appendingPathComponent("build", isDirectory: true)
@@ -106,6 +109,9 @@ final class ScratchNode: @unchecked Sendable {
         if holdFirstLook { arguments += ["--hold-first-look"] + (serverKnowsFirstLook ? ["--server-arg", ServerArguments.testFirstLookFlag] : []) }
         // How long the vault's `.user` seals verify (the engine plan's EN-D11), for a test that waits one out.
         if let sealLife { arguments += ["--test-user-seal-life", String(sealLife)] }
+        if let installRoot {
+            arguments += ["--server-arg", ServerArguments.testInstallRootFlag + installRoot.path, "--install-root", installRoot.path]
+        }
         arguments += hostArguments
         let executable = nodeRoot.appendingPathComponent("bin/vibeswitcher-host").path
         // The test process as the host's app too (stage 2's `TestHosts.connectAsApp`): one end of a pair as the host's
@@ -381,6 +387,38 @@ final class ScratchNode: @unchecked Sendable {
             throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    }
+}
+
+/// Installed builds for a scratch node's switches (the start plan's S8b): `<installRoot>/<commit>`, as `install-node.sh`
+/// lays one out, but from the built products.
+enum ScratchBuilds {
+    /// `<installRoot>/<commit>/bin/` holding copies of the built products (real files, not links: the record and the
+    /// host's handover check refuse a link), its `build-info` written by `BuildRecord` (the install's own writer), and
+    /// `<commit> <ISO time>` appended to `<installRoot>/installs`. The cli keeps its built name, `vibeswitcher-cli`
+    /// (`BuildRecord` records whatever regular files `bin/` holds). `replacing`: a product's file taken from another
+    /// path (the same name in `bin/`, recorded with its own bytes). The build's folder.
+    @discardableResult
+    static func install(commit: String, into installRoot: URL, replacing: [String: String] = [:]) throws -> URL {
+        let folder = installRoot.appendingPathComponent(commit, isDirectory: true)
+        let bin = folder.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        for name in ScratchNode.products {
+            try copyClosedOnExec(replacing[name] ?? builtProducts.appendingPathComponent(name).path, to: bin.appendingPathComponent(name).path)
+        }
+        if case .failure(let refusal) = BuildRecord.write(folder: folder.path, commit: commit, swiftVersionOutput: "test", resolved: Data()) {
+            throw HostCall.Failure(description: refusal.text)
+        }
+        let line = "\(commit) \(ISO8601DateFormatter().string(from: Date()))\n"
+        let installs = installRoot.appendingPathComponent("installs")
+        if let handle = FileHandle(forWritingAtPath: installs.path) {
+            defer { try? handle.close() }
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+        } else {
+            try line.write(to: installs, atomically: true, encoding: .utf8)
+        }
+        return folder
     }
 }
 

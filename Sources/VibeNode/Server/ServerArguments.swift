@@ -4,7 +4,8 @@ import VibeCore
 /// What `vibeswitcher-server` is started with (the engine plan's E1, EN-D3): by the session host's `ServerChild`,
 /// `--host-connector N --host-socket PATH`, then `--node --node-root PATH` (the user's node) or `--root PATH
 /// --node-root PATH` (a scratch host's), then each `--server-arg X` a scratch host was given. The test flags
-/// (`--test-user-scopes=…`, `--test-housekeeping=…`, `--test-child=…`, `--test-first-look`) come only that way; a server with `--node`
+/// (`--test-user-scopes=…`, `--test-housekeeping=…`, `--test-child=…`, `--test-first-look`,
+/// `--test-install-root=…`) come only that way; a server with `--node`
 /// refuses each, with a log line, and takes nothing from it.
 public struct ServerArguments: Equatable, Sendable {
     /// The connector's descriptor, inherited.
@@ -28,6 +29,10 @@ public struct ServerArguments: Equatable, Sendable {
     /// A scratch host's test says its vault holds its first look (`--hold-first-look`, stage 2's Task 10e): the engine
     /// refuses `lead` until the project's config and head are accepted (S7), as it always does for the user's node.
     public var testFirstLook = false
+    /// A scratch host's test's install root (the start plan's S8b): where `build.switch` finds the builds it switches
+    /// between, and `status` the install record (`<it>/installs`). The user's node takes the account's own
+    /// (`NodeFolders.defaultPrefix`), never this.
+    public var testInstallRoot: String?
     /// The test flags a server with `--node` left out, each as given.
     public var refused: [String] = []
 
@@ -35,6 +40,7 @@ public struct ServerArguments: Equatable, Sendable {
     public static let testHousekeepingFlag = "--test-housekeeping="
     public static let testChildFlag = "--test-child="
     public static let testFirstLookFlag = "--test-first-look"
+    public static let testInstallRootFlag = "--test-install-root="
 
     /// The housekeeping period without a test's: 30 s (S2).
     public static let housekeeping = 30
@@ -50,6 +56,7 @@ public struct ServerArguments: Equatable, Sendable {
         var housekeeping: Int?
         var child: String?
         var firstLook = false
+        var installRoot: String?
         var tests: [String] = []
         var index = 1
         func value() -> String? {
@@ -93,6 +100,11 @@ public struct ServerArguments: Equatable, Sendable {
             case testFirstLookFlag:
                 tests.append(word)
                 firstLook = true
+            case _ where word.hasPrefix(testInstallRootFlag):
+                tests.append(word)
+                let path = String(word.dropFirst(testInstallRootFlag.count))
+                guard path.hasPrefix("/") else { return .failure(Usage("\(testInstallRootFlag) needs an absolute path")) }
+                installRoot = path
             default:
                 return .failure(Usage("unknown argument \(word)"))
             }
@@ -102,13 +114,15 @@ public struct ServerArguments: Equatable, Sendable {
         guard let hostSocket else { return .failure(Usage("--host-socket is needed")) }
         guard node != (root != nil) else { return .failure(Usage("one of --node and --root is needed")) }
         var parsed = ServerArguments(connector: connector, hostSocket: hostSocket, node: node, root: root, nodeRoot: nodeRoot,
-                                     testUserScopes: scopes, testHousekeeping: housekeeping, testChild: child, testFirstLook: firstLook)
+                                     testUserScopes: scopes, testHousekeeping: housekeeping, testChild: child, testFirstLook: firstLook,
+                                     testInstallRoot: installRoot)
         if node {
             parsed.refused = tests
             parsed.testUserScopes = nil
             parsed.testHousekeeping = nil
             parsed.testChild = nil
             parsed.testFirstLook = false
+            parsed.testInstallRoot = nil
         }
         return .success(parsed)
     }

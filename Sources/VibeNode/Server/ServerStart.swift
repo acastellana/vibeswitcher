@@ -41,11 +41,13 @@ public enum ServerStart {
         for flag in parsed.refused { say("refused \(flag): the user's server takes no test flags") }
 
         // The root, before anything reads VibePaths (EN-D3).
+        var accountHome: String?
         if parsed.node {
             guard let home = getpwuid(getuid()).map({ String(cString: $0.pointee.pw_dir) }), home.hasPrefix("/") else {
                 say("not started: the account has no home in the user database")
                 exit(78)
             }
+            accountHome = home
             setenv("HOME", home, 1)
             unsetenv("VIBESWITCHER_HOME")
             unsetenv("CFFIXED_USER_HOME")
@@ -93,6 +95,8 @@ public enum ServerStart {
                                 clock: clock, sessions: sessions, options: options, note: say)
         requests.engine = engine
         requests.nodeRoot = parsed.nodeRoot
+        // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.
+        requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot
         engine.watchRoom()
         let server = NodeServer(root: root, requests: requests, housekeeping: parsed.testHousekeeping ?? ServerArguments.housekeeping,
                                 clock: clock, note: say)

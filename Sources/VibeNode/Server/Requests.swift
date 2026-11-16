@@ -67,6 +67,12 @@ public final class Requests: @unchecked Sendable {
     /// The home `hooks.install` and `hooks.remove` write in: the server's own (`getpwuid`'s on the node, the scratch home
     /// on a scratch node).
     public var home = VibePaths.home
+    /// Where `build.switch` finds the builds it switches between, and `status` the install record (the start plan's
+    /// S8b): the account's `NodeFolders.defaultPrefix` on the node, `--test-install-root` on a scratch node; none:
+    /// `build.switch` is refused and `status` gives no `builds`.
+    public var installRoot: String?
+    /// The waits a `build.switch` runs on (a test's shorter ones).
+    public var switchTiming = SwitchRequest.Timing()
     /// The repository a request's folder is in (`repository(_:)`, git: never on `queue`); a test's instead.
     var repositoryOf: @Sendable (String) -> String = { Requests.repository($0) }
 
@@ -113,7 +119,7 @@ public final class Requests: @unchecked Sendable {
 
     /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
-                                               "hooks.install", "hooks.remove"]
+                                               "hooks.install", "hooks.remove", "build.switch"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -189,6 +195,7 @@ public final class Requests: @unchecked Sendable {
         case "base.show": baseShow(request, reply: reply)
         case "base.accept", "base.keep": baseAnswer(request, reply: reply)
         case "hooks.install", "hooks.remove": hooks(request, reply: reply)
+        case "build.switch": buildSwitch(request, reply: reply)
         default: reply(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)")))
         }
     }
@@ -276,6 +283,7 @@ public final class Requests: @unchecked Sendable {
                 + (engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []).map(NodeWire.Value.string)
                 + ((engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])).map(NodeWire.Value.string)),
             "restart": engine?.restartValue ?? .null,
+            "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
         ])
     }
 
@@ -381,6 +389,26 @@ public final class Requests: @unchecked Sendable {
         // The host's notes asked again first: the programs are checked against its `binaries` as it says them now.
         guard install else { return run() }
         refreshNotes(run)
+    }
+
+    // MARK: build.switch
+
+    /// `build.switch` with `commit` (the start plan's S8b): `SwitchRequest`'s plan, handover and outcome, on the
+    /// install root's builds. The host's notes are asked again after it, so `status` names the build that runs.
+    private func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let commit = request.args?["commit"]?.string else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "build.switch needs commit, 40 lowercase hex digits")))
+        }
+        guard let installRoot else {
+            return reply(.init(re: request.id, error: .init(.refused, "this server has no install root to switch builds in")))
+        }
+        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, note: note).run(commit: commit) { [weak self] answer in
+            switch answer {
+            case .done(let value): reply(.init(re: request.id, result: value))
+            case .refused(let code, let why): reply(.init(re: request.id, error: .init(code, why)))
+            }
+            self?.refreshNotes()
+        }
     }
 
     // MARK: start

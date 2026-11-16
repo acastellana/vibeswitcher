@@ -20,8 +20,20 @@ final class StubHost: @unchecked Sendable {
     private var screens = true
     private var shown = "stub screen"
     private var welcoming = true
-    let notes = HostNotes(startedAt: Date(timeIntervalSince1970: 1_800_000_000), serverRestarts: 2, replacedPaths: ["/x/host.sock"],
-                          refusedAppConnections: 1)
+    /// The pid its welcomes give, and the build its notes name (none by default); a handover changes them as told.
+    private var welcomePID: Int32 = 4242
+    private var notesBuild: String?
+    /// What it does when asked to hand over (`.ok` and nothing else when nil); and the rest of an `.onCue` one, held
+    /// back until `cue()`.
+    private var handover: OnHandover?
+    private var cued: (() -> Void)?
+
+    /// Its notes now (`HostRequest.hostNotes`), naming `build`.
+    var notes: HostNotes { queue.sync { currentNotes } }
+    private var currentNotes: HostNotes {
+        HostNotes(startedAt: Date(timeIntervalSince1970: 1_800_000_000), serverRestarts: 2, replacedPaths: ["/x/host.sock"],
+                  refusedAppConnections: 1, build: notesBuild)
+    }
     let startedAt = Date(timeIntervalSince1970: 1_800_000_000)
 
     /// The node's record of the user's actions (`HostRequest.vaultV2`), kept as a host's vault keeps it.
@@ -84,6 +96,54 @@ final class StubHost: @unchecked Sendable {
         set { queue.sync { welcoming = newValue } }
     }
 
+    /// What a stand-in host does when asked to hand over (the app's `HostClientHandoverTests.OnHandover`). A real host's
+    /// exec ends every connection, so each form but a refusal, a hold and a cue ends every one.
+    indirect enum OnHandover {
+        /// Executes in place as `build`: the same pid, every connection dropped without an answer.
+        case reExec(build: String)
+        /// The new build couldn't take over and went back to this one: the same pid and build.
+        case fallBack
+        /// Another host took the socket.
+        case replacedBy(pid: Int32, build: String)
+        /// Gone, socket and all.
+        case quit
+        /// Says no, and carries on.
+        case refuse(String)
+        /// The probe ends when the test says so (`cue()`), then the rest as `then`.
+        case onCue(then: OnHandover)
+        /// The probe goes on for as long as the test does.
+        case hold
+    }
+
+    /// What it does at a handover.
+    var onHandover: OnHandover? {
+        get { queue.sync { handover } }
+        set { queue.sync { handover = newValue } }
+    }
+
+    /// The pid its welcomes give.
+    var pid: Int32 {
+        get { queue.sync { welcomePID } }
+        set { queue.sync { welcomePID = newValue } }
+    }
+
+    /// The build its notes name.
+    var build: String? {
+        get { queue.sync { notesBuild } }
+        set { queue.sync { notesBuild = newValue } }
+    }
+
+    /// Ends an `.onCue` handover's probe: the held answer goes now. False if no handover was asked yet.
+    @discardableResult
+    func cue() -> Bool {
+        queue.sync {
+            guard let answer = cued else { return false }
+            cued = nil
+            answer()
+            return true
+        }
+    }
+
     /// The sessions the next welcome lists.
     var sessions: [HostSession] {
         get { queue.sync { listed } }
@@ -142,17 +202,45 @@ final class StubHost: @unchecked Sendable {
         case .hello:
             guard welcoming else { return }
             send(.welcome(protocolVersion: HostProtocol.version, hostBuild: 42, sessions: listed, capabilities: welcomeCapabilities,
-                          pid: 4242, startedAt: startedAt), replyTo: envelope.seq, on: fd)
+                          pid: welcomePID, startedAt: startedAt), replyTo: envelope.seq, on: fd)
         case .screen(let id):
             if screens { send(.screenText(id: id, text: shown), replyTo: envelope.seq, on: fd) }
         case .history(let id, _):
             send(.historyText(id: id, history: "stub history", screen: "stub screen"), replyTo: envelope.seq, on: fd)
         case .hostNotes:
-            send(.hostNotes(notes), replyTo: envelope.seq, on: fd)
+            send(.hostNotes(currentNotes), replyTo: envelope.seq, on: fd)
+        case .handover:
+            guard let handover else { return send(.ok, replyTo: envelope.seq, on: fd) }
+            handOver(handover, replyTo: envelope.seq, on: fd)
         case .vaultV2(let request):
             send(.vaultV2(LeadVaultV2.answer(request, from: .app, book: &record)), replyTo: envelope.seq, on: fd)
         default:
             send(.ok, replyTo: envelope.seq, on: fd)
+        }
+    }
+
+    private func handOver(_ how: OnHandover, replyTo seq: Int, on fd: Int32) {
+        switch how {
+        case .reExec(let build):
+            notesBuild = build
+            Array(clients.keys).forEach(drop)
+        case .fallBack:
+            Array(clients.keys).forEach(drop)
+        case .replacedBy(let pid, let build):
+            welcomePID = pid
+            notesBuild = build
+            Array(clients.keys).forEach(drop)
+        case .quit:
+            Array(clients.keys).forEach(drop)
+            listener?.cancel()
+            listener = nil
+            unlink(path)
+        case .refuse(let message):
+            send(.error(message), replyTo: seq, on: fd)
+        case .onCue(let then):
+            cued = { [weak self] in self?.handOver(then, replyTo: seq, on: fd) }
+        case .hold:
+            break
         }
     }
 

@@ -1198,10 +1198,13 @@ memory and writes no file.
   that.
 - **A fresh host removes stale files**: after taking the lock, a host that isn't restoring removes any
   `host.lock.handover` and `.partial` (the Mac's format, or a scratch host's), and logs it.
-- **(call; the user confirms) No switch of builds while a worker or verifier runs**, until Task 3's measurement has
-  passed on this machine. With sealed copies the handover's exec is no longer a window; the rule costs the bootstrap
-  little and stays as the fallback if the measurement fails. The server refuses a switch while a worker or verifier
-  session is live, saying so; the lead may stay.
+- **(call; the user confirms) No switch of builds while a worker or verifier runs.** With sealed copies the handover's
+  exec is no longer a window, and stage 2's Task 3b measurement passed on this machine (the inventory, 2026-11-13); the
+  rule stays all the same (the start plan's ST-D15): stage 2's 9d review kept the server's 30 s idle bound for a
+  switched server on the grounds that no switch happens while a worker or verifier runs, and counting the requests in
+  flight in `HostServer.handle` is left to after the bootstrap. The rule is lifted then, with that count. The server
+  refuses `build.switch` while a worker or verifier session is live, naming decision 6 and each live one, with nothing
+  asked of the host; the lead may stay (the start plan's S8b, `SwitchRequest`).
 
 The Mac keeps its state file and socket channel, unchanged.
 
@@ -1214,12 +1217,14 @@ removes all three, for a few dozen lines: `memfd_create` and seals exist on this
 worker placed in the install folder with a matching record (S9); anything on a kernel where the measurement fails,
 beyond the rule on switches.
 
-**Before the bootstrap:** yes (sealed memory, sealed target and fallback, the rule on switches until measured).
+**Before the bootstrap:** yes (sealed memory, sealed target and fallback, the rule on switches until the in-flight
+count after the bootstrap).
 
 **Built in:** stage 2, Task 8 (the server child's record and image across a handover), Task 9 (sealed state and
 secrets, the target, the fallback, formats, flags, stale files); the rule on switches in the bootstrap path's step 8.
 
-**The user confirms:** that builds are switched only while no worker or verifier runs, until the measurement passes.
+**The user confirms:** that builds are switched only while no worker or verifier runs, until the in-flight count
+after the bootstrap.
 
 **Held by:** `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`,
 `HostHandoverTests.aBuildThatCantRestoreGoesBackToTheOldOne`, `HostHandoverStateTests.aStateOfAnotherFormatIsRefused`
@@ -1251,9 +1256,11 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `ServerChildTests.aServerChildEndedDuringTheHandoversProbeIsRefusedBeforeTheExec` (a server child being ended, which no
 record can carry, refuses a handover before its probe and again just before the exec: the stage 2 sweep);
 `SwitchTests.aSwitchWhileWorkersOrVerifiersAreLiveIsRefused` (the start plan's S8a: the switch's plan refuses while a
-worker or verifier is live; S8b's server case below holds it end to end).
-
-**Tests to write:** Step 8: `aSwitchWhileAWorkerRunsIsRefused`.
+worker or verifier is live); `SwitchTests.aSwitchWhileAWorkerRunsIsRefused` (S8b, end to end on a scratch node: a
+switch with a worker live is refused naming decision 6 and the worker, the host's pid and build unchanged, and with
+only the lead live it hands over, keeping the lead); `SwitchTests.aSwitchWhoseProbeTakesTwentySecondsIsWaitedForWithNoFalseFailure`
+and `SwitchTests.aRollbackTheHostRefusesSaysWhy` (S8b: the server waits past a slow probe, and a target the host
+refuses leaves the running build, the reply naming the host's reason).
 
 ## S9. What the host executes
 
@@ -1328,6 +1335,10 @@ worker or verifier is live; S8b's server case below holds it end to end).
   writes another commit's folder, so the watched file never changes and a running tool server never switches. Only
   tool servers started after a switch (whose MCP config names the new `--node-root`) run the new commit. What would
   set `BinaryWatch` off is a write over the old commit's file, which the seal watches (the bootstrap path, step 8).
+  A lead started before a switch names its own tool server's path for the workers and verifiers it starts
+  (`LeadToolset`), so **a team keeps its build until its lead restarts** (the start plan's ST-D16): with the rule on
+  switches no worker runs at a switch, but the lead may stay, and a worker it starts after the switch runs the old
+  commit's tool server. `switch`'s confirmation says so (`NodeTexts.switch`).
 - **The install** (the bootstrap path's steps 8 and 10) builds from a clean, detached `git worktree add` of a commit on
   `origin/v2` that both CI runners passed (it refuses a dirty tree), with a toolchain the user installed outside
   `$HOME` (root's, decision 12) and a fresh package cache, records `swift --version` and `Package.resolved`'s hash in
@@ -1961,7 +1972,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T12 | worker | replace the command line's binary | works | seal watches the builds folder (shown through the command line itself) | sandbox; signed releases |
 | T13 | worker | pid reuse to pass as the app | refused | app connections are made through the connector | holds |
 | T14 | worker | pid reuse to pass as another session | works | dominated by T1; program matched by token (Task 6) | connector or pid namespace |
-| T15 | worker | duplicate the host's descriptors in a handover's exec window | refused † (sealed copies, if measured) | rule on switches until measured | holds † |
+| T15 | worker | duplicate the host's descriptors in a handover's exec window | refused † (sealed copies, measured) | rule on switches until the in-flight count | holds † |
 | T16 | worker | forge, spoil or read the handover state | refused | no file: sealed memory | holds |
 | T17 | worker | have the host hand over to a build in its worktree, or swap the target after its check | refused | install root; hash of the sealed copy that runs | signed releases (for what the install folder holds) |
 | T18 | worker | fork or pass a lead's connection to another process and write on it | refused † | per-message credentials | holds † |
@@ -2037,7 +2048,7 @@ are written in the task named.
 | Nothing the host runs comes from a file changed after it loaded it, or from a folder the user can write | `SealedCopyTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`; `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`; `HostHardeningTests.aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`; `HandoverLinuxTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`; `InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` | Tasks 3, 8, 9; step 8 |
 | The user's host hands over only to an installed build whose hash matches, and runs what it checked | `HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`, `aTargetRenamedOverAfterItsCheckIsNotWhatRuns` and the five beside them | Task 9 |
 | A handover writes no file and keeps the vault on fallback | `HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`, `aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`, `aDowngradeIsRefused`; `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`; `HostHandoverStateTests.aStateOfAnotherFormatIsRefused` (now) | Tasks 8, 9 |
-| No switch while a worker or verifier runs, until measured | `aSwitchWhileAWorkerRunsIsRefused` | step 8 |
+| No switch while a worker or verifier runs, until the in-flight count after the bootstrap | `aSwitchWhileAWorkerRunsIsRefused` | step 8 |
 | A fresh memory vault takes nothing as baseline a worker could write | `ConfigSealFirstLookTests.*`; E4's `aLeadIsRefusedOnAFreshVaultUntilAccepted`; E8's `configAcceptSealsOnlyWhatItShowed`, `baseAcceptAfterARestartShowsWhatMoved` | Task 10, E4, E8 |
 | Sessions get no agent socket, interop, bus or runtime dir, and their shell is `bash --noprofile --norc` (the agent's Bash tool still sources `~/.bashrc` and the login files: S10, measured in Task 12b) | `SessionEnvironmentTests.*` | Task 10 |
 | Roles on Linux, the lead included, are denied tracers, the user's manager, Windows and `gh` (slips) | `LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`, `theLeadOnLinuxGetsTheTracerRules`, `theMacsDenyRulesAreTodays` | Task 10 |
@@ -2131,7 +2142,7 @@ file; every change keeps the Mac's code paths as they are (a platform answer or 
   a fresh vault, the restart notice listing what was reset and how the host ended.
 - The bootstrap path. Step 8: the unit's lines (S9), `--node` and `--node-root`, the static build, the clean install
   from a pushed commit with a root-owned toolchain, `build-info`'s `swift` and `resolved`, the seal's Linux list as in
-  S9 (and `.wslconfig` and the Startup folder while `/mnt/c` is mounted), the rule on switches until measured, the
+  S9 (and `.wslconfig` and the Startup folder while `/mnt/c` is mounted), the rule on switches until the in-flight count, the
   server image on a switch. The questions: now the one list in the bootstrap path; `~/.local/bin` is not first on
   this PATH, so the seal's list doesn't call it so (nor is it on the PATH an agent's Bash commands get: the
   snapshot records the PATH Claude Code started with, the unit's, S10, Task 12b).
