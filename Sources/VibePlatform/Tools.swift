@@ -245,6 +245,11 @@ extension Platform {
         ///
         /// They stop a slip, not a worker that tries: a rule binds the tool it names, and a shell reaches each of these
         /// in other spellings.
+        ///
+        /// Edits are `Edit(…)` rules alone: Claude Code matches every built-in tool that writes a file (Write, MultiEdit,
+        /// NotebookEdit) against `Edit(path)` rules, and a `Write(path)` rule never matches (2.1.325 says so of each:
+        /// "never matches · use Edit(…)"; its rule check: "only Edit(path) rules are … Edit rules cover all
+        /// file-editing tools").
         public static var roleDenyRules: [String] {
             #if canImport(Darwin)
             return []
@@ -253,9 +258,9 @@ extension Platform {
                             "wsl.exe", "cmd.exe", "powershell.exe", "gh", "git credential"]
             var rules = commands.map { "Bash(\($0):*)" } + ["Bash(git -c credential*)"]
             for folder in ["~/.config/systemd", "~/.config/environment.d", "~/.vibeswitcher/v2", "~/.vibeswitcher/lead"] {
-                rules += ["Edit(\(folder)/**)", "Write(\(folder)/**)"]
+                rules.append("Edit(\(folder)/**)")
             }
-            return rules + ["Read(//mnt/c/**)", "Edit(//mnt/c/**)", "Write(//mnt/c/**)"]
+            return rules + ["Read(//mnt/c/**)", "Edit(//mnt/c/**)"]
             #endif
         }
 

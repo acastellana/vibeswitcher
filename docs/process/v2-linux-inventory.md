@@ -544,7 +544,12 @@ What run 3's screen showed besides:
   `Write(//mnt/c/**)`, each "never matches · use Edit(…)". No path is left open: each of the eight has its `Edit(…)`
   rule beside it (stage 2's Task 10b's Linux rules in `Platform.Tools.roleDenyRules`, `LeadLaunch.userSettings`), and an
   `Edit(…)` rule binds every built-in tool that edits a file, Write too. The `Write(…)` rules are only redundant; the
-  follow-up, for the lead to decide, is to drop them so the warning goes. Not changed here.
+  follow-up, for the lead to decide, is to drop them so the warning goes. Not changed here. *2026-11-16, the engine
+  sweep:* checked against the 2.1.325 binary's own rule check (a `Write`, `MultiEdit` or `NotebookEdit` rule with a
+  path "is not matched by file permission checks — only Edit(path) rules are … Edit rules cover all file-editing
+  tools"); Linux's five dropped from `Platform.Tools.roleDenyRules` (VibePlatform, `v2`'s own). `LeadLaunch.userSettings`'
+  three stay: every role's on the Mac too, in a shared file, so their removal is owed on main
+  ([v2-mac-tasks](v2-mac-tasks.md#owed-on-the-mac)); the lead will be warned of those three until then.
 - **No status hook ran for the lead** (no state file under the node's root): the role's settings hold only the
   read-only PermissionRequest hook, and the status hooks are the user's settings' (`hooks install`), which the config
   folder didn't have. Without them the engine never sees the lead between turns and would type nothing into it. The

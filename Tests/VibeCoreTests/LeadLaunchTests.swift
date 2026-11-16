@@ -232,10 +232,8 @@ struct LeadLaunchTests {
     static let linuxRules = ["Bash(strace:*)", "Bash(ltrace:*)", "Bash(gdbserver:*)", "Bash(perf:*)", "Bash(systemctl --user:*)",
                              "Bash(systemd-run:*)", "Bash(loginctl:*)", "Bash(crontab:*)", "Bash(at:*)", "Bash(wsl.exe:*)", "Bash(cmd.exe:*)",
                              "Bash(powershell.exe:*)", "Bash(gh:*)", "Bash(git credential:*)", "Bash(git -c credential*)",
-                             "Edit(~/.config/systemd/**)", "Write(~/.config/systemd/**)", "Edit(~/.config/environment.d/**)",
-                             "Write(~/.config/environment.d/**)", "Edit(~/.vibeswitcher/v2/**)", "Write(~/.vibeswitcher/v2/**)",
-                             "Edit(~/.vibeswitcher/lead/**)", "Write(~/.vibeswitcher/lead/**)",
-                             "Read(//mnt/c/**)", "Edit(//mnt/c/**)", "Write(//mnt/c/**)"]
+                             "Edit(~/.config/systemd/**)", "Edit(~/.config/environment.d/**)", "Edit(~/.vibeswitcher/v2/**)",
+                             "Edit(~/.vibeswitcher/lead/**)", "Read(//mnt/c/**)", "Edit(//mnt/c/**)"]
 
     /// Each role's rules as its session gets them, for the four shapes `prepare` is called with.
     func rulesOfEachRole() throws -> [(role: LeadLaunch.Role, deny: [String])] {
@@ -263,6 +261,9 @@ struct LeadLaunchTests {
             // Read by name: the node's own folders, and the Windows side's, which no rule lets through.
             #expect(!deny.contains { $0.hasPrefix("Read(/mnt") }, "\(role): /mnt/c is //mnt/c, from the root")
         }
+        // No `Write(path)` rule, which Claude Code never matches ("never matches · use Edit(…)", 2.1.325): its file
+        // writes are bound by the `Edit(…)` rules.
+        #expect(!Platform.Tools.roleDenyRules.contains { $0.hasPrefix("Write(") }, "\(Platform.Tools.roleDenyRules)")
     }
 
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's rules; the Mac's lead has no debugger rules"))

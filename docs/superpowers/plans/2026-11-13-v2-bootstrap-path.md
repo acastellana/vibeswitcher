@@ -133,7 +133,8 @@ place first (that defeats PATH only: the binary is still your file, S11 item 15)
 - **M6. Before step 8's `start`** [D14]: in the supervising Claude Code's `~/.claude/settings.json`,
   `permissions.deny` gains, for each subcommand trade-off 7 lists and in both spellings, a rule such as
   `"Bash(vibeswitcher answer:*)"` and `"Bash(/home/<you>/.vibeswitcher/v2/builds/current/bin/vibeswitcher answer:*)"`,
-  and `"Edit(~/.vibeswitcher/v2/**)"`, `"Write(~/.vibeswitcher/v2/**)"`.
+  and `"Edit(~/.vibeswitcher/v2/**)"` (which binds Write too: Claude Code 2.1.325 says a `Write(…)` rule "never matches
+  · use Edit(…)").
 - **M7. Step 8, on the real node:** `vs start` (read S11's list, type the code: your acknowledgment); `vs hooks
   install`; the WSL measurement (note `vs status`'s host start time, close every Windows Terminal and WSL window for
   10 minutes, reopen one, `vs status` again: the same start time and the agent's test session still live mean WSL keeps
