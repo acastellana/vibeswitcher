@@ -50,7 +50,7 @@ struct ScratchNodeTests {
     @Test func aLongScratchRootGivesAShortFolderOfTheRunsOwn() throws {
         let long = scratch.url("long-" + String(repeating: "x", count: 60))
         let empty = try #require(ShortScratch.make(linkedFrom: long))
-        #expect(empty.folder != "/tmp" && empty.folder.hasPrefix("/tmp/vst-") && empty.folder.utf8.count <= 40, "\(empty.folder)")
+        #expect(empty.folder.hasPrefix(ShortScratch.shared + "/vst-") && empty.folder.utf8.count <= 40, "\(empty.folder)")
         #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: empty.link)) == empty.folder)
         #expect(URL(fileURLWithPath: empty.link).deletingLastPathComponent().standardizedFileURL.path == long.standardizedFileURL.path)
         #expect(ShortScratch.removeIfEmpty(empty))

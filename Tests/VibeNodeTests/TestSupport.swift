@@ -129,11 +129,13 @@ let shortScratchRoot: String = scratchRoot.path.utf8.count <= 40 ? scratchRoot.p
 /// go when the folder is empty; when a test left something there (a node's root, a socket's folder), both stay, and
 /// the link is what the check finds.
 enum ShortScratch {
+    /// The system's temporary folder, which every run on the machine shares: only this run's own folder in it is used.
+    static let shared = "/tmp"
     nonisolated(unsafe) private static var made: (folder: String, link: String)?
 
-    /// This run's folder, made once, removed at exit when empty; /tmp itself only when none can be made.
+    /// This run's folder, made once, removed at exit when empty; `shared` itself only when none can be made.
     static func forThisRun() -> String {
-        guard let pair = make(linkedFrom: scratchRoot) else { return "/tmp" }
+        guard let pair = make(linkedFrom: scratchRoot) else { return shared }
         made = pair
         atexit {
             guard let made = ShortScratch.made else { return }
@@ -146,7 +148,7 @@ enum ShortScratch {
 
     /// A new folder `/tmp/vst-<pid>-XXXXXX` (0700), and a link to it in `scratch` (made when missing).
     static func make(linkedFrom scratch: URL) -> (folder: String, link: String)? {
-        var template = Array("/tmp/vst-\(getpid())-XXXXXX".utf8CString)
+        var template = Array("\(shared)/vst-\(getpid())-XXXXXX".utf8CString)
         guard let made = template.withUnsafeMutableBufferPointer({ mkdtemp($0.baseAddress!) }) else { return nil }
         let folder = String(cString: made)
         let link = scratch.appendingPathComponent("short-scratch-\(getpid())-\(folder.suffix(6))").path
