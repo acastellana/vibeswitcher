@@ -247,6 +247,24 @@ final class Scratch: @unchecked Sendable {
     }
 }
 
+/// A script (a fake command) at `url`, mode 0755: its text written beside it (`<url>.txt`, never run) and copied to `url`
+/// by a child, `cp`. A script written by this process is open for writing here while it's written, and a child another
+/// test starts meanwhile can inherit that descriptor and keep it for as long as it lives; Linux won't run a file open
+/// for writing anywhere ("Text file busy", ETXTBSY). A fake xcode-select so failed under scripts/test-under-load.sh,
+/// which then named the toolchain's Testing.framework instead (LoadHarnessTests, linux CI 43840361847, 4 cores).
+func installScript(_ text: String, at url: URL) throws {
+    let source = url.appendingPathExtension("txt")
+    try text.write(to: source, atomically: true, encoding: .utf8)
+    let copy = Process()
+    copy.executableURL = URL(fileURLWithPath: "/bin/cp")
+    copy.arguments = [source.path, url.path]
+    try copy.run()
+    guard waitForEnd(copy), copy.terminationStatus == 0 else {
+        throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
+    }
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+}
+
 extension Scratch {
     /// A UserDefaults of a test's own, empty, kept in `defaults.plist` in a new folder `scratchRoot/<prefix>-<uuid>`
     /// that goes with this. Its suite is named by that path, not by a domain: cfprefsd writes a named suite

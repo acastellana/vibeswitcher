@@ -187,9 +187,9 @@ import Testing
         try FileManager.default.createDirectory(at: tools.appendingPathComponent("Library/Developer/Frameworks/Testing.framework"),
                                                 withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        let select = bin.appendingPathComponent("xcode-select")
-        try "#!/bin/bash\n[[ $1 == -p ]] || exit 9\necho '\(tools.path)'\n".write(to: select, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: select.path)
+        // Copied in by a child (`installScript`): written here, a child another test started meanwhile could hold it
+        // open for writing, its run fail ("Text file busy", hidden by `2> /dev/null`) and the toolchain be named.
+        try installScript("#!/bin/bash\n[[ $1 == -p ]] || exit 9\necho '\(tools.path)'\n", at: bin.appendingPathComponent("xcode-select"))
         let run = try await harness(["--check-only"], fake: idle, pathFirst: bin)
         #expect(run.status == 0, "\(run.output)")
         #expect(run.output.contains("ok to start"), "\(run.output)")

@@ -35,11 +35,10 @@ import Testing
         return app.appendingPathComponent("Contents/Developer").path
     }
 
-    /// A fake xcode-select that prints `selected` for -p (and fails for anything else: nothing may be switched).
+    /// A fake xcode-select that prints `selected` for -p (and fails for anything else: nothing may be switched). Copied in
+    /// by a child (`installScript`), so that no child another test starts holds it open for writing ("Text file busy").
     func select(_ selected: String) throws {
-        let script = bin.appendingPathComponent("xcode-select")
-        try "#!/bin/bash\n[[ $1 == -p ]] || exit 9\necho '\(selected)'\n".write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try installScript("#!/bin/bash\n[[ $1 == -p ]] || exit 9\necho '\(selected)'\n", at: bin.appendingPathComponent("xcode-select"))
     }
 
     /// pick_developer_dir with `xcodes` (the Xcode apps to look in), DEVELOPER_DIR `developerDir` or unset: its status,
@@ -166,9 +165,8 @@ import Testing
 
     /// xcode-select failing (no developer folder chosen), and no Xcode: the same line.
     @Test func noSelectedFolderAndNoXcodeFailsInOneLine() async throws {
-        let script = bin.appendingPathComponent("xcode-select")
-        try "#!/bin/bash\necho 'xcode-select: error: unable to get active developer directory' >&2\nexit 2\n".write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try installScript("#!/bin/bash\necho 'xcode-select: error: unable to get active developer directory' >&2\nexit 2\n",
+                          at: bin.appendingPathComponent("xcode-select"))
         let run = try await pick([root.appendingPathComponent("Xcode.app").path])
         #expect(run.status != 0)
         #expect(run.said.split(separator: "\n").count == 1, "\(run.said)")
