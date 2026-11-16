@@ -3446,3 +3446,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 12:15 Automatically (auto_advance): Cleaned up after-a-mac-restart (freed 2.6 GB of build output and temporary folders). It stays done.
 - 2026-11-16 12:15 Update: After a Mac restart, a card offers to reopen your sessions — **What changed:** VibeSwitcher keeps a running list of your open sessions and project leads. When it starts after a restart (or after its background process died while it was closed), a small "Reopen …
 - 2026-11-16 10:14 Merged merge-github-s-main-2: Merge GitHub's main (2404fe5e) from the other Mac, resolving AGENTS.md (build 220ffefdb01f)
+- 2026-11-16 14:03 Merged origin/main into main: 40 commits from the remote, as a merge commit, 8a6426da; the tests passed on it (build ec89ed431487)
