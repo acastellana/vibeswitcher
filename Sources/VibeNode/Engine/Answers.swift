@@ -469,7 +469,8 @@ extension LeadEngine {
         }
     }
 
-    /// A `.user` message posted to a lead's inbox: retired once its delivered record shows it. On `queue`.
+    /// A `.user` message posted to a lead's inbox: retired once its delivered record shows it, or once it's gone from
+    /// the inbox another way. On `queue`.
     func postedAsUser(_ id: String, tty: String, text: String, agentPid: Int32) {
         postedUser[id] = PostedUser(tty: tty, digest: LeadVaultV2.digest(text), agentPid: agentPid)
     }
@@ -480,13 +481,17 @@ extension LeadEngine {
     /// that waits while the lead's tool call runs long (a merge's tests) is still the user's when the lead takes it; the vault renews none a check
     /// has passed nor any past `LeadVaultV2.renewedLifeCap` from its first seal, and the server none it no longer sees
     /// waiting as it posted it (`PostedUser.isPosted`: the inbox is a file any process of the user's can rewrite, and a
-    /// line rewritten under a posted id keeps no seal alive). On `queue`, at each `look`.
+    /// line rewritten under a posted id keeps no seal alive). One neither waiting nor in the delivered record left the
+    /// inbox another way (a lead start's handover withdrew it, `LeadHandover.takeWaiting`, to hold it for the new lead
+    /// under a new id; its inbox was removed): retired too, and no longer looked for, so a lead replaced with the user's
+    /// messages waiting doesn't keep its inbox read at every look for the rest of the server's life. On `queue`, at
+    /// each `look`.
     func retireTaken() {
         guard !postedUser.isEmpty, !retiring else { return }
         retiring = true
         let (posted, inbox, client, note) = (postedUser, root, link.vaultV2, self.note)
-        reads.async({ _ -> (taken: [String], waiting: [String]) in
-            var taken: [String] = [], waiting: [String] = []
+        reads.async({ _ -> (taken: [String], waiting: [String], gone: [String]) in
+            var taken: [String] = [], waiting: [String] = [], gone: [String] = []
             for (tty, entries) in Dictionary(grouping: posted, by: \.value.tty) {
                 let delivered = SteerInbox.delivered(tty: tty, root: inbox)
                 let pending = Dictionary(SteerInbox.pending(tty: tty, root: inbox).map { ($0.id, $0) }) { first, _ in first }
@@ -497,13 +502,15 @@ extension LeadEngine {
                         if was.isPosted(line) { waiting.append(id) }
                     } else if delivered.contains(id) {
                         taken.append(id)
+                    } else {
+                        gone.append(id)
                     }
                 }
             }
-            return (taken, waiting)
+            return (taken, waiting, gone)
         }) { [weak self] found in
             guard let self else { return }
-            let taken = found.taken
+            let taken = found.taken + found.gone
             guard !taken.isEmpty || !found.waiting.isEmpty else {
                 self.retiring = false
                 return
@@ -513,7 +520,7 @@ extension LeadEngine {
                     note("lead: \(found.waiting.count) waiting message(s) of the user's not renewed in the vault: tried again at the next look")
                 }
                 let retired = (try? client.retireUserSeals(taken)) != nil
-                if !retired { note("lead: \(taken.count) delivered message(s) of the user's not retired in the vault yet: tried again") }
+                if !retired { note("lead: \(taken.count) taken or withdrawn message(s) of the user's not retired in the vault yet: tried again") }
                 self.queue.async {
                     if retired { taken.forEach { self.postedUser[$0] = nil } }
                     self.retiring = false

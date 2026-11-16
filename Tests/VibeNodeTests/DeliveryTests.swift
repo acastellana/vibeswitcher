@@ -293,6 +293,26 @@ struct DeliveryTests {
         #expect(retired == nil)
     }
 
+    /// A `.user` message withdrawn from the lead's inbox (a lead start's handover, `LeadHandover.takeWaiting`, holds it
+    /// for the new lead under a new id) is retired and no longer looked for: the server doesn't read that inbox at every
+    /// look for the rest of its life.
+    @Test func aUserMessageWithdrawnFromTheInboxIsNoLongerLookedFor() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        let words = "Name it the reader."
+        #expect(await world.deliver(words, from: .user, action: UUID().uuidString.lowercased()) == true)
+        let id = try #require(world.pending(lead).first { $0.text == words }?.id, "\(world.pending(lead))")
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.postedUser[id] } != nil })
+        #expect(SteerInbox.withdraw(id: id, tty: lead.session.tty, root: world.host.root)?.text == words)
+        #expect(await eventually(timeout: 120) {
+            world.look()
+            return world.queue.sync { world.engine.postedUser[id] } == nil
+        }, "\(world.queue.sync { world.engine.postedUser })")
+        let retired = world.host.book.v2 { $0?.retired[id] }
+        #expect(retired != nil)
+    }
+
     /// Two messages sent back to back while the lead becomes able to take them between the two: the second waits
     /// behind the first's post, and they reach the lead in the order sent.
     @Test func backToBackMessagesKeepTheirOrderWhenTheLeadCanTakeThemBetween() async throws {
