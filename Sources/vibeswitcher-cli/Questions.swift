@@ -4,7 +4,8 @@ import VibeNode
 
 /// `vibeswitcher questions [FOLDER] [--all] [--json]` (the engine plan's E6): the open cards the server holds (the
 /// lead's questions and approvals, held config, base moves), closed ones too with `--all`. A read: anyone of the uid,
-/// no code. Every field a worker or the lead wrote is printed inert (`CardText`).
+/// no code. Every field a worker or the lead wrote is printed inert (`CardText`); under `--json`, what `inert` would
+/// replace is escaped (`NodeWire.printable`).
 enum QuestionsCommand {
     static let usage = "usage: vibeswitcher questions [FOLDER] [--all] [--json]"
 
@@ -34,7 +35,7 @@ enum QuestionsCommand {
         case .success(let reply):
             guard reply.ok, let cards = reply.result?["cards"]?.array else { return Say.replyError(reply) }
             if json {
-                Say.out(String(decoding: NodeWire.line(reply.result ?? .null).dropLast(), as: UTF8.self))
+                Say.out(String(decoding: NodeWire.printable(NodeWire.line(reply.result ?? .null)).dropLast(), as: UTF8.self))
                 return 0
             }
             if cards.isEmpty { Say.out(all ? "no cards" : "no open cards") }

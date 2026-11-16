@@ -26,6 +26,22 @@ struct NodeWireTests {
         #expect(lines.append(both.dropFirst(10)).count == 2)
     }
 
+    /// Review Focus 7: JSON for a terminal escapes what `ConfigSeal.inert` would replace (C1 controls, DEL, bidi and
+    /// other format characters, past U+FFFF too) and means the same JSON.
+    @Test func printableJSONEscapesWhatATerminalWouldActOn() throws {
+        let text = "a\u{1b}[31m b\u{9b}31m c\u{202e}d \u{7f} e\u{2066}\u{200b}\u{feff}\u{2028} f\u{e0001}\u{f0000} é漢🙂/"
+        let value = NodeWire.Value.object(["k": .string(text), "list": .array([.string("\u{85}")])])
+        let line = NodeWire.printable(NodeWire.line(value))
+        #expect(line.last == UInt8(ascii: "\n"))
+        let printed = String(decoding: line.dropLast(), as: UTF8.self)
+        let raw = printed.unicodeScalars.filter { $0.value < 0x20 || (0x7F...0x9F).contains($0.value) || (0x200B...0x200F).contains($0.value)
+            || (0x2028...0x202E).contains($0.value) || (0x2066...0x2069).contains($0.value) || $0.value == 0xFEFF || $0.value >= 0xE0000 }
+        #expect(raw.isEmpty, "\(raw.map { String($0.value, radix: 16) })")
+        #expect(printed.contains("é漢🙂/") && printed.contains(#"\u009b"#) && printed.contains(#"\udb40\udc01"#), "\(printed)")
+        #expect(NodeWire.decode(NodeWire.Value.self, line.dropLast()) == value)
+        #expect(NodeWire.printable(Data("{}".utf8)) == Data("{}".utf8))
+    }
+
     @Test func anUnknownFieldIsIgnored() throws {
         let line = Data(#"{"v":1,"id":"a","kind":"status","args":{},"later":{"nested":[1,2]},"flag":true}"#.utf8)
         let request = try #require(NodeWire.decode(NodeWire.Request.self, line))

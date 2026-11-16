@@ -197,4 +197,21 @@ struct QuestionCardTests {
         let forbidden = text.unicodeScalars.filter { $0.value == 0x1B || $0.value == 0x07 || (0x202A...0x202E).contains($0.value) || (0x2066...0x2069).contains($0.value) }
         #expect(forbidden.isEmpty, "\(forbidden.map { String($0.value, radix: 16) })")
     }
+
+    /// Review Focus 7 under `--json`: a question and options holding C1 controls, DEL and bidirectional characters
+    /// (which JSONEncoder leaves raw) reach `questions --json`'s output escaped, and the JSON still reads as they were.
+    @Test func untrustedTextIsEscapedUnderJSON() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let question = "Merge? \u{9B}2J\u{7F} \u{202E}txt.exe\u{2066}"
+        _ = try await node.askingLead(question, options: ["Yes \u{9D}0;owned\u{9C}", "No"])
+        let ran = try await node.run(["questions", "--json"])
+        #expect(ran.status == 0, "\(ran.output)\(ran.errors)")
+        let raw = ran.output.unicodeScalars.filter { ($0.value < 0x20 && $0 != "\n") || (0x7F...0x9F).contains($0.value)
+            || (0x202A...0x202E).contains($0.value) || (0x2066...0x2069).contains($0.value) }
+        #expect(raw.isEmpty, "\(raw.map { String($0.value, radix: 16) })")
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(ran.output.utf8)) as? [String: Any])
+        let card = try #require((object["cards"] as? [[String: Any]])?.first)
+        #expect((card["question"] as? [String: Any])?["text"] as? String == question, "\(card)")
+    }
 }

@@ -71,7 +71,7 @@ enum StatusCommand {
             report["format"] = .int(format)
             report["facts"] = .array(facts.lines.map(NodeWire.Value.string))
             report["journal"] = .array(journal.map(NodeWire.Value.string))
-            let data = NodeWire.line(NodeWire.Value.object(report))
+            let data = NodeWire.printable(NodeWire.line(NodeWire.Value.object(report)))
             try? FileHandle.standardOutput.write(contentsOf: data)
             return 0
         }
@@ -180,7 +180,7 @@ enum StatusCommand {
             },
         ]
         let data = (try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
-        return String(decoding: data, as: UTF8.self)
+        return String(decoding: NodeWire.printable(data), as: UTF8.self)
     }
 
     /// One line a session, in columns: `ttypts3  claude  /home/me/project  needs you  since 14:03:21`.

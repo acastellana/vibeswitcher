@@ -276,6 +276,27 @@ public enum NodeWire {
         return data
     }
 
+    /// JSON text (`line`'s, or JSONSerialization's) for a terminal: every scalar `ConfigSeal.inert` would replace (C1
+    /// controls, DEL, bidirectional and other format characters, separators, private-use and unassigned scalars)
+    /// written as a `\uXXXX` escape (a surrogate pair past U+FFFF). The JSON means the same, so nothing is lost to a
+    /// reader of it, and none of these reaches the terminal raw (Review Focus 7): JSONEncoder escapes only what's below
+    /// U+0020. They can only be inside strings, so the escapes are valid JSON. A newline that ends `json` stays.
+    public static func printable(_ json: Data) -> Data {
+        var text = String.UnicodeScalarView()
+        let body = json.last == UInt8(ascii: "\n") ? json.dropLast() : json[...]
+        for scalar in String(decoding: body, as: UTF8.self).unicodeScalars {
+            switch scalar.properties.generalCategory {
+            case .control, .format, .lineSeparator, .paragraphSeparator, .privateUse, .unassigned, .surrogate:
+                for unit in String(scalar).utf16 { text.append(contentsOf: String(format: "\\u%04x", unit).unicodeScalars) }
+            default:
+                text.append(scalar)
+            }
+        }
+        var data = Data(String(text).utf8)
+        if body.count != json.count { data.append(UInt8(ascii: "\n")) }
+        return data
+    }
+
     /// A line (without its newline) as `T`; nil when it isn't one.
     public static func decode<T: Decodable>(_ type: T.Type, _ line: Data) -> T? {
         try? JSONDecoder().decode(type, from: line)
