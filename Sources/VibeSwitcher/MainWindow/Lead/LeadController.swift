@@ -581,7 +581,7 @@ final class LeadController: ObservableObject {
     }
 
     /// Starts asked for before the host said which sessions run (right after a relaunch), by root: decided then.
-    private var pendingStarts: [String: (goal: String?, show: Bool, askAboutMovedHead: Bool)] = [:]
+    private var pendingStarts: [String: (goal: String?, show: Bool, askAboutMovedHead: Bool, resume: String?)] = [:]
     /// The leads found running (after a relaunch, an install) whose role the vault binds to their session: bound
     /// again, by root. Each live lead session is looked at once.
     @Published private(set) var keptLeads: [String: UUID] = [:]
@@ -931,7 +931,15 @@ final class LeadController: ObservableObject {
         return holdsRole == false && fromUser ? .askToReplace(running) : .show(running)
     }
 
-    private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool) {
+    /// Reopens the lead of `root` after a Mac restart (the restart card, on your click): a lead start like any other (a
+    /// fresh grant bound to its new session, the same prompt, rules and environment), carrying on the agent's
+    /// conversation `conversation`, and told once, as that start's message, that the Mac restarted and which of its
+    /// tasks had workers running (`RestartReopen.leadNotice`). A lead already running there is told instead.
+    func reopenLead(root: String, conversation: String, show: Bool = false) {
+        startLead(root: root, goal: nil, show: show, askAboutMovedHead: true, resume: conversation)
+    }
+
+    private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool, resume: String? = nil) {
         // The lead's vault is the session host's: with none running yet (a fresh Mac, no session opened since launch)
         // it's started first, as opening a session starts it (or waited for, one already starting), then the start
         // goes on. One that doesn't start says so, not the vault's connect error.
@@ -940,7 +948,7 @@ final class LeadController: ObservableObject {
             return host.ensureHost { [weak self] problem in
                 guard let self else { return }
                 if let problem { return self.alert("The lead didn't start.", problem) }
-                self.startLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+                self.startLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, resume: resume)
             }
         case .connecting, .connected, .outdated:
             break
@@ -948,23 +956,23 @@ final class LeadController: ObservableObject {
         // A relaunched app's session list is empty until the host's welcome: no sign no lead runs. Held until then, as
         // the sessions read below are the ones listed now.
         if host.state == .connecting {
-            pendingStarts[root] = (goal, show, askAboutMovedHead)
+            pendingStarts[root] = (goal, show, askAboutMovedHead, resume)
             return
         }
         readLeadSessions { [weak self] running in
-            self?.startLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: running[root])
+            self?.startLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: running[root], resume: resume)
         }
     }
 
     /// `running`: the project's live lead session, as its board names it.
-    private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool, running: HostSession?) {
+    private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool, running: HostSession?, resume: String? = nil) {
         guard let running else {
             if Self.plan(hostState: host.state, running: nil, holdsRole: nil, fromUser: askAboutMovedHead) == .wait {
                 // A relaunched app's session list is empty until the host's welcome: that's no sign no lead runs.
-                pendingStarts[root] = (goal, show, askAboutMovedHead)
+                pendingStarts[root] = (goal, show, askAboutMovedHead, resume)
                 return
             }
-            return prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: nil)
+            return prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: nil, resume: resume)
         }
         // Whether it holds its role, the vault says (off the main thread: it's a call to the host); held, it's bound
         // to its session again, as at a relaunch.
@@ -976,15 +984,20 @@ final class LeadController: ObservableObject {
                 guard let self else { return }
                 switch Self.plan(hostState: self.host.state, running: running.id, holdsRole: holds, fromUser: askAboutMovedHead) {
                 case .wait:
-                    self.pendingStarts[root] = (goal, show, askAboutMovedHead)
+                    self.pendingStarts[root] = (goal, show, askAboutMovedHead, resume)
                 case .start:
-                    self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: running)
+                    self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: running, resume: resume)
                 case .show(let id):
                     if let goal { self.deliver("New goal: \(goal)", from: Self.commandLine, root: root) }
+                    // Reopened after a restart, but a lead runs there already (started since): it's told instead.
+                    if resume != nil {
+                        let board = BoardStore(root: root)
+                        self.deliver(built: { RestartReopen.leadNotice(board: board.load()) }, from: .system("restart"), root: root)
+                    }
                     if show { self.select(id) }
                 case .askToReplace(let id):
                     if self.askToReplace(root: root, running: running) {
-                        self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: running)
+                        self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: running, resume: resume)
                     } else if show {
                         self.select(id)
                     }
@@ -998,7 +1011,9 @@ final class LeadController: ObservableObject {
         guard host.state != .connecting, !pendingStarts.isEmpty else { return }
         let pending = pendingStarts
         pendingStarts = [:]
-        for (root, start) in pending { startLead(root: root, goal: start.goal, show: start.show, askAboutMovedHead: start.askAboutMovedHead) }
+        for (root, start) in pending {
+            startLead(root: root, goal: start.goal, show: start.show, askAboutMovedHead: start.askAboutMovedHead, resume: start.resume)
+        }
     }
 
     /// The leads still running when the app starts again (a relaunch, an install handed their sessions over): each
@@ -1037,7 +1052,8 @@ final class LeadController: ObservableObject {
     }
 
     /// `running`: the lead this start may replace.
-    private func prepareLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool, running: HostSession?) {
+    /// `resume`: the agent conversation a lead reopened after a restart carries on (see `reopenLead`).
+    private func prepareLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool, running: HostSession?, resume: String? = nil) {
         // The lead's vault lives in the session host: an older one still serving its sessions can't hold it (and
         // one too old to hand over stays until restarted).
         if case .outdated = host.state, !host.hostCapabilities.contains(HostProtocol.Capability.leadVault) {
@@ -1062,6 +1078,8 @@ final class LeadController: ObservableObject {
             let policy = WorkingPolicy.load()
             let prepared = Result<(grant: String, launch: LeadLaunch.Prepared), Error> {
                 let workflowPath = try boardStore.prepare()
+                // Reopened after a restart: its one message, from the board as the restart left it.
+                let notice = resume.map { _ in RestartReopen.leadNotice(board: boardStore.load()) }
                 var workflow = LeadWorkflow.load(from: workflowPath)
                 workflow.baseBranch = workflow.baseBranch ?? boardStore.load().baseBranch
                 // Only the app makes a lead (the session host tells the app from the team): its grant (the lead's
@@ -1092,8 +1110,9 @@ final class LeadController: ObservableObject {
                 // in the window from now on, and what the user told it there goes to the new lead first.
                 var handed: (tty: String, turnsFile: String)?
                 let old = handover.replaced.flatMap { $0.session.flatMap(UUID.init(uuidString:)) } ?? running?.id
-                if let old, let tty = handover.replaced?.tty ?? running?.tty {
-                    replacedSession = old
+                if let old, handover.replaced?.tty ?? running?.tty != nil { replacedSession = old }
+                // A reopened lead carries on its own conversation: no turns handed over.
+                if resume == nil, let old, let tty = handover.replaced?.tty ?? running?.tty {
                     let transcript = transcripts[old.uuidString]
                         ?? running.flatMap { TranscriptLocator.claude(cwd: root, name: name, startedAt: $0.startedAt, home: home) }
                     let turns = transcript.flatMap { LastTurns.read(transcript: $0, tty: tty, home: home) }
@@ -1114,9 +1133,9 @@ final class LeadController: ObservableObject {
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy),
-                    start: LeadPrompts.leadStart(root: root, goal: goal, note: Self.commandLineNote, replaced: handed),
+                    start: notice ?? LeadPrompts.leadStart(root: root, goal: goal, note: Self.commandLineNote, replaced: handed),
                     server: Self.serverPath, name: name, model: run.model, advisor: run.advisor,
-                    folder: vault.runFolder(root: root, name: name), cwd: root)
+                    folder: vault.runFolder(root: root, name: name), cwd: root, resume: resume)
                 return (grant, launch)
             }
             if case .failure = prepared, let issued { try? vault.revoke(issued, root: root) }

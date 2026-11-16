@@ -549,11 +549,12 @@ public enum LeadLaunch {
     /// Writes the role's files (0600) and returns the command line to run. They go in `folder`: the vault's run folder
     /// for the role (`LeadVault.runFolder`, outside the repository); `<root>/.vibeswitcher/run/<name>/` when none is given.
     /// The session's TMPDIR is made under `temporary` for `cwd`, where it's started (the task's worktree, else `root`):
-    /// what its swift builds and tests leave there goes with it (see `SessionTemp`).
+    /// what its swift builds and tests leave there goes with it (see `SessionTemp`). `resume`: the agent's conversation to
+    /// carry on (`--resume`), `start` then being its next message.
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
                                server: String, name: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
                                branch: String? = nil, records: String? = nil, folder: URL? = nil, cwd: String? = nil,
-                               temporary: URL = SessionTemp.root, home: String = VibePaths.home) throws -> Prepared {
+                               temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -619,6 +620,9 @@ public enum LeadLaunch {
         // Consulted at decision points (Claude Code's advisor; the flag isn't in `claude --help`).
         if let advisor { parts.append("--advisor \(quote(advisor))") }
         if let effort { parts.append("--effort \(quote(claudeEffort(effort)))") }
+        // A lead reopened after a restart (`RestartReopen`): its same conversation, `start` its next message. Nothing
+        // else differs from a fresh start: the same files, rules and environment.
+        if let resume { parts.append("--resume \(quote(resume))") }
         parts.append("-- \(quote(start))")
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
         // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).

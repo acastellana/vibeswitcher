@@ -95,6 +95,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         return model
     }()
     private var welcomeWindow: OnboardingWindowController?
+    /// After a Mac restart, the card offering to reopen the sessions that were open (see `RestartReopen`).
+    private lazy var restartOffer: RestartOffer = {
+        let offer = RestartOffer()
+        offer.resumeSession = { [weak self] request in self?.resume(request) }
+        offer.reopenLead = { [weak self] root, conversation in self?.leadController.reopenLead(root: root, conversation: conversation) }
+        offer.show = { [weak self] in
+            guard let self else { return }
+            let card = restartCard ?? RestartCardWindowController(offer: restartOffer)
+            restartCard = card
+            card.show()
+        }
+        offer.close = { [weak self] in self?.restartCard?.close() }
+        return offer
+    }()
+    private var restartCard: RestartCardWindowController?
     let windowModel = WindowModel()
     private var mainWindow: MainWindowController?
     private lazy var windowActions = WindowActions(
@@ -233,6 +248,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // Script blocks' files a crash left behind (see `RunnableCommand.Script`).
         RunnableCommand.Script.removeAll()
         HookBinary.atLaunch(connect: { hostClient.connectIfRunning() })
+        // The live window sessions' record, kept as they start and end; and, once the host is known (none running, or
+        // its welcome), the restart card if the sessions it names went with a restart.
+        restartOffer.watchRecord(hostClient, sessions: store.$sessions.eraseToAnyPublisher())
+        restartOffer.watchLaunch(hostClient)
         // Leads' witness and questions work with the window closed too.
         _ = leadController
         // Requests filed or sent while the feature was called vault requests, carried over once.
@@ -923,13 +942,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private func resumeSession(_ row: WindowRow) {
         guard let id = row.hostID, let info = hostClient.sessions.first(where: { $0.id == id }),
               let agentSession = windowModel.agentSessions[id] else { return }
-        let command = LaunchPlan.resumeCommand(base: info.command, agent: agentSession.agent, sessionID: agentSession.sessionID)
-        hostClient.spawn(SpawnRequest(cwd: info.cwd, command: command, env: [:], cols: info.cols, rows: info.rows,
-                                      keepShell: false, label: info.label, agent: agentSession.agent.rawValue)) { [weak self] result in
-            guard case .success(let session) = result else { return }
+        let request = LaunchPlan.resumeRequest(cwd: info.cwd, base: info.command, agent: agentSession.agent, sessionID: agentSession.sessionID,
+                                               cols: info.cols, rows: info.rows, label: info.label)
+        resume(request) { [weak self] _ in
             self?.mainWindow?.pane.forget(id)
             self?.hostClient.remove(id)
-            self?.showMainWindow(select: session.id)
+        }
+    }
+
+    /// Starts a Resume's window session (`LaunchPlan.resumeRequest`) and shows it: the sidebar's Resume and the restart
+    /// card's (`RestartOffer`). `started` hears the new session.
+    private func resume(_ request: SpawnRequest, started: @escaping (HostSession) -> Void = { _ in }) {
+        hostClient.spawn(request) { [weak self] result in
+            switch result {
+            case .success(let session):
+                started(session)
+                self?.showMainWindow(select: session.id)
+            case .failure(let error):
+                Breadcrumbs.shared.note("resume: \(request.label) in \((request.cwd as NSString).lastPathComponent) didn't start: \(error.message)")
+            }
         }
     }
 
