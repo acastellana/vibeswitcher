@@ -1013,6 +1013,56 @@ extension ProcessesTests {
         #expect(Platform.Processes.lockHolder(path: folder.appendingPathComponent("none").path) == nil)
     }
 
+    /// `/proc/locks` is a seq_file: one read(2) gives at most a page of its lines, and the next read starts again at
+    /// the next line's position in the kernel's list. A lock taken or released, between two reads, before the line the
+    /// first ended at moves every later line by one, and a line is then read twice or not at all. Each file this holds
+    /// is found held by this process, every time, while four threads take and release locks of their own and the
+    /// list runs past a page (150 files held: three pages and more).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux: /proc/locks"))
+    func theLockHolderIsFoundWhileOtherLocksComeAndGo() throws {
+        let folder = try TestScriptLinuxTests.scratch("locks-churn")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var held: [(path: String, fd: Int32)] = []
+        defer { held.forEach { close($0.fd) } }
+        for index in 0..<150 {
+            let path = folder.appendingPathComponent("held-\(index).lock").path
+            let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+            try #require(fd >= 0)
+            held.append((path, fd))
+            try #require(flock(fd, LOCK_EX | LOCK_NB) == 0)
+        }
+        final class Stop: @unchecked Sendable {
+            private let lock = NSLock()
+            private var stopped = false
+            var isSet: Bool { lock.withLock { stopped } }
+            func set() { lock.withLock { stopped = true } }
+        }
+        let stop = Stop()
+        let ended = DispatchSemaphore(value: 0)
+        let churners = 4
+        for index in 0..<churners {
+            let path = folder.appendingPathComponent("churn-\(index).lock").path
+            let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+            try #require(fd >= 0)
+            let thread = Thread {
+                while !stop.isSet {
+                    _ = flock(fd, LOCK_EX)
+                    _ = flock(fd, LOCK_UN)
+                }
+                close(fd)
+                ended.signal()
+            }
+            thread.start()
+        }
+        var missed: [String] = []
+        for _ in 0..<20 {
+            for file in held where Platform.Processes.lockHolder(path: file.path) != getpid() { missed.append((file.path as NSString).lastPathComponent) }
+        }
+        stop.set()
+        for _ in 0..<churners { ended.wait() }
+        #expect(missed.isEmpty, "\(missed.count) of \(20 * held.count) looks missed the holder: \(missed.prefix(5))")
+    }
+
     @Test func theLocksListIsReadByDeviceAndInode() {
         let locks = """
             1: POSIX  ADVISORY  WRITE 1203 08:20:524301 0 EOF

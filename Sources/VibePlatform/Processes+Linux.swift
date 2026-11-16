@@ -506,15 +506,62 @@ extension Platform.Processes.System {
 // `/proc/locks` and `/proc/<pid>/cgroup`.
 extension Platform.Processes.System {
     /// The file's device (split as the kernel's `MAJOR`/`MINOR` do: 12 bits and 20 bits, in glibc's encoding of
-    /// `dev_t`) and inode, then `/proc/locks` read for them.
+    /// `dev_t`) and inode, then `/proc/locks` read for them (`lockListReads`).
     static func lockHolder(path: String) -> pid_t? {
         var info = stat()
-        guard stat(path, &info) == 0, case .success(let bytes) = contents("/proc/locks") else { return nil }
+        guard stat(path, &info) == 0 else { return nil }
         let device = UInt64(info.st_dev)
         let major = ((device >> 8) & 0xfff) | ((device >> 32) & ~UInt64(0xfff))
         let minor = (device & 0xff) | ((device >> 12) & ~UInt64(0xff))
-        return Platform.Processes.lockHolder(locks: String(decoding: bytes, as: UTF8.self), major: major, minor: minor,
-                                             inode: UInt64(info.st_ino))
+        for firstRead in lockListFirstReads {
+            guard case .success(let read) = lockList(firstRead: firstRead) else { return nil }
+            if let pid = Platform.Processes.lockHolder(locks: String(decoding: read.bytes, as: UTF8.self), major: major, minor: minor,
+                                                       inode: UInt64(info.st_ino)) {
+                return pid
+            }
+            if read.whole { return nil }
+        }
+        return nil
+    }
+
+    /// `/proc/locks` is a seq_file: one read(2) gives at most a page of its lines (whatever the buffer asks), made
+    /// under the kernel's lock, and the next read starts again at the next line's position in the list. A lock taken
+    /// or released between two reads, before the line the first ended at, moves every later line by one: the line at
+    /// the start of the next read is then read twice, or not at all (a flock that comes and goes beside a holder
+    /// listed past a page hid it; the load run's "no process holds the scratch node's lock"). The list can't be had in
+    /// one read once it is longer than a page, and two whole reads can agree and both miss the same line: the kernel
+    /// lets the lockers move between its reads alone, so they move at the same places each time.
+    ///
+    /// So: a list given by one read is whole, and its answer final. Else it is read again, each time with its first
+    /// read a different part of a page (a page, a half, a quarter, three quarters), so every later read starts at
+    /// lines a quarter of a page or more away from where the earlier ones started, until a read names the holder. A
+    /// line names a lock that was held as it was read (a line read twice is still one), so a holder named by any read
+    /// is one; a holder is missed only when its line starts a read in all four.
+    static let lockListFirstReads: [Int] = [pageSize, pageSize / 2, pageSize / 4, pageSize * 3 / 4]
+
+    /// `/proc/locks` read to its end, `firstRead` bytes asked for first and a page each time after: its bytes, and
+    /// whether one read gave them all (the next found the end).
+    static func lockList(firstRead: Int) -> Result<(bytes: [UInt8], whole: Bool), Platform.Errno> {
+        let fd = open("/proc/locks", O_RDONLY | O_CLOEXEC)
+        guard fd >= 0 else { return .failure(Platform.Errno(code: errno)) }
+        defer { close(fd) }
+        var bytes: [UInt8] = []
+        var reads = 0, failure: Int32 = 0
+        withUnsafeTemporaryAllocation(of: UInt8.self, capacity: max(pageSize, firstRead)) { chunk in
+            while true {
+                let got = read(fd, chunk.baseAddress, reads == 0 ? firstRead : pageSize)
+                if got > 0 {
+                    bytes.append(contentsOf: UnsafeMutableBufferPointer(rebasing: chunk[..<got]))
+                    reads += 1
+                } else if got == 0 {
+                    return
+                } else if errno != EINTR {
+                    failure = errno
+                    return
+                }
+            }
+        }
+        return failure == 0 ? .success((bytes, reads <= 1)) : .failure(Platform.Errno(code: failure))
     }
 
     static let hasCgroups = true
