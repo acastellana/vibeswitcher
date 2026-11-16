@@ -48,8 +48,10 @@ struct TestLockTests {
 
     var lock: TestLock { TestLock(directory: url("locks").path) }
 
-    /// A process that takes the lock (its slot `slot`) with perl's flock, says "held", and sleeps: another program
-    /// holding it.
+    /// A process that takes the lock (its slot `slot`) with perl's flock, says "held", and holds it until it's killed,
+    /// or until this process has gone (its parent is another, looked at every 0.5 s): another program holding it. Never
+    /// for a fixed time: it slept 60 s, past which a test still running (a full suite's: 97 to 145 s) found the slot
+    /// let go.
     func outsideHolder(_ lock: TestLock, slot: Int = 1) throws -> Process {
         try Self.outsideHolder(path: lock.slotPath(slot))
     }
@@ -59,7 +61,7 @@ struct TestLockTests {
                                                 attributes: [.posixPermissions: 0o700])
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        process.arguments = ["-MFcntl=:flock", "-e", #"open(F, ">>", $ARGV[0]) or die; flock(F, LOCK_EX) or die; $| = 1; print "held\n"; sleep 60"#, path]
+        process.arguments = ["-MFcntl=:flock", "-e", #"open(F, ">>", $ARGV[0]) or die; flock(F, LOCK_EX) or die; $| = 1; print "held\n"; my $p = getppid(); select(undef, undef, undef, 0.5) while getppid() == $p"#, path]
         let pipe = Pipe()
         process.standardOutput = pipe
         try process.run()

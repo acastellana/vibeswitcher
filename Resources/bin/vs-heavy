@@ -289,14 +289,19 @@ taken=$(/usr/bin/perl -MFcntl=:DEFAULT,:flock -MPOSIX=strftime -e '
         return "$p$th in line, behind $list";
     }
     sub take { my ($from) = @_; for my $i ($from .. $#handles) { return $i + 1 if flock($handles[$i][0], LOCK_EX | LOCK_NB); } return 0; }
+    # Linux: whether $pid is a zombie (its state, after the last ")" of /proc/<pid>/stat, is Z).
+    sub zombie { my ($pid) = @_; return 0 unless $^O eq "linux" && open(my $stat, "<", "/proc/$pid/stat"); return ((scalar <$stat>) // "") =~ /.*\)\s+Z\s/s ? 1 : 0; }
     my ($start, $said, $saidAt, $got) = (time, "", 0, 0);
     while (1) {
         my @ahead = ahead();
         my $from = 0;
         for (@ahead) { $from = $_->[1] if $_->[1] > $from; }
         last if $got = take($from);
-        # The script went (kill -9): out of line rather than wait for nobody.
-        if (!kill(0, $script) || getppid() == 1) { leave(); exit 1; }
+        # The script went (kill -9): out of line rather than wait for nobody. Linux: killed outright, it is a zombie that
+        # kill 0 still finds until its parent waits for it, and this, in a subshell of its, is not reparented; a parent
+        # that waits only once every copy of the descriptors of the script is closed (a Foundation Process: this holds one)
+        # never would. Its state says it went.
+        if (!kill(0, $script) || getppid() == 1 || zombie($script)) { leave(); exit 1; }
         my (@told, @keys);
         for my $i (0 .. $#handles) {
             my ($who, $key, $age, $idle) = holder($handles[$i][1]);
