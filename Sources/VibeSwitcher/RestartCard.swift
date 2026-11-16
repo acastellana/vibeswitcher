@@ -65,6 +65,10 @@ final class RestartOffer: ObservableObject {
         recordedAt = record?.updatedAt
     }
 
+    /// The app's lives as long as the app; one that goes (a test's, the sandbox's) leaves no write behind it that
+    /// lands after its folder is gone.
+    deinit { writer.flush() }
+
     /// Returns once the record's writes so far are on disk (a test reading it).
     func flushRecord() { writer.flush() }
 
