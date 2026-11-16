@@ -3329,3 +3329,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 07:55 Automatically (auto_advance): Started the audit of ui-journeys-select-copy at 6e7e48fb (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-16 07:55 Released merges-are-held-doesn's worker (idle since its done report on 473ced2a) while its audit runs
 - 2026-11-16 07:55 Automatically (auto_advance): Started the audit of merges-are-held-doesn at 473ced2a (It touches sensitive_paths (Sources/VibeCore/LeadToolset.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-16 08:01 Audit of merges-are-held-doesn: complete, clean, round 1: 2 Nit open
+- 2026-11-16 08:02 Audit of ui-journeys-select-copy: complete, clean, round 1: 2 Nit open
