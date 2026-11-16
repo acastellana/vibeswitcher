@@ -279,6 +279,8 @@ public final class LeadToolset: MCPToolset {
     var batchClock: () -> Date = { Date() }
     /// The pipeline watch's clock (`LeadPipeline`): a test's stand-in.
     var pipelineClock: () -> Date = { Date() }
+    /// The awake clock the watch counts by (`PipelineSleep`, read with `macTime`).
+    let pipelineSleep = PipelineSleep()
     /// The lints this repository carries that read the lead's records (`RecordLint.carried`), read once; a test's
     /// stand-in.
     lazy var recordLints: () -> RecordLint.Lints = { [root] in

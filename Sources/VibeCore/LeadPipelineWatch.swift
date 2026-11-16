@@ -5,7 +5,7 @@ import Foundation
 /// (`LeadAdvance.watchPipeline`), so a stall is seen within minutes though nothing in the project's folder changes.
 extension LeadToolset {
     /// What may hold the merges, as VibeSwitcher sees it now (`LeadPipeline.Signals`).
-    func pipelineSignals(_ workflow: LeadWorkflow, now: Date) -> LeadPipeline.Signals {
+    func pipelineSignals(_ workflow: LeadWorkflow, now: Date, sleep: MacSleepLog = MacSleepLog()) -> LeadPipeline.Signals {
         var signals = LeadPipeline.Signals()
         let base = workflow.base
         signals.head = branchHead(base)
@@ -26,7 +26,7 @@ extension LeadToolset {
         if let lock = heavyLock(workflow) {
             let holders = lock.holders()
             if holders.count >= lock.slots {
-                signals.slotsHeld = (lock.slots, TestLock.text(holders, for: root, now: now))
+                signals.slotsHeld = (lock.slots, LeadPipeline.slotsText(holders, root: root, now: now, sleep: sleep))
             }
         }
         let limits = macLimits()
@@ -91,12 +91,13 @@ extension LeadToolset {
     @discardableResult
     func watchPipeline(now: Date? = nil) -> LeadPipeline.Look {
         let now = now ?? pipelineClock()
+        let sleep = pipelineSleep.note(macTime)
         let workflow = self.workflow
         let board = store.load()
         // It runs after every run of auto_advance's passes: the signals (git, the records' lint) only once a task stalled.
-        let quick = LeadPipeline.look(board, signals: LeadPipeline.Signals(lastMerge: lastMerge()), base: workflow.base, now: now)
+        let quick = LeadPipeline.look(board, signals: LeadPipeline.Signals(lastMerge: lastMerge()), base: workflow.base, now: now, sleep: sleep)
         guard !quick.stalled.isEmpty else { return quick }
-        let look = LeadPipeline.look(board, signals: pipelineSignals(workflow, now: now), base: workflow.base, now: now)
+        let look = LeadPipeline.look(board, signals: pipelineSignals(workflow, now: now, sleep: sleep), base: workflow.base, now: now, sleep: sleep)
         guard look.tell, let text = look.text, let since = look.since, let cause = look.cause else { return look }
         try? store.update { board in
             board.pipeline = LeadPipeline.Told(at: now.timeIntervalSince1970, since: since.timeIntervalSince1970, cause: cause.rawValue)
@@ -109,10 +110,28 @@ extension LeadToolset {
     /// status's line while merges are held (`LeadPipeline`); nil when none is.
     func pipelineLine(now: Date? = nil) -> String? {
         let now = now ?? pipelineClock()
+        let sleep = pipelineSleep.note(macTime)
         let workflow = self.workflow
         let board = store.load()
-        // Nothing ready long enough: no signals read.
+        // Nothing ready long enough (by the wall clock, which the awake clock never passes): no signals read.
         guard board.tasks.contains(where: { LeadPipeline.readySince($0).map { now.timeIntervalSince($0) >= LeadPipeline.stallAfter } ?? false }) else { return nil }
-        return LeadPipeline.look(board, signals: pipelineSignals(workflow, now: now), base: workflow.base, now: now).text
+        return LeadPipeline.look(board, signals: pipelineSignals(workflow, now: now, sleep: sleep), base: workflow.base, now: now, sleep: sleep).text
+    }
+}
+
+/// The pipeline watch's sleep log (`MacSleepLog`, the awake clock the witness and sleep reporting use), noted at each
+/// look the tool server takes: what the Mac slept between two looks is the wall clock's gain beyond the awake clock's,
+/// however long the Mac stayed asleep between them. In memory, as long as the tool server runs.
+final class PipelineSleep: @unchecked Sendable {
+    private let lock = NSLock()
+    private var log = MacSleepLog()
+
+    /// Notes the two clocks now, read together (the wall clock `time`'s, not the watch's, so a test that fakes only
+    /// the watch's finds no sleep); the log as it is then.
+    func note(_ time: MacTime) -> MacSleepLog {
+        lock.withLock {
+            log.note(time)
+            return log
+        }
     }
 }

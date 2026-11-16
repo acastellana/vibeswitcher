@@ -161,3 +161,97 @@ struct LeadPipelineTests: LeadTeamFixture {
         #expect(progress.contains("Pipeline held: add-b ready to merge with none landing; cause: the lead's records failing a check"), "\(progress)")
     }
 }
+
+/// The held-merges report by the Mac's awake clock (`MacTime`, noted as the witness's sleep log does): on 2026-11-16 a
+/// Mac in maintenance sleep on battery told the lead "Merges are held … for 138 min … slot 1 … for 150 min, long" at
+/// one dark wake, then the same at 169, 215 and 260 min, though nothing had run: the test processes sat at 0% CPU
+/// because the Mac slept.
+@Suite(.serialized)
+struct LeadPipelineSleepTests: LeadTeamFixture {
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
+
+    static let t0 = LeadPipelineTests.t0
+
+    /// A Mac awake 25 min, then asleep with dark wakes at 138, 169, 215 and 260 min, each a minute awake: the lead is
+    /// told once while awake, not again at a dark wake, and status counts awake minutes and names the sleep. Awake
+    /// again for 30 min, it's told again, as today.
+    @Test func darkWakesDontRepeatTheReportAndItsMinutesAreAwake() throws {
+        let url = temp.url("pipeline-sleep")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let root = url.resolvingSymlinksInPath().path
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }
+        try "one\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt"], in: root)
+        Git.run(["commit", "-q", "-m", "first"], in: root)
+        let lead = try lead(root, FakeRuntime())
+        lead.testLock = nil
+        lead.mergeStats = { nil }
+        lead.recordLints = { .all }
+        // The wall clock, and the awake clock: it stands still while the Mac sleeps.
+        var wall = Self.t0
+        var awake: TimeInterval = 1_000
+        lead.pipelineClock = { wall }
+        lead.macTime = MacTime(wall: { wall }, awake: { awake })
+        func at(minute: Double, awakeMinute: Double) {
+            wall = Self.t0.addingTimeInterval(minute * 60)
+            awake = 1_000 + awakeMinute * 60
+        }
+        try lead.store.update { board in board.tasks.append(LeadPipelineTests.ready("add-b", at: Self.t0)) }
+
+        at(minute: 5, awakeMinute: 5)
+        #expect(!lead.watchPipeline().tell)
+        at(minute: 21, awakeMinute: 21)
+        #expect(lead.watchPipeline().tell)
+        #expect(lead.store.load().reports?.count == 1)
+        at(minute: 25, awakeMinute: 25)
+        #expect(!lead.watchPipeline().tell)
+        // Asleep from minute 25; each dark wake a minute awake.
+        for (index, minute) in [138.0, 169, 215, 260].enumerated() {
+            at(minute: minute, awakeMinute: 25 + Double(index + 1))
+            let look = lead.watchPipeline()
+            #expect(!look.tell, "dark wake at \(minute) min: \(String(describing: look.text))")
+            // The next look waits for the awake time still due, not a wall time already past.
+            #expect((look.next ?? .distantPast) > wall)
+        }
+        #expect(lead.store.load().reports?.count == 1, "\(lead.store.load().reports ?? [])")
+        // Status: 29 min awake, the sleep named.
+        let status = lead.call("status", [:]).text
+        #expect(status.contains("Merges are held: add-b has been ready to merge for 29 min"), "\(status)")
+        #expect(status.contains("the Mac slept 231 min"), "\(status)")
+        // Awake again: 30 min awake after the report, it's told again.
+        at(minute: 290, awakeMinute: 50)
+        #expect(!lead.watchPipeline().tell)
+        at(minute: 291, awakeMinute: 51)
+        #expect(lead.watchPipeline().tell)
+        #expect(lead.store.load().reports?.count == 2)
+    }
+
+    /// A slot whose run the Mac slept through: its minutes are awake ones, the sleep is named, and it isn't "long";
+    /// a slot held long while the Mac was awake still is.
+    @Test func aSlotPausedBySleepSaysSoInsteadOfLong() {
+        let now = Self.t0.addingTimeInterval(150 * 60)
+        var sleep = MacSleepLog()
+        // Awake from the start to minute 12, then asleep (dark wakes, no time awake to speak of) to minute 150.
+        sleep.note(wall: Self.t0.timeIntervalSince1970, awake: 0)
+        sleep.note(wall: Self.t0.addingTimeInterval(12 * 60).timeIntervalSince1970, awake: 12 * 60)
+        sleep.note(wall: now.timeIntervalSince1970, awake: 12 * 60)
+        let paused = TestLock.Holder(slot: 1, note: "pid 7, scripts/test.sh in /elsewhere/p, since 02:10", since: Self.t0, project: "p")
+        let text = LeadPipeline.slotsText([paused], root: "/r/mine", now: now, sleep: sleep)
+        #expect(text == "slot 1 held by another project's run, for 12 min, paused by sleep: 138 min of its 150 min", "\(text)")
+        // Awake all the way: as TestLock says it, long.
+        let awake = LeadPipeline.slotsText([paused], root: "/r/mine", now: now, sleep: MacSleepLog())
+        #expect(awake == TestLock.text([paused], for: "/r/mine", now: now) && awake.hasSuffix("for 150 min, long"), "\(awake)")
+        // The report names it under the slots cause, its minutes awake.
+        let board = LeadPipelineTests.board([LeadPipelineTests.ready("add-b", at: Self.t0)])
+        let look = LeadPipeline.look(board, signals: .init(head: "h", slotsHeld: (1, text)), base: "main", now: now, sleep: sleep)
+        #expect(look.stalled.isEmpty && !look.tell, "12 min awake isn't a stall: \(String(describing: look.text))")
+        let later = now.addingTimeInterval(10 * 60)
+        sleep.note(wall: later.timeIntervalSince1970, awake: 22 * 60)
+        let held = LeadPipeline.look(board, signals: .init(head: "h", slotsHeld: (1, text)), base: "main", now: later, sleep: sleep)
+        #expect(held.tell && held.cause == .slots, "\(String(describing: held.text))")
+        #expect((held.text ?? "").hasPrefix("Merges are held: add-b has been ready to merge for 22 min awake with no merge landing; the Mac slept 138 min of the 160 min since"), "\(String(describing: held.text))")
+        #expect((held.text ?? "").contains("paused by sleep: 138 min of its 150 min") && !(held.text ?? "").contains("min, long"), "\(String(describing: held.text))")
+    }
+}

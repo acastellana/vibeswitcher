@@ -155,29 +155,57 @@ public enum LeadPipeline {
         return nil
     }
 
-    /// The watch's look at `board` at `now` (see the type's comment).
-    public static func look(_ board: LeadBoard, signals: Signals, base: String, now: Date) -> Look {
+    /// The watch's look at `board` at `now` (see the type's comment). Its times count the time the Mac was awake, by
+    /// `sleep` (the awake clock, noted at each look as the witness's is; see `LeadBudget.awake`): a stall's 20 min, its
+    /// 30 min between reports and the minutes it says. On 2026-11-16 a Mac in maintenance sleep on battery told the
+    /// lead "ready to merge for 138 min … slot 1 … for 150 min, long" at one dark wake, then again at 169, 215 and 260
+    /// min, though nothing had run. What the log can't say counts as awake.
+    public static func look(_ board: LeadBoard, signals: Signals, base: String, now: Date, sleep: MacSleepLog = MacSleepLog()) -> Look {
         let ready = board.tasks.compactMap { task in readySince(task).map { (task.slug, $0) } }.sorted { $0.1 < $1.1 }
         // Ready, with no merge landing, for at least `stallAfter`: from when it was ready or the last merge landed,
         // whichever is later. A task ready before a merge of others landed stalls 20 min after that merge.
         let waiting = { (ready: Date) -> Date in signals.lastMerge.map { max(ready, $0) } ?? ready }
-        let stalled = ready.filter { _, since in now.timeIntervalSince(waiting(since)) >= stallAfter }
+        // What the Mac slept from `from` to now, and so its time awake since.
+        let slept = { (from: Date) -> TimeInterval in
+            from < now ? sleep.reading(from: from.timeIntervalSince1970, to: now.timeIntervalSince1970)?.slept ?? 0 : 0
+        }
+        let awake = { (from: Date) -> TimeInterval in max(0, now.timeIntervalSince(from) - slept(from)) }
+        let stalled = ready.filter { _, since in awake(waiting(since)) >= stallAfter }
         guard let first = stalled.first else {
-            // The next one to reach its mark (no merge landing meanwhile).
-            let next = ready.map { waiting($0.1).addingTimeInterval(stallAfter) }.filter { $0 > now }.min()
+            // The next one to reach its mark (no merge landing meanwhile), if the Mac stays awake.
+            let next = ready.map { waiting($0.1) }.map { $0.addingTimeInterval(stallAfter + slept($0)) }.filter { $0 > now }.min()
             return Look(stalled: [], since: nil, cause: nil, text: nil, tell: false, next: next)
         }
         let since = waiting(first.1)
         let (cause, said) = cause(board, signals: signals, base: base, now: now)
         let names = stalled.map(\.0)
-        let waited = Worktrees.duration(now.timeIntervalSince(since))
-        let text = "Merges are held: \(names.joined(separator: ", ")) \(names.count == 1 ? "has" : "have") been ready to merge for \(waited) with no merge landing. Cause: \(cause.rawValue). " + said
+        let asleep = slept(since)
+        let waited = Worktrees.duration(awake(since)) + (asleep >= 60 ? " awake" : "")
+        // The sleep named, in the witness's words: paused work, not held work.
+        let paused = asleep >= 60 ? sleep.reading(from: since.timeIntervalSince1970, to: now.timeIntervalSince1970).map { "; " + $0.text(now: now) } ?? "" : ""
+        let text = "Merges are held: \(names.joined(separator: ", ")) \(names.count == 1 ? "has" : "have") been ready to merge for \(waited) with no merge landing\(paused). Cause: \(cause.rawValue). " + said
         // One stall lasts until a merge lands: its oldest task changing (sent back, verified again, a batch's split) is
-        // the same stall, told at most every `repeatEvery`. A merge landing after the last report ended that one.
+        // the same stall, told at most every `repeatEvery` of time awake, so a dark wake in the night, with nothing run
+        // since, doesn't tell it again. A merge landing after the last report ended that one.
         let told = board.pipeline.flatMap { told in (signals.lastMerge.map { $0.timeIntervalSince1970 > told.at } ?? false) ? nil : told }
-        let tell = told.map { now.timeIntervalSince1970 - $0.at >= repeatEvery } ?? true
-        let next = tell ? now.addingTimeInterval(repeatEvery) : Date(timeIntervalSince1970: told!.at + repeatEvery)
+        let toldAt = told.map { Date(timeIntervalSince1970: $0.at) }
+        let tell = toldAt.map { awake($0) >= repeatEvery } ?? true
+        let next = tell ? now.addingTimeInterval(repeatEvery) : toldAt!.addingTimeInterval(repeatEvery + slept(toldAt!))
         return Look(stalled: names, since: since, cause: cause, text: text, tell: tell, next: next)
+    }
+
+    /// Every slot's holder (`TestLock.text(_:for:now:)`), by the awake clock: a run the Mac slept through has its time
+    /// held (and so "long") counted awake, and says what sleep paused of it, "slot 1 held by another project's run, for
+    /// 12 min, paused by sleep: 138 min of its 150 min", rather than "for 150 min, long" for a run that sat at 0% CPU
+    /// because the Mac slept.
+    static func slotsText(_ holders: [TestLock.Holder], root: String, now: Date, sleep: MacSleepLog) -> String {
+        guard !holders.isEmpty else { return TestLock.text(holders, for: root, now: now) }
+        return holders.map { holder in
+            let slept = holder.since.flatMap { $0 < now ? sleep.reading(from: $0.timeIntervalSince1970, to: now.timeIntervalSince1970)?.slept : nil } ?? 0
+            guard slept >= 60 else { return TestLock.text([holder], for: root, now: now) }
+            return TestLock.text([holder], for: root, now: now.addingTimeInterval(-slept))
+                + ", paused by sleep: \(Worktrees.duration(slept)) of its \(Worktrees.duration(holder.held(now: now)))"
+        }.joined(separator: "; ")
     }
 
     /// What holds the merges, and the one action needed, in words.
