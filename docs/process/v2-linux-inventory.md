@@ -560,6 +560,30 @@ The next run, after the weekly limit resets (Nov 18) and with the user's go-ahea
 spent): `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<config> bash scripts/test.sh --filter EngineEndToEndTests/aRealLead`,
 its `E9:` lines giving each step's time here.
 
+## A full scratch team run (the bootstrap path's step 9, the start plan's S10, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+`ScratchRunTests` in `Tests/VibeNodeTests/ScratchRunTests.swift`, on a `ScratchNode` (never the user's node), everything
+driven through the built command line on a pty of its own (`script`). The scratch repository commits `src/` and
+`check.sh` (the test command, `sh ./check.sh`, which notes the folder it ran in); its `workflow.md` sets `merge_policy:
+ask_sensitive` with `sensitive_paths: src/**`, `verifier_model: haiku` and `audit_finders: 1` (ST-D21).
+
+**`aScratchTeamOfFakesBuildsAuditsAndMerges` (`FakeClaude` as every session) passes, in 53 s, and 3 of 3 under load
+24**: the config and base accepted (each code typed); `lead` started; its `ask_user` listed by `questions` and answered
+(in the vault, then typed into the lead as the user's); two tasks touching `src/` and a worker on each, both live at once
+under `mac_max_sessions` 4; the test's commit in each worktree, on `agent/<slug>`; a merge before the audit refused for
+"no passing audit"; the verifier's `submit_audit` through its own tool server, the verdict in the vault on the worker's
+commit; the merge held for the user's approval, the lead's approval card answered with `LeadWorkflow.approval(of:)`
+(the vault holds it for that task and commit only); the merge landed on `main` with `VS-Task` and `check.sh` run in the
+merge's worktree. Every command line call named "scratch node at <root>" on stderr, and each state change showed its
+code prompt. Three mutants of the product fail it, each on its own assertion: the gate merging with no verdict, the
+vault recording the approval under another commit, and `approved` ignoring the task and commit.
+
+**`aScratchTeamPlansBuildsAuditsAndMerges` (gated on `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`, a real lead on Sonnet,
+the verifier on haiku) has not run: an open item.** The test account is at its weekly limit until Nov 18, and E9's
+Step 2 passes first. Each run needs the user's go-ahead, three at most:
+`VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=~/.vibeswitcher-test-claude vs-heavy bash scripts/test.sh --filter
+ScratchRunTests/aScratchTeamPlansBuildsAuditsAndMerges`, its `S10:` lines giving each step's time and the models here.
+
 ## The config seal's Linux list (the start plan's S7, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
 
 **Step 0, the startup files' targets** (read by the agent, read only). Each `.` and `source` in `~/.bashrc`,

@@ -458,6 +458,9 @@ Each ends in something that runs.
      once here.
    - **Proves:** two workers in worktrees, one audit, one merge through the gate with tests green, one question
      answered from the command line: the design's stage 4 Done-when, on a scratch repository.
+   - *2026-11-16, the start plan's S10:* the owner is written. `ScratchRunTests.aScratchTeamOfFakesBuildsAuditsAndMerges`
+     (the rehearsal with `FakeClaude`) passes here; `aScratchTeamPlansBuildsAuditsAndMerges` (gated) hasn't run yet:
+     the test account's weekly limit resets Nov 18, and E9's Step 2 passes first. Not done until it passed once.
 10. **The bootstrap.**
     - **Before:** the user's steps M2, M3, M5, M6 and M8
       ([above](#things-only-you-can-do-on-the-machine)). `vibeswitcher start` checks interop; the rest are the

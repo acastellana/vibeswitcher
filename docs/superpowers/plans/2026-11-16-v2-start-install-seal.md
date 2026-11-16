@@ -2280,7 +2280,7 @@ its Needs. E9's Step 2 is still required, as the spec says.
   - `assertScratchForm(_ output:)`: stderr names "scratch node at <root>", and every state change printed its code
     prompt.
 
-- [ ] **Step 1: The rehearsal, ungated.** `aScratchTeamOfFakesBuildsAuditsAndMerges`:
+- [x] **Step 1: The rehearsal, ungated.** `aScratchTeamOfFakesBuildsAuditsAndMerges`:
   - The accepts.
   - `lead` (a fake), whose `mcp` ops are: `ask_user`; `start_worker` twice (both live at once in their worktrees,
     under room 4); `audit`; `merge`.
@@ -2293,6 +2293,28 @@ its Needs. E9's Step 2 is still required, as the spec says.
 
   Shown failing on two mutants: a merge with no recorded verdict, and an approval bound to another commit. Each must
   fail on its own assertion.
+
+  *2026-11-16, S10:* passes on Linux in 53 s, and 3 of 3 under load 24. What differs from the above:
+  - `scratchRepository(in:marker:)` returns the commit. `src/` and `check.sh` are committed; `workflow.md` is written
+    in the board's folder (`ConfigHoldStore.workflowPath`, uncommitted, as E9's), since `.vibeswitcher/` is the
+    lead's folder, not the repository's. The repository has its own `user.name`/`user.email`: the merge stamps its
+    landed commit with trailers ("Committer identity unknown" without one, as a user's repository never is).
+    `check.sh` appends `pwd` to a marker file in a scratch folder of its own; the merge's run is the line naming
+    `merge-<slug>`.
+  - `assertScratchForm(_:root:typed:_:)` takes the `CommandRun`: a run on a terminal names the node on the pty (its
+    stderr) and shows `Type XXXX and Enter`; any other names it on stderr and never on stdout. Every call goes through
+    `ScratchRunTests.CommandLine`, which checks them all at the end.
+  - "One merge": the merge lands as the rebased commit with VibeSwitcher's `VS-*` trailers, followed by the lead's
+    records commit, so it's exactly one commit with a `VS-Task` trailer since the base.
+  - Also asserted: a merge before the audit is refused for "no passing audit" and the vault holds no verdict; the
+    approval is bound to its task and its commit (not the other worker's).
+  - The mutants, each applied to the product and reverted: (1) `mergeGate` with no verdict lets the head through (no
+    `reviewNeeded`, no `unauditedCommit`) fails only on "a merge before the audit is refused" (`unauditedCommit`
+    alone still refuses it, so a one-line mutant of `reviewNeeded` survives); (2a) the vault recording the approval
+    under another commit fails first on "the vault has the approval", and (2b) `approved` ignoring the task and
+    commit fails only on the two binding checks.
+  - `realClaudeScript(root:config:claude:)` takes the `claude` it runs; `theRealClaudeScriptAddsSonnetOnlyWhenNoModelIsGiven`
+    checks it ungated, with a stand-in.
 - [ ] **Step 2: The gated run.** `aScratchTeamPlansBuildsAuditsAndMerges`, enabled only with
   `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` on the run's command line.
   - A real lead on Sonnet with a scripted goal: exactly two tasks touching `src/`, one question to the user, both
@@ -2307,6 +2329,14 @@ its Needs. E9's Step 2 is still required, as the spec says.
     - one merge commit on the base whose tests ran;
     - the lead's question answered as the user's (its action and digest in the vault);
     - `assertScratchForm` on every call.
+
+  *2026-11-16, S10:* written, not run: the test account is at its weekly limit until Nov 18, E9 Step 2 hasn't passed
+  yet, and each run needs the user's go-ahead. The lead's goal names its two tasks' titles, so the harness trusts the
+  repository and both worktrees (`Slug.make` of each title) before the lead starts: VibeSwitcher writes no trust
+  entry, and a worker in an untrusted folder would wait on Claude Code's trust dialog. Cleanup takes out only the
+  entries it wrote. The verifier's and the workers' models are read from the landed commit's `VS-Verifier-Model` and
+  `VS-Worker-Model` trailers. It answers each card as it comes (the approval with exactly the option it offers, any
+  other with its first option) until the greeting task is done, up to 55 minutes.
 - [ ] **Step 3: Verify.**
   - `bash scripts/test.sh --filter ScratchRunTests`: Step 1 runs, Step 2 is skipped.
   - under load: `scripts/test-under-load.sh --load 24 -r 3 -f 'ScratchRunTests'`.
@@ -2314,6 +2344,9 @@ its Needs. E9's Step 2 is still required, as the spec says.
     `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=~/.vibeswitcher-test-claude vs-heavy bash scripts/test.sh --filter
     ScratchRunTests/aScratchTeamPlansBuildsAuditsAndMerges`.
   - Record each run in the inventory: Claude Code version, models, each step's time, the cost seen, and what failed.
+
+  *2026-11-16, S10:* the first two done (Step 1 passes, Step 2 skipped; 3 of 3 under load); the gated runs wait for
+  Nov 18 and the user's go-ahead, after E9 Step 2.
 - [ ] **Step 4:** commit ("v2: a full scratch team run"). Push, both green: by the lead before M2, by the user after.
 
 **Done when:** Step 1 passes on Linux, and Step 2 passed once here (or waits, saying why, as an open item). That is the
