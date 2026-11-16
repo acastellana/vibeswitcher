@@ -3343,3 +3343,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 09:31 Started a worker on after-a-mac-restart
 - 2026-11-16 09:31 Automatically (auto_advance): Started a worker on after-a-mac-restart (After a Mac restart, a card offers to reopen the sessions that were open).
 - 2026-11-16 09:31 Automatically (auto_advance): Overlap for after-a-mac-restart's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ui-journeys-b-team (kept: its branch changes it).
+- 2026-11-16 09:37 Exception on after-a-mac-restart by lead of vibeswitcher: edits to Sources/VibeCore/LeadLaunch.swift, Sources/VibeSwitcher/LeadController*.swift, Sources/VibeCore/LeadController*.swift accepted. Reason: A reopened lead must go through the lead start (a fresh vault grant bound to the new session, same prompt, MCP config and environment) with a new resume option adding --resume <agentSessionID>. The si…
