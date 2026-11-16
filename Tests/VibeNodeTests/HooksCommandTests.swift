@@ -228,6 +228,16 @@ struct HooksCommandTests {
         #expect(try accepted(node).isEmpty)
         #expect(!FileManager.default.fileExists(atPath: settings(node).path))
         #expect(!FileManager.default.fileExists(atPath: bin(node).path))
+
+        // The start plan's Review Focus 4: a remove with no terminal is refused too, and changes nothing.
+        let install = try await node.runOnTerminal(["hooks", "install"])
+        #expect(install.status == 0, "\(install.output)\n\(node.said)")
+        let remove = try await run(URL(fileURLWithPath: "/usr/bin/setsid"), ["--wait", commandLine.path, "hooks", "remove"], environment: node.environment())
+        #expect(remove.status == 77, "\(remove.output)\(remove.errors)")
+        #expect(remove.errors.contains(TypedOutcome.noTerminal.refusal), "\(remove.errors)")
+        #expect(try accepted(node) == ["hooks.install"])
+        #expect(HookInstaller.isInstalled(in: try object(settings(node))))
+        #expect(HookInstaller.isInstalled(in: try object(codexHooks(node))))
     }
 
     // MARK: Sealed as the app's
@@ -257,12 +267,23 @@ struct HooksCommandTests {
         #expect(try await held(node, repo) == ["~/.claude/settings.json"])
     }
 
-    /// S9's card order is accept first; this pins the other.
-    @Test func aHooksInstallBeforeTheFirstAcceptIsSealedToo() async throws {
+    /// S9's card order is accept first; this pins the other. Before the vault's first look nothing is recorded, so the
+    /// app's seal has nothing to chain from (`sealAppWrites` seals only what was sealed as the write found it): the
+    /// install isn't sealed as the app's write. The first look's card shows what it wrote, and the first accept seals
+    /// it with the rest (the S6 review).
+    @Test func aHooksInstallBeforeTheFirstLookIsShownByTheFirstAccept() async throws {
         let (node, repo) = try await acceptedNode()
         defer { node.stop() }
         let ran = try await node.runOnTerminal(["hooks", "install"])
         #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(commands(try object(settings(node)))["Stop"] == ["\(hook(node)) claude"])
+        #expect(commands(try object(codexHooks(node)))["Stop"] == ["\(hook(node)) codex"])
+        for name in Self.programs {
+            #expect(try Data(contentsOf: bin(node).appendingPathComponent(name)) == Data(contentsOf: node.nodeRoot.appendingPathComponent("bin/" + name)), "\(name)")
+        }
+        // On the first look's card, with everything else the vault has nothing recorded for.
+        let shown = try await held(node, repo)
+        for name in ["~/.claude/settings.json", "~/.codex/hooks.json", "~/.vibeswitcher/bin"] { #expect(shown.contains(name), "\(name): \(shown)") }
         try await node.acceptConfig(repo)
         #expect(try await held(node, repo).isEmpty)
         // Sealed from then on: a change made here is held.
@@ -333,6 +354,8 @@ struct HooksCommandTests {
             }
         }
         watcher.start()
+        // Stopped on every path out: a throw here would otherwise leave it spinning for the rest of the run.
+        defer { done.value = true }
         let ran = try await node.runOnTerminal(["hooks", "install"])
         done.value = true
         #expect(ran.status == 0, "\(ran.output)\n\(node.said)")

@@ -649,6 +649,11 @@ process that a process of the user can't change.
 - The text of the lead's questions: a turned lead asks what it likes. Only the card's facts are the engine's.
 - A lead (or a process inside its session) can record a `base_branch` hash of its own (`setGuarded` takes the lead's),
   and an approval card's diff is then taken against that base; the card names the base.
+- **(2026-11-16, the review of the start plan's S6; the fix is the lead's call)** `hooks install` is sealed through
+  `appWrite`, which fingerprints the watched things before and after the write: a change another process of the
+  user's makes in between (a program renamed over in `~/.vibeswitcher/bin`, a hook added to `settings.json` before the
+  edit reads it) is sealed with the install. The programs are written before `appWrite`, so the window is the renames
+  and the config edits (the start plan's ST-D17 note).
 
 Acceptable only on VibeSwitcher's own repository, with interop off, until stage 4's signed approvals.
 
@@ -728,7 +733,9 @@ The engine's E8: `RestartTests.anAnswerWrittenToTheServersFilesIsNotTakenAfterAR
 plan's S6, 2026-11-16): `HooksCommandTests.aSessionsProcessCannotInstallHooks`,
 `HooksCommandTests.aHooksInstallWithNoTerminalIsRefused`, `HooksCommandTests.hooksInstallWritesAsTheAppAndSealsIt`,
 `HooksCommandTests.aNodeRootProgramThatDiffersFromBuildInfoIsNotInstalled`,
-`HooksCommandTests.aChangeInTheBuildsFolderNotAcceptedRefusesTheInstall`.
+`HooksCommandTests.aChangeInTheBuildsFolderNotAcceptedRefusesTheInstall`; from its review,
+`ConfigHoldStoreTests.aLookSealsTheAppsOwnWritesTheHostDidntTake` (a seal the host didn't take is asked again at the next
+look).
 
 **Tests to write:** none left: Step 8's are under Held by.
 

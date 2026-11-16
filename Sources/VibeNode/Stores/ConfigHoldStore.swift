@@ -106,10 +106,14 @@ public enum ConfigHoldStore {
     /// do): an app's look with no card (`checkConfig(root:)`) would seal everything held that didn't move since, as an
     /// older app's Accept does (the E6 review), and the app's `ConfigHolds.look` only reads the record. A look the vault
     /// refuses is only
-    /// said. `snapshot`: the project's last accepts (E8's `AcceptedSnapshot`), which say of each held thing and guard rail
+    /// said. First, look or not, the server's own config writes the host didn't take when they were made are asked
+    /// again (`retrySealingAppWrites`): only the hashes those writes left are sealed so. `snapshot`: the project's last accepts (E8's `AcceptedSnapshot`), which say of each held thing and guard rail
     /// whether it's the same, changed or new since. Fails when the record can't be read.
     public static func held(root: String, vault: LeadVault, home: String, look: Bool = true,
                             snapshot: AcceptedSnapshot.Project? = nil) -> Result<Shown, Error> {
+        // The server's own writes of the agents' config (`hooks install`) the host couldn't seal when they were made,
+        // asked again first, as the app's `ConfigHolds.look` does (the S6 review).
+        vault.retrySealingAppWrites()
         if look { _ = try? vault.checkConfig(root: root, shown: [:]) }
         let record: [String: String]?
         do { record = try vault.guardedRecord(root: root) } catch { return .failure(error) }

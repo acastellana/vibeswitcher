@@ -392,6 +392,16 @@ accepted every recommendation so far. Each can be overruled before its task star
       it. S6 also refuses while the seal holds an unaccepted change under `.vibeswitcher/v2/builds` (S7's `.listing`
       sees a rewrite by its `ctime`), or says here why not.
     - The command line no longer writes locally, and its `CLAUDE_CONFIG_DIR` is ignored.
+    - *2026-11-16, the S6 review:* what `appWrite` seals is not limited to the bytes the server wrote. It
+      fingerprints each watched thing before the write and again after, and the vault seals a chain from its sealed
+      hash to what it reads itself. So a change another process of the user's makes between those reads (a program
+      renamed over, a hook added to `settings.json` before the edit reads it and merged in) is sealed with the write.
+      S6 now writes and flushes the programs before `appWrite`, so the window is only the renames and the config
+      edits. Closing it needs a VibeCore change that this plan's Non-seam edits don't list: `appWrite` (or a variant)
+      told each item's expected result, recording a line only when one read of the item both matches it and gives the
+      fingerprint, and the config edit refusing bytes that differ from the `before` fingerprint. That is left to the
+      lead. Also from that review: a seal the host didn't take is asked again at the next look
+      (`ConfigHoldStore.held` calls `retrySealingAppWrites`, as the app's `ConfigHolds.look` does).
     - Harnesses that prepare a real-agent folder (E9 Step 2, S10) write its hooks with
       `HookInstaller.install(agent:at:hookBinary:)` directly.
 18. **ST-D18: The seal reads large folders by their metadata.**
@@ -1543,7 +1553,11 @@ added. The Mac runs `theMacStillReadsOnlyTheAppBundle`, the gate's Mac case and 
     - the vault's next look holds nothing (sealed as the app's write);
     - the same edit made by the test directly, not through the server, is held.
   - `aHooksInstallBeforeTheFirstAcceptIsSealedToo`: the same with `hooks install` before `config accept` (S9's card
-    order is accept first; this pins the other).
+    order is accept first; this pins the other). *2026-11-16, the S6 review:* now
+    `aHooksInstallBeforeTheFirstLookIsShownByTheFirstAccept`. Before the vault's first look nothing is recorded, so
+    the vault's `sealAppWrites` has no sealed hash to chain from and the install can't be sealed as the app's write.
+    The case pins what does happen: the first look's card shows the configs and `~/.vibeswitcher/bin` as installed,
+    the first accept seals them, and a later direct edit is held.
   - `aNodeRootProgramThatDiffersFromBuildInfoIsNotInstalled`:
     - The test replaces the scratch node-root's `bin/vibeswitcher-hook` link (ScratchNode links it to the `.build`
       product) with a copy, then appends one byte to the copy. The shared product is never written.
@@ -1601,6 +1615,22 @@ added. The Mac runs `theMacStillReadsOnlyTheAppBundle`, the gate's Mac case and 
   cases), the lints (`HomePathLint` took `buildsName` for a home path kept once: it is a computed name now),
   `VibeNodeTests|VibeCoreTests|VibePlatformTests` under `vs-heavy` (3389 cases, green), and `HooksCommandTests|ServerTests`
   under load (24, 3 runs, nothing left behind).
+
+*2026-11-16, the S6 review (committed as "v2 step 8: S6 review fixes"):*
+- **The race in what is sealed** (major) is real; its full fix is a VibeCore edit not in the Non-seam table, left to
+  the lead (ST-D17's note). Made here: `HooksRequest.stage` writes and flushes each program's temporary before
+  `appWrite`, and only the renames and the config edits run inside it. The catch path's `sealAppWrites()` stays: the
+  lines are already queued by `appWrite`'s `defer` on any path, and the call only waits for that ask.
+- **A seal the host didn't take** was kept only in the server's memory and never asked again. `ConfigHoldStore.held`
+  (`config held`, a card's look, the engine's look) now calls `vault.retrySealingAppWrites()` first. New case
+  `ConfigHoldStoreTests.aLookSealsTheAppsOwnWritesTheHostDidntTake`, failing without it. A server restart before
+  that look still loses the pending list (it is in memory, as the app's is).
+- `aHooksInstallBeforeTheFirstAcceptIsSealedToo` renamed and restated (Step 1's note). It now also checks the configs
+  and the programs.
+- `noTemporaryIsLeftInTheWatchedFolder`: the watcher thread is stopped by a `defer` on every path out.
+- `aHooksInstallWithNoTerminalIsRefused` also runs `hooks remove` with no terminal after a terminal install: exit 77,
+  `noTerminal`'s text, nothing recorded, and the hooks stay.
+- Port map: row 55 says `HookSetup.trustCodex` isn't ported, and `HookBinaryLaunchTests` has its row.
 
 **Done when:** the cases pass on Linux, E9 Step 1 still passes, and row 55 is `ported`.
 

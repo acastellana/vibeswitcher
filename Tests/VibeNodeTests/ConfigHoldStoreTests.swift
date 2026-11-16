@@ -78,6 +78,25 @@ struct ConfigHoldStoreTests {
         return (home, root, app, lead, skill, manifest)
     }
 
+    /// The S6 review: an app write the host didn't take when it was made (`sealAppWrites` kept it in the pending list)
+    /// is asked again at the next look before the vault looks, as the app's `ConfigHolds.look` does
+    /// (`retrySealingAppWrites`). So hooks that `hooks install` wrote while the host didn't answer are not held as a
+    /// change made outside a session.
+    @Test func aLookSealsTheAppsOwnWritesTheHostDidntTake() throws {
+        let team = try team()
+        let settings = team.home + "/.claude/settings.json"
+        // The same vault folder, its host not answering when the write is made.
+        let away = LeadVault(folder: team.app.folder) { _ in throw LeadVault.Refused("The session host didn't answer.") }
+        try away.appWrite([settings], home: team.home) {
+            try HookInstaller.install(agent: .claude, at: URL(fileURLWithPath: settings), hookBinary: team.home + "/.vibeswitcher/bin/vibeswitcher-hook")
+        }
+        away.sealAppWrites()
+
+        let shown = try ConfigHoldStore.held(root: team.root, vault: team.app, home: team.home).get()
+        #expect(shown.items.isEmpty, "\(shown.items.map(\.name))")
+        #expect(try team.asLead.checkConfig(root: team.root).held.isEmpty)
+    }
+
     /// The reported change on the card: named by skill with its time, and its difference (`config held --diff NAME`).
     @Test func theHeldListNamesTheChangeAndCanShowItsDifference() throws {
         let team = try team()

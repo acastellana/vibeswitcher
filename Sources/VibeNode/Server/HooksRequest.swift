@@ -10,8 +10,8 @@ import VibeCore
 ///   file) and hashes the bytes it read. Each must equal the `binaries` entry of the `build-info` the host loaded at its
 ///   start (`HostNotes.binaries`, S5): a worker can rewrite the `build-info` on disk too, so the copy on disk isn't asked.
 ///   Those bytes, never a second read, are written to a temporary beside `<home>/.vibeswitcher/bin` (in
-///   `<home>/.vibeswitcher`: the bin folder is watched, and a look while a temporary is in it would hold it) and renamed
-///   in. Then each agent's config (`HookInstaller.configURL(for:home:)`) gets the hooks, running
+///   `<home>/.vibeswitcher`: the bin folder is watched, and a look while a temporary is in it would hold it), flushed,
+///   and only then, inside `appWrite`, renamed in. Then each agent's config (`HookInstaller.configURL(for:home:)`) gets the hooks, running
 ///   `<home>/.vibeswitcher/bin/vibeswitcher-hook`.
 /// - Remove takes only VibeSwitcher's hooks out of each config (`HookInstaller.uninstall`); the programs stay.
 /// - Every path is passed to `appWrite` as `ConfigSeal.homeWatched(home:)` spells it (`<home>/.vibeswitcher/bin/…`,
@@ -23,6 +23,13 @@ import VibeCore
 ///   check asks the user to look at the builds folder first. Before the vault has recorded the folder at all (a fresh
 ///   vault before its first accept) there is nothing to compare: the install goes on, and the first accept shows the
 ///   folder as it is.
+///
+/// - What is sealed: `appWrite` fingerprints each watched thing before the write and again after it, and the vault
+///   seals a change from the sealed hash to what the vault itself reads then. So a change another process of the user's
+///   makes between those two reads is sealed with the write. The programs are written and flushed before the first
+///   read, so the window is the renames and the config edits. Closing it needs `appWrite` to seal only the result the
+///   write itself made, a VibeCore change the start plan doesn't list (ST-D17's note of the S6 review).
+/// - A seal the host didn't take is asked again at the next look (`ConfigHoldStore.held`, `retrySealingAppWrites`).
 ///
 /// Blocking (the vault's calls go to the host): the server runs it on the engine's read queue, never its own.
 public struct HooksRequest {
@@ -69,14 +76,30 @@ public struct HooksRequest {
         let targets = Self.programs.map { (binFolder as NSString).appendingPathComponent($0) }
         let configs = agents.map(configPath)
         let hook = (binFolder as NSString).appendingPathComponent("vibeswitcher-hook")
+        let dot = URL(fileURLWithPath: home).appendingPathComponent(".vibeswitcher", isDirectory: true)
+        // The programs' bytes written and flushed before `appWrite` takes its fingerprints, so only the renames and the
+        // config edits fall between those and the ones it takes after (the S6 review: what changes in between is
+        // sealed with the write).
+        var staged: [String: String] = [:]
+        defer { for temporary in staged.values { unlink(temporary) } }
+        do {
+            try VibePaths.ensurePrivate(dot)
+            for name in Self.programs { if let temporary = try stage(read[name] ?? Data(), name: name) { staged[name] = temporary } }
+        } catch {
+            return .failure(StartRefusal("the hooks' programs couldn't be written: \(ConfigSeal.inert(Self.describe(error), limit: .max)): nothing was installed", exitCode: 1))
+        }
         do {
             try vault.appWrite(targets + configs, home: home) {
-                try VibePaths.ensurePrivate(URL(fileURLWithPath: binFolder, isDirectory: true),
-                                            within: URL(fileURLWithPath: home).appendingPathComponent(".vibeswitcher", isDirectory: true))
-                for name in Self.programs { try put(read[name] ?? Data(), name: name) }
+                try VibePaths.ensurePrivate(URL(fileURLWithPath: binFolder, isDirectory: true), within: dot)
+                for name in Self.programs {
+                    guard let temporary = staged[name] else { continue }
+                    guard rename(temporary, (binFolder as NSString).appendingPathComponent(name)) == 0 else { throw Platform.Errno(code: errno) }
+                    staged[name] = nil
+                }
                 for agent in agents { try HookInstaller.install(agent: agent, at: URL(fileURLWithPath: configPath(agent)), hookBinary: hook) }
             }
         } catch {
+            // `appWrite` has asked the vault already for what changed; this waits for that ask.
             vault.sealAppWrites()
             return .failure(StartRefusal("the hooks weren't all installed: \(ConfigSeal.inert(Self.describe(error), limit: .max))", exitCode: 1))
         }
@@ -148,13 +171,14 @@ public struct HooksRequest {
 
     // MARK: The write
 
-    /// `data` written to a new temporary in `<home>/.vibeswitcher` (0755, never following a link), then renamed over
-    /// `<home>/.vibeswitcher/bin/<name>`; nothing when the program there is these bytes already, 0755.
-    func put(_ data: Data, name: String) throws {
+    /// `data` written to a new temporary in `<home>/.vibeswitcher` (0755, never following a link) and flushed: its
+    /// path, for the caller to rename over `<home>/.vibeswitcher/bin/<name>`; nil when the program there is these bytes
+    /// already, 0755.
+    func stage(_ data: Data, name: String) throws -> String? {
         let target = (binFolder as NSString).appendingPathComponent(name)
         var info = stat()
         if lstat(target, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_mode & 0o7777 == 0o755,
-           case .success(let existing) = BuildRecord.readRegular(target), existing == data { return }
+           case .success(let existing) = BuildRecord.readRegular(target), existing == data { return nil }
         let temporary = ((binFolder as NSString).deletingLastPathComponent as NSString)
             .appendingPathComponent(".\(name).\(getpid()).\(UUID().uuidString.prefix(8)).tmp")
         let fd = Sys.open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o755)
@@ -171,11 +195,11 @@ public struct HooksRequest {
         }
         if failed == 0, fsync(fd) != 0 { failed = errno }
         Sys.close(fd)
-        if failed == 0, rename(temporary, target) != 0 { failed = errno }
         guard failed == 0 else {
             unlink(temporary)
             throw Platform.Errno(code: failed)
         }
+        return temporary
     }
 
     static func describe(_ error: Error) -> String {
