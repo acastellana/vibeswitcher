@@ -102,6 +102,15 @@ public enum NodeJournal {
     /// SWIFT_BACKTRACE=<value|unset>`.
     public static let startLine = "vibeswitcher-host: started pid "
 
+    /// The newest start line of the host `pid` in a detached host's log (`NodeStarter.hostLog`, where its stderr goes:
+    /// no journal, ST-D6), as what follows `vibeswitcher-host: started `; nil when the log holds none. The log is the
+    /// user's file and any worker's to write, so nothing vouches for the line (the review of S8c, 2026-11-16).
+    public static func hostLogStart(_ log: String, pid: pid_t) -> String? {
+        let opening = startLine + "\(pid) "
+        return log.split(whereSeparator: \.isNewline).last { $0.hasPrefix(opening) }
+            .map { String($0.dropFirst("vibeswitcher-host: started ".count)) }
+    }
+
     /// The node's starts, stops and server restarts in `entries`: systemd's job lines for the node's unit
     /// (`JOB_TYPE=start|stop` with `JOB_RESULT=done`, its `UNIT` or `USER_UNIT` the node's), and the host's line for a
     /// server child that ended and is started again (stage 2's Task 8b). Ordered by time.

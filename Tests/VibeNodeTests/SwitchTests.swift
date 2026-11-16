@@ -103,7 +103,7 @@ struct SwitchTests {
     /// nothing. The confirmation says every session is kept and names no count of sessions it ends; it says a running
     /// team keeps its build until its lead restarts (ST-D16) and the seal's hold until `vs config accept` (ST-D23).
     @Test func aSwitchSaysItKeepsSessions() throws {
-        let text = NodeTexts.switch(from: Self.a, to: Self.b)
+        let text = NodeTexts.switch(from: Self.a, to: Self.b, rewrites: .unitAndCurrent)
         #expect(text.contains(Self.a) && text.contains(Self.b), "\(text)")
         #expect(text.contains("keeps every session"), "\(text)")
         let count = try Regex("\\b[0-9]+ sessions?\\b")
@@ -120,12 +120,34 @@ struct SwitchTests {
     /// the user reads it before typing the code; the rest is the switch's.
     @Test func aRollbackSaysWhereItGoes() {
         let line = "\(Self.a) 2026-11-16T10:00:00Z"
-        let text = NodeTexts.rollback(from: Self.b, to: Self.a, line: line)
+        let text = NodeTexts.rollback(from: Self.b, to: Self.a, line: line, rewrites: .unitAndCurrent)
         #expect(text.contains(Self.a) && text.contains(Self.b) && text.contains(line), "\(text)")
         #expect(text.contains("keeps every session") && text.contains("the seal holds every team until `vs config accept`"), "\(text)")
         // A line holding a control character is shown inert.
-        let odd = NodeTexts.rollback(from: Self.b, to: Self.a, line: "\(Self.a) \u{1b}[2Jx")
+        let odd = NodeTexts.rollback(from: Self.b, to: Self.a, line: "\(Self.a) \u{1b}[2Jx", rewrites: .unitAndCurrent)
         #expect(!odd.contains("\u{1b}"), "\(odd)")
+    }
+
+    /// The review of S8c: the confirmation the code is typed against says what the node's follow-up writes. Under
+    /// systemd the unit's `ExecStart` and `current` (above); on a node started detached (no systemd, ST-D6) there is no
+    /// unit and only `current` is moved; a scratch node and the Mac rewrite neither, and say why.
+    @Test func aConfirmationSaysWhatTheNodesModeRewrites() {
+        let line = "\(Self.a) 2026-11-16T10:00:00Z"
+        for text in [NodeTexts.switch(from: Self.a, to: Self.b, rewrites: .currentOnly),
+                     NodeTexts.rollback(from: Self.a, to: Self.b, line: line, rewrites: .currentOnly)] {
+            #expect(text.contains("`current` is moved to \(Self.b), so the next `vs start` runs it"), "\(text)")
+            #expect(!text.contains("unit's ExecStart") && !text.contains("the unit change"), "\(text)")
+            #expect(text.contains("the seal holds every team until `vs config accept`") && text.contains("builds folder"), "\(text)")
+            #expect(text.contains("keeps every session"), "\(text)")
+        }
+        for text in [NodeTexts.switch(from: Self.a, to: Self.b, rewrites: .nothing("a scratch node")),
+                     NodeTexts.rollback(from: Self.a, to: Self.b, line: line, rewrites: .nothing("a scratch node"))] {
+            #expect(text.contains("no unit is rewritten and `current` isn't moved (a scratch node)"), "\(text)")
+            #expect(!text.contains("ExecStart") && !text.contains("is moved to"), "\(text)")
+            #expect(text.contains("keeps every session"), "\(text)")
+        }
+        // The reason is shown inert.
+        #expect(!NodeTexts.switch(from: Self.a, to: Self.b, rewrites: .nothing("x\u{1b}[2J")).contains("\u{1b}"))
     }
 
     // MARK: The follow-up (Linux: a scratch prefix and a recording systemctl)
@@ -302,9 +324,6 @@ struct SwitchTests {
         #expect(!world.isDone(Self.b))
     }
 
-    /// The review of S8a: the follow-up writes the unit as `start` does (ST-D3, ST-D4): the account's home and swiftly's
-    /// folder from where `start` takes them, the node folder only through `NodeFolders.toolFolders`, never a unit's
-    /// edited HOME or PATH written back for a switch the user then accepts.
     /// A node started detached (no systemd, ST-D6; S8c) has no unit, and its `start` starts the build `vs` runs from: its
     /// follow-up checks the target and the host as `apply` does, then moves only `current`, calling nothing and leaving
     /// the unit folder as it was.
@@ -330,6 +349,82 @@ struct SwitchTests {
         #expect(world.prefixEntries == [Self.a, Self.b, "current"].sorted(), "\(world.prefixEntries)")
     }
 
+    /// The review of S8c: the switch's target is checked as an installed build (`NodeFolders.verifyBuild`: its `bin`
+    /// holds exactly what its `build-info` records, each hash the recorded one) before the code is asked, so a build
+    /// whose tool server or command line a worker rewrote is refused with nothing switched; the host checks only the
+    /// host's and the server's images at the handover.
+    @Test(NodeTraits.linuxOnly) func aSwitchsTargetIsCheckedBeforeTheCodeIsAsked() throws {
+        let world = try World(scratch)
+        #expect(SwitchFollowUp.targetRefusal(prefix: world.prefix.path, commit: Self.b) == nil)
+        // The command line's file rewritten, its build-info left alone (the world's builds hold no tool server).
+        let cli = world.prefix.appendingPathComponent("\(Self.b)/bin/\(NodeFolders.installedCLI)")
+        let good = try Data(contentsOf: cli)
+        try Data("#!/bin/sh\n# rewritten\n".utf8).write(to: cli)
+        let refused = try #require(SwitchFollowUp.targetRefusal(prefix: world.prefix.path, commit: Self.b))
+        #expect(refused.text.contains("isn't an installed build") && refused.text.contains("sha256") && refused.text.contains("nothing was switched"),
+                "\(refused)")
+        #expect(refused.exitCode == 77)
+        try good.write(to: cli)
+        // A file added to bin, a commit not installed, or no commit at all.
+        let extra = world.prefix.appendingPathComponent("\(Self.b)/bin/extra")
+        try Data("x".utf8).write(to: extra)
+        #expect(SwitchFollowUp.targetRefusal(prefix: world.prefix.path, commit: Self.b)?.text.contains("extra") == true)
+        try FileManager.default.removeItem(at: extra)
+        #expect(SwitchFollowUp.targetRefusal(prefix: world.prefix.path, commit: Self.c) != nil)
+        #expect(SwitchFollowUp.targetRefusal(prefix: world.prefix.path, commit: "../x")?.text.contains("40 hex") == true)
+        #expect(SwitchFollowUp.targetRefusal(prefix: world.prefix.path, commit: Self.b) == nil)
+    }
+
+    /// The review of S8c: on a node whose follow-up checks the host (under systemd, or started detached), its pid before
+    /// the switch must be known before the code is asked. `status` names none while the server's link to its host
+    /// isn't welcomed yet: the host is then asked again (`hostCheck`), and when it still names none the switch is
+    /// refused with nothing switched, never handed over and then left half done ("the pid isn't known").
+    @Test func theHostsPidIsKnownBeforeTheCodeIsAsked() throws {
+        var asked = 0
+        let known = try SwitchFollowUp.hostBefore(pid: 42, build: Self.a, hostCheck: { asked += 1; return .failure(StartRefusal("no")) }).get()
+        #expect(known == SwitchFollowUp.Host(pid: 42, build: Self.a) && asked == 0)
+        let askedAgain = try SwitchFollowUp.hostBefore(pid: nil, build: nil, hostCheck: { asked += 1; return .success(SwitchFollowUp.Host(pid: 43, build: Self.a)) }).get()
+        #expect(askedAgain == SwitchFollowUp.Host(pid: 43, build: Self.a) && asked == 1)
+        guard case .failure(let refused) = SwitchFollowUp.hostBefore(pid: nil, build: Self.a, hostCheck: { .failure(StartRefusal("the server's status names no host pid yet", exitCode: 1)) }) else {
+            Issue.record("a switch went with no host pid"); return
+        }
+        #expect(refused.text.contains("nothing was switched") && refused.text.contains("names no host pid yet"), "\(refused)")
+        #expect(refused.exitCode == 1)
+    }
+
+    /// The review of S8c: `build.switch`'s reply lost (the connection closed, or no answer in time) may come after the
+    /// host handed over. The host as a fresh connection sees it decides: its pid unchanged and on the target is handed
+    /// over, and the follow-up runs; anything else, or no answer, says the host may have switched and how to finish.
+    @Test func aLostReplyIsFollowedUpOnlyWhenTheHostRunsTheTarget() throws {
+        let lost = "the node's server closed the connection"
+        let host = try SwitchFollowUp.afterLostReply(lost, commit: Self.b, hostPid: 42, hostCheck: { .success(SwitchFollowUp.Host(pid: 42, build: Self.b)) }).get()
+        #expect(host == SwitchFollowUp.Host(pid: 42, build: Self.b))
+        for seen in [Result<SwitchFollowUp.Host, StartRefusal>.success(SwitchFollowUp.Host(pid: 42, build: Self.a)),
+                     .success(SwitchFollowUp.Host(pid: 43, build: Self.b)), .success(SwitchFollowUp.Host(pid: 42, build: nil)),
+                     .failure(StartRefusal("no server answered", exitCode: 1))] {
+            guard case .failure(let refused) = SwitchFollowUp.afterLostReply(lost, commit: Self.b, hostPid: 42, hostCheck: { seen }) else {
+                Issue.record("followed up with \(seen)"); continue
+            }
+            #expect(refused.text.contains(lost) && refused.text.contains("the host may have switched") && refused.text.contains("`vs status`")
+                    && refused.text.contains("`vs switch \(Self.b)` again finishes this"), "\(refused)")
+            #expect(refused.exitCode == 1)
+        }
+    }
+
+    /// The review of S8c: a detached host's start line (ST-D24) is in its log (`NodeStarter.hostLog`), not the journal:
+    /// the newest line of the host's pid is taken, as what follows `vibeswitcher-host: started `.
+    @Test func aDetachedHostsStartLineIsReadFromItsLog() {
+        let log = [HostStartLine.text(pid: 42, commit: Self.a, backtrace: "enable=no"), "other output",
+                   HostStartLine.text(pid: 7, commit: Self.c, backtrace: nil),
+                   HostStartLine.text(pid: 42, commit: Self.b, backtrace: "enable=no"), "vibeswitcher-host: started pid 4 build x", ""].joined(separator: "\n")
+        #expect(NodeJournal.hostLogStart(log, pid: 42) == "pid 42 build \(Self.b) SWIFT_BACKTRACE=enable=no")
+        #expect(NodeJournal.hostLogStart(log, pid: 7) == "pid 7 build \(Self.c) SWIFT_BACKTRACE=unset")
+        #expect(NodeJournal.hostLogStart(log, pid: 4242) == nil && NodeJournal.hostLogStart("", pid: 42) == nil)
+    }
+
+    /// The review of S8a: the follow-up writes the unit as `start` does (ST-D3, ST-D4): the account's home and swiftly's
+    /// folder from where `start` takes them, the node folder only through `NodeFolders.toolFolders`, never a unit's
+    /// edited HOME or PATH written back for a switch the user then accepts.
     @Test(NodeTraits.linuxOnly) func aUnitsEditedHomeOrPathIsNotCarriedThroughASwitch() throws {
         let world = try World(scratch)
         // A worker's HOME and swift folder, in start's form: the unit for B is start's, from the account's values.
@@ -937,6 +1032,30 @@ struct SwitchTests {
         #expect(host.pid == Int(node.hostPID) && host.build == Self.a, "\(host)")
     }
 
+    /// The review of S8c: a target whose tool server a worker rewrote (its `build-info` left alone) is refused before
+    /// the confirmation and the code, with nothing switched: the host's handover checks only the host's and the
+    /// server's images, so `B/bin/vibeswitcher-mcp` would otherwise be every later lead's tool server.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(5))) func aSwitchToATamperedBuildIsRefusedBeforeTheCode() async throws {
+        let builds = try twoBuilds(paddedServer: false)
+        let mcp = builds.b.appendingPathComponent("bin/vibeswitcher-mcp")
+        chmod(mcp.path, 0o755)
+        let handle = try FileHandle(forWritingTo: mcp)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data([0]))
+        try handle.close()
+        let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
+        defer { node.stop() }
+        let switched = try await node.runOnTerminal(["switch", Self.b])
+        #expect(switched.status == 77, "\(switched.output)\n\(node.said)")
+        #expect(switched.output.contains("isn't an installed build") && switched.output.contains("nothing was switched"), "\(switched.output)")
+        #expect(!switched.output.contains("This switches the node"), "\(switched.output)")
+        let client = try WireClient(node)
+        let accepted = (Self.status(client)?["accepted"]?.array ?? []).compactMap { $0["kind"]?.string }
+        #expect(!accepted.contains("build.switch"), "\(accepted)")
+        let host = Self.host(client)
+        #expect(host.pid == Int(node.hostPID) && host.build == Self.a, "\(host)")
+    }
+
     /// A tool server started from `A/bin/vibeswitcher-mcp` before the switch (S9) still runs `A` after it: the same
     /// process, its image `A`'s, answering; its `BinaryWatch` sees no new build (the switch rewrites no build's files),
     /// so it never switches in place, and the build it reported is `A`.
@@ -1022,7 +1141,9 @@ struct SwitchTests {
     /// ST-D16: a lead started before the switch keeps starting its workers with the old build's tool server: after
     /// `switch B`, its `start_worker` starts a worker whose MCP config names `A`'s tool server, which reports `A`.
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild() async throws {
-        let builds = try twoBuilds(paddedServer: false)
+        // B's server padded, so the server too runs B before the worker starts (the review of S8c): only the lead's own
+        // tool server's path then names A.
+        let builds = try twoBuilds(paddedServer: true)
         let (node, repo) = try await leadReadyNode(builds)
         defer { node.stop() }
         let lead = try await Self.startLead(node, repo)
@@ -1035,7 +1156,7 @@ struct SwitchTests {
         // The switch, with only the lead live.
         let switched = try await node.runOnTerminal(["switch", Self.b])
         try #require(switched.status == 0, "\(switched.output)\n\(node.said)")
-        #expect(Self.host(try WireClient(node)).build == Self.b)
+        try #require(await Self.everythingNames(node, Self.b), "\(node.said)")
 
         try tools.call("start_worker", ["task": "write-the-parser"])
         let worker = try await EngineEndToEndTests.connected(node, label: "Worker: Write the parser", calling: "progress",

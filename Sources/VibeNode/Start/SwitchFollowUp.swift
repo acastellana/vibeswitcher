@@ -153,6 +153,57 @@ public enum SwitchFollowUp {
         return .success(())
     }
 
+    // MARK: Before the code, and a reply lost (the review of S8c, 2026-11-16)
+
+    /// The switch's target checked before the code is asked: a commit whose folder in `prefix` is an installed build
+    /// (`NodeFolders.verifyBuild`: its `bin/` holds exactly the files its `build-info` records, each with the recorded
+    /// hash). The host checks only its own and its server's images against `build-info` at the handover, so a tool
+    /// server or command line a worker rewrote is refused here, with nothing switched. A worker that rewrites
+    /// `build-info` with them passes (the security document's S9, "Doesn't promise"). nil when it is one.
+    public static func targetRefusal(prefix: String, commit: String) -> StartRefusal? {
+        guard NodeUnit.isCommit(commit) else {
+            return StartRefusal("the switch's target \(ConfigSeal.inert(commit, limit: 64)) isn't a commit (40 hex digits): nothing was switched")
+        }
+        if case .failure(let refused) = NodeFolders.verifyBuild(folder: NodeFolders.join(prefix, commit), prefix: prefix) {
+            return StartRefusal("the switch's target isn't an installed build: \(refused.text); nothing was switched")
+        }
+        return nil
+    }
+
+    /// The host before a switch whose follow-up checks it (on a node under systemd or started detached): `pid` and
+    /// `build` as `status` named them, or, when it named no pid (the server's link to its host isn't welcomed yet, as
+    /// after a server restart), what `hostCheck` sees once it names one. Without it the follow-up would refuse after
+    /// the handover, leaving the host on the target and the unit and `current` on the old build, so the switch is
+    /// refused before the code instead, with nothing switched.
+    public static func hostBefore(pid: pid_t?, build: String?, hostCheck: () -> Result<Host, StartRefusal>) -> Result<Host, StartRefusal> {
+        if let pid { return .success(Host(pid: pid, build: build)) }
+        switch hostCheck() {
+        case .success(let host): return .success(host)
+        case .failure(let refused):
+            return .failure(StartRefusal("the host's pid isn't known (\(refused.text)), so the switch's follow-up couldn't check the host: nothing was switched; try again once `vs status` names the host's pid",
+                                         exitCode: refused.exitCode))
+        }
+    }
+
+    /// `build.switch`'s reply lost (`lost`: the connection closed, or no answer in time), which may come after the
+    /// host handed over: the server a switch replaces may end before it replies (`ServerChild.replaceWhenIdle`). The
+    /// host as `hostCheck` sees it decides: its pid still `hostPid` (when known) and on `commit` is handed over, and
+    /// the follow-up runs. Anything else, or no answer, is a refusal saying the host may have switched, and how to
+    /// finish (`vs switch <commit>` again: the server then answers that it runs already, and the follow-up runs).
+    public static func afterLostReply(_ lost: String, commit: String, hostPid: pid_t?,
+                                      hostCheck: () -> Result<Host, StartRefusal>) -> Result<Host, StartRefusal> {
+        let mayHave = "\(ConfigSeal.inert(lost, limit: 400)); the host may have switched: `vs status` shows its build; \(again(commit))"
+        switch hostCheck() {
+        case .failure(let refused):
+            return .failure(StartRefusal("\(mayHave) (the host couldn't be checked: \(refused.text))", exitCode: 1))
+        case .success(let host):
+            guard host.build == commit, hostPid.map({ $0 == host.pid }) ?? true else {
+                return .failure(StartRefusal("\(mayHave) (the host now: pid \(host.pid), build \(host.build.map { ConfigSeal.inert($0, limit: 64) } ?? "none named"))", exitCode: 1))
+            }
+            return .success(host)
+        }
+    }
+
     /// Points `<prefix>/current` at `commit` (a relative link): made as a temporary beside it, then renamed over it, so
     /// `current` always names one build. nil, or why not.
     /// `unit`: whether a unit was rewritten and reloaded first (`apply`), which the refusal says.

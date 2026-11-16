@@ -75,29 +75,52 @@ public enum NodeTexts {
     /// target's build and keeps every session, so it names no count; a running team keeps its build until its lead
     /// restarts (ST-D16); the seal holds every team until `vs config accept`, since the builds folder and the unit
     /// change (ST-D23). The code is still typed (EN-D5), where the app asked nothing.
-    public static func `switch`(from: String, to: String) -> String {
+    public static func `switch`(from: String, to: String, rewrites: SwitchRewrites) -> String {
         (["This switches the node from the build of commit \(ConfigSeal.inert(from, limit: 64)) to the build of commit \(ConfigSeal.inert(to, limit: 64)):"]
-            + switchConsequences(to: to)).joined(separator: "\n")
+            + switchConsequences(to: to, rewrites: rewrites)).joined(separator: "\n")
     }
 
     /// `rollback`'s (S8a, ST-D14): the switch's, going back to `to`, the commit installed before the running build,
     /// with the `installs` line it was read from (`line`: the file is any worker's to edit, so the user reads it here).
-    public static func rollback(from: String, to: String, line: String) -> String {
+    public static func rollback(from: String, to: String, line: String, rewrites: SwitchRewrites) -> String {
         ([
             "This rolls the node back from the build of commit \(ConfigSeal.inert(from, limit: 64)) to the build of commit \(ConfigSeal.inert(to, limit: 64)), the one installed before it:",
             "  its line in the installs record: \(ConfigSeal.inert(line, limit: .max)) (any worker can write that record: check the commit is one you installed)",
-        ] + switchConsequences(to: to)).joined(separator: "\n")
+        ] + switchConsequences(to: to, rewrites: rewrites)).joined(separator: "\n")
+    }
+
+    /// What the command line's follow-up writes after a switch, by the node's mode (the review of S8c, 2026-11-16), so
+    /// the confirmation the code is typed against says what happens: under systemd the unit's `ExecStart` and
+    /// `current` (`SwitchFollowUp.apply`); on a node started detached only `current` (`applyDetached`: no unit);
+    /// on a scratch node or the Mac nothing, with why.
+    public enum SwitchRewrites: Equatable, Sendable {
+        case unitAndCurrent
+        case currentOnly
+        case nothing(String)
     }
 
     /// What a switch to `to` does and leaves, for `switch` and `rollback`.
-    static func switchConsequences(to: String) -> [String] {
+    static func switchConsequences(to: String, rewrites: SwitchRewrites) -> [String] {
         let commit = ConfigSeal.inert(to, limit: 64)
+        let written: [String]
+        switch rewrites {
+        case .unitAndCurrent:
+            written = [
+                "  your unit's ExecStart is rewritten to \(commit) and `current` names it, so the next start runs it",
+                "  the seal holds every team until `vs config accept`, since the builds folder and the unit change (`vs config held` shows them)",
+            ]
+        case .currentOnly:
+            written = [
+                "  `current` is moved to \(commit), so the next `vs start` runs it (no systemd: there is no unit)",
+                "  the seal holds every team until `vs config accept`, since the builds folder changes (`vs config held` shows it)",
+            ]
+        case .nothing(let why):
+            written = ["  no unit is rewritten and `current` isn't moved (\(ConfigSeal.inert(why, limit: 200)))"]
+        }
         return [
             "  the host hands over to \(commit)'s host, which keeps every session",
             "  a running team keeps its build until its lead restarts: a lead started before the switch keeps starting its workers with the old build's tool server",
-            "  your unit's ExecStart is rewritten to \(commit) and `current` names it, so the next start runs it",
-            "  the seal holds every team until `vs config accept`, since the builds folder and the unit change (`vs config held` shows them)",
-        ]
+        ] + written
     }
 
     /// What `status` says of a node started detached (ST-D6).

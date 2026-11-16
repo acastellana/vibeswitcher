@@ -735,7 +735,9 @@ plan's S6, 2026-11-16): `HooksCommandTests.aSessionsProcessCannotInstallHooks`,
 `HooksCommandTests.aNodeRootProgramThatDiffersFromBuildInfoIsNotInstalled`,
 `HooksCommandTests.aChangeInTheBuildsFolderNotAcceptedRefusesTheInstall`; from its review,
 `ConfigHoldStoreTests.aLookSealsTheAppsOwnWritesTheHostDidntTake` (a seal the host didn't take is asked again at the next
-look).
+look). Step 8's `switch` and `rollback` from the command line behind the typed code (the start plan's S8c, 2026-11-16):
+`SwitchTests.aSwitchWithNoTerminalIsRefused`, `SwitchTests.aSwitchHandsOverToTheInstalledBuildAndEverythingNamesIt`,
+`SwitchTests.theSwitchsReplyReachesTheCommandLineBeforeTheServerIsReplaced`.
 
 **Tests to write:** none left: Step 8's are under Held by.
 
@@ -1417,6 +1419,16 @@ what it needs.
   by a host restart. A detached node's record and log (`~/.vibeswitcher/v2/node.pid`, `host.log`) aren't on the list:
   each detached start rewrites them, and the record's readers check the process it names instead (S3; 2026-11-16, the
   review of the start plan's S3).
+- What a switch or rollback goes to (the review of the start plan's S8c, 2026-11-16). `build.switch` isn't refused
+  while the seal holds a change under `~/.vibeswitcher/v2/builds` that nobody accepted (`hooks install` is), so a
+  switch can make a build whose folder a worker changed the user's host: the seal holds every team after it, not the
+  switch. The command line checks the target's `bin/` against its `build-info` before the code is asked, and the host
+  checks its own and its server's images at the handover, so only an inconsistent change is refused: a worker that
+  rewrites `build-info` with the binaries passes both. The rollback's target comes from `<prefix>/installs`, which
+  any worker can write (a self-consistent folder planted with a line for it is offered); the confirmation shows the
+  line and asks the user to check it. Whether a switch waits for `vs config accept` is the lead's call (it changes the
+  order S9 of the start plan runs). A detached host's start line, which `switch` shows, is read from its log
+  (`host.log`), which any worker can write.
 - Signed releases (stage 8) are what make "what is installed is what was released" a lock.
 
 **Before the bootstrap:** yes (sealed copies, the static build, the unit as above).
@@ -1474,6 +1486,11 @@ unit's wants, requires or upholds folder, or a directive start didn't write, ref
 `SwitchTests.aUnitsEditedHomeOrPathIsNotCarriedThroughASwitch` (the start plan's S8a: the switch's rewrite keeps the
 commit-folder `ExecStart`, checks the target's `bin` against its `build-info` and the host first, and writes HOME and
 PATH as `start` does, never a unit's edited ones back; 2026-11-16, with the review of S8a);
+`SwitchTests.aDetachedNodesFollowUpMovesOnlyCurrent` (the start plan's S8c: a node started detached has its follow-up's
+checks and moves only `current`), `SwitchTests.aSwitchsTargetIsCheckedBeforeTheCodeIsAsked`,
+`SwitchTests.aSwitchToATamperedBuildIsRefusedBeforeTheCode` (the review of S8c: the target's `bin` is checked against
+its `build-info` before the code is asked, so a rewritten tool server or command line is refused with nothing
+switched; 2026-11-16);
 `SwitchTests.aSwitchSaysItKeepsSessions` (the start plan's S8a: `switch`'s confirmation says a running team keeps its
 build until its lead restarts, ST-D16; 2026-11-16, with the review of S8b);
 `InstallTests.aRecordNamesItsToolchainAndResolvedFile`, `InstallTests.aRecordHashesEveryProgramAndRefusesALink`,
@@ -1515,12 +1532,14 @@ entry changed in place, removed and back changed, or a read cut at its cap, whil
 no change, except in the lead's accepted hooks, where only GitGuard's baseline of a repository the seal hasn't seen
 (folders, run copies, exact shims, its record) comes so and a hook added to a copy is held; the hooks record's `told`
 flag, read as GitGuard reads the record, is no change; a scratch home's seal reads nothing outside it; a worker's start
-doesn't hold its team; 2026-11-16, with the review of S7).
+doesn't hold its team; 2026-11-16, with the review of S7);
+`SwitchTests.aRunningToolServerKeepsItsBuildAcrossASwitch`, `SwitchTests.aToolServerStartedAfterASwitchIsTheNewBuilds`,
+`SwitchTests.aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild` (the start plan's S8c: a running tool server keeps its
+build, one started after the switch is the new build's, and a worker a pre-switch lead starts keeps the old build's
+while the host and the server run the new one, ST-D16; 2026-11-16, with the review of S8c).
 
 **Tests to write:** Step 8: `InstallTests.anInstallBuildsWithTheRootToolchain` (written, gated on M3's toolchain: run
-once after M3), `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds`,
-`aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild` (ST-D16's companion case, S8c). After
-the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts`.
+once after M3). After the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts`.
 
 ## S10. The sessions' environment
 

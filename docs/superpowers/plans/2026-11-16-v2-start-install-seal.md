@@ -2135,8 +2135,35 @@ inventory. The Mac runs `theMacsListIsEmpty`.
   "switching to the build at" in the tool server's log. Each tool server's commit is its log's `source: build` line
   (`ServerBuild.running`'s label). The lead's and the worker's tool servers are named by their session's command and
   by their logs.
-- The confirmation still says the unit's `ExecStart` is rewritten on a node started detached, which has none (S8a's
-  text).
+- The confirmation said the unit's `ExecStart` is rewritten on a node started detached, which has none (S8a's text):
+  the review of S8c (below) makes it say what the node's mode rewrites.
+
+*2026-11-16, the review of S8c:*
+- The confirmation says what this node's follow-up writes: `NodeTexts.switch(from:to:rewrites:)` and
+  `rollback(from:to:line:rewrites:)` take `NodeTexts.SwitchRewrites` (`.unitAndCurrent` under systemd, `.currentOnly`
+  on a node started detached, `.nothing(why)` on a scratch node or the Mac); `aConfirmationSaysWhatTheNodesModeRewrites`.
+- The target is checked as an installed build before the code is asked (`SwitchFollowUp.targetRefusal`, the follow-up's
+  `NodeFolders.verifyBuild`, in the prefix, or a scratch node's server's `builds.installRoot`): the host checks only its
+  own and its server's images at the handover, so a rewritten tool server or command line is refused with nothing
+  switched (`aSwitchsTargetIsCheckedBeforeTheCodeIsAsked`, `aSwitchToATamperedBuildIsRefusedBeforeTheCode`). A worker
+  that rewrites `build-info` too still passes (the security document's S9, Doesn't promise).
+- Where the follow-up checks the host, a pid `status` doesn't name yet (the link not welcomed) is asked again through
+  `hostCheck` before the code (`SwitchFollowUp.hostBefore`), or the switch is refused with nothing switched
+  (`theHostsPidIsKnownBeforeTheCodeIsAsked`).
+- A `build.switch` reply lost (closed, or not answered in time) is followed by `hostCheck`
+  (`SwitchFollowUp.afterLostReply`): the host on the target with its pid unchanged is handed over, journaled, and
+  followed up; otherwise the refusal says the host may have switched, `vs status` and `vs switch <target>` again
+  (`aLostReplyIsFollowedUpOnlyWhenTheHostRunsTheTarget`; the decision, in process: the command line's wiring isn't
+  reached by a test, since a scratch node's server doesn't drop the reply).
+- On a node started detached the start line is read from the host's log (`NodeStarter.hostLog`), the newest line of
+  the host's pid (`NodeJournal.hostLogStart`, `aDetachedHostsStartLineIsReadFromItsLog`), said to be any worker's to
+  write; the Mac says its host writes none.
+- `aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild` pads `B`'s server and waits until the host and the server both name
+  `B` before `start_worker`, so only the lead's own tool server names `A`.
+- Not changed, the lead's call: `build.switch` isn't gated on the seal's unaccepted change under the builds folder
+  (`hooks install` is), and the rollback's target comes from `installs`, which any worker can write. Gating it would
+  reorder S9 (install, `vs config accept`, then switch); recorded in the security document's S9, Doesn't promise.
+- The security document's S3 and S9 `Held by` lines name S8c's cases.
 
 - [x] **Step 1: Failing tests:**
   - `aSwitchHandsOverToTheInstalledBuildAndEverythingNamesIt`:
