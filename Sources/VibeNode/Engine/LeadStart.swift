@@ -290,6 +290,7 @@ extension LeadEngine {
             let (taken, replacedLead, said) = (waiting, replaced, notes)
             self.queue.async {
                 for message in taken { self.leads.hold(.init(text: message.text, from: message.from), root: root) }
+                self.withdrewFromInbox(taken.map(\.id))
                 switch prepared {
                 case .failure(let error):
                     self.finish(root: root, .refused("\(error)"))

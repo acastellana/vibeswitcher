@@ -297,9 +297,10 @@ struct DeliveryTests {
         #expect(retired == nil)
     }
 
-    /// A `.user` message withdrawn from the lead's inbox (a lead start's handover, `LeadHandover.takeWaiting`, holds it
-    /// for the new lead under a new id) is retired and no longer looked for: the server doesn't read that inbox at every
-    /// look for the rest of its life.
+    /// A `.user` message taken out of the lead's inbox another way than the lead's hook (a process of the user's
+    /// withdrew it; a lead start's handover retires by name, see LeadStartTests) is retired and no longer looked for once
+    /// it was out of the readable inbox at two looks: the server doesn't read that inbox at every look for the rest of
+    /// its life.
     @Test func aUserMessageWithdrawnFromTheInboxIsNoLongerLookedFor() async throws {
         let world = try await DeliveryWorld.make(scratch)
         defer { world.stop() }
@@ -308,6 +309,7 @@ struct DeliveryTests {
         #expect(await world.deliver(words, from: .user, action: UUID().uuidString.lowercased()) == true)
         let id = try #require(world.pending(lead).first { $0.text == words }?.id, "\(world.pending(lead))")
         #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.postedUser[id] } != nil })
+        try world.post("a report for the lead", from: .system("worker a"), to: lead, age: 0)
         #expect(SteerInbox.withdraw(id: id, tty: lead.session.tty, root: world.host.root)?.text == words)
         #expect(await eventually(timeout: 120) {
             world.look()
@@ -315,6 +317,47 @@ struct DeliveryTests {
         }, "\(world.queue.sync { world.engine.postedUser })")
         let retired = world.host.book.v2 { $0?.retired[id] }
         #expect(retired != nil)
+    }
+
+    /// The sweep's review of the above: the inbox isn't read under its lock, and each rewriter of it truncates it before
+    /// writing the rest back. A look that reads it empty (between the two), unreadable, or cut short (the user's line not
+    /// written back yet) retires nothing: the user's message still waits, its seal unretired, and the lead's hook hands it
+    /// over as the user's.
+    @Test func aUserMessageIsntRetiredForOneLookAtARewrittenInbox() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        let words = "Name it the parser."
+        #expect(await world.deliver(words, from: .user, action: UUID().uuidString.lowercased()) == true)
+        let id = try #require(world.pending(lead).first { $0.text == words }?.id, "\(world.pending(lead))")
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.postedUser[id] } != nil })
+        try world.post("a report for the lead", from: .system("worker a"), to: lead, age: 0)
+        let inbox = world.host.root.appendingPathComponent("steer/\(lead.session.tty).jsonl")
+        let whole = try Data(contentsOf: inbox)
+        let report = try #require(whole.split(separator: 0x0A).first { !$0.isEmpty && (try? JSONDecoder().decode(SteerMessage.self, from: Data($0)))?.id != id })
+        func oneLook() async {
+            world.look()
+            await world.drained()
+            await offPool { world.engine.work.sync(flags: .barrier) {} }
+            await world.drained()
+        }
+        // Empty, unreadable, cut short: one look at each, the whole inbox written back between them.
+        for state in ["empty", "unreadable", "cut short", "cut short again"] {
+            switch state {
+            case "empty": try Data().write(to: inbox)
+            case "unreadable": try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: inbox.path)
+            default: try (Data(report) + Data("\n".utf8)).write(to: inbox)
+            }
+            await oneLook()
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: inbox.path)
+            try whole.write(to: inbox)
+            await oneLook()
+            #expect(world.queue.sync { world.engine.postedUser[id] } != nil, "\(state)")
+            let retired = world.host.book.v2 { $0?.retired[id] }
+            #expect(retired == nil, "\(state)")
+        }
+        let taken = SteerInbox.take(tty: lead.session.tty, agentPid: try #require(lead.agentPid), root: world.host.root)
+        #expect(taken.contains { $0.id == id && $0.from == .user }, "\(taken)")
     }
 
     /// Two messages sent back to back while the lead becomes able to take them between the two: the second waits

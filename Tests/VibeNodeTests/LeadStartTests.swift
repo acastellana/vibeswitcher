@@ -259,6 +259,38 @@ struct LeadStartTests {
         #expect(value["replaced"]?.array == [.string(NodeIds.session(host: old))])
     }
 
+    /// The sweep's review: a `.user` message the server posted to the replaced lead, withdrawn by the handover (held for
+    /// the new lead under a new id), is retired by name and no longer looked for, though the old inbox it left reads
+    /// empty (which says nothing at a look: a rewriter of the inbox leaves it empty for a moment).
+    @Test func aUserMessageTheHandoverTookIsRetiredByName() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let old = try started(await world.start())
+        let oldSession = try #require(world.leads().first { $0.id == old })
+        let harness = NodeHarness(found: oldSession, on: world.host, fake: world.fake)
+        try await harness.waitFor { harness.agentPid != nil }
+        let pid = try #require(harness.agentPid)
+        try BoardStore(root: world.repo).update { board in
+            board.leadPid = pid
+            board.leadTTY = oldSession.tty
+            board.leadSession = old.uuidString
+        }
+        let words = "Name it the reader."
+        let message = SteerMessage(text: words, from: .user, agentPid: pid)
+        try SteerInbox.post(message, tty: oldSession.tty, root: world.host.root)
+        world.queue.sync { world.engine.postedAsUser(message.id, tty: oldSession.tty, text: words, agentPid: pid) }
+        let grant = try #require(world.host.vault.current(.lead, root: world.repo, task: nil)?.id)
+        try world.host.vault.revoke(grant, root: world.repo)
+
+        _ = try started(await world.start(replace: true))
+        #expect(SteerInbox.pending(tty: oldSession.tty, root: world.host.root).isEmpty)
+        #expect(world.held().map(\.text) == [words], "\(world.held())")
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.postedUser[message.id] } == nil },
+                "\(world.queue.sync { world.engine.postedUser })")
+        let retired = world.host.book.v2 { $0?.retired[message.id] }
+        #expect(retired != nil)
+    }
+
     /// The security follow-ups' item 11: the board is the repository's, which any process of the user's can write. A
     /// board naming another project's session (its id, its terminal and its agent) replaces nothing when a lead starts:
     /// what waits in that session's inbox stays there, none of it is held for the new lead, and its conversation isn't

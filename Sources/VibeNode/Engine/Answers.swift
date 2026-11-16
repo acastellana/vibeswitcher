@@ -24,6 +24,10 @@ struct PostedUser: Equatable, Sendable {
     func isPosted(_ line: SteerMessage) -> Bool {
         line.from == .user && line.agentPid == agentPid && LeadVaultV2.digest(line.text) == digest
     }
+
+    /// How many looks a posted id is out of a readable inbox (and out of its delivered record) before it's taken as gone
+    /// another way and retired (`LeadEngine.retireTaken`).
+    static let goneLooks = 2
 }
 
 /// Questions, answers, cards and holds (the engine plan's E6; the app's `LeadController.answer`, `hold`, `runTimers` and
@@ -481,36 +485,47 @@ extension LeadEngine {
     /// that waits while the lead's tool call runs long (a merge's tests) is still the user's when the lead takes it; the vault renews none a check
     /// has passed nor any past `LeadVaultV2.renewedLifeCap` from its first seal, and the server none it no longer sees
     /// waiting as it posted it (`PostedUser.isPosted`: the inbox is a file any process of the user's can rewrite, and a
-    /// line rewritten under a posted id keeps no seal alive). One neither waiting nor in the delivered record left the
-    /// inbox another way (a lead start's handover withdrew it, `LeadHandover.takeWaiting`, to hold it for the new lead
-    /// under a new id; its inbox was removed): retired too, and no longer looked for, so a lead replaced with the user's
-    /// messages waiting doesn't keep its inbox read at every look for the rest of the server's life. On `queue`, at
-    /// each `look`.
+    /// line rewritten under a posted id keeps no seal alive). One a lead start's handover withdrew (`withdrawnUser`: it
+    /// holds it for the new lead under a new id) is retired by name. One otherwise neither waiting nor in the delivered
+    /// record left the inbox another way: retired too, and no longer looked for, but only once it was out of the inbox
+    /// at `PostedUser.goneLooks` looks that read lines from it (`goneUser`). The inbox isn't read under its lock, and each
+    /// rewriter of it (a hook's delivery, a withdrawal, a wake) truncates it before writing the rest back, so one read can
+    /// see it empty or cut short; an empty or unreadable inbox says nothing either way. On `queue`, at each `look`.
     func retireTaken() {
         guard !postedUser.isEmpty, !retiring else { return }
         retiring = true
-        let (posted, inbox, client, note) = (postedUser, root, link.vaultV2, self.note)
-        reads.async({ _ -> (taken: [String], waiting: [String], gone: [String]) in
-            var taken: [String] = [], waiting: [String] = [], gone: [String] = []
+        let (posted, withdrawn, inbox, client, note) = (postedUser, withdrawnUser, root, link.vaultV2, self.note)
+        reads.async({ _ -> (taken: [String], waiting: [String], gone: [String], seen: [String]) in
+            var taken: [String] = [], waiting: [String] = [], gone: [String] = [], seen: [String] = []
             for (tty, entries) in Dictionary(grouping: posted, by: \.value.tty) {
                 let delivered = SteerInbox.delivered(tty: tty, root: inbox)
-                let pending = Dictionary(SteerInbox.pending(tty: tty, root: inbox).map { ($0.id, $0) }) { first, _ in first }
+                let lines = SteerInbox.pending(tty: tty, root: inbox)
+                let pending = Dictionary(lines.map { ($0.id, $0) }) { first, _ in first }
                 // Taken: in the delivered record and out of the inbox, as the lead's hook leaves it (the record alone is any
                 // process's to write: an id put there while the line waits doesn't retire its seal).
                 for (id, was) in entries.sorted(by: { $0.key < $1.key }) {
-                    if let line = pending[id] {
+                    if withdrawn.contains(id) {
+                        taken.append(id)
+                    } else if let line = pending[id] {
+                        seen.append(id)
                         if was.isPosted(line) { waiting.append(id) }
                     } else if delivered.contains(id) {
                         taken.append(id)
-                    } else {
+                    } else if !lines.isEmpty {
                         gone.append(id)
                     }
                 }
             }
-            return (taken, waiting, gone)
+            return (taken, waiting, gone, seen)
         }) { [weak self] found in
             guard let self else { return }
-            let taken = found.taken + found.gone
+            found.seen.forEach { self.goneUser[$0] = nil }
+            var taken = found.taken
+            for id in found.gone {
+                let looks = (self.goneUser[id] ?? 0) + 1
+                self.goneUser[id] = looks
+                if looks >= PostedUser.goneLooks { taken.append(id) }
+            }
             guard !taken.isEmpty || !found.waiting.isEmpty else {
                 self.retiring = false
                 return
@@ -519,14 +534,30 @@ extension LeadEngine {
                 if (try? client.renewUserSeals(found.waiting)) == nil {
                     note("lead: \(found.waiting.count) waiting message(s) of the user's not renewed in the vault: tried again at the next look")
                 }
-                let retired = (try? client.retireUserSeals(taken)) != nil
+                let retired = taken.isEmpty || (try? client.retireUserSeals(taken)) != nil
                 if !retired { note("lead: \(taken.count) taken or withdrawn message(s) of the user's not retired in the vault yet: tried again") }
                 self.queue.async {
-                    if retired { taken.forEach { self.postedUser[$0] = nil } }
+                    if retired {
+                        for id in taken {
+                            self.postedUser[id] = nil
+                            self.withdrawnUser.remove(id)
+                            self.goneUser[id] = nil
+                        }
+                    }
                     self.retiring = false
                 }
             }
         }
+    }
+
+    /// A lead start's handover took `ids` out of the replaced lead's inbox (`LeadHandover.takeWaiting`), to hold them for
+    /// the new lead under new ids: those of the user's this server posted are retired by name at once (`retireTaken`). On
+    /// `queue`.
+    func withdrewFromInbox(_ ids: [String]) {
+        let posted = ids.filter { postedUser[$0] != nil }
+        guard !posted.isEmpty else { return }
+        withdrawnUser.formUnion(posted)
+        retireTaken()
     }
 
     // MARK: Held config

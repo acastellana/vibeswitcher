@@ -139,6 +139,13 @@ public final class LeadEngine: @unchecked Sendable {
     /// (`retireUserSeals`) once its delivered record shows them, renewed while that same line waits (`retireTaken`).
     var postedUser: [String: PostedUser] = [:]
     var retiring = false
+    /// Of `postedUser`, the ids a lead start's handover withdrew (`LeadHandover.takeWaiting`): retired by name at the
+    /// next look, whatever the inbox shows then.
+    var withdrawnUser: Set<String> = []
+    /// Of `postedUser`, how many looks each id was out of a readable inbox and out of the delivered record
+    /// (`retireTaken`): retired once that's `PostedUser.goneLooks` looks, so one read between a rewriter's truncate and
+    /// write retires nothing.
+    var goneUser: [String: Int] = [:]
     /// The user's messages being recorded in the vault before they're delivered (`tellAsUser`), by root: what's sent to
     /// that lead meanwhile waits behind them.
     var recordingUser: [String: Int] = [:]
