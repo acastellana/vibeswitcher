@@ -259,8 +259,9 @@ extension Platform.Processes {
 
 extension Platform.Processes {
     /// The process holding a lock on the file at `path` (a `flock` or a POSIX lock, as `/proc/locks` lists it), found
-    /// by the file's device and inode, never by its name: a file renamed over `path` is another file, and its holder
-    /// another process. Linux: the first holder `/proc/locks` names with a pid (an open file description's lock, which
+    /// by the file's device and inode as the kernel holds them (its file system's device, which `stat`'s isn't on btrfs
+    /// or an overlay), never by its name: a file renamed over `path` is another file, and its holder another process;
+    /// a link at `path` is not followed. Linux: the first holder `/proc/locks` names with a pid (an open file description's lock, which
     /// names none, and a waiter, are passed over); nil when nothing holds one, the file isn't there, or the list can't
     /// be read. The Mac: nil (it has no such list). The engine plan's EN-D8: the command line's check of a scratch
     /// node, whose server must be the child of the host holding `<root>/scratch-host.lock`.

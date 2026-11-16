@@ -505,23 +505,37 @@ extension Platform.Processes.System {
 #if os(Linux)
 // `/proc/locks` and `/proc/<pid>/cgroup`.
 extension Platform.Processes.System {
-    /// The file's device (split as the kernel's `MAJOR`/`MINOR` do: 12 bits and 20 bits, in glibc's encoding of
-    /// `dev_t`) and inode, then `/proc/locks` read for them (`lockListReads`).
+    /// The file's device and inode as the kernel holds them, as `/proc/locks` prints them (the device of the file system
+    /// the file is on, its superblock's, and the inode's own number), then `/proc/locks` read for them
+    /// (`lockListFirstReads`). Both come from one descriptor opened on the path, no link followed (`vibe_path_file`: a
+    /// link there names no lock): `stat`'s `st_dev` isn't the superblock's on btrfs (a subvolume's own device) or on an
+    /// overlay over several file systems (a layer's), so a holder there was never found. The device is split as the
+    /// kernel's `MAJOR`/`MINOR` do (12 bits and 20 bits, in glibc's encoding of `dev_t`).
     static func lockHolder(path: String) -> pid_t? {
-        var info = stat()
-        guard stat(path, &info) == 0 else { return nil }
-        let device = UInt64(info.st_dev)
-        let major = ((device >> 8) & 0xfff) | ((device >> 32) & ~UInt64(0xfff))
-        let minor = (device & 0xff) | ((device >> 12) & ~UInt64(0xff))
+        guard let file = kernelFile(path: path) else { return nil }
+        let major = ((file.device >> 8) & 0xfff) | ((file.device >> 32) & ~UInt64(0xfff))
+        let minor = (file.device & 0xff) | ((file.device >> 12) & ~UInt64(0xff))
         for firstRead in lockListFirstReads {
             guard case .success(let read) = lockList(firstRead: firstRead) else { return nil }
             if let pid = Platform.Processes.lockHolder(locks: String(decoding: read.bytes, as: UTF8.self), major: major, minor: minor,
-                                                       inode: UInt64(info.st_ino)) {
+                                                       inode: file.inode) {
                 return pid
             }
             if read.whole { return nil }
         }
         return nil
+    }
+
+    /// What `path` names (no link followed) as the kernel holds it: its file system's device (in `stat`'s encoding) and
+    /// its inode number, and `stat`'s device beside them. Nil when the path names nothing or /proc can't say.
+    static func kernelFile(path: String) -> (device: UInt64, inode: UInt64, statDevice: UInt64)? {
+        var statDevice: UInt64 = 0
+        var statInode: UInt64 = 0
+        var mode: UInt32 = 0
+        var device: UInt64 = 0
+        var inode: UInt64 = 0
+        guard vibe_path_file(path, &statDevice, &statInode, &mode, &device, &inode) == 0 else { return nil }
+        return (device, inode, statDevice)
     }
 
     /// `/proc/locks` is a seq_file: one read(2) gives at most a page of its lines (whatever the buffer asks), made

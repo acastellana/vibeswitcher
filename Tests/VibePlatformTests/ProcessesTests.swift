@@ -1072,6 +1072,52 @@ extension ProcessesTests {
         #expect(missed.isEmpty, "\(missed.count) of \(20 * held.count) looks missed the holder: \(missed.prefix(5))")
     }
 
+    /// `/proc/locks` prints the device of the file system a file is on (its superblock's), which `stat`'s `st_dev`
+    /// isn't on btrfs (a subvolume's own device) or on an overlay over several file systems (a layer's): a holder there
+    /// is found all the same (none was). Run where such a mount is found (WSL's `/mnt/wslg/versions.txt`, an overlay; Fedora's
+    /// btrfs `/home`): its mount point is taken with a shared lock for the look, and let go.
+    @Test(.enabled(if: ProcessesTests.mountWithAnotherStatDevice() != nil, "no mount here whose stat device is another"))
+    func theLockHolderIsFoundWhereStatsDeviceIsAnother() throws {
+        let path = try #require(Self.mountWithAnotherStatDevice())
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        try #require(fd >= 0)
+        defer { close(fd) }
+        try #require(flock(fd, LOCK_SH | LOCK_NB) == 0)
+        defer { _ = flock(fd, LOCK_UN) }
+        // A holder, found by the file system's device: another run beside this one may hold its own shared lock on
+        // the same mount point and be named first, so any holder is the answer (with `stat`'s device, none ever is).
+        #expect(Platform.Processes.lockHolder(path: path) != nil, "\(path)")
+    }
+
+    /// A mount point, a folder or a file, this process can open (no link followed) whose `st_dev` isn't the device `/proc/self/mountinfo`
+    /// gives its mount, the mount being the one the path reaches (fdinfo's `mnt_id`, not one mounted over). Nil on the
+    /// Mac (no mountinfo) and where there is none.
+    static func mountWithAnotherStatDevice() -> String? {
+        guard let mounts = try? String(contentsOfFile: "/proc/self/mountinfo", encoding: .utf8) else { return nil }
+        for line in mounts.split(separator: "\n") {
+            let fields = line.split(separator: " ").map(String.init)
+            guard fields.count > 4, let id = Int(fields[0]) else { continue }
+            let numbers = fields[2].split(separator: ":").compactMap { UInt64($0) }
+            guard numbers.count == 2 else { continue }
+            let path = fields[4].replacingOccurrences(of: "\\040", with: " ")
+            var named = stat()
+            guard lstat(path, &named) == 0, (named.st_mode & S_IFMT) == S_IFDIR || (named.st_mode & S_IFMT) == S_IFREG else { continue }
+            let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK | O_NOCTTY)
+            guard fd >= 0 else { continue }
+            defer { close(fd) }
+            var info = stat()
+            guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR || (info.st_mode & S_IFMT) == S_IFREG else { continue }
+            let device = UInt64(info.st_dev)
+            let major = ((device >> 8) & 0xfff) | ((device >> 32) & ~UInt64(0xfff))
+            let minor = (device & 0xff) | ((device >> 12) & ~UInt64(0xff))
+            guard major != numbers[0] || minor != numbers[1],
+                  let fdinfo = try? String(contentsOfFile: "/proc/self/fdinfo/\(fd)", encoding: .utf8),
+                  fdinfo.split(separator: "\n").contains("mnt_id:\t\(id)") else { continue }
+            return path
+        }
+        return nil
+    }
+
     @Test func theLocksListIsReadByDeviceAndInode() {
         let locks = """
             1: POSIX  ADVISORY  WRITE 1203 08:20:524301 0 EOF
