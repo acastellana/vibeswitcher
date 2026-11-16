@@ -1633,7 +1633,12 @@ against it. Each line says what reduces it now, if anything.
     last renewed (EN-D11; the server renews the seal of each of the user's messages it still sees waiting in the
     lead's inbox as it posted it, the vault renews none its own lead's or the app's check has passed nor any two hours after
     it was first made, so an answer that waits through a long tool call stays the user's: S3, 2026-11-16), so a replay
-    is delivered at most once, inside that window; signed approvals close it.
+    works only inside that window: up to 15 minutes after the seal's last renewal, and never more than two hours plus
+    one life after it was first made. Inside it a replay is not once only: the server retires a seal only when it sees
+    the line gone and its id in `<tty>.delivered`, and nothing checks the delivered record before a delivery, so a
+    worker that copies the line back (several copies, or one at a time with the id taken out of the delivered record)
+    has it delivered as the user's each time until the seal's life ends (2026-11-16, the engine sweep). Signed
+    approvals close it.
 30. Until the handover through sealed memory is built (Task 9), nothing; after it, no handover state on disk. A stale
     Mac-format file is removed by a fresh host (S8).
 
@@ -1809,7 +1814,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T38 | worker | get a genuine approval for its commit through a card it wrote on the board | refused | cards built from git and the vault, bound to their id | holds |
 | T39 | worker | open a window on the Windows desktop asking for a password | works while WSLg is on | decision 9 | sandbox |
 | T40 | worker | reach Windows-side localhost services (mirrored networking) | works | none | egress proxy |
-| T41 | worker | replay a sealed message of the user's into the lead's inbox | works until E6; from E6, at most once within a seal's 15 minutes | E6: a `.user` seal verifies false once retired or 15 minutes after it was made or renewed while untaken (EN-D11); renewed only for the line the server posted, never two hours past its first making (2026-11-16) | signed approvals |
+| T41 | worker | replay a sealed message of the user's into the lead's inbox | works until E6; from E6, only within a seal's life (15 minutes after its last renewal, two hours plus one life after its first making at most), as often as it is copied back there | E6: a `.user` seal verifies false once retired or 15 minutes after it was made or renewed while untaken (EN-D11); renewed only for the line the server posted, never two hours past its first making (2026-11-16) | signed approvals |
 | T42 | worker | take a new session's terminal before its launcher does | refused (Task 6) | launcher checks `TIOCSCTTY`; host checks `TIOCGSID` | holds |
 
 ## The Mac and Linux

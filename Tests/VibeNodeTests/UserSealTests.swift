@@ -129,7 +129,7 @@ struct UserSealTests {
         // Taken with no delivered record left behind: the server never sees it taken.
         let first = take(node, lead, recordDelivered: false)
         #expect(first.contains { $0.id == message.id && $0.from == .user }, "\(first)")
-        // Inside its life a copy is still the user's (S11 item 29: delivered once more); past it, not.
+        // Inside its life a copy is still the user's (S11 item 29: as often as it is copied back); past it, not.
         #expect(await eventually(timeout: 60) { verifies(node, message) == false }, "\(node.said)")
         try putBack(line, node, lead)
         let replayed = take(node, lead)
