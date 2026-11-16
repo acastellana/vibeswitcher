@@ -378,8 +378,10 @@ final class ShellDesk: ObservableObject {
         tellingEnd.insert(request.id)
         deliver(request.session, text) { [self] delivery in
             guard delivery != .notYet else { tellingEnd.remove(request.id); return }
+            // The command's exit status, whatever it is, without an error word: a non-zero exit is the command's own
+            // outcome (the asker is told it), not the app's fault, so the app-health watcher doesn't count it.
             let end = session?.commandEnd
-            log("\(request.id) ended: " + (end.map { $0.ok ? "status 0" : "failed, status \($0.status.map(String.init) ?? "not known")" } ?? "not captured")
+            log("\(request.id) ended: " + (end.map { $0.ok ? "status 0" : "status \($0.status.map(String.init) ?? "not known")" } ?? "not captured")
                 + (delivery == .ended ? "; its asker's session ended, so no one is told" : "; told"))
             // Recorded before it may be told again: a look whose read came before this write can't send it twice.
             work.async { [self] in

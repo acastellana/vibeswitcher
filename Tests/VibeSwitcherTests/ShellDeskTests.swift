@@ -47,8 +47,16 @@ struct ShellDeskTests {
         return session
     }
 
-    func desk(_ seen: Seen, clock: Clock, folder: URL) -> ShellDesk {
-        let desk = ShellDesk(folder: folder, now: { clock.now }, log: { _ in })
+    /// What the desk wrote to app.log, as the app's default `log` writes it ("shell: …"); written from its queue too.
+    final class Logged: @unchecked Sendable {
+        private let lock = NSLock()
+        private var kept: [String] = []
+        var lines: [String] { lock.lock(); defer { lock.unlock() }; return kept }
+        func note(_ line: String) { lock.lock(); kept.append("shell: " + line); lock.unlock() }
+    }
+
+    func desk(_ seen: Seen, clock: Clock, folder: URL, logged: Logged? = nil) -> ShellDesk {
+        let desk = ShellDesk(folder: folder, now: { clock.now }, log: { logged?.note($0) })
         desk.sessionNames = { seen.names }
         desk.hostSessions = { seen.sessions }
         desk.verifyStamps = { try WalletTestStamps.verify($0) }
@@ -323,6 +331,35 @@ struct ShellDeskTests {
         for _ in 0..<3 { await refreshed(desk) }
         await refreshed(self.desk(seen, clock: clock, folder: folder))
         #expect(seen.told.count == 2)
+    }
+
+    /// A card's command ending, well or not (2026-11-16: an install's status 51, a script's status 1), is that command's
+    /// own outcome, told to its asker: its app.log line isn't an error line nor a cause the app-health watcher proposes a
+    /// task for. The desk's own faults on the same path still are.
+    @Test func aCardCommandsEndIsNotAnAppLogError() async throws {
+        let ends: [(ok: Bool, status: Int?)] = [(true, 0), (false, 1), (false, 51), (false, nil)]
+        for (index, end) in ends.enumerated() {
+            let folder = temp.url("shells-\(index)"), seen = Seen(), clock = Clock(), logged = Logged()
+            let desk = desk(seen, clock: clock, folder: folder, logged: logged)
+            let request = try file(folder)
+            await refreshed(desk)
+            await acted(desk, .run, request.id)
+            #expect(await until { ShellAsk.answer(request.id, in: folder)?.told == true })
+            seen.sessions = [Self.shellSession(CommandEnd(ok: end.ok, status: end.status, startedAt: Self.created,
+                                                          at: Self.created.addingTimeInterval(1), tail: "done", cut: false))]
+            await refreshed(desk)
+            #expect(await until { ShellAsk.answer(request.id, in: folder)?.endTold == true })
+            let line = try #require(logged.lines.first { $0.contains("\(request.id) ended: ") }, "\(logged.lines)")
+            #expect(line.hasSuffix("ended: status \(end.status.map(String.init) ?? "not known"); told"), "\(line)")
+            #expect(AppHealth.errorKind("20:45:21.701 " + line) == nil, "\(line)")
+            #expect(AppHealth.cause(ofLine: "20:45:21.701 " + line, at: "2026-11-16 20:45:21") == nil, "\(line)")
+        }
+        // The desk's faults on the shell path are still reported.
+        let id = "2dcd3245-9d73-4f60-9bdf-cd8534769d50"
+        #expect(AppHealth.errorKind("10:00:00.000 shell: couldn't record \(id): disk full") != nil)
+        #expect(AppHealth.cause(ofLine: "10:00:00.000 shell: \(id) didn't start: no such folder", at: "2026-11-16 10:00:00")?.key
+                == "notice Run refused: the shell session didn't start")
+        #expect(AppHealth.cause(ofLine: "10:00:00.000 shell: \(id) not started: couldn't record it (disk full)", at: "2026-11-16 10:00:00") != nil)
     }
 
     /// Exit 0: one message saying it succeeded. The shell then stays open as an interactive shell (its title changes,

@@ -615,6 +615,21 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(watch.pending.contains(where: AppHealth.wakes))
     }
 
+    /// A vs-shell card's normal end ("ended by itself" after its command went well, "ended by Close Finished Shells") isn't
+    /// an error line, nor a cause the watcher proposes a task for. A shell whose command really failed still is.
+    @Test func shellCardsEndingNormallyAreNotErrorLines() throws {
+        let ends = ["09:12:01.123 shell: 5D9B6333 (Shell: Install VibeSwitcher from main) ended by itself: its command went well 10m ago and nobody used it since",
+                    "09:40:00.000 shell: 99ACD251 (Shell: Install VibeSwitcher from main) ended by Close Finished Shells"]
+        for line in ends {
+            #expect(AppHealth.errorKind(line) == nil, "\(line)")
+            #expect(AppHealth.cause(ofLine: line, at: "2026-11-16 09:12") == nil, "\(line)")
+        }
+        var watch = AppHealth.Watch()
+        watch.saw(lines: ends, now: start)
+        #expect(watch.errors.isEmpty, "\(watch.errors)")
+        #expect(watch.causes.byKey.isEmpty, "\(watch.causes.byKey.keys.sorted())")
+    }
+
     /// A line naming a task whose slug holds an error word ("a-failed-merge-run") isn't an error line: the word is part of
     /// a name, not what the line says. A real failure line of the same part still counts.
     @Test func errorWordsInsideNamesAreNotErrorLines() throws {
