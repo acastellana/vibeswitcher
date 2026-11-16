@@ -178,35 +178,115 @@ func scratchEnvironment(_ folder: URL, _ extra: [String: String] = [:]) -> [Stri
     return environment.merging(extra) { $1 }
 }
 
-/// Runs `executable` with `arguments` in `environment`, to its end (a hang guard of 120 s), off the pool.
+/// Runs `executable` with `arguments` in `environment`, to its end (a hang guard of 120 s), off the pool: its exit
+/// status (the signal's number when one ended it, as Foundation's `terminationStatus`) and what it wrote.
+///
+/// Started by `Platform.Spawn` (posix_spawn; stdin /dev/null, no other descriptor of this process, no signal blocked)
+/// and collected here by its pid, each wait bounded, on a thread of its own: not Foundation's `Process`, whose `run()`
+/// crashed the test process (SIGSEGV) under load while a test started one every 200 ms, and whose waits the repo
+/// doesn't trust unbounded (VibePlatformTests' `ProcessesTests.Child`).
 func run(_ executable: URL, _ arguments: [String], environment: [String: String]) async throws -> CommandRun {
-    let process = Process()
-    process.executableURL = executable
-    process.arguments = arguments
-    process.environment = environment
-    let output = Pipe(), errors = Pipe()
-    process.standardOutput = output
-    process.standardError = errors
-    process.standardInput = FileHandle.nullDevice
-    try process.run()
-    let (out, err) = await offPool { () -> (Data, Data) in
-        // Both read at once: a child that fills one pipe while this waits on the other would never end.
-        let errorsRead = ErrorsRead()
-        let done = DispatchSemaphore(value: 0)
-        Thread {
-            errorsRead.data = errors.fileHandleForReading.readDataToEndOfFile()
-            done.signal()
-        }.start()
-        let out = output.fileHandleForReading.readDataToEndOfFile()
-        done.wait()
-        return (out, errorsRead.data)
+    let command = "\(executable.lastPathComponent) \(arguments.joined(separator: " "))"
+    // Close-on-exec from the call that makes them: no child another test starts meanwhile holds a writing end, which
+    // would keep the reads below from ending when this child goes.
+    var output: [Int32] = [-1, -1], errors: [Int32] = [-1, -1]
+    guard Sys.pipeClosedOnExec(&output) == 0 else { throw Platform.Errno(code: errno) }
+    guard Sys.pipeClosedOnExec(&errors) == 0 else {
+        let code = errno
+        output.forEach { Sys.close($0) }
+        throw Platform.Errno(code: code)
     }
-    #expect(await exited(process, within: 120), "\(executable.lastPathComponent) \(arguments.joined(separator: " ")) never ended")
-    return CommandRun(status: process.terminationStatus, output: String(decoding: out, as: UTF8.self),
-                      errors: String(decoding: err, as: UTF8.self))
+    var spawn = Platform.Spawn(executable: executable.path, arguments: [executable.path] + arguments)
+    spawn.environment = environment.map { "\($0.key)=\($0.value)" }
+    spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+    spawn.stdout = .descriptor(output[1])
+    spawn.stderr = .descriptor(errors[1])
+    let pid: pid_t
+    do { pid = try await started(spawn) } catch {
+        (output + errors).forEach { Sys.close($0) }
+        throw error
+    }
+    // The child's ends are its own now.
+    Sys.close(output[1])
+    Sys.close(errors[1])
+    let (reading, readingErrors) = (output[0], errors[0])
+    let ran = await offPool { () -> (out: Data, err: Data, status: Int32?) in
+        defer {
+            Sys.close(reading)
+            Sys.close(readingErrors)
+        }
+        // Both read at once, as they come: a child that fills one pipe while this waits on the other would never end.
+        // Past the guard the child is killed, and what it wrote is read for 10 s more at most.
+        let guardEnd = MacTime.real.awake() + 120
+        var deadline = guardEnd, killed = false
+        var out = Data(), err = Data(), open: [Int32] = [reading, readingErrors]
+        var chunk = [UInt8](repeating: 0, count: 64 * 1024)
+        while !open.isEmpty {
+            let now = MacTime.real.awake()
+            if now >= deadline {
+                guard !killed else { break }
+                Sys.kill(pid, SIGKILL)
+                killed = true
+                deadline = now + 10
+            }
+            var watched = open.map { pollfd(fd: $0, events: Int16(POLLIN), revents: 0) }
+            guard poll(&watched, nfds_t(watched.count), 100) > 0 else { continue }
+            for entry in watched where entry.revents != 0 {
+                let count = Sys.read(entry.fd, &chunk, chunk.count)
+                if count < 0, errno == EINTR || errno == EAGAIN { continue }
+                if count <= 0 {
+                    open.removeAll { $0 == entry.fd }
+                } else if entry.fd == reading {
+                    out.append(contentsOf: chunk[0..<count])
+                } else {
+                    err.append(contentsOf: chunk[0..<count])
+                }
+            }
+        }
+        return (out, err, collected(pid, by: killed ? MacTime.real.awake() : guardEnd))
+    }
+    #expect(ran.status != nil, "\(command) never ended")
+    let raw = ran.status ?? 0
+    let status = raw & 0x7f == 0 ? (raw >> 8) & 0xff : raw & 0x7f
+    return CommandRun(status: ran.status == nil ? -1 : status, output: String(decoding: ran.out, as: UTF8.self),
+                      errors: String(decoding: ran.err, as: UTF8.self))
 }
 
-/// What a child wrote to its stderr, read on a thread of its own (handed over through a semaphore).
-private final class ErrorsRead: @unchecked Sendable {
-    var data = Data()
+/// Starts `spawn`: its pid. "Text file busy" (a program a test has just copied, while a child another test forked
+/// during the copy still holds it open until its exec) lasts a moment and no event says when it's over, so the start
+/// is tried again, for at most 10 s.
+private func started(_ spawn: Platform.Spawn) async throws -> pid_t {
+    let giveUp = MacTime.real.awake() + 10
+    while true {
+        switch spawn.start() {
+        case .success(let pid): return pid
+        case .failure(let failure) where failure.code == ETXTBSY && MacTime.real.awake() < giveUp:
+            try await Task.sleep(nanoseconds: 20_000_000)
+        case .failure(let failure): throw failure
+        }
+    }
+}
+
+/// Collects child `pid`, asking every few milliseconds (a blocking call: off the pool) until `deadline`; still there
+/// then, it's killed and asked for 10 s more. Its wait status, or nil when it was never collected (nor by anyone else:
+/// one no child of this process any more is nil too).
+private func collected(_ pid: pid_t, by deadline: TimeInterval) -> Int32? {
+    var raw: Int32 = 0
+    var pause: useconds_t = 500
+    var limit = deadline, killed = false
+    while true {
+        let found = waitpid(pid, &raw, WNOHANG)
+        if found == pid { return raw }
+        if found < 0, errno != EINTR { return nil }
+        if MacTime.real.awake() >= limit {
+            guard !killed else { return nil }
+            Sys.kill(pid, SIGKILL)
+            killed = true
+            limit = MacTime.real.awake() + 10
+        }
+        if found == 0 {
+            usleep(pause)
+            pause = min(pause * 2, 20_000)
+        }
+    }
 }

@@ -80,9 +80,18 @@ struct ServerCheckTests {
         }
         let status = try await run(commandLine, ["status"], environment: environment)
         #expect(status.errors.contains("status --probe"), "\(status.errors)")
-        // A socket file no one listens on any more: the same.
-        let listener = try UnixSocket.listen(path: root.appendingPathComponent("v2/server.sock").path)
-        Sys.close(listener)
+        // A socket file no one listens on (a server's that died): the same. Bound and never listening, so every
+        // connect is refused whoever holds a copy (`held`, as another test's spawn in flight would). Not a listener
+        // closed here: it lives on while any descriptor table holds it, and the connection would be taken.
+        let path = root.appendingPathComponent("v2/server.sock").path
+        let bound = Platform.Sockets.makeSocket(type: Platform.Sockets.stream)
+        try #require(bound >= 0)
+        defer { Sys.close(bound) }
+        let address = try #require(Platform.Sockets.unixAddress(path))
+        try #require(Platform.Sockets.bindOwnerOnly(bound, to: address, path: path, mode: 0o600) == nil)
+        let held = dup(bound)
+        try #require(held >= 0)
+        defer { Sys.close(held) }
         let stale = try await run(commandLine, ["status"], environment: environment)
         #expect(stale.status == 69 && stale.errors.contains("the node isn't running"), "\(stale.errors)")
     }
