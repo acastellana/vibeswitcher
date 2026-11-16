@@ -198,6 +198,9 @@ public struct NodeStarter {
         ["HOME=\(home)", "PATH=\(path)", "SWIFT_BACKTRACE=enable=no"]
     }
 
+    /// The lock a detached start holds from the record's check to its settle: `<root>/v2/node.pid.lock` (0600).
+    public static func detachedLock(root: String) -> String { NodeFolders.join(root, "v2/node.pid.lock") }
+
     /// Where a detached host's stdout and stderr go: `<root>/v2/host.log`.
     public static func hostLog(root: String) -> String { NodeFolders.join(root, "v2/host.log") }
 
@@ -210,23 +213,45 @@ public struct NodeStarter {
     /// with `detachedEnvironment` only, stdin `/dev/null` and stdout and stderr appended to `hostLog` (0600, opened
     /// with `O_NOFOLLOW`). The host is this process's child until it exits, then init's.
     ///
-    /// Refused before anything is started while `root`'s record names a process that still runs (its server didn't
-    /// answer, and a second host would only fail on the first one's lock). Then the record (`NodeRecord`: its pid and
-    /// start) is written; a host that ends within `settle` is collected, its record removed, and refused: "the host
-    /// ended at once (pid, status); see <log>".
-    public static func startDetached(host: [String], home: String, path: String, root: String,
+    /// The whole start holds `detachedLock(root:)` (an exclusive `flock`), from the record's check through the record's
+    /// write and the settle: another start meanwhile is refused before anything ("another start of the node is under
+    /// way"), so two starts at once can't both pass the check and leave the record naming a host that failed on the
+    /// first one's lock while the first runs unrecorded (the review of S3).
+    ///
+    /// Refused before anything is started while `root`'s record names a process that still runs (its start ticks) with
+    /// the host's command line (`isHost`: the installed command line passes `NodeCheck.isInstalledHost`): its server
+    /// didn't answer, and a second host would only fail on the first one's lock. A record naming any other process
+    /// (one given the number since, or any process a worker wrote in) is replaced, and that process left alone (the
+    /// review of S3: stop refuses such a record, so it mustn't keep a start from running either). Then the record
+    /// (`NodeRecord`: its pid and start) is written; a host that ends within `settle` is collected, its record removed,
+    /// and refused: "the host ended at once (pid, status); see <log>".
+    public static func startDetached(host: [String], home: String, path: String, root: String, isHost: ([String]) -> Bool,
                                      settle: TimeInterval = detachedSettle) -> Result<NodeRecord, StartRefusal> {
         guard let program = host.first, program.hasPrefix("/") else {
             return .failure(StartRefusal("the host's command isn't an absolute path: \(ConfigSeal.inert(host.joined(separator: " "), limit: .max))", exitCode: 1))
-        }
-        if let old = NodeRecord.read(root: root), old.isLive() {
-            return .failure(StartRefusal("the recorded host (pid \(old.pid), \(ConfigSeal.inert(NodeRecord.path(root: root), limit: .max))) still runs, but its server didn't answer: `vibeswitcher stop` ends it, then run start again", exitCode: 1))
         }
         let log = hostLog(root: root)
         do {
             try VibePaths.ensurePrivate(URL(fileURLWithPath: NodeFolders.join(root, "v2"), isDirectory: true))
         } catch {
             return .failure(StartRefusal("\(ConfigSeal.inert(NodeFolders.join(root, "v2"), limit: .max)) can't be made: \(error.localizedDescription)", exitCode: 1))
+        }
+        let lockPath = detachedLock(root: root)
+        let lock = Sys.open(lockPath, O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY | O_CLOEXEC, 0o600)
+        guard lock >= 0 else {
+            return .failure(StartRefusal("the start's lock \(ConfigSeal.inert(lockPath, limit: .max)) can't be opened: \(String(cString: strerror(errno)))", exitCode: 1))
+        }
+        defer { Sys.close(lock) }
+        var lockInfo = stat()
+        guard fstat(lock, &lockInfo) == 0, lockInfo.st_mode & S_IFMT == S_IFREG, fchmod(lock, 0o600) == 0 else {
+            return .failure(StartRefusal("the start's lock \(ConfigSeal.inert(lockPath, limit: .max)) isn't a regular file of yours", exitCode: 1))
+        }
+        while flock(lock, LOCK_EX | LOCK_NB) != 0 {
+            if errno == EINTR { continue }
+            return .failure(StartRefusal("another start of the node is under way (it holds \(ConfigSeal.inert(lockPath, limit: .max))): nothing was started", exitCode: 1))
+        }
+        if let old = NodeRecord.read(root: root), old.isLive(), isHost(Platform.Processes.arguments(old.pid)) {
+            return .failure(StartRefusal("the recorded host (pid \(old.pid), \(ConfigSeal.inert(NodeRecord.path(root: root), limit: .max))) still runs, but its server didn't answer: `vibeswitcher stop` ends it, then run start again", exitCode: 1))
         }
         let fd = Sys.open(log, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_NOCTTY | O_CLOEXEC, 0o600)
         guard fd >= 0 else {

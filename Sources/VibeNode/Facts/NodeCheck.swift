@@ -137,12 +137,18 @@ public enum NodeCheck {
         }
     }
 
-    /// Whether `arguments` (a process's command line) are the installed host's (ST-D7):
-    /// `<prefix>/<40 hex>/bin/vibeswitcher-host --node --node-root <prefix>/<same> …`.
+    /// Whether `arguments` (a process's command line) are the installed host's (ST-D7): argv[0]
+    /// `<prefix>/<40 hex>/bin/vibeswitcher-host`, argv[1] `--node`, and exactly one `--node-root`, wherever it comes,
+    /// naming that same `<prefix>/<commit>` (`--handover-fallback-node-root` is another word). The unit's start has it
+    /// at argv[2]; after a handover (S8) the new image's argv holds the handover's flags first and its build's
+    /// `--node-root` near the end (`HandoverMemory`'s `folderArguments`), and a fallback's its own back at the end (the
+    /// review of S3: ST-D7's literal `--node --node-root` would refuse a detached host once it has switched builds).
     public static func isInstalledHost(_ arguments: [String], prefix: String) -> Bool {
         let top = prefix.hasSuffix("/") && prefix.count > 1 ? String(prefix.dropLast()) : prefix
-        guard arguments.count >= 4, arguments[1] == "--node", arguments[2] == "--node-root" else { return false }
-        let folder = arguments[3]
+        guard arguments.count >= 4, arguments[1] == "--node" else { return false }
+        let roots = arguments.indices.dropFirst(2).filter { arguments[$0] == "--node-root" }
+        guard roots.count == 1, let at = roots.first, at + 1 < arguments.count else { return false }
+        let folder = arguments[at + 1]
         guard folder.hasPrefix(top + "/") else { return false }
         let commit = String(folder.dropFirst(top.count + 1))
         return NodeUnit.isCommit(commit) && arguments[0] == folder + "/bin/vibeswitcher-host"

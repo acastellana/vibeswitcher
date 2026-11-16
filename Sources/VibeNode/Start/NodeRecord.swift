@@ -91,15 +91,18 @@ public struct NodeRecord: Codable, Equatable, Sendable {
     public func isLive() -> Bool { Self.liveTicks(pid) == startTicks }
 
     /// Whether the recorded process has ended, collecting it when it is this process's child (the command line that
-    /// started it, or a test): a child that ended is collected here, so none is left a zombie.
+    /// started it, or a test): such a child counts as ended only once it is collected, so none is left a zombie. A
+    /// multithreaded host's main thread shows as a zombie while its other threads still exit, and can't be collected
+    /// yet then (`waitpid` says 0): that isn't ended (seen under load, the review of S3). Any other process: once it no
+    /// longer runs from its recorded start.
     public func hasEnded() -> Bool {
         var status: Int32 = 0
         while true {
             let reaped = waitpid(pid, &status, WNOHANG)
             if reaped == pid { return true }
-            if reaped < 0, errno == EINTR { continue }
-            break
+            if reaped == 0 { return false }
+            if errno == EINTR { continue }
+            return !isLive()
         }
-        return !isLive()
     }
 }

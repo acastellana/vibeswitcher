@@ -628,6 +628,15 @@ process that a process of the user can't change.
   listener's pid, after `SO_PEERCRED`: no start ticks are compared.
 - Under the weaker rule (no user systemd), a session's process that left the host's tree, unset its marker and holds
   a terminal of its own (`script`, a pty it opened and made its controlling terminal) passes as the user's voice.
+- **(2026-11-16, the review of the start plan's S3; the journal part is the lead's call)** Without a user systemd there
+  is no journal (journald is systemd's): S11's acknowledgment is asked at each detached start, and the start's, the
+  stop's and each request's entries aren't written (the command line says "isn't recorded"), so `status` can't mark an
+  accepted request with no entry or a start nobody typed. The node's record, `~/.vibeswitcher/v2/node.pid`, is any
+  worker's to write: the command line's server check and `stop`'s signals take the process it names only while it is
+  the installed, non-dumpable host by its start ticks and command line, so a rewritten record makes them refuse (a
+  denial: removing the file, or a `start`, clears it), never signal or trust another process. A detached `stop` ends
+  the host and the processes found under it (the tree, read again while the host ends): a session's process that left
+  the host's tree before it was read (a daemon double-forked to init) outlives the stop.
 - The text of the lead's questions: a turned lead asks what it likes. Only the card's facts are the engine's.
 - A lead (or a process inside its session) can record a `base_branch` hash of its own (`setGuarded` takes the lead's),
   and an approval card's diff is then taken against that base; the card names the base.
@@ -676,7 +685,9 @@ started detached by its record): `StartCommandTests.aStopFallbackWithNoTerminalI
 `StartCommandTests.stopJournalsItsOwnStopBeforeTheManagerIsAsked`,
 `StartCommandTests.aCommandLineBuiltInDotBuildRefusesTheStopFallbackBeforeAnyWrite`,
 `StartCommandTests.aStopWithAServerThatDoesntAnswerStopsTheUnit`, `ServerCheckTests.theCommandLineChecksADetachedNodeByItsRecord`,
-`StartCommandTests.statusSaysTheWeakerRuleWithoutSystemd`. The
+`StartCommandTests.statusSaysTheWeakerRuleWithoutSystemd`, and from its review `ServerTests.aStopFromTheUserEndsEverySessionThenTheHost`
+(the confirmation counts the host's live sessions), `StartCommandTests.twoDetachedStartsAtOnceStartOneHost`,
+`StartCommandTests.aChildStartedWhileTheHostEndsIsFoundToo`, `StartCommandTests.theMacsStopWithNoServerSaysTheNodeIsntRunning`. The
 scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (a Windows
 Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. The engine's E4:
 `LeadStartTests.aSessionsProcessCannotStartALead`, `LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`,
@@ -1326,7 +1337,9 @@ what it needs.
   `~/.vibeswitcher/lead/git-hooks`, `~/.local/bin`, `~/.local/share/claude/versions`, the toolchain's `usr/bin`, every
   other user-writable folder on the unit's PATH, and, while `/mnt/c` is mounted, `.wslconfig` and the Windows Startup
   folder) and holds workers and merges once one changes: a detector at points in time, reset to "held until accepted"
-  by a host restart.
+  by a host restart. A detached node's record and log (`~/.vibeswitcher/v2/node.pid`, `host.log`) aren't on the list:
+  each detached start rewrites them, and the record's readers check the process it names instead (S3; 2026-11-16, the
+  review of the start plan's S3).
 - Signed releases (stage 8) are what make "what is installed is what was released" a lock.
 
 **Before the bootstrap:** yes (sealed copies, the static build, the unit as above).
@@ -1618,7 +1631,11 @@ against it. Each line says what reduces it now, if anything.
     the user's deny rules are guard rails, decision 14); WSL interop while on; `ssh localhost` if an ssh server runs.
     Without a user systemd (S3's weaker rule), also a session's process that left the host's tree and holds a terminal
     of its own (`script`): the server takes a state change only from a peer with a controlling terminal, a guard rail.
-    Each user's-voice request is in the journal and shown by `status`.
+    Each user's-voice request is in the journal and shown by `status`; without a user systemd there is no journal, so
+    no acknowledgment, start, stop or request is journalled and `status` can't flag an unexplained start (2026-11-16,
+    the review of the start plan's S3, pending the lead's call). There, too, the node's record
+    `~/.vibeswitcher/v2/node.pid` is any worker's to rewrite (its readers then refuse: S3), and a session's process
+    that left the host's tree outlives a detached `stop`.
 14. The user's own processes acting for a worker: a `vibeswitcher` or `systemctl` earlier on the user's PATH, an alias
     in a shell startup file, and the user's terminal (`/dev/pts/N` is the user's: a worker can draw text the user didn't
     run, and race the shell for the user's keys and passwords). Reduced by running the command line by its absolute

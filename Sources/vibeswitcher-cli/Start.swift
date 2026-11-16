@@ -52,7 +52,8 @@ enum StartCommand {
                 let root = NodeFolders.nodeRoot(accountHome: home)
                 let record: NodeRecord
                 switch NodeStarter.startDetached(host: NodeUnit.execStart(prefix: unit.prefix, commit: unit.commit), home: unit.home,
-                                                 path: NodeUnit.path(swiftBin: unit.swiftBin, nodeBin: unit.nodeBin), root: root) {
+                                                 path: NodeUnit.path(swiftBin: unit.swiftBin, nodeBin: unit.nodeBin), root: root,
+                                                 isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }) {
                 case .failure(let refused): return .failure(refused)
                 case .success(let written): record = written
                 }
@@ -134,11 +135,12 @@ enum StartCommand {
 }
 
 extension StartCommand {
-    /// The probe a detached start waits on (S3): the server connected and checked, with a context made again so its
-    /// check reads the record just written, gives `.listening` (or `.refusedByCheck`); with nothing listening, the
-    /// recorded host ended (collected, being this process's child) gives `.hostEnded`; anything else is `.notYet`.
+    /// The probe a detached start waits on (S3): the server connected and checked against the host this start spawned
+    /// (`record`, held here: `node.pid` isn't read again, so a record another process writes meanwhile can't point the
+    /// check at another host; the review of S3) gives `.listening` (or `.refusedByCheck`); with nothing listening, that
+    /// host ended (collected, being this process's child) gives `.hostEnded`; anything else is `.notYet`.
     static func detachedProbe(_ record: NodeRecord) -> NodeStarter.Probe {
-        switch NodeClient.connect(NodeContext.current(), timeout: 5) {
+        switch NodeClient.connect(NodeContext(root: VibePaths.root, mode: .detached(record: record)), timeout: 5) {
         case .success: return .listening
         case .failure(.refused(let why)): return .refusedByCheck(why)
         case .failure(.broken): return .notYet

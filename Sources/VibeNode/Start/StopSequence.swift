@@ -91,6 +91,14 @@ public struct StopSequence {
 
     public init(steps: Steps) { self.steps = steps }
 
+    /// The kind `stop` runs as: `.scratch` for a scratch node, and on the Mac (`onTheMac`: no node runs detached there,
+    /// though `NodeFolders.mode` says `.noSystemd` with no `/run/systemd/system`), so its stop with no server refuses as
+    /// before S3 (69, "the node isn't running") with no fallback (the review of S3); the user's node on Linux otherwise,
+    /// with this machine's mode (`mode`, read only then).
+    public static func kind(isScratch: Bool, onTheMac: Bool, mode: () -> NodeFolders.Mode) -> StartSequence.Kind {
+        isScratch || onTheMac ? .scratch : .node(mode())
+    }
+
     /// `stop`, in ST-D7's order (the type's comment).
     public func run() -> Result<Outcome, StartRefusal> {
         let kind = steps.kind()

@@ -229,6 +229,9 @@ struct ServerTests {
         let server = try #require(node.serverPID)
         let ran = try await node.runOnTerminal(["stop"])
         #expect(ran.status == 0, "\(ran.output)")
+        // The confirmation counts what the stop ends: the host's live sessions (two plain programs, no agent on any
+        // terminal the scan lists), not the scan's agents (the review of S3).
+        #expect(ran.output.contains("This ends 2 sessions in all projects"), "\(ran.output)")
         #expect(ran.output.contains("2 sessions ended"), "\(ran.output)")
         // Every session ended, then the host, and with it the server.
         #expect(await exited(node.process, within: 60), "\(node.said)")

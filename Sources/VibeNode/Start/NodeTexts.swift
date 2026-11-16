@@ -46,9 +46,11 @@ public enum NodeTexts {
     /// The `stop` fallback's through systemd (ST-D7): the unit stopped by the manager, every process in it with it.
     public static let stopUnit = "This stops your systemd unit \(NodeUnit.fileName) (`systemctl --user stop`): its host, its server and every session in it end (KillMode=control-group), without the server's orderly stop of the leads first."
 
-    /// The `stop` fallback's on a machine without systemd (ST-D7): the recorded host, by its pid and command line.
+    /// The `stop` fallback's on a machine without systemd (ST-D7): the recorded host, by its pid and command line, and
+    /// what is found under it; not every process a session started (no cgroup holds them: `NodeStopper.stopDetached`,
+    /// the review of S3).
     public static func stopDetached(pid: pid_t, arguments: [String]) -> String {
-        "This ends the node's host, pid \(pid) (\(ConfigSeal.inert(arguments.joined(separator: " "), limit: .max))): SIGTERM, then SIGKILL after 30 s, and whatever was under it; its server and sessions end with it, without the server's orderly stop of the leads first."
+        "This ends the node's host, pid \(pid) (\(ConfigSeal.inert(arguments.joined(separator: " "), limit: .max))): SIGTERM, then SIGKILL after 30 s, and the processes found under it (its server, its sessions and theirs), without the server's orderly stop of the leads first. Without systemd a process that left the host's tree (a daemon a session started) isn't found, and keeps running."
     }
 
     /// The detached start's (ST-D6), on a machine without systemd: the host's command, its environment, where its output

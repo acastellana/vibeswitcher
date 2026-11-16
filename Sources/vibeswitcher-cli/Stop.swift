@@ -4,12 +4,13 @@ import VibeNode
 
 /// `vibeswitcher stop` (the engine plan's EN-D6; the start plan's S3). It only wires `StopSequence`, which holds the
 /// order (ST-D7): through the server when it answers (asked `status` first, so the confirmation says how many sessions
-/// end, `NodeTexts.stop(live:)`), which stops taking requests, ends the leads and then every other session, and asks
-/// the host to shut down; the typed code (the command line's own, from the action id) first, and the accepted request
+/// end, `NodeTexts.stop(live:)`: the host's live sessions, `host.liveSessions`), which stops taking requests, ends the
+/// leads and then every other session, and asks the host to shut down; the typed code (the command line's own, from the action id) first, and the accepted request
 /// written to the journal (ids only). On the user's node, when no server answers, or what listens sends no hello or
 /// fails `ServerCheck`, it stops without the server: from an installed build only, after the typed code and the
 /// journal entry, the unit through `/usr/bin/systemctl --user stop`, or, without systemd, the host the record names,
-/// once checked (`NodeStopper`). A scratch node is never stopped that way (69 with no server, as before).
+/// once checked (`NodeStopper`). A scratch node is never stopped that way (69 with no server, as before), nor is the
+/// Mac's, where no node runs detached (`StopSequence.kind`).
 enum StopCommand {
     static let usage = "usage: vibeswitcher stop"
 
@@ -29,7 +30,8 @@ enum StopCommand {
         let connection = Connection()
         let isHost: ([String]) -> Bool = { NodeCheck.isInstalledHost($0, prefix: prefix) }
         let steps = StopSequence.Steps(
-            kind: { context.isScratch ? .scratch : .node(NodeFolders.mode(runtimeFolder: runtime)) },
+            kind: { StopSequence.kind(isScratch: context.isScratch, onTheMac: Platform.CodeIdentity.isAvailable,
+                                      mode: { NodeFolders.mode(runtimeFolder: runtime) }) },
             installedBuild: { NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: prefix) },
             server: { server(context, connection) },
             typed: { code, what in TypedWord.ask(code: code, what: what) },
@@ -83,7 +85,9 @@ enum StopCommand {
                 return .failed(StartRefusal("\(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))", exitCode: Say.exitCode(replyCode: code)))
             }
             connection.client = client
-            return .answered(live: result["sessions"]?.array?.count ?? 0)
+            // What the server's stop ends: the host's live sessions (`host.liveSessions`), not `sessions`, which lists
+            // every agent on a terminal, hosted or not, and no plain program the host runs (the review of S3).
+            return .answered(live: result["host"]?["liveSessions"]?.int ?? 0)
         }
     }
 

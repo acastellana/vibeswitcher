@@ -238,7 +238,8 @@ public final class Requests: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + Self.notesWait) { answer() }
     }
 
-    /// `status`'s result: the node, the server, the host and its notes, the rule, the sessions, leads and cards
+    /// `status`'s result: the node, the server, the host (its live sessions counted: what `stop` ends, its confirmation's
+    /// count; the review of the start plan's S3) and its notes, the rule, the sessions, leads and cards
     /// (none before E4 and E6), the accepted requests and the notices (the node stopping; a lead whose board names a
     /// session the vault doesn't bind, E5; a base move that refused a running lead's merge, E7's refresh; a host restart
     /// that ended a project's team, and a running lead the vault gives no role, E8), and the last host restart
@@ -252,6 +253,7 @@ public final class Requests: @unchecked Sendable {
             "server": .object(["pid": .int(Int(serverPID)), "startedAt": .date(startedAt), "commit": .string(commit)]),
             "host": .object(["startedAt": link.hostStartedAt.map(NodeWire.Value.date) ?? .null,
                              "state": .string(Self.word(link.state)),
+                             "liveSessions": .int(link.sessions.filter(\.isLive).count),
                              "notes": notes.map { Self.value($0.notes, at: $0.at) } ?? .null]),
             "rule": .object(["mode": .string(rule.mode.rawValue), "says": .string(rule.says),
                              "scopes": .array(rule.scopes.map { .string($0.pattern) })]),

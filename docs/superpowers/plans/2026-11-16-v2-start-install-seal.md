@@ -1024,6 +1024,48 @@ manager refusal).
     `VibeNodeTests|VibeCoreTests|VibePlatformTests` (3314 cases, green), and
     `StartCommandTests|ServerCheckTests|StatusCommandTests` under load (24, 3 runs, nothing left behind).
 
+  *2026-11-16, the review of S3 (committed as "v2 step 8: S3 review fixes"):*
+  - **The stop's count.** `status`'s `sessions` is the scan of every agent on a terminal, hosted or not, and no plain
+    program the host runs; the server's stop ends the host's live sessions. `status` now gives `host.liveSessions`
+    (`link.sessions.filter(\.isLive).count`) and `stop`'s confirmation counts it
+    (`ServerTests.aStopFromTheUserEndsEverySessionThenTheHost` checks "This ends 2 sessions"; without the fix it said 6
+    here, the machine's own agents).
+  - **One detached start at a time.** `startDetached` holds an exclusive `flock` on `<root>/v2/node.pid.lock`
+    (`NodeStarter.detachedLock(root:)`, 0600, `O_NOFOLLOW`) from the record's check through the record's write and the
+    settle; another start meanwhile is refused before anything (`twoDetachedStartsAtOnceStartOneHost`).
+  - **A record naming another process doesn't block a start.** `startDetached(host:home:path:root:isHost:settle:)`
+    takes `isHost` (the command line passes `NodeCheck.isInstalledHost`) and refuses only while the recorded process
+    runs from its start ticks with the host's command line; any other record is replaced and its process left alone.
+    `stop`'s "now names another process; nothing ended" names the file whose removal clears it.
+  - **The start's wait checks the host it spawned.** `detachedProbe` connects with
+    `NodeContext(root:mode: .detached(record:))` holding the record `startDetached` returned; `node.pid` isn't read
+    again during the wait (the note above about a fresh context per probe no longer holds). The command line's
+    detached branch isn't run here (this machine has systemd), so this is read, not tested.
+  - **A detached stop reads the tree again.** `NodeStopper.gathered(_:host:)`: what is under the host is read again
+    every 100 ms while it ends and before its SIGKILL, and what is under each process found once it has ended and
+    before each is killed (`aChildStartedWhileTheHostEndsIsFoundToo`). A process that left the tree before it was read
+    still outlives the stop: the confirmation (`NodeTexts.stopDetached`), the code's comment and the security
+    document's S3 and S11 item 13 say so instead of claiming `KillMode=control-group`.
+  - **The handover's command line (the S8 note above).** `isInstalledHost` takes argv[0]
+    `<prefix>/<commit>/bin/vibeswitcher-host`, `--node` at argv[1] and exactly one `--node-root` naming that same
+    folder, wherever it comes: after a handover the new image's argv holds the handover's flags first and its build's
+    `--node-root` near the end (`HandoverMemory.folderArguments`), and a fallback's its own back at the end. This
+    widens ST-D7's literal form; `stoppingByAStalePidLeavesTheProcessNowUnderItAlone` holds both forms and the
+    refusals (two `--node-root`, another build's, only the fallback's).
+  - **The Mac's stop.** `StopSequence.kind(isScratch:onTheMac:mode:)`: on the Mac (`Platform.CodeIdentity`) a stop with
+    no server refuses as before S3 (69, "the node isn't running"), with no installed-build check or fallback
+    (`theMacsStopWithNoServerSaysTheNodeIsntRunning`).
+  - **Found under load while checking these: a host collected too early.** `NodeRecord.hasEnded` took "no longer
+    live" for ended, but a multithreaded host's main thread shows as a zombie while its other threads still exit,
+    when `waitpid` can't collect it yet: `stopDetached` returned with the host left a zombie child
+    (`aNodeWithoutSystemdRunsInASessionOfItsOwnAndStopEndsIt` failed 1 run in 3 to 5 under load). A child of this
+    process now counts as ended only once collected; 8 runs of 8 green after.
+  - **No journal without systemd (still the lead's call).** The security document now says what the code does: S3's
+    doesn't-promise and S11 item 13 say that without a user systemd nothing is journalled and `status` can't flag an
+    unexplained start, and name `~/.vibeswitcher/v2/node.pid` as a file any worker can rewrite (its readers refuse
+    then); S9's seal list says why the record and `host.log` aren't watched. To refuse instead, the code change above
+    (`acknowledgeWithoutJournal` and the two "isn't recorded" branches) still applies.
+
 **Done when:** the cases pass on Linux. The port map's `HostClientReapTests` row is `ported` (EN-D12), `HostRestartTests`
 is half ported (its first case is S8a's), and the `HostClient.swift` row's lifecycle part (183-221, 293-366) is
 `ported`.
