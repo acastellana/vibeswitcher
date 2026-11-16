@@ -23,7 +23,7 @@ final class FakeAgent {
         let bin = scratch.appendingPathComponent("fake-bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let claude = bin.appendingPathComponent("claude")
-        try Self.copyClosedOnExec(URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path, to: claude.path)
+        try copyClosedOnExec(URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path, to: claude.path)
         let command = "cd '\(folder.path)' && exec '\(claude.path)' 600"
         let deadline = MacTime.real.awake() + 60
         while pid == 0, MacTime.real.awake() < deadline, !Task.isCancelled {
@@ -64,22 +64,6 @@ final class FakeAgent {
             throw error
         }
         input = ends[1]
-    }
-
-    /// `source` copied to `target` (made, mode 0755) through a descriptor that is close-on-exec, so that no program
-    /// another test starts holds it open for writing, which would refuse the copy's exec ("Text file busy").
-    private static func copyClosedOnExec(_ source: String, to target: String) throws {
-        let bytes = [UInt8](try Data(contentsOf: URL(fileURLWithPath: source)))
-        let fd = open(target, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o755)
-        guard fd >= 0 else { throw Platform.Errno(code: errno) }
-        defer { Sys.close(fd) }
-        var done = 0
-        while done < bytes.count {
-            let wrote = bytes.withUnsafeBytes { Sys.write(fd, $0.baseAddress! + done, bytes.count - done) }
-            if wrote < 0, errno == EINTR { continue }
-            guard wrote > 0 else { throw Platform.Errno(code: errno) }
-            done += wrote
-        }
     }
 
     /// The processes under the terminal; none before it started or once it was collected (its pid may be another's).

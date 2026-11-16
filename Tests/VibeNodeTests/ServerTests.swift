@@ -59,7 +59,9 @@ struct ServerTests {
         let bin = node.root.appendingPathComponent("fake-bin")
         for folder in [project, bin] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         let claude = bin.appendingPathComponent("claude")
-        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath(), to: claude)
+        // Copied through a close-on-exec descriptor: a child another test forks meanwhile can't hold it open for
+        // writing, which refuses the exec below ("Text file busy") and ended the session before the agent ran.
+        try copyClosedOnExec(URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path, to: claude.path)
         let session = try await node.spawn("exec '\(claude.path)' 600", cwd: project.path)
         var found: pid_t = 0
         let started = await eventually(timeout: 60) {

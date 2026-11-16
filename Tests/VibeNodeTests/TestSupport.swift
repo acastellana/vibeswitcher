@@ -361,3 +361,21 @@ func collected(_ pid: pid_t, by deadline: TimeInterval) -> Int32? {
         }
     }
 }
+
+/// `source` copied to `target` (made, mode 0755) through a descriptor that is close-on-exec, so that no program another
+/// test starts meanwhile holds it open for writing, which would refuse the copy's exec ("Text file busy"): how a test
+/// makes a fake agent from `/bin/sleep` (`FakeAgent`, `ServerTests`), never `FileManager.copyItem`, whose descriptor a
+/// child forked during the copy inherits.
+func copyClosedOnExec(_ source: String, to target: String) throws {
+    let bytes = [UInt8](try Data(contentsOf: URL(fileURLWithPath: source)))
+    let fd = open(target, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o755)
+    guard fd >= 0 else { throw Platform.Errno(code: errno) }
+    defer { Sys.close(fd) }
+    var done = 0
+    while done < bytes.count {
+        let wrote = bytes.withUnsafeBytes { Sys.write(fd, $0.baseAddress! + done, bytes.count - done) }
+        if wrote < 0, errno == EINTR { continue }
+        guard wrote > 0 else { throw Platform.Errno(code: errno) }
+        done += wrote
+    }
+}

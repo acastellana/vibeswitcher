@@ -559,7 +559,7 @@ The port map's rows 223 and 224 become `made`, and the new rows are added. `Pack
     - `func check() -> Result<Found, StartRefusal>`, with `Found { claude; swift; node; git }`. It looks only in the
       given folders, with no shell.
 
-- [ ] **Step 1: Failing tests** (in `StartCommandTests`, `linuxOnly` where they touch the file system):
+- [x] **Step 1: Failing tests** (in `StartCommandTests`, `linuxOnly` where they touch the file system):
   - `theUnitStartsTheCommitsFolderNotCurrent`: `ExecStart` is exactly `execStart(prefix:commit:)`. It holds `--node`,
     `--node-root <p>/<c>` and `--server <p>/<c>/bin/vibeswitcher-server`, and no `current`.
   - `theUnitIsRestartNoKillModeControlGroupWithATimeout`: `Restart=no`, `KillMode=control-group`,
@@ -593,16 +593,45 @@ The port map's rows 223 and 224 become `made`, and the new rows are added. `Pack
   - `thePreflightNamesWhatIsMissing`: in a scratch folder, it refuses with "claude", then "swift in
     ~/.local/share/swiftly/bin", then "node", then "git in a folder only root can write". All present: `Found` holds
     the four absolute paths.
-- [ ] **Step 2: Implement.** `text` writes `[Unit]`, `[Service]` and `[Install]` in a fixed order, one assignment a line.
+- [x] **Step 2: Implement.** `text` writes `[Unit]`, `[Service]` and `[Install]` in a fixed order, one assignment a line.
   `ExecStart` is space-joined with no quoting, after the refusal of unsafe characters (ST-D4). `parse` is a line reader
   for the tests, `unitBuild` and `SwitchFollowUp`. The ownership checks take `stat` as a parameter so a test can stand
   in for another uid.
-- [ ] **Step 3: Verify.**
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter StartCommandTests`
   - the lints (AGENTS.md's command)
   - `scripts/test-under-load.sh --load 24 -r 3 -f 'StartCommandTests'`
 - [ ] **Step 4:** commit ("v2: the node's unit, its folders and start's preflight"). Push and both jobs green, by the
   lead.
+
+  *2026-11-16, S1 as made (committed; the push is the lead's):*
+  - `NodeUnit` is an `enum`, not a `struct`: it has no instances, only the unit's values. Callers write the same
+    `NodeUnit.text(…)`.
+  - The lead's ST-D2 measurement: `QT_ACCESSIBILITY` and `GSM_SKIP_SSH_AGENT_WORKAROUND` joined
+    `NodeFacts.expectedManagerEnvironment`, with that basis in its comment. `SSH_AUTH_SOCK` joined `NodeUnit.unset` as
+    `NodeUnit.unsetFromManager` (so `unset` is the spec's eight plus it), and `managerRefusal` leaves out only
+    `unsetFromManager`. `status` still names `SSH_AUTH_SOCK` as beyond the expected (`NodeFacts.extraVariables` is
+    unchanged).
+  - Added beside the listed interface, for S2's `show` check: `NodeUnit.showProperties` (the `-p` list, in order),
+    `NodeUnit.showMismatch(_:expected:)` (the first property that differs, both values said), and `NodeUnit.words(_:)`
+    (a value's words, quotes dropped). `expectedShow`'s `ExecStart` is its first part, up to `ignore_errors=no ;`:
+    systemd 255 here prints the last run's `start_time`, `pid` and status after it (read with
+    `systemctl --user show dbus.service`, a read), so `showMismatch` compares it as a prefix. An empty command list
+    (`ExecStartPre`) isn't printed at all; a property not printed counts as empty.
+  - `NodeFolders.toolFolders` takes `uid:` and `status:` (the `lstat` stand-in, `NodeFolders.fileStatus`), and
+    `NodeFolders.installedCLI` is `vibeswitcher` until S4a's `BuildRecord.installedNames`. An existing unit's node
+    folder is kept only when it is `<home>/.nvm/versions/node/v…/bin`; `--node-version` must read `vX[.Y[.Z]]`.
+  - The unit refuses `'` too (systemd reads single quotes in `ExecStart`), besides ST-D4's characters.
+  - `StartCommandTests`'s suite-wide `linuxOnly` moved onto its four scratch-node cases and the file-system ones, so
+    the Mac runs the pure cases.
+  - The task's note: `ServerTests.statusThroughTheServerListsWhatTheProbeLists` copied `/bin/sleep` with
+    `FileManager.copyItem` and exec'd it at once ("the fake agent never ran" under load: a child forked meanwhile held
+    the copy open for writing, "Text file busy"). `FakeAgent`'s `copyClosedOnExec` is now `TestSupport.swift`'s, and
+    that case uses it.
+  - Verified: `StartCommandTests`, `ServerTests` and `StatusCommandTests` alone and under load (24, 3 runs), the
+    lints, and `VibeNodeTests|VibeCoreTests|VibePlatformTests` under `vs-heavy`. That run's one other failure,
+    `LoadHarnessTests.itsBuildRunsOnItsSlotsShareOfTheCores` (its `build-homes-…` folder gone), passed alone; S1
+    touches nothing it runs.
 
 **Done when:** the cases pass on Linux. The Mac runs the pure cases (unit text, parse, disjointness, refusals, the
 manager refusal).

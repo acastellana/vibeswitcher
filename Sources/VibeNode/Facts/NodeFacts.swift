@@ -156,6 +156,11 @@ public struct NodeFacts: Equatable, Sendable {
         "XDG_DATA_DIRS", "XDG_CONFIG_DIRS", "MANAGERPID", "MANAGERPIDFDID", "INVOCATION_ID", "SYSTEMD_EXEC_PID",
         "JOURNAL_STREAM", "NOTIFY_SOCKET", "MEMORY_PRESSURE_WATCH", "MEMORY_PRESSURE_WRITE", "MOTD_SHOWN",
         "DISPLAY", "WAYLAND_DISPLAY", "PULSE_SERVER", "WSL2_GUI_APPS_ENABLED", "WSL_DISTRO_NAME", "WSLENV",
+        // Measured here by the lead, 2026-11-16 (the start plan's ST-D2): a desktop session's, set by gnome-keyring's
+        // start. They change nothing the host or a session runs (Qt's accessibility bridge, and a flag that only
+        // gnome-session reads). `SSH_AUTH_SOCK`, measured with them, isn't here: the unit unsets it
+        // (`NodeUnit.unsetFromManager`).
+        "QT_ACCESSIBILITY", "GSM_SKIP_SSH_AGENT_WORKAROUND",
     ]
 
     /// The names in a `systemctl --user show-environment` text (`NAME=value` lines; a value may be quoted, `$'…'`)
