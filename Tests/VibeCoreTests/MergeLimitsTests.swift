@@ -136,8 +136,7 @@ extension LeadToolsetTests {
         Git.run(["commit", "-q", "-m", "c"], in: root)
         let hooks = Git.run(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], in: root).output
         try FileManager.default.createDirectory(atPath: hooks, withIntermediateDirectories: true)
-        try "#!/bin/sh\necho 'pre-rebase hook says no' >&2\nexit 1\n".write(toFile: hooks + "/pre-rebase", atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hooks + "/pre-rebase")
+        try installScript("#!/bin/sh\necho 'pre-rebase hook says no' >&2\nexit 1\n", atPath: hooks + "/pre-rebase")
         // Through merge only: the lead's base moved by hand here, as merge would have moved it.
         try vault.setHead(Git.run(["rev-parse", "main"], in: root).output, root: root, branch: "main")
         let merged = call(lead, "merge", ["task": "add-b"])

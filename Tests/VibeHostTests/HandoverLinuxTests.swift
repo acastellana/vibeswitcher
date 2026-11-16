@@ -61,8 +61,7 @@ import Testing
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let bin = dir + "/bin", ran = dir + "/git-ran"
         try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
-        try "#!/bin/sh\ntouch \(ran)\nexec /usr/bin/git \"$@\"\n".write(toFile: bin + "/git", atomically: true, encoding: .utf8)
-        #expect(chmod(bin + "/git", 0o755) == 0)
+        try installScript("#!/bin/sh\ntouch \(ran)\nexec /usr/bin/git \"$@\"\n", atPath: bin + "/git")
         let (status, said) = try await Self.refusedHost(in: dir, [], path: bin)
         #expect(status == 1, "\(said)")
         #expect(said.contains("not started: this machine lacks git (none on PATH in a folder owned by root that only root can write)"), "\(said)")
@@ -772,8 +771,7 @@ extension HandoverLinuxTests {
         let ran = root + "/ran"
         try FileManager.default.createDirectory(atPath: root + "/s/bin", withIntermediateDirectories: true)
         let script = root + "/s/bin/" + BuildInfo.host
-        FileManager.default.createFile(atPath: script, contents: Data("#!/bin/sh\ntouch '\(ran)'\nexec '\(hostLauncher)' \"$@\"\n".utf8),
-                                       attributes: [.posixPermissions: 0o755])
+        try installScript("#!/bin/sh\ntouch '\(ran)'\nexec '\(hostLauncher)' \"$@\"\n", atPath: script)
         _ = try Self.buildFolder(in: root, "s", binaries: [BuildInfo.host: try Self.sha256(of: script)])
         #expect(try Self.refusal(Self.check(script, installRoot: root)) == "\(script) is a script, not an installed build's image")
 

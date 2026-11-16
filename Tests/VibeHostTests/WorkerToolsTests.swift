@@ -73,8 +73,7 @@ import Testing
             printf '\\n ✻ Welcome to Claude Code v2.1.311\\n\\n   /help for help, /status for your current setup\\n\\n   cwd: %s\\n\\n> ' "$PWD"
             wait
             """
-        try script.write(toFile: claude, atomically: true, encoding: .utf8)
-        chmod(claude, 0o755)
+        try installScript(script, atPath: claude)
         try LaunchPresets(global: [], byProject: [root: [LaunchPreset(name: "Fake Claude", kind: .claude, command: claude)]])
             .save(to: URL(fileURLWithPath: vibe + "/presets.json"))
 

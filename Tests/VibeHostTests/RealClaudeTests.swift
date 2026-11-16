@@ -130,7 +130,7 @@ import Testing
             mv \(RecentProjects.shellQuote(markers)).partial \(RecentProjects.shellQuote(markers))
 
             """
-        _ = FileManager.default.createFile(atPath: run.project + "/markers.sh", contents: Data(script.utf8), attributes: [.posixPermissions: 0o755])
+        try installScript(script, atPath: run.project + "/markers.sh")
         let snapshots = run.config.appendingPathComponent("shell-snapshots").path
         let before = Set((try? FileManager.default.contentsOfDirectory(atPath: snapshots)) ?? [])
 
@@ -180,8 +180,7 @@ import Testing
 
         // The command: a script that sleeps (2.1.323's Bash tool refuses a standalone `sleep` of that length, and a
         // script is what a verifier's long commands are: a branch's tests).
-        _ = FileManager.default.createFile(atPath: run.project + "/hold.sh", contents: Data("#!/bin/bash\nsleep \"$1\"\n".utf8),
-                                           attributes: [.posixPermissions: 0o755])
+        try installScript("#!/bin/bash\nsleep \"$1\"\n", atPath: run.project + "/hold.sh")
         // A verifier's environment, as its launch gives it in its inline settings: every Bash command through the tool
         // server's binary as Claude Code's shell prefix (`BranchCode.runPrefix`).
         let session = try await run.start(allowing: ["./hold.sh 611", "./hold.sh 622"], env: LeadLaunch.verifierEnvironment(server: mcp),

@@ -816,8 +816,7 @@ struct WorktreesTests {
     func failingHook(_ name: String, saying text: String, in root: String) throws {
         let hooks = Git.run(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], in: root).output
         try FileManager.default.createDirectory(atPath: hooks, withIntermediateDirectories: true)
-        try "#!/bin/sh\necho '\(text)' >&2\nexit 1\n".write(toFile: hooks + "/" + name, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hooks + "/" + name)
+        try installScript("#!/bin/sh\necho '\(text)' >&2\nexit 1\n", atPath: hooks + "/" + name)
     }
 
     /// E-15: a rebase stopped by something else than a conflict says what stopped it.

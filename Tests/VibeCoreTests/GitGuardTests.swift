@@ -39,8 +39,7 @@ struct GitGuardTests: LeadTeamFixture {
     func hook(_ name: String, in folder: String, marks: String, as mark: String? = nil) throws {
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let path = folder + "/" + name
-        try "#!/bin/sh\n\(touching(marks, mark ?? name))\nexit 0\n".write(toFile: path, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        try installScript("#!/bin/sh\n\(touching(marks, mark ?? name))\nexit 0\n", atPath: path)
     }
 
     func commit(_ files: [String: String], in dir: String, _ message: String = "change") throws {
@@ -66,8 +65,7 @@ struct GitGuardTests: LeadTeamFixture {
             #expect(Git.run(["config", key, value], in: root).ok)
         }
         let fsmonitor = temp.url("fsmonitor").path
-        try "#!/bin/sh\n\(touching(marks, "fsmonitor"))\n".write(toFile: fsmonitor, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fsmonitor)
+        try installScript("#!/bin/sh\n\(touching(marks, "fsmonitor"))\n", atPath: fsmonitor)
         #expect(Git.run(["config", "core.fsmonitor", fsmonitor], in: root).ok)
     }
 
@@ -373,8 +371,7 @@ struct GitGuardTests: LeadTeamFixture {
         let runs = marks + "/runs"
         let script = "#!/bin/sh\necho run >> '\(runs)'\nup=\"$(dirname \"$(dirname \"$0\")\")/commit-msg\"\n"
             + "if [ -f \"$up\" ] && [ \"$(wc -l < '\(runs)')\" -lt 5 ]; then sh -e \"$up\" \"$@\"; fi\n. \"$(dirname \"$0\")/_/lib.sh\"\n"
-        try script.write(toFile: hooks + "/commit-msg", atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hooks + "/commit-msg")
+        try installScript(script, atPath: hooks + "/commit-msg")
         for args in [["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }
         try commit(["a.txt": "one\n"], in: root)
         #expect(marked(marks) == ["runs", "subfolder-lib"])
@@ -498,8 +495,7 @@ struct GitGuardTests: LeadTeamFixture {
         #expect(Shell.run(executable: "/usr/bin/git", args: ["init", "-q", "-b", "main"], in: root).ok)
         let strip = "#!/bin/sh\n\(touching(marks, "user-commit-msg"))\ngrep -v '^Co-Authored-By:' \"$1\" > \"$1.tmp\"; mv \"$1.tmp\" \"$1\"\n"
         let hook = root + "/.git/hooks/commit-msg"
-        try strip.write(toFile: hook, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
+        try installScript(strip, atPath: hook)
 
         for args in [["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }
         try "one\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)

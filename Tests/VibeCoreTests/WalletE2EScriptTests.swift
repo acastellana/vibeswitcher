@@ -57,9 +57,9 @@ struct WalletE2EScriptTests {
             ] {
                 let url = root.appendingPathComponent(path)
                 try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try text.write(to: url, atomically: true, encoding: .utf8)
+                // The fake commands copied in by a child (`installScript`: no "Text file busy"), the rest written.
+                if path.hasPrefix("bin/") { try installScript(text, at: url) } else { try text.write(to: url, atomically: true, encoding: .utf8) }
             }
-            for tool in ["npm", "node"] { chmod(root.appendingPathComponent("bin/\(tool)").path, 0o755) }
             try fm.createDirectory(at: root.appendingPathComponent("tmp"), withIntermediateDirectories: true)
             try fm.createDirectory(at: root.appendingPathComponent("home"), withIntermediateDirectories: true)
         }
@@ -348,9 +348,9 @@ struct WalletE2ERealTestnetGuardTests {
             ] {
                 let url = root.appendingPathComponent(path)
                 try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try text.write(to: url, atomically: true, encoding: .utf8)
+                // The fake commands copied in by a child (`installScript`: no "Text file busy"), the rest written.
+                if path.hasPrefix("bin/") { try installScript(text, at: url) } else { try text.write(to: url, atomically: true, encoding: .utf8) }
             }
-            for tool in ["curl", "node", "npm"] { chmod(root.appendingPathComponent("bin/\(tool)").path, 0o755) }
             try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
             try fm.createDirectory(at: config, withIntermediateDirectories: true)
             chmod(config.path, 0o700)

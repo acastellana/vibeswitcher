@@ -1288,8 +1288,7 @@ final class ServerChildHost {
         #expect(await eventually { host.server.queue.sync { host.server.tally.refusedAppConnections } == 1 })
 
         let probe = dir + "/probe.sh", go = dir + "/go"
-        try Data("#!/bin/sh\nwhile [ ! -e '\(go)' ]; do sleep 0.05; done\nexit 1\n".utf8).write(to: URL(fileURLWithPath: probe))
-        #expect(chmod(probe, 0o755) == 0)
+        try installScript("#!/bin/sh\nwhile [ ! -e '\(go)' ]; do sleep 0.05; done\nexit 1\n", atPath: probe)
         let app = try TestClient(host)
         let seq = app.send(.handover(executable: probe))
         var statePath: String?
@@ -1330,8 +1329,7 @@ final class ServerChildHost {
         #expect(await eventually { noted().contains("which another process holds locked") }, "\(noted())")
         // A probe that says no, after leaving a mark: were it run, the handover would end there, the host serving on.
         let probe = dir + "/probe.sh", ran = dir + "/probed"
-        try Data("#!/bin/sh\n: > '\(ran)'\nexit 1\n".utf8).write(to: URL(fileURLWithPath: probe))
-        #expect(chmod(probe, 0o755) == 0)
+        try installScript("#!/bin/sh\n: > '\(ran)'\nexit 1\n", atPath: probe)
         let app = try TestClient(host)
         let seq = app.send(.handover(executable: probe))
         #expect(await eventually { app.reply(to: seq) != nil })
@@ -1365,8 +1363,7 @@ final class ServerChildHost {
         let replaced = try #require(HostPathWatch.identity(atPath: host.lock))
 
         let probe = dir + "/probe.sh", go = dir + "/go"
-        try Data("#!/bin/sh\nwhile [ ! -e '\(go)' ]; do sleep 0.05; done\nexit 1\n".utf8).write(to: URL(fileURLWithPath: probe))
-        #expect(chmod(probe, 0o755) == 0)
+        try installScript("#!/bin/sh\nwhile [ ! -e '\(go)' ]; do sleep 0.05; done\nexit 1\n", atPath: probe)
         let app = try TestClient(host)
         let seq = app.send(.handover(executable: probe))
         var statePath: String?

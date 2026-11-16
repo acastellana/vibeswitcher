@@ -21,11 +21,15 @@ struct NodeQuestionPostTests {
         }
     }
 
-    /// A listener at `path` that records each line it reads and answers each request `ok`.
+    /// A listener at `path` that records each line it reads and answers each request `ok`, until it's stopped. Its
+    /// thread closes the socket as it ends, never `stop`: closed under a thread still about to poll it (one started
+    /// late on a loaded machine), its number went to the next test's listener, whose post the old thread then took,
+    /// answered and recorded in the wrong test (linux CI 43840361847: the post answered, `listener.lines` `[]`).
     private final class Listener: @unchecked Sendable {
         let fd: Int32
         private let lock = NSLock()
         private var got: [String] = []
+        private var stopped = false
         var lines: [String] { lock.withLock { got } }
 
         init(path: String) throws {
@@ -35,9 +39,13 @@ struct NodeQuestionPostTests {
         }
 
         private func serve() {
-            while true {
+            defer { Sys.close(fd) }
+            while !lock.withLock({ stopped }) {
+                // Looks every 50 ms whether it's been stopped (a shut-down listening socket may not wake a poll).
                 var watched = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-                guard poll(&watched, 1, 10_000) > 0, watched.revents & Int16(POLLIN) != 0 else { return }
+                let woke = poll(&watched, 1, 50)
+                if woke == 0 || (woke < 0 && errno == EINTR) { continue }
+                guard woke > 0, watched.revents & Int16(POLLIN) != 0 else { return }
                 let client = accept(fd, nil, nil)
                 guard client >= 0 else { if errno == EAGAIN || errno == EINTR { continue } else { return } }
                 _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
@@ -60,7 +68,11 @@ struct NodeQuestionPostTests {
             }
         }
 
-        func stop() { shutdown(fd, Int32(SHUT_RDWR)); Sys.close(fd) }
+        /// Ends its thread, which closes the socket.
+        func stop() {
+            lock.withLock { stopped = true }
+            shutdown(fd, Int32(SHUT_RDWR))
+        }
     }
 
     private var question: LeadQuestion { LeadQuestion(text: "Blue or red?", options: ["Blue", "Red"]) }

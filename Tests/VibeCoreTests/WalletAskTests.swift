@@ -184,8 +184,7 @@ struct WalletAskTests {
         let bin = scratch.url("bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let passage = bin.appendingPathComponent("passage")
-        try "#!/bin/sh\n".write(to: passage, atomically: true, encoding: .utf8)
-        chmod(passage.path, 0o755)
+        try installScript("#!/bin/sh\n", at: passage)
         let none = [scratch.url("missing/Passage.app")]
         typealias Manager = WalletAsk.WalletManager
         #expect(Manager.from(peer: "", passagePath: "", path: bin.path, apps: none) == .noPeer)

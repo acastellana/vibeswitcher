@@ -48,8 +48,10 @@ struct TestLockTests {
 
     var lock: TestLock { TestLock(directory: url("locks").path) }
 
-    /// A process that takes the lock (its slot `slot`) with perl's flock, says "held", and sleeps: another program
-    /// holding it.
+    /// A process that takes the lock (its slot `slot`) with perl's flock, says "held", and holds it until it's killed,
+    /// or until this process has gone (its parent is another, looked at every 0.5 s): another program holding it. Never
+    /// for a fixed time: it slept 60 s, past which a test still running (a full suite's: 97 to 145 s) found the slot
+    /// let go.
     func outsideHolder(_ lock: TestLock, slot: Int = 1) throws -> Process {
         try Self.outsideHolder(path: lock.slotPath(slot))
     }
@@ -59,7 +61,7 @@ struct TestLockTests {
                                                 attributes: [.posixPermissions: 0o700])
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        process.arguments = ["-MFcntl=:flock", "-e", #"open(F, ">>", $ARGV[0]) or die; flock(F, LOCK_EX) or die; $| = 1; print "held\n"; sleep 60"#, path]
+        process.arguments = ["-MFcntl=:flock", "-e", #"open(F, ">>", $ARGV[0]) or die; flock(F, LOCK_EX) or die; $| = 1; print "held\n"; my $p = getppid(); select(undef, undef, undef, 0.5) while getppid() == $p"#, path]
         let pipe = Pipe()
         process.standardOutput = pipe
         try process.run()
@@ -174,12 +176,11 @@ struct TestLockTests {
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let asked = worktree.appendingPathComponent("asked").path
         let swift = bin.appendingPathComponent("swift")
-        try """
+        try installScript("""
             #!/bin/bash
             echo "$* | $\(TestLock.coresVariable)" > \(RecentProjects.shellQuote(asked))
 
-            """.write(to: swift, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swift.path)
+            """, at: swift)
         let q = RecentProjects.shellQuote
         // PATH after the login shell's startup files (path_helper puts the system's first); the lock's folder as the
         // merge's, so vs-heavy knows the held slot as one of its own.
@@ -600,9 +601,8 @@ struct TestLockTests {
         let locks = url("heavy-locks").path
         let home = url("getconf-home"), bin = url("failing-sysctl"), go = url("go")
         for folder in [home, bin] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-        try "#!/bin/sh\necho 'sysctl: sysctl fmt -1 1024 1: Operation not permitted' >&2\nexit 1\n"
-            .write(to: bin.appendingPathComponent("sysctl"), atomically: true, encoding: .utf8)
-        chmod(bin.appendingPathComponent("sysctl").path, 0o755)
+        try installScript("#!/bin/sh\necho 'sysctl: sysctl fmt -1 1024 1: Operation not permitted' >&2\nexit 1\n",
+                          at: bin.appendingPathComponent("sysctl"))
         let probe = Process()
         probe.executableURL = URL(fileURLWithPath: "/usr/bin/getconf")
         probe.arguments = ["_NPROCESSORS_ONLN"]
@@ -705,11 +705,8 @@ struct TestLockTests {
             sleep "${SWIFT_SLEEP:-1}"
             echo "$RUN $1 end" >> \(RecentProjects.shellQuote(log))
             """
-        try swift.write(to: bin.appendingPathComponent("swift"), atomically: true, encoding: .utf8)
-        try "#!/bin/bash\nexit 0\n".write(to: bin.appendingPathComponent("node"), atomically: true, encoding: .utf8)
-        for name in ["swift", "node"] {
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent(name).path)
-        }
+        try installScript(swift, at: bin.appendingPathComponent("swift"))
+        try installScript("#!/bin/bash\nexit 0\n", at: bin.appendingPathComponent("node"))
         return (bin.path, log)
     }
 

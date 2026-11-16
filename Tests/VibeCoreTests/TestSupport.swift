@@ -247,6 +247,42 @@ final class Scratch: @unchecked Sendable {
     }
 }
 
+/// A script (a fake command) at `url`, mode 0755: its text written to a scratch file (never run) and copied to `url` by
+/// a child, `cp`. A script written by this process is open for writing here while it's written, and a child another
+/// test starts meanwhile can inherit that descriptor and keep it for as long as it lives; Linux won't run a file open
+/// for writing anywhere ("Text file busy", ETXTBSY). A fake xcode-select so failed under scripts/test-under-load.sh,
+/// which then named the toolchain's Testing.framework instead (LoadHarnessTests, linux CI 43840361847, 4 cores). `cp`
+/// is started with `Platform.Spawn` and reaped by a bounded `waitpid(WNOHANG)`, never Foundation's `waitUntilExit`,
+/// which hung for good on the Mac's CI after its child was gone. Its folder must be there.
+func installScript(_ text: String, at url: URL, mode: Int = 0o755) throws {
+    try installScript(text, atPath: url.path, mode: mode)
+}
+
+/// `installScript` at a path.
+func installScript(_ text: String, atPath path: String, mode: Int = 0o755) throws {
+    // The text in a scratch file of its own, gone after the copy: none is left beside the script (a hooks folder).
+    let source = scratchRoot.appendingPathComponent("script-\(UUID().uuidString).txt").path
+    try text.write(toFile: source, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(atPath: source) }
+    var copy = Platform.Spawn(executable: "/bin/cp", arguments: ["/bin/cp", source, path])
+    copy.stdin = .path("/dev/null", flags: O_RDONLY)
+    guard case .success(let pid) = copy.start() else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: path]) }
+    var status: Int32 = 0
+    var reaped: pid_t = 0
+    let deadline = MacTime.real.awake() + hangGuard
+    repeat {
+        reaped = waitpid(pid, &status, WNOHANG)
+        if reaped == 0 { usleep(1_000) }
+    } while (reaped == 0 || (reaped < 0 && errno == EINTR)) && MacTime.real.awake() < deadline
+    if reaped == 0 {
+        kill(pid, SIGKILL)
+        _ = waitpid(pid, &status, 0)
+    }
+    // Exited 0: no signal, no status.
+    guard reaped == pid, status == 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: path]) }
+    try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: path)
+}
+
 extension Scratch {
     /// A UserDefaults of a test's own, empty, kept in `defaults.plist` in a new folder `scratchRoot/<prefix>-<uuid>`
     /// that goes with this. Its suite is named by that path, not by a domain: cfprefsd writes a named suite

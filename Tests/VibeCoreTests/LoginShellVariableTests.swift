@@ -27,8 +27,7 @@ struct LoginShellVariableTests {
             \(rc)
             exec /bin/sh "$@"
             """
-        try script.write(toFile: path, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+        try installScript(script, atPath: path, mode: 0o700)
         return path
     }
 

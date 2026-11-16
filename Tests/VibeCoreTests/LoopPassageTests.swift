@@ -23,12 +23,11 @@ struct LoopPassageTests {
                 let bin = root.appendingPathComponent("\(side)/bin", isDirectory: true)
                 try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
                 let wrapper = bin.appendingPathComponent("passage")
-                try """
+                try installScript("""
                     #!/bin/bash
                     LOOP_PASSAGE_ROOT=\(RecentProjects.shellQuote(root.path)) LOOP_PASSAGE_SIDE=\(side) exec \(RecentProjects.shellQuote(LoopPassageTests.script)) "$@"
 
-                    """.write(to: wrapper, atomically: true, encoding: .utf8)
-                chmod(wrapper.path, 0o755)
+                    """, at: wrapper)
             }
         }
         func passage(_ side: String) -> String { root.appendingPathComponent("\(side)/bin/passage").path }
