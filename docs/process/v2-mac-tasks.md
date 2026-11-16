@@ -131,6 +131,17 @@ it. Each is done once the Mac work begins.
   hands another project's inbox and conversation to the new lead. The node checks first (`LeadEngine.replacedLead`:
   the host's session list and the vault's binding, the security follow-ups' item 11); the Mac's fix is the same check
   before `takeWaiting`, in `Sources/VibeSwitcher`, which `v2` doesn't edit.
+- **The Mac's `LeadController` delivery, wake and flush** ([the port map's](v2-port-map.md) E5 row for
+  `LeadController.swift`, delivery): `deliver` (1225) takes the lead `LeadHandover.named(board)` gives and checks only
+  that its pid runs an agent on the board's terminal (`leadRuns`, 593); the wake (1339, 1384) and the flush (1432)
+  type into the session the board names. Nothing asks the vault who holds the lead role or the host which session runs
+  on that terminal, so a `board.json` any session can write, naming a worker's own session or another project's
+  running lead, gets this project's answers and reports, and the wakes are typed into it. The node checks first
+  (`Delivery.target`: the session the vault binds to the root's lead role, live in the host's list, on the board's
+  terminal; the security follow-ups' item 12, EN-D14); the Mac's fix is the same resolution (or at least
+  `LeadHandover.current(board, holder:isRunning:)`) in those three paths, in `Sources/VibeSwitcher`, which `v2`
+  doesn't edit. Check on a real Mac: a scratch board naming another project's running lead (or a worker's session)
+  gets no delivery, wake or flush, and the message stays held.
 - **The three Mac-only lints**: `AccessibilityLintTests`, `DebugAidsLintTests` and `ElapsedTimeLintTests` are in
   `Tests/VibeSwitcherTests` (the app's target), which Linux doesn't build, so `v2`'s lint runs on Linux never ran
   them. Run them on the Mac (`bash scripts/test.sh --filter 'AccessibilityLint|DebugAidsLint|ElapsedTimeLint'`) over
