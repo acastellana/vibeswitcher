@@ -213,14 +213,18 @@ final class ScratchNode: @unchecked Sendable {
         if testEnd >= 0 { Sys.close(testEnd) }
     }
 
-    /// The processes under `pid` (children, theirs, and so on), each with its start (`Platform.Processes.link`).
-    static func descendants(of pid: pid_t) -> [Platform.Processes.Link] {
+    /// The processes under `pid` (children, theirs, and so on), each with its start (`Platform.Processes.link`). Each
+    /// is read after its parent's listing, so only one whose link still names that parent counts: a child that ended
+    /// meanwhile and whose pid went to another process isn't taken for it (that one has another parent), and one whose
+    /// parent ended meanwhile is left to `endStrays`. `children` and `link`: the system's, or a test's.
+    static func descendants(of pid: pid_t, children: (pid_t) -> [pid_t] = Platform.Processes.children,
+                            link: (pid_t) -> Platform.Processes.Link? = Platform.Processes.link) -> [Platform.Processes.Link] {
         var found: [Platform.Processes.Link] = []
-        var next = Platform.Processes.children(pid)
-        while let child = next.popLast() {
-            guard let link = Platform.Processes.link(child), !found.contains(where: { $0.pid == child }) else { continue }
+        var next = children(pid).map { (pid: $0, parent: pid) }
+        while let (child, parent) = next.popLast() {
+            guard let link = link(child), link.parent == parent, !found.contains(where: { $0.pid == child }) else { continue }
             found.append(link)
-            next += Platform.Processes.children(child)
+            next += children(child).map { (pid: $0, parent: child) }
         }
         return found
     }
@@ -264,14 +268,15 @@ final class ScratchNode: @unchecked Sendable {
     }
 
     /// Kills `root`'s strays (SIGKILL, each checked by its start first) and waits for them to end, again until a look
-    /// finds none (one may start another meanwhile), for 30 s at most.
+    /// finds none (one may start another meanwhile), for 30 s at most: each wait after the kills ends at that deadline
+    /// too, not 10 s past it.
     static func endStrays(of root: String) {
         let deadline = MacTime.real.awake() + 30
         while MacTime.real.awake() < deadline {
             var found = strays(of: root)
             if found.isEmpty { return }
             for link in found where runs(link) { kill(link.pid, SIGKILL) }
-            let killed = MacTime.real.awake() + 10
+            let killed = min(MacTime.real.awake() + 10, deadline)
             while !found.isEmpty, MacTime.real.awake() < killed {
                 Thread.sleep(forTimeInterval: 0.02)
                 found = found.filter(runs)

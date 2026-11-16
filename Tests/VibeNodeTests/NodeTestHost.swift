@@ -59,7 +59,11 @@ final class NodeTestHost: @unchecked Sendable {
         config.projectAllowList = projectAllowList
         config.appExecutable = HostServer.executable(of: getpid())
         config.ringCapacity = 1 << 20
-        config.logPath = folder.appendingPathComponent("host.log").path
+        // No session log (`HostLog`): it writes in this process, with no end the stop can wait for (a held resize line,
+        // an input unit's hold, a session's exit can come after `stop()` returned), and makes its folder at each line,
+        // so a line written while or after the scratch removes the folder brings the folder back. No test reads it, and
+        // it went with the folder anyway.
+        config.logPath = nil
         server = HostServer(config: config)
         do { try server.start() } catch {
             try? FileManager.default.removeItem(at: socketFolder)
@@ -78,11 +82,12 @@ final class NodeTestHost: @unchecked Sendable {
     /// removes its socket's folder. Once.
     ///
     /// `HostServer.stop(terminateSessions:)` only signals the sessions (SIGHUP, then SIGKILL 5 s on): a session still
-    /// ending writes into its `HOME` while the scratch removes the folder, which then stays (a `node-host-*` folder
-    /// left by a load run). So what was under each session's program before the stop (the program too, each known by
-    /// its start, as `ScratchNode.stop` knows them) is waited for, bounded (`ScratchNode.waitForEnd`), then anything
-    /// still naming the sessions' `HOME` in its environment (started meanwhile, or detached before the listing) is
-    /// ended (`ScratchNode.endStrays`).
+    /// ending can write into its `HOME` while the scratch removes the folder, which then stays (a `node-host-*` folder
+    /// left by a load run; the host's own log, this process's one writer there that outlives the stop, is off for the same reason, see
+    /// `init`). So what was under each session's program before the stop (the program too, each known by its start, as
+    /// `ScratchNode.stop` knows them, read on the host's queue, where the session reaps its program) is waited for,
+    /// 20 s at most (`ScratchNode.waitForEnd`), then anything still naming the sessions' `HOME` in its environment
+    /// (started meanwhile, or detached before the listing) is ended, 30 s at most (`ScratchNode.endStrays`).
     func stop() {
         let first = lock.withLock { () -> Bool in
             defer { stopped = true }
@@ -94,11 +99,14 @@ final class NodeTestHost: @unchecked Sendable {
             server.closeAppConnector(appConnector)
             Sys.close(appConnector)
         }
-        let list = { [server] in server.sessions.values.filter { $0.info.isLive }.map(\.info.childPID) }
-        let programs = DispatchQueue.getSpecific(key: HostServer.queueKey) != nil ? list() : server.queue.sync(execute: list)
-        let under = programs.flatMap { pid in
-            (Platform.Processes.link(pid).map { [$0] } ?? []) + ScratchNode.descendants(of: pid)
+        // On the host's queue, where a session reaps its program: each program's pid is still its own while it's read.
+        let list = { [server] in
+            server.sessions.values.filter { $0.info.isLive }.flatMap { session -> [Platform.Processes.Link] in
+                let pid = session.info.childPID
+                return (Platform.Processes.link(pid).map { [$0] } ?? []) + ScratchNode.descendants(of: pid)
+            }
         }
+        let under = DispatchQueue.getSpecific(key: HostServer.queueKey) != nil ? list() : server.queue.sync(execute: list)
         server.stop(terminateSessions: true)
         ScratchNode.waitForEnd(under)
         ScratchNode.endStrays(of: home.path)

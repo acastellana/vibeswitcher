@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import VibeCore
+import VibeHost
 import VibeNode
 
 /// The engine's scratch host (`NodeTestHost`): the test process is its app through the connector, and each has a root
@@ -66,11 +67,59 @@ struct NodeTestHostTests {
         #expect(seen.count == 2 && seen[0] != seen[1])
     }
 
+    /// The stop ends what its sessions left running before it returns: a program that ignores the hangup and the
+    /// terminate the host's stop sends (the host's SIGKILL comes 5 s later, after the stop has returned), and a child it
+    /// detached (no longer under the program when the stop lists it), each writing into the sessions' `HOME`, which the
+    /// scratch removes next.
+    @Test func theStopEndsWhatItsSessionsLeftRunning() async throws {
+        let host = try NodeTestHost(scratch)
+        defer { host.stop() }
+        let pids = host.home.appendingPathComponent("pids")
+        let loop = "trap '' HUP TERM; echo $$ >> \(FakeClaude.quoted(pids.path)); while :; do date >> \"$HOME/late\"; sleep 0.05; done"
+        let session = try await host.spawn("( sh -c \(FakeClaude.quoted(loop)) & ); \(loop)")
+        func written() -> [pid_t] {
+            ((try? String(contentsOf: pids, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { pid_t($0) }
+        }
+        #expect(await eventually { written().count == 2 }, "session \(session.id) started \(written())")
+        let links = written().compactMap(Platform.Processes.link)
+        #expect(links.count == 2 && links.allSatisfy(ScratchNode.runs), "\(links)")
+        await offPool { host.stop() }
+        let left = links.filter(ScratchNode.runs)
+        #expect(left.isEmpty, "still running once the stop returned: \(left.map(\.pid))")
+    }
+
+    /// The scratch host's own writer, the host's log (a held resize line, an input unit's hold, a session's exit),
+    /// can write after the stop returned, while or after the scratch removes the folder: it writes nowhere, so its
+    /// folder never comes back.
+    @Test func aLineTheHostLogsAfterItsStopLeavesNothing() throws {
+        let host = try NodeTestHost(scratch)
+        host.stop()
+        try FileManager.default.removeItem(at: host.folder)
+        host.server.note("host: a line after the stop")
+        #expect(!FileManager.default.fileExists(atPath: host.folder.path))
+    }
+
     /// What a connection was sent, from its queue.
     private final class Events: @unchecked Sendable {
         private let lock = NSLock()
         private var all: [HostEventEnvelope] = []
         func add(_ envelope: HostEventEnvelope) { lock.withLock { all.append(envelope) } }
         func reply(to seq: Int) -> HostEvent? { lock.withLock { all.first { $0.replyTo == seq }?.event } }
+    }
+}
+
+/// What the scratch hosts' stops wait for and end (`ScratchNode.descendants`), on a process table of the test's own.
+@Suite struct ScratchStopTests {
+    /// A child listed under its parent that ended before its link was read, its pid gone to a process of someone
+    /// else's, isn't taken for it, nor is anything under that process: the stop would kill them 10 s on.
+    @Test func aChildWhosePidWentToAnotherProcessIsntItsParents() {
+        // 10 has children 11 and 12; 12 ended after the listing and its pid is now another process's (its parent 99),
+        // which has a child of its own, 13. 11 has a child, 14.
+        let children: [pid_t: [pid_t]] = [10: [11, 12], 11: [14], 12: [13]]
+        let parents: [pid_t: pid_t] = [11: 10, 12: 99, 13: 12, 14: 11]
+        let found = ScratchNode.descendants(of: 10, children: { children[$0] ?? [] }) { pid in
+            parents[pid].map { Platform.Processes.Link(pid: pid, parent: $0, startTicks: UInt64(pid), terminal: nil) }
+        }
+        #expect(found.map(\.pid).sorted() == [11, 14], "\(found)")
     }
 }
