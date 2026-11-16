@@ -30,8 +30,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         let folder = temp.url("bin").path
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let path = folder + "/codex"
-        try "#!/bin/sh\nprintf '%s\\0' \"$@\" > '\(log)'\n".write(toFile: path, atomically: true, encoding: .utf8)
-        chmod(path, 0o755)
+        try installScript("#!/bin/sh\nprintf '%s\\0' \"$@\" > '\(log)'\n", atPath: path)
         return path
     }
 

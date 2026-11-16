@@ -41,8 +41,7 @@ struct IndexLockTests {
         Git.run(["commit", "-q", "-m", "sub"], in: root)
         // Only now: the commit above collects the submodule's status too.
         let hook = temp.url("fsmonitor-hook").path
-        try "#!/bin/sh\ntouch \"$INDEX_LOCK_TESTS_WAITING\"\nexec sleep 300\n".write(toFile: hook, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
+        try installScript("#!/bin/sh\ntouch \"$INDEX_LOCK_TESTS_WAITING\"\nexec sleep 300\n", atPath: hook)
         Git.run(["config", "core.fsmonitor", hook], in: sub)
         return root
     }

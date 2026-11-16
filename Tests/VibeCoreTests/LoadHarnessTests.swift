@@ -363,7 +363,7 @@ import Testing
         let bin = temp.url("fake-swift"), log = temp.url("swift-args"), homes = temp.url("build-homes")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let swift = bin.appendingPathComponent("swift")
-        try """
+        try installScript("""
         #!/bin/bash
         echo "$*" >> '\(log.path)'
         echo "$HOME|$CFFIXED_USER_HOME" > '\(homes.path)'
@@ -372,8 +372,7 @@ import Testing
         echo 'fixture.swift:1: error: forced compiler failure' >&2
         exit 1
 
-        """.write(to: swift, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swift.path)
+        """, at: swift)
         let fake = try fakeMac(temp.url("load"))
         func build(_ environment: [String: String?]) throws -> String {
             try? FileManager.default.removeItem(at: log)
@@ -472,10 +471,7 @@ import Testing
                 """),
             (bin.appendingPathComponent("vibeswitcher-mcp"), "#!/bin/bash\necho 'FooTests/a() failed'\n"),
         ] + bundle
-        for (url, text) in scripts {
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
-        }
+        for (url, text) in scripts { try installScript(text, at: url) }
         let record = copy.appendingPathComponent(".build/test-under-load/result.json")
         let fake = try fakeMac(temp.url("load"))
         func run() async throws -> (output: String, result: [String: Any]) {

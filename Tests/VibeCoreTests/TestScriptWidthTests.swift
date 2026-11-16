@@ -96,8 +96,7 @@ struct TestScriptWidthTests {
         ]
         for (name, text) in fakes {
             let file = bin.appendingPathComponent(name)
-            try text.write(to: file, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+            try installScript(text, at: file)
         }
         let environment = Self.environment([
             "PATH": bin.path + ":/usr/bin:/bin:/usr/sbin:/sbin",

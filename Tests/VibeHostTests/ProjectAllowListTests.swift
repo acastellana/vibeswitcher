@@ -210,8 +210,7 @@ struct ProjectAllowListTests {
         let plain = try folder("plain")
         let bin = try folder("bin")
         let marker = bin + "/git-ran"
-        FileManager.default.createFile(atPath: bin + "/git", contents: Data("#!/bin/sh\ntouch '\(marker)'\nexec /usr/bin/git \"$@\"\n".utf8),
-                                       attributes: [.posixPermissions: 0o755])
+        try installScript("#!/bin/sh\ntouch '\(marker)'\nexec /usr/bin/git \"$@\"\n", atPath: bin + "/git")
         let list = try list([allowed])
 
         let folders = [allowed, real, forgedPair, forgedFile, plain]

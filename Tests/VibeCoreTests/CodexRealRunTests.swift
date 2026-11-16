@@ -56,8 +56,7 @@ struct CodexRealRunTests {
         let worktree = try Worktrees.open(root: root, slug: "hello", base: "main")
         let log = temp.url("calls.jsonl").path
         let server = temp.url("stub-mcp").path
-        try ("#!/usr/bin/python3\n" + Self.stub(log: log)).write(toFile: server, atomically: true, encoding: .utf8)
-        chmod(server, 0o755)
+        try installScript("#!/usr/bin/python3\n" + Self.stub(log: log), atPath: server)
         var task = LeadTask(slug: "hello", title: "Add hello.txt", contract: LeadContract(
             goal: "hello.txt holds the line `hi`, committed on this branch.",
             acceptance: ["`git show HEAD:hello.txt` prints hi",
@@ -152,8 +151,7 @@ struct CodexRealRunTests {
         chmod(codexHome + "/auth.json", 0o600)
         let log = temp.url("calls.jsonl").path
         let server = temp.url("stub-mcp").path
-        try ("#!/usr/bin/python3\n" + Self.stub(log: log)).write(toFile: server, atomically: true, encoding: .utf8)
-        chmod(server, 0o755)
+        try installScript("#!/usr/bin/python3\n" + Self.stub(log: log), atPath: server)
         let lints = LeadPrompts.Policy.lintTests(in: worktree).joined(separator: "|")
         var task = LeadTask(slug: "checks", title: "Run the project's checks", contract: LeadContract(
             goal: "Run the project's checks below, each exactly as written, one after the other, and report what each printed.",

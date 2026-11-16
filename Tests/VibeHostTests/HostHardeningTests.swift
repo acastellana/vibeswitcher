@@ -569,12 +569,12 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let target = dir + "/elsewhere-host"
-        FileManager.default.createFile(atPath: target, contents: Data("""
+        try installScript("""
             #!/bin/sh
             case " $* " in *" --handover-probe "*) exec '\(hostLauncher)' "$@";; esac
             exec '\(hostLauncher)' "$@" --lock '\(dir)/elsewhere.lock' --parser-test-hooks
 
-            """.utf8), attributes: [.posixPermissions: 0o755])
+            """, atPath: target)
         let host = try await ServerChildHost(actions: ["call census", "handover \(target)"], usersHost: true)
         defer { host.stop() }
         let helper = try #require(await host.firstHelper(), "\(host.said)")

@@ -85,7 +85,8 @@ final class ScratchHostProcess {
     /// A script standing in for a build: `body` is its shell code.
     func script(_ name: String, _ body: String) -> String {
         let path = dir + "/" + name
-        FileManager.default.createFile(atPath: path, contents: Data("#!/bin/sh\n\(body)\n".utf8), attributes: [.posixPermissions: 0o755])
+        // Copied in by a child (`installScript`): no child another test starts holds it open for writing.
+        do { try installScript("#!/bin/sh\n\(body)\n", atPath: path) } catch { Issue.record("\(path) wasn't written: \(error)") }
         return path
     }
 

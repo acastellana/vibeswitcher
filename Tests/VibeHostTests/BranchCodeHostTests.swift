@@ -164,8 +164,7 @@ import Testing
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let team = try Team(temp)
         let hook = team.root + "/.git/hooks/post-merge"
-        try "#!/bin/sh\nsh '\(team.dir)/probe.sh'\n".write(toFile: hook, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
+        try installScript("#!/bin/sh\nsh '\(team.dir)/probe.sh'\n", atPath: hook)
         let folder = team.dir + "/mcp"
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: folder + "/a.in", contents: nil)

@@ -17,8 +17,7 @@ import Testing
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         // The project's Claude command: a script that writes what it was given and ends.
         let claude = dir.path + "/claude", given = dir.path + "/given"
-        try "#!/bin/sh\nprintf '%s\\n' \"$@\" > '\(given)'\n".write(toFile: claude, atomically: true, encoding: .utf8)
-        chmod(claude, 0o755)
+        try installScript("#!/bin/sh\nprintf '%s\\n' \"$@\" > '\(given)'\n", atPath: claude)
         let prompt = String(repeating: "Check every line, and say what you found. ", count: 600)
         let launch = try LeadLaunch.prepare(role: .worker, root: dir.path, task: "x", base: claude, prompt: prompt, start: "Go.",
                                             server: "/s", name: "worker-inline", folder: dir.appendingPathComponent("run"), cwd: dir.path,

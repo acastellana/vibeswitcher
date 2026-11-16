@@ -63,9 +63,7 @@ import Testing
         // The project's Codex command: the real CLI, with the scratch Codex home and Homebrew's node on PATH.
         let codex = dir + "/codex"
         // The session's environment is the host's: the scratch home goes in here, as the fake claude's does in WorkerToolsTests.
-        try "#!/bin/sh\nexport \(env) CODEX_HOME='\(codexHome)' PATH=\"/opt/homebrew/bin:$PATH\"\n/bin/stty -a > '\(dir)/stty.log' 2>&1; /usr/bin/env | /usr/bin/grep -E '^(TERM|COLORTERM|TERM_PROGRAM|COLUMNS|LINES|NO_COLOR)=' > '\(dir)/env.log'\nexec /opt/homebrew/bin/codex \"$@\"\n"
-            .write(toFile: codex, atomically: true, encoding: .utf8)
-        chmod(codex, 0o755)
+        try installScript("#!/bin/sh\nexport \(env) CODEX_HOME='\(codexHome)' PATH=\"/opt/homebrew/bin:$PATH\"\n/bin/stty -a > '\(dir)/stty.log' 2>&1; /usr/bin/env | /usr/bin/grep -E '^(TERM|COLORTERM|TERM_PROGRAM|COLUMNS|LINES|NO_COLOR)=' > '\(dir)/env.log'\nexec /opt/homebrew/bin/codex \"$@\"\n", atPath: codex)
         try LaunchPresets(global: [], byProject: [root: [LaunchPreset(name: "Codex", kind: .codex, command: codex)]])
             .save(to: URL(fileURLWithPath: vibe + "/presets.json"))
 

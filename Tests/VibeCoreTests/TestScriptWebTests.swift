@@ -17,13 +17,12 @@ struct TestScriptWebTests {
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: web, withIntermediateDirectories: true)
         let node = bin.appendingPathComponent("node")
-        try """
+        try installScript("""
             #!/bin/bash
             echo "ran $(basename "$1") HOME=$HOME TMPDIR=$TMPDIR"
             grep -q FAIL "$1" && { echo "assertion failed in $(basename "$1")"; exit 3; }
             exit 0
-            """.write(to: node, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: node.path)
+            """, at: node)
         for (name, text) in tests { try text.write(to: web.appendingPathComponent(name), atomically: true, encoding: .utf8) }
         return root
     }

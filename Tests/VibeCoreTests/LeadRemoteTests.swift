@@ -325,8 +325,7 @@ struct LeadRemoteTests: LeadTeamFixture {
         // ext:: URL (a command) is refused.
         let marker = scene.root + "/../ran"
         let script = scene.root + "/../upload-pack.sh"
-        try "#!/bin/sh\ntouch '\(marker)'\nexec git-upload-pack \"$@\"\n".write(toFile: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script)
+        try installScript("#!/bin/sh\ntouch '\(marker)'\nexec git-upload-pack \"$@\"\n", atPath: script)
         git(["config", "remote.origin.uploadpack", script], in: scene.root)
         _ = try pushed(scene, "c.txt", "sea\n", message: "Remote two")
         let again = lead.call("fetch_remote", [:])

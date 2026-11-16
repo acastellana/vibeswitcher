@@ -174,12 +174,11 @@ struct TestLockTests {
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let asked = worktree.appendingPathComponent("asked").path
         let swift = bin.appendingPathComponent("swift")
-        try """
+        try installScript("""
             #!/bin/bash
             echo "$* | $\(TestLock.coresVariable)" > \(RecentProjects.shellQuote(asked))
 
-            """.write(to: swift, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swift.path)
+            """, at: swift)
         let q = RecentProjects.shellQuote
         // PATH after the login shell's startup files (path_helper puts the system's first); the lock's folder as the
         // merge's, so vs-heavy knows the held slot as one of its own.
@@ -600,9 +599,8 @@ struct TestLockTests {
         let locks = url("heavy-locks").path
         let home = url("getconf-home"), bin = url("failing-sysctl"), go = url("go")
         for folder in [home, bin] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-        try "#!/bin/sh\necho 'sysctl: sysctl fmt -1 1024 1: Operation not permitted' >&2\nexit 1\n"
-            .write(to: bin.appendingPathComponent("sysctl"), atomically: true, encoding: .utf8)
-        chmod(bin.appendingPathComponent("sysctl").path, 0o755)
+        try installScript("#!/bin/sh\necho 'sysctl: sysctl fmt -1 1024 1: Operation not permitted' >&2\nexit 1\n",
+                          at: bin.appendingPathComponent("sysctl"))
         let probe = Process()
         probe.executableURL = URL(fileURLWithPath: "/usr/bin/getconf")
         probe.arguments = ["_NPROCESSORS_ONLN"]
@@ -705,11 +703,8 @@ struct TestLockTests {
             sleep "${SWIFT_SLEEP:-1}"
             echo "$RUN $1 end" >> \(RecentProjects.shellQuote(log))
             """
-        try swift.write(to: bin.appendingPathComponent("swift"), atomically: true, encoding: .utf8)
-        try "#!/bin/bash\nexit 0\n".write(to: bin.appendingPathComponent("node"), atomically: true, encoding: .utf8)
-        for name in ["swift", "node"] {
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent(name).path)
-        }
+        try installScript(swift, at: bin.appendingPathComponent("swift"))
+        try installScript("#!/bin/bash\nexit 0\n", at: bin.appendingPathComponent("node"))
         return (bin.path, log)
     }
 

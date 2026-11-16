@@ -37,7 +37,7 @@ struct PassageContractTests {
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try help.write(to: URL(fileURLWithPath: path.path + ".help"), atomically: true, encoding: .utf8)
         let calls = RecentProjects.shellQuote(path.path + ".calls")
-        try """
+        try installScript("""
             #!/bin/bash
             \(needsCli ? "[[ ${1:-} == cli ]] || { echo \"$*\" >>\(calls); exit 98; }; shift" : "")
             case ${1:-} in
@@ -46,8 +46,7 @@ struct PassageContractTests {
                 *) echo "$*" >>\(calls); exit 99 ;;
             esac
 
-            """.write(to: path, atomically: true, encoding: .utf8)
-        chmod(path.path, 0o755)
+            """, at: path)
     }
 
     /// Runs the script with `arguments`; its PATH is the system's folders after `bin` (when given), and its app
@@ -218,8 +217,7 @@ struct PassageContractTests {
         // A help that exits 1.
         let failing = scratch.url("failing").appendingPathComponent("passage")
         try FileManager.default.createDirectory(at: failing.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try "#!/bin/bash\n[[ $1 == version ]] && { echo 'passage 1.0'; exit 0; }\necho 'passage: no' >&2\nexit 1\n".write(to: failing, atomically: true, encoding: .utf8)
-        chmod(failing.path, 0o755)
+        try installScript("#!/bin/bash\n[[ $1 == version ]] && { echo 'passage 1.0'; exit 0; }\necho 'passage: no' >&2\nexit 1\n", at: failing)
         let failed = try check(["--passage", failing.path])
         #expect(failed.status == 1)
         #expect(driftLines(failed.out).contains("DRIFT  help: `passage help` exited 1: passage: no"), "\(failed.out)")

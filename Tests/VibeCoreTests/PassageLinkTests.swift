@@ -69,8 +69,7 @@ struct PassageLinkTests {
                 esac
                 exit 2
                 """
-            try script.write(toFile: executable, atomically: true, encoding: .utf8)
-            chmod(executable, 0o755)
+            try installScript(script, atPath: executable)
         }
 
         func file(_ name: String) -> URL { folder.appendingPathComponent(name) }

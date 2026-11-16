@@ -11,8 +11,7 @@ struct PassageCommandTests {
     /// An executable file at `path` (folders made).
     func file(_ path: URL) throws {
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try "#!/bin/sh\nexit 0\n".write(to: path, atomically: true, encoding: .utf8)
-        chmod(path.path, 0o755)
+        try installScript("#!/bin/sh\nexit 0\n", at: path)
     }
 
     @Test func aPathSetInSettingsIsRunAsWhatItPointsAt() throws {
