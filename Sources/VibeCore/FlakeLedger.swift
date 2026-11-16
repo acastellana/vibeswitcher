@@ -19,10 +19,10 @@ public struct LeadFlakeFix: Codable, Equatable, Sendable {
 }
 
 /// A merge whose first test run failed, so its failing tests (or the whole command) ran once more (`MergeRerun`):
-/// what reran and whether it passed, and the paired run of the failing tests on the base it was rebased onto. Record
-/// only: none of this decides a merge. It's what the lead decides from whether a filtered rerun is a coin flip (it
-/// passes more often than a whole one) and whether a branch's red test is the branch's (green on the base) or flaky
-/// (red there too).
+/// what reran and whether it passed, and, after a filtered rerun that failed, the run of the tests it still failed on
+/// the base it was rebased onto: green there, the branch's failure; red there too, the merge went ahead on them
+/// (`redOnBase`) and each got a task to fix it. The lead reads from it whether a filtered rerun is a coin flip (it
+/// passes more often than a whole one) and how often main's own red tests come up in merges.
 public struct LeadRerunRecord: Codable, Equatable, Sendable {
     /// The paired base run's outcome.
     public enum Base: String, Codable, Sendable {
@@ -54,9 +54,12 @@ public struct LeadRerunRecord: Codable, Equatable, Sendable {
     public var baseCommit: String?
     public var base: Base?
     public var baseNote: String?
+    /// The tests its filtered rerun still failed that failed on the base too, the rest of its checks passing without
+    /// them: the merge went ahead on them (`Worktrees.Check.passedRedOnBase`). Nil when it didn't.
+    public var redOnBase: [String]?
 
     public init(task: String, commit: String, at: Double, tests: [String], filtered: Bool, passed: Bool, load: Double? = nil,
-                baseCommit: String? = nil, base: Base? = nil, baseNote: String? = nil) {
+                baseCommit: String? = nil, base: Base? = nil, baseNote: String? = nil, redOnBase: [String]? = nil) {
         self.task = task
         self.commit = commit
         self.at = at
@@ -67,6 +70,7 @@ public struct LeadRerunRecord: Codable, Equatable, Sendable {
         self.baseCommit = baseCommit
         self.base = base
         self.baseNote = baseNote
+        self.redOnBase = redOnBase
     }
 }
 
@@ -156,7 +160,8 @@ public struct FlakeLedger: Equatable, Sendable {
     }
 
     /// For status: the merges that went to a rerun within `flakeWindow` of `now`, how often a filtered rerun passed
-    /// against a whole one, and the paired base runs' results; nil when none went to a rerun.
+    /// against a whole one, the base runs' results, and the merges that went ahead on tests red on the base too; nil
+    /// when none went to a rerun.
     public func rerunLine(now: Double) -> String? {
         let recent = reruns.filter { now - $0.at <= LeadBoard.flakeWindow }
         guard !recent.isEmpty else { return nil }
@@ -168,10 +173,12 @@ public struct FlakeLedger: Equatable, Sendable {
         let filtered = recent.filter(\.filtered), whole = recent.filter { !$0.filtered }
         let red = recent.filter { $0.base == .red }.count, green = recent.filter { $0.base == .green }.count
         let unpaired = recent.count - red - green
-        return "Merge reruns in the last \(Int(LeadBoard.flakeWindow / 86_400)) days (record only, nothing here decides a merge): \(recent.count) merge\(recent.count == 1 ? "" : "s") went to a rerun, \(recent.filter(\.passed).count) passed it. "
+        let ahead = recent.filter { $0.redOnBase != nil }.count
+        return "Merge reruns in the last \(Int(LeadBoard.flakeWindow / 86_400)) days: \(recent.count) merge\(recent.count == 1 ? "" : "s") went to a rerun, \(recent.filter(\.passed).count) passed it. "
             + "Filtered reruns (the failing tests only): \(rate(filtered)); whole reruns: \(rate(whole)). "
-            + "The failing tests run once on the base: branch red/base green (the branch's) \(green), red on the base too (flaky) \(red)"
-            + (unpaired > 0 ? ", not paired \(unpaired) (skipped, hung, or tests the base lacks)" : "") + "."
+            + "The failing tests run once on the base: branch red/base green (the branch's) \(green), red on the base too \(red)"
+            + (ahead > 0 ? " (\(ahead) merged on it, each such test given a task to fix it)" : "")
+            + (unpaired > 0 ? ", not paired \(unpaired) (passed its rerun, skipped, hung, or tests the base lacks)" : "") + "."
     }
 }
 

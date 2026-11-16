@@ -628,16 +628,29 @@ public enum AppHealth {
         return "\(part): \(word)"
     }
 
-    /// Whether `text` has `word` with no letter right before or after it ("error", not "apierror" or "errors").
+    /// Whether `text` has `word` as a word of its own, not inside a name: nothing that joins it to a name right before or
+    /// after it ("error", not "apierror", "errors", the task "a-failed-merge-run", "error_log" or "build.failed.log").
     static func contains(_ text: String, word: String) -> Bool {
         var start = text.startIndex
         while let range = text.range(of: word, range: start..<text.endIndex) {
-            let before = range.lowerBound == text.startIndex ? nil : text[text.index(before: range.lowerBound)]
-            let after = range.upperBound == text.endIndex ? nil : text[range.upperBound]
-            if !(before?.isLetter ?? false), !(after?.isLetter ?? false) { return true }
+            let before = range.lowerBound == text.startIndex ? nil : text.index(before: range.lowerBound)
+            let joinedBefore = before.map { joins(text, at: $0, toward: text.startIndex) } ?? false
+            let joinedAfter = range.upperBound != text.endIndex && joins(text, at: range.upperBound, toward: text.index(before: text.endIndex))
+            if !joinedBefore, !joinedAfter { return true }
             start = range.upperBound
         }
         return false
+    }
+
+    /// Whether the character at `index`, next to a word, makes the word part of a name: a letter or digit, a joiner of
+    /// slugs and paths ("-", "_", "/"), or a dot with a letter or digit beyond it (a file name's, not a sentence's end).
+    /// `toward` is the end of the text away from the word.
+    private static func joins(_ text: String, at index: String.Index, toward end: String.Index) -> Bool {
+        let character = text[index]
+        if character.isLetter || character.isNumber || "-_/".contains(character) { return true }
+        guard character == ".", index != end else { return false }
+        let beyond = text[end < index ? text.index(before: index) : text.index(after: index)]
+        return beyond.isLetter || beyond.isNumber
     }
 
     // MARK: The files
@@ -794,6 +807,9 @@ public enum AppHealth {
         /// Freezes, error lines and failure notices counted by cause (see `AppHealthCauses.swift`, `causes`); optional
         /// so a state file from before it still decodes.
         public var causeLog: AppHealth.Causes?
+        /// How many looks the day's trend waited for the app's sleep ledger to reach the day's end (see `look`); nil
+        /// while it doesn't wait.
+        public var sleepWaits: Int?
 
         public struct Told: Codable, Equatable, Sendable {
             public var at: Double
@@ -854,19 +870,33 @@ public enum AppHealth {
         public func nextLook(now: Date) -> Date {
             var next = Calendar.current.startOfDay(for: now).addingTimeInterval(86_400 + 60)
             if let opened { next = min(next, Date(timeIntervalSince1970: opened + AppHealth.window)) }
-            if !pending.isEmpty { next = min(next, now.addingTimeInterval(5 * 60)) }
+            if !pending.isEmpty || sleepWaits != nil { next = min(next, now.addingTimeInterval(5 * 60)) }
             return next
         }
 
         /// What's due now: the digest under way once `window` has passed since it opened, and a day's trend once a
-        /// later day starts. Each goes into `pending`; `AppHealthWatcher` hands those to the lead.
-        public mutating func look(now: Date, folders: Folders, memory: Memory?) {
+        /// later day starts. Each goes into `pending`; `AppHealthWatcher` hands those to the lead. `sleep`: what the
+        /// Mac's sleep paused (`SleepCost`), read for the trend.
+        public mutating func look(now: Date, folders: Folders, memory: Memory?, sleep: () -> SleepCost? = { nil }) {
             if let opened, now.timeIntervalSince1970 >= opened + AppHealth.window {
                 if let digest = digest(now: now, folders: folders) { pending.append(digest) }
             }
             let today = Self.day(now)
+            var waits = false
+            let cost = lookedOn.map { $0 < today } == true ? sleep() : nil
             if let last = lookedOn, last < today {
-                if let trend = trend(of: last, now: now, memory: memory) {
+                // The sleep ledger is the app's, written after the look that finds a sleep: a Mac that slept through
+                // midnight wakes with this look first. The day's trend waits until the ledger has seen the day end
+                // (at most `sleepWaitLimit` looks, 5 min apart); a ledger no look wrote doesn't hold it.
+                if let seen = cost?.seen, let end = Self.start(of: Self.day(last, offset: 1) ?? today), seen < end.timeIntervalSince1970,
+                   (sleepWaits ?? 0) < Self.sleepWaitLimit {
+                    sleepWaits = (sleepWaits ?? 0) + 1
+                    waits = true
+                }
+            }
+            if let last = lookedOn, last < today, !waits {
+                sleepWaits = nil
+                if let trend = trend(of: last, now: now, memory: memory, sleep: cost) {
                     pending.append(trend)
                     // Its repeats are told now.
                     for key in told.keys { told[key]?.repeats = 0 }
@@ -874,7 +904,7 @@ public enum AppHealth {
                 // What keeps coming back, as tasks: one proposal per cause, in one message.
                 if causeLog != nil, let proposals = causes.propose(closing: last) { pending.append(proposals) }
             }
-            lookedOn = today
+            if !waits { lookedOn = today }
             prune(now: now)
             // A lead that never takes them doesn't make them pile up.
             pending = Array(pending.suffix(10))
@@ -1004,14 +1034,16 @@ public enum AppHealth {
                 + (crash.frames.isEmpty ? "none recorded" : crash.frames.joined(separator: " < "))
         }
 
-        /// A day's trend: its freezes against the 7 days before, crashes, error lines, memory now, and the repeats
-        /// counted since they were told. Nil on a quiet day (none of those, and memory not growing fast).
-        func trend(of day: String, now: Date, memory: Memory?) -> String? {
+        /// A day's trend: its freezes against the 7 days before, crashes, error lines, memory now, the repeats
+        /// counted since they were told, and each project's in-flight task time that fell in sleep (`sleep`). Nil on a
+        /// quiet day (none of those, and memory not growing fast).
+        func trend(of day: String, now: Date, memory: Memory?, sleep: SleepCost? = nil) -> String? {
             let had = days[day] ?? Day()
             let growth = memory?.growth(now: now)
             let growing = growth.map { $0 >= AppHealth.worryingGrowth } ?? false
             let repeats = told.filter { $0.value.repeats > 0 }.sorted { $0.key < $1.key }
-            guard !had.quiet || growing || !repeats.isEmpty else { return nil }
+            let slept = sleep?.digestText(day: day)
+            guard !had.quiet || growing || !repeats.isEmpty || slept != nil else { return nil }
             let before = (1...7).compactMap { Self.day(day, offset: -$0) }.map { days[$0]?.hangs ?? 0 }
             let average = Double(before.reduce(0, +)) / 7
             var parts = ["VibeSwitcher's day, \(day), from its own logs (read by VibeSwitcher itself, no model): "
@@ -1033,6 +1065,7 @@ public enum AppHealth {
             if !repeats.isEmpty {
                 parts.append("Seen again since told, not told again: " + repeats.map { "\($0.key) ×\($0.value.repeats) (first \($0.value.first))" }.joined(separator: "; ") + ".")
             }
+            if let slept { parts.append(slept) }
             return Redaction.secrets(in: parts.joined(separator: " "))
         }
 
@@ -1051,6 +1084,17 @@ public enum AppHealth {
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.dateFormat = "yyyy-MM-dd"
             return formatter.string(from: date)
+        }
+
+        /// How many looks a day's trend waits for the sleep ledger: an hour's.
+        static let sleepWaitLimit = 12
+
+        /// The start of `day` (yyyy-MM-dd), this Mac's time.
+        static func start(of day: String) -> Date? {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.date(from: day).map { Calendar.current.startOfDay(for: $0) }
         }
 
         /// The day `offset` days from `day`.

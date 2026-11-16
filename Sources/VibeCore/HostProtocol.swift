@@ -188,6 +188,9 @@ public struct HostSession: Codable, Equatable, Sendable, Identifiable {
     /// What the program last reported over OSC 7501 (its own record, not its tasks'); nil when it hasn't, or cleared it.
     /// Optional, so apps and hosts from before it still decode each other's sessions.
     public var programStatus: ProgramStatus?
+    /// A Run-card shell's command ended (`CommandCapture`, `ShellTidy.reportsOutcome`): its status and the last of its
+    /// output. Nil while it runs, and for every other session. Optional, as `programStatus`.
+    public var commandEnd: CommandEnd?
 
     public var isLive: Bool { exit == nil }
 

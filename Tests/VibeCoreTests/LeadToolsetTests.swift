@@ -177,6 +177,7 @@ final class FakeSeat: LeadRuntime {
     }
     var server: String { shared.server }
     func claudeCommand(root: String) -> String { shared.claudeCommand(root: root) }
+    func codexCommand(root: String) -> String { shared.codexCommand(root: root) }
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
         try shared.spawn(cwd: cwd, command: command, env: env, label: label, agent: agent)
     }

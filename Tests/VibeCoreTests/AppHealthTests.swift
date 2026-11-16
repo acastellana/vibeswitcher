@@ -615,6 +615,29 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(watch.pending.contains(where: AppHealth.wakes))
     }
 
+    /// A line naming a task whose slug holds an error word ("a-failed-merge-run") isn't an error line: the word is part of
+    /// a name, not what the line says. A real failure line of the same part still counts.
+    @Test func errorWordsInsideNamesAreNotErrorLines() throws {
+        let named = ["16:29:22.734 role sweep: ending the worker on a-failed-merge-run (vibeswitcher, done), session 28677AD0 pid 72106",
+                     "16:29:23.001 role sweep: ending the worker on devpreviewtests-fail-in (vibeswitcher, done), session 1A2B3C4D pid 72107",
+                     "16:29:24.000 lead: opened /Users/someone/project/error_log.txt and run-timed-out.json",
+                     "16:29:25.000 lead: read build.failed.log"]
+        for line in named { #expect(AppHealth.errorKind(line) == nil, "\(line)") }
+        let folders = try folders()
+        var watch = AppHealth.Watch()
+        watch.saw(lines: named, now: start)
+        #expect(watch.errors.isEmpty, "\(watch.errors)")
+        watch.look(now: start.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        #expect(!watch.pending.contains { $0.contains("role sweep: failed") }, "\(watch.pending)")
+        // The same part's real failure, also at a sentence's end and before a colon, still counts.
+        #expect(AppHealth.errorKind("16:30:00.000 role sweep: ending the worker on a-failed-merge-run failed: no such process") == "role sweep: failed")
+        #expect(AppHealth.errorKind("16:30:00.000 role sweep: the kill failed.") == "role sweep: failed")
+        #expect(AppHealth.errorKind("16:30:00.000 role sweep: (failed)") == "role sweep: failed")
+        watch.pending = []
+        watch.saw(lines: ["16:30:00.000 role sweep: ending the worker on a-failed-merge-run failed: no such process"], now: start.addingTimeInterval(3600))
+        #expect(watch.errors == ["role sweep: failed": 1])
+    }
+
     @Test func repeatedCrashesStayFyiUntilTheRepeatWindowExpires() throws {
         let folders = try folders()
         var watch = AppHealth.Watch()

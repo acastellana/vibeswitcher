@@ -429,6 +429,9 @@ struct SettingsNoteTests {
         #expect(try help(.usageLimits).contains("\(Int(AccountUsage.threshold)) %"))
         #expect(SettingsNote.usageLimits.text.contains("still stops"))
         #expect(SettingsNote.power.text.contains("nothing new starts"))
+        // What keeps work running overnight, and what doesn't whatever Keep Awake says.
+        #expect(try help(.power).contains("on AC power with the lid open, or with an external display connected"))
+        #expect(try help(.power).contains("A closed lid sleeps whatever this setting says"))
         #expect(try description("battery-hold").contains("start no new work and merge nothing"))
         // What only you can do.
         #expect(SettingsNote.shells.text.contains("nothing runs until you press Run") && SettingsNote.shells.text.contains("any command as you"))

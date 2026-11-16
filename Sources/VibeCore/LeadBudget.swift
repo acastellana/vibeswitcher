@@ -29,7 +29,13 @@ public enum LeadBudget {
     /// in line for the Mac-wide test and build lock; nor does a session that ended, or quit, or stopped on an API
     /// error. Nor an audit: its task is in review, not running.
     public static func counts(_ seen: LeadWitness.Seen, task: LeadTask) -> Bool {
-        guard task.status == .running, seen.live, !seen.agentQuit, seen.apiError == nil, seen.usageLimit == nil, seen.lockWait == nil,
+        task.status == .running && works(seen)
+    }
+
+    /// Whether a session's time counts as work, whatever its task (the vault counts small_task_min's time from these,
+    /// mapped to tasks by its own records: `LeadVault.noteWorking`).
+    public static func works(_ seen: LeadWitness.Seen) -> Bool {
+        guard seen.live, !seen.agentQuit, seen.apiError == nil, seen.usageLimit == nil, seen.lockWait == nil,
               seen.status != .needsInput else { return false }
         switch seen.activity {
         case .needsInput?, .apiError?, .usageLimit?: return false

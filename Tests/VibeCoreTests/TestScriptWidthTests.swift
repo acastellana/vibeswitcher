@@ -1,9 +1,10 @@
 import Foundation
 import Testing
+import VibeCore
 
 /// scripts/test.sh gives Swift Testing its width (SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH) on the slot vs-heavy
-/// gives the run: at most VS_HEAVY_CORES, its share of the cores, as the build is; without one, a test a core of the
-/// whole Mac (a caller's own width kept) as before. With the whole Mac's width, 3 boosted slots each ran up to 12 tests
+/// gives the run: at most VS_HEAVY_CORES, its width (the cores free when it starts, at least the slot's share), as the
+/// build is; without one, a test a core of the whole Mac (a caller's own width kept) as before. With the whole Mac's width, 3 boosted slots each ran up to 12 tests
 /// at once on 12 cores (2026-11-08: load 100–225, the app froze about 40 times). Driven through `scripts/test.sh
 /// --width` (no slot), and through a whole run with a fake `swift` and `node` first on PATH and its slot in a scratch
 /// lock folder: no build, no real slot taken.
@@ -17,7 +18,8 @@ struct TestScriptWidthTests {
     static func environment(_ extra: [String: String]) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         for key in [widthKey, "VS_HEAVY_CORES", "VIBESWITCHER_TEST_LOCK", "VIBESWITCHER_TEST_LOCK_DIR",
-                    "VIBESWITCHER_HEAVY_SLOTS", "VIBESWITCHER_HEAVY_NCPU"] {
+                    "VIBESWITCHER_HEAVY_SLOTS", "VIBESWITCHER_HEAVY_NCPU",
+                    "VIBESWITCHER_HEAVY_CORES_FOR", "VIBESWITCHER_HEAVY_LOAD"] {
             environment[key] = nil
         }
         return environment.merging(extra) { $1 }
@@ -73,8 +75,10 @@ struct TestScriptWidthTests {
     }
 
     /// The whole run, its slot taken by the repository's vs-heavy in a scratch lock folder (12 cores, 3 slots: a share
-    /// of 4): swift test gets a width of 4, its share, not 12.
-    @Test func aRunsSwiftTestGetsItsSlotsShare() async throws {
+    /// of 4), the load injected: on a Mac as loaded as it has cores swift test gets a width of 4, its share, not 12; on a
+    /// calm one (load 2.5, no other slot held), the 9 cores free when it started (2026-11-08 to 11-12 a merge on a calm
+    /// Mac ran at the share alone: 15 min instead of 8). The run's output says the width.
+    @Test(arguments: [("12", 4), ("2.5", 9)]) func aRunsSwiftTestGetsTheCoresFreeAtLeastItsSlotsShare(load: String, width: Int) async throws {
         let root = temp.url("width-run")
         let bin = root.appendingPathComponent("bin"), locks = root.appendingPathComponent("locks")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
@@ -97,10 +101,15 @@ struct TestScriptWidthTests {
             "VIBESWITCHER_TEST_LOCK_DIR": locks.path,
             "VIBESWITCHER_HEAVY_NCPU": "12",
             "VIBESWITCHER_HEAVY_SLOTS": "3",
+            "VIBESWITCHER_HEAVY_LOAD": load,
+            // A test a core of these 12, whatever this Mac has.
+            Self.widthKey: "12",
         ])
         let (_, output) = try await Self.run(["--filter", "Nothing"], environment: environment)
         // Only what swift test was given is judged: the rest of the run (the security tests' host) depends on a build.
         let lines = output.components(separatedBy: "\n").filter { $0.hasPrefix("swift test:") }
-        #expect(lines == ["swift test: width=4 cores=4"], "\(output)")
+        #expect(lines == ["swift test: width=\(width) cores=\(width)"], "\(output)")
+        #expect(output.contains("vs-heavy: VS_HEAVY_CORES \(width) of 12 cores: "), "\(output)")
+        #expect(MergeSample.cores(in: output) == width, "\(output)")
     }
 }

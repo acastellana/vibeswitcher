@@ -69,15 +69,15 @@ struct WorkingPolicyTests: LeadTeamFixture {
         let workflow = LeadWorkflow.parse("---\ntest_command: cargo test\n---")
         let worker = LeadPrompts.worker(task: Self.task, root: "/r/tge", workflow: workflow)
         let verifier = LeadPrompts.verifier(task: Self.task, root: "/r/tge", workflow: workflow)
-        for prompt in [worker, verifier] {
-            #expect(prompt.contains(LeadPrompts.heavyWork))
-            #expect(prompt.contains("`vs-heavy <command>`") && prompt.contains("full test suite or a release build"))
-        }
+        #expect(verifier.contains(LeadPrompts.heavyWork))
+        #expect(verifier.contains("`vs-heavy <command>`") && verifier.contains("full test suite or a release build"))
+        // The worker has it once, in its policy section's rule (vs-heavy says itself when it waits or stops a command).
+        #expect(worker.contains(WorkingPolicy.heavyJobs) && !worker.contains(LeadPrompts.heavyWork))
     }
 
     /// The boost release (2026-11-01): the worst load spikes came from heavy jobs outside the Mac-wide slots (an
     /// hour-long Stryker run, VMs, simulations). Every lead, worker and verifier gets the rule in its policy section,
-    /// whatever the user's own policy says, and workers and verifiers in their heavy-work brief.
+    /// whatever the user's own policy says, and verifiers in their heavy-work brief too.
     @Test func everyRoleIsToldLongOrManyCoreJobsRunUnderVsHeavy() {
         let workflow = LeadWorkflow.parse("---\ntest_command: npm test\n---")
         let root = "/Users/someone/dev/wallet-manager"

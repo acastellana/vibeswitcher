@@ -10,7 +10,8 @@ import Foundation
 /// asking session's chat with the folder and the exact command; nothing starts until the user presses Run there (or
 /// Settings › Agents lets agents open shells without asking). Run starts an ordinary New Shell session in that folder,
 /// its shell given the command at launch (`spawnRequest`), never typed into it. What happened goes back to the asking
-/// session as a message.
+/// session as a message (`message`), and once the command ends, how it ended: its exit status, how long it ran and the
+/// last lines of its output, capped and redacted (`ending`, from what the session host captured: `CommandCapture`).
 public struct ShellRequest: Codable, Equatable, Sendable {
     public static let format = "vs-shell-request v1"
     /// The request file at most, the command included.
@@ -134,8 +135,11 @@ public enum ShellAsk {
         requests with vs-wallet). A card in this session's chat shows the folder and the exact command; nothing runs
         until the user presses Run there (unless they let agents open shells without asking, in Settings › Agents).
         The words after -- are joined with spaces into one shell line, run by the user's login shell, which stays open
-        as an interactive shell when the command ends. What happens (started, with the new session's name; declined;
-        expired after 30 minutes) comes to this session as a message.
+        as an interactive shell when the command ends: quoting inside a word is lost, so give a line that needs quotes
+        as one argument (vs-shell run -- "bash -c 'make && make install'"); a word the shell would split or read again
+        is warned about. What happens (started, with the new session's name; declined; expired after 30 minutes) comes
+        to this session as a message, and when the command ends, another with its exit status, how long it ran and the
+        last lines of its output (up to 40 lines, secrets masked).
 
           --cwd     the folder to start in (relative to this one); it must exist
           --label   a name for the new session (up to 80 characters)
@@ -187,8 +191,9 @@ public enum ShellAsk {
                 throw Refusal("VibeSwitcher's session host didn't stamp the request (\(error))")
             }
             try file(request, stamp: WalletStamp(session: session, digest: digest, seal: seal), in: folder)
-            let then = "What happens (started, with the new session's name; declined; expired) will come to this session as a message; "
-                + "don't file it again."
+            let then = "What happens (started, with the new session's name; declined; expired) will come to this session as a message, "
+                + "and when the command ends, its exit status and the last lines of its output; don't file it again."
+                + (splitWarning(command).map { "\n\n" + $0 } ?? "")
             if atOnce {
                 return (0, "Filed shell request \(request.id). The user lets agents open shells without asking, so VibeSwitcher starts it "
                            + "in a new shell session in a moment; its card in this session's chat records it. \(then)", "")
@@ -201,6 +206,26 @@ public enum ShellAsk {
         } catch {
             return (1, "", "vs-shell: refused: \(error)")
         }
+    }
+
+    /// Characters a shell reads in a word: a word holding one, joined with the others by spaces, isn't one word any more.
+    static let shellReads = Set(" \t\n;&|<>()$`\\\"'*?")
+
+    /// The warning for words the user's shell would split or read again once joined into one line (user report
+    /// 2026-11-12: `vs-shell run -- bash -c 'git log -1 --oneline && …'` ran `bash -c git log …`, and git printed its
+    /// usage); nil when there's nothing to warn of. One word alone is the whole line, as meant.
+    static func splitWarning(_ words: [String]) -> String? {
+        guard words.count > 1 else { return nil }
+        let read = words.enumerated().filter { $0.element.contains(where: shellReads.contains) }
+        guard !read.isEmpty else { return nil }
+        let line = words.joined(separator: " ")
+        let meant = words.map { word in word.contains(where: shellReads.contains) ? RecentProjects.shellQuote(word) : word }.joined(separator: " ")
+        let which = read.map { "word \($0.offset + 1) (`\($0.element.count > 60 ? String($0.element.prefix(60)) + "…" : $0.element)`)" }
+            .joined(separator: ", ")
+        return "Warning: \(which) holds spaces, quotes or characters the shell reads. vs-shell joins the words with spaces into one "
+            + "line, so the user's shell reads them again, and the card runs exactly `\(line)`. If you meant each word as one word, "
+            + "ask the user to decline this card and file it again with the whole line as one argument, quoted for the shell: "
+            + "vs-shell run -- \(RecentProjects.shellQuote(meant))"
     }
 
     /// `path` (relative to `cwd`) as an existing folder's real path, symbolic links resolved; refused otherwise.
@@ -272,8 +297,14 @@ public enum ShellAsk {
         public var why: String?
         /// The asking session was told (or is gone, so no one can be).
         public var told: Bool
+        /// Started by a build that tells the asker how the command ended: false until it's told (or the asker is
+        /// gone), then true. Nil for every other answer, and a start from before (never followed).
+        public var endTold: Bool?
+        /// Its card was dismissed while the end is still to be told: the files stay until it is (`endTold`).
+        public var dismissed: Bool?
 
-        public init(state: State, at: Date, auto: Bool = false, shell: String? = nil, name: String? = nil, why: String? = nil, told: Bool = false) {
+        public init(state: State, at: Date, auto: Bool = false, shell: String? = nil, name: String? = nil, why: String? = nil, told: Bool = false,
+                    endTold: Bool? = nil) {
             self.state = state
             self.at = at.timeIntervalSince1970
             self.auto = auto
@@ -281,7 +312,11 @@ public enum ShellAsk {
             self.name = name
             self.why = why
             self.told = told
+            self.endTold = endTold
         }
+
+        /// The command's end is still to be told to the asker.
+        public var awaitsEnd: Bool { state == .started && endTold == false }
     }
 
     static func answerFile(_ id: String, in folder: URL) -> URL { folder.appendingPathComponent(".\(id).answer") }
@@ -304,7 +339,8 @@ public enum ShellAsk {
     /// runs it, then stays open as an interactive shell (`keepShell`). The command is never typed into the terminal,
     /// nor pasted into the shell's line: `eval` of the variable runs it as one whole line, whatever it ends with.
     ///
-    /// After it the line tells the terminal how the command ended (`ShellTidy.report`): the host keeps that with the
+    /// Before the command the line tells the terminal it starts (`ShellTidy.start`), and after it how it ended, with its
+    /// exit status (`ShellTidy.report`): the host keeps the output between, its end (`CommandCapture`), and that with the
     /// session, and a shell whose command went well and that nobody uses leaves by itself (`ShellTidy`).
     public static func spawnRequest(_ request: ShellRequest, cols: Int = 120, rows: Int = 36) -> SpawnRequest {
         SpawnRequest(cwd: request.cwd, command: "\(ShellTidy.launchLine) \(ShellTidy.report)", env: [commandVariable: request.command],
@@ -316,9 +352,52 @@ public enum ShellAsk {
         request.label.isEmpty ? "Shell" : "Shell: \(request.label)"
     }
 
+    static func head(_ request: ShellRequest) -> String {
+        "Shell request \(request.id) (`\(request.command.count > 120 ? String(request.command.prefix(120)) + "…" : request.command)` in \(request.cwd))"
+    }
+
+    /// What the asking session hears once the command of a started request ended, from its shell session as the host
+    /// has it (`session`; nil when the host no longer has it): nil while the command runs. Its exit status, how long it
+    /// ran, and the last lines it printed (`CommandEnd.tail`, capped by the host, secrets masked here); what wasn't
+    /// captured is said, never guessed.
+    public static func ending(_ request: ShellRequest, _ answer: Answer, session: HostSession?) -> String? {
+        let head = head(request), name = "\"\(answer.name ?? sessionLabel(request))\""
+        guard let session else {
+            return "\(head): its shell session \(name) is gone from VibeSwitcher before the command said how it ended, so its exit "
+                + "status and output weren't captured. Ask the user how it went."
+        }
+        guard let end = session.commandEnd else {
+            guard !session.isLive else { return nil }
+            let shell = session.exit.map { " (its shell exited with status \($0.status))" } ?? ""
+            return "\(head): its shell session \(name) ended\(shell) before the command said how it ended (it may have run `exit`, or "
+                + "the session was closed), so its exit status and output weren't captured. Ask the user how it went."
+        }
+        let ran = end.startedAt.map { " after \(Durations.short(end.at.timeIntervalSince($0)))" } ?? ""
+        var text: String
+        switch (end.ok, end.status) {
+        case (true, _): text = "\(head) succeeded: the command exited with status 0\(ran)."
+        case (false, let status?): text = "\(head) FAILED: the command exited with status \(status)\(ran)."
+        case (false, nil): text = "\(head) FAILED: the command exited non-zero\(ran); its exact status wasn't captured."
+        }
+        switch end.tail {
+        case nil:
+            text += " Its output wasn't captured (VibeSwitcher didn't see the command start); the user sees it in session \(name)."
+        case let tail? where tail.isEmpty:
+            text += " It printed nothing."
+        case let tail?:
+            let shown = Redaction.secrets(in: tail)
+            let lines = shown.split(separator: "\n", omittingEmptySubsequences: false).count
+            var fence = "```"
+            while shown.contains(fence) { fence += "`" }
+            text += " \(end.cut ? "The last \(lines) lines of its output (earlier ones left out" : "Its output (\(lines) line\(lines == 1 ? "" : "s")"), "
+                + "secrets masked):\n\(fence)\n\(shown)\n\(fence)"
+        }
+        return text + "\nThe shell stays open in session \(name) as an interactive shell; what's typed there afterwards isn't sent to you."
+    }
+
     /// What the asking session hears once the request is answered (nil while it's starting).
     public static func message(_ request: ShellRequest, _ answer: Answer) -> String? {
-        let head = "Shell request \(request.id) (`\(request.command.count > 120 ? String(request.command.prefix(120)) + "…" : request.command)` in \(request.cwd))"
+        let head = head(request)
         switch answer.state {
         case .starting: return nil
         case .started:
@@ -326,6 +405,7 @@ public enum ShellAsk {
                 + ", in a new shell session named \"\(answer.name ?? sessionLabel(request))\" (session \(answer.shell ?? "?")). It runs in "
                 + "that session's terminal, which stays open as a shell when the command ends; the user sees it there. A wallet "
                 + "request it files with vs-wallet shows as a card under that session."
+                + (answer.endTold == nil ? "" : " When the command ends, its exit status and the last lines of its output come to you as another message.")
         case .declined: return "\(head) was declined by the user: nothing ran."
         case .expired:
             return "\(head) expired after 30 minutes without the user's answer: nothing ran. If it's still needed, ask the user, "

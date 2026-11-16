@@ -1158,6 +1158,8 @@ final class PhoneAccess: ObservableObject {
         case .noneUp(let isText):
             guard let session = store.sessions.first(where: { $0.identity == sid }) else { return .error(409, Self.sessionChanged) }
             guard let raw else { return .error(503, "Couldn't read that tab right now.") }
+            // `status`, not `shownStatus`: a worker waiting on its lead reads as working on the phone, which then
+            // sends its quick replies; its prompt is still up, and this is what keeps them out of it.
             guard let shown = PhoneMenu.read(screen: raw, needsInput: session.status == .needsInput) else { return nil }
             return isText && PhoneMenu.takesText(shown) ? nil : .error(409, Self.menuOpen(in: session))
         }
