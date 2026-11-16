@@ -541,7 +541,10 @@ for a replay later. The vault renews none more than two hours after the seal was
 `LeadVaultV2.renewedLifeCap`), so a seal lives two hours and one life at most. And only a taking marks a seal checked
 (after which it is renewed no more): the app's (a handover) or a session holding a lead's role (its hook taking its
 inbox); a worker's or an outsider's check of the same message reads and changes nothing, so it can't end a waiting
-answer's renewal and let it arrive unverified. The security follow-ups' items 16 and 17.
+answer's renewal and let it arrive unverified. A lead's check takes only its own messages, each decided alone: the
+vault records each `.user` seal's recipient as it seals it (the session the host finds the message's agent pid in),
+and only that session's check, as a lead's, marks it; another project's lead checking the same message reads only.
+The security follow-ups' items 16, 17 and 19 (2026-11-16).
 
 **(call, new)** **Answers at rest.** A user's-voice request the server accepts is recorded in the host's vault (an
 app-only write) before it is acted on, and a restarted server takes answers and holds only from there, asking again
@@ -667,7 +670,8 @@ The engine's E8: `RestartTests.anAnswerWrittenToTheServersFilesIsNotTakenAfterAR
 `ApprovalCardTests.anApprovalCardTakesOnlyTheBaseTheUserAccepted` (item 14),
 `ApprovalCardTests.aRevisedApprovalShowsTheNewCommitsFactsAndApprovesOnlyThat` (item 15, verified),
 `UserSealTests.aLineRewrittenUnderAPostedIdKeepsNoSealAlive`, `LeadVaultV2Tests.aUserSealIsRenewedNoLongerThanItsCap`
-(item 16), `LeadVaultV2Tests.onlyATakingMarksAUserSealChecked` (item 17). The close-out review (2026-11-16):
+(item 16), `LeadVaultV2Tests.onlyATakingMarksAUserSealChecked` (item 17), `LeadVaultV2Tests.aLeadTakesOnlyTheMessagesSealedForIt`
+(item 19: another project's lead's check takes nothing). The close-out review (2026-11-16):
 `AnswerTests.anAnswerGoesToTheLeadAsTheCardShowedTheQuestionNeverAsTheBoardSays`, `AnswerTests.aHoldQuotesTheCardsQuestionAndProposal`,
 `AnswerTests.onlyAPostedQuestionsOwnTimerRunsOut`, `ApprovalCardTests.anApprovalCardDiffsAgainstTheHeadTheVaultRecords`,
 `ApprovalCardTests.anEmptyBaseBranchTakesTheBranchTheLeadStartedOn`,
@@ -1612,7 +1616,7 @@ against it. Each line says what reduces it now, if anything.
     the user's earlier sealed message back into the lead's inbox gets it delivered again, verified as the user's.
     From the engine's E6, a `.user` seal verifies false once the server retired it or 15 minutes after it was made or
     last renewed (EN-D11; the server renews the seal of each of the user's messages it still sees waiting in the
-    lead's inbox as it posted it, the vault renews none a lead's or the app's check has passed nor any two hours after
+    lead's inbox as it posted it, the vault renews none its own lead's or the app's check has passed nor any two hours after
     it was first made, so an answer that waits through a long tool call stays the user's: S3, 2026-11-16), so a replay
     is delivered at most once, inside that window; signed approvals close it.
 30. Until the handover through sealed memory is built (Task 9), nothing; after it, no handover state on disk. A stale
@@ -1676,7 +1680,8 @@ close-out review: an ended lead's inbox goes on only when the vault binds the ro
 (Task 10d: the allow-list); `NodeFactsTests.statusSaysPlainModeAndInterop`,
 `ServerTests.statusThroughTheServerListsWhatTheProbeLists` (`status`'s standing plain-mode line),
 `StartCommandTests.startPrintsTheNotPromisedListOnceAndRecordsTheAck` (`start` prints the list once and records the
-acknowledgment in the journal; the engine's E1).
+acknowledgment in the journal; the engine's E1); `LeadVaultV2Tests.aLeadTakesOnlyTheMessagesSealedForIt` (item 29: a
+replay window's renewal ends only by the message's own lead's taking, the security follow-ups' item 19).
 
 ## S12. After the bootstrap
 

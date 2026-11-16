@@ -1028,7 +1028,7 @@ extension LeadVault {
                 return .ok
             case .seal(let message):
                 if let refusal = maySeal(message, caller: caller, agentSession: agentSession) { return .refused(refusal) }
-                LeadVaultV2.sealed(message, book: &state.v2, changed: &changed)
+                LeadVaultV2.sealed(message, target: agentSession, book: &state.v2, changed: &changed)
                 return .seal(SteerInbox.seal(message, key: SymmetricKey(data: state.senderKey)))
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)

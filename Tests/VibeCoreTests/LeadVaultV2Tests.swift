@@ -156,7 +156,7 @@ struct LeadVaultV2Tests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
         book.configHome = home
-        let app = book.vault(folder: folder, as: { .app })
+        let app = book.vault(folder: folder, as: { .app }, agentSession: { $0 == 42 ? "lead-session" : nil })
         try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "lead-session")
         let lead = book.vault(folder: folder, as: { .session("lead-session") })
         try lead.bind(try lead.issue(role: .worker, root: root, task: "parser"), root: root, session: "worker-session")
@@ -168,6 +168,49 @@ struct LeadVaultV2Tests {
         #expect(book.v2 { $0?.checked[answer.id] } == nil)
         #expect(try lead.verify([answer]) == [true])
         #expect(book.v2 { $0?.checked[answer.id] } != nil)
+    }
+
+    /// The security follow-ups' item 19: a lead's check is a taking only for the messages sealed for it (the session its
+    /// agent ran in when the host sealed them). Another project's lead checking B's waiting answer leaves it unchecked,
+    /// so its renewal goes on; B's own lead's check marks it; the app's check (a handover) takes any.
+    @Test(.enabled(if: linux, "Linux: the record is kept there only")) func aLeadTakesOnlyTheMessagesSealedForIt() throws {
+        let home = scratch.url("home").resolvingSymlinksInPath().path
+        let folder = scratch.url("vault")
+        let rootA = (home as NSString).appendingPathComponent("repo-a")
+        let rootB = (home as NSString).appendingPathComponent("repo-b")
+        for root in [rootA, rootB] { try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let book = LeadVault.Book()
+        book.configHome = home
+        let sessions: [Int32: String] = [41: "lead-a", 42: "lead-b"]
+        let app = book.vault(folder: folder, as: { .app }, agentSession: { sessions[$0] })
+        try app.bind(try app.startLead(root: rootA, branch: "main"), root: rootA, session: "lead-a")
+        try app.bind(try app.startLead(root: rootB, branch: "main"), root: rootB, session: "lead-b")
+        let leadA = book.vault(folder: folder, as: { .session("lead-a") })
+        let leadB = book.vault(folder: folder, as: { .session("lead-b") })
+        var answer = SteerMessage(text: "Answer to your question: yes", from: .user, agentPid: 42)
+        answer.seal = try app.seal(answer)
+        // A's lead checks B's answer: it passes, and is taken by no one.
+        #expect(try leadA.verify([answer]) == [true])
+        #expect(book.v2 { $0?.checked[answer.id] } == nil)
+        // B's own lead's check takes it.
+        #expect(try leadB.verify([answer]) == [true])
+        #expect(book.v2 { $0?.checked[answer.id] } != nil)
+        // In one batch each message alone: A's check of its own and B's takes only A's.
+        var forA = SteerMessage(text: "Answer: no", from: .user, agentPid: 41)
+        forA.seal = try app.seal(forA)
+        var forB = SteerMessage(text: "Answer: maybe", from: .user, agentPid: 42)
+        forB.seal = try app.seal(forB)
+        #expect(try leadA.verify([forB, forA]) == [true, true])
+        #expect(book.v2 { $0?.checked[forA.id] } != nil)
+        #expect(book.v2 { $0?.checked[forB.id] } == nil)
+        // A seal the host found no session for: no lead's check takes it; the app's does.
+        var nobodys = SteerMessage(text: "Answer: later", from: .user, agentPid: 99)
+        nobodys.seal = try app.seal(nobodys)
+        #expect(try leadB.verify([nobodys]) == [true])
+        #expect(book.v2 { $0?.checked[nobodys.id] } == nil)
+        #expect(try app.verify([nobodys, forB]) == [true, true])
+        #expect(book.v2 { $0?.checked[nobodys.id] != nil && $0?.checked[forB.id] != nil })
     }
 
     /// A vault saved before the field (no `v2` key) reads as before, and one without anything recorded saves none.

@@ -78,10 +78,13 @@ public enum LeadVaultV2 {
         /// Each action whose `.user` message was posted to its lead, by action id: when (the close-out review). A copy
         /// `engine.json` still holds after a restart is vouched for no more.
         public var spent: [String: Double] = [:]
+        /// Each `.user` seal's recipient, by the message's id: the session the host found its agent pid running in when
+        /// it sealed it (the security follow-ups' item 19). Only that session's own check, as a lead's, is a taking.
+        public var targets: [String: String] = [:]
 
         public init() {}
 
-        /// A record saved before `checked`, `first` or `spent` reads with none.
+        /// A record saved before `checked`, `first`, `spent` or `targets` reads with none.
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             actions = try container.decodeIfPresent([UserAction].self, forKey: .actions) ?? []
@@ -90,6 +93,7 @@ public enum LeadVaultV2 {
             checked = try container.decodeIfPresent([String: Double].self, forKey: .checked) ?? [:]
             first = try container.decodeIfPresent([String: Double].self, forKey: .first) ?? [:]
             spent = try container.decodeIfPresent([String: Double].self, forKey: .spent) ?? [:]
+            targets = try container.decodeIfPresent([String: String].self, forKey: .targets) ?? [:]
         }
     }
 
@@ -172,12 +176,16 @@ public enum LeadVaultV2 {
         }
     }
 
-    /// The `.seal` hook: a `.user` seal the host is about to make for `message` is recorded with its time (Linux only).
-    public static func sealed(_ message: SteerMessage, book: inout Book?, changed: inout Bool, now: Double = Date().timeIntervalSince1970) {
+    /// The `.seal` hook: a `.user` seal the host is about to make for `message` is recorded with its time and its
+    /// recipient, `target`: the session the host found the message's agent pid running in (`agentSession`; nil: none it
+    /// runs, so no session's check takes it), Linux only.
+    public static func sealed(_ message: SteerMessage, target: String? = nil, book: inout Book?, changed: inout Bool,
+                              now: Double = Date().timeIntervalSince1970) {
         guard isOn, message.from == .user else { return }
         var record = book ?? Book()
         record.seals[message.id] = now
         if record.first[message.id] == nil { record.first[message.id] = now }
+        record.targets[message.id] = target
         prune(&record, now: now)
         book = record
         changed = true
@@ -191,6 +199,13 @@ public enum LeadVaultV2 {
     /// a process outside the sessions) reads and changes nothing, so it can't stop a waiting answer's renewal.
     public static func verified(_ messages: [SteerMessage], _ valid: [Bool], book: inout Book?, changed: inout Bool,
                                 takes: Bool = true, now: Double = Date().timeIntervalSince1970) -> [Bool] {
+        verified(messages, valid, book: &book, changed: &changed, taking: { _ in takes }, now: now)
+    }
+
+    /// As above, deciding for each message whether the check takes it: `taking` gets the session its seal was recorded
+    /// for (`Book.targets`; nil: none recorded).
+    static func verified(_ messages: [SteerMessage], _ valid: [Bool], book: inout Book?, changed: inout Bool,
+                         taking: (_ target: String?) -> Bool, now: Double) -> [Bool] {
         guard isOn else { return valid }
         let life = sealLife
         var record = book
@@ -199,7 +214,7 @@ public enum LeadVaultV2 {
             if record?.retired[message.id] != nil { return false }
             let made = record?.seals[message.id] ?? message.at
             guard now - made <= life else { return false }
-            if takes, record?.seals[message.id] != nil, record?.checked[message.id] == nil {
+            if record?.seals[message.id] != nil, record?.checked[message.id] == nil, taking(record?.targets[message.id]) {
                 record?.checked[message.id] = now
                 changed = true
             }
@@ -209,16 +224,23 @@ public enum LeadVaultV2 {
         return result
     }
 
-    /// The `.verify` hook as the book calls it: a check by `caller` is a taking (`takes`) when it is the app's (a
-    /// handover) or a session's that holds a lead's role among `members` (every team's), the lead's
-    /// own hook taking its inbox (the security follow-ups' item 17). Who takes is decided here, not in the book's handler
-    /// (the close-out review: the port map's kinds keep that hook to a line).
+    /// The `.verify` hook as the book calls it: a check by `caller` is a taking when it is the app's (a handover), for
+    /// every message; or, for each message alone, when the caller is a session that holds a lead's role among `members`
+    /// (every team's) and the message's seal was made for that same session (`Book.targets`): the lead's own hook taking
+    /// its own inbox (the security follow-ups' items 17 and 19). Another project's lead checking this lead's message
+    /// reads only, as does a lead's check of a seal recorded with no recipient. Who takes is decided here, not in the
+    /// book's handler (the close-out review: the port map's kinds keep that hook to a line).
     public static func verified(_ messages: [SteerMessage], _ valid: [Bool], book: inout Book?, changed: inout Bool,
                                 caller: LeadVault.Caller, members: [LeadVault.Member],
                                 now: Double = Date().timeIntervalSince1970) -> [Bool] {
         guard isOn else { return valid }
-        let takes = caller == .app || members.contains { $0.role == .lead && $0.session.map { .session($0) } == caller }
-        return verified(messages, valid, book: &book, changed: &changed, takes: takes, now: now)
+        if caller == .app { return verified(messages, valid, book: &book, changed: &changed, taking: { _ in true }, now: now) }
+        guard case .session(let session) = caller, members.contains(where: { $0.role == .lead && $0.session == session }) else {
+            return verified(messages, valid, book: &book, changed: &changed, taking: { _ in false }, now: now)
+        }
+        return verified(messages, valid, book: &book, changed: &changed, taking: { target in
+            target.map { $0.lowercased() == session.lowercased() } ?? false
+        }, now: now)
     }
 
     /// Seals, retirements and checks older than a seal's life verify false by their age alone: they're dropped.
@@ -229,6 +251,7 @@ public enum LeadVaultV2 {
         let seals = record.seals
         record.checked = record.checked.filter { seals[$0.key] != nil || $0.value >= cutoff }
         record.first = record.first.filter { seals[$0.key] != nil }
+        record.targets = record.targets.filter { seals[$0.key] != nil }
     }
 }
 
