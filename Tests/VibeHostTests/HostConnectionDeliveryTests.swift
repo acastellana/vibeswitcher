@@ -283,6 +283,9 @@ import Testing
         host.hangUp()
         #expect(await offPool { ended.wait(timeout: .now() + hangGuard) } == .success, "the reader didn't see the end")
         release.signal()
+        // The reader says it saw the end before it hands the close to the queue, so a drain right after can come first
+        // (a full run under load: `[]`): the close is waited for; then the queue drained, a second one would be in.
+        #expect(await eventually { !log.items.isEmpty }, "no close")
         queue.sync {}
         #expect(log.items == [.closed])
     }
