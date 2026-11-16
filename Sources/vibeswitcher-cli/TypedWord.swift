@@ -1,5 +1,6 @@
 import Foundation
 import VibeCore
+import VibeNode
 
 /// The typed word (the engine plan's EN-D5): every state-changing request asks, on the command line's controlling
 /// terminal (`/dev/tty`), for a four-letter code printed with what the request will do. No controlling terminal:
@@ -8,23 +9,12 @@ import VibeCore
 /// would be typed for nothing. A guard rail against a request run without the user's hands (an agent's Bash tool has
 /// no terminal; `script` gives it one), not a lock.
 enum TypedWord {
-    enum Outcome: Equatable {
-        case typed
-        case wrong
-        case noTerminal
-    }
-
-    /// What `refused` says for each outcome but `typed`.
-    static func refusal(_ outcome: Outcome) -> String {
-        switch outcome {
-        case .typed: return ""
-        case .wrong: return "the code typed isn't the one shown: nothing was done"
-        case .noTerminal: return "this needs a code typed on a terminal (this process has no controlling terminal: /dev/tty can't be opened): nothing was done"
-        }
-    }
+    /// What `refused` says for each outcome but `typed` (`TypedOutcome.refusal`, in `VibeNode` since the start plan's
+    /// S2, so `StartSequence` takes the asker's answer).
+    static func refusal(_ outcome: TypedOutcome) -> String { outcome.refusal }
 
     /// Shows `what` and `code` on the controlling terminal (`/dev/tty` alone) and reads one line there.
-    static func ask(code: String, what: String) -> Outcome {
+    static func ask(code: String, what: String) -> TypedOutcome {
         let fd = open("/dev/tty", O_RDWR | O_NOCTTY | O_CLOEXEC)
         guard fd >= 0 else { return .noTerminal }
         defer { Sys.close(fd) }

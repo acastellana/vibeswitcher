@@ -576,3 +576,577 @@ extension StartCommandTests {
                                               node: nodeBin.appendingPathComponent("node").path, git: git.path), "\(found)")
     }
 }
+
+// MARK: - `start` through systemd (the start plan's S2)
+
+/// What a `StartSequence` stand-in saw, in order: each step's name as it ran (`typed:` with what it said, `journal:`
+/// with the entry's event, `starter:` with the commit), the entries' fields and what was said.
+final class StartWorld: @unchecked Sendable {
+    static let home = "/home/u"
+    static let prefix = "/home/u/.vibeswitcher/v2/builds"
+    static let installed = StartCommandTests.commit
+    static let swiftBin = "/home/u/.local/share/swiftly/bin"
+    static let nodeBin = "/home/u/.nvm/versions/node/v22.1.0/bin"
+
+    private let lock = NSLock()
+    private var _log: [String] = []
+    private var _entries: [[(name: String, value: String)]] = []
+    private var _said: [String] = []
+    private var _started: [(NodeUnit.Inputs, Bool)] = []
+
+    var kind = StartSequence.Kind.node(.systemd)
+    var installedBuild: Result<(commit: String, folder: String), StartRefusal> = .success((commit: installed, folder: prefix + "/" + installed))
+    var facts = NodeFacts(interop: false, automounts: [], kernelLines: [], manager: .extra([]))
+    var managerEnvironment: Result<String, NodeFacts.Failure> = .success("HOME=/home/u\nPATH=/usr/bin:/bin\nXDG_RUNTIME_DIR=/run/user/1000\n")
+    var managerConfig: StartRefusal?
+    var server = StartSequence.ServerAnswer.notRunning("the node isn't running: no server answers at /x/v2/server.sock")
+    var acknowledged: Result<Bool, NodeFacts.Failure> = .success(false)
+    /// What each typed code gives, in turn (the last repeated).
+    var typed: [TypedOutcome] = [.typed]
+    var journalWrites = true
+    var existingUnit: String?
+    var unitBuild: Result<NodeUnit.Inputs, StartRefusal> = .failure(StartRefusal("no unit"))
+    var current: String? = installed
+    var toolFolders: Result<(swiftBin: String, nodeBin: String), StartRefusal> = .success((swiftBin: swiftBin, nodeBin: nodeBin))
+    var toolFoldersAsked: [NodeUnit.Inputs?] = []
+    var preflight: Result<StartPreflight.Found, StartRefusal> = .success(.init(claude: "/home/u/.local/share/claude/versions/2.1", swift: swiftBin + "/swift",
+                                                                                 node: nodeBin + "/node", git: "/usr/bin/git"))
+    var starter: Result<NodeStarter.Started, StartRefusal>?
+
+    var log: [String] { lock.withLock { _log } }
+    var entries: [[(name: String, value: String)]] { lock.withLock { _entries } }
+    var said: String { lock.withLock { _said.joined(separator: "\n") } }
+    var started: [(NodeUnit.Inputs, Bool)] { lock.withLock { _started } }
+
+    private func note(_ step: String) { lock.withLock { _log.append(step) } }
+
+    /// The steps, each noting itself.
+    var steps: StartSequence.Steps {
+        var typedCount = 0
+        return StartSequence.Steps(
+            home: Self.home, prefix: Self.prefix,
+            kind: { self.note("kind"); return self.kind },
+            installedBuild: { self.note("installedBuild"); return self.installedBuild },
+            facts: { self.note("facts"); return self.facts },
+            managerEnvironment: { self.note("managerEnvironment"); return self.managerEnvironment },
+            managerConfig: { self.note("managerConfig"); return self.managerConfig },
+            serverAnswers: { self.note("server"); return self.server },
+            acknowledged: { self.note("acknowledged"); return self.acknowledged },
+            showList: { self.note("showList") },
+            typed: { _, what in
+                self.note("typed:" + what)
+                defer { typedCount += 1 }
+                return self.typed[min(typedCount, self.typed.count - 1)]
+            },
+            say: { line in self.lock.withLock { self._said.append(line) } },
+            journal: { fields in
+                self.note("journal:" + (fields.first { $0.name == "VIBESWITCHER_EVENT" }?.value ?? "?"))
+                guard self.journalWrites else { return false }
+                self.lock.withLock { self._entries.append(fields) }
+                return true
+            },
+            existingUnit: { self.note("existingUnit"); return self.existingUnit },
+            unitBuild: { _ in self.note("unitBuild"); return self.unitBuild },
+            current: { self.note("current"); return self.current },
+            toolFolders: { _, unit in
+                self.note("toolFolders")
+                self.lock.withLock { self.toolFoldersAsked.append(unit) }
+                return self.toolFolders
+            },
+            preflight: { _, _ in self.note("preflight"); return self.preflight },
+            starter: { inputs, atLogin in
+                self.note("starter:" + inputs.commit)
+                self.lock.withLock { self._started.append((inputs, atLogin)) }
+                return self.starter ?? .success(NodeStarter.Started(commit: inputs.commit, enabledAtLogin: atLogin))
+            })
+    }
+
+    func run(_ arguments: StartArguments = StartArguments()) -> Result<StartSequence.Outcome, StartRefusal> {
+        StartSequence(steps: steps).run(arguments)
+    }
+
+    /// Whether any step after the checks wrote, called or recorded anything.
+    var touchedNothing: Bool { !log.contains { $0.hasPrefix("starter:") || $0.hasPrefix("journal:") } && entries.isEmpty }
+}
+
+extension StartCommandTests {
+    // MARK: StartSequence (pure: the Mac runs these)
+
+    @Test func theS11ListComesBeforeAnythingIsStarted() throws {
+        let world = StartWorld()
+        #expect(try world.run().get() == .started(commit: StartWorld.installed))
+        let log = world.log
+        let ack = try #require(log.firstIndex(of: "journal:" + NotPromised.ackEvent), "\(log)")
+        let list = try #require(log.firstIndex(of: "showList"), "\(log)")
+        let started = try #require(log.firstIndex { $0.hasPrefix("starter:") }, "\(log)")
+        #expect(list < ack && ack < started, "\(log)")
+        // Before the preflight, the unit's build and the confirmation, too: "the first time … before anything".
+        #expect(ack < (log.firstIndex(of: "preflight") ?? 0) && ack < (log.firstIndex(of: "existingUnit") ?? 0), "\(log)")
+        #expect(world.entries.first?.contains { $0.name == "VIBESWITCHER_EVENT" && $0.value == NotPromised.ackEvent } == true)
+
+        // The acknowledgment's code typed wrong: nothing is called, written or recorded.
+        let wrong = StartWorld()
+        wrong.typed = [.wrong]
+        guard case .failure(let refused) = wrong.run() else { Issue.record("a wrong acknowledgment code started the node"); return }
+        #expect(refused.text == TypedOutcome.wrong.refusal, "\(refused)")
+        #expect(wrong.touchedNothing, "\(wrong.log)")
+        #expect(!wrong.log.contains("preflight") && !wrong.log.contains("existingUnit"), "\(wrong.log)")
+
+        // Acknowledged before: the list isn't shown, and only the start's own code is asked.
+        let known = StartWorld()
+        known.acknowledged = .success(true)
+        #expect(try known.run().get() == .started(commit: StartWorld.installed))
+        #expect(!known.log.contains("showList") && known.log.filter { $0.hasPrefix("typed:") }.count == 1, "\(known.log)")
+        #expect(!known.entries.contains { $0.contains { $0.value == NotPromised.ackEvent } })
+    }
+
+    @Test func startJournalsItsOwnStartBeforeTheManagerIsAsked() throws {
+        let world = StartWorld()
+        world.acknowledged = .success(true)
+        _ = try world.run().get()
+        let log = world.log
+        let typed = try #require(log.firstIndex { $0.hasPrefix("typed:") }, "\(log)")
+        let entry = try #require(log.firstIndex(of: "journal:start"), "\(log)")
+        let started = try #require(log.firstIndex { $0.hasPrefix("starter:") }, "\(log)")
+        #expect(typed < entry && entry < started, "\(log)")
+        // The entry is `NodeJournal.entry(event: "start", action:)`: stamped as journald stamps a terminal scope's
+        // entry, and followed 2 s later by systemd's start of the unit, it explains that start.
+        let fields = try #require(world.entries.last)
+        #expect(fields.contains { $0.name == "VIBESWITCHER_EVENT" && $0.value == "start" } && fields.contains { $0.name == "VIBESWITCHER_ACTION" })
+        var stamped: [String: Any] = ["_UID": "1000", "_SYSTEMD_CGROUP": "/init.scope"]
+        for field in fields { stamped[field.name] = field.value }
+        let at = NodeJournalTests.start
+        let entries = NodeJournalTests.read([NodeJournalTests.line(stamped, at: at), NodeJournalTests.job("start", at: at.addingTimeInterval(2))])
+        let starts = NodeJournal.events(entries)
+        #expect(starts.count == 1)
+        #expect(NodeJournal.unexplained(starts: starts, entries: entries, rule: NodeJournalTests.rule).isEmpty)
+
+        // An entry that can't be written: refused, nothing started.
+        let unwritten = StartWorld()
+        unwritten.acknowledged = .success(true)
+        unwritten.journalWrites = false
+        guard case .failure(let refused) = unwritten.run() else { Issue.record("a start with no journal entry went on"); return }
+        #expect(refused.text.contains("journal"), "\(refused)")
+        #expect(!unwritten.log.contains { $0.hasPrefix("starter:") }, "\(unwritten.log)")
+    }
+
+    @Test func aStartWithNoTerminalIsRefused() {
+        for acknowledged in [false, true] {
+            let world = StartWorld()
+            world.acknowledged = .success(acknowledged)
+            world.typed = [.noTerminal]
+            guard case .failure(let refused) = world.run() else { Issue.record("a start with no terminal went on"); return }
+            #expect(refused.text == TypedOutcome.noTerminal.refusal, "\(refused)")
+            #expect(refused.text.contains("controlling terminal"), "\(refused)")
+            #expect(world.touchedNothing, "\(world.log)")
+        }
+    }
+
+    @Test func aCommandLineBuiltInDotBuildRefusesNodeModeBeforeAnyWrite() {
+        let world = StartWorld()
+        world.installedBuild = .failure(StartRefusal("start runs only from an installed build: this command line is /src/.build/debug/vibeswitcher-cli"))
+        guard case .failure(let refused) = world.run() else { Issue.record("a command line under .build started the node"); return }
+        #expect(refused.text.contains("start runs only from an installed build"), "\(refused)")
+        // The mode was read (a file read), and nothing after the check: no facts (the manager's environment is a
+        // systemctl call), no server, no unit, no call, no entry.
+        #expect(world.log == ["kind", "installedBuild"], "\(world.log)")
+        // A scratch node isn't asked for an installed build (its harness starts it).
+        let scratch = StartWorld()
+        scratch.kind = .scratch
+        scratch.installedBuild = world.installedBuild
+        _ = scratch.run()
+        #expect(!scratch.log.contains("installedBuild"), "\(scratch.log)")
+    }
+
+    @Test func startStartsTheUnitsCommitNotCurrent() throws {
+        let unitCommit = Self.other, current = StartWorld.installed
+        let world = StartWorld()
+        world.acknowledged = .success(true)
+        world.existingUnit = "a unit naming \(unitCommit)"
+        // What the unit's text says of its home and swift folder isn't taken: the unit is made again from the
+        // account's home and the fixed places (the review of S1).
+        let unitInputs = NodeUnit.Inputs(prefix: StartWorld.prefix, commit: unitCommit, home: "/srv/other", swiftBin: "/srv/swift/bin",
+                                         nodeBin: "/home/u/.nvm/versions/node/v20.0.0/bin")
+        world.unitBuild = .success(unitInputs)
+        world.current = current
+        world.toolFolders = .success((swiftBin: StartWorld.swiftBin, nodeBin: "/home/u/.nvm/versions/node/v20.0.0/bin"))
+        #expect(try world.run().get() == .started(commit: unitCommit))
+        let (inputs, atLogin) = try #require(world.started.first)
+        #expect(inputs == NodeUnit.Inputs(prefix: StartWorld.prefix, commit: unitCommit, home: StartWorld.home, swiftBin: StartWorld.swiftBin,
+                                          nodeBin: "/home/u/.nvm/versions/node/v20.0.0/bin"))
+        #expect(!atLogin)
+        // The unit's node folder went to toolFolders (kept unless --node-version is given).
+        #expect(world.toolFoldersAsked == [unitInputs])
+        // The confirmation names both commits, and how to run current.
+        #expect(world.said.contains(unitCommit) && world.said.contains(current), "\(world.said)")
+        #expect(world.said.contains("`vs switch \(current)`"), "\(world.said)")
+
+        // No unit: the command line's own installed build, and nothing said of current.
+        let fresh = StartWorld()
+        fresh.acknowledged = .success(true)
+        #expect(try fresh.run(StartArguments(atLogin: true)).get() == .started(commit: StartWorld.installed))
+        #expect(fresh.started.first?.0.commit == StartWorld.installed && fresh.started.first?.1 == true)
+        #expect(!fresh.said.contains("vs switch"), "\(fresh.said)")
+        #expect(!fresh.log.contains("unitBuild"), "\(fresh.log)")
+
+        // A unit start won't take: refused, naming why, nothing started.
+        let broken = StartWorld()
+        broken.acknowledged = .success(true)
+        broken.existingUnit = "x"
+        broken.unitBuild = .failure(StartRefusal("the unit's build isn't started: …; removing the unit file lets `start` run `current`"))
+        guard case .failure(let refused) = broken.run() else { Issue.record("a unit start can't take was started"); return }
+        #expect(refused.text.contains("removing the unit file"), "\(refused)")
+        #expect(broken.touchedNothing, "\(broken.log)")
+    }
+
+    @Test func aRunningNodeIsNotStartedAndAcknowledgesAfterItsAnswer() throws {
+        let world = StartWorld()
+        world.server = .running
+        #expect(try world.run().get() == .running)
+        let log = world.log
+        #expect(!log.contains { $0.hasPrefix("starter:") || $0 == "journal:start" || $0 == "preflight" || $0 == "existingUnit" }, "\(log)")
+        // The acknowledgment, the first time, after the server's answer (as before S2).
+        let server = try #require(log.firstIndex(of: "server"))
+        let ack = try #require(log.firstIndex(of: "journal:" + NotPromised.ackEvent), "\(log)")
+        #expect(server < ack)
+        // A journal that can't be read: the list shown, and said that it can't be recorded; the node still runs.
+        let unread = StartWorld()
+        unread.server = .running
+        unread.acknowledged = .failure(.init("journalctl --user didn't answer"))
+        #expect(try unread.run().get() == .running)
+        #expect(unread.log.contains("showList") && unread.said.contains("can't be recorded"), "\(unread.log) \(unread.said)")
+    }
+
+    @Test func aScratchNodeWithNoServerIsRefusedByTheSequence() {
+        let world = StartWorld()
+        world.kind = .scratch
+        guard case .failure(let refused) = world.run() else { Issue.record("a scratch node was started by the command line"); return }
+        #expect(refused.exitCode == 69, "\(refused)")
+        #expect(refused.text.contains("the node isn't running") && refused.text.contains("started by its harness"), "\(refused)")
+        #expect(world.touchedNothing && !world.log.contains("typed:") && !world.log.contains("managerEnvironment"), "\(world.log)")
+        // A listener that fails the check, on a scratch node: refused as before (77).
+        let squatted = StartWorld()
+        squatted.kind = .scratch
+        squatted.server = .refusedByCheck("the process listening on the server's socket (pid 9) is dumpable: not the node's server")
+        guard case .failure(let check) = squatted.run() else { Issue.record("a scratch node with a squatter went on"); return }
+        #expect(check.exitCode == 77 && check.text.contains("is dumpable"), "\(check)")
+    }
+
+    @Test func theManagerAndTheMachineAreRefusedBeforeTheServerIsAsked() {
+        let extra = StartWorld()
+        extra.managerEnvironment = .success("HOME=/home/u\nPATH=/usr/bin:/bin\nGIT_CONFIG_GLOBAL=/srv/g\n")
+        guard case .failure(let manager) = extra.run() else { Issue.record("an extra manager variable started the node"); return }
+        #expect(manager.text.contains("GIT_CONFIG_GLOBAL") && manager.text.contains("unset-environment"), "\(manager)")
+        #expect(!extra.log.contains("server") && extra.touchedNothing, "\(extra.log)")
+
+        let config = StartWorld()
+        config.managerConfig = StartRefusal("/home/u/.config/systemd/user.conf sets DefaultEnvironment=")
+        guard case .failure(let conf) = config.run() else { Issue.record("a user.conf setting an environment started the node"); return }
+        #expect(conf.text.contains("DefaultEnvironment"), "\(conf)")
+        #expect(!config.log.contains("server"), "\(config.log)")
+
+        let unread = StartWorld()
+        unread.managerEnvironment = .failure(.init("systemctl --user show-environment didn't answer"))
+        guard case .failure(let notRead) = unread.run() else { Issue.record("an unread manager environment started the node"); return }
+        #expect(notRead.text.contains("show-environment"), "\(notRead)")
+
+        let interop = StartWorld()
+        interop.facts.interop = true
+        guard case .failure(let on) = interop.run() else { Issue.record("interop on started the node"); return }
+        #expect(on.text.contains("WSL interop is on"), "\(on)")
+        #expect(interop.log == ["kind", "installedBuild", "facts"], "\(interop.log)")
+
+        // A machine whose pid 1 is systemd and whose manager's socket is missing: refused, never started detached.
+        let missing = StartWorld()
+        missing.kind = .node(.socketMissing)
+        guard case .failure(let socket) = missing.run() else { Issue.record("a missing manager socket started the node"); return }
+        #expect(socket.text.contains("socket is missing"), "\(socket)")
+        #expect(missing.touchedNothing, "\(missing.log)")
+        // No systemd: S3's detached start, not yet.
+        let none = StartWorld()
+        none.kind = .node(.noSystemd)
+        guard case .failure(let detached) = none.run() else { Issue.record("a machine without systemd started the node"); return }
+        #expect(detached.text.contains("no systemd"), "\(detached)")
+        #expect(none.touchedNothing, "\(none.log)")
+    }
+
+    @Test func startArgumentsAreTheUsagesOnly() {
+        #expect(StartArguments.parse([]) == StartArguments())
+        #expect(StartArguments.parse(["--interop-is-on", "--at-login", "--node-version", "v22.1.0"])
+                == StartArguments(interopIsOn: true, atLogin: true, nodeVersion: "v22.1.0"))
+        for bad in [["--node-version"], ["--at-login", "--at-login"], ["x"], ["--node-version", "--at-login"]] {
+            #expect(StartArguments.parse(bad) == nil, "\(bad)")
+        }
+        #expect(StartArguments.usage == "usage: vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]")
+    }
+
+    @Test func theStartConfirmationSaysWhatKillModeMeans() {
+        let text = NodeTexts.start(unit: Self.inputs, current: Self.other, previousCommit: Self.commit, atLogin: false)
+        #expect(text.contains(NodeUnit.killModeConsequence), "\(text)")
+        #expect(text.contains("KillMode=control-group") && text.contains("Restart=no") && text.contains("TimeoutStopSec=45"), "\(text)")
+        #expect(text.contains(NodeUnit.execStart(prefix: Self.inputs.prefix, commit: Self.commit).joined(separator: " ")), "\(text)")
+        #expect(text.contains("the unit runs \(Self.commit); current is \(Self.other) (installed later): `vs switch \(Self.other)` runs it"), "\(text)")
+        #expect(text.contains("named \(Self.commit) before"), "\(text)")
+        #expect(text.contains(Self.inputs.swiftBin) && text.contains(Self.inputs.nodeBin), "\(text)")
+        #expect(!text.contains("at login"), "\(text)")
+        let plain = NodeTexts.start(unit: Self.inputs, current: Self.commit, previousCommit: nil, atLogin: true)
+        #expect(!plain.contains("vs switch") && !plain.contains("before"), "\(plain)")
+        #expect(plain.contains("at login"), "\(plain)")
+    }
+
+    // MARK: The wait (the app's HostClientSlowStartTests, port-map row 99), on an injected clock
+
+    /// A clock the wait's pauses move, and a starter whose probe is `probe` at each time.
+    private static func waiting(_ probe: @escaping @Sendable (TimeInterval) -> NodeStarter.Probe) -> (NodeStarter, () -> TimeInterval) {
+        final class Clock: @unchecked Sendable { var now: TimeInterval = 0 }
+        let clock = Clock()
+        let starter = NodeStarter(tools: .init(systemctl: "/nonexistent/systemctl", unitFolder: "/nonexistent/unit", runtimeFolder: "/nonexistent/run"),
+                                  listen: { probe(clock.now) }, now: { clock.now }, pause: { clock.now += $0 })
+        return (starter, { clock.now })
+    }
+
+    @Test func aNodeThatTakesSecondsToListenIsWaitedFor() {
+        // 5 s late: past the 3 s the app's client once gave its host.
+        let (starter, now) = Self.waiting { $0 < 5 ? .notYet : .listening }
+        #expect(starter.awaitListening() == nil)
+        #expect(now() >= 5 && now() < NodeStarter.listenLimit, "\(now())")
+    }
+
+    @Test func aNodeThatEndsWithoutListeningIsFailed() {
+        let (starter, now) = Self.waiting { _ in .unitEnded(result: "exit-code") }
+        #expect(starter.awaitListening() == StartRefusal("the node didn't start (exit-code); see journalctl --user -u vibeswitcher-node", exitCode: 1))
+        // At once, not at the limit.
+        #expect(now() < 1, "\(now())")
+    }
+
+    /// The node form of `anotherHostListeningIsConnectedToWhileOursStillStarts`: what listens on the node's socket and
+    /// fails the server check isn't the node starting. It is waited past, never taken; once the node's own server
+    /// answers, that one is; at the limit the refusal names the check's reason.
+    @Test func aListenerThatFailsTheServerCheckIsNotTheNodeStarting() {
+        let reason = "not the unit's MainPID's child"
+        let (passing, passed) = Self.waiting { $0 < 3 ? .refusedByCheck(reason) : .listening }
+        #expect(passing.awaitListening() == nil)
+        #expect(passed() >= 3, "\(passed())")
+        let (starter, now) = Self.waiting { _ in .refusedByCheck(reason) }
+        guard let refused = starter.awaitListening() else { Issue.record("a listener failing the check was taken"); return }
+        #expect(refused.text.contains(reason), "\(refused)")
+        #expect(now() >= NodeStarter.listenLimit, "\(now())")
+    }
+
+    @Test func theWaitIsTheAppsHostStartLimit() {
+        #expect(NodeStarter.listenLimit == 180)
+    }
+
+    @Test func theInstalledCommandLineRunsUsrBinSystemctl() throws {
+        let tools = NodeStarter.node(accountHome: "/home/u", uid: 1000)
+        #expect(tools == NodeStarter.Tools(systemctl: "/usr/bin/systemctl", unitFolder: "/home/u/.config/systemd/user", runtimeFolder: "/run/user/1000"))
+        // systemctl runs with the manager's socket named and nothing else of this process's environment (no
+        // XDG_RUNTIME_DIR or DBUS_SESSION_BUS_ADDRESS a worker set picks the manager it talks to).
+        #expect(NodeStarter.environment(runtimeFolder: tools.runtimeFolder) == ["PATH=/usr/bin:/bin", "XDG_RUNTIME_DIR=/run/user/1000"])
+        // Whatever the environment holds: the start's code reads none of it. (Setting PATH or XDG_* in this process
+        // would race the suite's other cases, so the code is read instead: comments and strings aside, no getenv,
+        // ProcessInfo or environ in Sources/VibeNode/Start.)
+        let folder = ServerLintTests.repo.appendingPathComponent("Sources/VibeNode/Start")
+        let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasSuffix(".swift") }
+        #expect(files.contains("NodeStarter.swift") && files.contains("NodeFolders.swift"), "\(files)")
+        for file in files {
+            let code = ServerLintTests.code(try String(contentsOf: folder.appendingPathComponent(file), encoding: .utf8))
+            for word in ["getenv", "ProcessInfo", "environ"] {
+                #expect(!code.contains(try Regex("\\b\(word)\\b")), "\(file) reads \(word)")
+            }
+        }
+    }
+}
+
+// MARK: NodeStarter against a recording systemctl (Linux: a scratch folder and a spawned stand-in)
+
+extension StartCommandTests {
+    /// A scratch unit folder, a runtime folder holding `systemd/private`, and a recording `systemctl` in `folder`: each
+    /// call's arguments appended to `calls`, the environment it saw (`XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`)
+    /// to `environments`; `show <unit> -p …` answered with `show`, `show-environment` with `environment`.
+    struct Manager {
+        let folder: URL
+        let unitFolder: URL
+        let runtime: URL
+        let systemctl: URL
+
+        var tools: NodeStarter.Tools { .init(systemctl: systemctl.path, unitFolder: unitFolder.path, runtimeFolder: runtime.path) }
+        var unitFile: URL { unitFolder.appendingPathComponent(NodeUnit.fileName) }
+
+        init(_ scratch: Scratch) throws {
+            folder = scratch.url("manager")
+            unitFolder = folder.appendingPathComponent("home/.config/systemd/user")
+            runtime = folder.appendingPathComponent("run-user")
+            systemctl = folder.appendingPathComponent("systemctl")
+            try FileManager.default.createDirectory(at: runtime.appendingPathComponent("systemd"), withIntermediateDirectories: true)
+            try Data().write(to: runtime.appendingPathComponent("systemd/private"))
+            try ScratchNode.script("""
+                #!/bin/sh
+                printf '%s\\n' "$*" >> '\(folder.path)/calls'
+                printf 'XDG_RUNTIME_DIR=%s DBUS_SESSION_BUS_ADDRESS=%s\\n' "${XDG_RUNTIME_DIR-unset}" "${DBUS_SESSION_BUS_ADDRESS-unset}" >> '\(folder.path)/environments'
+                case "$*" in
+                  *show-environment*) cat '\(folder.path)/environment' ;;
+                  "--user show "*) cat '\(folder.path)/show' ;;
+                esac
+                exit 0
+
+                """, at: systemctl)
+            try "HOME=/home/u\nLANG=C.UTF-8\nPATH=/usr/local/bin:/usr/bin:/bin\nXDG_RUNTIME_DIR=/run/user/1000\n"
+                .write(to: folder.appendingPathComponent("environment"), atomically: true, encoding: .utf8)
+        }
+
+        /// `show`'s answer: what the manager prints for `expected` (an empty command list left out, as systemd does),
+        /// each of `changed` put in its place (nil: left out).
+        func answer(_ expected: [String: String], changing changed: [String: String?] = [:]) throws {
+            var lines: [String] = []
+            for key in NodeUnit.showProperties {
+                let value: String? = changed.keys.contains(key) ? changed[key]! : expected[key]
+                guard let value else { continue }
+                if key.hasPrefix("Exec"), value.isEmpty { continue }
+                lines.append(key == "ExecStart" ? "\(key)=\(value) start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }" : "\(key)=\(value)")
+            }
+            try (lines.joined(separator: "\n") + "\n").write(to: folder.appendingPathComponent("show"), atomically: true, encoding: .utf8)
+        }
+
+        func setEnvironment(_ text: String) throws {
+            try text.write(to: folder.appendingPathComponent("environment"), atomically: true, encoding: .utf8)
+        }
+
+        var calls: [String] { ((try? String(contentsOf: folder.appendingPathComponent("calls"), encoding: .utf8)) ?? "").split(separator: "\n").map(String.init) }
+        var environments: [String] { ((try? String(contentsOf: folder.appendingPathComponent("environments"), encoding: .utf8)) ?? "").split(separator: "\n").map(String.init) }
+
+        func starter() -> NodeStarter { NodeStarter(tools: tools, listen: { .listening }) }
+    }
+
+    static let showCall = "--user show vibeswitcher-node -p " + NodeUnit.showProperties.joined(separator: ",")
+
+    @Test(NodeTraits.linuxOnly) func startWritesTheUnitAndAsksTheManagerToStartIt() throws {
+        let manager = try Manager(scratch)
+        try manager.answer(NodeUnit.expectedShow(Self.inputs, unitFile: manager.unitFile.path))
+        let started = try manager.starter().startUnit(Self.inputs, atLogin: false).get()
+        #expect(started == NodeStarter.Started(commit: Self.commit, enabledAtLogin: false))
+        // The unit file is NodeUnit.text, 0644, and nothing else is left in the folder (its temporary renamed in).
+        #expect(try String(contentsOf: manager.unitFile, encoding: .utf8) == NodeUnit.text(Self.inputs).get())
+        #expect(NodeFolders.fileStatus(manager.unitFile.path).map { $0.mode & 0o777 } == 0o644)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: manager.unitFolder.path) == [NodeUnit.fileName])
+        // The calls, exactly: the reload, the show check, the manager's environment read again, the start.
+        #expect(manager.calls == ["--user daemon-reload", Self.showCall, "--user show-environment", "--user start vibeswitcher-node"], "\(manager.calls)")
+        // Each with the manager's socket given and no bus address of this process's.
+        #expect(manager.environments == Array(repeating: "XDG_RUNTIME_DIR=\(manager.runtime.path) DBUS_SESSION_BUS_ADDRESS=unset", count: 4), "\(manager.environments)")
+    }
+
+    @Test(NodeTraits.linuxOnly) func startAtLoginEnablesFirst() throws {
+        let manager = try Manager(scratch)
+        try manager.answer(NodeUnit.expectedShow(Self.inputs, unitFile: manager.unitFile.path))
+        _ = try manager.starter().startUnit(Self.inputs, atLogin: true).get()
+        #expect(manager.calls == ["--user daemon-reload", Self.showCall, "--user show-environment", "--user enable vibeswitcher-node",
+                                  "--user start vibeswitcher-node"], "\(manager.calls)")
+        // A plain start never enables (startWritesTheUnitAndAsksTheManagerToStartIt's calls).
+        let plain = try Manager(scratch)
+        try plain.answer(NodeUnit.expectedShow(Self.inputs, unitFile: plain.unitFile.path))
+        _ = try plain.starter().startUnit(Self.inputs, atLogin: false).get()
+        #expect(!plain.calls.contains { $0.contains("enable") }, "\(plain.calls)")
+    }
+
+    @Test(NodeTraits.linuxOnly) func aDropInMakesStartRefuse() throws {
+        let cases: [(field: String, value: String?)] = [
+            ("DropInPaths", "<units>/vibeswitcher-node.service.d/x.conf"),
+            ("ExecStartPre", "{ path=/bin/sh ; argv[]=/bin/sh -c x ; ignore_errors=no ;"),
+            ("UnsetEnvironment", ""),
+        ]
+        for (field, value) in cases {
+            let manager = try Manager(scratch)
+            try manager.answer(NodeUnit.expectedShow(Self.inputs, unitFile: manager.unitFile.path),
+                               changing: [field: value?.replacingOccurrences(of: "<units>", with: manager.unitFolder.path)])
+            guard case .failure(let refused) = manager.starter().startUnit(Self.inputs, atLogin: false) else {
+                Issue.record("\(field) changed and start went on"); continue
+            }
+            #expect(refused.text.contains(field), "\(field): \(refused)")
+            #expect(manager.calls == ["--user daemon-reload", Self.showCall], "\(field): \(manager.calls)")
+        }
+    }
+
+    @Test(NodeTraits.linuxOnly) func aManagerXdgConfigHomeDoesntMoveTheUnit() throws {
+        let manager = try Manager(scratch)
+        // The manager reads a unit elsewhere (its environment's XDG_CONFIG_HOME, say): it shows that file.
+        let elsewhere = manager.folder.appendingPathComponent("xdg/systemd/user/vibeswitcher-node.service")
+        try manager.answer(NodeUnit.expectedShow(Self.inputs, unitFile: manager.unitFile.path), changing: ["FragmentPath": elsewhere.path])
+        guard case .failure(let refused) = manager.starter().startUnit(Self.inputs, atLogin: false) else {
+            Issue.record("a unit the manager reads elsewhere was started"); return
+        }
+        #expect(refused.text.contains("FragmentPath") && refused.text.contains(elsewhere.path), "\(refused)")
+        #expect(!manager.calls.contains("--user start vibeswitcher-node"), "\(manager.calls)")
+        // The unit was written in the unit folder given, and only there.
+        #expect(FileManager.default.fileExists(atPath: manager.unitFile.path))
+        #expect(!FileManager.default.fileExists(atPath: elsewhere.path))
+    }
+
+    /// The review of S1: a `daemon-reload` applies `user.conf`'s `DefaultEnvironment=` and `environment.d`, so a name
+    /// written after the facts were read shows only now. The manager's environment read again after the show check
+    /// refuses, and nothing is enabled or started.
+    @Test(NodeTraits.linuxOnly) func aManagerVariableThatShowsAfterTheReloadRefusesStart() throws {
+        let manager = try Manager(scratch)
+        try manager.answer(NodeUnit.expectedShow(Self.inputs, unitFile: manager.unitFile.path))
+        try manager.setEnvironment("HOME=/home/u\nPATH=/usr/bin:/bin\nGIT_CONFIG_GLOBAL=/srv/evil.gitconfig\n")
+        guard case .failure(let refused) = manager.starter().startUnit(Self.inputs, atLogin: true) else {
+            Issue.record("a manager variable that showed after the reload was started past"); return
+        }
+        #expect(refused.text.contains("GIT_CONFIG_GLOBAL"), "\(refused)")
+        #expect(manager.calls == ["--user daemon-reload", Self.showCall, "--user show-environment"], "\(manager.calls)")
+    }
+
+    /// A recording systemctl for the command line on a scratch root: every call appended to `<test>/calls`, the
+    /// facts' `show-environment` and the status's unit state answered as `ScratchNode`'s stand-in answers them.
+    private static func recordingSystemctl(in testFolder: URL) throws {
+        try ScratchNode.script("""
+            #!/bin/sh
+            printf '%s\\n' "$*" >> '\(testFolder.path)/calls'
+            case "$*" in
+              *show-environment*) printf 'HOME=/home/test\\nLANG=C.UTF-8\\nPATH=/usr/bin:/bin\\nUSER=test\\nXDG_RUNTIME_DIR=/run/user/1000\\n' ;;
+              *ExecMainStartTimestamp*) printf 'Result=success\\nExecMainStatus=0\\nExecMainStartTimestamp=\\n' ;;
+            esac
+            exit 0
+
+            """, at: testFolder.appendingPathComponent("systemctl"))
+    }
+
+    private static func calls(in testFolder: URL) -> [String] {
+        ((try? String(contentsOf: testFolder.appendingPathComponent("calls"), encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    }
+
+    @Test(NodeTraits.linuxOnly) func aScratchNodeIsNotStartedByTheCommandLine() async throws {
+        let root = try scratch.shortFolder("vss")
+        let testFolder = root.appendingPathComponent("v2/test")
+        try FileManager.default.createDirectory(at: testFolder, withIntermediateDirectories: true)
+        try ScratchNode.standIns(in: testFolder, scopes: ScratchNode.ownScope.map { [$0] })
+        try Self.recordingSystemctl(in: testFolder)
+        let home = root.appendingPathComponent("home"), xdg = root.appendingPathComponent("xdg-config")
+        let environment = scratchEnvironment(root, ["VIBESWITCHER_HOME": root.path, "HOME": home.path, "CFFIXED_USER_HOME": home.path,
+                                                    "XDG_CONFIG_HOME": xdg.path, "XDG_RUNTIME_DIR": root.appendingPathComponent("xdg-runtime").path])
+        let ran = try await run(commandLine, ["start", "--interop-is-on"], environment: environment)
+        #expect(ran.status == 69, "\(ran.output)\(ran.errors)")
+        #expect(ran.errors.contains("started by its harness"), "\(ran.errors)")
+        // The facts' show-environment, and nothing else: no daemon-reload, enable, start or stop.
+        #expect(Self.calls(in: testFolder) == ["--user show-environment"], "\(Self.calls(in: testFolder))")
+        // No unit written, in the scratch home or where its XDG_CONFIG_HOME points.
+        for folder in [home.appendingPathComponent(".config/systemd/user"), xdg.appendingPathComponent("systemd/user")] {
+            #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent(NodeUnit.fileName).path), "\(folder.path)")
+        }
+    }
+
+    @Test(NodeTraits.linuxOnly) func aNodeAlreadyRunningIsNotStartedAgain() async throws {
+        let node = try await ScratchNode(scratch)
+        try Self.recordingSystemctl(in: node.testFolder)
+        let ran = try await node.runOnTerminal(["start"])
+        #expect(ran.status == 0, "\(ran.output)")
+        #expect(ran.output.contains("the node runs"), "\(ran.output)")
+        let calls = Self.calls(in: node.testFolder)
+        #expect(!calls.contains { $0.contains("daemon-reload") || $0.contains("enable") || $0.contains(" start ") || $0.hasSuffix(" start")
+            || $0.contains(" stop") }, "\(calls)")
+        #expect(!FileManager.default.fileExists(atPath: node.home.appendingPathComponent(".config/systemd/user/\(NodeUnit.fileName)").path))
+        // Its environment points XDG_* at scratch folders and drops the bus address (defence in depth, ST-D2).
+        let environment = node.environment()
+        #expect(environment["XDG_RUNTIME_DIR"]?.hasPrefix(node.root.path) == true && environment["XDG_CONFIG_HOME"]?.hasPrefix(node.root.path) == true)
+        #expect(environment["DBUS_SESSION_BUS_ADDRESS"] == nil)
+    }
+}

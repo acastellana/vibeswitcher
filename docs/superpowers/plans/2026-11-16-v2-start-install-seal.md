@@ -709,7 +709,7 @@ manager refusal).
   - `NodeTexts.start(unit:current:previousCommit:folders:) -> String`. It shows `NodeUnit.killModeConsequence`, the
     unit's commit, `current` when it differs, the commit the unit named before, and the swift and node folders.
 
-- [ ] **Step 1: Failing tests** (`StartCommandTests`):
+- [x] **Step 1: Failing tests** (`StartCommandTests`):
   - `startWritesTheUnitAndAsksTheManagerToStartIt`:
     - In-process `NodeStarter` with a scratch unit folder, a scratch runtime folder holding `systemd/private`, and a
       recording `systemctl` stand-in. The stand-in appends its arguments to a file, and answers `show` with
@@ -755,17 +755,66 @@ manager refusal).
     and the swift and node folders.
   - The existing four cases still pass, `startPrintsTheNotPromisedListOnceAndRecordsTheAck` included (a running node
     still acknowledges after its answer).
-- [ ] **Step 2: Implement.**
+- [x] **Step 2: Implement.**
   - `Start.swift` builds `StartSequence.Steps` from `NodeContext` and runs it. It holds no order of its own. Until S3,
     `NodeFolders.Mode.noSystemd` refuses ("no systemd: the detached start is S3's").
   - The unit is written to a temporary file in the unit folder, then renamed (0644). The folder is made 0755 if absent.
   - Every systemctl run is spawned with the bounded wait.
   - The S11 text is printed through `ConfigSeal.inert` where it echoes anything read.
-- [ ] **Step 3: Verify.**
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter 'StartCommandTests|ServerCheckTests|ScratchNodeTests'`
   - the lints
   - `scripts/test-under-load.sh --load 24 -r 3 -f 'StartCommandTests'`
 - [ ] **Step 4:** commit ("v2: start writes the node's unit and starts it"). Push, both green.
+
+  *2026-11-16, S2 as made (committed; the push is the lead's):*
+  - **The order.** On the user's node the installed-build check comes right after the mode, before the facts and so
+    before the interop refusal (ST-D5 put that second): the facts run `systemctl --user show-environment`, and the
+    Review Focus's "nothing is written or called before the installed-build check" and
+    `aCommandLineBuiltInDotBuildRefusesNodeModeBeforeAnyWrite`'s "no facts beyond the mode" hold only so. The
+    manager-variable and manager-configuration refusals run only where `NodeFolders.mode` says `.systemd`; a
+    machine without the manager's socket or without systemd is refused after the server is asked, so a running node
+    still answers there.
+  - **`StartSequence.Steps`** takes, beside the plan's list: `home` and `prefix` (values), `kind` (`.scratch` or
+    `.node(NodeFolders.Mode)`), `managerEnvironment` (read once: the command line hands the same text to the facts),
+    `managerConfig`, `unitBuild`, `current`, `toolFolders` and `newAction`, so every disk read is a step and the Mac
+    runs the sequence's cases. `typed` takes `(code, what)` (two codes are asked: the acknowledgment's and the
+    start's own). The plan's `confirm` is `say`: every line the sequence prints. `serverAnswers` gives
+    `ServerAnswer { running, notRunning(why), refusedByCheck(why), failed(StartRefusal) }`; on the user's node
+    `notRunning` and `refusedByCheck` go on to the start (the wait waits past a listener that fails the check), on a
+    scratch node they're refused (69 with the client's "the node isn't running" and "started by its harness", which
+    `ServerCheckTests.theCommandLineWithNoNodeSaysSoNotConnectionRefused` still finds; 77 for the check).
+  - **`StartRefusal` gains `exitCode`** (77 by default; 69 a scratch node with no server; 1 an entry not written or a
+    manager that didn't start the unit). `StartArguments` (`parse`, `usage`) is `VibeNode`'s. A running node's
+    acknowledgment keeps today's exits (77 a code not typed, 1 an entry not written); a stopped node's start refuses
+    when the journal can't be read (the record of the acknowledgment and of the start is there).
+  - **`NodeStarter.startUnit`'s calls** are `daemon-reload`, `show vibeswitcher-node -p …`, then `show-environment`
+    (the second read from S1's review), `enable` with `--at-login`, `start`; the tests assert exactly that.
+    `awaitListening() -> StartRefusal?` is the wait on its own (nil once the server answers), which the
+    `HostClientSlowStartTests` port drives with an injected clock and `pause`. `Started { commit, enabledAtLogin }`
+    (enabled: the `default.target.wants` link, read, not asked). Every `systemctl` runs with
+    `NodeStarter.environment(runtimeFolder:)` (`PATH=/usr/bin:/bin`, `XDG_RUNTIME_DIR=<runtime>`) and nothing of the
+    command line's; the stand-in records that it saw no `DBUS_SESSION_BUS_ADDRESS`. `NodeStarter.run` is the bounded
+    spawn (`Platform.Spawn`, `waitpid` with `WNOHANG`), and the command line's `NodeContext` runs every tool through
+    it now (`runTool`, the user's node with that environment), in place of Foundation's `Process.waitUntilExit`.
+  - **The command line's probe** reads `systemctl --user show -p ActiveState,Result vibeswitcher-node` by name, not
+    with `--value` (values without names, in an order it doesn't rely on).
+  - **`NodeTexts.start(unit:current:previousCommit:atLogin:)`**: the plan's `folders:` is the unit's own `swiftBin`
+    and `nodeBin`; `atLogin` says whether it is enabled.
+  - **`theInstalledCommandLineRunsUsrBinSystemctl`** doesn't set `PATH` or `XDG_*` in the test process (process-wide,
+    racing the suite's other cases). It asserts `NodeStarter.node`'s constants and `environment(runtimeFolder:)`, and
+    reads `Sources/VibeNode/Start` for `getenv`, `ProcessInfo` and `environ` outside comments and strings.
+  - Added cases beside the plan's: `aManagerVariableThatShowsAfterTheReloadRefusesStart` (S1's review),
+    `aRunningNodeIsNotStartedAndAcknowledgesAfterItsAnswer`, `aScratchNodeWithNoServerIsRefusedByTheSequence`,
+    `theManagerAndTheMachineAreRefusedBeforeTheServerIsAsked`, `startArgumentsAreTheUsagesOnly`.
+    `aNodeAlreadyRunningIsNotStartedAgain` also checks `ScratchNode.environment`'s scratch `XDG_*` and no bus address.
+  - `PrivateWriteLintTests.allowed` names `NodeStarter.swift`'s one `createDirectory` (the user's unit folder, 0755).
+    The security document's S9 `Held by:` names S2's six unit and manager cases.
+  - Verified: `StartCommandTests|ServerCheckTests|ScratchNodeTests|StatusCommandTests|ServerTests`, the lints,
+    `StartCommandTests` and `ServerCheckTests|StatusCommandTests|ScratchNodeTests` under load (24, 3 runs), and
+    `VibeNodeTests|VibeCoreTests|VibePlatformTests` under `vs-heavy`. That run's other failures,
+    `LoginShellVariableTests` (two cases, timing under the full run's load), passed alone; S2 touches nothing they run.
+    `aScratchNodeIsNotStartedByTheCommandLine` fails with `Start.swift` reverted.
 
 **Done when:** the cases pass on Linux. The port map's `HostClientSlowStartTests` row is `ported`. The Mac runs
 `NodeTexts`' and `StartSequence`'s cases.

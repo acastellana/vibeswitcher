@@ -1,0 +1,257 @@
+import Foundation
+import VibeCore
+
+/// Starts the node as the user's systemd unit (the start plan's S2; the bootstrap path's "Who starts the node"): the
+/// unit written whole, `daemon-reload`, what the manager then shows of it checked against what was written (ST-D2), the
+/// manager's environment read again, `enable` only for `start --at-login`, `start`, then a wait for the node's server
+/// to answer. Every tool and folder is a parameter (`Tools`, ST-D1), and so are the probe and the clock: the installed
+/// command line passes `node(accountHome:uid:)`, tests a scratch folder and a recording `systemctl`.
+///
+/// Each `systemctl` runs by its absolute path through `Platform.Spawn`, waited for with a bound (`run`), never
+/// Foundation's `Process`, and with an environment of its own: `PATH=/usr/bin:/bin` and the manager's runtime folder,
+/// so no `XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS` of this process's picks the manager it talks to.
+public struct NodeStarter {
+    /// The tools and folders the start uses.
+    public struct Tools: Equatable, Sendable {
+        public var systemctl: String
+        /// Where the unit file goes (`NodeFolders.unitFolder`).
+        public var unitFolder: String
+        /// The user's runtime folder (`NodeFolders.runtimeFolder`): the manager's socket is `systemd/private` in it.
+        public var runtimeFolder: String
+
+        public init(systemctl: String, unitFolder: String, runtimeFolder: String) {
+            self.systemctl = systemctl
+            self.unitFolder = unitFolder
+            self.runtimeFolder = runtimeFolder
+        }
+    }
+
+    /// The installed command line's: `/usr/bin/systemctl`, `<home>/.config/systemd/user` and `/run/user/<uid>`, the
+    /// home from `getpwuid`. No environment variable changes any of them.
+    public static func node(accountHome: String, uid: uid_t) -> Tools {
+        Tools(systemctl: "/usr/bin/systemctl", unitFolder: NodeFolders.unitFolder(accountHome: accountHome), runtimeFolder: NodeFolders.runtimeFolder(uid: uid))
+    }
+
+    /// The environment every `systemctl` runs with: nothing of this process's.
+    public static func environment(runtimeFolder: String) -> [String] {
+        ["PATH=/usr/bin:/bin", "XDG_RUNTIME_DIR=\(runtimeFolder)"]
+    }
+
+    /// The unit's name as `systemctl` is given it.
+    public static let unitName = "vibeswitcher-node"
+
+    /// What the probe found, once.
+    public enum Probe: Equatable, Sendable {
+        /// The node's server answers and passes `ServerCheck`.
+        case listening
+        /// Nothing answers yet, and the unit still runs.
+        case notYet
+        /// What listens fails `ServerCheck`, and why: not the node starting (waited past, never taken).
+        case refusedByCheck(String)
+        /// The unit ended (`ActiveState` `failed` or `inactive`), with its `Result`.
+        case unitEnded(result: String)
+    }
+
+    /// A start that went: the commit, and whether the unit is enabled at login.
+    public struct Started: Equatable, Sendable {
+        public var commit: String
+        public var enabledAtLogin: Bool
+
+        public init(commit: String, enabledAtLogin: Bool) {
+            self.commit = commit
+            self.enabledAtLogin = enabledAtLogin
+        }
+    }
+
+    /// How long the server is waited for: the app's `HostClient.hostStartLimit`.
+    public static let listenLimit: TimeInterval = 180
+    /// How long between two probes.
+    public static let probeInterval: TimeInterval = 0.25
+    /// How long one `systemctl` is given.
+    public static let toolLimit: TimeInterval = 120
+
+    public let tools: Tools
+    private let listen: () -> Probe
+    private let now: () -> TimeInterval
+    private let pause: (TimeInterval) -> Void
+
+    /// `listen`: the probe (the command line's: `NodeClient.connect` and `ServerCheck`, then the unit's state). `now`:
+    /// seconds on a monotonic clock (the system's awake time by default, as `NodeClock`'s). `pause`: how a pause between
+    /// probes passes (a sleep by default; a test moves its clock).
+    public init(tools: Tools, listen: @escaping () -> Probe, now: (() -> TimeInterval)? = nil, pause: ((TimeInterval) -> Void)? = nil) {
+        self.tools = tools
+        self.listen = listen
+        self.now = now ?? { MacTime.real.awake() }
+        self.pause = pause ?? { Thread.sleep(forTimeInterval: $0) }
+    }
+
+    /// The unit file: `<unitFolder>/vibeswitcher-node.service`.
+    public var unitFile: String { NodeFolders.join(tools.unitFolder, NodeUnit.fileName) }
+
+    /// Writes the unit for `unit`, then `daemon-reload`, the show check, the manager's environment again, `enable`
+    /// (only `atLogin`), `start`, and the wait (`awaitListening`). Each refusal names what failed; nothing after it is
+    /// asked.
+    public func startUnit(_ unit: NodeUnit.Inputs, atLogin: Bool) -> Result<Started, StartRefusal> {
+        let text: String
+        switch NodeUnit.text(unit) {
+        case .failure(let refused): return .failure(refused)
+        case .success(let made): text = made
+        }
+        if let refused = write(text) { return .failure(refused) }
+        if let refused = ask(["--user", "daemon-reload"]).refusal { return .failure(refused) }
+        let shown = ask(["--user", "show", Self.unitName, "-p", NodeUnit.showProperties.joined(separator: ",")])
+        if let refused = shown.refusal { return .failure(refused) }
+        if let mismatch = NodeUnit.showMismatch(shown.output, expected: NodeUnit.expectedShow(unit, unitFile: unitFile)) {
+            return .failure(StartRefusal("the manager doesn't run the unit start wrote: \(mismatch). A drop-in (in \(ConfigSeal.inert(unitFile, limit: .max)).d/, a service.d/ folder, ~/.local/share/systemd/user, ~/.config/systemd/user.control or /run/user/<uid>/systemd/) or another unit file of the same name changes it; remove it, and nothing was started"))
+        }
+        // A `daemon-reload` applies `user.conf`'s `DefaultEnvironment=` and the `environment.d` generators: a name
+        // written after the facts were read shows only now (the review of S1).
+        let environment = ask(["--user", "show-environment"])
+        if let refused = environment.refusal { return .failure(refused) }
+        if let refused = NodeFolders.managerRefusal(showEnvironment: environment.output) { return .failure(refused) }
+        if atLogin, let refused = ask(["--user", "enable", Self.unitName]).refusal { return .failure(refused) }
+        if let refused = ask(["--user", "start", Self.unitName]).refusal {
+            return .failure(StartRefusal("\(refused.text); see journalctl --user -u \(Self.unitName)", exitCode: 1))
+        }
+        if let refused = awaitListening() { return .failure(refused) }
+        return .success(Started(commit: unit.commit, enabledAtLogin: isEnabled))
+    }
+
+    /// Waits for the node's server (`listen`), `listenLimit` at most: nil once it answers and passes the check; a
+    /// refusal when the unit ends first ("the node didn't start (<result>)", at once) or at the limit (naming the
+    /// check's reason when what listened failed it). A listener that fails the check is waited past, never taken.
+    public func awaitListening() -> StartRefusal? {
+        let deadline = now() + Self.listenLimit
+        var check: String?
+        while true {
+            switch listen() {
+            case .listening: return nil
+            case .unitEnded(let result):
+                return StartRefusal("the node didn't start (\(ConfigSeal.inert(result, limit: 64))); see journalctl --user -u \(Self.unitName)", exitCode: 1)
+            case .refusedByCheck(let why): check = why
+            case .notYet: break
+            }
+            guard now() < deadline else {
+                let limit = Int(Self.listenLimit)
+                if let check {
+                    return StartRefusal("the node's server didn't answer within \(limit) s: what listens on its socket fails the server check (\(ConfigSeal.inert(check, limit: .max))); see journalctl --user -u \(Self.unitName)", exitCode: 1)
+                }
+                return StartRefusal("the node's server didn't answer within \(limit) s; see journalctl --user -u \(Self.unitName)", exitCode: 1)
+            }
+            pause(Self.probeInterval)
+        }
+    }
+
+    /// Whether the unit is enabled at login: its link in `default.target.wants`, a read, no call.
+    public var isEnabled: Bool {
+        NodeFolders.fileStatus(NodeFolders.join(tools.unitFolder, "default.target.wants/\(NodeUnit.fileName)")) != nil
+    }
+
+    // MARK: - The unit file and systemctl
+
+    /// Writes `text` to a temporary file in the unit folder (made 0755 if absent), 0644, then renames it over the
+    /// unit file; nil, or why not.
+    private func write(_ text: String) -> StartRefusal? {
+        let folder = tools.unitFolder
+        if NodeFolders.fileStatus(folder) == nil {
+            do {
+                try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+            } catch {
+                return StartRefusal("the unit folder \(ConfigSeal.inert(folder, limit: .max)) can't be made: \(error.localizedDescription)", exitCode: 1)
+            }
+        }
+        let temporary = NodeFolders.join(folder, ".\(NodeUnit.fileName).\(getpid()).\(UUID().uuidString.prefix(8)).tmp")
+        let fd = Sys.open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
+        guard fd >= 0 else {
+            return StartRefusal("the unit can't be written in \(ConfigSeal.inert(folder, limit: .max)): \(String(cString: strerror(errno)))", exitCode: 1)
+        }
+        let bytes = Array(text.utf8)
+        var done = 0
+        var failed: Int32 = 0
+        if fchmod(fd, 0o644) != 0 { failed = errno }
+        while failed == 0, done < bytes.count {
+            let wrote = bytes.withUnsafeBytes { Sys.write(fd, $0.baseAddress! + done, bytes.count - done) }
+            if wrote < 0, errno == EINTR { continue }
+            guard wrote > 0 else { failed = wrote < 0 ? errno : EIO; break }
+            done += wrote
+        }
+        if failed == 0, fsync(fd) != 0 { failed = errno }
+        Sys.close(fd)
+        if failed == 0, rename(temporary, unitFile) != 0 { failed = errno }
+        guard failed == 0 else {
+            unlink(temporary)
+            return StartRefusal("the unit can't be written to \(ConfigSeal.inert(unitFile, limit: .max)): \(String(cString: strerror(failed)))", exitCode: 1)
+        }
+        return nil
+    }
+
+    /// Runs `systemctl arguments` with `environment(runtimeFolder:)`: its output, and a refusal naming the call when
+    /// it couldn't be run, didn't end in time, or didn't exit 0.
+    private func ask(_ arguments: [String]) -> (output: String, refusal: StartRefusal?) {
+        let call = ([tools.systemctl] + arguments).joined(separator: " ")
+        guard let ran = Self.run(tools.systemctl, arguments, environment: Self.environment(runtimeFolder: tools.runtimeFolder)) else {
+            return ("", StartRefusal("\(ConfigSeal.inert(call, limit: .max)) couldn't be run, or didn't end within \(Int(Self.toolLimit)) s", exitCode: 1))
+        }
+        guard ran.status == 0 else { return (ran.output, StartRefusal("\(ConfigSeal.inert(call, limit: .max)) exited \(ran.status)", exitCode: 1)) }
+        return (ran.output, nil)
+    }
+
+    /// Runs `program` (by its absolute path, never looked up) with `arguments` and `environment` (nil: this
+    /// process's), stdin `/dev/null` and stderr dropped, in a process group of its own: its exit status (128 and the
+    /// signal's number for one a signal ended) and its stdout. Started with `Platform.Spawn` and collected by its pid
+    /// with bounded waits (`waitpid` with `WNOHANG`), never Foundation's `waitUntilExit` (the Mac's hang). Past
+    /// `timeout` its group is killed and the answer is nil; nil too when it can't be started.
+    public static func run(_ program: String, _ arguments: [String], environment: [String]?, timeout: TimeInterval = toolLimit) -> (status: Int32, output: String)? {
+        var ends: [Int32] = [-1, -1]
+        guard Sys.pipeClosedOnExec(&ends) == 0 else { return nil }
+        var spawn = Platform.Spawn(executable: program, arguments: [program] + arguments)
+        spawn.environment = environment
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .descriptor(ends[1])
+        spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        spawn.group = .ownGroup
+        let started = spawn.start()
+        Sys.close(ends[1])
+        defer { Sys.close(ends[0]) }
+        guard case .success(let pid) = started else { return nil }
+
+        let clock = MacTime.real
+        let deadline = clock.awake() + timeout
+        var output: [UInt8] = []
+        var chunk = [UInt8](repeating: 0, count: 16 * 1024)
+        var timedOut = false
+        while true {
+            let left = deadline - clock.awake()
+            guard left > 0 else { timedOut = true; break }
+            var watched = pollfd(fd: ends[0], events: Int16(POLLIN), revents: 0)
+            let woke = poll(&watched, 1, Int32(max(1, min(left * 1_000, 1_000))))
+            if woke < 0, errno == EINTR { continue }
+            if woke == 0 { continue }
+            let got = Sys.read(ends[0], &chunk, chunk.count)
+            if got < 0, errno == EINTR || errno == EAGAIN { continue }
+            guard got > 0 else { break }
+            output.append(contentsOf: chunk[0..<got])
+        }
+        if timedOut { Sys.kill(-pid, SIGKILL) }
+        // Its output has ended (or it was killed): collected by its pid, the wait bounded; past it, killed and
+        // collected for 10 s more.
+        var status: Int32 = 0
+        var collectBy = clock.awake() + (timedOut ? 10 : timeout)
+        var killed = timedOut
+        while true {
+            let reaped = waitpid(pid, &status, WNOHANG)
+            if reaped == pid { break }
+            if reaped < 0, errno != EINTR { return nil }
+            if clock.awake() >= collectBy {
+                guard !killed else { return nil }
+                Sys.kill(-pid, SIGKILL)
+                killed = true
+                collectBy = clock.awake() + 10
+            }
+            usleep(2_000)
+        }
+        guard !killed else { return nil }
+        let signal = status & 0x7f
+        return (signal == 0 ? (status >> 8) & 0xff : 128 + signal, String(decoding: output, as: UTF8.self))
+    }
+}

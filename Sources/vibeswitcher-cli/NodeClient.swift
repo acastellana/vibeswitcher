@@ -48,23 +48,31 @@ struct NodeContext {
         return VoiceRule(mode: .systemd, scopes: VoiceRule.terminalScopes, uid: getuid(), says: "the terminal scopes")
     }
 
+    /// The environment a tool runs with: on the user's node only `NodeStarter.environment` (`PATH=/usr/bin:/bin` and
+    /// the manager's runtime folder from the uid, never this process's `XDG_RUNTIME_DIR` or bus address: the start
+    /// plan's ST-D2); a scratch node's stand-ins get this process's.
+    var toolEnvironment: [String]? { isScratch ? nil : NodeStarter.environment(runtimeFolder: NodeFolders.runtimeFolder(uid: getuid())) }
+
+    /// `systemctl --user show-environment`'s text, or why it can't be had.
+    func managerEnvironment() -> Result<String, NodeFacts.Failure> {
+        guard let systemctl else { return .failure(.init(Self.noStandIn)) }
+        guard let ran = runTool(systemctl, ["--user", "show-environment"]), ran.status == 0 else {
+            return .failure(.init("systemctl --user show-environment didn't answer"))
+        }
+        return .success(ran.output)
+    }
+
     /// What the machine says (`NodeFacts`); a scratch node's test may stand in for binfmt_misc and the mounts with
-    /// the folder `<root>/v2/test/binfmt_misc` and `<root>/v2/test/mounts`.
-    func facts() -> NodeFacts {
+    /// the folder `<root>/v2/test/binfmt_misc` and `<root>/v2/test/mounts`. `managerEnvironment`: the manager's
+    /// environment read already (`start` reads it once for the facts and its refusal); read here when nil.
+    func facts(managerEnvironment read: Result<String, NodeFacts.Failure>? = nil) -> NodeFacts {
         func standIn(_ name: String, _ system: String) -> String {
             let path = testFolder.appendingPathComponent(name).path
             return isScratch && FileManager.default.fileExists(atPath: path) ? path : system
         }
-        let systemctl = self.systemctl
         return NodeFacts.read(.machine(binfmtFolder: standIn("binfmt_misc", "/proc/sys/fs/binfmt_misc"),
                                        mountsFile: standIn("mounts", "/proc/mounts"),
-                                       managerEnvironment: {
-            guard let systemctl else { return .failure(.init(Self.noStandIn)) }
-            guard let ran = Self.run(systemctl, ["--user", "show-environment"]), ran.status == 0 else {
-                return .failure(.init("systemctl --user show-environment didn't answer"))
-            }
-            return .success(ran.output)
-        }))
+                                       managerEnvironment: { read ?? managerEnvironment() }))
     }
 
     /// The journal entries the command line reads: the node unit's and its own. nil, and why, when there is no
@@ -73,7 +81,7 @@ struct NodeContext {
         guard let journalctl else { return .failure(.init(Self.noStandIn)) }
         var entries: [JournalEntry] = []
         for match in [["-u", VoiceRule.nodeUnit], ["SYSLOG_IDENTIFIER=\(NodeJournal.identifier)"]] {
-            guard let ran = Self.run(journalctl, ["--user", "-o", "json", "--no-pager"] + match), ran.status == 0 else {
+            guard let ran = runTool(journalctl, ["--user", "-o", "json", "--no-pager"] + match), ran.status == 0 else {
                 return .failure(.init("journalctl --user didn't answer"))
             }
             entries += NodeJournal.entries(json: ran.output)
@@ -85,7 +93,7 @@ struct NodeContext {
 
     /// The unit's state (`systemctl --user show`); nil without a manager.
     func unitState() -> NodeJournal.UnitState? {
-        guard let systemctl, let ran = Self.run(systemctl, ["--user", "show", "-p", "Result,ExecMainStatus,ExecMainStartTimestamp", VoiceRule.nodeUnit]),
+        guard let systemctl, let ran = runTool(systemctl, ["--user", "show", "-p", "Result,ExecMainStatus,ExecMainStartTimestamp", VoiceRule.nodeUnit]),
               ran.status == 0 else { return nil }
         return NodeJournal.unitState(show: ran.output)
     }
@@ -109,20 +117,10 @@ struct NodeContext {
         return false
     }
 
-    /// Runs `program` (by its absolute path, never looked up) with `arguments`, stdin /dev/null; its status and
-    /// stdout. nil when it can't be started.
-    static func run(_ program: String, _ arguments: [String]) -> (status: Int32, output: String)? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: program)
-        process.arguments = arguments
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        process.standardInput = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return nil }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+    /// Runs `program` (by its absolute path, never looked up) with `arguments`, stdin /dev/null, with `toolEnvironment`;
+    /// its status and stdout. nil when it can't be started or doesn't end within a minute.
+    func runTool(_ program: String, _ arguments: [String]) -> (status: Int32, output: String)? {
+        NodeStarter.run(program, arguments, environment: toolEnvironment, timeout: 60)
     }
 }
 

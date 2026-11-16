@@ -66,7 +66,8 @@ final class ScratchNode: @unchecked Sendable {
         output = root.appendingPathComponent("host.out").path
         testFolder = root.appendingPathComponent("v2/test", isDirectory: true)
         let files = FileManager.default
-        for folder in [home, nodeRoot.appendingPathComponent("bin"), testFolder, root.appendingPathComponent("tmp")] {
+        for folder in [home, nodeRoot.appendingPathComponent("bin"), testFolder, root.appendingPathComponent("tmp"),
+                       testFolder.appendingPathComponent("xdg-runtime"), testFolder.appendingPathComponent("xdg-config")] {
             try files.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
         // As on the user's node, a session finds the node's root through its HOME (`<home>/.vibeswitcher`): the lead is
@@ -145,14 +146,18 @@ final class ScratchNode: @unchecked Sendable {
         Platform.Processes.children(hostPID).first { Platform.Processes.arguments($0).first == "vibeswitcher-server" }
     }
 
-    /// The environment the command line runs with on this node: its root, a home of its own, and `extra`.
+    /// The environment the command line runs with on this node: its root, a home of its own, `XDG_RUNTIME_DIR` and
+    /// `XDG_CONFIG_HOME` in scratch folders and no `DBUS_SESSION_BUS_ADDRESS` (defence in depth: the command line reads
+    /// none of them in node mode, the start plan's ST-D2), and `extra`.
     func environment(_ extra: [String: String] = [:]) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        for key in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", PeerFacts.sessionMarkerName] { environment[key] = nil }
+        for key in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", PeerFacts.sessionMarkerName, "DBUS_SESSION_BUS_ADDRESS"] { environment[key] = nil }
         environment["HOME"] = home.path
         environment["CFFIXED_USER_HOME"] = home.path
         environment["VIBESWITCHER_HOME"] = root.path
         environment["TMPDIR"] = root.appendingPathComponent("tmp").path + "/"
+        environment["XDG_RUNTIME_DIR"] = testFolder.appendingPathComponent("xdg-runtime").path
+        environment["XDG_CONFIG_HOME"] = testFolder.appendingPathComponent("xdg-config").path
         return environment.merging(extra) { $1 }
     }
 

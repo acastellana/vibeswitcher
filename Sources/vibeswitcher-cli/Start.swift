@@ -2,64 +2,128 @@ import Foundation
 import VibeCore
 import VibeNode
 
-/// `vibeswitcher start [--interop-is-on]` (the engine plan's E1; the bootstrap path's step 8 starts a stopped node and
-/// calls the same print). Before anything it reads the machine (`NodeFacts`): with WSL interop on it refuses unless
-/// told; it says automount, a `kernel=` line and the manager's environment. Then, to a running node, it asks the
-/// server (the user's voice) and prints when the node started; and until the journal holds a `not-promised-ack` entry
-/// the voice rule passes, it prints S11's list in short (`NotPromised`), asks for the typed code and writes that entry.
+/// `vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]` (the engine plan's E1; the start plan's
+/// S2). It only wires `StartSequence`, which holds the order (ST-D5): the installed-build check on the user's node, the
+/// facts and the interop refusal, the manager's environment, then a running node's answer, or, for a stopped node,
+/// S11's acknowledgment, the build, the confirmation, the typed code, the journal entry and `NodeStarter`'s start of
+/// the unit. On the user's node every tool and folder is a constant or comes from `getpwuid` (`NodeStarter.node`); a
+/// scratch node is never started here (69: its harness starts it).
 enum StartCommand {
-    static let usage = "usage: vibeswitcher start [--interop-is-on]"
-
     static func run(_ arguments: [String]) -> Int32 {
-        guard arguments.isEmpty || arguments == ["--interop-is-on"] else { return Say.usage(usage) }
+        guard let parsed = StartArguments.parse(arguments) else { return Say.usage(StartArguments.usage) }
         let context = NodeContext.current()
         context.sayScratch()
-        let facts = context.facts()
-        if let refusal = StartCheck.refusal(facts: facts, interopIsOn: arguments == ["--interop-is-on"]) {
-            return Say.refused(refusal)
+        let home = VibePaths.accountHome
+        let prefix = NodeFolders.defaultPrefix(accountHome: home)
+        let tools = NodeStarter.node(accountHome: home, uid: getuid())
+        let manager = Once { context.managerEnvironment() }
+        let steps = StartSequence.Steps(
+            home: home, prefix: prefix,
+            kind: { context.isScratch ? .scratch : .node(NodeFolders.mode(runtimeFolder: tools.runtimeFolder)) },
+            installedBuild: { NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: prefix) },
+            facts: { context.facts(managerEnvironment: manager.value) },
+            managerEnvironment: { manager.value },
+            managerConfig: { NodeFolders.managerConfigRefusal(accountHome: home) },
+            serverAnswers: { serverAnswers(context) },
+            acknowledged: { acknowledged(context) },
+            showList: { Say.out(NotPromised.text) },
+            typed: { code, what in TypedWord.ask(code: code, what: what) },
+            say: { Say.out($0) },
+            journal: { context.writeJournal($0) },
+            existingUnit: {
+                guard let data = FileManager.default.contents(atPath: (tools.unitFolder as NSString).appendingPathComponent(NodeUnit.fileName)) else { return nil }
+                return String(decoding: data, as: UTF8.self)
+            },
+            unitBuild: { NodeFolders.unitBuild(unitText: $0, prefix: prefix) },
+            current: { currentCommit(prefix: prefix) },
+            toolFolders: { NodeFolders.toolFolders(accountHome: home, nodeVersion: $0, existingUnit: $1) },
+            preflight: { StartPreflight(claudeLink: NodePreflight.claudeLink(root: context.root, accountHome: home), swiftBin: $0, nodeBin: $1).check() },
+            starter: { unit, atLogin in
+                NodeStarter(tools: tools, listen: { probe(context, tools: tools) }).startUnit(unit, atLogin: atLogin)
+            })
+        switch StartSequence(steps: steps).run(parsed) {
+        case .success: return 0
+        case .failure(let refused) where refused.exitCode == 77: return Say.refused(refused.text)
+        case .failure(let refused):
+            Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
+            return refused.exitCode
         }
-        for line in facts.lines { Say.out(line) }
+    }
+
+    /// The server asked for `start`: connected, checked (`ServerCheck`), asked, the request journaled and "the node
+    /// runs" said.
+    static func serverAnswers(_ context: NodeContext) -> StartSequence.ServerAnswer {
         let client: NodeClient
         switch NodeClient.connect(context) {
-        case .failure(let failure): return Say.failed(failure)
+        case .failure(.notRunning(let why)): return .notRunning(why)
+        case .failure(.refused(let why)): return .refusedByCheck(why)
+        case .failure(let failure): return .failed(StartRefusal(failure.message, exitCode: failure.exitCode))
         case .success(let connected): client = connected
         }
         let action = UUID().uuidString.lowercased()
         switch client.request("start", action: action) {
-        case .failure(let failure): return Say.failed(failure)
+        case .failure(let failure): return .failed(StartRefusal(failure.message, exitCode: failure.exitCode))
         case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+            guard reply.ok, let result = reply.result else {
+                let code = reply.error?.code ?? "internal"
+                return .failed(StartRefusal("\(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))", exitCode: Say.exitCode(replyCode: code)))
+            }
             context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "start", epoch: client.hello.epoch))
             Say.out("the node runs: its server since \(ConfigSeal.inert(result["serverStartedAt"]?.string ?? "?", limit: 64)), its host since \(ConfigSeal.inert(result["hostStartedAt"]?.string ?? "?", limit: 64))")
+            return .running
         }
-        return acknowledgeNotPromised(context)
     }
 
-    /// S11's list, once: printed and acknowledged by the typed code (a journal entry), unless an entry that passes the
-    /// rule is there already.
-    static func acknowledgeNotPromised(_ context: NodeContext) -> Int32 {
-        let entries: [JournalEntry]
-        switch context.journalEntries() {
-        case .failure(let failure):
-            Say.out(NotPromised.text)
-            Say.out("(\(failure.reason): the acknowledgment can't be recorded)")
-            return 0
-        case .success(let read): entries = read
+    /// Whether the journal holds a `not-promised-ack` entry that passes the rule.
+    static func acknowledged(_ context: NodeContext) -> Result<Bool, NodeFacts.Failure> {
+        context.journalEntries().map { entries in
+            entries.contains { $0.identifier == NodeJournal.identifier && $0.event == NotPromised.ackEvent && NodeJournal.passes($0, rule: context.journalRule) }
         }
-        let rule = context.journalRule
-        if entries.contains(where: { $0.identifier == NodeJournal.identifier && $0.event == NotPromised.ackEvent && NodeJournal.passes($0, rule: rule) }) {
-            return 0
+    }
+
+    /// The commit `<prefix>/current` names (a link to a commit's folder), nil when none.
+    static func currentCommit(prefix: String) -> String? {
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: (prefix as NSString).appendingPathComponent("current")) else { return nil }
+        let name = (target as NSString).lastPathComponent
+        return name.utf8.count == 40 && name.allSatisfy { $0.isHexDigit } ? name : nil
+    }
+
+    /// The probe `NodeStarter` waits on: the server connected and checked gives `.listening` (or `.refusedByCheck`);
+    /// with nothing listening, the unit's `ActiveState` `failed` or `inactive` gives `.unitEnded` with its `Result`;
+    /// anything else is `.notYet`. `show` without `--value`, read by name: the plan's `--value` prints values with no
+    /// names, in an order this doesn't rely on (2026-11-16).
+    static func probe(_ context: NodeContext, tools: NodeStarter.Tools) -> NodeStarter.Probe {
+        switch NodeClient.connect(context, timeout: 5) {
+        case .success: return .listening
+        case .failure(.refused(let why)): return .refusedByCheck(why)
+        case .failure(.broken): return .notYet
+        case .failure(.notRunning): break
         }
-        Say.out(NotPromised.text)
-        let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: "This records that you read the list above (a journal entry).")
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
-        guard context.writeJournal(NodeJournal.entry(event: NotPromised.ackEvent, action: action)) else {
-            Say.err("vibeswitcher: the acknowledgment couldn't be written to the journal")
-            return 1
+        guard let ran = NodeStarter.run(tools.systemctl, ["--user", "show", "-p", "ActiveState,Result", NodeStarter.unitName],
+                                        environment: NodeStarter.environment(runtimeFolder: tools.runtimeFolder), timeout: 30),
+              ran.status == 0 else { return .notYet }
+        var values: [String: String] = [:]
+        for line in ran.output.split(whereSeparator: \.isNewline) {
+            guard let equals = line.firstIndex(of: "=") else { continue }
+            values[String(line[..<equals])] = String(line[line.index(after: equals)...])
         }
-        Say.out("recorded: you read what plain mode doesn't promise")
-        return 0
+        guard let active = values["ActiveState"], ["failed", "inactive"].contains(active) else { return .notYet }
+        return .unitEnded(result: values["Result"] ?? active)
+    }
+}
+
+/// A value read once, when first asked for.
+final class Once<Value> {
+    private let make: () -> Value
+    private var made: Value?
+
+    init(_ make: @escaping () -> Value) { self.make = make }
+
+    var value: Value {
+        if let made { return made }
+        let value = make()
+        made = value
+        return value
     }
 }
 
@@ -80,6 +144,11 @@ enum Say {
     static func replyError(_ reply: NodeWire.Reply) -> Int32 {
         let code = reply.error?.code ?? "internal"
         err("vibeswitcher: \(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))")
+        return exitCode(replyCode: code)
+    }
+
+    /// The exit code for a reply's error code.
+    static func exitCode(replyCode code: String) -> Int32 {
         switch code {
         case NodeWire.Code.voice.rawValue, NodeWire.Code.refused.rawValue, NodeWire.Code.stopping.rawValue: return 77
         case NodeWire.Code.badArgs.rawValue: return 65

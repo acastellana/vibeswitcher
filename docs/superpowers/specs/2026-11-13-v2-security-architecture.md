@@ -1349,7 +1349,12 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `StartCommandTests.theUnitStartsTheCommitsFolderNotCurrent`,
 `StartCommandTests.theUnitIsRestartNoKillModeControlGroupWithATimeout`,
 `StartCommandTests.theUnitUnsetsTheListedNamesAndSetsBacktraceOff`, `StartCommandTests.noNameIsBothUnsetAndAssigned`,
-`StartCommandTests.theUnitsPathIsQuotedAndHasNoMnt` (the start plan's S1).
+`StartCommandTests.theUnitsPathIsQuotedAndHasNoMnt` (the start plan's S1);
+`StartCommandTests.startWritesTheUnitAndAsksTheManagerToStartIt`, `StartCommandTests.aDropInMakesStartRefuse`,
+`StartCommandTests.aManagerXdgConfigHomeDoesntMoveTheUnit`,
+`StartCommandTests.aManagerVariableThatShowsAfterTheReloadRefusesStart`,
+`StartCommandTests.theInstalledCommandLineRunsUsrBinSystemctl`, `StartCommandTests.aScratchNodeIsNotStartedByTheCommandLine`
+(the start plan's S2: the manager runs the unit start wrote, asked by the absolute systemctl with an environment of its own).
 
 **Tests to write:** Step 8: a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,

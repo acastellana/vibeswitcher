@@ -19,7 +19,7 @@ enum ServerCheck {
         case .scratch(let root):
             expected = Platform.Processes.lockHolder(path: (root as NSString).appendingPathComponent(NodeCheck.scratchLock))
         case .node:
-            expected = context.systemctl.flatMap { NodeContext.run($0, ["--user", "show", "-p", "MainPID", "--value", VoiceRule.nodeUnit]) }
+            expected = context.systemctl.flatMap { context.runTool($0, ["--user", "show", "-p", "MainPID", "--value", VoiceRule.nodeUnit]) }
                 .flatMap { $0.status == 0 ? pid_t($0.output.trimmingCharacters(in: .whitespacesAndNewlines)) : nil }
                 .flatMap { $0 > 0 ? $0 : nil }
         }

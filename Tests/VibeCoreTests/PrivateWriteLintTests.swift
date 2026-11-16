@@ -31,6 +31,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeSwitcher/AppStatus.swift": (1, "app-status.json in ~/.vibeswitcher (0700): to move to the helper"),
         "Sources/VibeSwitcher/SessionStore.swift": (1, "the state folder, made 0700 by ensurePrivateDirectories first"),
         // Not VibeSwitcher's own files.
+        "Sources/VibeNode/Start/NodeStarter.swift": (1, "the user's systemd unit folder (~/.config/systemd/user), made 0755 as systemd's own folders are when absent (the start plan's S2); the unit file in it is written 0644 by open(O_EXCL|O_NOFOLLOW) and renamed in"),
         "Sources/VibeCore/LeadBoard.swift": (2, ".git/info/exclude: git's file"),
         "Sources/VibeCore/LeadRecords.swift": (4, "records_dir: the repository's own committed files, with its usual modes (the product inventory's committed copy in the checkout)"),
         "Sources/VibeCore/ProductInventory.swift": (2, "a scratch folder in the temporary directory, removed after: the commit's script and inputs, run there"),

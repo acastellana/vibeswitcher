@@ -12,7 +12,7 @@ signal(SIGPIPE, SIG_IGN)
 
 let usage = """
     usage: vibeswitcher status [--json] | status --probe [--json] | status --ack
-           vibeswitcher start [--interop-is-on]
+           vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
            vibeswitcher lead FOLDER [--goal TEXT] [--take-head] [--replace]
            vibeswitcher questions [FOLDER] [--all] [--json]
