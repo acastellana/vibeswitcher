@@ -2601,6 +2601,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 09:52 Audit of merge-github-s-main-2: complete, clean, round 1: 1 Nit open
 - 2026-11-16 09:52 Automatically (auto_advance): Didn't merge merge-github-s-main-2: Not merged (nothing was tested): agent/merge-github-s-main-2 holds commits of origin/main (up to 2404fe5e) that main lacks, and fetch_remote hasn't fetched origin/main. Run fetch_remote, then merge again: a branch that carries the remote's commits lands as a true merge, with the remote's records as fetch_remote fetched them.
 - 2026-11-16 09:52 Fetched origin/main at 2404fe5e: main is 35 commits ahead of origin/main and 87 commits behind it
+- 2026-11-16 09:57 Automatically (auto_advance): Didn't merge merge-github-s-main-2: Not merged (nothing was tested): Gate code on main isn't installed yet: 1 commit (Route worker terminal needs through the lead); merges run the installed build (32244f28b05f). agent/merge-github-s-main-2 holds commits of origin/main (up to 2404fe5e), and its merge runs through that build's gate, which lacks them. Ask the user to install the app from main (scripts/build-app.sh --install), then merge again.
 - 2026-11-12 00:32 Asked the user to push main at f2ebe92b (28 commits) to origin/main
 - 2026-11-12 00:39 Pushed main at f2ebe92b (28 commits) to origin/main, on the user's click
 - 2026-11-12 02:13 Automatically fetched origin/main at f2ebe92b: 0 commits from the other Mac at origin/main (f2ebe92b3518adebac54e585ae6c0d26510bb853): merge_remote would do nothing: main has everything origin/main has.
@@ -2867,3 +2868,4 @@ Proposed task 1: Find why dictations end with no text
   Counts by day, 2026-11-06 to 2026-11-12: 11-06 ×0, 11-07 ×0, 11-08 ×0, 11-09 ×1, 11-10 ×0, 11-11 ×1, 11-12 ×1.
   Lines: first at 2026-11-09 17:16:39, last at 2026-11-12 17:50:25 in ~/.vibeswitcher/debug/app.log (app.log.1 once it rotated).
   Line, masked: dictation: Claude's ended, session <id>, no text: …
+- 2026-11-16 10:14 Merged merge-github-s-main-2: Merge GitHub's main (2404fe5e) from the other Mac, resolving AGENTS.md (build 220ffefdb01f)
