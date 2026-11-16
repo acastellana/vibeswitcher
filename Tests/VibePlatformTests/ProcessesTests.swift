@@ -679,14 +679,23 @@ struct ProcessesTests {
         let count = try #require(Processes.openDescriptorCount(pid))
         #expect(count >= 4 && count >= open.count)
 
-        // This process, with the file open too, isn't told of the descriptor its own list is read through.
+        // This process, with the file open too, isn't told of the descriptor its own list is read through. Another
+        // test may be listing this process's descriptors meanwhile, its own descriptor on the folder then rightly in
+        // the list; but the call's own is in every list it makes when it isn't left out, so some list of a few names
+        // none (each other listing lasts a moment).
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
         let own = Processes.openFiles(getpid())
         #expect(own.contains(path))
-        #expect(!own.contains { $0.hasPrefix("/proc/") && $0.hasSuffix("/fd") })
+        let listing = { (paths: [String]) in paths.contains { $0.hasPrefix("/proc/") && $0.hasSuffix("/fd") } }
+        let deadline = DispatchTime.now() + 10
+        var clean = !listing(own)
+        while !clean, DispatchTime.now() < deadline { clean = !listing(Processes.openFiles(getpid())) }
+        #expect(clean, "every list of this process's files named a descriptor on its fd folder: \(own)")
+        // Its count, read after the list, while other tests open and close descriptors: no fewer than its standard
+        // three and the file.
         let ownCount = try #require(Processes.openDescriptorCount(getpid()))
-        #expect(ownCount >= 4 && ownCount >= own.count)
+        #expect(ownCount >= 4)
 
         #if os(Linux)
         // Removed, a file still held open is at no path: not listed, under its old name or any other.
