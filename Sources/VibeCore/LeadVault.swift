@@ -1433,6 +1433,9 @@ extension LeadVault {
                 }
             }
             if carried { held = Self.heldValue(before) }
+            // A folder whose entries every session's start adds (Linux's list, `.entries`): entries added or removed only,
+            // and not held, are sealed as they are; the removed ones are kept, so one back changed is a change.
+            for key in now.keys where before[key] == nil { if let kept = LinuxSealList.cameOrWent(key: key, recorded: recorded, now: hashes) { recorded[key] = now[key]; recorded[ConfigSeal.keysKey(of: key)] = kept } }
             // Not told at this look (a plugin no settings enable now, the scripts of a settings file that doesn't read):
             // marked, so that if it comes back changed, no quiet look seals it: when it changed isn't known.
             for key in Array(recorded.keys) where ConfigSeal.isWatchedKey(key) && ConfigSeal.isHome(key: key) == home && now[key] == nil

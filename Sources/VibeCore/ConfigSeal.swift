@@ -47,6 +47,12 @@ public enum ConfigSeal {
             /// commands), each by contents (`settingsScripts`); `project` stands for `$CLAUDE_PROJECT_DIR`, and what's
             /// at or under `skip` is watched already.
             case scripts(home: String, project: String?, skip: [String])
+            /// A big folder, by its metadata only: every entry's name, type, mode, size, inode, times and link target,
+            /// no cap, never a file's contents (`LinuxSealList.listingHash`; the start plan's ST-D18). Linux's list only.
+            case listing
+            /// A folder read as `folder` whose entries come and go with every session: an entry added or removed is no
+            /// change, one changed in place is (`LinuxSealList.cameOrWent`; the start plan's ST-D19). Linux's list only.
+            case entries
         }
 
         public var name: String
@@ -244,7 +250,7 @@ public enum ConfigSeal {
     public static func isHome(key: String) -> Bool {
         let rest = key.hasPrefix(keysPrefix) ? key.dropFirst(keysPrefix.count) : key.hasPrefix(gonePrefix) ? key.dropFirst(gonePrefix.count)
             : key.hasPrefix(keyPrefix) ? key.dropFirst(keyPrefix.count) : ""
-        return rest.hasPrefix("~/")
+        return rest.hasPrefix("~/") || rest.hasPrefix("/mnt/") || rest.hasPrefix("/run/user/")
     }
 
     /// The key of the per-key hashes of the thing `key` (a watched key) hashes.
@@ -336,6 +342,7 @@ public enum ConfigSeal {
             Watched(name: "~/" + file + scriptsSuffix, path: (home as NSString).appendingPathComponent(file), kind: .scripts(home: home, project: nil, skip: skip))
         }
         return files + scripts + plugins(home: home, enabledIn: settingsFiles.map { (home as NSString).appendingPathComponent($0) })
+            + LinuxSealList.watched(home: home, uid: getuid())
     }
 
     /// Everything watched for the team of the repository at `root`, with your home at `home`: your home's, the main
@@ -442,8 +449,8 @@ public enum ConfigSeal {
                 all[keysPrefix + item.name] = encode(Dictionary(parts, uniquingKeysWith: { first, _ in first }))
                 continue
             }
-            if item.kind == .folder {
-                let folder = readFolder(item)
+            if item.kind == .folder || item.kind == .entries {
+                let folder = item.kind == .entries ? LinuxSealList.readEntries(item) : readFolder(item)
                 all[keyPrefix + item.name] = folder.hash
                 all[keysPrefix + item.name] = encode(folder.entries)
                 all[countingPrefix + item.name] = folder.countingHash
@@ -612,8 +619,10 @@ public enum ConfigSeal {
             case .other: add("other")
             case .unreadable: add("unreadable")
             }
-        case .folder:
+        case .folder, .entries:
             return readFolder(watched).hash
+        case .listing:
+            return LinuxSealList.listingHash(watched.path)
         case .mcpServers:
             var servers = mcpServers(watched.path)
             for _ in 1..<3 where servers == nil {

@@ -559,3 +559,35 @@ What run 3's screen showed besides:
 The next run, after the weekly limit resets (Nov 18) and with the user's go-ahead (the three runs this task allowed are
 spent): `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<config> bash scripts/test.sh --filter EngineEndToEndTests/aRealLead`,
 its `E9:` lines giving each step's time here.
+
+## The config seal's Linux list (the start plan's S7, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+**Step 0, the startup files' targets** (read by the agent, read only). Each `.` and `source` in `~/.bashrc`,
+`~/.profile`, `~/.bash_profile` and `~/.bash_login` (the last two absent here; all four are watched whether they
+exist or not, `ConfigSeal.homeFiles`):
+
+| File, line | Target | Watched by |
+| --- | --- | --- |
+| `.bashrc` 105 | `~/.bash_aliases` (absent here) | `LinuxSealList.homeEntries`, and `sourced` |
+| `.bashrc` 113, 115 | `/usr/share/bash-completion/bash_completion`, `/etc/bash_completion` | left out: root-owned |
+| `.bashrc` 120, 121 | `$NVM_DIR/nvm.sh`, `$NVM_DIR/bash_completion` (`NVM_DIR="$HOME/.nvm"`, line 119) | `homeEntries` (`.nvm/nvm.sh`, `.nvm/bash_completion`); `sourced` doesn't expand `$NVM_DIR` |
+| `.bashrc` 124 | `~/projects/rally/.rally-aliases` | `homeEntries`, and `sourced` |
+| `.profile` 15 | `"$HOME/.bashrc"` | `ConfigSeal.homeFiles` |
+| `.profile` 33 | `'/home/<user>/.local/share/swiftly/env.sh'` (by the home's own path) | `homeEntries`, and `sourced` (it takes the home's own path too) |
+
+**One look at the real home's list**, timed: `VIBESWITCHER_SEAL_TIMING_HOME=$(getent passwd $(id -un) | cut -d: -f6)
+bash scripts/test.sh --filter LinuxSealListTests/aLookOfTheLinuxListIsTimed`, read only, leaving out every entry under
+`~/.claude` and `~/.vibeswitcher`: **33 entries hashed in 0.48 s**. They were the 6 files of `homeEntries`, `~/bin`, the 7
+systemd and autostart folders and `user.conf`, `~/.codex/shell-snapshots`, the 5 listings (`~/.config/gh`,
+`~/.local/bin`, `~/.local/share/claude/versions`, swiftly's `toolchains` and `bin`), node's
+`~/.nvm/versions/node/v22.16.0` (no unit yet: each `v*`), the 2 `/run/user/1000/systemd` folders, and
+`/mnt/c` mounted (9p), each of 5 Windows users' `.wslconfig` and Startup folder (`CodexSandboxOffline`, `WsiAccount`,
+`kstel`, `monts`, `postgres`; `Default User` is a junction, so left out, as are `Public`, `Default` and `All Users`). The
+look reads metadata only for the listings: the swiftly toolchain and node's folder are the large ones.
+
+**The measurement (ST-D19)**, `EngineEndToEndTests.aWorkersStartDoesNotHoldItsTeam` on a scratch node with the fakes:
+on plain folders the first `start_worker` was refused for `~/.claude/shell-snapshots`, `~/.vibeswitcher/lead/run`
+and `~/.vibeswitcher/lead/git-hooks` (GitGuard's baseline at the first guarded git, then the lead's tool server setting
+`told` in `accepted.json`). On `.entries` for all four (and `told` left out of the hooks record's per-path hash) it
+passes: two workers start, and `config held` holds nothing after either. The real Claude Code's snapshot is checked
+once, at M8's first lead (S9's "Prepared for M8").

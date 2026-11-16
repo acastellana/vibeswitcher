@@ -338,15 +338,14 @@ struct SwitchTests {
     /// ST-D23: after the follow-up in a scratch home, the seal's entries for the builds folder and the unit folder both
     /// changed, so the next look holds every team until `config accept`.
     ///
-    /// The entries are the ones S7's `LinuxSealList.homeEntries` lists (`.vibeswitcher/v2/builds`,
-    /// `.config/systemd/user`). `LinuxSealList` is S7's, not yet in this lane (2026-11-16): the case fingerprints them
-    /// as `.folder`s, as today's `ConfigSeal` reads them; once S7 lands it takes `LinuxSealList.watched(home:uid:)`'s
-    /// entries for those names.
+    /// The entries are `LinuxSealList.watched(home:uid:)`'s for those names (S7, 2026-11-16): the builds folder a
+    /// `.listing`, the unit folder a `.folder`.
     @Test(NodeTraits.linuxOnly) func aSwitchLeavesTheSealHoldingUntilAccepted() throws {
         let world = try World(scratch)
-        let entries = [".vibeswitcher/v2/builds", ".config/systemd/user"].map {
-            ConfigSeal.Watched(name: "~/" + $0, path: world.home.appendingPathComponent($0).path, kind: .folder)
-        }
+        let names = ["~/.vibeswitcher/v2/builds", "~/.config/systemd/user"]
+        let entries = names.compactMap { name in LinuxSealList.watched(home: world.home.path, uid: getuid()).first { $0.name == name } }
+        try #require(entries.map(\.name) == names)
+        #expect(entries.map(\.kind) == [.listing, .folder])
         let before = entries.map(ConfigSeal.fingerprint)
         #expect(before.allSatisfy { $0 != nil })
         #expect(entries.map(ConfigSeal.fingerprint) == before)

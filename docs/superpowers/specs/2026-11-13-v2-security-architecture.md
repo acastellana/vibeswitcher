@@ -1405,10 +1405,17 @@ PATH as `start` does, never a unit's edited ones back; 2026-11-16, with the revi
 `InstallTests.aRecordForAFolderNamedOtherThanItsCommitIsRefused`, `InstallTests.theCommandLineWritesTheRecord` (the start
 plan's S4a: build-info records the toolchain's swift --version text and Package.resolved's hash, and hashes only
 regular files in bin, each once under one name; a link, a folder, a FIFO, or a build folder named other than its
-commit is refused; 2026-11-16, with the review of S4a).
+commit is refused; 2026-11-16, with the review of S4a);
+`LinuxSealListTests.aWriteToEachItemOfTheLinuxListIsHeld`, `LinuxSealListTests.aSourcedFileIsWatched`,
+`LinuxSealListTests.aListingNeverReadsContents`, `LinuxSealListTests.aListingIsNotCut`,
+`LinuxSealListTests.theWindowsFilesAreWatchedOnlyWhileMounted`,
+`LinuxSealListTests.anEntriesFolderCountsOnlyEntriesChangedInPlace`, `LinuxSealListTests.theMacsListIsEmpty`,
+`EngineEndToEndTests.aWorkersStartDoesNotHoldItsTeam`, `SwitchTests.aSwitchLeavesTheSealHoldingUntilAccepted` (the
+start plan's S7: a write to each item of the seal's Linux list is held, the big folders read by their metadata with
+no cap, a folder of `.entries` held only for an entry changed in place or removed and back changed, and a worker's
+start doesn't hold its team; 2026-11-16).
 
-**Tests to write:** Step 8: a write
-to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,
+**Tests to write:** Step 8: `InstallTests.anInstallFromADirtyTreeIsRefused`,
 `anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (also reads `/proc/<pid>/maps` of the installed host, server
 and a parser), `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds`. After
 the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts`.

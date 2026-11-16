@@ -4,7 +4,10 @@ import Foundation
 /// tests (`Tests/VibeSwitcherTests/FakeClaude.swift`, the port map's "Copied from the app"), with what the node needs
 /// besides: a launcher, so the process table sees it as Claude (`install(in:)`); Claude's own arguments taken and
 /// skipped; its files per terminal (`--fake-folder`); and one more control op, `mcp`, which calls a tool of the tool
-/// server its `--mcp-config` names. The three positional arguments the app's harness passes still work.
+/// server its `--mcp-config` names. The three positional arguments the app's harness passes still work. Started
+/// through its launcher, it writes its shell snapshot at its start, as Claude Code does
+/// (`<CLAUDE_CONFIG_DIR or ~/.claude>/shell-snapshots/snapshot-bash-<ms>-<random>.sh`, the start plan's ST-D19), never in
+/// the account's own home.
 enum FakeClaude {
     /// Where an installed fake is: its launcher (`claude`, the program a session runs) and the folder its sessions'
     /// files go in.
@@ -1233,7 +1236,28 @@ def control():
     return True
 
 
+def write_shell_snapshot():
+    """As Claude Code does at its start (the start plan's ST-D19): CONFIG/shell-snapshots/snapshot-bash-<ms>-<random>.sh,
+    CONFIG its CLAUDE_CONFIG_DIR or ~/.claude. Never in the account's own home (the user database's): a test's HOME only."""
+    try:
+        import pwd
+        own = os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError):
+        return
+    home = os.environ.get("HOME", "")
+    config = os.environ.get("CLAUDE_CONFIG_DIR") or (os.path.join(home, ".claude") if home else "")
+    if not config or os.path.realpath(config) == own or os.path.realpath(config).startswith(own + "/.claude"):
+        return
+    folder = os.path.join(config, "shell-snapshots")
+    os.makedirs(folder, exist_ok=True)
+    name = "snapshot-bash-%d-%s.sh" % (int(time.time() * 1000), uuid.uuid4().hex[:6])
+    with open(os.path.join(folder, name), "w") as snapshot:
+        snapshot.write("# Snapshot file\n# Unset all aliases to avoid conflicts with functions\nunalias -a 2>/dev/null || true\n")
+
+
 def main():
+    if TERMINAL is not None:
+        write_shell_snapshot()
     tty.setraw(0)
     out(ESC + "[?2004h")
     if PROMPT:

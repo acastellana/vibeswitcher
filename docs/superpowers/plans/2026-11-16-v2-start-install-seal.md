@@ -1459,11 +1459,57 @@ landed; otherwise it uses E9's.
   - `ConfigSeal.Watched.Kind.listing` (and `.entries` if needed).
   - Every entry `executes` (none is in `instructions`).
 
-- [ ] **Step 0: Check the real startup files** (an agent step, read only, outside the suite). List every `.` and
+*2026-11-16, S7 as made (committed; the push is the lead's):*
+- `LinuxSealList.watched(home:uid:mounts:outside:)`: `outside` (nil by default) is where the entries outside the home
+  are read; nil reads them at `/` only for the account's own home (`getpwuid(uid)`'s), and leaves them out for any
+  other. So a scratch home's seal, every existing test's and every `ScratchNode`'s, never reads the real
+  `/run/user/<uid>` or `/mnt/c` (`aScratchHomeReadsNothingOutsideIt`); the real node's home is the account's. The cases
+  read the outside entries under a scratch root.
+- **The measurement, `aWorkersStartDoesNotHoldItsTeam`, held the team on the plain folders**, and named three:
+  `~/.claude/shell-snapshots`, `~/.vibeswitcher/lead/run` and `~/.vibeswitcher/lead/git-hooks` (the first
+  `start_worker` refused: "changed outside a team session"). The third is beyond ST-D19's two: GitGuard's baseline
+  (`GitGuard.baseline`, written at the first guarded git, here `base show`) adds the copy and `accepted.json`, and the
+  lead's tool server then rewrites `accepted.json` once to set `told` (`GitGuard.notice`). So all four (the two
+  snapshot folders, `run`, `git-hooks`) are `.entries`, and the case passes on that form. `git-hooks`' per-path hash of
+  `<key>/accepted.json` leaves out `told` (`LinuxSealList.readEntries`, the `.entries` read branch into
+  `LinuxSealList`; `theHooksRecordsToldFlagIsNoChange`). A changed hooks copy, or a record changed otherwise (the
+  lead's `accept_git_hooks`), still holds the team until `config accept`.
+- `.entries`' rule as made: a key not held (`before[key] == nil`, so a held thing is still only the user's click to
+  clear) whose change is only entries added or removed is recorded as it is, **the removed entries kept** in its
+  per-path hashes, so one removed and written back changed is a change in place (a worker that deletes the lead's
+  snapshot, waits for a look, and writes it back changed is held). The kept entries go at the next accept, which
+  records the folder as it is. Entries are compared by `FolderRead.entries`' hash (the first 64 bits of each line's
+  SHA-256, the line holding the name, mode and contents' digest), not by mtime.
+- `LinuxSealList.cameOrWent(key:recorded:now:)` returns the per-path hashes to record (nil: judged as ever);
+  `LinuxSealList.readEntries(_:)` and `listingHash(_:)` are the two read branches. The `judge` hook is a comment and
+  one line.
+- The Windows Startup folder is a `.listing` (read over 9p by metadata, and it gives no card detail), so every held
+  folder's detail at once stays under the host's 1 MiB message (`ConfigSealCardTests`' budget: 7 Linux `.folder`s,
+  4 `.entries` and the 2 `/run/user` folders beside the Mac's 7).
+- `sourced` also takes a target written by the home's own path (`.profile` here sources
+  `'/home/<user>/.local/share/swiftly/env.sh'`), and only targets under the home (a name outside it would be judged as
+  the checkout's).
+- Node's version folder: each node `bin` under `~/.nvm/versions/node/` on the unit's PATH
+  (`Environment="PATH=…"`, as S1 writes it); when the unit is missing or names none, each `v*`.
+- `aWorkersStartDoesNotHoldItsTeam` is in `EngineEndToEndTests` (its helpers). "A merge isn't refused for the seal"
+  is the lead's own look (`checkConfig`, which a merge's tests and every role's start ask): a second worker starts,
+  and `config held` (the app's look) holds nothing after each start. `FakeClaudeTests.theFakeWritesItsShellSnapshot`
+  holds the fake's snapshot. The fake writes it only when started through its launcher, never under the account's own
+  home.
+- `SwitchTests.aSwitchLeavesTheSealHoldingUntilAccepted` takes `LinuxSealList.watched(home:uid:)`'s entries (the
+  builds folder a `.listing`), as S8a's note said.
+- `ConfigSealPluginTests.aHookWritingItsLogWhileAWorkerRunsHoldsNothing` keeps its assertion; its hook script moved
+  from `~/bin` (now watched here, which held it a second time) to `~/tools`.
+- Residuals for the lead: a role restarted under the same name rewrites `run/<key>/<name>/…` in place and holds the
+  team; a listing (ST-D18) misses a write in the kernel tick of the last change it recorded (ctime is coarse here);
+  a new entry in an `.entries` folder is never held (a snapshot is sourced only by the session that wrote it; a role's
+  launch files are written whole at its start).
+
+- [x] **Step 0: Check the real startup files** (an agent step, read only, outside the suite). List every `.` and
   `source` target in `~/.bashrc`, `~/.profile`, `~/.bash_profile` and `~/.bash_login`. Record in the inventory that
   each user-writable target is in `homeEntries` or found by `sourced`. Targets under root-owned folders
   (`/usr/share/bash-completion`, `/etc/bash_completion`) are left out.
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `aWriteToEachItemOfTheLinuxListIsHeld` (linuxOnly, `LinuxSealListTests`): for every entry, a write in a scratch
     home changes that entry's fingerprint, and no other entry's. For listings, the write keeps size and mtime: a
     `touch -d` back, contents changed. Absent items hash as absent and change when created.
@@ -1482,13 +1528,14 @@ landed; otherwise it uses E9's.
     writing its shell snapshot): a lead starts a worker. The next look holds nothing, and a merge isn't refused for
     the seal. If this fails on the plain-folder form, the step takes `.entries` for the churning folders (ST-D19), and
     the case passes on it.
-- [ ] **Step 2: Implement** the hook line and the kinds as in [Non-seam edits](#non-seam-edits-this-plan-makes). The
+- [x] **Step 2: Implement** the hook line and the kinds as in [Non-seam edits](#non-seam-edits-this-plan-makes). The
   `.folder` walk keeps `maxEntries`; `.listing` has no cap (ST-D18).
-- [ ] **Step 3: Verify.**
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter 'LinuxSealListTests|ConfigSealTests|LeadVaultTests|EngineEndToEndTests|FakeClaudeTests'`
   - the lints
   - under load
-- [ ] **Step 4:** commit ("v2: the config seal's Linux list"). Push, both green.
+- [ ] **Step 4:** commit ("v2: the config seal's Linux list"). Push, both green. *2026-11-16:* committed on
+  `v2-step8` as "v2 step 8: S7, the config seal's Linux list"; the push and both jobs are the lead's.
 
 **Done when:** the cases pass. Row 224 is `made`. The look's time on the real home and Step 0's check are in the
 inventory. The Mac runs `theMacsListIsEmpty`.
