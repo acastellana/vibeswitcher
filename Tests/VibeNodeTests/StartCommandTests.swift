@@ -441,7 +441,7 @@ extension StartCommandTests {
     /// An installed build in `prefix`: `<prefix>/<folderName>/bin/` with the cli, host and server (small stand-ins), and
     /// a `build-info` naming `commit` with their hashes.
     @discardableResult
-    private static func makeBuild(prefix: URL, commit: String, folderName: String? = nil) throws -> URL {
+    static func makeBuild(prefix: URL, commit: String, folderName: String? = nil) throws -> URL {
         let folder = prefix.appendingPathComponent(folderName ?? commit)
         let bin = folder.appendingPathComponent("bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)

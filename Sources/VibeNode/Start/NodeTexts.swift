@@ -71,6 +71,35 @@ public enum NodeTexts {
         return lines.joined(separator: "\n")
     }
 
+    /// `switch`'s (S8a; the app's `HostClient.RestartPlan.handOver`, port-map row 100): the host hands over to the
+    /// target's build and keeps every session, so it names no count; a running team keeps its build until its lead
+    /// restarts (ST-D16); the seal holds every team until `vs config accept`, since the builds folder and the unit
+    /// change (ST-D23). The code is still typed (EN-D5), where the app asked nothing.
+    public static func `switch`(from: String, to: String) -> String {
+        (["This switches the node from the build of commit \(ConfigSeal.inert(from, limit: 64)) to the build of commit \(ConfigSeal.inert(to, limit: 64)):"]
+            + switchConsequences(to: to)).joined(separator: "\n")
+    }
+
+    /// `rollback`'s (S8a, ST-D14): the switch's, going back to `to`, the commit installed before the running build,
+    /// with the `installs` line it was read from (`line`: the file is any worker's to edit, so the user reads it here).
+    public static func rollback(from: String, to: String, line: String) -> String {
+        ([
+            "This rolls the node back from the build of commit \(ConfigSeal.inert(from, limit: 64)) to the build of commit \(ConfigSeal.inert(to, limit: 64)), the one installed before it:",
+            "  its line in the installs record: \(ConfigSeal.inert(line, limit: .max)) (any worker can write that record: check the commit is one you installed)",
+        ] + switchConsequences(to: to)).joined(separator: "\n")
+    }
+
+    /// What a switch to `to` does and leaves, for `switch` and `rollback`.
+    static func switchConsequences(to: String) -> [String] {
+        let commit = ConfigSeal.inert(to, limit: 64)
+        return [
+            "  the host hands over to \(commit)'s host, which keeps every session",
+            "  a running team keeps its build until its lead restarts: the workers a lead started before the switch start the old build's tool server",
+            "  your unit's ExecStart is rewritten to \(commit) and `current` names it, so the next start runs it",
+            "  the seal holds every team until `vs config accept`, since the builds folder and the unit change (`vs config held` shows them)",
+        ]
+    }
+
     /// What `status` says of a node started detached (ST-D6).
     public static let weakerRule = "no systemd: the weaker voice rule; the node's pid file is yours, and any worker's, to write"
 

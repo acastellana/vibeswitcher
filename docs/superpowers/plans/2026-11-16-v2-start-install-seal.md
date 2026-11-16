@@ -1486,7 +1486,30 @@ inventory. The Mac runs `theMacsListIsEmpty`.
     restarts; the seal holds every team until `vs config accept`, since the builds folder and the unit change").
   - `NodeTexts.rollback(from:to:line:) -> String`: the same, with the target and its `installs` line.
 
-- [ ] **Step 1: Failing tests** (`SwitchTests`, pure unless said):
+*2026-11-16, as built:*
+- `SwitchFollowUp.apply(tools:prefix:commit:hostPid:hostCheck:)`: the plan's `unitFolder:systemctl:` are
+  `NodeStarter.Tools` (each `systemctl` runs with the runtime folder in its environment, as start's do), and the pid
+  the host had before the switch is `hostPid:`. `hostCheck` returns what it saw, `SwitchFollowUp.Host(pid:build:)`,
+  and the follow-up judges it, so "a `hostCheck` that reports another pid or build" is a case of its own. A missing
+  unit file is refused (`vs start` writes it). A `daemon-reload` the manager refuses leaves the unit rewritten (said)
+  and `current` unmoved (`aReloadThatFailsLeavesCurrentAndSaysTheUnitChanged`). *For S8c:* a detached node (no
+  systemd, ST-D6) has no unit, so its CLI skips the follow-up or moves only `current`; S8c decides.
+- The unit is written and `daemon-reload` asked through `NodeStarter`'s own `write` and `ask`, made internal to the
+  module (they were private).
+- `Plan.refusedWhileTeamsWork` carries the live workers' and verifiers' roles, in the order given; a target not
+  installed is said before the rule.
+- `rollbackTarget` takes the nearest earlier line naming another commit before the running commit's last line, and
+  skips lines whose first word isn't 40 lowercase hex digits.
+- `aSwitchLeavesTheSealHoldingUntilAccepted`: `LinuxSealList` is S7's and not in this lane yet, so the case
+  fingerprints `~/.vibeswitcher/v2/builds` and `~/.config/systemd/user` as `ConfigSeal.Watched` `.folder`s (today's
+  kinds). When S7 lands, the case takes `LinuxSealList.watched(home:uid:)`'s entries for those names (the builds folder
+  as `.listing`).
+- The app's cases map as row 99 says: `theBundledBuildIsUsed` and `noRestartIsOfferedWithoutAnOutdatedHost` as
+  `theRunningCommitIsAlreadyRunning`; the replace and handover cases as `aSwitchWithNoLiveSessionOrOnlyLeadsHandsOver`;
+  `anOlderHostKeepsItsSessionsUntilTheyEnd` as `aSwitchWhileWorkersOrVerifiersAreLiveIsRefused`. The app's "no
+  confirmation" (`!needsConfirmation`) becomes `NodeWire.changesState("build.switch")` in `aSwitchSaysItKeepsSessions`.
+
+- [x] **Step 1: Failing tests** (`SwitchTests`, pure unless said):
   - The `HostClientPlanTests` port (row 99) on `SwitchPlan`:
     - the running commit gives `.already`;
     - a commit not in the install root gives `.notInstalled`;
@@ -1506,9 +1529,10 @@ inventory. The Mac runs `theMacsListIsEmpty`.
     count, and says the seal's hold. The code is still typed (EN-D5). Row 100's name for it changes from
     `aHostThatHandsOverKeepsSessionsWithoutAsking`, because the node asks a code where the app asked nothing.
   - `aRollbackSaysWhereItGoes`: `NodeTexts.rollback` holds the target and its `installs` line.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Verify.** `bash scripts/test.sh --filter SwitchTests`; the lints; under load.
-- [ ] **Step 4:** commit ("v2: the switch's plan and follow-up"). Push, both green.
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Verify.** `bash scripts/test.sh --filter SwitchTests`; the lints; under load.
+- [ ] **Step 4:** commit ("v2: the switch's plan and follow-up"). Push, both green. *2026-11-16:* committed on
+  `v2-step8-a` as "v2 step 8: S8a, the switch's plan and follow-up"; the push and both jobs are the lead's.
 
 **Done when:** the cases pass. The Mac runs the pure cases.
 

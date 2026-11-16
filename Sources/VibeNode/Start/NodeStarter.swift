@@ -324,8 +324,8 @@ public struct NodeStarter {
     // MARK: - The unit file and systemctl
 
     /// Writes `text` to a temporary file in the unit folder (made 0755 if absent), 0644, then renames it over the
-    /// unit file; nil, or why not.
-    private func write(_ text: String) -> StartRefusal? {
+    /// unit file; nil, or why not. `SwitchFollowUp` writes the switched unit with it too (S8a).
+    func write(_ text: String) -> StartRefusal? {
         let folder = tools.unitFolder
         if NodeFolders.fileStatus(folder) == nil {
             do {
@@ -360,8 +360,8 @@ public struct NodeStarter {
     }
 
     /// Runs `systemctl arguments` with `environment(runtimeFolder:)`: its output, and a refusal naming the call when
-    /// it couldn't be run, didn't end in time, or didn't exit 0.
-    private func ask(_ arguments: [String]) -> (output: String, refusal: StartRefusal?) {
+    /// it couldn't be run, didn't end in time, or didn't exit 0. `SwitchFollowUp`'s `daemon-reload` too (S8a).
+    func ask(_ arguments: [String]) -> (output: String, refusal: StartRefusal?) {
         let call = ([tools.systemctl] + arguments).joined(separator: " ")
         guard let ran = Self.run(tools.systemctl, arguments, environment: Self.environment(runtimeFolder: tools.runtimeFolder)) else {
             return ("", StartRefusal("\(ConfigSeal.inert(call, limit: .max)) couldn't be run, or didn't end within \(Int(Self.toolLimit)) s", exitCode: 1))
