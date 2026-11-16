@@ -3299,3 +3299,22 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 00:20 Audit of ui-journeys-b-team: complete, clean, round 3: 1 Important closed, 2 Nit closed
 - 2026-11-16 00:33 Pipeline held: ui-journeys-a-run ready to merge with none landing; cause: every test slot held
 - 2026-11-16 00:33 Merged ui-journeys-a-run: UI journeys: a run that draws no shots fails instead of reading "unchanged" (no audit: review none) (build 64a972289c0f with changes not committed)
+- 2026-11-16 00:34 Automatically (auto_advance): Merged ui-journeys-a-run (UI journeys: a run that draws no shots fails instead of reading "unchanged") into main at 43a355b4, review none: on its worker's done report on 710ab3df and the full test run.
+- 2026-11-16 00:34 Automatically (auto_advance): Cleaned up ui-journeys-a-run (freed 2.0 GB of build output and temporary folders). It stays done.
+- 2026-11-16 01:02 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 01:37 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 02:09 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 02:51 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 03:23 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 04:09 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 04:54 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 05:28 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 05:38 Planned merges-are-held-doesn: "Merges are held" doesn't count sleep and doesn't repeat while the Mac sleeps
+- 2026-11-16 05:38 Started a worker on merges-are-held-doesn
+- 2026-11-16 05:38 Automatically (auto_advance): Started a worker on merges-are-held-doesn ("Merges are held" doesn't count sleep and doesn't repeat while the Mac sleeps).
+- 2026-11-16 06:13 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 06:57 Pipeline held: dark-mode-the-code, ui-journeys-b-team ready to merge with none landing; cause: every test slot held
+- 2026-11-16 07:21 Kept ui-journeys-b-team unmerged: Experiment arm B (team), not merged: decisions.md, team experiment instance 1. The normal arm's version is on main.
+- 2026-11-16 07:22 Update: Team experiment: one feature built both ways (result: not adopted) — **What ran:** the sandbox UI journeys feature (a screenshot-diff runner, plus select/copy, Run-card and dictation journeys). It was built twice from the same main, starting at the same moment (20:33):
+- 2026-11-16 07:23 Merged dark-mode-the-code: Dark mode: the code block's Run confirmation sheet draws white on white in sandbox shots (build 64a972289c0f with changes not committed)
+- 2026-11-16 07:23 Flaky in dark-mode-the-code's merge: aClientAddedLaterRunsOnItsOwnPeriod(), aStalledParserHoldsUpOnlyItsSession(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
