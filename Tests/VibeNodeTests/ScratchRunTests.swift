@@ -154,6 +154,72 @@ struct ScratchRunTests {
         }
     }
 
+    /// The gated run's model check (ST-D21: workers on Sonnet, the verifier on haiku) reads what each role really ran on,
+    /// from the config folder's transcripts by the session's name, and holds the verifier's trailer to haiku: a model
+    /// the run notes as "unknown", an alias beside a full id, or workers on Claude's default each fail it.
+    @Test func theRunsModelsAreReadByRoleFromTheConfigFoldersTranscripts() throws {
+        let config = scratch.url("config")
+        let root = scratch.url("project").path
+        let slug = "add-the-greeting"
+        let folder = config.appendingPathComponent("projects").appendingPathComponent(RecentProjects.claudeSlug(for: Worktrees.path(root: root, slug: slug)))
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        func transcript(_ name: String?, _ file: String, model: String, id: String) throws {
+            var lines: [[String: Any]] = []
+            if let name { lines.append(["type": "custom-title", "customTitle": name]) }
+            lines.append(["type": "assistant", "timestamp": "2026-11-16T10:00:00.000Z",
+                          "message": ["id": id, "model": model, "usage": ["input_tokens": 10, "output_tokens": 5]]])
+            let data = try lines.map { try JSONSerialization.data(withJSONObject: $0) }.reduce(Data()) { $0 + $1 + Data("\n".utf8) }
+            try data.write(to: folder.appendingPathComponent(file))
+        }
+        try transcript("worker-\(slug)", "a.jsonl", model: "claude-sonnet-4-5-20250929", id: "m1")
+        try transcript("verify-\(slug)", "b.jsonl", model: "claude-haiku-4-5-20251001", id: "m2")
+        try transcript(nil, "c.jsonl", model: "claude-opus-4-1", id: "m3")
+        let ran = Self.sessionModels(config: config, root: root, slug: slug)
+        #expect(ran.workers == ["claude-sonnet-4-5-20250929"] && ran.verifiers == ["claude-haiku-4-5-20251001"], "\(ran)")
+
+        let sonnet = ["claude-sonnet-4-5-20250929"], haiku = ["claude-haiku-4-5-20251001"]
+        #expect(Self.modelProblem(workers: sonnet, verifiers: haiku, verifierTrailer: "haiku") == nil)
+        // Workers on Claude's default (the script never added --model sonnet), or on haiku.
+        #expect(Self.modelProblem(workers: ["claude-opus-4-1"], verifiers: haiku, verifierTrailer: "haiku") != nil)
+        #expect(Self.modelProblem(workers: haiku, verifiers: haiku, verifierTrailer: "haiku") != nil)
+        // No worker's transcript read (the trailer's "unknown"), or no verifier's.
+        #expect(Self.modelProblem(workers: [], verifiers: haiku, verifierTrailer: "haiku") != nil)
+        #expect(Self.modelProblem(workers: sonnet, verifiers: [], verifierTrailer: "haiku") != nil)
+        // A verifier on the workers' family under an alias beside their full id; a trailer that says nothing.
+        #expect(Self.modelProblem(workers: sonnet, verifiers: ["claude-sonnet-4-5-20250929"], verifierTrailer: "sonnet") != nil)
+        for trailer in [nil, "unknown", "none", "sonnet"] {
+            #expect(Self.modelProblem(workers: sonnet, verifiers: haiku, verifierTrailer: trailer) != nil, "\(trailer ?? "nil")")
+        }
+    }
+
+    /// The gated run types an approval only of exactly the audited commit, whatever else a card offers.
+    @Test func anApprovalIsTypedOnlyForTheAuditedCommit() {
+        let audited = String(repeating: "ab", count: 20), other = String(repeating: "cd", count: 20)
+        #expect(Self.approvalOption(["Approve \(audited)", "Not yet"], audited: nil) == nil)
+        #expect(Self.approvalOption(["Approve \(other)", "Not yet"], audited: audited) == nil)
+        #expect(Self.approvalOption(["Not yet", "Approve \(audited.uppercased())"], audited: audited) == "Approve \(audited.uppercased())")
+        #expect(Self.approvalOption(["Approve \(other)", "Approve \(audited)"], audited: audited) == "Approve \(audited)")
+    }
+
+    /// A worker's commit is one on its `agent/` branch that touches `src/`: a commit on the base before the branch was
+    /// cut (the lead's records, every 5 minutes) isn't one.
+    @Test func aWorkersCommitIsOneOnItsBranchThatTouchesSrc() async throws {
+        let repo = scratch.url("records-repo")
+        let first = try await Self.scratchRepository(in: repo, marker: try Self.markerFile(scratch))
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent("records"), withIntermediateDirectories: true)
+        try "progress\n".write(to: repo.appendingPathComponent("records/progress.md"), atomically: true, encoding: .utf8)
+        try await scratchGit(repo.path, ["add", "--", "records/progress.md"])
+        try await scratchGit(repo.path, ["commit", "-q", "-m", "records"])
+        try await scratchGit(repo.path, ["branch", "agent/idle", "main"])
+        try await scratchGit(repo.path, ["checkout", "-q", "-b", "agent/busy", "main"])
+        try "busy\n".write(to: repo.appendingPathComponent("src/busy.txt"), atomically: true, encoding: .utf8)
+        try await scratchGit(repo.path, ["add", "--", "src/busy.txt"])
+        try await scratchGit(repo.path, ["commit", "-q", "-m", "busy"])
+        try await scratchGit(repo.path, ["checkout", "-q", "main"])
+        let found = Self.workerBranches(repo, since: first)
+        #expect(found.branches == ["agent/busy", "agent/idle"] && found.withoutCommit == ["agent/idle"], "\(found)")
+    }
+
     // MARK: The gated run, a real lead on Sonnet
 
     /// The user's throwaway Claude Code config folder, named on the run's command line only.
@@ -222,25 +288,34 @@ struct ScratchRunTests {
         }
         let cli = Self.CommandLine(node: node)
         try await cli.accept(repo, from: first)
+        // Room for the team's 4 sessions, and no load or memory hold: the machine's own load isn't the run's (ST-D21).
+        try node.noLoadHold(maxSessions: 4)
         step("1, config and base accepted")
         let started = try await cli.run(["lead", repo.path, "--goal", Self.realGoal], typed: true)
         try #require(started.status == 0 && started.output.contains("the lead started"), "\(started.output)\n\(node.said)")
         #expect(started.output.contains(script.resolvingSymlinksInPath().path), "\(started.output)")
         step("2, the lead started")
 
-        // The cards as they come: the lead's question answered with its first option, the approval with exactly what it
-        // offers; until the greeting's task is merged, up to the suite's limit.
+        // The cards as they come: the lead's question answered with its first option, an approval only of exactly the
+        // greeting's audited commit (the vault's verdict), as a user would; until the greeting's task is merged, up to
+        // the suite's limit.
         let greeting = slugs[0]
         var question: String?, approvalCard: String?, answeredCards: Set<String> = []
         var merged = false
         let deadline = began + 55 * 60
         while !merged, MacTime.real.awake() < deadline {
             for card in await Self.openCards(node) where !answeredCards.contains(card.id) {
-                if let offered = card.options.first(where: { LeadVault.approvedCommit(in: $0) != nil }) {
-                    let ran = try await cli.run(["answer", card.id, offered], typed: true)
-                    #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
-                    approvalCard = card.id
-                    step("the approval answered (\(offered))")
+                if card.options.contains(where: { LeadVault.approvedCommit(in: $0) != nil }) {
+                    // No verdict yet: looked at again on the next round. One on another commit: left unanswered.
+                    guard let audited = try await Self.verdict(node, repo, task: greeting)?.commit else { continue }
+                    if let offered = Self.approvalOption(card.options, audited: audited) {
+                        let ran = try await cli.run(["answer", card.id, offered], typed: true)
+                        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+                        approvalCard = card.id
+                        step("the approval answered (\(offered))")
+                    } else {
+                        Issue.record("an approval card not of the audited \(audited), left unanswered: \(card.text) \(card.options)")
+                    }
                 } else {
                     let listed = try await cli.run(["questions"])
                     #expect(listed.output.contains(card.id), "\(listed.output)")
@@ -260,14 +335,22 @@ struct ScratchRunTests {
 
         // Two agent/* branches, each with a worker's commit.
         try Self.assertWorkersCommitted(repo, since: first, count: 2)
-        // A verdict in the vault, from a verifier on a model other than the workers' (the landed commit's trailers say
-        // which each ran on).
+        // A verdict in the vault, from a verifier on a model other than the workers': the workers on Sonnet and the
+        // verifier on haiku, as their transcripts in the config folder say and the landed commit's verifier trailer.
         let verdict = try #require(try await Self.verdict(node, repo, task: greeting), "the vault holds no verdict for \(greeting)")
         #expect(verdict.passes, "\(verdict)")
         let landed = try await Self.landed(repo, since: first).first { Self.trailer("VS-Task", in: $0) == greeting } ?? ""
         let workerModel = Self.trailer("VS-Worker-Model", in: landed), verifierModel = Self.trailer("VS-Verifier-Model", in: landed)
-        print("S10: the worker's model \(workerModel ?? "none"), the verifier's \(verifierModel ?? "none")")
-        #expect(verifierModel != nil && verifierModel != workerModel, "\(landed)")
+        let ran = slugs.map { Self.sessionModels(config: config, root: project, slug: $0) }
+        let workers = ran.flatMap(\.workers), verifiers = ran[0].verifiers
+        print("S10: the workers ran on \(workers), the verifier on \(verifiers); the trailers say \(workerModel ?? "none") and \(verifierModel ?? "none")")
+        #expect(ran.allSatisfy { !$0.workers.isEmpty }, "a worker's transcript missing: \(ran)")
+        let problem = Self.modelProblem(workers: workers, verifiers: verifiers, verifierTrailer: verifierModel)
+        #expect(problem == nil, "\(problem ?? "")\n\(landed)")
+        // The user's approval, of exactly the audited commit, recorded for the greeting's task; and the landed commit's
+        // review names that commit.
+        #expect(try await Self.approved(node, repo, task: greeting, commit: verdict.commit), "the vault has no approval of \(verdict.commit)")
+        #expect(Self.trailer("VS-Review", in: landed)?.contains(String(verdict.commit.prefix(12))) == true, "\(landed)")
         // One merge on the base, its tests run.
         let onBase = try await Self.landed(repo, since: first)
         #expect(onBase.compactMap { Self.trailer("VS-Task", in: $0) } == [greeting], "\(onBase)")
@@ -351,14 +434,54 @@ struct ScratchRunTests {
         return script
     }
 
-    /// The `agent/*` branches, `count` of them, each with a commit past `first` (a worker's).
+    /// The `agent/*` branches, `count` of them, each with a worker's commit (`workerBranches`).
     static func assertWorkersCommitted(_ repo: URL, since first: String, count: Int, sourceLocation: SourceLocation = #_sourceLocation) throws {
+        let found = workerBranches(repo, since: first)
+        #expect(found.branches.count == count, "\(found.branches)", sourceLocation: sourceLocation)
+        #expect(found.withoutCommit.isEmpty, "no worker's commit on \(found.withoutCommit)", sourceLocation: sourceLocation)
+    }
+
+    /// The `agent/*` branches, and those of them with no worker's commit: none past `first` touching `src/` (a commit
+    /// on the base before the branch was cut, the lead's records every 5 minutes, isn't one).
+    static func workerBranches(_ repo: URL, since first: String) -> (branches: [String], withoutCommit: [String]) {
         let branches = Platform.lines(Git.run(["for-each-ref", "--format=%(refname:short)", "refs/heads/agent/"], in: repo.path).output)
-        #expect(branches.count == count, "\(branches)", sourceLocation: sourceLocation)
-        for branch in branches {
-            let ahead = Int(Git.run(["rev-list", "--count", "\(first)..\(branch)"], in: repo.path).output) ?? 0
-            #expect(ahead >= 1, "\(branch) has no worker's commit", sourceLocation: sourceLocation)
+        return (branches, branches.filter { (Int(Git.run(["rev-list", "--count", "\(first)..\($0)", "--", "src/"], in: repo.path).output) ?? 0) < 1 })
+    }
+
+    /// The models `slug`'s worker and verifier sessions ran on, from their transcripts in the Claude Code config folder
+    /// `config` (`$CLAUDE_CONFIG_DIR/projects`, where the real-claude script's sessions write; the node's own
+    /// `receiptUsage` reads its scratch home's), each session told by its name (`LeadReceipts.role`).
+    static func sessionModels(config: URL, root: String, slug: String) -> (workers: [String], verifiers: [String]) {
+        let projects = config.appendingPathComponent("projects")
+        var files: [(role: LeadReceipts.Role, url: URL)] = []
+        for folder in LeadReceipts.folders(root: root, slug: slug, home: "/").map({ projects.appendingPathComponent($0.lastPathComponent) }) {
+            let found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            for file in found where file.pathExtension == "jsonl" {
+                if let role = LeadReceipts.role(named: LeadReceipts.names(in: file), slug: slug) { files.append((role, file)) }
+            }
         }
+        let usage = LeadReceipts.usage(files, since: 0)
+        return (usage.worker?.models ?? [], usage.verifier?.models ?? [])
+    }
+
+    /// What's wrong with the run's models against ST-D21 (workers on Sonnet, the verifier on haiku, and the landed
+    /// commit's `VS-Verifier-Model` saying haiku); nil when nothing is.
+    static func modelProblem(workers: [String], verifiers: [String], verifierTrailer: String?) -> String? {
+        if workers.isEmpty { return "no worker's transcript was read" }
+        if let off = workers.first(where: { !LeadReviewFloor.sameModel($0, "sonnet") }) { return "a worker ran on \(off), not sonnet" }
+        if verifiers.isEmpty { return "no verifier's transcript was read" }
+        if let off = verifiers.first(where: { !LeadReviewFloor.sameModel($0, "haiku") }) { return "the verifier ran on \(off), not haiku" }
+        guard let trailer = verifierTrailer, LeadReviewFloor.knownModel(trailer), LeadReviewFloor.sameModel(trailer, "haiku") else {
+            return "the landed commit's verifier model is \(verifierTrailer ?? "missing"), not haiku"
+        }
+        return nil
+    }
+
+    /// The option of `options` approving exactly `audited` (the verdict's commit); nil while there's no verdict, or when
+    /// none approves it.
+    static func approvalOption(_ options: [String], audited: String?) -> String? {
+        guard let audited = audited?.lowercased() else { return nil }
+        return options.first { LeadVault.approvedCommit(in: $0) == audited }
     }
 
     /// The messages of the commits on `main` since `first`, newest first (a merge's landed commit, and the records the

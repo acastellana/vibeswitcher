@@ -2334,9 +2334,25 @@ its Needs. E9's Step 2 is still required, as the spec says.
   yet, and each run needs the user's go-ahead. The lead's goal names its two tasks' titles, so the harness trusts the
   repository and both worktrees (`Slug.make` of each title) before the lead starts: VibeSwitcher writes no trust
   entry, and a worker in an untrusted folder would wait on Claude Code's trust dialog. Cleanup takes out only the
-  entries it wrote. The verifier's and the workers' models are read from the landed commit's `VS-Verifier-Model` and
-  `VS-Worker-Model` trailers. It answers each card as it comes (the approval with exactly the option it offers, any
-  other with its first option) until the greeting task is done, up to 55 minutes.
+  entries it wrote. It answers each card as it comes (any question with its first option) until the greeting task is
+  done, up to 55 minutes.
+
+  *2026-11-16, S10 review fixes:* what the review changed in the gated case:
+  - It calls `noLoadHold(maxSessions: 4)` before the lead starts, as ST-D21 says (it was missing).
+  - The models are read from the role's own transcripts in the config folder (`sessionModels(config:root:slug:)`:
+    `$CLAUDE_CONFIG_DIR/projects`, each session told by its name, `LeadReceipts.role`). `VS-Worker-Model` is
+    "unknown" in this harness: a worker on Claude's default is noted "", and `receiptUsage` reads the node's
+    scratch home, not the config folder. `modelProblem` asks for every worker on sonnet, the verifier on haiku, and
+    `VS-Verifier-Model` naming haiku. Before, the case compared the two trailers as strings, which passed whatever
+    the workers ran on.
+  - An approval is typed only when it is of exactly the vault's verdict commit for the greeting (`approvalOption`).
+    Any other approval card is recorded as an issue and left unanswered. After the merge, the case asks the vault for
+    the approval of (greeting, verdict commit), and expects `VS-Review` to name that commit.
+  - A worker's commit is one on its `agent/` branch past the base that touches `src/` (`workerBranches`). Before,
+    the lead's records commit on the base, made before a branch was cut, counted as one.
+  - Each of these is checked ungated (`theRunsModelsAreReadByRoleFromTheConfigFoldersTranscripts`,
+    `anApprovalIsTypedOnlyForTheAuditedCommit`, `aWorkersCommitIsOneOnItsBranchThatTouchesSrc`). Each was shown
+    failing on stubs that do what the old code did.
 - [ ] **Step 3: Verify.**
   - `bash scripts/test.sh --filter ScratchRunTests`: Step 1 runs, Step 2 is skipped.
   - under load: `scripts/test-under-load.sh --load 24 -r 3 -f 'ScratchRunTests'`.
