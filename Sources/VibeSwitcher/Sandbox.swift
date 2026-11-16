@@ -2417,7 +2417,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
             switch rest {
             case "team", "overview", "activity": UserDefaults.standard.set(rest, forKey: "inspectorTab")
             case "hide", "show":
-                if UserDefaults.standard.bool(forKey: "inspectorCollapsed") != (rest == "hide") { window?.toggleInspectorAction(nil) }
+                // Set on the pane itself, not animated, whatever the saved default says: Toggle Inspector's animated
+                // collapse is driven by the display, so while the Mac's display sleeps it never ends, and the pane stays
+                // drawn while it reports collapsed (the team arm's journeys at night drew the inspector on every shot).
+                // Saved as the toggle saves it.
+                if let inspector = (window?.window?.contentViewController as? NSSplitViewController)?
+                    .splitViewItems.first(where: { $0.behavior == .inspector }) {
+                    inspector.isCollapsed = rest == "hide"
+                    UserDefaults.standard.set(inspector.isCollapsed, forKey: "inspectorCollapsed")
+                } else {
+                    return reply(false, "inspector \(rest): the main window has no inspector pane")
+                }
             default: return reply(false, "inspector team|overview|activity|hide|show")
             }
             settle { reply(true, "inspector: \(rest)") }
