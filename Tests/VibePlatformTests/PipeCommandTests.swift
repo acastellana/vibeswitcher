@@ -50,11 +50,13 @@ struct PipeCommandTests {
             }
             // The end: no writer left.
             if count == 0 { return (text(written), true) }
-            // Nothing to read while one is (EAGAIN): until there is, or the last has gone.
+            // Nothing to read while one is (EAGAIN): until there is, or the last has gone. A tenth of a second at a
+            // time, then read again: macOS's poll doesn't wake when a FIFO's last writer goes, and slept out the whole
+            // hang guard (v2 macos: aStopSignalStopsTheCommandAndItsGroup 300 s in every run, then a read saying end).
             let left = deadline.timeIntervalSinceNow
             guard left > 0 else { return (text(written), false) }
             var polled = pollfd(fd: reading, events: Int16(POLLIN), revents: 0)
-            _ = poll(&polled, 1, Int32(min(left, 3600) * 1000) + 1)
+            _ = poll(&polled, 1, Int32(min(left, 0.1) * 1000) + 1)
         }
     }
 

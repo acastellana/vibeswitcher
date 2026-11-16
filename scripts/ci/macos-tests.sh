@@ -14,6 +14,11 @@
 # nothing but a listed node test failed: Swift Testing's own "Test run … passed" line, no failed test or suite, no
 # build error, no timeout, nothing left running, no preference file left, and no node test failed but listed ones.
 #
+# Beside scripts/test.sh runs scripts/ci/watchdog.sh, silent while the run is on time. WATCHDOG_MARGIN seconds (300)
+# before vs-heavy's timeout it says when each swift phase started and ended, what still runs, its open descriptors,
+# and sends a SIGABRT to the testing helper alone, so a hung run names its test (swift test holds back its lines until
+# it exits, and vs-heavy's stop loses them) and leaves a backtrace in .build/crash-reports.
+#
 # scripts/ci/macos-tests.sh --check-list: only checks the list (it runs anywhere, Linux too).
 # SKIPS=FILE: another list, for this script's own checks. JUDGE=FILE: only judges FILE as scripts/test.sh's output.
 set -uo pipefail
@@ -80,7 +85,31 @@ for skip in ${skips[@]+"${skips[@]}"}; do arguments+=(--skip "$skip"); done
 log=${RUNNER_TEMP:-.build}/macos-tests.log
 mkdir -p "$(dirname "$log")"
 # The runner is slower than the Mac vs-heavy's hour was chosen on.
-VIBESWITCHER_HEAVY_TIMEOUT=${VIBESWITCHER_HEAVY_TIMEOUT:-80m} bash scripts/test.sh ${arguments[@]+"${arguments[@]}"} 2>&1 | tee "$log"
-status=${PIPESTATUS[0]}
+export VIBESWITCHER_HEAVY_TIMEOUT=${VIBESWITCHER_HEAVY_TIMEOUT:-80m}
+# The watchdog's report comes this long before vs-heavy's stop, as vs-heavy reads its TIME: minutes unless it says.
+if [[ $VIBESWITCHER_HEAVY_TIMEOUT =~ ^([0-9]+)([smh]?)$ ]]; then
+    case ${BASH_REMATCH[2]} in
+        s) timeout=$(( 10#${BASH_REMATCH[1]} )) ;;
+        h) timeout=$(( 10#${BASH_REMATCH[1]} * 3600 )) ;;
+        *) timeout=$(( 10#${BASH_REMATCH[1]} * 60 )) ;;
+    esac
+else
+    echo "VIBESWITCHER_HEAVY_TIMEOUT=$VIBESWITCHER_HEAVY_TIMEOUT: give minutes (90, 90m), seconds (30s) or hours (2h)"
+    exit 2
+fi
+margin=${WATCHDOG_MARGIN:-300}
+(( timeout > 2 * margin )) && after=$(( timeout - margin )) || after=$(( timeout / 2 ))
+# Where the workflow keeps them from.
+export WATCHDOG_REPORTS=$PWD/.build/crash-reports
+echo "macos-tests $(date -u +%H:%M:%SZ): scripts/test.sh starts (vs-heavy stops it after $timeout s)"
+( bash scripts/test.sh ${arguments[@]+"${arguments[@]}"} 2>&1 | tee "$log"; exit "${PIPESTATUS[0]}" ) &
+run=$!
+bash scripts/ci/watchdog.sh "$run" "$after" &
+watchdog=$!
+wait "$run"
+status=$?
+echo "macos-tests $(date -u +%H:%M:%SZ): scripts/test.sh ended, exit $status"
+# It ends with the run, after its report when it is giving one.
+wait "$watchdog"
 (( status == 0 )) && exit 0
 only_listed_failed "$log"

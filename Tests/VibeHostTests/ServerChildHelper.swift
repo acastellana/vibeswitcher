@@ -32,8 +32,10 @@ import Testing
 ///   close-on-exec, asks for a census as `childVariable` below says: "child-called STATUS".
 /// - `dumpable`: makes itself dumpable again (`PR_SET_DUMPABLE 1`): "dumpable 0".
 /// - `handover PATH`: asks the host to hand over to PATH: "handover <its answer>".
-/// - `shut-connector`: shuts its connector for writing (the host's end then reads its end) and runs on, reading no more
-///   actions, until its parent is no longer the host: "shut 0", or "shut <errno>".
+/// - `shut-connector`: says "shutting", then shuts its connector for writing (the host's end then reads its end) and runs
+///   on, reading no more actions, until its parent is no longer the host; "shut <errno>" after it only when the call
+///   failed. The line comes first because the host ends it as soon as its end reads that: a line after the call may
+///   never be written.
 /// - `linger`: ignores SIGTERM and runs on, reading no more actions and not watching its connector, until its parent is
 ///   no longer the host or it is killed (a server slow to end, which the host SIGKILLs `ServerChild.replaceLimit` after
 ///   its SIGTERM): "lingering".
@@ -176,7 +178,8 @@ enum ServerChildHelper {
                     report("handover refused \(error)")
                 }
             case ("shut-connector", 1):
-                report("shut \(shutdown(connector, Int32(SHUT_WR)) == 0 ? 0 : errno)")
+                report("shutting")
+                if shutdown(connector, Int32(SHUT_WR)) != 0 { report("shut \(errno)") }
                 let parent = getppid()
                 while getppid() == parent { usleep(20_000) }
                 _exit(0)

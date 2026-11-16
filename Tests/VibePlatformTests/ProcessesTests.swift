@@ -23,24 +23,103 @@ struct ProcessesTests {
 
     // MARK: Children
 
-    /// A child of this process that stays until its test ends it.
-    final class Child {
-        let process: Process
-        /// What it reads, when the test holds the other end.
-        private let input: Pipe?
+    /// A child of this process that stays until its test ends it: started by `Platform.Spawn` (posix_spawn) and
+    /// collected here alone, by its pid (nothing else in the run collects a child it didn't start).
+    ///
+    /// Not Foundation's `Process`: on the Mac its `waitUntilExit()` never returned for the child of
+    /// `openFilesNamesAFileTheChildHolds`, which had ended and been collected (no zombie was left, and nothing in this
+    /// process but Foundation collects a `Process`'s child), and the run sat at no CPU until vs-heavy's timeout (GitHub
+    /// run 43717393732, 2026-11-15; the two hangs before it named no test). A child this collects can't be lost so, and
+    /// a wait for one is bounded all the same.
+    final class Child: @unchecked Sendable {
+        let pid: pid_t
+        /// Its arguments, for what a test says of it.
+        let command: String
+        private let lock = NSLock()
+        /// The ends of its stdin and stdout the test holds, or -1: closed as it is ended.
+        private var input: Int32, output: Int32
+        /// Its wait status once collected: here, or by someone else (`elsewhere`, and no status known).
+        private var status: Int32?
+        private var elsewhere = false
 
-        init(_ process: Process, input: Pipe? = nil) {
-            self.process = process
+        init(pid: pid_t, command: String, input: Int32 = -1, output: Int32 = -1) {
+            self.pid = pid
+            self.command = command
             self.input = input
+            self.output = output
         }
 
-        var pid: pid_t { process.processIdentifier }
+        /// KILL (which a stopped one takes too), unless it has ended or been collected, here or by someone else: asked
+        /// first, under the same lock, so its pid is its own when the signal goes (a pid collected elsewhere may
+        /// already name another process).
+        func kill() {
+            lock.withLock { if !reapLocked() { Sys.kill(pid, SIGKILL) } }
+        }
 
-        /// Ends it (KILL, which a stopped one takes too) and collects it.
-        func end() {
-            try? input?.fileHandleForWriting.close()
-            if process.isRunning { kill(pid, SIGKILL) }
-            process.waitUntilExit()
+        /// Collects it if it has ended: whether it has been collected, now or before. One that is no child of this
+        /// process any more (ECHILD) was collected by someone else.
+        private func reap() -> Bool {
+            lock.withLock { reapLocked() }
+        }
+
+        /// `reap()`, the lock held.
+        private func reapLocked() -> Bool {
+            guard status == nil else { return true }
+            var raw: Int32 = 0
+            while true {
+                let found = waitpid(pid, &raw, WNOHANG)
+                if found == pid {
+                    status = raw
+                    return true
+                }
+                if found == 0 { return false }
+                if errno == EINTR { continue }
+                status = -1
+                elsewhere = true
+                return true
+            }
+        }
+
+        /// Waits for it to end and collects it, asking every few milliseconds on a thread of its own (the test's task
+        /// gives back its thread of the cooperative pool meanwhile): true once collected. Still there after `limit`,
+        /// or collected by someone else, it is an issue naming it, and false.
+        @discardableResult
+        func collect(within limit: TimeInterval = ProcessesTests.hangGuard,
+                     sourceLocation: SourceLocation = #_sourceLocation) async -> Bool {
+            let deadline = DispatchTime.now() + limit
+            let collected = await ProcessesTests.offPool { [self] () -> Bool in
+                var pause: useconds_t = 500
+                while !reap() {
+                    guard DispatchTime.now() < deadline else { return false }
+                    usleep(pause)
+                    pause = min(pause * 2, 20_000)
+                }
+                return true
+            }
+            guard collected else {
+                Issue.record("child \(pid) (\(command)) still there \(limit) s into the wait for its end", sourceLocation: sourceLocation)
+                return false
+            }
+            guard !lock.withLock({ elsewhere }) else {
+                Issue.record("child \(pid) (\(command)) was collected by someone else: its end can't be known here",
+                             sourceLocation: sourceLocation)
+                return false
+            }
+            return true
+        }
+
+        /// Ends it: its stdin and stdout closed, KILL, and collected (`collect`, bounded by `limit`).
+        func end(within limit: TimeInterval = ProcessesTests.hangGuard, sourceLocation: SourceLocation = #_sourceLocation) async {
+            lock.withLock {
+                for fd in [input, output] where fd >= 0 { Sys.close(fd) }
+                (input, output) = (-1, -1)
+            }
+            kill()
+            await collect(within: limit, sourceLocation: sourceLocation)
+        }
+
+        deinit {
+            for fd in [input, output] where fd >= 0 { Sys.close(fd) }
         }
     }
 
@@ -54,82 +133,96 @@ struct ProcessesTests {
         }
     }
 
-    /// `process.run()` on a thread of its own with no signal blocked: a process started on Linux from a task's thread
-    /// (libdispatch's, which blocks every signal it can) inherits that, and would end only by KILL.
-    static func run(_ process: Process) async throws {
-        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
-            let thread = Thread {
-                var none = sigset_t()
-                sigemptyset(&none)
-                pthread_sigmask(SIG_SETMASK, &none, nil)
-                done.resume(with: Result {
-                    // "Text file busy": a program a test has just copied can't be run while any process still holds
-                    // the copy open for writing, and a child another test forked during the copy holds it until that
-                    // child execs. It lasts a moment and no event says when it is over, so the run is tried again,
-                    // for at most 10 s.
-                    let giveUp = DispatchTime.now() + .seconds(10)
-                    while true {
-                        do { return try process.run() } catch let error as NSError
-                            where error.domain == NSPOSIXErrorDomain && error.code == Int(ETXTBSY) && DispatchTime.now() < giveUp {
-                            usleep(20_000)
-                        }
-                    }
-                })
+    /// `executable arguments` to start (its argv[0] the executable's path): this process's environment with `extra`
+    /// added, its stdin /dev/null until the caller says otherwise, its outputs dropped.
+    static func spawn(_ executable: String, _ arguments: [String], in directory: URL? = nil,
+                      adding extra: [String: String] = [:]) -> Platform.Spawn {
+        var spawn = Platform.Spawn(executable: executable, arguments: [executable] + arguments)
+        spawn.environment = ProcessInfo.processInfo.environment.merging(extra) { $1 }.map { "\($0.key)=\($0.value)" }
+        spawn.directory = directory?.path
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .path("/dev/null", flags: O_WRONLY)
+        spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        return spawn
+    }
+
+    /// A pipe whose ends are close-on-exec (`Sys.pipeClosedOnExec`).
+    static func newPipe() throws -> (reading: Int32, writing: Int32) {
+        var ends: [Int32] = [-1, -1]
+        guard Sys.pipeClosedOnExec(&ends) == 0 else { throw Platform.Errno(code: errno) }
+        return (ends[0], ends[1])
+    }
+
+    /// Starts `spawn` (with no signal blocked, whatever the task's thread blocks): its pid.
+    static func run(_ spawn: Platform.Spawn) async throws -> pid_t {
+        // "Text file busy": a program a test has just copied can't be run while any process still holds the copy open
+        // for writing, and a child another test forked during the copy holds it until that child execs. It lasts a
+        // moment and no event says when it is over, so the start is tried again, for at most 10 s.
+        let giveUp = DispatchTime.now() + .seconds(10)
+        while true {
+            switch spawn.start() {
+            case .success(let pid): return pid
+            case .failure(let failure) where failure.code == ETXTBSY && DispatchTime.now() < giveUp:
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            case .failure(let failure): throw failure
             }
-            thread.name = "start"
-            thread.start()
         }
     }
 
-    static func process(_ executable: String, _ arguments: [String], in directory: URL? = nil, adding extra: [String: String] = [:]) -> Process {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(extra) { $1 }
-        if let directory { process.currentDirectoryURL = directory }
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        return process
-    }
-
-    /// `executable arguments` as a child, started and no more: reading `input`, its outputs dropped. It is a process
-    /// from here on, but not yet surely the program: on Linux a child is first a copy of its parent (its arguments
-    /// and name the parent's) and then, while the kernel puts the program in its place, has no arguments at all.
-    static func start(_ executable: String, _ arguments: [String] = [], input: FileHandle = .nullDevice) async throws -> Child {
-        let process = process(executable, arguments)
-        process.standardInput = input
-        try await run(process)
-        return Child(process)
+    /// `executable arguments` as a child, started and no more: reading `input` (/dev/null when nil), its outputs
+    /// dropped. It is a process from here on, but not yet surely the program: on Linux a child is first a copy of its
+    /// parent (its arguments and name the parent's) and then, while the kernel puts the program in its place, has no
+    /// arguments at all.
+    static func start(_ executable: String, _ arguments: [String] = [], input: FileHandle? = nil) async throws -> Child {
+        var spawn = Self.spawn(executable, arguments)
+        if let input { spawn.stdin = .descriptor(input.fileDescriptor) }
+        return Child(pid: try await run(spawn), command: spawn.arguments.joined(separator: " "))
     }
 
     /// A child that surely runs its program: one that repeats what it reads (/bin/cat by default), given a line and
     /// waited for until it has said it back. It then waits for more, until the test ends it.
     static func startEchoing(_ executable: String = "/bin/cat", _ arguments: [String] = [], in directory: URL? = nil,
                              adding extra: [String: String] = [:]) async throws -> Child {
-        let process = process(executable, arguments, in: directory, adding: extra)
-        let input = Pipe(), output = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        try await run(process)
-        let child = Child(process, input: input)
+        // Close-on-exec from the call that makes them (pipe2 on Linux): no child another test starts meanwhile holds
+        // an end, which would keep the read below from ending when this child goes.
+        let input = try newPipe()
+        let output: (reading: Int32, writing: Int32)
+        do { output = try newPipe() } catch {
+            [input.reading, input.writing].forEach { Sys.close($0) }
+            throw error
+        }
+        var spawn = Self.spawn(executable, arguments, in: directory, adding: extra)
+        spawn.stdin = .descriptor(input.reading)
+        spawn.stdout = .descriptor(output.writing)
+        let pid: pid_t
+        do { pid = try await run(spawn) } catch {
+            [input.reading, input.writing, output.reading, output.writing].forEach { Sys.close($0) }
+            throw error
+        }
+        // The child's ends are its own now; a write to it once it has gone is EPIPE, not SIGPIPE.
+        Sys.close(input.reading)
+        Sys.close(output.writing)
+        Platform.Sockets.noSigPipe(input.writing)
+        let child = Child(pid: pid, command: spawn.arguments.joined(separator: " "), input: input.writing, output: output.reading)
         // One that never answers is ended, which ends the read below.
-        let lost = DispatchWorkItem { kill(process.processIdentifier, SIGKILL) }
+        let lost = DispatchWorkItem { child.kill() }
         DispatchQueue.global().asyncAfter(deadline: .now() + hangGuard, execute: lost)
         defer { lost.cancel() }
-        let line = Data("ready\n".utf8)
-        let answer = await offPool { () -> Data in
-            try? input.fileHandleForWriting.write(contentsOf: line)
-            var read = Data()
+        let line = Array("ready\n".utf8)
+        let (writing, reading) = (input.writing, output.reading)
+        let answer = await offPool { () -> [UInt8] in
+            _ = line.withUnsafeBytes { Sys.write(writing, $0.baseAddress, $0.count) }
+            var read = [UInt8](), buffer = [UInt8](repeating: 0, count: 256)
             while !read.contains(0x0a) {
-                let more = output.fileHandleForReading.availableData
-                if more.isEmpty { break }
-                read.append(more)
+                let got = Sys.read(reading, &buffer, buffer.count)
+                if got < 0, errno == EINTR { continue }
+                guard got > 0 else { break }
+                read.append(contentsOf: buffer[0..<got])
             }
             return read
         }
         guard answer == line else {
-            child.end()
+            await child.end()
             throw NotEchoing(executable: executable, answer: String(decoding: answer, as: UTF8.self))
         }
         return child
@@ -209,6 +302,52 @@ struct ProcessesTests {
 
     static func seconds(_ time: timeval) -> Double { Double(time.tv_sec) + Double(time.tv_usec) / 1_000_000 }
 
+    // MARK: The harness
+
+    /// Whether `issue` names child `pid`, as `Child`'s issues do.
+    static func names(_ issue: Issue, _ pid: pid_t) -> Bool {
+        issue.comments.contains { $0.rawValue.hasPrefix("child \(pid) ") }
+    }
+
+    /// A child someone else collects (here the test, behind the harness's back) is named when its test ends it, and
+    /// that end comes: nothing waits for an end it can't see. The Mac's Foundation lost a child so, and its
+    /// `waitUntilExit()` held the run until vs-heavy's timeout; Linux's tells the end of one collected elsewhere as
+    /// an exit, which no one would have been told was not.
+    @Test func aChildCollectedElsewhereIsNamedAndItsEndComes() async throws {
+        let child = try await Self.startEchoing()
+        let pid = child.pid
+        kill(pid, SIGKILL)
+        let collected = await Self.offPool { () -> pid_t in
+            var status: Int32 = 0
+            var found: pid_t
+            repeat { found = waitpid(pid, &status, 0) } while found < 0 && errno == EINTR
+            return found
+        }
+        #expect(collected == pid, "waitpid: \(collected)")
+        await withKnownIssue("the harness can't know how a child it didn't collect ended") {
+            await child.end()
+        } matching: { Self.names($0, pid) }
+    }
+
+    /// A wait for a child's end is bounded: here one that still runs, asked for with a tenth of a second's limit, is
+    /// named and the wait returns; it is still there to end.
+    @Test func aChildStillThereAtTheLimitIsNamedAndTheWaitEnds() async throws {
+        let child = try await Self.startEchoing()
+        defer { await child.end() }
+        let pid = child.pid
+        var collected = true
+        await withKnownIssue("a child that runs on isn't collected") {
+            collected = await child.collect(within: 0.1)
+        } matching: { Self.names($0, pid) }
+        #expect(!collected)
+        #expect(kill(pid, 0) == 0)
+        guard case .record(let record) = Processes.record(pid) else {
+            Issue.record("its record: \(Processes.record(pid))")
+            return
+        }
+        #expect(record.state != .zombie)
+    }
+
     // MARK: This process
 
     @Test func thisProcessIsInTheTable() throws {
@@ -282,7 +421,7 @@ struct ProcessesTests {
 
     @Test func aChildsArgumentsAndProgramAreItsOwn() async throws {
         let child = try await Self.startEchoing("/bin/cat", ["-"])
-        defer { child.end() }
+        defer { await child.end() }
         let pid = child.pid
         #expect(Processes.arguments(pid) == ["/bin/cat", "-"])
         #expect(Processes.executable(pid) == Self.real("/bin/cat"))
@@ -306,7 +445,7 @@ struct ProcessesTests {
     @Test func aChildJustStartedHasItsOwnArgumentsSoon() async throws {
         let own = ["/bin/sleep", "300"]
         let child = try await Self.start("/bin/sleep", ["300"])
-        defer { child.end() }
+        defer { await child.end() }
         let early = Processes.arguments(child.pid)
         #expect(early == own || early.isEmpty || early == CommandLine.arguments, "\(early)")
         var latest = early
@@ -323,7 +462,7 @@ struct ProcessesTests {
         let folder = try Self.scratch("cwd")
         defer { try? FileManager.default.removeItem(at: folder) }
         let child = try await Self.startEchoing(in: folder)
-        defer { child.end() }
+        defer { await child.end() }
         #expect(Processes.cwd(child.pid) == Self.real(folder.path))
         #if os(Linux)
         // Removed under it, the folder is nowhere: not a path that ends " (deleted)".
@@ -335,7 +474,7 @@ struct ProcessesTests {
     @Test func aChildsEnvironmentIsReadable() async throws {
         let mark = "mark \(UUID().uuidString)"
         let child = try await Self.startEchoing(adding: ["VS_PROCESSES_TEST": mark, "VS_PROCESSES_EMPTY": ""])
-        defer { child.end() }
+        defer { await child.end() }
         let environment = try #require(Processes.environment(child.pid))
         #expect(environment.contains("VS_PROCESSES_TEST=\(mark)"))
         #expect(environment.contains("VS_PROCESSES_EMPTY="))
@@ -344,7 +483,7 @@ struct ProcessesTests {
 
     @Test func aChildIsAmongThisProcesssChildren() async throws {
         let child = try await Self.startEchoing()
-        defer { child.end() }
+        defer { await child.end() }
         let children = Processes.children(getpid())
         #expect(children.contains(child.pid))
         #expect(!children.contains(getpid()))
@@ -354,8 +493,9 @@ struct ProcessesTests {
     @Test func aProcessThatExitedIsGone() async throws {
         let child = try await Self.start("/bin/sh", ["-c", "exit 0"])
         let pid = child.pid
-        // Its end, collected: Foundation's wait returns after it.
-        await Self.offPool { child.process.waitUntilExit() }
+        // Its end, collected.
+        let collected = await child.collect()
+        try #require(collected)
         #expect(Self.isGone(Processes.record(pid)), "\(Processes.record(pid))")
         if case .gone = Processes.brief(pid) {} else { Issue.record("its short record: \(Processes.brief(pid))") }
         #expect(Processes.kernelRecord(pid) == nil)
@@ -371,14 +511,13 @@ struct ProcessesTests {
         #expect(Processes.residentBytes(pid) == nil)
     }
 
-    /// A child that ignores USR1 (a shell's `trap ''`, kept across its exec) is read so, TERM at its default; once it
-    /// has gone, nothing is read. TERM, not USR2: a child keeps what this process ignores, and the signal tests change
-    /// USR2 here (only under `SignalTestLock`); no test ignores TERM.
+    /// A child that ignores USR1 (a shell's `trap ''`, kept across its exec) is read so, TERM at its default (where
+    /// `spawn` starts every child); once it has gone, nothing is read.
     @Test func theSignalsAChildIgnoresAreRead() async throws {
         let child = try await Self.startEchoing("/bin/sh", ["-c", "trap '' USR1; exec /bin/cat"])
         let pid = child.pid
         let ignored = Processes.ignoredSignals(pid)
-        child.end()
+        await child.end()
         let mask = try #require(ignored)
         #expect(mask & (UInt64(1) << UInt64(SIGUSR1 - 1)) != 0, "\(String(mask, radix: 16))")
         #expect(mask & (UInt64(1) << UInt64(SIGTERM - 1)) == 0, "\(String(mask, radix: 16))")
@@ -485,7 +624,7 @@ struct ProcessesTests {
     @Test func twoReadsOfOneProcesssStartAreEqual() async throws {
         let before = Date().timeIntervalSince1970
         let child = try await Self.start("/bin/sleep", ["300"])
-        defer { child.end() }
+        defer { await child.end() }
         let after = Date().timeIntervalSince1970
         for pid in [getpid(), child.pid] {
             guard case .record(let first) = Processes.record(pid), case .record(let second) = Processes.record(pid),
@@ -506,7 +645,7 @@ struct ProcessesTests {
     @Test func cpuSecondsGrowForABusyChild() async throws {
         let begun = Date()
         let child = try await Self.start("/bin/sh", ["-c", "while :; do :; done"])
-        defer { child.end() }
+        defer { await child.end() }
         let pid = child.pid
         let first = try #require(Processes.cpuSeconds(pid))
         #expect(first >= 0)
@@ -530,7 +669,7 @@ struct ProcessesTests {
         let path = Self.real(file.path)
         // A shell that opens the file as its descriptor 3, then says its first line back and waits for a second.
         let child = try await Self.startEchoing("/bin/sh", ["-c", "exec 3< held.txt; read line; echo \"$line\"; read rest"], in: folder)
-        defer { child.end() }
+        defer { await child.end() }
         let pid = child.pid
 
         let open = Processes.openFiles(pid)
@@ -566,7 +705,7 @@ struct ProcessesTests {
         let name = "a b) c)"
         let program = try Self.cat(named: name, in: folder)
         let child = try await Self.startEchoing(program.path)
-        defer { child.end() }
+        defer { await child.end() }
         let pid = child.pid
         guard case .record(let record) = Processes.record(pid) else {
             Issue.record("its record: \(Processes.record(pid))")
@@ -591,7 +730,7 @@ struct ProcessesTests {
 
     @Test func aStoppedChildIsStopped() async throws {
         let child = try await Self.startEchoing()
-        defer { child.end() }
+        defer { await child.end() }
         let pid = child.pid
         kill(pid, SIGSTOP)
         var state = Processes.State.unknown
@@ -635,7 +774,7 @@ struct ProcessesTests {
         let program = try Self.cat(named: "tool", in: folder)
         let path = Self.real(folder.path) + "/tool"
         let child = try await Self.startEchoing(program.path)
-        defer { child.end() }
+        defer { await child.end() }
         #expect(Processes.executable(child.pid) == path)
         #expect(!Processes.executableWasReplaced(child.pid))
 
@@ -646,13 +785,13 @@ struct ProcessesTests {
         #expect(Processes.executableWasReplaced(child.pid))
         // The new one's own process runs what is there.
         let next = try await Self.startEchoing(program.path)
-        defer { next.end() }
+        defer { await next.end() }
         #expect(Processes.executable(next.pid) == path)
         #expect(!Processes.executableWasReplaced(next.pid))
 
         let odd = try Self.cat(named: "tool (deleted)", in: folder)
         let named = try await Self.startEchoing(odd.path)
-        defer { named.end() }
+        defer { await named.end() }
         #expect(Processes.executable(named.pid) == path + " (deleted)")
         #expect(!Processes.executableWasReplaced(named.pid))
         guard case .record(let record) = Processes.record(named.pid) else { return }
@@ -685,7 +824,7 @@ struct ProcessesTests {
         var session: pid_t = 0
         defer {
             if session > 0 { kill(session, SIGKILL) }
-            launcher.end()
+            await launcher.end()
         }
         let taken = await Self.eventually {
             session = tcgetpgrp(primary)
