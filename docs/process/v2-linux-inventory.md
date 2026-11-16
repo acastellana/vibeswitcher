@@ -469,3 +469,60 @@ line) with a `VoiceRuleTests` case that it is taken; the `systemd-run` line beco
 is refused (if it isn't under `user@1000.service`, the rule's first line needs another look before the bootstrap);
 and the journal answer decides whether `NodeContext.journalEntries` adds `_UID=<uid>` to its `journalctl --user`
 matches.
+
+## The engine's proof under a scratch host (the engine's E9, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+`EngineEndToEndTests` in `Tests/VibeNodeTests/EngineEndToEndTests.swift`, on this machine (Ubuntu 24.04 under WSL2, 24
+cores), each on a `ScratchNode` (a scratch host started from the build, its server the built `vibeswitcher-server`,
+holding its fresh vault's first look as the user's host does), everything driven through the built command line on a
+pty of its own (`script`).
+
+**`aLeadStartedFromTheCommandLineAsksAndIsAnswered` (`FakeClaude` as the lead, and as the worker and verifier its tool
+server starts) passes, in 217 s**: `lead` refused until `config held`/`config accept CARD` and `base show
+--from`/`base accept CARD` (each code typed), then `lead REPO --goal "say hi"` started by the fake's resolved path; the
+lead's `ask_user` with two options made a card `questions` lists; `answer CARD "the second"` (its code typed) was in the
+vault (the request's action, and the message's digest under it) and then typed into the idle lead as its prompt, as the
+user's, the message as it is. A second `start_worker` refused for `mac_max_sessions` (1, in the root's
+`mac-limits.json`) was followed by one message from the room watch once the limit was raised (within its 60 s look),
+with one wake prompt; the worker's blocked report reached the idle lead with one wake prompt; the verifier `audit`
+started, waiting on a Bash permission prompt (Claude Code 2.1.316's form) its hooks reported, was declined after
+`LeadWitness.promptWait` (120 s, real time) with the reason, and the lead told once. Two mutants of the engine fail it:
+the user's answer recorded but never delivered (no prompt ending with the answer), and the witness never declining
+(the verifier never declined, no report for the lead).
+
+**A scratch node's workers couldn't reach their host** until the test gave the node's home a `.vibeswitcher` link to
+its root (`ScratchNode`). The lead is given `VIBESWITCHER_HOME` on a scratch node (`LeadEngine.environment`), but the
+workers and verifiers its tool server starts get only the host's session variables (`Platform.Tools.sessionEnvironmentNames`:
+HOME, not `VIBESWITCHER_HOME`), so their tool servers looked for `<home>/.vibeswitcher/host.sock`, never asked their
+role, and `start_worker` ended each worker 45 s on ("its vibeswitcher tools didn't connect"). The user's node is not
+affected (its root is `<home>/.vibeswitcher`, and its sessions' HOME is the user's); on a scratch node the link is the
+same layout.
+
+**`aRealLeadOnSonnetAsksAndIsAnswered` (gated on `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`) has not passed: an open item.**
+Three gated runs, Claude Code **2.1.325** (`~/.local/bin/claude`, the native build), `--model sonnet` (Sonnet 5.5 on the
+screen), the scratch node's `<root>/v2/test/claude` a script running it with the config folder; the scratch
+repository's trust entry written into the folder's `.claude.json` and taken out at the end:
+
+| Run | Steps 1 (config and base accepted) and 2 (the lead started) | What happened |
+| --- | --- | --- |
+| 1 | 0.6 s, 0.2 s | the test process crashed (SIGSEGV in Foundation's `Process.run`, under `TestSupport.swift`'s `run`) while it polled `questions --json` with a child every 200 ms; the run's trust entry stayed and was taken out by hand. The wait now asks the server over the wire (`WireClient`), and the command line lists the card once |
+| 2 | 0.5 s, 0.2 s | no card in 5 min; the screen in the failure was cut at its first empty cell (a NUL), so what it showed wasn't seen. The test now prints the screen (NULs as spaces), the lead's hook state and the board every 30 s |
+| 3 | 0.6 s, 0.2 s | the lead started and took its start prompt, the goal in it; then **"You've hit your weekly limit · resets Nov 18, 6pm (Europe/Madrid)"**, and Claude Code's menu (stop and wait, wait and continue, usage credits) stayed up to the end |
+
+What run 3's screen showed besides:
+
+- **Claude Code 2.1.325 warns that eight of the lead's deny rules never match**: `Write(~/.vibeswitcher/mac-limits.json)`,
+  `Write(~/.vibeswitcher/boost.json)`, `Write(~/.vibeswitcher/policy.md)`, `Write(~/.config/systemd/**)`,
+  `Write(~/.config/environment.d/**)`, `Write(~/.vibeswitcher/v2/**)`, `Write(~/.vibeswitcher/lead/**)` and
+  `Write(//mnt/c/**)`, each "never matches · use Edit(…)". So in 2.1.325 those `Write(…)` rules guard nothing, and only
+  an `Edit(…)` rule for the same path would (stage 2's Task 10b's Linux rules and `LeadLaunch`'s lists): for the lead
+  to decide; not changed here.
+- **No status hook ran for the lead** (no state file under the node's root): the role's settings hold only the
+  read-only PermissionRequest hook, and the status hooks are the user's settings' (`hooks install`), which the config
+  folder didn't have. Without them the engine never sees the lead between turns and would type nothing into it. The
+  test now runs `hooks install --agent claude` into the config folder first (this node's copy of the hook, which writes
+  under the node's root through the lead's `VIBESWITCHER_HOME`) and `hooks remove` at its end, as R10 does.
+
+The next run, after the weekly limit resets (Nov 18) and with the user's go-ahead (the three runs this task allowed are
+spent): `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<config> bash scripts/test.sh --filter EngineEndToEndTests/aRealLead`,
+its `E9:` lines giving each step's time here.

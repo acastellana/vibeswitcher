@@ -8,7 +8,7 @@ import VibeNode
 /// a connector given as `--test-app-pid`/`--test-app-connector`), with the built `vibeswitcher-server` as its server
 /// child, on a short scratch root of its own (a socket's path fits in `sun_path`).
 ///
-/// - `VIBESWITCHER_HOME` is the root; the host listens on `<root>/host.sock`, locks `<root>/scratch-host.lock`, and
+/// - `VIBESWITCHER_HOME` is the root, and `<home>/.vibeswitcher` a link to it (the sessions' HOME is `<home>`); the host listens on `<root>/host.sock`, locks `<root>/scratch-host.lock`, and
 ///   takes `--node-root <root>/build`, whose `bin/` holds links to the built products and whose `build-info` records
 ///   each one's SHA-256 (stage 2's `BuildInfo`), so the host's start check (Task 9b) passes and stays exercised.
 /// - `<root>/v2/test/` holds the stand-ins of the Global Constraints: a recording journal socket (`journal.sock`,
@@ -63,6 +63,13 @@ final class ScratchNode: @unchecked Sendable {
         let files = FileManager.default
         for folder in [home, nodeRoot.appendingPathComponent("bin"), testFolder, root.appendingPathComponent("tmp")] {
             try files.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
+        // As on the user's node, a session finds the node's root through its HOME (`<home>/.vibeswitcher`): the lead is
+        // given `VIBESWITCHER_HOME` (`LeadEngine.environment`), but the workers and verifiers its tool server starts
+        // aren't, and their tool servers and hooks reach this node's host and inboxes only so (E9).
+        let homeRoot = home.appendingPathComponent(".vibeswitcher")
+        if (try? files.destinationOfSymbolicLink(atPath: homeRoot.path)) == nil {
+            try files.createSymbolicLink(atPath: homeRoot.path, withDestinationPath: root.path)
         }
         let fakeFolder = testFolder.appendingPathComponent("fake-claude", isDirectory: true)
         if reusing == nil {
