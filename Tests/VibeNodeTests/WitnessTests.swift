@@ -113,6 +113,18 @@ struct WitnessTests {
         await world.drained()
     }
 
+    /// A refresh whose witness looked after this was called, with the disk look that witness asked of `reads` run too:
+    /// `refresh`'s drain ends at the look's `witnessed`, before the disk watch's check it queues on `reads` (one hop
+    /// more), and a free-space change made after that check had run would be what it reads (a load run's
+    /// `lowDiskIsToldOncePerEpisode`: the back-up look read the low value again, so the episode never ended).
+    private func looked(_ world: DeliveryWorld) async {
+        let looks = { world.queue.sync { world.engine.witnessLooks.values.reduce(0, +) } }
+        let before = looks()
+        world.engine.refresh()
+        #expect(await eventually(timeout: 60) { looks() > before }, "no witness look")
+        await world.drained()
+    }
+
     /// What waits in the lead's inbox with `text` in it.
     private func told(_ world: DeliveryWorld, _ lead: NodeHarness, _ text: String) -> [SteerMessage] {
         world.pending(lead).filter { $0.text.contains(text) }
@@ -291,9 +303,10 @@ struct WitnessTests {
         await refresh(world)
         await refresh(world)
         #expect(told(world, lead, low).count == 1)
-        // Back up, then low again: a new episode.
+        // Back up, then low again: a new episode. The back-up look is waited for: a low read then would keep the
+        // episode going.
         free.value = DiskSpace.bytes(100)
-        await refresh(world)
+        await looked(world)
         #expect(told(world, lead, low).count == 1)
         free.value = DiskSpace.bytes(1)
         world.engine.refresh()
