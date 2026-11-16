@@ -76,15 +76,23 @@ extension LeadEngine {
                 saveState()
             }
         }
-        if first { keepRunningLeads() }
+        if first || rebindAgain { keepRunningLeads() }
     }
 
     /// The host that welcomed the engine isn't the one before (`at`, `before`): every project's lead and team ended with
-    /// the old one, and its vault started over. Said in the log and, project by project, in `status`. On `queue`.
+    /// the old one, and its vault started over. Said in the log and, project by project, in `status`. What was held for
+    /// a lead that ended with it is dropped, project by project in the log: a lead started later never gets the old
+    /// team's news or an answer to a question it didn't ask. On `queue`.
     func hostRestarted(at: Double, before: Double) {
         let gone = knownLeads.union(hostRestart?.gone ?? []).union(heldAtRest().map(\.root))
         hostRestart = EngineState.Restart(at: at, before: before, gone: gone.sorted())
         knownLeads = Set(leads.leads.values.filter { $0.session != nil }.map(\.root))
+        for root in gone.sorted() {
+            let dropped = leads.takeHeld(project: NodeIds.project(root: root))
+            guard !dropped.isEmpty else { continue }
+            note("the session host restarted: dropped \(dropped.count) message(s) held for the lead of \(LeadMail.project(of: root)), "
+                 + "which ended with it")
+        }
         note("the session host restarted (it started at \(NodeWire.dateText(Date(timeIntervalSince1970: at))), the one before at "
              + "\(NodeWire.dateText(Date(timeIntervalSince1970: before)))): "
              + (gone.isEmpty ? "no lead ran under the old one" : "the leads and teams of \(gone.sorted().map { LeadMail.project(of: $0) }.joined(separator: ", ")) ended with it")
@@ -129,17 +137,25 @@ extension LeadEngine {
     /// Each live lead session the vault binds its project's lead role to, bound to it again (the app's
     /// `keepRunningLeads`, `LeadController` 960-993): which lead holds each root is read from its board on `reads`, the
     /// vault asked off the engine's queue. One the vault gives no role (it binds the role to no session, or another) is
-    /// left as it is: `status` says so while it runs. Each session once; one the vault couldn't be asked about is tried
-    /// again at the next refresh. On `queue`.
+    /// left as it is: `status` says so while it runs. Each session once; one the vault couldn't be asked about, or a
+    /// pass the link dropped under (before its board read or after it), is tried again at the next refresh or welcome.
+    /// On `queue`.
     func keepRunningLeads() {
-        guard link.state == .connected, !keepingRunning else { return }
+        guard !keepingRunning else { return }
+        guard link.state == .connected else {
+            rebindAgain = true
+            return
+        }
         keepingRunning = true
         rebindAgain = false
         let sessions = link.sessions
         reads.async({ files in LeadStore.leadSessions(sessions) { files.names.board($0).leadSession } }) { [weak self] running in
             guard let self else { return }
             self.keepingRunning = false
-            guard self.link.state == .connected else { return }
+            guard self.link.state == .connected else {
+                self.rebindAgain = true
+                return
+            }
             self.keepRunning(running)
         }
     }

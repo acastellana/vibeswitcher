@@ -162,6 +162,7 @@ extension LeadEngine {
         // A lead runs again: what was held for it goes now; and it's woken for what waits.
         deliverHeld(root: root)
         wake(root: root)
+        witnessLooks[root, default: 0] += 1
         witnessStep?("applied")
     }
 

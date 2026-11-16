@@ -263,9 +263,11 @@ public final class Requests: @unchecked Sendable {
         ])
     }
 
-    /// A lead as `status` lists it: the store's, with its open and blocking questions and its open cards (E6).
+    /// A lead as `status` lists it: the store's, with its open and blocking questions and its open cards (E6), and how
+    /// many of the witness's looks this server applied for it (`looks`, E8's review).
     private func leadValue(_ lead: LeadStore.Lead) -> NodeWire.Value {
         guard case .object(var fields) = lead.value else { return lead.value }
+        fields["looks"] = .int(engine?.witnessLooks[lead.root] ?? 0)
         let open = engine?.cards.list(project: lead.project) ?? []
         let questions = open.filter { $0.kind == .question || $0.kind == .approval }
         fields["questions"] = .object(["open": .int(questions.count), "blocking": .int(questions.filter(\.isBlocking).count)])

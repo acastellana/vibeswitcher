@@ -170,6 +170,10 @@ final class ScratchNode: @unchecked Sendable {
         guard first else { return }
         let server = serverPID
         let host = hostPID
+        // Every process under the host now (its server, the sessions' shells and agents, their tool servers and hooks),
+        // each known by its start too: once the host is gone they're init's, and one still ending writes into the root
+        // while the scratch is removed (the E8 review's leftover `vsn-` root under load).
+        let under = host > 0 ? Self.descendants(of: host) : []
         if host > 0, process.isRunning {
             kill(host, SIGTERM)
             let deadline = MacTime.real.awake() + 10
@@ -183,10 +187,46 @@ final class ScratchNode: @unchecked Sendable {
             while kill(server, 0) == 0, MacTime.real.awake() < deadline { Thread.sleep(forTimeInterval: 0.02) }
             if kill(server, 0) == 0 { kill(server, SIGKILL) }
         }
+        Self.waitForEnd(under)
         ScratchNodes.ended(host)
         recorder?.stop()
         if HostConnection.connector(for: socket) == testEnd { HostConnection.unregister(path: socket) }
         if testEnd >= 0 { Sys.close(testEnd) }
+    }
+
+    /// The processes under `pid` (children, theirs, and so on), each with its start (`Platform.Processes.link`).
+    static func descendants(of pid: pid_t) -> [Platform.Processes.Link] {
+        var found: [Platform.Processes.Link] = []
+        var next = Platform.Processes.children(pid)
+        while let child = next.popLast() {
+            guard let link = Platform.Processes.link(child), !found.contains(where: { $0.pid == child }) else { continue }
+            found.append(link)
+            next += Platform.Processes.children(child)
+        }
+        return found
+    }
+
+    /// Whether the process `link` names still runs: its pid with the same start (not a later process given the number),
+    /// and not a zombie.
+    static func runs(_ link: Platform.Processes.Link) -> Bool {
+        guard Platform.Processes.link(link.pid)?.startTicks == link.startTicks else { return false }
+        return Platform.Processes.kernelRecord(link.pid)?.state != .zombie
+    }
+
+    /// Waits for each of `processes` to end, 10 s (they had their hangup with the host's terminals), then ends those
+    /// still running (SIGKILL, each checked by its start first) and waits 10 s more.
+    static func waitForEnd(_ processes: [Platform.Processes.Link]) {
+        var running = processes
+        for (index, wait) in [10.0, 10.0].enumerated() {
+            let deadline = MacTime.real.awake() + wait
+            while true {
+                running = running.filter(runs)
+                if running.isEmpty || MacTime.real.awake() >= deadline { break }
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            guard index == 0 else { break }
+            for link in running where runs(link) { kill(link.pid, SIGKILL) }
+        }
     }
 
     /// Starts `command` (a shell line) in a new session of this node's host, as its app, and returns it.

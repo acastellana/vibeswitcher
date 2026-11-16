@@ -166,6 +166,9 @@ public final class LeadEngine: @unchecked Sendable {
     /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"
     /// on the engine's queue once a look is applied (`witnessed`); tests watch or slow them. Set on `queue`.
     var witnessStep: ((String) -> Void)?
+    /// How many of the witness's looks were applied for each root since this engine started (`status` gives each lead's
+    /// as `looks`: what a test waits on to know looks went by). On `queue`.
+    public internal(set) var witnessLooks: [String: Int] = [:]
     /// Each project's free disk space, watched (`LeadWitness.Disk`), by root: on `reads` only.
     let disks = DiskWatches()
     /// The bytes free on the volume holding a path, as the disk watch reads them (`DiskSpace.free`). Faked in tests.

@@ -43,7 +43,7 @@ struct RestartTests {
         // A look or two on: each still once.
         let looked = try await node.statusJSON()
         #expect(looked["leads"] != nil)
-        try await node.refreshes(2)
+        try await node.looks(2, at: lead.repo)
         let inbox = node.inbox(lead.session.tty)
         let answers = inbox.filter { $0.text.hasSuffix(": Parser") }
         #expect(answers.count == 1, "\(inbox)")
@@ -143,8 +143,10 @@ struct RestartTests {
     }
 
     /// LeadRelaunchTests' `aRelaunchLeavesTheUsersAppLogAlone`: the account's own `~/.vibeswitcher/v2` (the home from
-    /// the user database) gains no `server.sock` or `engine.json` while a scratch node's server starts and restarts,
-    /// checked by absence and inode before and after (it may not exist at all); the scratch root has both.
+    /// the user database) gains no `server.sock` or `engine.json` while a scratch node's server starts and restarts:
+    /// one absent before is absent after; one there already (the account's own node runs, and rewrites `engine.json` as
+    /// it goes, so no inode is compared) isn't the scratch server's, whose `status` names the scratch root. The scratch
+    /// root has both.
     @Test func aServerRestartLeavesTheUsersLogAlone() async throws {
         let home = try #require(getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) })
         let users = URL(fileURLWithPath: home).appendingPathComponent(".vibeswitcher/v2", isDirectory: true)
@@ -163,7 +165,12 @@ struct RestartTests {
         #expect(started.status == 0, "\(started.output)\n\(node.said)")
         _ = try await node.restartServer()
         #expect(await node.eventuallyLead(repo) { $0["bound"] as? String != nil }, "\(node.said)")
-        #expect(look() == before, "\(look()) \(before)")
+        let after = look()
+        for (name, inode) in before where inode == nil { #expect(after[name] ?? nil == nil, "\(name): \(after) \(before)") }
+        let resolved = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+        let status = try await node.statusJSON()
+        #expect((status["root"] as? String).map(resolved) == resolved(node.root.path), "\(status)")
+        #expect(resolved(node.root.path) != resolved(users.deletingLastPathComponent().path))
         #expect(FileManager.default.fileExists(atPath: node.serverSocket))
         #expect(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: EngineState.url(root: node.root).path) })
         #expect(EngineState.load(root: node.root).state.hostStartedAt != nil)
@@ -185,17 +192,155 @@ struct RestartTests {
         // The questions listed no longer show it: no card.
         let listed = try await node.run(["questions", "--json"])
         #expect(!listed.output.contains("Name the parser?"), "\(listed.output)")
-        try await node.refreshes(2)
+        try await node.looks(2, at: lead.repo)
         #expect(told().count == 1, "\(told())")
+    }
+
+    /// A lead running when the server starts again whose role the vault gives to another (here a lead grant issued by
+    /// the app and bound to no session, as a start elsewhere leaves it): it's left as it is, said in the log, and
+    /// `status` says it holds no role while it runs; its role isn't bound back to it.
+    @Test func aServerRestartLeavesALeadWithoutItsRoleAsItIs() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let repo = node.root.appendingPathComponent("repo")
+        try await scratchRepository(repo)
+        let started = try await node.runOnTerminal(["lead", repo.path, "--goal", "plan the work"])
+        #expect(started.status == 0 && started.output.contains("the lead started"), "\(started.output)\n\(node.said)")
+        let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") })
+        let issued = try await offPool { [socket = node.socket] in
+            try HostCall.vault(.issue(role: .lead, root: repo.path, task: nil, auditing: nil, finder: nil), socket: socket)
+        }
+        guard case .grant = issued else { Issue.record("\(issued)"); return }
+        #expect(node.currentLead(repo.path)?.hasSuffix(" none") == true, "\(String(describing: node.currentLead(repo.path)))")
+
+        _ = try await node.restartServer()
+        let short = lead.id.uuidString.prefix(8)
+        #expect(await node.eventuallyStatus { status in
+            ((status["notices"] as? [String]) ?? []).contains { $0.contains("the lead of repo runs (session \(short)) but the vault binds its role to no session or another") }
+        }, "\(node.said)")
+        #expect(node.said.contains("lead: the running lead of repo (session \(short)) holds no role in the vault; left as it is"), "\(node.said)")
+        let status = try await node.statusJSON()
+        let listed = ((status["leads"] as? [[String: Any]]) ?? []).first { $0["root"] as? String == repo.path }
+        #expect((listed?["bound"] as? String)?.lowercased() != lead.id.uuidString.lowercased(), "\(String(describing: listed))")
+        #expect(node.currentLead(repo.path)?.hasSuffix(" none") == true)
+    }
+
+    /// The witness keeps what it told and first saw in `engine.json` as it goes (no other save in the case writes it):
+    /// an engine started again on the same root tells the lead none of it again, and auto_advance's first sighting of a
+    /// verifier that ended keeps its time. Against a `DeliveryWorld` (the lead mid-turn, so what's told is posted), the
+    /// team handed to the witness as the refresh's reads would: a worker whose session ended on a running task (one
+    /// event: two would hold the second behind the first's post, and a hold saves `engine.json` too), and a verifier
+    /// that ended without a verdict on a task in review.
+    @Test func theWitnessesToldKeysAndFirstSightingsOutliveARestart() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        let root = world.repo
+        let now = Date()
+        let slug = "ended-\(UUID().uuidString.prefix(8).lowercased())"
+        let (worker, verifier) = (UUID(), UUID())
+        let contract = LeadContract(goal: "g", acceptance: [], boundaries: [], context: "")
+        try BoardStore(root: root).update { board in
+            var running = LeadTask(slug: slug, title: "Ended", contract: contract, status: .running)
+            running.worker = worker.uuidString
+            board.tasks.append(running)
+            var audited = LeadTask(slug: slug + "-audited", title: "Audited", contract: contract, status: .review)
+            audited.verifier = verifier.uuidString
+            board.tasks.append(audited)
+        }
+        var team = TeamReading()
+        team.advancing = true
+        let tty = "ttypts\(Int.random(in: 700..<800))"
+        let cwd = (root as NSString).appendingPathComponent(".vibeswitcher/worktrees/\(slug)")
+        team.hosted[worker.uuidString] = HostSession(id: worker, tty: tty, childPID: 63_000, cwd: cwd, command: "claude", label: "Worker: Ended",
+                                                     agent: "claude", title: "Claude", startedAt: now - 7_200, cols: 120, rows: 40,
+                                                     exit: .init(status: 1, at: now - 60))
+        team.hosted[verifier.uuidString] = HostSession(id: verifier, tty: "ttypts\(Int.random(in: 800..<900))", childPID: 63_001, cwd: cwd,
+                                                       command: "claude", label: "Verifier: Audited", agent: "claude", title: "Claude",
+                                                       startedAt: now - 600, cols: 120, rows: 40, exit: .init(status: 0, at: now - 30))
+        let board = BoardStore(root: root).load()
+        let key = "\(root)|\(verifier.uuidString)"
+
+        // A look by the engine that ran: the worker's end told, the verifier first seen.
+        let applied = Locked(0)
+        world.queue.sync {
+            world.engine.witnessStep = { if $0 == "applied" { applied.mutate { $0 += 1 } } }
+            world.engine.refreshed(roots: [root], loaded: [root: board], teams: [root: team], refusals: [:])
+        }
+        #expect(await eventually(timeout: 120) { applied.value == 1 })
+        await world.drained()
+        func told() -> [SteerMessage] { world.pending(lead).filter { $0.text.contains(slug) } }
+        let toldBefore = told().count
+        #expect(toldBefore == 1, "\(world.pending(lead).map(\.text))")
+        #expect(world.queue.sync { world.engine.leads.held[world.project] ?? [] }.isEmpty)
+        let sighted = try #require(world.queue.sync { world.engine.advanceSeen[key] })
+        #expect(await eventually(timeout: 60) { EngineState.load(root: world.host.root).state.firstSightings?[key] != nil })
+
+        // The engine started again on the same root, its store knowing the lead (a refresh of its own), then the same look.
+        let again = world.restarted()
+        let appliedAgain = Locked(0)
+        world.queue.sync {
+            again.freeSpace = { _ in nil }
+            again.witnessStep = { if $0 == "applied" { appliedAgain.mutate { $0 += 1 } } }
+        }
+        #expect(world.queue.sync { again.advanceSeen[key].map { abs($0.timeIntervalSince(sighted)) < 0.001 } } == true)
+        again.refresh()
+        #expect(await eventually(timeout: 120) { appliedAgain.value == 1 && world.queue.sync { again.leads.leads[world.project]?.session } == lead.session.id })
+        world.queue.sync { again.refreshed(roots: [root], loaded: [root: board], teams: [root: team], refusals: [:]) }
+        #expect(await eventually(timeout: 120) { appliedAgain.value == 2 })
+        await offPool {
+            for _ in 0..<3 {
+                again.reads.queue.sync {}
+                world.queue.sync {}
+            }
+        }
+        #expect(told().count == toldBefore, "\(told().map(\.text))")
+        #expect(world.queue.sync { again.leads.held[world.project] ?? [] }.isEmpty)
+        #expect(world.queue.sync { again.advanceSeen[key].map { abs($0.timeIntervalSince(sighted)) < 0.001 } } == true)
+    }
+
+    /// The rebind of the running leads at the server's start isn't lost to a link that drops under it: a pass whose
+    /// board read comes back with the link reconnecting runs again (at the refresh or the welcome after), and the lead's
+    /// role is bound to its session. Against a `DeliveryWorld`, whose lead starts after the engine's first welcome.
+    @Test func aRebindTheLinkDroppedUnderRunsAgain() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        #expect(await eventually(timeout: 60) { world.queue.sync { !world.engine.keepingRunning } })
+        #expect(world.queue.sync { world.engine.adopting.isEmpty })
+        world.queue.sync {
+            world.engine.keepRunningLeads()
+            // Dropped while the boards are read; the read comes back (it's on the engine's queue) before the next welcome.
+            world.link.connectAgain()
+            world.engine.reads.queue.sync {}
+        }
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.link.state == .connected } })
+        // Asked of the vault (each session once: `adopting`), and bound.
+        let bound = await eventually(timeout: 60) {
+            world.engine.refresh()
+            return world.queue.sync { world.engine.adopting.contains(lead.session.id) }
+                && world.stored?.bound?.lowercased() == lead.session.id.uuidString.lowercased()
+        }
+        #expect(bound, "\(String(describing: world.stored))")
     }
 
     // MARK: The host's restart
 
     /// Every project's lead and team ended with the host: the restarted node's `status` says so, project by project,
-    /// and gives the restart; `lead` stays refused until the accepts (E4's gate).
+    /// and gives the restart; `lead` stays refused until the accepts (E4's gate); once a lead starts there, the project's
+    /// notice is gone. What was held for the old lead (here the witness's news of the old team, in `engine.json` while
+    /// both hosts were down) is dropped, said in the log, and never reaches the new lead.
     @Test func aHostRestartSaysTheTeamIsGone() async throws {
-        let (node, repo) = try await hostRestarted(leadBefore: true)
+        let oldNews = "The worker on parser (of the team before) says it's done."
+        let (node, repo) = try await hostRestarted(leadBefore: true) { node, repo in
+            var state = EngineState.load(root: node.root).state
+            state.held.append(.init(root: repo.path, order: 1, text: oldNews, from: .system("witness")))
+            try state.save(root: node.root)
+        }
         defer { node.stop() }
+        #expect(await eventually(timeout: 60) { node.said.contains("dropped 1 message(s) held for the lead of repo, which ended with it") },
+                "\(node.said)")
+        #expect(await eventually(timeout: 60) { !EngineState.load(root: node.root).state.held.contains { $0.text.contains(oldNews) } })
         let status = try await node.statusJSON()
         let notices = (status["notices"] as? [String]) ?? []
         #expect(notices.contains { $0.contains("the lead and team of repo (\(repo.path)) ended with the host before it") }, "\(notices)")
@@ -206,6 +351,23 @@ struct RestartTests {
         #expect(plain.output.contains("restart: the session host restarted at"), "\(plain.output)")
         let refused = try await node.runOnTerminal(["lead", repo.path])
         #expect(refused.status == 77 && refused.output.contains("config held"), "\(refused.output)")
+
+        try await node.acceptConfig(repo)
+        let shown = try await node.run(["base", "show", repo.path])
+        let card = try #require(ScratchNode.card(shown.output, "base accept"), "\(shown.output)\(shown.errors)")
+        let recorded = try await node.runOnTerminal(["base", "accept", card])
+        #expect(recorded.status == 0, "\(recorded.output)")
+        let started = try await node.runOnTerminal(["lead", repo.path, "--goal", "plan the work"])
+        #expect(started.status == 0 && started.output.contains("the lead started"), "\(started.output)\n\(node.said)")
+        let after = try await node.statusJSON()
+        #expect(!((after["notices"] as? [String]) ?? []).contains { $0.contains("ended with the host before it") }, "\(after)")
+        #expect(((after["restart"] as? [String: Any])?["gone"] as? [String]) == [], "\(after)")
+        let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") })
+        try await node.looks(1, at: repo)
+        // Neither posted to it nor still held for it.
+        #expect(!node.inbox(lead.tty).contains { $0.text.contains(oldNews) }, "\(node.inbox(lead.tty))")
+        // (What the new lead is sent before it names itself on its board is held meanwhile: `engine.json` says which.)
+        #expect(!EngineState.load(root: node.root).state.held.contains { $0.text.contains(oldNews) })
     }
 
     /// With the engine's own gate away (the scratch server isn't told its host holds the first look), a lead starts on
@@ -219,7 +381,9 @@ struct RestartTests {
         let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") })
         let tools = node.fake.files(terminal: lead.tty)
         #expect(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: tools.control.path) })
-        try tools.call("add_task", ["title": "Write the parser", "goal": "A parser.", "acceptance": ["swift test passes"]])
+        // Not started by auto_advance too: its start racing the one asked here for the task's branch is a git lock, not
+        // the vault's refusal.
+        try tools.call("add_task", ["title": "Write the parser", "goal": "A parser.", "acceptance": ["swift test passes"], "auto_advance": false])
         #expect(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)")
         try tools.call("start_worker", ["task": "write-the-parser"])
         #expect(await eventually(timeout: 120) { tools.calls().count == 2 }, "\(tools.calls())")
@@ -414,7 +578,7 @@ struct RestartTests {
         // The lead still holds its role: the vault (carried over) binds it to its session, and the server's list has it.
         #expect(node.currentLead(lead.repo.path)?.hasSuffix(" " + lead.session.id.uuidString) == true, "\(String(describing: node.currentLead(lead.repo.path)))")
         #expect(await node.eventuallyLead(lead.repo) { $0["session"] as? String == NodeIds.session(host: lead.session.id) }, "\(node.said)")
-        try await node.refreshes(2)
+        try await node.looks(2, at: lead.repo)
         let status = try await node.statusJSON()
         #expect(status["restart"] == nil || status["restart"] is NSNull, "\(status)")
         #expect(node.inbox(lead.session.tty).count == inboxBefore, "\(node.inbox(lead.session.tty))")
@@ -545,11 +709,22 @@ extension ScratchNode {
         }
     }
 
-    /// Two more of the engine's 3 s refreshes have run (`status` answers only from its queue, which runs them).
-    func refreshes(_ count: Int) async throws {
-        let until = MacTime.real.awake() + Double(3 * count) + 0.5
-        try #require(await eventually(timeout: 60) { MacTime.real.awake() >= until })
-        _ = try await statusJSON()
+    /// `count` more of the witness's looks at `repo`'s lead were applied, and one after them, so what the last of them
+    /// posted is in (each look's posts are on the reads queue ahead of the next look's work), as `status` counts them
+    /// (the lead's `looks`).
+    func looks(_ count: Int, at repo: URL) async throws {
+        func looked() async -> Int? {
+            let status = try? await statusJSON()
+            return ((status?["leads"] as? [[String: Any]]) ?? []).first { $0["root"] as? String == repo.path }?["looks"] as? Int
+        }
+        let start = try #require(await looked(), "\(said)")
+        let deadline = MacTime.real.awake() + 120
+        var now = start
+        while now < start + count + 1, MacTime.real.awake() < deadline {
+            try await Task.sleep(nanoseconds: 200_000_000)
+            now = await looked() ?? now
+        }
+        try #require(now >= start + count + 1, "looks \(start) to \(now)\n\(said)")
     }
 
     /// Kills the server (unless `after`: one already killed) and waits for the one the host starts again, its link
