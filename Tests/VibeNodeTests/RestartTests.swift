@@ -715,11 +715,15 @@ extension ScratchNode {
 
     /// `count` more of the witness's looks at `repo`'s lead were applied, and one after them, so what the last of them
     /// posted is in (each look's posts are on the reads queue ahead of the next look's work), as `status` counts them
-    /// (the lead's `looks`).
+    /// (the lead's `looks`). Asked over the wire, one connection a look, off the pool: no child process every 200 ms
+    /// (the test process crashed in Foundation's `Process.run` under load while this started one each look).
     func looks(_ count: Int, at repo: URL) async throws {
         func looked() async -> Int? {
-            let status = try? await statusJSON()
-            return ((status?["leads"] as? [[String: Any]]) ?? []).first { $0["root"] as? String == repo.path }?["looks"] as? Int
+            await offPool { [self] () -> Int? in
+                guard let client = try? WireClient(self),
+                      let reply = WireClient.reply(client.request("status", action: nil, timeout: 10)) else { return nil }
+                return reply.result?["leads"]?.array?.first { $0["root"]?.string == repo.path }?["looks"]?.int
+            }
         }
         let start = try #require(await looked(), "\(said)")
         let deadline = MacTime.real.awake() + 120

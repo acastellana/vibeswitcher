@@ -7,7 +7,7 @@ import Testing
 /// A wait that should return is given the hang guard: past it the watch is stopped, the wait answers nil and the
 /// test fails.
 ///
-/// One at a time: the descriptor count below is of this suite's watches alone.
+/// One at a time.
 @Suite(.serialized)
 struct FolderWatchTests {
     typealias Change = Platform.FolderWatch.Change
@@ -305,29 +305,71 @@ struct FolderWatchTests {
         return (names.count, inotify.count)
     }
 
+    /// What of this process's descriptors is one test's own: inotify ones watching `folder` (an inotify descriptor's
+    /// /proc/self/fdinfo lists each of its watches by the watched inode and device, so another test's watch of a
+    /// folder of its own never counts), ones open on `folder` itself, and ones on a pipe whose inode is in `pipes`.
+    /// A descriptor closed between the listing and its reading isn't counted.
+    static func owned(watching folder: URL, pipes: Set<UInt64> = []) throws -> (inotify: Int, folder: Int, pipes: Int) {
+        var status = stat()
+        guard stat(folder.path, &status) == 0 else { throw Failure(what: "\(folder.path): errno \(errno)") }
+        // fdinfo gives the device as the kernel keeps it (major << 20 | minor), stat as glibc encodes it.
+        let device = UInt64(status.st_dev)
+        let major = ((device >> 8) & 0xfff) | ((device >> 32) & ~UInt64(0xfff))
+        let minor = (device & 0xff) | ((device >> 12) & ~UInt64(0xff))
+        let watch = "ino:\(String(UInt64(status.st_ino), radix: 16)) sdev:\(String(major << 20 | minor, radix: 16)) "
+        let real = ProcessesTests.real(folder.path)
+        var counts = (inotify: 0, folder: 0, pipes: 0)
+        for name in try FileManager.default.contentsOfDirectory(atPath: "/proc/self/fd") {
+            guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/fd/\(name)") else { continue }
+            if target == "anon_inode:inotify" {
+                let info = (try? String(contentsOfFile: "/proc/self/fdinfo/\(name)", encoding: .utf8)) ?? ""
+                if info.split(separator: "\n").contains(where: { $0.hasPrefix("inotify wd:") && $0.contains(watch) }) { counts.inotify += 1 }
+            } else if target == real {
+                counts.folder += 1
+            } else if target.hasPrefix("pipe:["), let inode = UInt64(target.dropFirst(6).dropLast()), pipes.contains(inode) {
+                counts.pipes += 1
+            }
+        }
+        return counts
+    }
+
+    /// The inode of the wake pipe a watch holds until it is stopped or reads on a queue (its `wakeRead`, read through
+    /// the watch's mirror: private to it).
+    static func wakePipe(_ watch: Platform.FolderWatch) throws -> UInt64 {
+        let held = Mirror(reflecting: watch.system).children.first { $0.label == "wakeRead" }?.value as? Int32
+        let end = try #require(held, "the watch's wake pipe wasn't found: \(Mirror(reflecting: watch.system).children.map { $0.label ?? "?" })")
+        var status = stat()
+        try #require(fstat(end, &status) == 0, "errno \(errno)")
+        return UInt64(status.st_ino)
+    }
+
     /// 200 watches made and stopped, each of the ways a watch is used in turn: none leaves a descriptor. Each is
-    /// waited for to have closed what it held (`released`) before the next. The inotify descriptors are this
-    /// suite's alone and counted exactly; the count of all descriptors is shared with the tests running beside
-    /// this one, so it is only held to less than one a cycle of any one way (50 cycles each).
+    /// waited for to have closed what it held (`released`) before the next. Only what is this test's own is counted
+    /// (`owned`), exactly: the inotify descriptors watching its folder, descriptors on the folder, and the wake pipes
+    /// of its watches (none before: the folder is new); the process's other descriptors are the tests' running beside
+    /// this one. A first live watch of two of the ways checks the count sees what a watch holds.
     @Test func twoHundredWatchesLeaveNoDescriptor() throws {
         let folders = try Self.folders()
         defer { try? FileManager.default.removeItem(at: folders.root) }
         let queue = DispatchQueue(label: "folder-watch-tests.cycles")
-        let before = try Self.descriptors()
+        var pipes = Set<UInt64>()
         for cycle in 0..<200 {
             let watch: Platform.FolderWatch
             switch cycle % 4 {
             case 0:
                 // Made and stopped, never read.
                 watch = try #require(Platform.FolderWatch(path: folders.watched.path))
+                pipes.insert(try Self.wakePipe(watch))
             case 1:
                 // A change read, then stopped.
                 watch = try #require(Platform.FolderWatch(path: folders.watched.path))
+                pipes.insert(try Self.wakePipe(watch))
                 try Self.make(folders.watched.appendingPathComponent("cycle-\(cycle)"))
                 #expect(Self.next(watch) == .entries)
             case 2:
                 // Stopped under a wait.
                 watch = try #require(Platform.FolderWatch(path: folders.watched.path))
+                pipes.insert(try Self.wakePipe(watch))
                 let answered = DispatchSemaphore(value: 0)
                 Thread.detachNewThread {
                     _ = watch.wait()
@@ -341,16 +383,26 @@ struct FolderWatchTests {
                 let descriptor = open(folders.watched.path, O_RDONLY)
                 try #require(descriptor >= 0)
                 watch = try #require(Platform.FolderWatch(descriptor: descriptor))
+                pipes.insert(try Self.wakePipe(watch))
                 watch.deliver(on: queue) { _ in }
+            }
+            if cycle == 0 || cycle == 3 {
+                // Live: its inotify descriptor, and its wake pipe's two ends until it reads on a queue; the handed
+                // descriptor is closed by the watch as it is made. (Only twice: each count lists /proc/self/fd, a
+                // descriptor ProcessesTests' own-list check sees when it reads at that moment.)
+                let live = try Self.owned(watching: folders.watched, pipes: pipes)
+                #expect(live.inotify == 1 && live.folder == 0 && live.pipes == (cycle == 3 ? 0 : 2), "cycle \(cycle): \(live)")
             }
             watch.stop()
             try #require(watch.system.released.wait(timeout: .now() + Self.hangGuard) == .success, "cycle \(cycle) still holds a descriptor")
         }
         // A watch that can't be made holds nothing either.
         for _ in 0..<50 { #expect(Platform.FolderWatch(path: folders.root.appendingPathComponent("never-made").path) == nil) }
-        let after = try Self.descriptors()
-        #expect(after.inotify <= before.inotify, "\(after.inotify - before.inotify) inotify descriptors left open")
-        #expect(after.all - before.all < 50, "\(after.all - before.all) descriptors more than before")
+        #expect(pipes.count == 200, "\(pipes.count) wake pipes seen")
+        let after = try Self.owned(watching: folders.watched, pipes: pipes)
+        #expect(after.inotify == 0, "\(after.inotify) inotify descriptors on the watched folder left open")
+        #expect(after.folder == 0, "\(after.folder) descriptors on the watched folder left open")
+        #expect(after.pipes == 0, "\(after.pipes) ends of the watches' wake pipes left open")
     }
     #endif
 }
