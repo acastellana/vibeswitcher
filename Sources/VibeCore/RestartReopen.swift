@@ -155,16 +155,77 @@ public enum RestartReopen {
 
     public static var file: URL { VibePaths.root.appendingPathComponent("open-sessions.json") }
 
-    /// The record, or none (no file, or one this build can't read).
-    public static func load(from file: URL = RestartReopen.file) -> [Entry] {
-        guard let data = try? Data(contentsOf: file), let record = try? decoder.decode(Record.self, from: data) else { return [] }
-        return record.entries
+    /// The record's sessions, or none (no file, or one this build can't read).
+    public static func load(from file: URL = RestartReopen.file) -> [Entry] { loadRecord(from: file)?.entries ?? [] }
+
+    /// The record, or nil (no file, or one this build can't read).
+    public static func loadRecord(from file: URL = RestartReopen.file) -> Record? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return try? decoder.decode(Record.self, from: data)
+    }
+
+    /// An entry less its window size: what decides whether the record needs writing again.
+    public static func withoutSize(_ entry: Entry) -> Entry {
+        var entry = entry
+        entry.cols = 0
+        entry.rows = 0
+        return entry
+    }
+
+    /// When this Mac last started (nil: unknown).
+    public static func bootTime() -> Date? {
+        var time = timeval()
+        var size = MemoryLayout<timeval>.size
+        guard sysctlbyname("kern.boottime", &time, &size, nil, 0) == 0 else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(time.tv_sec) + TimeInterval(time.tv_usec) / 1_000_000)
     }
 
     /// Writes the record (0600, atomically, flushed: it has to be there after a power cut).
     public static func save(_ entries: [Entry], to file: URL = RestartReopen.file) throws {
         try VibePaths.ensurePrivate(file.deletingLastPathComponent())
         try VibePaths.writePrivate(try encoder.encode(Record(entries: entries)), to: file, syncing: { fsync($0) == 0 })
+    }
+
+    /// Writes the record off the caller's thread (an fsync can take a while, and the sessions change on every resize):
+    /// one write at a time, in order, the latest record handed to it winning over any it hasn't started yet.
+    public final class RecordWriter: @unchecked Sendable {
+        public let file: URL
+        private let failed: @Sendable (Error) -> Void
+        private let queue = DispatchQueue(label: "vibeswitcher.restart-record", qos: .utility)
+        private let lock = NSLock()
+        private var next: [Entry]?
+        private var draining = false
+
+        public init(file: URL, failed: @escaping @Sendable (Error) -> Void = { _ in }) {
+            self.file = file
+            self.failed = failed
+        }
+
+        public func write(_ entries: [Entry]) {
+            lock.lock()
+            next = entries
+            let start = !draining
+            draining = true
+            lock.unlock()
+            if start { queue.async { self.drain() } }
+        }
+
+        /// Returns once every record handed to `write` so far is on disk.
+        public func flush() { queue.sync {} }
+
+        private func drain() {
+            while true {
+                lock.lock()
+                guard let entries = next else {
+                    draining = false
+                    lock.unlock()
+                    return
+                }
+                next = nil
+                lock.unlock()
+                do { try RestartReopen.save(entries, to: file) } catch { failed(error) }
+            }
+        }
     }
 
     private static var encoder: JSONEncoder {

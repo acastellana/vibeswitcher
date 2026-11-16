@@ -83,6 +83,9 @@ import Testing
         let client = host.client()
         let (offer, shown) = try offer([])
         let sessions = CurrentValueSubject<[Session], Never>([])
+        // An ended session's grace, run by the test.
+        var graces: [() -> Void] = []
+        offer.later = { _, run in graces.append(run) }
         offer.watchRecord(client, sessions: sessions.eraseToAnyPublisher())
         client.connectIfRunning()
         offer.watchLaunch(client)
@@ -106,8 +109,12 @@ import Testing
         #expect(await until { recorded().map(\.id) == [mine.id, lead.id] })
         #expect(recorded().last?.role == .lead)
 
-        // Ended: it leaves the record.
+        // Ended: it leaves the record once its grace has passed with the Mac still running.
         client.kill(lead.id)
+        #expect(await until { graces.count == 1 })
+        offer.flushRecord()
+        #expect(recorded().map(\.id) == [mine.id, lead.id])
+        graces.forEach { $0() }
         #expect(await until { recorded().map(\.id) == [mine.id] })
 
         // The host goes away (as at a restart): its sessions are marked ended in the app, but the record keeps them.
@@ -124,6 +131,47 @@ import Testing
         // The sessions the shutdown ends: not yours ending them, so they stay.
         offer.record(hosted: [], sessions: [])
         #expect(RestartReopen.load(from: offer.file).count == 1)
+    }
+
+    func hosted(_ entry: RestartReopen.Entry, cols: Int = 120, ended: Bool = false) -> HostSession {
+        HostSession(id: entry.id, tty: "/dev/ttys999", childPID: 1, cwd: entry.folder, command: entry.command, label: entry.label, agent: "claude",
+                    title: "", startedAt: Date(), cols: cols, rows: 36, exit: ended ? HostSession.Exit(status: 129, at: Date(), signal: 1) : nil)
+    }
+
+    /// An Apple-menu Restart whose session exits reach the app before the Mac says it's shutting down: the record
+    /// still names them when it freezes, and the next launch offers them.
+    @Test func sessionsEndingBeforeThePowerOffNoticeStayInTheRecord() throws {
+        let mine = entry("mine", folder: "/f"), lead = entry("acme", role: .lead, folder: "/r")
+        let (offer, _) = try offer([])
+        // The ended sessions' graces, apart from the freeze's own wait (which passing means the shutdown was cancelled).
+        var graces: [() -> Void] = []
+        offer.later = { [limit = offer.freezeLimit] wait, run in if wait != limit { graces.append(run) } }
+        offer.decide(hostSessions: [])
+        offer.record(hosted: [hosted(mine), hosted(lead)], sessions: [])
+        // The host ends them (they're listed ended, then not at all), and only then the power-off notice.
+        offer.record(hosted: [hosted(mine, ended: true), hosted(lead, ended: true)], sessions: [])
+        offer.record(hosted: [], sessions: [])
+        offer.freeze()
+        // Their graces pass before the app is ended: nothing leaves a frozen record.
+        #expect(graces.count == 2)
+        graces.forEach { $0() }
+        offer.flushRecord()
+        #expect(Set(RestartReopen.load(from: offer.file).map(\.id)) == [mine.id, lead.id])
+        let relaunched = RestartOffer(file: offer.file)
+        relaunched.decide(hostSessions: nil)
+        #expect(relaunched.offered.map(\.id) == [lead.id, mine.id])
+    }
+
+    /// A resize (each step of it) isn't written: only what reopening needs changing is.
+    @Test func aResizeAloneDoesntRewriteTheRecord() throws {
+        let mine = entry("mine", folder: "/f")
+        let (offer, _) = try offer([])
+        offer.decide(hostSessions: [])
+        offer.record(hosted: [hosted(mine)], sessions: [])
+        offer.flushRecord()
+        offer.record(hosted: [hosted(mine, cols: 200)], sessions: [])
+        offer.flushRecord()
+        #expect(RestartReopen.load(from: offer.file).map(\.cols) == [120])
     }
 
     @Test func aNewHostWithoutTheRecordedSessionsShowsTheCard() async throws {
@@ -214,6 +262,7 @@ import Testing
         offer.decide(hostSessions: nil)
         #expect(shown() == 1)
         offer.dismiss()
+        offer.flushRecord()
         // The app relaunched, still no host running.
         let relaunched = RestartOffer(file: offer.file)
         var shownAgain = 0
@@ -239,6 +288,7 @@ import Testing
         #expect(waits.count == 1)
         waits.forEach { $0() }
         #expect(!offer.frozen)
+        offer.flushRecord()
         #expect(RestartReopen.load(from: offer.file).isEmpty)
     }
 

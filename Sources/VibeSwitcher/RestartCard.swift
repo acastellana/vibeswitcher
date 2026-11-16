@@ -14,8 +14,15 @@ final class RestartOffer: ObservableObject {
 
     /// Where the record lives; a test's own.
     let file: URL
-    /// Whether a session's folder is still there; a test's own.
+    /// Writes it, off the main thread (each session's start, end, rename or new conversation is one write).
+    private let writer: RestartReopen.RecordWriter
+    /// Whether a session's folder is still there; a test's own. Asked once per offered session, when the offer is made.
     var folderExists: (String) -> Bool = RestartReopen.isFolder
+    /// Why each offered session can't be reopened (none: it can), worked out when the offer is made, not at each draw.
+    @Published private(set) var blockers: [UUID: RestartReopen.Blocker] = [:]
+    /// The Mac started after the record was last written: the sessions went with a restart, not with a host that ended
+    /// on its own (crashed, or killed while the app was closed). What the card's heading says.
+    @Published private(set) var macRestarted = true
     /// Resumes one of your own sessions: the sidebar's Resume (`LaunchPlan.resumeRequest`).
     var resumeSession: (SpawnRequest) -> Void = { _ in }
     /// Reopens a lead in its repository, carrying on its conversation (`LeadController.reopenLead`).
@@ -26,6 +33,14 @@ final class RestartOffer: ObservableObject {
 
     /// The record as last written (or read at launch).
     private(set) var recorded: [RestartReopen.Entry]
+    /// When the record read at launch was written (nil: none).
+    private let recordedAt: Date?
+    /// How long a session that ended stays in the record before it's taken out (`record`): at a restart, the host's
+    /// sessions may end before the Mac says it's shutting down (`freeze`), and they mustn't leave the record then.
+    var departureGrace: TimeInterval = 30
+    /// Sessions that ended and are kept in the record until their grace has passed, each with the wait that ends it.
+    private var departing: [UUID: Int] = [:]
+    private var departures = 0
     /// Launch's decision is made: from then on the record follows the live sessions.
     private(set) var decided = false
     /// The Mac is shutting down or logging out: the sessions ending now are the restart's, not yours, so the record
@@ -42,8 +57,16 @@ final class RestartOffer: ObservableObject {
 
     init(file: URL = RestartReopen.file) {
         self.file = file
-        recorded = RestartReopen.load(from: file)
+        writer = RestartReopen.RecordWriter(file: file) { error in
+            Breadcrumbs.shared.note("restart: the open sessions' record wasn't written: \(error)")
+        }
+        let record = RestartReopen.loadRecord(from: file)
+        recorded = record?.entries ?? []
+        recordedAt = record?.updatedAt
     }
+
+    /// Returns once the record's writes so far are on disk (a test reading it).
+    func flushRecord() { writer.flush() }
 
     /// Once, at launch, after the app tried to reattach to a running host (`HostClient.connectIfRunning`): no host
     /// running, or its welcome, decides.
@@ -85,7 +108,11 @@ final class RestartOffer: ObservableObject {
         guard !decided else { return }
         decided = true
         offered = RestartReopen.offer(record: recorded, hostSessions: hostSessions)
+        blockers = Dictionary(uniqueKeysWithValues: offered.compactMap { entry in
+            RestartReopen.blocker(entry, folderExists: folderExists).map { (entry.id, $0) }
+        })
         chosen = Set(offered.filter { blocker($0) == nil }.map(\.id))
+        if let recordedAt, let boot = RestartReopen.bootTime() { macRestarted = boot > recordedAt }
         if !offered.isEmpty {
             Breadcrumbs.shared.note("restart: \(offered.count) session(s) that were open are gone with the host; the card offers them")
             show()
@@ -99,16 +126,48 @@ final class RestartOffer: ObservableObject {
         Breadcrumbs.shared.note("restart: the session host didn't take this app's proof; no restart card, the record kept")
     }
 
-    /// The live sessions from a host that welcomed this app.
+    /// The live sessions from a host that welcomed this app. A session that started, or changed what reopening it
+    /// takes, is written at once; one that ended stays for `departureGrace` first. At a restart the host's sessions can
+    /// end before the Mac says it's shutting down, or after: either way they're still in the record when it freezes.
     func record(hosted: [HostSession], sessions: [Session]) {
         lastSeen = (hosted, sessions)
-        guard decided, !frozen else { return }
-        let fresh = RestartReopen.entries(hosted: hosted, sessions: sessions, previous: recorded)
-        guard fresh != recorded else { return }
-        recorded = fresh
-        do { try RestartReopen.save(fresh, to: file) } catch {
-            Breadcrumbs.shared.note("restart: the open sessions' record wasn't written: \(error)")
+        update(graceful: true)
+    }
+
+    /// The record from the live sessions as last seen. `graceful`: sessions that ended wait out their grace (otherwise
+    /// they leave at once).
+    private func update(graceful: Bool) {
+        guard decided, !frozen, let lastSeen else { return }
+        let fresh = RestartReopen.entries(hosted: lastSeen.hosted, sessions: lastSeen.sessions, previous: recorded)
+        let live = Set(fresh.map(\.id))
+        departing = departing.filter { !live.contains($0.key) }
+        var kept: [RestartReopen.Entry] = []
+        if graceful {
+            for entry in recorded where !live.contains(entry.id) {
+                kept.append(entry)
+                guard departing[entry.id] == nil else { continue }
+                departures += 1
+                let departure = departures
+                departing[entry.id] = departure
+                later(departureGrace) { [weak self] in self?.departed(entry.id, departure) }
+            }
+        } else {
+            departing = [:]
         }
+        let next = fresh + kept
+        // A size alone (each step of a window's resize) isn't worth a write: the recorded one does to reopen it.
+        guard next.map(RestartReopen.withoutSize) != recorded.map(RestartReopen.withoutSize) else { return }
+        recorded = next
+        writer.write(next)
+    }
+
+    /// A session's grace has passed with the Mac still running: it leaves the record (unless it's shutting down now).
+    private func departed(_ id: UUID, _ departure: Int) {
+        guard departing[id] == departure, !frozen else { return }
+        departing[id] = nil
+        guard let index = recorded.firstIndex(where: { $0.id == id }) else { return }
+        recorded.remove(at: index)
+        writer.write(recorded)
     }
 
     func freeze() {
@@ -128,12 +187,11 @@ final class RestartOffer: ObservableObject {
         guard frozen else { return }
         frozen = false
         Breadcrumbs.shared.note("restart: the shutdown was cancelled; the open sessions' record follows them again")
-        if let lastSeen { record(hosted: lastSeen.hosted, sessions: lastSeen.sessions) }
+        // What ended meanwhile did end: out at once.
+        update(graceful: false)
     }
 
-    func blocker(_ entry: RestartReopen.Entry) -> RestartReopen.Blocker? {
-        RestartReopen.blocker(entry, folderExists: folderExists)
-    }
+    func blocker(_ entry: RestartReopen.Entry) -> RestartReopen.Blocker? { blockers[entry.id] }
 
     func reopenAll() { reopen(chosen: nil) }
     func reopenChosen() { reopen(chosen: chosen) }
@@ -145,7 +203,7 @@ final class RestartOffer: ObservableObject {
     }
 
     private func reopen(chosen: Set<UUID>?) {
-        let reopening = RestartReopen.toReopen(offered, chosen: chosen, folderExists: folderExists)
+        let reopening = RestartReopen.ordered(offered).filter { (chosen?.contains($0.id) ?? true) && blocker($0) == nil }
         Breadcrumbs.shared.note("restart: reopening \(reopening.count) of \(offered.count) session(s)")
         for entry in reopening {
             guard let conversation = entry.agentSessionID else { continue }
@@ -164,9 +222,7 @@ final class RestartOffer: ObservableObject {
         choosing = false
         if lastSeen == nil, !recorded.isEmpty {
             recorded = []
-            do { try RestartReopen.save([], to: file) } catch {
-                Breadcrumbs.shared.note("restart: the open sessions' record wasn't emptied: \(error)")
-            }
+            writer.write([])
         }
         close()
     }
@@ -184,7 +240,7 @@ struct RestartCardView: View {
                     .foregroundStyle(.tint)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("The Mac restarted").font(.headline)
+                    Text(offer.macRestarted ? "The Mac restarted" : "Sessions ended while VibeSwitcher was closed").font(.headline)
                     Text(subtitle).font(.callout).foregroundStyle(.secondary)
                 }
             }
