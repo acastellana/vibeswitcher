@@ -1091,14 +1091,36 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
       "vibeswitcher-mcp"]`.
   - `vibeswitcher install-record FOLDER --commit C --swift-version-output F --resolved PATH` calls `BuildRecord.write`.
 
-- [ ] **Step 1: Failing tests** (`InstallTests`, in process):
+- [x] **Step 1: Failing tests** (`InstallTests`, in process):
   - `aRecordForAFolderNamedOtherThanItsCommitIsRefused`.
   - `aRecordHashesEveryProgramAndRefusesALink`: `binaries` holds each regular file's SHA-256 and nothing else. A link
     in `bin/` is refused.
   - `aRecordNamesItsToolchainAndResolvedFile`: `swift` equals the given version text, and `resolved` equals the
     SHA-256 of the given `Package.resolved`. `BuildInfo.read` takes the result.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Verify.** `bash scripts/test.sh --filter InstallTests`; the lints; under load.
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Verify.** `bash scripts/test.sh --filter InstallTests`; the lints; under load.
+
+*Notes, 2026-11-16 (the S4a executor):*
+- `write`'s `resolved:` takes the `Package.resolved` **bytes** (`Data`), not a path. The command line's form reads its
+  two files (regular, opened with `O_NOFOLLOW`) and calls it: `BuildRecord.Arguments` parses the words and
+  `BuildRecord.write(_:)` reads and writes. The version text is kept as given, except that the command line drops the
+  trailing line end of `swift --version > F`. A blank version text is refused.
+- **The folder's name is `C` or `C.partial`** (`BuildRecord.stagingSuffix`). S4b's step 10 runs `install-record` on
+  `<prefix>/<commit>.partial` and then renames it to `<commit>`, which a strict "named `C`" check would refuse. The
+  rename keeps the name equal to the commit. Any other name is refused, and so is a commit that isn't 40 lowercase hex.
+- Also refused: the build folder or `bin/` being a link, no `bin/`, an empty `bin/`, and an entry whose name isn't
+  UTF-8. `bin/` is listed through its own descriptor (`fdopendir`), and each entry is opened with `openat(bin, name,
+  O_NOFOLLOW | O_NONBLOCK)` and `fstat`'d as a regular file, so a FIFO doesn't hang the record. Names from the disk
+  reach the refusal through `ConfigSeal.inert`. `build-info` is written 0600 by `VibePaths.writePrivate`
+  (`PrivateWriteLint`), flushed before its rename.
+- `StartRefusal` is S1's (with S2's `exitCode`). `install-record` exits 64 on a misuse and the refusal's `exitCode`
+  otherwise, 77 for each of its refusals (an unreadable input file included), never 0 with nothing written.
+- `installedNames` spells the cli as S1's `NodeFolders.installedCLI` (`vibeswitcher`), so the two can't drift.
+- Two cases beyond the three: `theInstalledNamesAreTheBuildsPrograms`, and `theCommandLineWritesTheRecord`, which
+  runs the built command line's `install-record` (misuse 64, refusal 77, nothing written either way; the record it
+  writes; `help` doesn't list it). The suite has no `linuxOnly`: the Mac runs it. Its name also matches the existing
+  `ToolInstallTests`, so `--filter InstallTests` runs both; the load run used `VibeNodeTests.InstallTests`.
+- An earlier draft (another worktree, removed before it committed) was the start; it is reconciled with S1's names here.
 - [ ] **Step 4:** commit ("v2: the install's build record"). Push, both green.
 
 **Done when:** the cases pass on both runners.

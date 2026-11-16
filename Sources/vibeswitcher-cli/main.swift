@@ -44,6 +44,20 @@ case "base":
     exit(BaseCommand.run(Array(words.dropFirst())))
 case "hooks":
     exit(HooksCommand.run(Array(words.dropFirst())))
+case "install-record":
+    // Not in the usage text: `scripts/install-node.sh` runs it from the build it has just made (the start plan's ST-D13).
+    guard let arguments = BuildRecord.Arguments(Array(words.dropFirst())) else {
+        try? FileHandle.standardError.write(contentsOf: Data((BuildRecord.Arguments.usage + "\n").utf8))
+        exit(64)
+    }
+    switch BuildRecord.write(arguments) {
+    case .success:
+        try? FileHandle.standardOutput.write(contentsOf: Data("recorded \(arguments.folder)/\(BuildInfo.fileName)\n".utf8))
+        exit(0)
+    case .failure(let refusal):
+        try? FileHandle.standardError.write(contentsOf: Data((refusal.text + "\n").utf8))
+        exit(refusal.exitCode)
+    }
 case "help", "-h", "--help":
     try? FileHandle.standardOutput.write(contentsOf: Data((usage + "\n").utf8))
     exit(0)
