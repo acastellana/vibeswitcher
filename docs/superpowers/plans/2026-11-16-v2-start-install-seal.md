@@ -520,7 +520,7 @@ scripts/install-node.sh   S4b
 | `Sources/VibeCore/LeadGateBuild.swift` 44-54, `read(executable:)` | one hook: no app bundle and on Linux → `ServerBuildLinux.read(executable:)` | 4 | S5 |
 | `Sources/VibeCore/LeadGateBuild.swift`, `GateLag.refusal` | one hook: on Linux the install instruction is `ServerBuildLinux.installHint` ("install it with install-node.sh, then `vs switch`") | 4 | S5 |
 | `Sources/VibeCore/HostProtocol.swift`, `HostNotes` | `build: String?` and `binaries: [String: String]?`, from the `build-info` the host loaded | 6 | S5 |
-| `Sources/VibeHost/HostServer.swift` (where notes are made) | one hook line filling both from `HostStartLine` | 4 | S5 |
+| `Sources/VibeHost/HostServer.swift` (where notes are made) | one hook line filling both from `HostStartLine` (*2026-11-16, S5: not needed; the notes are made in `V2/HostNotesAnswer.swift`*) | 4 | S5 |
 | `Sources/vibeswitcher-host/main.swift` | one hook line after the start checks: `HostStartLine.say(config:)` (Linux only) | 4 | S5 |
 | `Sources/VibeCore/ConfigSeal.swift`, `homeWatched(home:)` | one hook line appending `LinuxSealList.watched(home:uid:)` | 4 | S7 |
 | `Sources/VibeCore/ConfigSeal.swift`, `Watched.Kind` and its read | `.listing` (ST-D18), and `.entries` if ST-D19's measurement needs it; one read branch each, into `LinuxSealList` | lead-approved | S7 |
@@ -1410,7 +1410,7 @@ waiting on M3).
   - The host's pid reaches the command line from the welcome (`.welcome(… pid, startedAt)`), which `HostLink`
     already reads, through `status` and the hello. `HostNotes` has no pid.
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `aLinuxToolServerNamesItsBuild` (linuxOnly): an executable in a scratch `<c>/bin/` with `build-info` gives
     `commit == c`, `changed == false`. One byte changed gives `changed == true`. No `build-info` gives nil.
   - `theMacStillReadsOnlyTheAppBundle` (Mac only): a path outside a `.app` gives nil, as today.
@@ -1424,11 +1424,37 @@ waiting on M3).
     `ExecMainPID`, or whose `_TRANSPORT` is `syslog`, isn't taken as a start line.
   - `statusNamesTheHostsBuild`: `status` prints "host … build <commit>" from `HostNotes.build`.
   - `anOlderHostsNotesWithoutABuildStillRead`: `HostNotes` decoded with no `build` or `binaries` key.
-- [ ] **Step 2: Implement** the hooks as listed.
-- [ ] **Step 3: Verify.**
+- [x] **Step 2: Implement** the hooks as listed.
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter 'ServerBuildLinuxTests|MergeProvenanceTests|ScratchNodeTests|StatusCommandTests|NodeJournalTests'`
   - the lints
   - under load
+
+*Notes, 2026-11-16 (the S5 executor):*
+- **No `HostServer.swift` edit.** The host's notes are made in `Sources/VibeHost/V2/HostNotesAnswer.swift`
+  (`hostNotes(startedAt:)`), a `V2/` file, so `build` and `binaries` are filled there from `HostStartLine` and the
+  planned `HostServer.swift` row isn't needed. The port map gains four rows (the two `LeadGateBuild.swift` hooks,
+  `HostNotes`, `main.swift`), and row 223 is `made`.
+- **`HostStartLine.say()` takes no `config:`**: the line needs only the pid, the checked commit and the environment's
+  `SWIFT_BACKTRACE` (read with `getenv`, made inert). Its hook line is just before main's existing "started" line, after
+  every start check. `HostStartLine.record(_:)` is called by `HostImages.load` once both images matched the
+  `build-info` (with `--node-root` only); `HostStartLine.text(pid:commit:backtrace:)` is the line's form.
+- **The journal's side:** `NodeJournal.events(_:mainPID:)` (default nil: nothing taken) gives each start a `detail`
+  (`Event.detail`, the line after `vibeswitcher-host: started `). A line counts only with `_TRANSPORT=stdout`; the last
+  start takes the newest line whose `_PID` is `mainPID`, after the start before it; an earlier start takes the newest
+  stdout line in its window, with " (not checked)". `NodeJournal.startLine` is the line's opening.
+  `UnitState.execMainPID` comes from the command line's `show -p …,ExecMainPID`. `status` says "journal: the node's
+  last start at T: …", and an unexplained start's line says what its host said.
+- **The host's pid:** `HostLink.hostPID` (from the welcome), carried as `NodeWire.Hello.Host.pid` (optional) and in
+  `status`'s `host.pid`; `status`'s host line is "host pid P since … , build C" (`unknown` when the notes name none).
+  `Requests.value(_:at:)` carries `build` (not `binaries`: the command line has no use for them).
+- **Tests where:** `anOlderHostsNotesWithoutABuildStillRead` is in `ServerBuildLinuxTests` (the Mac runs it); the gate's
+  Mac case is `theGateStillNamesTheAppInstallOnTheMac`; `aMergeReceiptNamesTheInstalledBuild` is in
+  `MergeProvenanceTests` (Linux only); `statusNamesTheHostsBuild` is in `StatusCommandTests` (`NodeTraits.linuxOnly`),
+  and also checks the hello's and `status`'s host pid. `ScratchNode.commit` names the scratch build's commit, and the
+  scratch host's environment gains `SWIFT_BACKTRACE=enable=no`.
+- `ServerBuildLinux.read` also needs the executable's folder to be named `bin`; a program its `build-info` doesn't name
+  is `changed`.
 - [ ] **Step 4:** commit ("v2: the host, the server and the tool server name their build"). Push, both green.
 
 **Done when:** the cases pass. The port map's row 223 is `made`, and the `HostNotes`, gate-text and start-line rows are

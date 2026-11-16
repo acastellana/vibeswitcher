@@ -320,13 +320,18 @@ public enum HostImages {
         case .failure(let why): return refused("its build-info: \(why)", closing: [own])
         }
         if let mismatch = info.mismatch(of: own, as: BuildInfo.host) { return refused(mismatch, closing: [own]) }
-        guard let path = value(after: "--server", in: arguments) else { return loaded(server: nil) }
+        // The record both images matched: what the host's notes and start line name (`HostStartLine`, the start plan's S5).
+        func checked(_ result: Result<Loaded, Refused>) -> Result<Loaded, Refused> {
+            if case .success = result { HostStartLine.record(info) }
+            return result
+        }
+        guard let path = value(after: "--server", in: arguments) else { return checked(loaded(server: nil)) }
         switch serverCopy(path: path, node: arguments.contains(nodeFlag)) {
         case .failure(let why):
             return refused(why.description, closing: [own])
         case .success(let server):
             if let mismatch = info.mismatch(of: server, as: BuildInfo.server) { return refused(mismatch, closing: [own, server]) }
-            return loaded(server: server)
+            return checked(loaded(server: server))
         }
     }
 

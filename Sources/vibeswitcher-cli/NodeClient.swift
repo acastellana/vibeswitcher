@@ -103,7 +103,7 @@ struct NodeContext {
 
     /// The unit's state (`systemctl --user show`); nil without a manager.
     func unitState() -> NodeJournal.UnitState? {
-        guard let systemctl, let ran = runTool(systemctl, ["--user", "show", "-p", "Result,ExecMainStatus,ExecMainStartTimestamp", VoiceRule.nodeUnit]),
+        guard let systemctl, let ran = runTool(systemctl, ["--user", "show", "-p", "Result,ExecMainStatus,ExecMainStartTimestamp,ExecMainPID", VoiceRule.nodeUnit]),
               ran.status == 0 else { return nil }
         return NodeJournal.unitState(show: ran.output)
     }

@@ -82,6 +82,55 @@ struct NodeJournalTests {
         NodeJournal.entry(event: "request", action: "a", kind: "start").allSatisfy { !$0.name.hasPrefix("_") }
     }
 
+    /// The host's start line (the start plan's S5, ST-D24), as journald records it from `pid` over `transport`.
+    static func startLine(pid: Int, build: String = String(repeating: "a", count: 40), transport: String = "stdout", at date: Date) -> String {
+        line(["MESSAGE": "vibeswitcher-host: started pid \(pid) build \(build) SWIFT_BACKTRACE=enable=no", "_PID": String(pid),
+              "_TRANSPORT": transport, "_UID": "1000",
+              "_SYSTEMD_CGROUP": "/user.slice/user-1000.slice/user@1000.service/app.slice/vibeswitcher-node.service"], at: date)
+    }
+
+    /// Every session is in the unit's cgroup, so a `logger` there lands under the unit too: a start line is the host's
+    /// only when journald's `_PID` is the unit's `ExecMainPID` and its `_TRANSPORT` is `stdout`. One from an earlier
+    /// invocation can't be checked, and says so.
+    @Test func aStartLineFromASessionIsNotTheHosts() throws {
+        let host = 4242
+        let at = Self.start.addingTimeInterval(1)
+        let ours = Self.read([Self.job("start", at: Self.start), Self.startLine(pid: host, at: at)])
+        let event = try #require(NodeJournal.events(ours, mainPID: Int32(host)).first)
+        #expect(event.kind == .start)
+        #expect(event.detail == "pid \(host) build \(String(repeating: "a", count: 40)) SWIFT_BACKTRACE=enable=no", "\(event)")
+        // From another pid in the unit (a session's `logger -t vibeswitcher-host`), or through syslog: not the host's.
+        let forged = String(repeating: "f", count: 40)
+        for lines in [[Self.job("start", at: Self.start), Self.startLine(pid: 777, build: forged, at: at)],
+                      [Self.job("start", at: Self.start), Self.startLine(pid: host, build: forged, transport: "syslog", at: at)],
+                      [Self.job("start", at: Self.start), Self.startLine(pid: host, build: forged, transport: "journal", at: at)]] {
+            let entries = Self.read(lines)
+            let events = NodeJournal.events(entries, mainPID: Int32(host))
+            #expect(events.count == 1 && events[0].kind == .start)
+            #expect(events[0].detail == nil, "\(events)")
+        }
+        // A forged line beside the host's own: the host's is the one taken, whichever came last.
+        let both = Self.read([Self.job("start", at: Self.start), Self.startLine(pid: host, at: at),
+                              Self.startLine(pid: 777, build: forged, at: at.addingTimeInterval(1))])
+        #expect(NodeJournal.events(both, mainPID: Int32(host)).first?.detail?.contains(forged) == false)
+        // Without the unit's main pid, nothing is taken.
+        #expect(NodeJournal.events(ours).first?.detail == nil)
+        // An earlier invocation's line: shown, as not checked (its pid was another main pid's).
+        let later = Self.start.addingTimeInterval(600)
+        let two = Self.read([Self.job("start", at: Self.start), Self.startLine(pid: 1111, at: at),
+                             Self.job("start", at: later), Self.startLine(pid: host, at: later.addingTimeInterval(1))])
+        let starts = NodeJournal.events(two, mainPID: Int32(host))
+        #expect(starts.count == 2)
+        #expect(starts.first?.detail?.hasSuffix("(not checked)") == true, "\(starts)")
+        #expect(starts.first?.detail?.contains("pid 1111") == true, "\(starts)")
+        #expect(starts.last?.detail == "pid \(host) build \(String(repeating: "a", count: 40)) SWIFT_BACKTRACE=enable=no", "\(starts)")
+        // Not a start event itself: the job's line is.
+        #expect(NodeJournal.events(Self.read([Self.startLine(pid: host, at: at)]), mainPID: Int32(host)).isEmpty)
+        // The unit's main pid as `systemctl --user show` gives it.
+        #expect(NodeJournal.unitState(show: "Result=success\nExecMainPID=4242\n").execMainPID == 4242)
+        #expect(NodeJournal.unitState(show: "ExecMainPID=0\n").execMainPID == nil)
+    }
+
     @Test func anAckSurvivesAServerRestart() throws {
         // The ack is the journal's, read afresh by each command line: a server that restarted (a new epoch, nothing
         // in its memory) changes nothing.

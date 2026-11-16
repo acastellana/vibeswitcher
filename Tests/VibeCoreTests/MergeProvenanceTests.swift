@@ -197,6 +197,32 @@ struct MergeProvenanceTests {
         #expect(Self.trailers(landed[0], in: root).isEmpty)
     }
 
+    /// On Linux the tool server's build is the installed one its executable is in (the start plan's S5): read from
+    /// `<commit>/bin/vibeswitcher-mcp` and its `build-info`, it reaches the merge's receipt.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux: the build-info read"))
+    func aMergeReceiptNamesTheInstalledBuild() throws {
+        let bin = URL(fileURLWithPath: scratch.url("installed").path).appendingPathComponent(Self.buildCommit + "/bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let bytes = Data("the installed tool server".utf8)
+        let executable = bin.appendingPathComponent("vibeswitcher-mcp")
+        try bytes.write(to: executable)
+        try BuildInfo(commit: Self.buildCommit, binaries: ["vibeswitcher-mcp": BuildInfo.sha256(of: bytes)], swift: "test",
+                      resolved: String(repeating: "0", count: 64)).encoded
+            .write(to: bin.deletingLastPathComponent().appendingPathComponent(BuildInfo.fileName))
+        let (root, runtime, lead) = try team()
+        lead.runningBuild = { ServerBuild.read(executable: executable.path) }
+        let added = lead.call("add_task", ["title": "add-z", "goal": "g", "acceptance": ["a"], "review": "none", "auto_advance": false, "model": "sonnet"])
+        #expect(!added.isError, "\(added.text)")
+        #expect(!lead.call("start_worker", ["task": "add-z"]).isError)
+        try fixture.commit(["z.txt": "z\n"], in: Worktrees.path(root: root, slug: "add-z"), "add-z")
+        #expect(!(try fixture.seat("worker-add-z", runtime).call("report", doneReport("done"))).isError)
+
+        let merged = lead.call("merge", ["task": "add-z"])
+        #expect(!merged.isError, "\(merged.text)")
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        #expect(Self.trailers(main, in: root)[LeadProvenance.build] == [Self.buildCommit], "\(Self.trailers(main, in: root))")
+    }
+
     // MARK: Batches
 
     /// merge_batching always: three tasks on one test run, each landed commit carrying its own task's trailers.

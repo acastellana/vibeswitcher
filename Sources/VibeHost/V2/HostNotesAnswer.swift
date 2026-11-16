@@ -72,11 +72,12 @@ extension HostHandover {
 extension HostServer {
     /// The answer to `HostRequest.hostNotes` (the app's alone, `authorized`): `startedAt` the host's own (this process's,
     /// across handovers), with the server child's restarts and what `tally` counted, the images' before this one's
-    /// included. On `queue`.
+    /// included, and the build this image's start checked (`HostStartLine`; the start plan's S5). On `queue`.
     func hostNotes(startedAt: Date) -> HostNotes {
         HostNotes(startedAt: startedAt, serverRestarts: tally.earlierServerRestarts + (serverChild?.restarts ?? 0),
                   replacedPaths: tally.replacedPaths, refusedAppConnections: tally.refusedAppConnections,
-                  lockHeldElsewhere: tally.lockHeldElsewhere, lockHeldElsewhereCount: tally.lockHeldElsewhereCount)
+                  lockHeldElsewhere: tally.lockHeldElsewhere, lockHeldElsewhereCount: tally.lockHeldElsewhereCount,
+                  build: HostStartLine.commit, binaries: HostStartLine.binaries)
     }
 
     /// `tally` for a handover's state (`HostHandover.State.tally`): nil on the Mac, which counts nothing (no connector,

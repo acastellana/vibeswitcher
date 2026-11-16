@@ -284,5 +284,7 @@ if ownsLaunchers {
     try? FileManager.default.removeItem(at: VibePaths.root.appendingPathComponent("steer/sender.key"))
     try? FileManager.default.removeItem(at: VibePaths.root.appendingPathComponent("lead/teams"))
 }
+// On Linux: its pid, its build and SWIFT_BACKTRACE, the journal's start line (see V2/HostStartLine.swift).
+HostStartLine.say()
 FileHandle.standardError.write(Data("vibeswitcher-host: started \(Date())\n".utf8))
 dispatchMain()

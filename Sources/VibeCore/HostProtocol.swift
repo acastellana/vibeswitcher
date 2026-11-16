@@ -353,15 +353,22 @@ public struct HostNotes: Codable, Equatable, Sendable {
     /// How many times it found its lock path naming a file another process held locked (once each time that began).
     /// Nil: a host that doesn't count it.
     public var lockHeldElsewhereCount: Int?
+    /// The commit of the build the host runs, from the `build-info` its start checked (`HostStartLine`, the start plan's
+    /// S5), and that record's `binaries`. Nil: a host started without one (the Mac's), or one that doesn't say.
+    public var build: String?
+    public var binaries: [String: String]?
 
     public init(startedAt: Date, serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int,
-                lockHeldElsewhere: String? = nil, lockHeldElsewhereCount: Int? = nil) {
+                lockHeldElsewhere: String? = nil, lockHeldElsewhereCount: Int? = nil, build: String? = nil,
+                binaries: [String: String]? = nil) {
         self.startedAt = startedAt
         self.serverRestarts = serverRestarts
         self.replacedPaths = replacedPaths
         self.refusedAppConnections = refusedAppConnections
         self.lockHeldElsewhere = lockHeldElsewhere
         self.lockHeldElsewhereCount = lockHeldElsewhereCount
+        self.build = build
+        self.binaries = binaries
     }
 }
 

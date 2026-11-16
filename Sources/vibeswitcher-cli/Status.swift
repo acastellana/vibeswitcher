@@ -81,8 +81,10 @@ enum StatusCommand {
         let server = result["server"], host = result["host"]
         out.append("node \(inert(result["node"]?.string)), server pid \(server?["pid"]?.int.map(String.init) ?? "?") since \(inert(server?["startedAt"]?.string)), build \(inert(server?["commit"]?.string))")
         let notes = host?["notes"]
-        out.append("host since \(inert(host?["startedAt"]?.string)) (\(inert(host?["state"]?.string)))"
-                   + (notes?.object != nil ? ", server restarts: \(notes?["serverRestarts"]?.int ?? 0), refused app connections: \(notes?["refusedAppConnections"]?.int ?? 0)" : ""))
+        // The host's pid (its welcome's) and its build (its notes', the build-info its start checked; the start plan's S5).
+        out.append("host pid \(host?["pid"]?.int.map(String.init) ?? "?") since \(inert(host?["startedAt"]?.string)) (\(inert(host?["state"]?.string)))"
+                   + (notes?.object != nil ? ", server restarts: \(notes?["serverRestarts"]?.int ?? 0), refused app connections: \(notes?["refusedAppConnections"]?.int ?? 0)" : "")
+                   + ", build \(notes?["build"]?.string.map { inert($0) } ?? "unknown")")
         for path in notes?["replacedPaths"]?.array ?? [] { out.append("the host took back its path \(inert(path.string))") }
         out += facts.lines + modeLines
         out.append("voice rule: \(inert(result["rule"]?["says"]?.string))")
@@ -127,9 +129,15 @@ enum StatusCommand {
         if let state, let result = state.result {
             lines.append("the node's unit last ended: \(inert(result)), status \(inert(state.execMainStatus)), started \(inert(state.execMainStartTimestamp))")
         }
-        for event in NodeJournal.unexplained(starts: NodeJournal.events(entries), entries: entries, rule: rule)
+        // Each start with the host's line, taken only from the unit's main pid (ST-D24, the start plan's S5).
+        let events = NodeJournal.events(entries, mainPID: state?.execMainPID)
+        if let last = events.last(where: { $0.kind == .start }), let detail = last.detail {
+            lines.append("journal: the node's last start at \(NodeWire.dateText(last.at)): \(inert(detail))")
+        }
+        for event in NodeJournal.unexplained(starts: events, entries: entries, rule: rule)
             where !NodeJournal.acknowledged(event, entries: entries, rule: rule) {
-            lines.append("journal: a \(event.kind.rawValue) at \(NodeWire.dateText(event.at)) that no `vibeswitcher start` or `stop` explains (`vibeswitcher status --ack` once read)")
+            lines.append("journal: a \(event.kind.rawValue) at \(NodeWire.dateText(event.at)) that no `vibeswitcher start` or `stop` explains (`vibeswitcher status --ack` once read)"
+                         + (event.detail.map { "; its host said: \(inert($0))" } ?? ""))
         }
         let requests = accepted.map { ($0["kind"]?.string ?? "?", $0["action"]?.string, $0["at"]?.string.flatMap(NodeWire.date)) }
         lines += NodeJournal.marks(accepted: requests, epoch: epoch, entries: entries, rule: rule).map { "journal: " + $0 }

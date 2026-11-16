@@ -88,6 +88,9 @@ public final class HostLink: @unchecked Sendable {
     public private(set) var capabilities: Set<String> = []
     /// When the host started, from its last welcome (nil from a host that doesn't say). On `queue`.
     public private(set) var hostStartedAt: Date?
+    /// The host's pid, from its last welcome (nil from a host that doesn't say): what `status` and the hello name (the
+    /// start plan's S5). On `queue`.
+    public private(set) var hostPID: Int32?
     /// Called once, on `queue`, when the link is gone (the host went away and didn't come back, or was refused): why.
     public var onGone: ((String) -> Void)?
     /// Called on `queue` at each welcome the link takes (the first, and the next after each reconnect; not one refused
@@ -280,6 +283,7 @@ public final class HostLink: @unchecked Sendable {
             guard capabilities.contains(HostProtocol.Capability.inputUnits) else { return end(Self.noInputUnits) }
             reconnectAttempt = 0
             hostStartedAt = startedAt
+            hostPID = pid
             let kept = Set(list.map(\.id))
             for session in sessions where !kept.contains(session.id) { changes.send(NodeIds.session(host: session.id), nil) }
             sessions = list

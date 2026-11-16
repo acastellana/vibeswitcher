@@ -40,9 +40,14 @@ public enum NodeJournal {
         }
         public var kind: Kind
         public var at: Date
-        public init(kind: Kind, at: Date) {
+        /// A start's host line (`startLine`, the start plan's S5): what follows `vibeswitcher-host: started ` (its pid,
+        /// build and `SWIFT_BACKTRACE`), with " (not checked)" after it for an earlier invocation's; nil when none is
+        /// taken, and for a stop or a server restart.
+        public var detail: String?
+        public init(kind: Kind, at: Date, detail: String? = nil) {
             self.kind = kind
             self.at = at
+            self.detail = detail
         }
     }
 
@@ -51,6 +56,8 @@ public enum NodeJournal {
         public var result: String?
         public var execMainStatus: String?
         public var execMainStartTimestamp: String?
+        /// The unit's main process now, or its last (`ExecMainPID`; nil for 0, none since the manager started).
+        public var execMainPID: Int32?
     }
 
     // MARK: Reading
@@ -74,7 +81,7 @@ public enum NodeJournal {
         }
     }
 
-    /// `systemctl --user show -p Result,ExecMainStatus,ExecMainStartTimestamp`'s `Name=value` lines.
+    /// `systemctl --user show -p Result,ExecMainStatus,ExecMainStartTimestamp,ExecMainPID`'s `Name=value` lines.
     public static func unitState(show text: String) -> UnitState {
         var state = UnitState()
         for line in text.split(whereSeparator: \.isNewline) {
@@ -84,17 +91,29 @@ public enum NodeJournal {
             case "Result": state.result = value
             case "ExecMainStatus": state.execMainStatus = value
             case "ExecMainStartTimestamp": state.execMainStartTimestamp = value
+            case "ExecMainPID": state.execMainPID = Int32(value).flatMap { $0 > 0 ? $0 : nil }
             default: break
             }
         }
         return state
     }
 
+    /// The host's start line's opening (`HostStartLine`, the start plan's S5): `<this><pid> build <commit|unknown>
+    /// SWIFT_BACKTRACE=<value|unset>`.
+    public static let startLine = "vibeswitcher-host: started pid "
+
     /// The node's starts, stops and server restarts in `entries`: systemd's job lines for the node's unit
     /// (`JOB_TYPE=start|stop` with `JOB_RESULT=done`, its `UNIT` or `USER_UNIT` the node's), and the host's line for a
     /// server child that ended and is started again (stage 2's Task 8b). Ordered by time.
-    public static func events(_ entries: [JournalEntry]) -> [Event] {
-        entries.compactMap { entry -> Event? in
+    ///
+    /// Each start carries the host's start line as its `detail` (ST-D24). Every session is in the unit's cgroup, so a
+    /// `logger -t vibeswitcher-host` from a worker lands under the unit too: a line counts only when journald's
+    /// trusted `_TRANSPORT` is `stdout` (the host's stderr, as the unit gives it), and for the last start only when its
+    /// trusted `_PID` is the unit's `mainPID` (`ExecMainPID`; a handover keeps the pid, so the newest such line is the
+    /// build that runs now). An earlier start's pid can't be checked any more: the newest stdout line between it and
+    /// the next start is shown, said "(not checked)". Without `mainPID`, no line is taken.
+    public static func events(_ entries: [JournalEntry], mainPID: Int32? = nil) -> [Event] {
+        var events = entries.compactMap { entry -> Event? in
             guard let at = entry.time else { return nil }
             let unit = entry.fields["USER_UNIT"] ?? entry.fields["UNIT"]
             if unit == VoiceRule.nodeUnit, entry.fields["JOB_RESULT"] == "done" {
@@ -109,6 +128,25 @@ public enum NodeJournal {
             }
             return nil
         }.sorted { $0.at < $1.at }
+        guard let mainPID else { return events }
+        let lines = entries.compactMap { entry -> (at: Date, pid: Int32?, text: String)? in
+            guard entry.fields["_TRANSPORT"] == "stdout", let at = entry.time, let message = entry.message,
+                  message.hasPrefix(startLine) else { return nil }
+            return (at, entry.fields["_PID"].flatMap { Int32($0) }, String(message.dropFirst("vibeswitcher-host: started ".count)))
+        }.sorted { $0.at < $1.at }
+        let starts = events.indices.filter { events[$0].kind == .start }
+        for (order, index) in starts.enumerated() {
+            let from = events[index].at
+            if order == starts.count - 1 {
+                // The invocation that runs now (or ran last): its main pid's line, the newest after the start before it.
+                let after = order > 0 ? events[starts[order - 1]].at : .distantPast
+                events[index].detail = lines.last { $0.pid == mainPID && $0.at >= after }.map(\.text)
+            } else {
+                let until = events[starts[order + 1]].at
+                events[index].detail = lines.last { $0.at >= from && $0.at < until }.map { $0.text + " (not checked)" }
+            }
+        }
+        return events
     }
 
     /// Whether `entry` counts: journald's `_UID` is the rule's user and its `_SYSTEMD_CGROUP` is one of the rule's

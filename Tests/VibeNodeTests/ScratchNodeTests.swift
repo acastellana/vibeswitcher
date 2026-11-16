@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import VibeCore
+import VibeNode
 
 /// The scratch node's own clean-up (the engine sweep's test findings): what it leaves running, and where its short
 /// folders go.
@@ -43,6 +44,22 @@ struct ScratchNodeTests {
 
         await offPool { node.stop() }
         #expect(!ScratchNode.runs(stray), "pid \(pid), out of the host's tree, outlived the stop")
+    }
+
+    /// The host says its pid, its build (the `build-info` its start checked) and `SWIFT_BACKTRACE` on its stderr at its
+    /// start (the start plan's S5), the line the command line reads from the journal as the start's detail (ST-D24).
+    @Test func theHostSaysItsBuildAndBacktraceAtItsStart() async throws {
+        let node = try await ScratchNode(scratch)
+        let line = "vibeswitcher-host: started pid \(node.hostPID) build \(ScratchNode.commit) SWIFT_BACKTRACE=enable=no"
+        #expect(await eventually(timeout: 30) { node.said.contains(line + "\n") }, "\(node.said)")
+        // As journald would record it from the unit's main process: the start's detail.
+        let entries = NodeJournal.entries(json: [
+            #"{"__REALTIME_TIMESTAMP":"1800000000000000","USER_UNIT":"vibeswitcher-node.service","JOB_TYPE":"start","JOB_RESULT":"done"}"#,
+            String(decoding: try JSONSerialization.data(withJSONObject: ["__REALTIME_TIMESTAMP": "1800000001000000", "MESSAGE": line,
+                                                                          "_PID": String(node.hostPID), "_TRANSPORT": "stdout"]), as: UTF8.self),
+        ].joined(separator: "\n"))
+        let start = try #require(NodeJournal.events(entries, mainPID: node.hostPID).first)
+        #expect(start.detail == "pid \(node.hostPID) build \(ScratchNode.commit) SWIFT_BACKTRACE=enable=no")
     }
 
     /// A scratch root too long for sockets gives a short folder of the run's own, linked from it, not the shared /tmp:

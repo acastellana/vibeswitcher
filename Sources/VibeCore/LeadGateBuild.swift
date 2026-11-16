@@ -45,7 +45,10 @@ public struct ServerBuild: Equatable, Sendable {
         let macOS = (path as NSString).deletingLastPathComponent
         let contents = (macOS as NSString).deletingLastPathComponent
         guard (macOS as NSString).lastPathComponent == "MacOS", (contents as NSString).lastPathComponent == "Contents",
-              (contents as NSString).deletingLastPathComponent.hasSuffix(".app") else { return nil }
+              (contents as NSString).deletingLastPathComponent.hasSuffix(".app") else {
+            // On Linux an installed build's build-info names it (V2/ServerBuildLinux.swift); the Mac: nil, as before.
+            return Platform.CodeIdentity.isAvailable ? nil : ServerBuildLinux.read(executable: path)
+        }
         let plist = (try? Data(contentsOf: URL(fileURLWithPath: (contents as NSString).appendingPathComponent("Info.plist"))))
             .flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any] } ?? [:]
         let commit = (plist["VSSourceCommit"] as? String).flatMap(Self.validCommit)
@@ -101,7 +104,8 @@ extension LeadToolset {
         func refusal(base: String, what: String) -> String {
             "Not merged (nothing was tested): \(text(base: base)) \(what) runs through that build's gate, which "
                 + (uncompared == nil ? "lacks them. " : "may lack them. ")
-                + "Ask the user to install the app from \(base) (scripts/build-app.sh --install), then merge again."
+                + (Platform.CodeIdentity.isAvailable ? "Ask the user to install the app from \(base) (scripts/build-app.sh --install), then merge again."
+                    : "Ask the user to install \(base)'s head (\(ServerBuildLinux.installHint)), then merge again.")
         }
     }
 

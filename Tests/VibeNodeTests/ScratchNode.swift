@@ -110,7 +110,9 @@ final class ScratchNode: @unchecked Sendable {
         var spawn = Platform.Spawn(executable: executable,
                                    arguments: [executable] + arguments + ["--test-app-pid", String(getpid()), "--test-app-connector", "0"])
         spawn.environment = ["HOME=\(home.path)", "CFFIXED_USER_HOME=\(home.path)", "VIBESWITCHER_HOME=\(root.path)", "SHELL=/bin/sh",
-                             "PATH=\(path)", "TMPDIR=\(root.appendingPathComponent("tmp").path)/"]
+                             "PATH=\(path)", "TMPDIR=\(root.appendingPathComponent("tmp").path)/",
+                             // As the node's unit gives its host (ST-D4): the host's start line says it (S5).
+                             "SWIFT_BACKTRACE=enable=no"]
         spawn.stdin = .descriptor(hostEnd)
         spawn.stdout = .path(output, flags: O_WRONLY | O_APPEND)
         spawn.stderr = .path(output, flags: O_WRONLY | O_APPEND)
@@ -313,6 +315,9 @@ final class ScratchNode: @unchecked Sendable {
     // MARK: The build folder and the stand-ins
 
     /// The built products this node's `bin/` links to.
+    /// The commit the scratch build's `build-info` records: what the host's start line and its notes name (S5).
+    static let commit = String(repeating: "0", count: 40)
+
     static let products = ["vibeswitcher-host", "vibeswitcher-server", "vibeswitcher-mcp", "vibeswitcher-hook", "vibeswitcher-cli"]
 
     /// Each product's SHA-256, read once per run.
@@ -332,7 +337,7 @@ final class ScratchNode: @unchecked Sendable {
             try FileManager.default.createSymbolicLink(atPath: folder.appendingPathComponent("bin/" + name).path,
                                                        withDestinationPath: builtProducts.appendingPathComponent(name).path)
         }
-        let info = BuildInfo(commit: String(repeating: "0", count: 40), binaries: hashes, swift: "test", resolved: String(repeating: "0", count: 64))
+        let info = BuildInfo(commit: commit, binaries: hashes, swift: "test", resolved: String(repeating: "0", count: 64))
         try info.encoded.write(to: folder.appendingPathComponent(BuildInfo.fileName))
     }
 

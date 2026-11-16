@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import VibeCore
+import VibeNode
 
 /// A fake `claude` on a terminal of its own: a copy of `sleep` named `claude` (the process table knows an agent by its
 /// name), exec'd by a shell that `script` runs on a new pty, in `folder`. The app's `FakeClaude` isn't this target's,
@@ -149,6 +150,23 @@ struct StatusCommandTests {
         #expect(session["agent"] as? String == "claude")
         let cwd = try #require(session["cwd"] as? String)
         #expect(URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path == project.resolvingSymlinksInPath().path)
+    }
+
+    /// `status` names the host's build, from its notes (`HostNotes.build`, the `build-info` its start checked), and the
+    /// host's pid from its welcome, which the hello carries too (the start plan's S5).
+    @Test(NodeTraits.linuxOnly) func statusNamesTheHostsBuild() async throws {
+        let node = try await ScratchNode(scratch)
+        #expect(try WireClient(node).hello.host.pid == node.hostPID)
+        let plain = try await node.run(["status"])
+        #expect(plain.status == 0, "\(plain.errors)")
+        let hostLine = plain.output.split(separator: "\n").first { $0.hasPrefix("host ") }.map(String.init) ?? ""
+        #expect(hostLine.contains("pid \(node.hostPID)"), "\(plain.output)")
+        #expect(hostLine.contains("build \(ScratchNode.commit)"), "\(plain.output)")
+        let shown = try await node.run(["status", "--json"])
+        let report = try #require(try JSONSerialization.jsonObject(with: Data(shown.output.utf8)) as? [String: Any], "\(shown.output)")
+        let host = try #require(report["host"] as? [String: Any])
+        #expect(host["pid"] as? Int == Int(node.hostPID), "\(host)")
+        #expect((host["notes"] as? [String: Any])?["build"] as? String == ScratchNode.commit, "\(host)")
     }
 
     @Test func theJSONCarriesFormatNodeAndId() async throws {

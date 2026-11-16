@@ -150,9 +150,13 @@ public enum NodeWire {
             public var startedAt: String?
             /// The host's notes as last asked (`HostLink.notes`), when its welcome lists them.
             public var notes: Value?
-            public init(startedAt: String?, notes: Value?) {
+            /// The host's pid, from its welcome (the start plan's S5); nil before the first welcome, or from a host
+            /// that doesn't say.
+            public var pid: Int32?
+            public init(startedAt: String?, notes: Value?, pid: Int32? = nil) {
                 self.startedAt = startedAt
                 self.notes = notes
+                self.pid = pid
             }
         }
 

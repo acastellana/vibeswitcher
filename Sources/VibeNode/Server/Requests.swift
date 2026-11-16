@@ -87,7 +87,8 @@ public final class Requests: @unchecked Sendable {
         let why: String? = { if case .notUser(let why) = voice { return why } else { return nil } }()
         return NodeWire.Hello(node: NodeIds.node, epoch: epoch,
                               server: .init(commit: commit, startedAt: NodeWire.dateText(startedAt), pid: serverPID),
-                              host: .init(startedAt: link.hostStartedAt.map(NodeWire.dateText), notes: notes.map { Self.value($0.notes, at: $0.at) }),
+                              host: .init(startedAt: link.hostStartedAt.map(NodeWire.dateText), notes: notes.map { Self.value($0.notes, at: $0.at) },
+                                          pid: link.hostPID),
                               kinds: NodeWire.taken, peer: .init(voice: voice == .user ? "user" : "other", why: why),
                               rule: rule.mode.rawValue)
     }
@@ -252,6 +253,7 @@ public final class Requests: @unchecked Sendable {
             "root": .string(root.path),
             "server": .object(["pid": .int(Int(serverPID)), "startedAt": .date(startedAt), "commit": .string(commit)]),
             "host": .object(["startedAt": link.hostStartedAt.map(NodeWire.Value.date) ?? .null,
+                             "pid": link.hostPID.map { .int(Int($0)) } ?? .null,
                              "state": .string(Self.word(link.state)),
                              "liveSessions": .int(link.sessions.filter(\.isLive).count),
                              "notes": notes.map { Self.value($0.notes, at: $0.at) } ?? .null]),
@@ -300,6 +302,7 @@ public final class Requests: @unchecked Sendable {
                  "replacedPaths": .array(notes.replacedPaths.map(NodeWire.Value.string)),
                  "refusedAppConnections": .int(notes.refusedAppConnections),
                  "lockHeldElsewhere": notes.lockHeldElsewhere.map(NodeWire.Value.string) ?? .null,
+                 "build": notes.build.map(NodeWire.Value.string) ?? .null,
                  "at": .date(at)])
     }
 
