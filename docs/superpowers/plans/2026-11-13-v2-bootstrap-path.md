@@ -118,10 +118,33 @@ place first (that defeats PATH only: the binary is still your file, S11 item 15)
   `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=~/.vibeswitcher-test-claude bash scripts/test.sh --filter <suite>` [D16].
 - **M2. Before the bootstrap:** on github.com, a fine-grained token that reads this repository only, then
   `gh auth login --with-token < token.txt` and remove the file (or `gh auth logout`); rulesets on `main`, `v2` and tags
-  requiring a pull request, with you as bypass [D11].
+  requiring a pull request, with you as bypass [D11]. The token's repository permissions: **Contents: read** (the
+  install fetches the commit with it) and **Actions: read** (the install asks GitHub's API whether both CI runners
+  passed the commit: the start plan's ST-D10), and nothing else.
 - **M3. Before step 8's first install:** Swift 6.4.2 owned by root, from swift.org's Ubuntu 24.04 x86_64 tarball with
   its signature checked: `sudo mkdir -p /opt/swift-6.4.2 && sudo tar -xzf swift-6.4.2-RELEASE-ubuntu24.04.tar.gz -C
-  /opt/swift-6.4.2 --strip-components=1`; tell the agent the path [D12].
+  /opt/swift-6.4.2 --strip-components=1`; tell the agent the path [D12]. In full (the start plan's S4c, 2026-11-16),
+  in a terminal of your own, in a scratch folder:
+
+  ```sh
+  cd "$(mktemp -d)"
+  curl -fLO https://download.swift.org/swift-6.4.2-release/ubuntu2404/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-ubuntu24.04.tar.gz
+  curl -fLO https://download.swift.org/swift-6.4.2-release/ubuntu2404/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-ubuntu24.04.tar.gz.sig
+  export GNUPGHOME="$PWD/gnupg" && mkdir -m 700 "$GNUPGHOME"   # a keyring of its own, not yours
+  curl -fsSL https://www.swift.org/keys/all-keys.asc | gpg --import -
+  gpg --verify swift-6.4.2-RELEASE-ubuntu24.04.tar.gz.sig swift-6.4.2-RELEASE-ubuntu24.04.tar.gz
+  # "Good signature from Swift Automatic Signing Key #…": go on; anything else: stop.
+  sudo mkdir -p /opt/swift-6.4.2
+  sudo tar -xzf swift-6.4.2-RELEASE-ubuntu24.04.tar.gz -C /opt/swift-6.4.2 --strip-components=1 --no-same-owner
+  sudo chown -R root:root /opt/swift-6.4.2 && sudo chmod -R go-w /opt/swift-6.4.2
+  ```
+
+  The URLs are those swift.org's install page gives for Ubuntu 24.04 x86_64; check them there if they fail. The
+  toolchain needs the packages swiftly's already needs here, so nothing else is installed. Then the agent checks,
+  read-only: `/opt/swift-6.4.2/usr/bin/swift --version` says 6.4.2; `find /opt/swift-6.4.2 \( ! -user root -o \(
+  ! -type l -perm /022 \) \) -print -quit` prints nothing; `/opt` and `/` are root's and writable by nobody else; and
+  runs the gated build, `VIBESWITCHER_INSTALL_TOOLCHAIN=/opt/swift-6.4.2 vs-heavy bash scripts/test.sh --filter
+  InstallTests/anInstallBuildsWithTheRootToolchain`.
 - **M4. During the engine's E1, before its voice rule** (E1 Step 1): give the agent the output of `cat
   /proc/self/cgroup` in a new Windows Terminal tab; the same run by the Bash tool of a `claude` started in that tab;
   `systemd-run --user --wait --pipe cat /proc/self/cgroup`; and `logger -t vibeswitcher-probe hello; journalctl --user
@@ -325,13 +348,18 @@ Each ends in something that runs.
      (the cases the engine's E2 didn't take), `HostRestartTests` (its two cases), as the port map lists them.
    - **The install**, `scripts/install-node.sh COMMIT` (S9, decision 12):
      - it refuses a dirty working tree, and builds from a clean, detached `git worktree add` of a commit on `origin/v2`
-       that both CI runners passed (checked through GitHub's API before it builds);
+       that both CI runners passed (checked through GitHub's API before it builds). As built (the start plan's ST-D9,
+       2026-11-16), the commit is fetched by its hash from GitHub into a fresh repository, so the worktree is of that
+       repository and nothing in the user's clone plays a part;
      - with a Swift toolchain the user installed outside `$HOME` (root's, for example under `/opt`; decision 12), a
        fresh package cache, and `--static-swift-stdlib` (Foundation included), so nothing an installed binary runs
-       loads from `~/.local/share/swiftly` or any folder the user can write; it checks each built binary with `ldd`
-       and refuses one that loads a library from a folder the user can write
+       loads from `~/.local/share/swiftly` or any folder the user can write; it checks each built binary (its
+       interpreter, no `RUNPATH`, its `NEEDED` set exactly the five glibc and C++ runtime libraries, each resolved by
+       the loader's own `--list`, never `ldd`) and refuses one that loads a library from a folder the user can write
        (`InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite`, which also reads `/proc/<pid>/maps` of
-     the installed host, server and a parser);
+       the installed host's image through dumpable stand-ins, a held launcher standing for the parsers, and
+       `vibeswitcher-mcp`; the server's maps are refused to its own uid, so it is covered by the binary check: the
+       start plan's ST-D12, 2026-11-16);
      - a release build of `vibeswitcher-host`, `vibeswitcher-server`, `vibeswitcher-cli` (installed as
        `vibeswitcher`), `vibeswitcher-hook` and `vibeswitcher-mcp` into `<prefix>/<commit>/bin`, with
        `Resources/bin/vs-*` in `<prefix>/<commit>/Resources/bin` (where `TestLock.commandFolder` looks: two folders up

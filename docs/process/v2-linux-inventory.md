@@ -598,3 +598,47 @@ once, at M8's first lead (S9's "Prepared for M8").
 *2026-11-16, S7's review:* the scratch repository has a hook of the user's (`pre-commit`), and after the two starts a
 second repository's first guarded git writes a new store with a shim: `config held` still holds nothing (the guard's
 baseline of a repository the seal hasn't seen comes as entries added; anything else added under `git-hooks` is held).
+
+## The install's static build (the start plan's S4c, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+The spike ran the install's build command (ST-D11) by hand, under `vs-heavy` (6 cores), with swiftly's 6.4.2 (the same
+release as M3's root toolchain, which isn't installed yet) in place of `/opt/swift-6.4.2`, on a `git clone --no-local`
+of commit 5d774d7f, with every SwiftPM folder and `HOME` in a scratch folder and only `HOME`, `PATH` and `TMPDIR` in
+the build's environment. glibc 2.39 (Ubuntu 24.04).
+
+- **ST-D11's flags as written fail.** With `-Xswiftc -no-toolchain-stdlib-rpath`, the flag reaches the package's
+  build-tool plugins too: SwiftTerm's `SwiftTermBuildInfoGenerator-tool` is linked against the toolchain's Swift
+  runtime dynamically (its `NEEDED` names `libswiftCore.so`, `libFoundation.so` and the rest) with no `RUNPATH`, so at
+  step 139 of 406 it stops: "error while loading shared libraries: libswiftCore.so: cannot open shared object file".
+  Without that flag the build completes, and the products still carry no `RUNPATH`: the driver adds the toolchain's
+  library folder only when it links the Swift runtime dynamically. `scripts/install-node.sh` drops the flag; its link
+  check still refuses any `RUNPATH`.
+- **The build:** 236 s of wall time for the second run, which kept the first run's 138 finished steps (C and assembly
+  of the dependencies); a run from nothing takes longer. SwiftPM fetches the resolved dependencies from their own
+  origins (GitHub) into the scratch cache.
+- **The products** (unstripped):
+
+  | Product | Size (bytes) |
+  | --- | --- |
+  | `vibeswitcher-host` | 136,231,856 |
+  | `vibeswitcher-server` | 136,796,656 |
+  | `vibeswitcher-cli` | 137,552,600 |
+  | `vibeswitcher-hook` | 128,939,768 |
+  | `vibeswitcher-mcp` | 129,128,632 |
+
+- **`readelf -l` and `readelf -d`, each of the five alike:** interpreter `/lib64/ld-linux-x86-64.so.2`; `NEEDED`
+  exactly `libm.so.6`, `libstdc++.so.6`, `libgcc_s.so.1`, `libc.so.6` and `ld-linux-x86-64.so.2` (ST-D12's set,
+  confirmed: libdl and libpthread are inside libc since glibc 2.34); no `RPATH`, `RUNPATH`, `AUDIT` or `DEPAUDIT`. The
+  loader's `--list` resolves them to `/lib/x86_64-linux-gnu/` (`/lib` a link to `/usr/lib`), every folder root's.
+- **The maps** (`InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite`, on the products installed into
+  a scratch prefix): the installed host (held dumpable) maps its own installed file,
+  `/usr/lib/x86_64-linux-gnu/{ld-linux-x86-64.so.2, libc.so.6, libgcc_s.so.1, libm.so.6, libstdc++.so.6.0.33}`,
+  `[heap]` and anonymous mappings. Its sealed copies are descriptors, not mappings. A held session launcher maps
+  `/memfd:vibeswitcher-launcher (deleted)`, the same five libraries, `[heap]`, `[stack]`, `[vdso]`, `[vvar]` and
+  anonymous mappings. `vibeswitcher-mcp`, in its poll of stdin, maps its own installed file, the same libraries and
+  `[heap]`. The server's maps: `open` fails with `EACCES` (non-dumpable), as ST-D12 expected.
+- The products are kept in `~/.cache/vibeswitcher-static-products/5d774d7f54bffc21f3538fcc35c4cf01d3e86a2a/` (with
+  `swift-version` and the commit's `Package.resolved`), outside every watched folder, for
+  `VIBESWITCHER_STATIC_PRODUCTS=<that folder> vs-heavy bash scripts/test.sh --filter InstallTests`.
+- **Not yet measured:** the gated build with the root toolchain (`InstallTests.anInstallBuildsWithTheRootToolchain`),
+  waiting on M3. Its sizes, time and link-check output go here when it has run.

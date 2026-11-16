@@ -60,7 +60,8 @@ install_node_main() {
     local -r repository=acastellana/vibeswitcher
     local -r workflows=("v2 linux" "v2 macos")
     local -r interpreter=/lib64/ld-linux-x86-64.so.2
-    # What swift_static's static-stdlib-args.lnk links dynamically (ST-D12; S4c's spike confirms or corrects it).
+    # What swift_static's static-stdlib-args.lnk links dynamically (ST-D12; S4c's spike, 2026-11-16, measured exactly
+    # this set on each of the five release products).
     local -r allowed_needed=" libc.so.6 libm.so.6 libstdc++.so.6 libgcc_s.so.1 ld-linux-x86-64.so.2 "
     # The build's products, by their build names; the cli is installed as `vibeswitcher` (BuildRecord.installedNames).
     local -r products=(vibeswitcher-host vibeswitcher-server vibeswitcher-cli vibeswitcher-hook vibeswitcher-mcp)
@@ -332,8 +333,11 @@ install_node_main() {
     # --- 8. The build (ST-D11): the fetched commit's vs-heavy, fresh caches, nothing of the caller's environment -----
     local bin
     if [[ -z $test_products ]]; then
+        # No -Xswiftc -no-toolchain-stdlib-rpath (ST-D11 had it; S4c's spike, 2026-11-16): it reaches the package's
+        # build-tool plugins too, which link the toolchain's stdlib dynamically and then can't load libswiftCore.so, and
+        # the build fails. The static products get no toolchain RUNPATH without it; the link check below says so.
         local flags=(-c release --build-system native --static-swift-stdlib --disable-local-rpath
-            -Xswiftc -no-toolchain-stdlib-rpath --only-use-versions-from-resolved-file --package-path "$src"
+            --only-use-versions-from-resolved-file --package-path "$src"
             --scratch-path "$tool_scratch/build" --cache-path "$tool_scratch/cache"
             --config-path "$tool_scratch/config" --security-path "$tool_scratch/security")
         # vs-heavy gets only what it needs: PATH, the account's HOME (where it reads the slots' count), TMPDIR, and the

@@ -271,8 +271,9 @@ struct InstallTests {
 extension InstallTests {
     /// The world: the working repository's one commit (`extra` files beside the working copy's), pushed to a bare
     /// origin's `v2` that serves reachable commits by hash, its clone, the stand-in `gh` (answering that both runners
-    /// passed the commit) and a prefix not yet made.
-    fileprivate func world(extra: [String: String] = [:]) async throws -> InstallScript.World {
+    /// passed the commit) and a prefix not yet made. With `repository`, the working repository is a `git clone
+    /// --no-local` of it instead, its HEAD as `v2`, and the commit is the working copy's files committed on top of it.
+    fileprivate func world(extra: [String: String] = [:], repository: URL? = nil) async throws -> InstallScript.World {
         typealias World = InstallScript.World
         let root = scratch.url("install")
         let world = World(root: root, work: root.appendingPathComponent("work"), origin: root.appendingPathComponent("origin.git"),
@@ -291,7 +292,12 @@ extension InstallTests {
         for path in copied {
             files[path] = try String(contentsOf: workingCopy.appendingPathComponent(path), encoding: .utf8)
         }
-        try await world.git(["init", "-q", "-b", "v2"])
+        if let repository {
+            try await InstallScript.git(["clone", "-q", "--no-local", repository.path, world.work.path], in: root, home: world.gitHome)
+            try await world.git(["checkout", "-q", "-B", "v2"])
+        } else {
+            try await world.git(["init", "-q", "-b", "v2"])
+        }
         let base = try await world.commit(files, message: "base")
         try await InstallScript.git(["init", "-q", "--bare", world.origin.path], in: root, home: world.gitHome)
         try await world.git(["config", "uploadpack.allowReachableSHA1InWant", "true"], in: world.origin)
@@ -685,6 +691,296 @@ extension InstallTests {
     }
 }
 
+/// The install's static build (the start plan's S4c, ST-D11 and ST-D12): the static products S4c's spike built
+/// (`VIBESWITCHER_STATIC_PRODUCTS=<that folder>` on the run's command line, skipped otherwise), installed by the script
+/// into a scratch prefix and run from there; and the gated build itself, with the root toolchain M3 installs
+/// (`VIBESWITCHER_INSTALL_TOOLCHAIN=/opt/swift-6.4.2`). Linux only, as the script's other cases.
+extension InstallTests {
+    /// The static products' folder (the five products by their build names, `swift-version`), as `--test-products`
+    /// takes it: given on the run's command line, nil otherwise.
+    static let staticProducts: URL? = ProcessInfo.processInfo.environment["VIBESWITCHER_STATIC_PRODUCTS"]
+        .flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
+    static let staticBuilt: ConditionTrait = .enabled(if: staticProducts != nil, "the static products aren't built: S4c Step 1")
+    /// M3's root toolchain, given on the run's command line and there.
+    static let rootToolchain: String? = ProcessInfo.processInfo.environment["VIBESWITCHER_INSTALL_TOOLCHAIN"]
+        .flatMap { $0.hasPrefix("/") && FileManager.default.fileExists(atPath: $0 + "/usr/bin/swift") ? $0 : nil }
+
+    /// The world's base commit installed from the static products: the world, the build folder and the run.
+    fileprivate func staticInstall() async throws -> (world: InstallScript.World, build: URL, ran: CommandRun) {
+        let world = try await world()
+        let products = try #require(Self.staticProducts)
+        let ran = try await world.install(try world.arguments(world.base) + ["--test-products", products.path])
+        return (world, world.prefix.appendingPathComponent(world.base, isDirectory: true), ran)
+    }
+
+    /// What an install of `world.base` laid out under the prefix (`build` its folder), from the products whose
+    /// `swift --version` output is `versionText`: the layout, `current`, `installs`, `build-info`, and where `vs-heavy`
+    /// is found. `products`: the folder the programs came from, when they were given (`--test-products`).
+    fileprivate func expectLaidOut(_ world: InstallScript.World, build: URL, versionText: String, products: URL?) throws {
+        let files = FileManager.default
+        let bin = build.appendingPathComponent("bin")
+        #expect(Set(try files.contentsOfDirectory(atPath: bin.path)) == Set(BuildRecord.installedNames))
+        let workingResources = InstallScript.workingCopy.appendingPathComponent("Resources/bin")
+        let tools = try files.contentsOfDirectory(atPath: workingResources.path).filter { $0.hasPrefix("vs-") }
+        #expect(Set(try files.contentsOfDirectory(atPath: build.appendingPathComponent("Resources/bin").path)) == Set(tools))
+        var programs = BuildRecord.installedNames.map { bin.appendingPathComponent($0) }
+        programs += tools.map { build.appendingPathComponent("Resources/bin/" + $0) } + [build.appendingPathComponent("Resources/install-node.sh")]
+        for program in programs {
+            var info = stat()
+            #expect(lstat(program.path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG, "\(program.path) isn't a regular file")
+            #expect(info.st_mode & 0o7777 == 0o755, "\(program.path): mode \(String(info.st_mode & 0o7777, radix: 8))")
+        }
+        // The script and its libraries are the commit's, which is the working copy's here.
+        for (installed, committed) in [("Resources/install-node.sh", "scripts/install-node.sh"), ("Resources/lib/scratch.sh", "scripts/lib/scratch.sh"),
+                                       ("Resources/lib/swift-jobs.sh", "scripts/lib/swift-jobs.sh")] {
+            #expect(files.contents(atPath: build.appendingPathComponent(installed).path)
+                        == files.contents(atPath: InstallScript.workingCopy.appendingPathComponent(committed).path), "\(installed)")
+        }
+        // No .git anywhere under the prefix.
+        let under = files.subpaths(atPath: world.prefix.path) ?? []
+        #expect(!under.isEmpty && !under.contains { $0.split(separator: "/").contains(".git") }, "\(under.filter { $0.contains(".git") })")
+        // current names the commit, and installs has its one line.
+        #expect(try files.destinationOfSymbolicLink(atPath: world.prefix.appendingPathComponent("current").path) == world.base)
+        let installs = try String(contentsOf: world.prefix.appendingPathComponent("installs"), encoding: .utf8)
+        let lines = installs.split(separator: "\n")
+        #expect(lines.count == 1 && lines.first?.hasPrefix(world.base + " ") == true, "\(installs)")
+
+        let info = try BuildInfo.read(buildFolder: build.path).get()
+        #expect(info.commit == world.base && info.commit == build.lastPathComponent)
+        #expect(info.binaries.count == BuildRecord.installedNames.count)
+        for name in BuildRecord.installedNames {
+            let bytes = try Data(contentsOf: bin.appendingPathComponent(name))
+            #expect(info.binaries[name] == BuildInfo.sha256(of: bytes), "\(name)")
+            if let products {
+                let built = name == NodeFolders.installedCLI ? "vibeswitcher-cli" : name
+                #expect(bytes == (try Data(contentsOf: products.appendingPathComponent(built))), "\(name) isn't the product given")
+            }
+        }
+        let resolved = try Data(contentsOf: InstallScript.workingCopy.appendingPathComponent("Package.resolved"))
+        #expect(info.resolved == BuildInfo.sha256(of: resolved))
+        #expect(info.swift == versionText.trimmingCharacters(in: .newlines), "\(info.swift)")
+        // vs-heavy is found where TestLock looks: two folders up from the program, then Resources/bin.
+        #expect(TestLock.commandFolder(besideExecutable: bin.appendingPathComponent("vibeswitcher-mcp").path)
+                    == build.appendingPathComponent("Resources/bin").resolvingSymlinksInPath().path)
+    }
+
+    @Test(NodeTraits.linuxOnly, InstallTests.staticBuilt, .timeLimit(.minutes(10)))
+    func aScratchInstallLaysOutTheBuildAndItsRecord() async throws {
+        let (world, build, ran) = try await staticInstall()
+        #expect(ran.status == 0, "\(ran.status) \(ran.errors)")
+        #expect(ran.output.contains("the seal holds every team until `vs config accept`"), "\(ran.output)")
+        let products = try #require(Self.staticProducts)
+        let versionText = try String(contentsOf: products.appendingPathComponent("swift-version"), encoding: .utf8)
+        try expectLaidOut(world, build: build, versionText: versionText, products: products)
+    }
+
+    @Test(NodeTraits.linuxOnly, InstallTests.staticBuilt, .timeLimit(.minutes(10)))
+    func aHostStartsFromAnInstalledFolder() async throws {
+        let (world, build, ran) = try await staticInstall()
+        try #require(ran.status == 0, "\(ran.status) \(ran.errors)")
+        // Its build-info check passed: the host's start line, said once both images matched it, names the commit.
+        let host = try await InstalledHost(scratch, build: build)
+        defer { host.end() }
+        let started = await eventually(timeout: 120) { host.said.contains("vibeswitcher-host: started pid \(host.pid) build \(world.base) ") }
+        #expect(started, "\(host.said)")
+
+        // One byte changed in a copy of the installed server: refused, naming it, and the host ends.
+        let copy = scratch.url("changed-server")
+        try FileManager.default.createDirectory(at: copy, withIntermediateDirectories: true)
+        let server = copy.appendingPathComponent(BuildInfo.server)
+        var bytes = try Data(contentsOf: build.appendingPathComponent("bin/" + BuildInfo.server))
+        bytes[bytes.count / 2] ^= 0x01
+        try bytes.write(to: server)
+        #expect(chmod(server.path, 0o755) == 0)
+        let refused = try await InstalledHost(scratch, build: build, server: server)
+        defer { refused.end() }
+        let status = await offPool { collected(refused.pid, by: MacTime.real.awake() + 120) }
+        let raw = try #require(status, "the host with a changed server never ended: \(refused.said)")
+        #expect(raw & 0x7f == 0 && (raw >> 8) & 0xff == 1, "status \(raw): \(refused.said)")
+        #expect(refused.said.contains("not started: \(BuildInfo.server): its sha256"), "\(refused.said)")
+        #expect(!refused.said.contains("started pid"), "\(refused.said)")
+    }
+
+    /// The maps half of S9's `anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (ST-D12; its `readelf` and
+    /// loader half is the script's link check, which this install passed): the installed host (held dumpable), a
+    /// session's launcher held after `beforeProgram` (the host's launchers' sealed copy, which stands for the parsers'
+    /// copy of the same image) and `vibeswitcher-mcp` waiting on stdin map nothing but ST-D12's allowed lines, and the
+    /// server's maps can't be read by its own uid (non-dumpable: `EACCES`, measured).
+    @Test(NodeTraits.linuxOnly, InstallTests.staticBuilt, .timeLimit(.minutes(10)))
+    func anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite() async throws {
+        let (_, build, ran) = try await staticInstall()
+        try #require(ran.status == 0, "\(ran.status) \(ran.errors)")
+        let hold = try scratch.shortFolder("vsmh").appendingPathComponent("go")
+        // HostImages.launcherTestHoldFlag and HostHardening.staysDumpableFlag (VibeHost's).
+        let node = try await ScratchNode(scratch, build: build, hostArguments: ["--launcher-test-hold", hold.path, "--test-stays-dumpable"])
+        defer {
+            FileManager.default.createFile(atPath: hold.path, contents: nil)
+            node.stop()
+        }
+        func maps(_ pid: pid_t) throws -> String { try String(contentsOfFile: "/proc/\(pid)/maps", encoding: .utf8) }
+
+        // The host: dumpable by its test flag, so its maps can be read.
+        try #require(Platform.Processes.isDumpable(node.hostPID) == true)
+        let hostMaps = try maps(node.hostPID)
+        #expect(Self.disallowedMaps(hostMaps, own: build.appendingPathComponent("bin/" + BuildInfo.host).path).isEmpty,
+                "\(Self.disallowedMaps(hostMaps, own: build.appendingPathComponent("bin/" + BuildInfo.host).path))")
+        #expect(hostMaps.contains(build.appendingPathComponent("bin/" + BuildInfo.host).path), "\(hostMaps)")
+
+        // A session's launcher, held dumpable after beforeProgram, still running the launchers' copy.
+        let session = try await node.spawn("exec sleep 600")
+        defer { kill(session.childPID, SIGKILL) }
+        #expect(await eventually { Platform.Processes.isDumpable(session.childPID) == true }, "\(node.said)")
+        let exe = (try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(session.childPID)/exe")) ?? ""
+        try #require(exe.hasPrefix("/memfd:"), "\(exe)")
+        let launcherMaps = try maps(session.childPID)
+        #expect(Self.disallowedMaps(launcherMaps, own: nil).isEmpty, "\(Self.disallowedMaps(launcherMaps, own: nil))")
+
+        // The server: non-dumpable, its maps refused to this uid.
+        #expect(await eventually { node.serverPID != nil }, "no server under the host")
+        let server = try #require(node.serverPID)
+        #expect(Platform.Processes.isDumpable(server) == false)
+        let fd = Sys.open("/proc/\(server)/maps", O_RDONLY | O_CLOEXEC)
+        let code = errno
+        if fd >= 0 { Sys.close(fd) }
+        #expect(fd < 0 && code == EACCES, "the server's maps: fd \(fd), errno \(code)")
+
+        // vibeswitcher-mcp, waiting on stdin: in its read of fd 0, or the poll of its loop over stdin (the syscall
+        // /proc names: 0 read, 7 poll, 271 ppoll).
+        let mcp = build.appendingPathComponent("bin/" + "vibeswitcher-mcp").path
+        var input: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&input) == 0)
+        defer { Sys.close(input[1]) }
+        let work = scratch.url("mcp")
+        try FileManager.default.createDirectory(at: work.appendingPathComponent("home"), withIntermediateDirectories: true)
+        var spawn = Platform.Spawn(executable: mcp, arguments: [mcp, "--root", work.path])
+        spawn.environment = ["HOME=\(work.appendingPathComponent("home").path)", "PATH=/usr/bin:/bin",
+                             "VIBESWITCHER_HOME=\(work.appendingPathComponent("vibeswitcher").path)", "TMPDIR=\(work.path)/"]
+        spawn.stdin = .descriptor(input[0])
+        spawn.stdout = .path("/dev/null", flags: O_WRONLY)
+        spawn.stderr = .path(work.appendingPathComponent("mcp.err").path, flags: O_WRONLY | O_CREAT | O_APPEND)
+        let pid = try await startRetrying(spawn)
+        Sys.close(input[0])
+        defer { kill(pid, SIGKILL); _ = collected(pid, by: MacTime.real.awake() + 10) }
+        let waiting = await eventually(timeout: 120) {
+            let syscall = (try? String(contentsOfFile: "/proc/\(pid)/syscall", encoding: .utf8)) ?? ""
+            return syscall.hasPrefix("0 0x0 ") || syscall.hasPrefix("7 ") || syscall.hasPrefix("271 ")
+        }
+        #expect(waiting, "vibeswitcher-mcp isn't reading stdin: \((try? String(contentsOfFile: "/proc/\(pid)/syscall", encoding: .utf8)) ?? "gone") \((try? String(contentsOf: work.appendingPathComponent("mcp.err"), encoding: .utf8)) ?? "")")
+        let mcpMaps = try maps(pid)
+        #expect(Self.disallowedMaps(mcpMaps, own: mcp).isEmpty, "\(Self.disallowedMaps(mcpMaps, own: mcp))")
+    }
+
+    /// The gated build: the real build through the script, with M3's root toolchain, on a `git clone --no-local` of
+    /// this repository with the working copy's script committed on top, a scratch prefix, the scratch origin and the
+    /// stand-in `gh`. Every binary passes the link check, and the layout is the static case's. It adds to those only
+    /// the root-owned toolchain and the build itself (minutes, under the run's `vs-heavy`; SwiftPM fetches the
+    /// commit's dependencies from their own origins, as any build does).
+    @Test(NodeTraits.linuxOnly, .enabled(if: InstallTests.rootToolchain != nil, "M3: the root toolchain isn't installed"), .timeLimit(.minutes(60)))
+    func anInstallBuildsWithTheRootToolchain() async throws {
+        let toolchain = try #require(Self.rootToolchain)
+        let world = try await world(repository: InstallScript.workingCopy)
+        let ran = try await world.install(try world.arguments(world.base) + ["--toolchain", toolchain])
+        #expect(ran.status == 0, "\(ran.status) \(ran.errors)")
+        // What install-record was given: the toolchain's `swift --version`, as the script runs it.
+        let version = try await run(URL(fileURLWithPath: toolchain + "/usr/bin/swift"), ["--version"],
+                                    environment: ["HOME": world.home.path, "PATH": "\(toolchain)/usr/bin:/usr/bin:/bin"])
+        let versionText = version.output
+        try expectLaidOut(world, build: world.prefix.appendingPathComponent(world.base, isDirectory: true), versionText: versionText, products: nil)
+    }
+
+    /// The maps check names a file the user can write (a scratch file, a deleted file that isn't a sealed copy) and
+    /// passes a root folder's file, the program's own file, the kernel's names, an anonymous mapping and a sealed copy.
+    @Test func theMapsCheckNamesAFileTheUserCanWrite() throws {
+        let folder = scratch.url("maps")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let mine = folder.appendingPathComponent("libmine.so").path, own = folder.appendingPathComponent("vibeswitcher-mcp").path
+        for path in [mine, own] { FileManager.default.createFile(atPath: path, contents: Data("x".utf8)) }
+        let allowed = [
+            "55a0c0000000-55a0c0100000 r-xp 00000000 08:20 1234                       \(own)",
+            "7f0000000000-7f0000100000 r-xp 00000000 08:20 99                    /usr/bin/env",
+            "7f0000100000-7f0000200000 rw-p 00000000 00:00 0                          [heap]",
+            "7f0000200000-7f0000300000 rw-p 00000000 00:00 0 ",
+            "7f0000300000-7f0000400000 r-xp 00000000 00:01 7                          /memfd:vibeswitcher-launcher (deleted)",
+            "7ffd00000000-7ffd00100000 rw-p 00000000 00:00 0                          [stack]",
+            "7ffd00100000-7ffd00102000 r--p 00000000 00:00 0                          [vvar]",
+            "7ffd00102000-7ffd00104000 r-xp 00000000 00:00 0                          [vdso]",
+        ]
+        let refused = [
+            "7f0000400000-7f0000500000 r-xp 00000000 08:20 4321                       \(mine)",
+            "7f0000500000-7f0000600000 r-xp 00000000 08:20 4322                       /usr/bin/env (deleted)",
+            "7f0000600000-7f0000700000 r-xp 00000000 08:20 4323                       [vsyscall-ish]",
+        ]
+        #expect(Self.disallowedMaps(allowed.joined(separator: "\n") + "\n", own: own).isEmpty, "\(Self.disallowedMaps(allowed.joined(separator: "\n"), own: own))")
+        #expect(Self.disallowedMaps((allowed + refused).joined(separator: "\n"), own: own) == refused)
+        // Without `own`, the program's own file is a file the user can write too.
+        #expect(Self.disallowedMaps(allowed[0], own: nil) == [allowed[0]])
+    }
+
+    /// The lines of a `/proc/<pid>/maps` that aren't ST-D12's: each names a file whose folders up to `/` are root's
+    /// and writable by nobody else (the file root's too), or is `[heap]`, `[stack]`, `[vdso]`, `[vvar]`, `[vsyscall]`,
+    /// an anonymous mapping or a sealed copy (`/memfd:… (deleted)`). `own`, the program's own installed file (the
+    /// image `execve` mapped, checked against `build-info`), is allowed besides.
+    static func disallowedMaps(_ text: String, own: String?) -> [String] {
+        text.split(separator: "\n").compactMap { line in
+            let words = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard words.count > 5 else { return nil }
+            let name = words.dropFirst(5).joined(separator: " ")
+            if ["[heap]", "[stack]", "[vdso]", "[vsyscall]"].contains(name) || name.hasPrefix("[vvar") || name.hasPrefix("[anon:") { return nil }
+            if name.hasPrefix("/memfd:"), name.hasSuffix(" (deleted)") { return nil }
+            if name == own { return nil }
+            if name.hasPrefix("/"), !name.hasSuffix(" (deleted)"), rootOnly(name) { return nil }
+            return String(line)
+        }
+    }
+
+    /// Whether `path` is root's, and every folder from it up to `/` root's and writable by nobody else.
+    static func rootOnly(_ path: String) -> Bool {
+        var info = stat()
+        guard lstat(path, &info) == 0, info.st_uid == 0, info.st_mode & 0o022 == 0 else { return false }
+        var folder = (path as NSString).deletingLastPathComponent
+        while true {
+            guard lstat(folder, &info) == 0, info.st_uid == 0, info.st_mode & S_IFMT == S_IFDIR, info.st_mode & 0o022 == 0 else { return false }
+            if folder == "/" { return true }
+            folder = (folder as NSString).deletingLastPathComponent
+        }
+    }
+}
+
+/// A scratch host started from an installed build folder's `bin/vibeswitcher-host` (S4c): `DetachedScratch`'s command
+/// line (a short root whose `home/.vibeswitcher` links to it, `--lock` in it, `--exit-with` this process, no `--node`)
+/// with the installed folder as `--node-root` and `server` (its own server by default) as `--server`; HOME, PATH and
+/// `SWIFT_BACKTRACE` as the unit gives them; what it says in `<root>/host.out`.
+private struct InstalledHost {
+    let root: URL
+    let pid: pid_t
+
+    init(_ scratch: Scratch, build: URL, server: URL? = nil) async throws {
+        root = try scratch.shortFolder("vsih")
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try FileManager.default.createSymbolicLink(atPath: home.appendingPathComponent(".vibeswitcher").path, withDestinationPath: root.path)
+        let out = root.appendingPathComponent("host.out").path
+        FileManager.default.createFile(atPath: out, contents: nil)
+        let host = build.appendingPathComponent("bin/" + BuildInfo.host).path
+        let socket = home.appendingPathComponent(".vibeswitcher/host.sock").path, lock = root.appendingPathComponent(NodeCheck.scratchLock).path
+        let arguments = [host, "--socket", socket, "--lock", lock, "--idle-exit", "600",
+                         "--server", (server ?? build.appendingPathComponent("bin/" + BuildInfo.server)).path, "--node-root", build.path,
+                         "--exit-with", String(getpid())]
+        var spawn = Platform.Spawn(executable: host, arguments: arguments)
+        spawn.environment = NodeStarter.detachedEnvironment(home: home.path, path: DetachedScratch.path)
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .path(out, flags: O_WRONLY | O_APPEND)
+        spawn.stderr = .path(out, flags: O_WRONLY | O_APPEND)
+        spawn.keep = []
+        pid = try await startRetrying(spawn)
+    }
+
+    var said: String { (try? String(contentsOf: root.appendingPathComponent("host.out"), encoding: .utf8)) ?? "" }
+
+    /// Ends it and what it started, whatever a case left (a host that ended already is only collected).
+    func end() { DetachedScratch.end(pid) }
+}
+
 /// `InstallTests`' fixture for `scripts/install-node.sh`: the synthetic repository, its origin, the clone and the
 /// stand-in `gh`.
 private enum InstallScript {
@@ -748,7 +1044,7 @@ private enum InstallScript {
                 try text.write(to: file, atomically: true, encoding: .utf8)
             }
             try await git(["add", "-A"])
-            try await git(["commit", "-q", "-m", message])
+            try await git(["commit", "-q", "--allow-empty", "-m", message])
             return try await git(["rev-parse", "HEAD"])
         }
 

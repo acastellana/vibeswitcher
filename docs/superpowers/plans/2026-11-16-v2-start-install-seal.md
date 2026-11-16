@@ -311,6 +311,10 @@ accepted every recommendation so far. Each can be overruled before its task star
       -no-toolchain-stdlib-rpath --only-use-versions-from-resolved-file`, with `--scratch-path`, `--cache-path`,
       `--config-path` and `--security-path` in `$tool_scratch`. All of them are in swiftly's 6.4.2 `swift build
       --help` (checked 2026-11-16). The products are found with `swift build --show-bin-path` and the same flags.
+    - *2026-11-16, S4c's spike:* `-Xswiftc -no-toolchain-stdlib-rpath` is dropped. It reaches the package's build-tool
+      plugins too (SwiftTerm's build-info generator), which link the toolchain's Swift runtime dynamically and then
+      can't load `libswiftCore.so`, so the build fails at step 139 of 406. Without it the static products still carry
+      no `RUNPATH` (the driver adds one only when it links the runtime dynamically), and the link check refuses one.
     - The toolchain must report the commit's `.swift-version` (6.4.2).
     - **Why not musl.** The musl SDK is installed here, but under `~/.swiftpm/swift-sdks`: user-writable, and hidden by
       the build's scratch `HOME`. Using it would need a root copy in M3, and the design's risk table puts it after the
@@ -1357,12 +1361,12 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
   (S9's test text, ST-D12; S11's residuals: ST-D9's first run, and the build below),
   `docs/process/v2-linux-inventory.md`
 
-- [ ] **Step 1: The static spike** (no code). Under `vs-heavy`, run ST-D11's exact build command with swiftly's
+- [x] **Step 1: The static spike** (no code). Under `vs-heavy`, run ST-D11's exact build command with swiftly's
   6.4.2 (the same release as M3's) and a scratch path. Record in the inventory: `readelf -l` and `readelf -d` of the
   five products, the absence of `RUNPATH`, each size, and the time. Keep the products in
   `~/.cache/vibeswitcher-static-products/<commit>/` (outside every watched folder) for Step 2. If the `NEEDED` set
   differs from ST-D12's, correct the script's list and its test in this task.
-- [ ] **Step 2: Failing tests on static products**, enabled only with `VIBESWITCHER_STATIC_PRODUCTS=<that folder>`
+- [x] **Step 2: Failing tests on static products**, enabled only with `VIBESWITCHER_STATIC_PRODUCTS=<that folder>`
   on the run's command line (skipped otherwise, saying "the static products aren't built: S4c Step 1"):
   - `aScratchInstallLaysOutTheBuildAndItsRecord`: `--test-products <static products>` gives this:
     - the layout above, with every `bin/` entry a regular file and no `.git` anywhere under the prefix;
@@ -1383,8 +1387,9 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
   it is skipped, saying "M3: the root toolchain isn't installed". It runs the real build through the script with
   `--prefix <scratch>`, `--test-origin` and the stand-in `gh`, on a fixture of a `git clone --no-local` of this
   repository with the working copy's script committed on top. Every binary passes the link check. It adds to the
-  static cases only the root-owned toolchain and the build itself.
-- [ ] **Step 4: Docs.** The three documents above. S11 gains the build's residual: the build's scratch folder is the
+  static cases only the root-owned toolchain and the build itself. *2026-11-16: written and skipped; open until M3 (the
+  notes below).*
+- [x] **Step 4: Docs.** The three documents above. S11 gains the build's residual: the build's scratch folder is the
   user's. So a worker can change sources or objects during the minutes-long build, or ptrace `swift-build`.
   `build-info` then vouches for the result, and the CI check still passes.
 - [ ] **Step 5: Verify.**
@@ -1394,7 +1399,43 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
     --filter InstallTests/anInstallBuildsWithTheRootToolchain`. Its sizes, time and link-check output go in the
     inventory.
   - the lints
+
+  *2026-11-16:* the first and third ran green here (the static cases passed, the gated one skipped); the second waits
+  on M3, so this step stays open.
 - [ ] **Step 6:** commit ("v2: the install's static build, checked"). Push, both green.
+
+*Notes, 2026-11-16 (the S4c executor):*
+- **M3 isn't done**, so the spike used swiftly's 6.4.2 (the same release) and the Step 3 case is written but open:
+  `anInstallBuildsWithTheRootToolchain` is skipped ("M3: the root toolchain isn't installed") until
+  `VIBESWITCHER_INSTALL_TOOLCHAIN=/opt/swift-6.4.2` names a toolchain that is there. It has never run. The user's exact
+  M3 commands (the tarball and its `.sig`, swift.org's keys in a keyring of its own, the root extraction, `chown` and
+  `chmod`) and the agent's read-only checks after are in the bootstrap path's M3 now. The spike didn't use the static
+  Linux SDK (musl) installed here: ST-D11 builds against glibc with `--static-swift-stdlib`, and the SDK lives under
+  `~/.swiftpm`, hidden by the build's scratch `HOME`.
+- **The spike corrected ST-D11, not ST-D12:** the `NEEDED` set is exactly ST-D12's on all five products, with no
+  `RUNPATH`; but the build fails with `-Xswiftc -no-toolchain-stdlib-rpath` (ST-D11's note above), so the script drops
+  that flag. The first run's log showed the failure; that half can't be a test here (the script refuses swiftly's
+  toolchain, 68), so the gated case is what will show it. Sizes, time, `readelf` and the maps are in the inventory.
+- The products are in `~/.cache/vibeswitcher-static-products/5d774d7f54bffc21f3538fcc35c4cf01d3e86a2a/` (with
+  `swift-version` and that commit's `Package.resolved`). The cases install them on the synthetic fixture's commit, so
+  their commit needn't match.
+- **Names as built:** the static cases are `InstallTests`' own (in the `linuxOnly` extension beside S4b's), gated by
+  `InstallTests.staticBuilt`. `aHostStartsFromAnInstalledFolder` starts the host directly (`InstalledHost`:
+  `DetachedScratch`'s command line on the installed folder) and waits on its start line (`HostStartLine`, said once
+  both images matched `build-info`) and, for the changed server, on its exit (1, "not started: vibeswitcher-server:
+  its sha256 …"). The maps case runs a `ScratchNode` on the installed folder: `ScratchNode` gained `build:` (an
+  installed folder in place of `<root>/build`) and `hostArguments:`.
+- **The maps rule differs from ST-D12's text in one line kind:** a program's own installed file
+  (`<prefix>/<commit>/bin/<name>`, the image `execve` mapped, in a folder the user can write) is allowed for the host
+  and the tool server. The host reads itself into a sealed copy, but the original mapping stays; the launcher runs
+  from its copy (`/memfd:vibeswitcher-launcher (deleted)`). Every other file must be root's with every folder up to
+  `/` root's and writable by nobody else (the script's `root_only`). A case beyond the plan's,
+  `theMapsCheckNamesAFileTheUserCanWrite` (pure, the Mac runs it), shows the check refusing a user's file and a
+  deleted one.
+- `vibeswitcher-mcp` "waiting on stdin" is its poll of stdin (syscall 7 in `/proc/<pid>/syscall`), not a `read`; the
+  case waits on either.
+- Beside the plan: `world(repository:)` clones a real repository for the gated case, and the fixture's commits pass
+  `--allow-empty` (the gated case's files may equal the clone's).
 
 **User step, M3:** before the gated case and before S9. The agent prepares the exact commands from the bootstrap path's
 M3, and how to check the tarball's signature (swift.org's key and the `.sig`). Afterwards it checks, read-only, that

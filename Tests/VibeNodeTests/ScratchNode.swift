@@ -28,6 +28,9 @@ import VibeNode
 /// however it goes: a runner killed or crashed leaves no node running (a host with a live session is never idle, so its
 /// `--idle-exit` never comes, and `ScratchNodes`' end at exit never runs then).
 ///
+/// `build`: an installed build folder (`<prefix>/<commit>`, the start plan's S4c) to run instead of `<root>/build`, as
+/// `--node-root` and the `--server` and host it names. `hostArguments`: more of the host's arguments (its test flags).
+///
 /// `reusing`: the root of a node stopped before (its host ended), for a host restart (E8): its files are kept (its
 /// `engine.json`, its snapshot, its journal's record, its repositories), its links and stand-ins made again where missing.
 ///
@@ -57,16 +60,17 @@ final class ScratchNode: @unchecked Sendable {
 
     init(_ scratch: Scratch, userScopes: [String]? = ScratchNode.ownScope.map { [$0] }, housekeeping: Int? = nil,
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
-         socketName: String = "host.sock", sealLife: Int? = nil, owner: pid_t = getpid(), reusing: URL? = nil, waitForServer: Bool = true) async throws {
+         socketName: String = "host.sock", sealLife: Int? = nil, owner: pid_t = getpid(), reusing: URL? = nil, waitForServer: Bool = true,
+         build: URL? = nil, hostArguments: [String] = []) async throws {
         root = try reusing ?? scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
-        nodeRoot = root.appendingPathComponent("build", isDirectory: true)
+        nodeRoot = build ?? root.appendingPathComponent("build", isDirectory: true)
         socket = root.appendingPathComponent(socketName).path
         lock = root.appendingPathComponent(NodeCheck.scratchLock).path
         output = root.appendingPathComponent("host.out").path
         testFolder = root.appendingPathComponent("v2/test", isDirectory: true)
         let files = FileManager.default
-        for folder in [home, nodeRoot.appendingPathComponent("bin"), testFolder, root.appendingPathComponent("tmp"),
+        for folder in [home, root.appendingPathComponent("build/bin"), testFolder, root.appendingPathComponent("tmp"),
                        testFolder.appendingPathComponent("xdg-runtime"), testFolder.appendingPathComponent("xdg-config")] {
             try files.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
@@ -79,7 +83,7 @@ final class ScratchNode: @unchecked Sendable {
         }
         let fakeFolder = testFolder.appendingPathComponent("fake-claude", isDirectory: true)
         if reusing == nil {
-            try Self.install(into: nodeRoot)
+            if build == nil { try Self.install(into: nodeRoot) }
             try Self.standIns(in: testFolder, scopes: userScopes)
             // The node's `claude` (EN-D13): a link a test puts there, to the fake's launcher.
             fake = try FakeClaude.install(in: fakeFolder)
@@ -102,6 +106,7 @@ final class ScratchNode: @unchecked Sendable {
         if holdFirstLook { arguments += ["--hold-first-look"] + (serverKnowsFirstLook ? ["--server-arg", ServerArguments.testFirstLookFlag] : []) }
         // How long the vault's `.user` seals verify (the engine plan's EN-D11), for a test that waits one out.
         if let sealLife { arguments += ["--test-user-seal-life", String(sealLife)] }
+        arguments += hostArguments
         let executable = nodeRoot.appendingPathComponent("bin/vibeswitcher-host").path
         // The test process as the host's app too (stage 2's `TestHosts.connectAsApp`): one end of a pair as the host's
         // stdin, the other registered for its socket, so this process can start sessions on it.

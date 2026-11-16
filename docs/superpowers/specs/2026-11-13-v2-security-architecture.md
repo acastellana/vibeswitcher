@@ -1331,7 +1331,27 @@ worker or verifier is live; S8b's server case below holds it end to end).
 - **The install** (the bootstrap path's steps 8 and 10) builds from a clean, detached `git worktree add` of a commit on
   `origin/v2` that both CI runners passed (it refuses a dirty tree), with a toolchain the user installed outside
   `$HOME` (root's, decision 12) and a fresh package cache, records `swift --version` and `Package.resolved`'s hash in
-  `build-info`, and the next install runs the previously installed build's script, not the working copy's.
+  `build-info`, and the next install runs the previously installed build's script, not the working copy's. As built
+  (the start plan's ST-D9 to ST-D12, 2026-11-16):
+  - the commit is fetched by its hash from the constant GitHub URL into a fresh repository, so nothing in the user's
+    clone (replace refs, hooks, filters, config) plays a part, and the `git worktree add` is of that repository; git
+    and gh run under `env -i`, and the script checks its own bytes and its libraries' against the expected commit's
+    blobs before it sources anything;
+  - the build is `swift build -c release --build-system native --static-swift-stdlib --disable-local-rpath
+    --only-use-versions-from-resolved-file` with every SwiftPM folder in its scratch folder and a scratch `HOME`;
+  - each product is checked before it is laid out: its interpreter exactly `/lib64/ld-linux-x86-64.so.2`; no
+    `RPATH`, `RUNPATH`, `DT_AUDIT` or `DT_DEPAUDIT`; its `NEEDED` set exactly `libc.so.6`, `libm.so.6`,
+    `libstdc++.so.6`, `libgcc_s.so.1` and `ld-linux-x86-64.so.2` (measured on the five release products by the start
+    plan's S4c spike); each resolved by the loader's own `--list` (never `ldd`) to a file whose folders up to `/` are
+    root's and writable by nobody else.
+  - The maps test reads `/proc/<pid>/maps` of the installed host's image through dumpable stand-ins: a scratch host
+    run from the installed folder with its test flag that keeps it dumpable, a session's launcher held dumpable (the
+    host's own sealed copy, which stands for the parsers that run the same copy), and `vibeswitcher-mcp` waiting on
+    stdin. Each line names a file in root's folders (or the program's own installed file, the image `execve` mapped
+    and `build-info` vouches for), or is a kernel name, an anonymous mapping or a sealed copy. A non-dumpable process's
+    maps are refused to its own uid (`EACCES`, measured on the server), so the server and the parsers are covered by
+    the link check and the loader's resolution, not by their maps. *A change to this section's earlier test text*,
+    which read the maps of the installed host, the server and a parser directly (the start plan's ST-D12).
 
 **Why.** Sealed copies make "a file replaced on disk is never what the host runs next" true, where held `O_PATH`
 descriptors and a dynamically linked runtime made it false; the static build is one flag and the toolchain already has
@@ -1442,7 +1462,15 @@ commit is refused; 2026-11-16, with the review of S4a);
 `InstallTests.aFirstInstallRunsOnlyTheCommitsOwnScript`, `InstallTests.theNextInstallRunsThePreviousBuildsScript`,
 `InstallTests.aSecondInstallOnTheSamePrefixIsRefused`, `InstallTests.anInstalledCommitIsRefusedBeforeAnyFetch`,
 `InstallTests.theTestFlagsNeedAScratchPrefix`, `InstallTests.nothingInTheUsersCloneOrConfigShapesTheBuild`,
-`InstallTests.aBinaryWithARunpathIsRefused`, `InstallTests.aBinaryWhoseNeededSetIsntExactIsRefused` (the start plan's
+`InstallTests.aBinaryWithARunpathIsRefused`, `InstallTests.aBinaryWhoseNeededSetIsntExactIsRefused`,
+`InstallTests.aScratchInstallLaysOutTheBuildAndItsRecord`, `InstallTests.aHostStartsFromAnInstalledFolder`,
+`InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite`, `InstallTests.theMapsCheckNamesAFileTheUserCanWrite`
+(the start plan's S4c, run with `VIBESWITCHER_STATIC_PRODUCTS` naming the spike's static products and skipped
+otherwise: an install lays out the five programs, `build-info`, `current` and `installs` with no `.git`; a host run
+from the installed folder passes its `build-info` check and refuses a server one byte off; the installed host, a held
+launcher and the tool server map only root's files, their own installed file and sealed copies, and the server's maps
+are refused, 2026-11-16; planned: `InstallTests.anInstallBuildsWithTheRootToolchain`, written and skipped until M3);
+(the start plan's
 S4b: the install refuses a dirty checkout, a commit not on v2 or that both runners didn't pass, a toolchain the user
 can write, a script or library that isn't the expected commit's (the commit's on a first install, the installed
 build's after it, whichever branch holds it), a second install on the same builds folder and a commit installed
@@ -1465,8 +1493,8 @@ no change, except in the lead's accepted hooks, where only GitGuard's baseline o
 flag, read as GitGuard reads the record, is no change; a scratch home's seal reads nothing outside it; a worker's start
 doesn't hold its team; 2026-11-16, with the review of S7).
 
-**Tests to write:** Step 8: `InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (also reads `/proc/<pid>/maps` of the installed host, server
-and a parser), `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds`. After
+**Tests to write:** Step 8: `InstallTests.anInstallBuildsWithTheRootToolchain` (written, gated on M3's toolchain: run
+once after M3), `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds`. After
 the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts`.
 
 ## S10. The sessions' environment
@@ -1613,7 +1641,12 @@ against it. Each line says what reduces it now, if anything.
    restart runs: the unit, its drop-ins, `environment.d`, the install folder and `build-info`, and what the install
    builds with (the toolchain and package caches, if the user's; while an install runs, its scratch checkout, caches
    and products, S9). The restarted host and its server are then the
-   worker's. Reduced by `UnsetEnvironment=` (the manager's environment no longer reaches the host), the commit-folder
+   worker's. The install itself (the start plan's S4c, 2026-11-16): its build's scratch folder is the user's, so a
+   worker can change sources or objects during the minutes-long build, or ptrace `swift-build` and the compilers it
+   runs; `build-info` then vouches for the result, and the CI check still passes, since it checked the commit, not the
+   build. And a first install (no `current` yet) run from a working copy a worker changed runs that worker's script,
+   which can skip any check (the start plan's ST-D9): before step 10 no team runs, and after the first install the
+   installed copy runs the next. Reduced by `UnsetEnvironment=` (the manager's environment no longer reaches the host), the commit-folder
    `ExecStart`, the start check (a slip caught), the seal (a detector) and the journal's record of starts no
    `vibeswitcher start` explains, which the command line reads itself. Starting the host's image itself with a
    handover's state of its own gives no more on the account's home: a state file gives no word on which host it is,
