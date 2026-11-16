@@ -20,6 +20,10 @@ public enum NodeFolders {
     /// Where installs go unless told otherwise: `<home>/.vibeswitcher/v2/builds`.
     public static func defaultPrefix(accountHome: String) -> String { join(accountHome, ".vibeswitcher/v2/builds") }
 
+    /// The user's node's root, `<home>/.vibeswitcher`, the home from `getpwuid` (the root the host started with
+    /// `--node` takes): where a detached node's record and log are (S3), whatever the command line's HOME says.
+    public static func nodeRoot(accountHome: String) -> String { join(accountHome, ".vibeswitcher") }
+
     /// How the node is started on this machine.
     public enum Mode: Equatable, Sendable {
         /// pid 1 is systemd and the user manager's socket is there: the unit.

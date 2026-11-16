@@ -618,6 +618,8 @@ final class StartWorld: @unchecked Sendable {
     var starter: Result<NodeStarter.Started, StartRefusal>?
     /// The starter refuses before it runs `beforeStart`, as a show check that fails does.
     var starterRefusesBeforeStart: StartRefusal?
+    /// The detached start's answer (S3), once its `beforeStart` ran.
+    var detached: Result<NodeStarter.Started, StartRefusal>?
 
     var log: [String] { lock.withLock { _log } }
     var entries: [[(name: String, value: String)]] { lock.withLock { _entries } }
@@ -668,6 +670,13 @@ final class StartWorld: @unchecked Sendable {
                 if let refused = beforeStart() { return .failure(refused) }
                 self.note("unit:start")
                 return self.starter ?? .success(NodeStarter.Started(commit: inputs.commit, enabledAtLogin: atLogin))
+            },
+            detached: { inputs, beforeStart in
+                self.note("detached:" + inputs.commit)
+                self.lock.withLock { self._started.append((inputs, false)) }
+                if let refused = beforeStart() { return .failure(refused) }
+                self.note("host:start")
+                return self.detached ?? .success(NodeStarter.Started(commit: inputs.commit, enabledAtLogin: false))
             })
     }
 
@@ -676,7 +685,7 @@ final class StartWorld: @unchecked Sendable {
     }
 
     /// Whether any step after the checks wrote, called or recorded anything.
-    var touchedNothing: Bool { !log.contains { $0.hasPrefix("starter:") || $0.hasPrefix("journal:") } && entries.isEmpty }
+    var touchedNothing: Bool { !log.contains { $0.hasPrefix("starter:") || $0.hasPrefix("detached:") || $0.hasPrefix("journal:") } && entries.isEmpty }
 }
 
 extension StartCommandTests {
@@ -906,12 +915,12 @@ extension StartCommandTests {
         guard case .failure(let socket) = missing.run() else { Issue.record("a missing manager socket started the node"); return }
         #expect(socket.text.contains("socket is missing"), "\(socket)")
         #expect(missing.touchedNothing, "\(missing.log)")
-        // No systemd: S3's detached start, not yet.
+        // No systemd: no manager is asked (S3's detached start, `aMachineWithoutSystemdStartsTheNodeDetached`).
         let none = StartWorld()
         none.kind = .node(.noSystemd)
-        guard case .failure(let detached) = none.run() else { Issue.record("a machine without systemd started the node"); return }
-        #expect(detached.text.contains("no systemd"), "\(detached)")
-        #expect(none.touchedNothing, "\(none.log)")
+        none.managerEnvironment = .failure(.init("no manager"))
+        #expect((try? none.run().get()) == .started(commit: StartWorld.installed), "\(none.log)")
+        #expect(!none.log.contains("managerEnvironment") && !none.log.contains("managerConfig"), "\(none.log)")
     }
 
     @Test func startArgumentsAreTheUsagesOnly() {
@@ -1399,5 +1408,503 @@ extension StartCommandTests {
         let environment = node.environment()
         #expect(environment["XDG_RUNTIME_DIR"]?.hasPrefix(node.root.path) == true && environment["XDG_CONFIG_HOME"]?.hasPrefix(node.root.path) == true)
         #expect(environment["DBUS_SESSION_BUS_ADDRESS"] == nil)
+    }
+}
+
+// MARK: - The detached start, the record and `stop` without a server (the start plan's S3)
+
+/// A scratch session host to start detached (S3): a short root whose `home/.vibeswitcher` is a link to it (the host's
+/// HOME, the only variable it gets besides PATH, finds its root so), `build/` holding links to the built products and
+/// their `build-info` (`ScratchNode.install`), and the host's command line: `ScratchNode`'s arguments (`--socket`, spelled
+/// through `<home>/.vibeswitcher` as the server finds its root's host socket,
+/// `--lock <root>/scratch-host.lock`, `--node-root`, `--server`, `--exit-with` this process, so it ends with the test
+/// process however that goes), no `--node`, then `extra`.
+struct DetachedScratch {
+    let root: URL
+    let home: URL
+    let command: [String]
+    static let path = "/usr/bin:/bin"
+
+    init(_ scratch: Scratch, extra: [String] = []) throws {
+        root = try scratch.shortFolder("vsdt")
+        home = root.appendingPathComponent("home", isDirectory: true)
+        let nodeRoot = root.appendingPathComponent("build", isDirectory: true)
+        for folder in [home, nodeRoot.appendingPathComponent("bin")] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
+        try FileManager.default.createSymbolicLink(atPath: home.appendingPathComponent(".vibeswitcher").path, withDestinationPath: root.path)
+        try ScratchNode.install(into: nodeRoot)
+        let socket = home.appendingPathComponent(".vibeswitcher/host.sock").path, lock = root.appendingPathComponent(NodeCheck.scratchLock).path
+        command = [nodeRoot.appendingPathComponent("bin/vibeswitcher-host").path, "--socket", socket, "--lock", lock, "--idle-exit", "600",
+                   "--server", nodeRoot.appendingPathComponent("bin/vibeswitcher-server").path, "--node-root", nodeRoot.path,
+                   "--exit-with", String(getpid())] + extra
+    }
+
+    func start(settle: TimeInterval = NodeStarter.detachedSettle) -> Result<NodeRecord, StartRefusal> {
+        NodeStarter.startDetached(host: command, home: home.path, path: Self.path, root: root.path, settle: settle)
+    }
+
+    var log: URL { root.appendingPathComponent("v2/host.log") }
+
+    /// Its server: the host's child named so (started from a sealed copy, known by its argv[0]).
+    static func server(of host: pid_t) -> pid_t? {
+        Platform.Processes.children(host).first { Platform.Processes.arguments($0).first == "vibeswitcher-server" }
+    }
+
+    /// Ends the host `pid` (this process's child, not yet collected) and what is under it, whatever a case left.
+    static func end(_ pid: pid_t) {
+        let under = ScratchNode.descendants(of: pid)
+        kill(pid, SIGKILL)
+        _ = collected(pid, by: MacTime.real.awake() + 10)
+        ScratchNode.waitForEnd(under)
+    }
+}
+
+/// What a `StopSequence` stand-in saw, in order: each step's name as it ran (`typed:` with what it showed, `journal:`
+/// with the entry's event, `fallback:` and `stopper:` with the mode, `throughServer`), the entries' fields and what
+/// was said.
+final class StopWorld: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _log: [String] = []
+    private var _entries: [[(name: String, value: String)]] = []
+    private var _said: [String] = []
+
+    var kind = StartSequence.Kind.node(.systemd)
+    var installedBuild: Result<(commit: String, folder: String), StartRefusal> = .success((commit: StartWorld.installed, folder: StartWorld.prefix + "/" + StartWorld.installed))
+    var server = StopSequence.ServerAnswer.notRunning("the node isn't running: no server answers at /x/v2/server.sock")
+    var typed = TypedOutcome.typed
+    var journalWrites = true
+    var fallback: Result<String, StartRefusal> = .success(NodeTexts.stopUnit)
+    var stopper: Result<Void, StartRefusal> = .success(())
+    var throughServer: Result<Void, StartRefusal> = .success(())
+
+    var log: [String] { lock.withLock { _log } }
+    var entries: [[(name: String, value: String)]] { lock.withLock { _entries } }
+    var said: String { lock.withLock { _said.joined(separator: "\n") } }
+    private func note(_ step: String) { lock.withLock { _log.append(step) } }
+
+    var steps: StopSequence.Steps {
+        StopSequence.Steps(
+            kind: { self.note("kind"); return self.kind },
+            installedBuild: { self.note("installedBuild"); return self.installedBuild },
+            server: { self.note("server"); return self.server },
+            typed: { _, what in self.note("typed:" + what); return self.typed },
+            say: { line in self.lock.withLock { self._said.append(line) } },
+            journal: { fields in
+                self.note("journal:" + (fields.first { $0.name == "VIBESWITCHER_EVENT" }?.value ?? "?"))
+                guard self.journalWrites else { return false }
+                self.lock.withLock { self._entries.append(fields) }
+                return true
+            },
+            throughServer: { _ in self.note("throughServer"); return self.throughServer },
+            fallback: { mode in self.note("fallback:\(mode)"); return self.fallback },
+            stopper: { mode in self.note("stopper:\(mode)"); return self.stopper })
+    }
+
+    func run() -> Result<StopSequence.Outcome, StartRefusal> { StopSequence(steps: steps).run() }
+
+    /// Whether anything was written, called or recorded.
+    var touchedNothing: Bool { !log.contains { $0.hasPrefix("journal:") || $0.hasPrefix("stopper:") || $0 == "throughServer" } && entries.isEmpty }
+}
+
+extension StartCommandTests {
+    // MARK: The detached start and its record (Linux: a scratch host started detached)
+
+    @Test(NodeTraits.linuxOnly) func aNodeWithoutSystemdRunsInASessionOfItsOwnAndStopEndsIt() async throws {
+        // A machine whose runtime folder is empty and whose pid 1 isn't systemd, by the mode's stand-ins: detached.
+        let machine = scratch.url("machine")
+        try FileManager.default.createDirectory(at: machine.appendingPathComponent("run-user"), withIntermediateDirectories: true)
+        try "init\n".write(to: machine.appendingPathComponent("comm"), atomically: true, encoding: .utf8)
+        #expect(NodeFolders.mode(runtimeFolder: machine.appendingPathComponent("run-user").path, systemdSystem: machine.appendingPathComponent("no-systemd").path,
+                                 initComm: machine.appendingPathComponent("comm").path) == .noSystemd)
+
+        let host = try DetachedScratch(scratch)
+        let record = try host.start().get()
+        let pid = record.pid
+        var ended = false
+        defer { if !ended { DetachedScratch.end(pid) } }
+        // A session of its own, with no controlling terminal (tty_nr 0); this process, the spawner, its parent (the
+        // command line exits after its wait, and the host is init's).
+        #expect(getsid(pid) == pid)
+        let link = try #require(Platform.Processes.link(pid))
+        #expect(link.terminal == nil && link.parent == getpid(), "\(link)")
+        // The record: its pid and start, 0600.
+        #expect(record == NodeRecord(pid: pid, startTicks: link.startTicks))
+        #expect(NodeRecord.read(root: host.root.path) == record)
+        var info = stat()
+        #expect(lstat(NodeRecord.path(root: host.root.path), &info) == 0 && info.st_mode & 0o777 == 0o600 && info.st_mode & S_IFMT == S_IFREG)
+        #expect(lstat(host.log.path, &info) == 0 && info.st_mode & 0o777 == 0o600)
+        // The host runs: its server, its child, listens.
+        let up = await eventually(timeout: 120) {
+            DetachedScratch.server(of: pid) != nil && FileManager.default.fileExists(atPath: host.root.appendingPathComponent("v2/server.sock").path)
+        }
+        try #require(up, "the detached host's server never came: \((try? String(contentsOf: host.log, encoding: .utf8)) ?? "")")
+        let server = try #require(DetachedScratch.server(of: pid))
+        #expect(getsid(server) == pid, "the server is in the host's session")
+        // Its output (and its server's) is in host.log.
+        let said = (try? String(contentsOf: host.log, encoding: .utf8)) ?? ""
+        #expect(said.contains("vibeswitcher-host: started") && said.contains("server child pid \(server)"), "\(said)")
+        // A second start while the recorded host runs: refused, nothing started.
+        guard case .failure(let again) = host.start() else { Issue.record("a second host was started over a live record"); return }
+        #expect(again.text.contains("still runs"), "\(again)")
+        #expect(NodeRecord.read(root: host.root.path) == record)
+
+        // stop without the server ends it, collects it (this process is its parent), and what was under it.
+        let under = ScratchNode.descendants(of: pid)
+        #expect(under.contains { $0.pid == server }, "\(under)")
+        let stopped = NodeStopper.stopDetached(root: host.root.path, isHost: { $0 == host.command })
+        #expect((try? stopped.get()) != nil, "\(stopped)")
+        var status: Int32 = 0
+        let reaped = waitpid(pid, &status, WNOHANG)
+        ended = reaped == -1
+        #expect(reaped == -1 && errno == ECHILD, "the host is still this process's child, or a zombie")
+        #expect(!under.contains(where: ScratchNode.runs), "\(under.filter(ScratchNode.runs))")
+        #expect(NodeRecord.read(root: host.root.path) == nil)
+    }
+
+    @Test(NodeTraits.linuxOnly) func theDetachedHostGetsOnlyTheListedEnvironment() async throws {
+        // Held dumpable (a scratch host's test flag), so its environment can be read from here. The test process's own
+        // variables (the run's VIBESWITCHER_HOME, TMPDIR, CFFIXED_USER_HOME…) stand for what a shell would pass:
+        // LD_PRELOAD or GIT_CONFIG_GLOBAL set here would reach every child the suite's other cases start meanwhile.
+        let host = try DetachedScratch(scratch, extra: ["--test-stays-dumpable"])
+        let record = try host.start().get()
+        defer { DetachedScratch.end(record.pid) }
+        try #require(await eventually(timeout: 120) { Platform.Processes.isDumpable(record.pid) == true })
+        let environment = try #require(Platform.Processes.environment(record.pid))
+        #expect(environment == ["HOME=\(host.home.path)", "PATH=\(DetachedScratch.path)", "SWIFT_BACKTRACE=enable=no"], "\(environment)")
+        #expect(environment == NodeStarter.detachedEnvironment(home: host.home.path, path: DetachedScratch.path))
+        #expect(ProcessInfo.processInfo.environment.count > 3)
+        // A dumpable process isn't the node's host: stop refuses it, and it still runs.
+        guard case .failure(let refused) = NodeStopper.stopDetached(root: host.root.path, isHost: { $0 == host.command }) else {
+            Issue.record("a dumpable recorded process was ended"); return
+        }
+        #expect(refused.text.contains("is dumpable") && refused.text.contains("nothing ended"), "\(refused)")
+        #expect(record.isLive())
+    }
+
+    /// The app's `HostClientReapTests.endingAHostByAStalePidLeavesTheProcessNowUnderItAlone` (port-map row 98): a
+    /// record whose pid now names another process, by its start or by its command line, ends nothing; that process
+    /// stays its own parent's to signal and collect.
+    @Test(NodeTraits.linuxOnly) func stoppingByAStalePidLeavesTheProcessNowUnderItAlone() async throws {
+        let root = try scratch.shortFolder("vsrp")
+        var spawn = Platform.Spawn(executable: "/bin/sleep", arguments: ["/bin/sleep", "600"])
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.keep = []
+        let pid = try await startRetrying(spawn)
+        var collectedHere = false
+        defer { if !collectedHere { kill(pid, SIGKILL); _ = collected(pid, by: MacTime.real.awake() + 10) } }
+        let ticks = try #require(Platform.Processes.link(pid)?.startTicks)
+        func stillRuns() -> Bool {
+            var status: Int32 = 0
+            return waitpid(pid, &status, WNOHANG) == 0 && Platform.Processes.kernelRecord(pid)?.state != .zombie
+        }
+
+        // The pid given to another process since the record was written: its start isn't the record's.
+        try NodeRecord(pid: pid, startTicks: ticks + 1).write(root: root.path)
+        guard case .failure(let stale) = NodeStopper.stopDetached(root: root.path, isHost: { _ in true }) else {
+            Issue.record("a stale record's pid was ended"); return
+        }
+        #expect(stale.text.contains("now names another process") && stale.text.contains("nothing ended"), "\(stale)")
+        #expect(stillRuns())
+        // Its start matching, but the command line isn't the installed host's.
+        try NodeRecord(pid: pid, startTicks: ticks).write(root: root.path)
+        let prefix = StartWorld.prefix
+        guard case .failure(let other) = NodeStopper.stopDetached(root: root.path, isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }) else {
+            Issue.record("a recorded process of another command line was ended"); return
+        }
+        #expect(other.text.contains("now names another process") && other.text.contains("/bin/sleep 600") && other.text.contains("nothing ended"), "\(other)")
+        #expect(stillRuns())
+        // Still this test's to end and collect: nobody signalled or collected it.
+        kill(pid, SIGTERM)
+        let status = try #require(collected(pid, by: MacTime.real.awake() + 30))
+        collectedHere = true
+        #expect(status & 0x7f == SIGTERM, "\(status)")
+
+        // The installed host's form, word by word.
+        let host = NodeUnit.execStart(prefix: prefix, commit: Self.commit)
+        #expect(NodeCheck.isInstalledHost(host, prefix: prefix))
+        #expect(NodeCheck.isInstalledHost(host, prefix: prefix + "/"))
+        for bad in [["/bin/sleep", "600"], Array(host.prefix(3)),
+                    ["\(prefix)/current/bin/vibeswitcher-host", "--node", "--node-root", "\(prefix)/current"],
+                    ["\(prefix)/\(Self.commit)/bin/vibeswitcher-host", "--node", "--node-root", "\(prefix)/\(Self.other)"],
+                    ["\(prefix)/\(Self.commit)/bin/vibeswitcher-host", "--node-root", "\(prefix)/\(Self.commit)", "--node"],
+                    ["/srv/x/\(Self.commit)/bin/vibeswitcher-host", "--node", "--node-root", "/srv/x/\(Self.commit)"]] {
+            #expect(!NodeCheck.isInstalledHost(bad, prefix: prefix), "\(bad)")
+        }
+    }
+
+    /// The app's `HostClientReapTests.aHostWhoseExitEventComesBeforeItCanBeReapedIsStillReaped` (port-map row 98): a
+    /// host that ends at once is collected by the start's bounded wait, so no zombie of it is left, and the start is
+    /// refused naming its log, which holds what it wrote.
+    @Test(NodeTraits.linuxOnly) func aHostThatExitsBeforeItIsWaitedForLeavesNoZombie() throws {
+        let root = try scratch.shortFolder("vszb")
+        let home = root.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        // A settle as long as the hang guard: the host's exit, not a time, ends the wait.
+        let started = NodeStarter.startDetached(host: ["/bin/sh", "-c", "echo said-out; echo said-err >&2; exit 3"], home: home.path,
+                                                path: DetachedScratch.path, root: root.path, settle: hangGuard)
+        guard case .failure(let refused) = started else { Issue.record("a host that ended at once was taken: \(started)"); return }
+        let log = root.appendingPathComponent("v2/host.log").path
+        #expect(refused.text.contains("the host ended at once") && refused.text.contains("exit status 3") && refused.text.contains("see \(log)"), "\(refused)")
+        let match = try #require(refused.text.firstMatch(of: try Regex("pid ([0-9]+)")), "\(refused)")
+        let pid = try #require(match.output[1].substring.flatMap { pid_t(String($0)) })
+        var status: Int32 = 0
+        #expect(waitpid(pid, &status, WNOHANG) != pid, "the host was left a zombie child")
+        #expect(NodeRecord.read(root: root.path) == nil)
+        let said = try String(contentsOfFile: log, encoding: .utf8)
+        #expect(said.contains("said-out") && said.contains("said-err"), "\(said)")
+        // A command that isn't absolute is refused before anything starts.
+        guard case .failure(let relative) = NodeStarter.startDetached(host: ["sh"], home: home.path, path: DetachedScratch.path, root: root.path) else {
+            Issue.record("a relative host command was started"); return
+        }
+        #expect(relative.text.contains("absolute"), "\(relative)")
+    }
+
+    @Test(NodeTraits.linuxOnly) func aRecordIsReadOnlyFromARegularFileOfItsOwnFormat() throws {
+        let root = try scratch.shortFolder("vsrr")
+        let record = NodeRecord(pid: 4242, startTicks: 99)
+        try record.write(root: root.path)
+        #expect(NodeRecord.read(root: root.path) == record)
+        let text = try String(contentsOfFile: NodeRecord.path(root: root.path), encoding: .utf8)
+        #expect(text == "{\"format\":1,\"pid\":4242,\"startTicks\":99}\n", "\(text)")
+        // A link in its place isn't followed, and is replaced by the next write, not written through.
+        let elsewhere = root.appendingPathComponent("elsewhere")
+        try text.write(to: elsewhere, atomically: true, encoding: .utf8)
+        unlink(NodeRecord.path(root: root.path))
+        try FileManager.default.createSymbolicLink(atPath: NodeRecord.path(root: root.path), withDestinationPath: elsewhere.path)
+        #expect(NodeRecord.read(root: root.path) == nil)
+        try NodeRecord(pid: 7, startTicks: 8).write(root: root.path)
+        #expect(try String(contentsOf: elsewhere, encoding: .utf8) == text)
+        #expect(NodeRecord.read(root: root.path) == NodeRecord(pid: 7, startTicks: 8))
+        // Another format, or no pid: none.
+        for bad in ["{\"format\":2,\"pid\":7,\"startTicks\":8}", "{\"format\":1,\"pid\":0,\"startTicks\":8}", "7"] {
+            try bad.write(toFile: NodeRecord.path(root: root.path), atomically: false, encoding: .utf8)
+            #expect(NodeRecord.read(root: root.path) == nil, "\(bad)")
+        }
+        // Removed only while it is still the one given.
+        try record.write(root: root.path)
+        NodeRecord.remove(root: root.path, ifStill: NodeRecord(pid: 1, startTicks: 1))
+        #expect(NodeRecord.read(root: root.path) == record)
+        NodeRecord.remove(root: root.path, ifStill: record)
+        #expect(NodeRecord.read(root: root.path) == nil)
+    }
+
+    // MARK: stop's unit form (Linux: a recording systemctl)
+
+    @Test(NodeTraits.linuxOnly) func stopWithNoServerStopsTheUnit() async throws {
+        let manager = try Manager(scratch)
+        #expect((try? NodeStopper.stopUnit(systemctl: manager.systemctl.path, runtimeFolder: manager.runtime.path).get()) != nil)
+        #expect(manager.calls == ["--user stop vibeswitcher-node"], "\(manager.calls)")
+        #expect(manager.environments == ["XDG_RUNTIME_DIR=\(manager.runtime.path) DBUS_SESSION_BUS_ADDRESS=unset"], "\(manager.environments)")
+        #expect(NodeStopper.unitWait == TimeInterval(NodeUnit.timeoutStop + 15))
+        try manager.fail("--user stop vibeswitcher-node")
+        guard case .failure(let failed) = NodeStopper.stopUnit(systemctl: manager.systemctl.path, runtimeFolder: manager.runtime.path) else {
+            Issue.record("a failed systemctl stop was taken"); return
+        }
+        #expect(failed.text.contains("stop vibeswitcher-node exited 1") && failed.exitCode == 1, "\(failed)")
+
+        // On a scratch node the command line's stop with no server still says the node isn't running (69) and asks
+        // its manager nothing (ST-D1).
+        let root = try scratch.shortFolder("vsst")
+        let testFolder = root.appendingPathComponent("v2/test")
+        try FileManager.default.createDirectory(at: testFolder, withIntermediateDirectories: true)
+        try ScratchNode.standIns(in: testFolder, scopes: ScratchNode.ownScope.map { [$0] })
+        try Self.recordingSystemctl(in: testFolder)
+        let ran = try await run(commandLine, ["stop"], environment: scratchEnvironment(root, ["VIBESWITCHER_HOME": root.path]))
+        #expect(ran.status == 69 && ran.errors.contains("the node isn't running"), "\(ran.output)\(ran.errors)")
+        #expect(!Self.calls(in: testFolder).contains { $0.contains("stop") }, "\(Self.calls(in: testFolder))")
+    }
+}
+
+extension StartCommandTests {
+    // MARK: StopSequence and the detached start's sequence (pure: the Mac runs these)
+
+    @Test func aStopWithAServerThatDoesntAnswerStopsTheUnit() throws {
+        for answer in [StopSequence.ServerAnswer.noHello("the node's server sent no hello"),
+                       .refusedByCheck("the process listening on the server's socket (pid 9) is dumpable: not the node's server"),
+                       .notRunning("the node isn't running: no server answers at /x/v2/server.sock")] {
+            let world = StopWorld()
+            world.server = answer
+            #expect(try world.run().get() == .withoutServer, "\(answer)")
+            let log = world.log
+            let typed = try #require(log.firstIndex { $0.hasPrefix("typed:") }, "\(log)")
+            let stopper = try #require(log.firstIndex(of: "stopper:systemd"), "\(log)")
+            #expect(typed < stopper && !log.contains("throughServer"), "\(log)")
+            #expect(log.first { $0.hasPrefix("typed:") } == "typed:" + NodeTexts.stopUnit, "\(log)")
+            #expect(world.said.contains("stop goes without it"), "\(world.said)")
+        }
+        // Without systemd, the recorded host's stopper.
+        let detached = StopWorld()
+        detached.kind = .node(.noSystemd)
+        detached.fallback = .success(NodeTexts.stopDetached(pid: 41, arguments: ["/h/bin/vibeswitcher-host", "--node"]))
+        #expect(try detached.run().get() == .withoutServer)
+        #expect(detached.log.contains("fallback:noSystemd") && detached.log.contains("stopper:noSystemd"), "\(detached.log)")
+        #expect(detached.log.contains { $0.hasPrefix("typed:This ends the node's host, pid 41 (/h/bin/vibeswitcher-host --node)") }, "\(detached.log)")
+
+        // A server that answers never falls back: its count in the confirmation, then its own stop.
+        let answered = StopWorld()
+        answered.server = .answered(live: 3)
+        #expect(try answered.run().get() == .throughServer)
+        #expect(answered.log == ["kind", "server", "typed:" + NodeTexts.stop(live: 3), "throughServer"], "\(answered.log)")
+        // A fallback that finds nothing to stop (the unit inactive, the record stale): refused, nothing asked.
+        let nothing = StopWorld()
+        nothing.fallback = .failure(StartRefusal("the recorded pid now names another process (…); nothing ended"))
+        guard case .failure(let stale) = nothing.run() else { Issue.record("a stale record went on"); return }
+        #expect(stale.text.contains("nothing ended") && nothing.touchedNothing && !nothing.log.contains { $0.hasPrefix("typed:") }, "\(nothing.log)")
+        // A manager whose socket is missing: refused before what it would stop is read.
+        let missing = StopWorld()
+        missing.kind = .node(.socketMissing)
+        guard case .failure(let socket) = missing.run() else { Issue.record("a missing manager socket went on"); return }
+        #expect(socket.text.contains("socket is missing") && missing.touchedNothing && !missing.log.contains { $0.hasPrefix("fallback:") }, "\(missing.log)")
+        // A scratch node never falls back: refused as before (69, 1, 77).
+        for (answer, code) in [(StopSequence.ServerAnswer.notRunning("the node isn't running: no server"), Int32(69)),
+                               (.noHello("the node's server sent no hello"), 1), (.refusedByCheck("is dumpable"), 77)] {
+            let scratch = StopWorld()
+            scratch.kind = .scratch
+            scratch.server = answer
+            guard case .failure(let refused) = scratch.run() else { Issue.record("a scratch node fell back"); return }
+            #expect(refused.exitCode == code && scratch.touchedNothing && !scratch.log.contains("installedBuild"), "\(answer): \(scratch.log)")
+        }
+    }
+
+    @Test func stopJournalsItsOwnStopBeforeTheManagerIsAsked() throws {
+        let world = StopWorld()
+        _ = try world.run().get()
+        let log = world.log
+        let typed = try #require(log.firstIndex { $0.hasPrefix("typed:") }, "\(log)")
+        let entry = try #require(log.firstIndex(of: "journal:stop"), "\(log)")
+        let stopper = try #require(log.firstIndex { $0.hasPrefix("stopper:") }, "\(log)")
+        #expect(typed < entry && entry < stopper, "\(log)")
+        // The entry is `NodeJournal.entry(event: "stop", action:)`: stamped as journald stamps a terminal scope's entry,
+        // and followed 30 s later by systemd's stop of the unit, it explains that stop.
+        let fields = try #require(world.entries.last)
+        #expect(fields.contains { $0.name == "VIBESWITCHER_EVENT" && $0.value == "stop" } && fields.contains { $0.name == "VIBESWITCHER_ACTION" })
+        var stamped: [String: Any] = ["_UID": "1000", "_SYSTEMD_CGROUP": "/init.scope"]
+        for field in fields { stamped[field.name] = field.value }
+        let at = NodeJournalTests.start
+        let entries = NodeJournalTests.read([NodeJournalTests.line(stamped, at: at), NodeJournalTests.job("stop", at: at.addingTimeInterval(30))])
+        let stops = NodeJournal.events(entries)
+        #expect(stops.count == 1 && stops.first?.kind == .stop, "\(stops)")
+        #expect(NodeJournal.unexplained(starts: stops, entries: entries, rule: NodeJournalTests.rule).isEmpty)
+
+        // An entry that can't be written: through systemd refused, nothing stopped.
+        let unwritten = StopWorld()
+        unwritten.journalWrites = false
+        guard case .failure(let refused) = unwritten.run() else { Issue.record("a stop with no journal entry went on"); return }
+        #expect(refused.text.contains("journal") && !unwritten.log.contains { $0.hasPrefix("stopper:") }, "\(unwritten.log)")
+        // Without systemd there is no journal: the stop goes on, said not recorded.
+        let none = StopWorld()
+        none.kind = .node(.noSystemd)
+        none.journalWrites = false
+        #expect(try none.run().get() == .withoutServer)
+        #expect(none.said.contains("isn't recorded"), "\(none.said)")
+    }
+
+    @Test func aStopFallbackWithNoTerminalIsRefused() {
+        for answer in [StopSequence.ServerAnswer.notRunning("the node isn't running"), .answered(live: 2)] {
+            let world = StopWorld()
+            world.server = answer
+            world.typed = .noTerminal
+            guard case .failure(let refused) = world.run() else { Issue.record("a stop with no terminal went on"); return }
+            #expect(refused.text == TypedOutcome.noTerminal.refusal, "\(refused)")
+            #expect(world.touchedNothing, "\(answer): \(world.log)")
+        }
+    }
+
+    @Test func aCommandLineBuiltInDotBuildRefusesTheStopFallbackBeforeAnyWrite() {
+        let world = StopWorld()
+        world.installedBuild = .failure(StartRefusal("start runs only from an installed build: this command line is /src/.build/debug/vibeswitcher-cli"))
+        guard case .failure(let refused) = world.run() else { Issue.record("a command line under .build stopped the node"); return }
+        #expect(refused.text.contains("runs only from an installed build") && refused.exitCode == 77, "\(refused)")
+        // The server was asked (a connection, as before S3), then the check, and nothing after it: no fallback read,
+        // no code, no entry, no stop.
+        #expect(world.log == ["kind", "server", "installedBuild"], "\(world.log)")
+        // Through the server, no installed build is needed (as before S3).
+        let answered = StopWorld()
+        answered.server = .answered(live: 0)
+        answered.installedBuild = world.installedBuild
+        #expect((try? answered.run().get()) == .throughServer)
+        #expect(!answered.log.contains("installedBuild"), "\(answered.log)")
+    }
+
+    @Test func aMachineWithoutSystemdStartsTheNodeDetached() throws {
+        let world = StartWorld()
+        world.kind = .node(.noSystemd)
+        world.existingUnit = "a unit naming \(Self.other)"
+        world.current = Self.other
+        #expect(try world.run().get() == .started(commit: StartWorld.installed))
+        let log = world.log
+        // No manager, no unit, no link folders: the command line's own build, detached.
+        for step in ["managerEnvironment", "managerConfig", "existingUnit", "unitBuild", "enabledBy"] {
+            #expect(!log.contains(step), "\(step): \(log)")
+        }
+        #expect(!log.contains { $0.hasPrefix("starter:") }, "\(log)")
+        let (inputs, atLogin) = try #require(world.started.first)
+        #expect(inputs == NodeUnit.Inputs(prefix: StartWorld.prefix, commit: StartWorld.installed, home: StartWorld.home,
+                                          swiftBin: StartWorld.swiftBin, nodeBin: StartWorld.nodeBin) && !atLogin)
+        // The list and its code first, then the start's code, then the entry before the host starts.
+        let ack = try #require(log.firstIndex(of: "journal:" + NotPromised.ackEvent), "\(log)")
+        let typed = try #require(log.lastIndex { $0.hasPrefix("typed:") }, "\(log)")
+        let entry = try #require(log.firstIndex(of: "journal:start"), "\(log)")
+        let detached = try #require(log.firstIndex { $0.hasPrefix("detached:") }, "\(log)")
+        let started = try #require(log.firstIndex(of: "host:start"), "\(log)")
+        #expect(ack < typed && typed < detached && detached < entry && entry < started, "\(log)")
+        // The confirmation: detached, its command, its environment, its log and its record, the weaker rule.
+        let said = world.said
+        #expect(said.contains("No systemd here: this starts the node detached") && said.contains(NodeUnit.execStart(prefix: StartWorld.prefix, commit: StartWorld.installed).joined(separator: " ")), "\(said)")
+        #expect(said.contains("SWIFT_BACKTRACE=enable=no") && said.contains("/home/u/.vibeswitcher/v2/host.log") && said.contains("/home/u/.vibeswitcher/v2/node.pid"), "\(said)")
+        #expect(said.contains(NodeTexts.weakerRule) && said.contains("current is \(Self.other)"), "\(said)")
+
+        // --at-login: refused, nothing asked.
+        let login = StartWorld()
+        login.kind = .node(.noSystemd)
+        guard case .failure(let refused) = login.run(StartArguments(atLogin: true)) else { Issue.record("a detached start enabled at login"); return }
+        #expect(refused.text.contains("nothing starts the node when you log in") && login.touchedNothing, "\(login.log)")
+        // No journal (none without systemd): the list and its code at each start, the start said not recorded.
+        let none = StartWorld()
+        none.kind = .node(.noSystemd)
+        none.acknowledged = .failure(.init("journalctl --user didn't answer"))
+        none.journalWrites = false
+        #expect(try none.run().get() == .started(commit: StartWorld.installed))
+        #expect(none.log.contains("showList") && none.log.filter { $0.hasPrefix("typed:") }.count == 2, "\(none.log)")
+        #expect(none.said.contains("can't be recorded") && none.said.contains("this start isn't recorded"), "\(none.said)")
+        // The code for the list typed wrong: nothing started.
+        let wrong = StartWorld()
+        wrong.kind = .node(.noSystemd)
+        wrong.typed = [.wrong]
+        guard case .failure = wrong.run() else { Issue.record("a wrong code started the node detached"); return }
+        #expect(wrong.touchedNothing, "\(wrong.log)")
+        // The host that didn't come: its refusal.
+        let failed = StartWorld()
+        failed.kind = .node(.noSystemd)
+        failed.acknowledged = .success(true)
+        failed.detached = .failure(StartRefusal("the host ended at once (pid 7, exit status 1); see /home/u/.vibeswitcher/v2/host.log", exitCode: 1))
+        guard case .failure(let ended) = failed.run() else { Issue.record("a host that ended was taken"); return }
+        #expect(ended.text.contains("ended at once"), "\(ended)")
+    }
+
+    /// The app's `HostRestartTests.anyOtherSaysHowManySessionsInAllProjectsItEndsAndAsksFirst` (port-map row 100),
+    /// restated on `stop`'s confirmation: how many sessions in all projects it ends; nothing live, it says so.
+    @Test func anyOtherSaysHowManySessionsInAllProjectsItEndsAndAsksFirst() {
+        #expect(NodeTexts.stop(live: 3) == "This ends 3 sessions in all projects (the leads first), then stops its host.")
+        #expect(NodeTexts.stop(live: 1) == "This ends 1 session in all projects (the leads first), then stops its host.")
+        #expect(NodeTexts.stop(live: 3).contains("ends 3 sessions in all projects"))
+        #expect(NodeTexts.stop(live: 0) == "No session is live; this stops the host.")
+        // Each is asked first: the confirmation is what the typed code is asked with.
+        let world = StopWorld()
+        world.server = .answered(live: 1)
+        _ = world.run()
+        #expect(world.log.contains("typed:" + NodeTexts.stop(live: 1)), "\(world.log)")
+    }
+
+    @Test func statusSaysTheWeakerRuleWithoutSystemd() throws {
+        #expect(NodeTexts.statusLines(mode: .detached(record: NodeRecord(pid: 4, startTicks: 5))) == [NodeTexts.weakerRule])
+        #expect(NodeTexts.statusLines(mode: .detached(record: nil)) == [NodeTexts.weakerRule])
+        #expect(NodeTexts.statusLines(mode: .node).isEmpty && NodeTexts.statusLines(mode: .scratch(root: "/srv/x")).isEmpty)
+        #expect(NodeTexts.weakerRule.contains("weaker voice rule") && NodeTexts.weakerRule.contains("pid file") && NodeTexts.weakerRule.contains("any worker"))
+        // `status` adds them after the facts, in both forms (the command line can't be put on a machine without
+        // systemd here: its code is read).
+        let status = try String(contentsOf: ServerLintTests.repo.appendingPathComponent("Sources/vibeswitcher-cli/Status.swift"), encoding: .utf8)
+        #expect(status.contains("NodeTexts.statusLines(mode: context.mode)") && status.contains("facts.lines + modeLines"))
     }
 }

@@ -15,10 +15,16 @@ import VibeCore
 /// leader can never leave its session. So a session's program a worker ptraced or replaced, made non-dumpable and
 /// listening, still fails (the security architecture document's S3).
 /// `VIBESWITCHER_HOME` naming the account's own folder gets the user's node's check. No flag or pid is passed.
+/// - **A node started detached** (the start plan's S3, ST-D6: the user's node on a machine whose pid 1 isn't systemd):
+///   non-dumpable, a child of the host its record (`NodeRecord`, `<root>/v2/node.pid`) names, in that process's
+///   session, with no cgroup line read. The record is honoured only while what it names is that host
+///   (`recordedHost`): started at the recorded tick, with the installed host's command line, non-dumpable.
 public enum NodeCheck {
     public enum Mode: Equatable, Sendable {
         case node
         case scratch(root: String)
+        /// The user's node started detached, and its record when one could be read (S3).
+        case detached(record: NodeRecord?)
     }
 
     /// A scratch host's lock in its root (`ScratchNode`'s `--lock`).
@@ -70,8 +76,11 @@ public enum NodeCheck {
             }
         }
         guard let expectedParent else {
-            return mode == .node ? "the node's unit has no main process to check the server against"
-                : "no process holds the scratch node's lock, so the server can't be checked against its host"
+            switch mode {
+            case .node: return "the node's unit has no main process to check the server against"
+            case .scratch: return "no process holds the scratch node's lock, so the server can't be checked against its host"
+            case .detached: return "the node's record names no host to check the server against"
+            }
         }
         guard let parent = listener.parent, parent == expectedParent else {
             return "the process listening on the server's socket (pid \(listener.pid)) isn't a child of the node's host (pid \(expectedParent))"
@@ -82,5 +91,60 @@ public enum NodeCheck {
                 + "a session's program, not the node's server"
         }
         return nil
+    }
+
+    /// The process `pid` as the command line reads it (`ServerCheck`): whether it is dumpable, its parent, its cgroup
+    /// lines and its session.
+    public static func listener(pid: pid_t) -> Listener {
+        let session = getsid(pid)
+        return Listener(pid: pid, dumpable: Platform.Processes.isDumpable(pid), parent: Platform.Processes.link(pid)?.parent,
+                        cgroup: Platform.Processes.cgroup(pid), session: session > 0 ? session : nil)
+    }
+
+    /// What a detached node's record names (S3).
+    public enum Recorded: Equatable, Sendable {
+        /// The node's host, by its pid.
+        case host(pid_t)
+        /// No host: no record, or the process it names has ended (the node isn't running). Why, said.
+        case none(String)
+        /// A process that isn't the node's host (another one given the number since, another command line, or a
+        /// dumpable one). Why, said: nothing is checked against it or signalled.
+        case other(String)
+    }
+
+    /// The host `record` names, or why it isn't one: the process must still run from the recorded tick (`startTicks`:
+    /// nil when it has gone or is a zombie), its command line (`arguments`) must be the installed host's (`isHost`;
+    /// the command line passes `isInstalledHost`, a test its scratch host's), and it must be non-dumpable
+    /// (`dumpable`). Every reader is a parameter, the system's by default.
+    public static func recordedHost(_ record: NodeRecord?, isHost: ([String]) -> Bool,
+                                    startTicks: (pid_t) -> UInt64? = NodeRecord.liveTicks,
+                                    arguments: (pid_t) -> [String] = Platform.Processes.arguments,
+                                    dumpable: (pid_t) -> Bool? = Platform.Processes.isDumpable) -> Recorded {
+        guard let record else { return .none("no host is recorded") }
+        let pid = record.pid
+        guard let ticks = startTicks(pid) else { return .none("the recorded host (pid \(pid)) has ended") }
+        guard ticks == record.startTicks else {
+            return .other("the recorded pid now names another process (pid \(pid) started at tick \(ticks), the record says \(record.startTicks))")
+        }
+        let words = arguments(pid)
+        guard isHost(words) else {
+            return .other("the recorded pid now names another process (pid \(pid) runs \(ConfigSeal.inert(words.joined(separator: " "), limit: 512)), not the installed host)")
+        }
+        switch dumpable(pid) {
+        case false?: return .host(pid)
+        case true?: return .other("the recorded host (pid \(pid)) is dumpable: not the node's host")
+        case nil: return .other("whether the recorded host (pid \(pid)) is dumpable can't be told")
+        }
+    }
+
+    /// Whether `arguments` (a process's command line) are the installed host's (ST-D7):
+    /// `<prefix>/<40 hex>/bin/vibeswitcher-host --node --node-root <prefix>/<same> …`.
+    public static func isInstalledHost(_ arguments: [String], prefix: String) -> Bool {
+        let top = prefix.hasSuffix("/") && prefix.count > 1 ? String(prefix.dropLast()) : prefix
+        guard arguments.count >= 4, arguments[1] == "--node", arguments[2] == "--node-root" else { return false }
+        let folder = arguments[3]
+        guard folder.hasPrefix(top + "/") else { return false }
+        let commit = String(folder.dropFirst(top.count + 1))
+        return NodeUnit.isCommit(commit) && arguments[0] == folder + "/bin/vibeswitcher-host"
     }
 }

@@ -11,9 +11,19 @@ struct NodeContext {
     let root: URL
     let mode: NodeCheck.Mode
 
+    /// The context of this process: a scratch node when `VIBESWITCHER_HOME` names one; else the user's node, which on
+    /// Linux, where `NodeFolders.mode` says pid 1 isn't systemd, was started detached and is checked by its record
+    /// (the start plan's S3, ST-D6; read again with each context, so a start that wrote a new record sees it). A
+    /// machine whose manager's socket is missing keeps the unit's check (its `MainPID` can't be read, so a server
+    /// fails it), and `start` and `stop`'s fallback refuse it.
     static func current() -> NodeContext {
         let home = getenv("VIBESWITCHER_HOME").map { String(cString: $0) }
-        return NodeContext(root: VibePaths.root, mode: NodeCheck.mode(vibeswitcherHome: home, accountHome: VibePaths.accountHome))
+        let account = VibePaths.accountHome
+        var mode = NodeCheck.mode(vibeswitcherHome: home, accountHome: account)
+        if mode == .node, !Platform.CodeIdentity.isAvailable, NodeFolders.mode(runtimeFolder: NodeFolders.runtimeFolder(uid: getuid())) == .noSystemd {
+            mode = .detached(record: NodeRecord.read(root: NodeFolders.nodeRoot(accountHome: account)))
+        }
+        return NodeContext(root: VibePaths.root, mode: mode)
     }
 
     var isScratch: Bool { if case .scratch = mode { return true } else { return false } }

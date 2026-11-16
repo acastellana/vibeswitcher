@@ -70,8 +70,9 @@ public struct StartArguments: Equatable, Sendable {
 /// 5. A server that answers and passes `ServerCheck`: "the node runs" (the command line's `serverAnswers` says it),
 ///    then S11's acknowledgment the first time, as before S2. A scratch node with no server is refused: its harness
 ///    starts it (69).
-/// 6. Otherwise, on the user's node: a machine without the manager's socket (refused) or without systemd (S3's), then
-///    S11's list and its acknowledgment the first time, before anything is started.
+/// 6. Otherwise, on the user's node: a machine without the manager's socket (refused), or without systemd (the
+///    detached start, S3: `runDetached`), then S11's list and its acknowledgment the first time, before anything is
+///    started.
 /// 7. The build: the unit's commit when there is a unit file (`unitBuild`), else the command line's own; the swift and
 ///    node folders (`toolFolders`); the preflight. The unit's `Inputs` are made from the account's home, those folders
 ///    and the commit, never from the unit's own `HOME` or swift folder (the review of S1).
@@ -83,6 +84,11 @@ public struct StartArguments: Equatable, Sendable {
 ///    start as unexplained; it runs only once the starter's checks passed, so a start they refuse leaves no entry
 ///    that explains a job someone else starts within its window (the review of S2; ST-D5 put the entry before the
 ///    starter, noted 2026-11-16).
+///
+/// On a machine without systemd (S3, ST-D6) the start is detached (`Steps.detached`): no unit is read or written, the
+/// build is this command line's own, `--at-login` is refused (nothing starts the node at login), and there is no
+/// journal: S11's list and its code are asked at each start while the acknowledgment can't be read, and the start's
+/// entry is written when it can be, said not recorded when it can't (2026-11-16).
 public struct StartSequence {
     /// Which node the command line is on.
     public enum Kind: Equatable, Sendable {
@@ -155,6 +161,10 @@ public struct StartSequence {
         public var starter: (_ unit: NodeUnit.Inputs, _ atLogin: Bool, _ beforeStart: @escaping () -> StartRefusal?) -> Result<NodeStarter.Started, StartRefusal>
         /// A new action id (a UUID's text), from which each typed code comes (`NodeIds.code(action:)`).
         public var newAction: () -> String
+        /// The detached start (S3) of the unit's inputs on a machine without systemd, given `beforeStart` (the journal
+        /// entry) to run before the host is started: the command line passes `NodeStarter.startDetached` with
+        /// `NodeUnit.execStart`, then the wait.
+        public var detached: (_ unit: NodeUnit.Inputs, _ beforeStart: @escaping () -> StartRefusal?) -> Result<NodeStarter.Started, StartRefusal>
 
         public init(home: String, prefix: String, kind: @escaping () -> Kind,
                     installedBuild: @escaping () -> Result<(commit: String, folder: String), StartRefusal>,
@@ -168,7 +178,9 @@ public struct StartSequence {
                     toolFolders: @escaping (_ nodeVersion: String?, _ existingUnit: NodeUnit.Inputs?) -> Result<(swiftBin: String, nodeBin: String), StartRefusal>,
                     preflight: @escaping (_ swiftBin: String, _ nodeBin: String) -> Result<StartPreflight.Found, StartRefusal>,
                     starter: @escaping (_ unit: NodeUnit.Inputs, _ atLogin: Bool, _ beforeStart: @escaping () -> StartRefusal?) -> Result<NodeStarter.Started, StartRefusal>,
-                    newAction: @escaping () -> String = { UUID().uuidString.lowercased() }) {
+                    newAction: @escaping () -> String = { UUID().uuidString.lowercased() },
+                    detached: @escaping (_ unit: NodeUnit.Inputs, _ beforeStart: @escaping () -> StartRefusal?) -> Result<NodeStarter.Started, StartRefusal>
+                        = { _, _ in .failure(StartRefusal("no systemd: this command line has no detached start", exitCode: 1)) }) {
             self.home = home
             self.prefix = prefix
             self.kind = kind
@@ -190,6 +202,7 @@ public struct StartSequence {
             self.preflight = preflight
             self.starter = starter
             self.newAction = newAction
+            self.detached = detached
         }
     }
 
@@ -245,7 +258,7 @@ public struct StartSequence {
         case .node(.socketMissing):
             return .failure(StartRefusal("the user manager's socket is missing (<runtime folder>/systemd/private): pid 1 is systemd, so start won't take this machine for one without it and start the node detached; see `systemctl --user status`"))
         case .node(.noSystemd):
-            return .failure(StartRefusal("no systemd: the detached start is S3's, not yet made"))
+            return runDetached(arguments, installed: installed)
         }
 
         if let refused = acknowledgeBeforeStart() { return .failure(refused) }
@@ -289,6 +302,70 @@ public struct StartSequence {
             steps.say("the node started from \(started.commit); its server answers" + (started.enabledAtLogin ? " (enabled: it starts at your login)" : ""))
             return .success(.started(commit: started.commit))
         }
+    }
+
+    /// The detached start (S3, ST-D6; the type's comment): `--at-login` refused; S11's list; the build (this command
+    /// line's own), its folders and the preflight; the confirmation (`NodeTexts.startDetached`); the start's own code;
+    /// then `detached`, whose `beforeStart` writes the journal entry when there is a journal.
+    private func runDetached(_ arguments: StartArguments, installed: (commit: String, folder: String)) -> Result<Outcome, StartRefusal> {
+        if arguments.atLogin {
+            return .failure(StartRefusal("no systemd: nothing starts the node when you log in (start --at-login needs the user manager); run start without it"))
+        }
+        if let refused = acknowledgeWithoutJournal() { return .failure(refused) }
+        let folders: (swiftBin: String, nodeBin: String)
+        switch steps.toolFolders(arguments.nodeVersion, nil) {
+        case .failure(let refused): return .failure(refused)
+        case .success(let found): folders = found
+        }
+        let found: StartPreflight.Found
+        switch steps.preflight(folders.swiftBin, folders.nodeBin) {
+        case .failure(let refused): return .failure(refused)
+        case .success(let result): found = result
+        }
+        let inputs = NodeUnit.Inputs(prefix: steps.prefix, commit: installed.commit, home: steps.home, swiftBin: folders.swiftBin, nodeBin: folders.nodeBin)
+        // The unit's refusals of a path (a character systemd reads, /mnt/) hold for the detached host's PATH and HOME too.
+        if case .failure(let refused) = NodeUnit.text(inputs) { return .failure(refused) }
+        let root = NodeFolders.nodeRoot(accountHome: steps.home)
+        steps.say(NodeTexts.startDetached(unit: inputs, current: steps.current(), log: NodeStarter.hostLog(root: root), record: NodeRecord.path(root: root)))
+        steps.say("claude: \(ConfigSeal.inert(found.claude, limit: .max)); git: \(ConfigSeal.inert(found.git, limit: .max))")
+        let action = steps.newAction()
+        let outcome = steps.typed(NodeIds.code(action: action), "This starts the node detached from the build above.")
+        guard outcome == .typed else { return .failure(StartRefusal(outcome.refusal)) }
+        let journal = steps.journal, say = steps.say
+        let entry: () -> StartRefusal? = {
+            if !journal(NodeJournal.entry(event: "start", action: action)) {
+                say("(no journal on a machine without systemd: this start isn't recorded)")
+            }
+            return nil
+        }
+        switch steps.detached(inputs, entry) {
+        case .failure(let refused): return .failure(refused)
+        case .success(let started):
+            steps.say("the node started detached from \(started.commit); its server answers")
+            return .success(.started(commit: started.commit))
+        }
+    }
+
+    /// S11's list before a detached start, the first time: as `acknowledgeBeforeStart`, but where the journal can't be
+    /// read or written (a machine without systemd has none) the list is shown and its code asked at each start, and
+    /// said not recorded.
+    private func acknowledgeWithoutJournal() -> StartRefusal? {
+        let unread: String?
+        switch steps.acknowledged() {
+        case .success(true): return nil
+        case .success(false): unread = nil
+        case .failure(let failure): unread = failure.reason
+        }
+        steps.showList()
+        let action = steps.newAction()
+        let outcome = steps.typed(NodeIds.code(action: action), Self.acknowledgeWhat)
+        guard outcome == .typed else { return StartRefusal(outcome.refusal) }
+        if unread == nil, steps.journal(NodeJournal.entry(event: NotPromised.ackEvent, action: action)) {
+            steps.say("recorded: you read what plain mode doesn't promise")
+        } else {
+            steps.say("(no journal\(unread.map { " (\(ConfigSeal.inert($0, limit: .max)))" } ?? ""): the acknowledgment can't be recorded, and start shows the list again next time)")
+        }
+        return nil
     }
 
     /// S11's list once, to a node that runs (as before S2): a journal that can't be read shows the list and says the

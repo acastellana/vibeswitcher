@@ -8,7 +8,9 @@ import VibeNode
 /// S11's acknowledgment, the build, the confirmation, the typed code, the journal entry and `NodeStarter`'s start of
 /// the unit. On the user's node every tool and folder is a constant or comes from `getpwuid` (`NodeStarter.node`); a
 /// scratch node is never started here (69: its harness starts it), and its command line never builds those tools: its
-/// starter refuses at the wiring too, and it reads no unit (the review of S2).
+/// starter refuses at the wiring too, and it reads no unit (the review of S2). On a machine without systemd the node is
+/// started detached (S3, `NodeStarter.startDetached` with `NodeUnit.execStart`), its record and log in
+/// `<getpwuid home>/.vibeswitcher/v2/`, then waited for as the unit is.
 enum StartCommand {
     static func run(_ arguments: [String]) -> Int32 {
         guard let parsed = StartArguments.parse(arguments) else { return Say.usage(StartArguments.usage) }
@@ -43,6 +45,22 @@ enum StartCommand {
             starter: { unit, atLogin, beforeStart in
                 guard let tools else { return .failure(StartRefusal(StartSequence.scratchNotStarted, exitCode: 69)) }
                 return NodeStarter(tools: tools, listen: { probe(context, tools: tools) }).startUnit(unit, atLogin: atLogin, beforeStart: beforeStart)
+            },
+            detached: { unit, beforeStart in
+                guard let tools else { return .failure(StartRefusal(StartSequence.scratchNotStarted, exitCode: 69)) }
+                if let refused = beforeStart() { return .failure(refused) }
+                let root = NodeFolders.nodeRoot(accountHome: home)
+                let record: NodeRecord
+                switch NodeStarter.startDetached(host: NodeUnit.execStart(prefix: unit.prefix, commit: unit.commit), home: unit.home,
+                                                 path: NodeUnit.path(swiftBin: unit.swiftBin, nodeBin: unit.nodeBin), root: root) {
+                case .failure(let refused): return .failure(refused)
+                case .success(let written): record = written
+                }
+                let log = NodeStarter.hostLog(root: root)
+                if let refused = NodeStarter(tools: tools, listen: { detachedProbe(record) }).awaitListening(detachedLog: log) {
+                    return .failure(refused)
+                }
+                return .success(NodeStarter.Started(commit: unit.commit, enabledAtLogin: false))
             })
         switch StartSequence(steps: steps).run(parsed) {
         case .success: return 0
@@ -112,6 +130,21 @@ enum StartCommand {
         }
         guard let active = values["ActiveState"], ["failed", "inactive"].contains(active) else { return .notYet }
         return .unitEnded(result: values["Result"] ?? active)
+    }
+}
+
+extension StartCommand {
+    /// The probe a detached start waits on (S3): the server connected and checked, with a context made again so its
+    /// check reads the record just written, gives `.listening` (or `.refusedByCheck`); with nothing listening, the
+    /// recorded host ended (collected, being this process's child) gives `.hostEnded`; anything else is `.notYet`.
+    static func detachedProbe(_ record: NodeRecord) -> NodeStarter.Probe {
+        switch NodeClient.connect(NodeContext.current(), timeout: 5) {
+        case .success: return .listening
+        case .failure(.refused(let why)): return .refusedByCheck(why)
+        case .failure(.broken): return .notYet
+        case .failure(.notRunning): break
+        }
+        return record.hasEnded() ? .hostEnded("pid \(record.pid)") : .notYet
     }
 }
 

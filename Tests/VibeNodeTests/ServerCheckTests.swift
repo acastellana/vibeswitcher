@@ -197,4 +197,65 @@ struct ServerCheckTests {
                 "\(String(describing: refusal?.debugDescription))")
         #expect(refusal?.contains(ConfigSeal.inert(named, limit: .max)) == true)
     }
+
+    /// S3: a node started detached is checked by its record (ST-D6): the listener a non-dumpable child of the host the
+    /// record names, in its session, honoured only while what the record names is that host; no cgroup line is read.
+    @Test func theCommandLineChecksADetachedNodeByItsRecord() async throws {
+        // The rules, on stand-ins for the reads.
+        let record = NodeRecord(pid: 40, startTicks: 777)
+        let host = NodeUnit.execStart(prefix: "/home/u/.vibeswitcher/v2/builds", commit: "0123456789abcdef0123456789abcdef01234567")
+        let isHost: ([String]) -> Bool = { NodeCheck.isInstalledHost($0, prefix: "/home/u/.vibeswitcher/v2/builds") }
+        func recorded(_ record: NodeRecord?, ticks: UInt64? = 777, words: [String] = host, dumpable: Bool? = false) -> NodeCheck.Recorded {
+            NodeCheck.recordedHost(record, isHost: isHost, startTicks: { _ in ticks }, arguments: { _ in words }, dumpable: { _ in dumpable })
+        }
+        #expect(recorded(record) == .host(40))
+        guard case .other(let restarted) = recorded(record, ticks: 778) else { Issue.record("a pid whose start changed was taken"); return }
+        #expect(restarted.contains("now names another process"), "\(restarted)")
+        guard case .other(let sleeping) = recorded(record, words: ["/bin/sleep", "600"]) else { Issue.record("another command line was taken"); return }
+        #expect(sleeping.contains("/bin/sleep 600"), "\(sleeping)")
+        guard case .other(let dumpable) = recorded(record, dumpable: true) else { Issue.record("a dumpable host was taken"); return }
+        #expect(dumpable.contains("dumpable"), "\(dumpable)")
+        if case .host = recorded(record, dumpable: nil) { Issue.record("a host whose dumpability can't be told was taken") }
+        if case .host = recorded(record, ticks: nil) { Issue.record("an ended host was taken") }
+        if case .host = recorded(nil) { Issue.record("no record was taken") }
+
+        let mode = NodeCheck.Mode.detached(record: record)
+        // The real child: accepted, with no cgroup line read (nil here).
+        let child = NodeCheck.Listener(pid: 50, dumpable: false, parent: 40, cgroup: nil, session: 40)
+        #expect(NodeCheck.refusal(child, mode: mode, expectedParent: 40, parentSession: 40) == nil)
+        var outside = child
+        outside.cgroup = ["0::/init.scope"]
+        #expect(NodeCheck.refusal(outside, mode: mode, expectedParent: 40, parentSession: 40) == nil)
+        // Not the recorded host's child; in a session of its own; dumpable; no host to check against.
+        var stranger = child
+        stranger.parent = 41
+        #expect(NodeCheck.refusal(stranger, mode: mode, expectedParent: 40, parentSession: 40)?.contains("isn't a child of the node's host (pid 40)") == true)
+        var session = child
+        session.session = 50
+        #expect(NodeCheck.refusal(session, mode: mode, expectedParent: 40, parentSession: 40)?.contains("isn't in the node's host's session") == true)
+        var open = child
+        open.dumpable = true
+        #expect(NodeCheck.refusal(open, mode: mode, expectedParent: 40, parentSession: 40)?.contains("is dumpable") == true)
+        #expect(NodeCheck.refusal(child, mode: mode, expectedParent: nil, parentSession: nil)?.contains("record names no host") == true)
+
+        // On the system's reads: a scratch host started detached, its record, and its server.
+        let detached = try DetachedScratch(scratch)
+        let written = try detached.start().get()
+        defer { DetachedScratch.end(written.pid) }
+        try #require(await eventually(timeout: 120) {
+            DetachedScratch.server(of: written.pid).map { Platform.Processes.isDumpable($0) == false } == true
+        }, "the detached host's server never came: \((try? String(contentsOf: detached.log, encoding: .utf8)) ?? "")")
+        let server = try #require(DetachedScratch.server(of: written.pid))
+        let read = try #require(NodeRecord.read(root: detached.root.path))
+        #expect(NodeCheck.recordedHost(read, isHost: { $0 == detached.command }) == .host(written.pid))
+        let listener = NodeCheck.listener(pid: server)
+        #expect(listener.parent == written.pid && listener.session == written.pid && listener.dumpable == false, "\(listener)")
+        #expect(NodeCheck.refusal(listener, mode: .detached(record: read), expectedParent: written.pid, parentSession: getsid(written.pid)) == nil)
+        // The same host, but not of the installed host's form: not the node's.
+        guard case .other = NodeCheck.recordedHost(read, isHost: isHost) else { Issue.record("a scratch host was taken for the installed one"); return }
+        // A recorded pid whose start changed: not the host.
+        guard case .other = NodeCheck.recordedHost(NodeRecord(pid: written.pid, startTicks: written.startTicks + 1), isHost: { $0 == detached.command }) else {
+            Issue.record("a record whose start changed was honoured"); return
+        }
+    }
 }

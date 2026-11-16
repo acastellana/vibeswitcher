@@ -64,12 +64,14 @@ enum StatusCommand {
             result = given
         }
         let facts = context.facts()
+        // A node started detached: the weaker rule, and its pid file any worker can write (the start plan's S3).
+        let modeLines = NodeTexts.statusLines(mode: context.mode)
         let journal = journalLines(context, accepted: result["accepted"]?.array ?? [], epoch: result["epoch"]?.string,
                                    restart: result["restart"])
         if asJSON {
             var report = result.object ?? [:]
             report["format"] = .int(format)
-            report["facts"] = .array(facts.lines.map(NodeWire.Value.string))
+            report["facts"] = .array((facts.lines + modeLines).map(NodeWire.Value.string))
             report["journal"] = .array(journal.map(NodeWire.Value.string))
             let data = NodeWire.printable(NodeWire.line(NodeWire.Value.object(report)))
             try? FileHandle.standardOutput.write(contentsOf: data)
@@ -82,7 +84,7 @@ enum StatusCommand {
         out.append("host since \(inert(host?["startedAt"]?.string)) (\(inert(host?["state"]?.string)))"
                    + (notes?.object != nil ? ", server restarts: \(notes?["serverRestarts"]?.int ?? 0), refused app connections: \(notes?["refusedAppConnections"]?.int ?? 0)" : ""))
         for path in notes?["replacedPaths"]?.array ?? [] { out.append("the host took back its path \(inert(path.string))") }
-        out += facts.lines
+        out += facts.lines + modeLines
         out.append("voice rule: \(inert(result["rule"]?["says"]?.string))")
         let sessions = result["sessions"]?.array ?? []
         out.append(sessions.isEmpty ? "No agent sessions." : "sessions:")

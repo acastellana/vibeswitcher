@@ -911,7 +911,7 @@ manager refusal).
   - `NodeTexts.stop(live: Int) -> String` ("This ends 3 sessions in all projects (the leads first), then stops its
     host."; the singular form; 0 live: "No session is live; this stops the host.").
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `aNodeWithoutSystemdRunsInASessionOfItsOwnAndStopEndsIt`:
     - A scratch home whose runtime folder is empty, and mode stand-ins saying pid 1 isn't systemd.
     - `startDetached` with a scratch host command (`--lock <root>/scratch-host.lock`, no `--node`; `ScratchNode`'s
@@ -946,14 +946,83 @@ manager refusal).
   - `statusSaysTheWeakerRuleWithoutSystemd`: the line names the pid file as writable by any worker.
   - The `HostRestartTests` port (row 100), its second case: `anyOtherSaysHowManySessionsInAllProjectsItEndsAndAsksFirst`
     restated on `NodeTexts.stop(live:)` (3 sessions; 1 session; 0).
-- [ ] **Step 2: Implement.**
+- [x] **Step 2: Implement.**
   - `Stop.swift` builds `StopSequence.Steps` and runs it. The fallback runs only in node mode (unit or record).
   - `NodeContext` chooses `.node` or `.detached` from `NodeFolders.mode`. `.socketMissing` refuses.
-- [ ] **Step 3: Verify.**
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter 'StartCommandTests|ServerCheckTests|StatusCommandTests|CloseOnExecLint'`
   - the lints
   - under load (`StartCommandTests|ServerCheckTests`)
 - [ ] **Step 4:** commit ("v2: a node without systemd, its record, and stop without the server"). Push, both green.
+
+  *2026-11-16, S3 as made (committed; the push is the lead's):*
+  - **Test first.** The cases were written before the code: with the code's changes stashed, the two suites don't
+    build (`NodeRecord`, `StopSequence`, `NodeStopper`, `NodeTexts.stop`, `NodeStarter.startDetached` missing).
+  - **Names that differ from the interface above:**
+    - `NodeStopper.stopUnit(systemctl:runtimeFolder:wait:)` takes the runtime folder too: the manager is reached
+      through it (`NodeStarter.environment(runtimeFolder:)`), never through this process's `XDG_RUNTIME_DIR`. `wait`
+      defaults to `NodeStopper.unitWait` (`TimeoutStopSec` + 15 s). `NodeStopper.detachedHost(root:isHost:)` is the
+      check `stopDetached` and the confirmation share.
+    - `StopSequence.ServerAnswer`'s `notRunning`, `noHello` and `refusedByCheck` carry why, and `failed(StartRefusal)`
+      is an error reply to `status`. `Steps` holds `kind` (`StartSequence.Kind`), `installedBuild`, `server`,
+      `typed(code, what)`, `say` (the plan's `confirm`), `journal`, `throughServer(action)` (the server's stop and its
+      `request` entry, as before S3), `fallback(mode)` (what the fallback stops, said before the code: the unit, or the
+      recorded host by pid and command line; or why nothing: a unit `inactive` or `failed`, or no live host recorded,
+      is 69 "the node isn't running", a stale record "nothing ended"), `stopper(mode)` and `newAction`. `Outcome` is
+      `throughServer` or `withoutServer`.
+    - `NodeStarter.startDetached(host:home:path:root:settle:)` is static. `settle` (`detachedSettle`, 1 s) is how
+      long it watches for an exit at once; it refuses before anything while the record names a process that still
+      runs. Beside it: `detachedEnvironment(home:path:)`, `hostLog(root:)`, `Probe.hostEnded`, and
+      `awaitListening(detachedLog:)`, whose refusals then name the log and `stop`.
+    - `NodeCheck.recordedHost(_:isHost:startTicks:arguments:dumpable:) -> Recorded { host, none, other }`,
+      `NodeCheck.isInstalledHost(_:prefix:)` (ST-D7's form), and `NodeCheck.listener(pid:)` (the command line's reads,
+      shared with the test). `NodeRecord` also has `path(root:)`, `liveTicks(_:)`, `hasEnded()` (collects its own
+      child) and `remove(root:ifStill:)`. `isLive` reads `Platform.Processes.link`, on both systems, not `token`
+      (the Mac's token has no start ticks).
+    - `NodeFolders.nodeRoot(accountHome:)`: the record and the log are in `<getpwuid home>/.vibeswitcher/v2/`, the
+      root the `--node` host takes, whatever the command line's HOME says.
+    - `NodeTexts.stopUnit`, `stopDetached(pid:arguments:)`, `startDetached(unit:current:log:record:)`, `weakerRule` and
+      `statusLines(mode:)` beside `stop(live:)`.
+  - **The detached start in `StartSequence`** (`Steps.detached`, whose default refuses): on `.node(.noSystemd)` no
+    unit is read or written and no manager is asked. The build is the command line's own: a unit names a commit only
+    the manager runs. `--at-login` is refused. The journal entry is `detached`'s `beforeStart`, before the spawn.
+  - **No journal without systemd (for the lead).** journald is systemd's, so on a machine without systemd the
+    acknowledgment and the start's and stop's entries can't be recorded. S2's order (refuse when the journal can't be
+    read or written) would then keep the detached start and stop from ever running. In the detached mode only, S11's
+    list and its code are asked at each start while the acknowledgment can't be read, and the start's and stop's
+    entries are written when they can be and said not recorded when they can't. Through systemd nothing changed. To
+    refuse instead, `StartSequence.acknowledgeWithoutJournal` and the two "isn't recorded" branches go.
+  - **The stop's order.** The server is asked first: a connection, then `status` for the confirmation's count. The
+    installed-build check comes only before the fallback, so `stop` through a server that answers works from any build,
+    as before S3. A fallback on a machine whose manager's socket is missing is refused.
+  - **`NodeContext`** takes `.detached(record:)` on Linux where `NodeFolders.mode` says `.noSystemd` (never on the
+    Mac). `.socketMissing` keeps `.node`: its `MainPID` can't be read, so a server fails the check, and `start` and the
+    fallback refuse it. A detached start's wait makes a fresh context for each probe, so the check reads the record
+    just written.
+  - **Tests that differ.**
+    - `theDetachedHostGetsOnlyTheListedEnvironment` doesn't set `LD_PRELOAD`, `GIT_CONFIG_GLOBAL` or
+      `VIBESWITCHER_HOME` in the test process: they are process-wide, and would reach every child the suite's other
+      cases start (S2's note). The run's own variables (`VIBESWITCHER_HOME`, `TMPDIR`, `CFFIXED_USER_HOME` and the rest)
+      stand for them. The host's environment is exactly the three.
+    - The scratch host's `--socket` is spelled `<home>/.vibeswitcher/host.sock`: its server takes only its root's host
+      socket, by path.
+    - ST-D6's `tty_nr` check is `Platform.Processes.link(pid).terminal == nil`.
+    - No case puts the command line itself in the detached mode: this machine has systemd, and the mode is read from
+      fixed paths. `ServerCheck`'s detached branch and `Stop.swift`'s fallback wiring are read, not run.
+      `theCommandLineChecksADetachedNodeByItsRecord` drives `NodeCheck` on the system's reads of a scratch host started
+      detached.
+    - Added: `aRecordIsReadOnlyFromARegularFileOfItsOwnFormat`, `aMachineWithoutSystemdStartsTheNodeDetached`.
+      `theManagerAndTheMachineAreRefusedBeforeTheServerIsAsked`'s last part now checks that a machine without systemd
+      asks no manager.
+  - *For S8:* a handover execs a new image in the host's process (the pid and start kept), and its command line is
+    then the new image's. Whether it still has ST-D7's form decides whether `stop`'s fallback and the server check take
+    a detached host after a switch.
+  - The port map's `HostClientReapTests` row is `ported`, `HostRestartTests` half ported, and the `HostClient.swift`
+    row's starting and reaping (183-221, 293-366) `ported`. The security document's S3 and S9 `Held by:` lines name
+    S3's cases.
+  - Verified: `StartCommandTests|ServerCheckTests` (69 cases) and the lints with `StatusCommandTests` (132 cases),
+    `VibeNodeTests|VibeCoreTests|VibePlatformTests` (3314 cases, green), and
+    `StartCommandTests|ServerCheckTests|StatusCommandTests` under load (24, 3 runs, nothing left behind).
 
 **Done when:** the cases pass on Linux. The port map's `HostClientReapTests` row is `ported` (EN-D12), `HostRestartTests`
 is half ported (its first case is S8a's), and the `HostClient.swift` row's lifecycle part (183-221, 293-366) is

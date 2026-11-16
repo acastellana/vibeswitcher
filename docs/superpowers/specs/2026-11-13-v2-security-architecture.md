@@ -670,7 +670,13 @@ their review: `VoiceRuleTests.anUnreadOwnCgroupClosesTheRule`,
 stopped node behind the typed code, and its journal entry, written only once the starter's checks pass):
 `StartCommandTests.aStartWithNoTerminalIsRefused`, `StartCommandTests.startJournalsItsOwnStartBeforeTheManagerIsAsked`,
 `StartCommandTests.aRefusedStartLeavesNoEntryThatExplainsALaterJob`,
-`StartCommandTests.theStartEntryIsWrittenOnlyOnceTheChecksPass` (the review of S2). The
+`StartCommandTests.theStartEntryIsWrittenOnlyOnceTheChecksPass` (the review of S2). The start plan's S3 (`stop`
+without the server behind the typed code and its journal entry, from an installed build only, and the check of a node
+started detached by its record): `StartCommandTests.aStopFallbackWithNoTerminalIsRefused`,
+`StartCommandTests.stopJournalsItsOwnStopBeforeTheManagerIsAsked`,
+`StartCommandTests.aCommandLineBuiltInDotBuildRefusesTheStopFallbackBeforeAnyWrite`,
+`StartCommandTests.aStopWithAServerThatDoesntAnswerStopsTheUnit`, `ServerCheckTests.theCommandLineChecksADetachedNodeByItsRecord`,
+`StartCommandTests.statusSaysTheWeakerRuleWithoutSystemd`. The
 scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (a Windows
 Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. The engine's E4:
 `LeadStartTests.aSessionsProcessCannotStartALead`, `LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`,
@@ -1369,7 +1375,11 @@ unit's wants, requires or upholds folder, or a directive start didn't write, ref
 `StartCommandTests.aUnitThatAlreadyRunsIsNotStartedAgainOrClaimed`,
 `StartCommandTests.aPlainStartOfAnEnabledUnitSaysSoBeforeItsCode`, `StartCommandTests.theEnabledLinksAreFoundInEveryWantsFolder`,
 `StartCommandTests.aFailedStartAfterEnableSaysTheUnitStaysEnabled`, `StartCommandTests.theBoundedRunKillsWhatOutlivesItsTimeout`
-(the review of S2).
+(the review of S2); `StartCommandTests.aNodeWithoutSystemdRunsInASessionOfItsOwnAndStopEndsIt`,
+`StartCommandTests.theDetachedHostGetsOnlyTheListedEnvironment`,
+`StartCommandTests.stoppingByAStalePidLeavesTheProcessNowUnderItAlone`,
+`StartCommandTests.aHostThatExitsBeforeItIsWaitedForLeavesNoZombie`, `StartCommandTests.stopWithNoServerStopsTheUnit`
+(the start plan's S3: the detached start's session and environment, and a stop that signals only the recorded host).
 
 **Tests to write:** Step 8: a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,

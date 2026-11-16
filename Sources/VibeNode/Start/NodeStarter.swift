@@ -50,6 +50,8 @@ public struct NodeStarter {
         case refusedByCheck(String)
         /// The unit ended (`ActiveState` `failed` or `inactive`), with its `Result`.
         case unitEnded(result: String)
+        /// The host started detached ended (S3), and how, said.
+        case hostEnded(String)
     }
 
     /// A start that went: the commit, and whether the unit is enabled at login.
@@ -141,7 +143,10 @@ public struct NodeStarter {
     /// Waits for the node's server (`listen`), `listenLimit` at most: nil once it answers and passes the check; a
     /// refusal when the unit ends first ("the node didn't start (<result>)", at once) or at the limit (naming the
     /// check's reason when what listened failed it). A listener that fails the check is waited past, never taken.
-    public func awaitListening() -> StartRefusal? {
+    ///
+    /// `detachedLog`: the host was started detached (S3), its output in that file: the refusals name it and `stop`,
+    /// not the unit's journal and `systemctl`.
+    public func awaitListening(detachedLog: String? = nil) -> StartRefusal? {
         let deadline = now() + Self.listenLimit
         var check: String?
         while true {
@@ -149,6 +154,8 @@ public struct NodeStarter {
             case .listening: return nil
             case .unitEnded(let result):
                 return StartRefusal("the node didn't start (\(ConfigSeal.inert(result, limit: 64))); see journalctl --user -u \(Self.unitName)", exitCode: 1)
+            case .hostEnded(let how):
+                return StartRefusal("the node's host ended before its server answered (\(ConfigSeal.inert(how, limit: 128))); see \(ConfigSeal.inert(detachedLog ?? "its log", limit: .max))", exitCode: 1)
             case .refusedByCheck(let why): check = why
             case .notYet: break
             }
@@ -156,7 +163,8 @@ public struct NodeStarter {
                 let limit = Int(Self.listenLimit)
                 // The unit ended would have been seen: at the limit it may still run (a host still starting, or one
                 // whose socket another process holds), and start doesn't stop it (the review of S2).
-                let still = "; the unit may still run: `systemctl --user stop \(Self.unitName)` stops it; see journalctl --user -u \(Self.unitName)"
+                let still = detachedLog.map { "; the host may still run: `vibeswitcher stop` ends it; see \(ConfigSeal.inert($0, limit: .max))" }
+                    ?? "; the unit may still run: `systemctl --user stop \(Self.unitName)` stops it; see journalctl --user -u \(Self.unitName)"
                 if let check {
                     return StartRefusal("the node's server didn't answer within \(limit) s: what listens on its socket fails the server check (\(ConfigSeal.inert(check, limit: .max)))\(still)", exitCode: 1)
                 }
@@ -180,6 +188,112 @@ public struct NodeStarter {
             [".wants", ".requires", ".upholds"].contains { name.hasSuffix($0) }
                 && NodeFolders.fileStatus(NodeFolders.join(NodeFolders.join(unitFolder, name), NodeUnit.fileName)) != nil
         }.sorted()
+    }
+
+    // MARK: - The detached start (S3)
+
+    /// The environment of a host started detached (ST-D6): exactly `HOME`, the unit's `PATH` and
+    /// `SWIFT_BACKTRACE=enable=no`; nothing of the command line's own (an `LD_PRELOAD` an edited `.bashrc` set included).
+    public static func detachedEnvironment(home: String, path: String) -> [String] {
+        ["HOME=\(home)", "PATH=\(path)", "SWIFT_BACKTRACE=enable=no"]
+    }
+
+    /// Where a detached host's stdout and stderr go: `<root>/v2/host.log`.
+    public static func hostLog(root: String) -> String { NodeFolders.join(root, "v2/host.log") }
+
+    /// How long `startDetached` watches the host it started for an exit at once.
+    public static let detachedSettle: TimeInterval = 1
+
+    /// Starts `host` (its argv, by its absolute path; the installed command line passes `NodeUnit.execStart`) detached,
+    /// on a machine without systemd (ST-D6): with `Platform.Spawn` in a session of its own (`posix_spawn`'s `SETSID`,
+    /// not a double fork: the command line is multithreaded), keeping no descriptor of the command line's, in `home`,
+    /// with `detachedEnvironment` only, stdin `/dev/null` and stdout and stderr appended to `hostLog` (0600, opened
+    /// with `O_NOFOLLOW`). The host is this process's child until it exits, then init's.
+    ///
+    /// Refused before anything is started while `root`'s record names a process that still runs (its server didn't
+    /// answer, and a second host would only fail on the first one's lock). Then the record (`NodeRecord`: its pid and
+    /// start) is written; a host that ends within `settle` is collected, its record removed, and refused: "the host
+    /// ended at once (pid, status); see <log>".
+    public static func startDetached(host: [String], home: String, path: String, root: String,
+                                     settle: TimeInterval = detachedSettle) -> Result<NodeRecord, StartRefusal> {
+        guard let program = host.first, program.hasPrefix("/") else {
+            return .failure(StartRefusal("the host's command isn't an absolute path: \(ConfigSeal.inert(host.joined(separator: " "), limit: .max))", exitCode: 1))
+        }
+        if let old = NodeRecord.read(root: root), old.isLive() {
+            return .failure(StartRefusal("the recorded host (pid \(old.pid), \(ConfigSeal.inert(NodeRecord.path(root: root), limit: .max))) still runs, but its server didn't answer: `vibeswitcher stop` ends it, then run start again", exitCode: 1))
+        }
+        let log = hostLog(root: root)
+        do {
+            try VibePaths.ensurePrivate(URL(fileURLWithPath: NodeFolders.join(root, "v2"), isDirectory: true))
+        } catch {
+            return .failure(StartRefusal("\(ConfigSeal.inert(NodeFolders.join(root, "v2"), limit: .max)) can't be made: \(error.localizedDescription)", exitCode: 1))
+        }
+        let fd = Sys.open(log, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_NOCTTY | O_CLOEXEC, 0o600)
+        guard fd >= 0 else {
+            return .failure(StartRefusal("the host's log \(ConfigSeal.inert(log, limit: .max)) can't be opened: \(String(cString: strerror(errno)))", exitCode: 1))
+        }
+        defer { Sys.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, fchmod(fd, 0o600) == 0 else {
+            return .failure(StartRefusal("the host's log \(ConfigSeal.inert(log, limit: .max)) isn't a regular file of yours", exitCode: 1))
+        }
+
+        var spawn = Platform.Spawn(executable: program, arguments: host)
+        spawn.environment = detachedEnvironment(home: home, path: path)
+        spawn.directory = home
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .descriptor(fd)
+        spawn.stderr = .descriptor(fd)
+        spawn.group = .ownSession
+        spawn.keep = []
+        let pid: pid_t
+        switch spawn.start() {
+        case .failure(let error):
+            return .failure(StartRefusal("the host \(ConfigSeal.inert(program, limit: .max)) couldn't be started (errno \(error.code))", exitCode: 1))
+        case .success(let started): pid = started
+        }
+        // Its start, read while it is this process's child (an ended child stays a zombie until collected below, so
+        // the number can't be another's yet).
+        guard let ticks = Platform.Processes.link(pid)?.startTicks else {
+            _ = endChild(pid)
+            return .failure(StartRefusal("the host's start (pid \(pid)) couldn't be read; it was ended", exitCode: 1))
+        }
+        let record = NodeRecord(pid: pid, startTicks: ticks)
+        do {
+            try record.write(root: root)
+        } catch {
+            _ = endChild(pid)
+            return .failure(StartRefusal("the node's record \(ConfigSeal.inert(NodeRecord.path(root: root), limit: .max)) can't be written (\(error)); the host was ended", exitCode: 1))
+        }
+        let clock = MacTime.real
+        let deadline = clock.awake() + settle
+        var status: Int32 = 0
+        while clock.awake() < deadline {
+            let reaped = waitpid(pid, &status, WNOHANG)
+            if reaped == pid {
+                NodeRecord.remove(root: root, ifStill: record)
+                let signal = status & 0x7f
+                let how = signal == 0 ? "exit status \((status >> 8) & 0xff)" : "signal \(signal)"
+                return .failure(StartRefusal("the host ended at once (pid \(pid), \(how)); see \(ConfigSeal.inert(log, limit: .max))", exitCode: 1))
+            }
+            if reaped < 0, errno != EINTR { break }
+            usleep(5_000)
+        }
+        return .success(record)
+    }
+
+    /// Kills this process's child `pid` and collects it, 10 s at most: whether it was collected.
+    static func endChild(_ pid: pid_t) -> Bool {
+        Sys.kill(pid, SIGKILL)
+        let deadline = MacTime.real.awake() + 10
+        var status: Int32 = 0
+        while MacTime.real.awake() < deadline {
+            let reaped = waitpid(pid, &status, WNOHANG)
+            if reaped == pid { return true }
+            if reaped < 0, errno != EINTR { return false }
+            usleep(2_000)
+        }
+        return false
     }
 
     // MARK: - The unit file and systemctl
