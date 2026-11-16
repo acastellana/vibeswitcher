@@ -14,6 +14,9 @@
 #   --test-origin URL    fetch from URL (file:// allowed) instead of GitHub
 #   --test-products DIR  copy DIR's built products instead of building (no toolchain, no build); DIR/swift-version
 #                        stands for `swift --version`'s output
+#   --test-hold DIR      once the products are checked, where a FIFO DIR/checked.go is there: write DIR/checked.at
+#                        (src=, partial=, bin=: the checkout, the staging folder, the products' folder) and wait for a
+#                        line on the FIFO (120 s at most), so a test can change what a worker could change there
 #
 # Exit codes: 0 installed; 64 usage; 65 your checkout isn't clean; 66 provenance (this script, or a library beside it,
 # isn't the expected commit's); 67 COMMIT isn't on v2 or CI didn't pass it; 68 the toolchain; 69 the linked-library
@@ -22,7 +25,8 @@
 # before any network call, and every refusal before any build. One install runs at a time on a prefix (a lock on it).
 #
 # What it trusts (ST-D9): nothing in --repo, and nothing in your git and gh configuration: every git and gh runs under
-# `env -i`, gh with a configuration folder no process of yours can make; COMMIT and v2 are fetched from the constant
+# `env -i`, gh with a configuration folder no process of yours can make, and the courtesy check's git with a git folder
+# of the script's own, never --repo's configuration; COMMIT and v2 are fetched from the constant
 # repository below, never from your `origin`. Before it sources anything, it checks its own bytes and those of
 # lib/scratch.sh and lib/swift-jobs.sh beside it against the expected commit's blobs, and it sources the blob, never the
 # file: COMMIT on the first install; once <prefix>/current exists, the commit current/build-info names, and it then runs
@@ -33,7 +37,9 @@
 #   /usr/bin/env -i HOME=<home> PATH=/usr/bin:/bin /bin/bash <its absolute path> COMMIT …
 # Nor does it hold off a worker live while it runs: the scratch checkout, its vs-heavy, the fresh caches and the products
 # are the user's to write until they are copied and recorded (the security document's S9 and S11). Run it with no team
-# running; the checkout and the products are checked again before the layout, which catches a change left in place.
+# running. Each product is read once, into the staging folder, and only that copy is checked, hashed and installed; the
+# copy is hashed again before it first runs, and the checkout (untracked and ignored files too) is checked again before
+# the layout, which catches a change left in place.
 #
 # At its end it prints that the seal holds every team until `vs config accept` (the builds folder changed, ST-D23).
 
@@ -77,10 +83,10 @@ install_node_main() {
 
     # --- 1. Arguments ------------------------------------------------------------------------------------------------
     local commit="" prefix="" prefix_given=0 repo="" toolchain=/opt/swift-6.4.2 gh=/usr/bin/gh gh_given=0
-    local test_origin="" test_products=""
+    local test_origin="" test_products="" test_hold=""
     while (( $# )); do
         case $1 in
-            --prefix|--repo|--toolchain|--gh|--test-origin|--test-products)
+            --prefix|--repo|--toolchain|--gh|--test-origin|--test-products|--test-hold)
                 (( $# >= 2 )) && [[ -n $2 ]] || fail 64 "$1 needs a value"
                 case $1 in
                     --prefix) prefix=$2; prefix_given=1 ;;
@@ -89,9 +95,10 @@ install_node_main() {
                     --gh) gh=$2; gh_given=1 ;;
                     --test-origin) test_origin=$2 ;;
                     --test-products) test_products=$2 ;;
+                    --test-hold) test_hold=$2 ;;
                 esac
                 shift 2 ;;
-            -h|--help) /usr/bin/sed -n '2,38p' "${BASH_SOURCE[0]}" | /usr/bin/sed 's/^# \{0,1\}//'; exit 0 ;;
+            -h|--help) /usr/bin/sed -n '2,44p' "${BASH_SOURCE[0]}" | /usr/bin/sed 's/^# \{0,1\}//'; exit 0 ;;
             -*) fail 64 "unknown option $1" ;;
             *) [[ -z $commit ]] || fail 64 "one COMMIT only (also given: $1)"; commit=$1; shift ;;
         esac
@@ -107,8 +114,8 @@ install_node_main() {
     [[ $prefix == /* ]] || prefix=$PWD/$prefix
     prefix=${prefix%/}
 
-    if (( gh_given )) || [[ -n $test_origin || -n $test_products ]]; then
-        (( prefix_given )) || fail 64 "--gh, --test-origin and --test-products need --prefix, a scratch folder"
+    if (( gh_given )) || [[ -n $test_origin || -n $test_products || -n $test_hold ]]; then
+        (( prefix_given )) || fail 64 "--gh, --test-origin, --test-products and --test-hold need --prefix, a scratch folder"
         local real default_real vibeswitcher_real
         real=$(/usr/bin/realpath -m -- "$prefix") || fail 64 "can't resolve --prefix $prefix"
         default_real=$(/usr/bin/realpath -m -- "$default_prefix") || fail 64 "can't resolve $default_prefix"
@@ -141,17 +148,91 @@ install_node_main() {
     jq_run() { /usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/jq "$@"; }
 
     # --- 2. The courtesy check: the checkout is clean (an install of a commit you meant to amend) -------------------
-    if [[ -z $repo ]]; then
-        repo=$(git_run -C "$PWD" rev-parse --show-toplevel 2> /dev/null) || fail 64 "$PWD isn't in a git checkout: give --repo"
+    # Nothing of the checkout's own git configuration acts (the security follow-ups' item 25): its .git/config can name
+    # a filter.<x>.clean or .process command its attributes apply to a file, which a diff runs as the user. So git runs
+    # on a git folder of the script's own: a configuration of its own (with the few settings below, which say how a
+    # file's bytes and mode are read and name no command, read as data from the checkout's), HEAD the checkout's,
+    # resolved by hand, a copy of its index, its objects (their alternates with them) by GIT_OBJECT_DIRECTORY, and the
+    # checkout as the work tree. Submodules aren't looked into: a submodule's own git folder would be read.
+    # The early folder (removed by fail until on_exit can) holds that git folder, then the fresh repository (step 4).
+    early=$(/usr/bin/mktemp -d /tmp/install-node-early.XXXXXX) || fail 1 "can't make a scratch folder under /tmp"
+    early_ours=1
+    local nocheckout top gitdir common head ref line
+    if [[ -n $repo ]]; then
+        nocheckout="--repo $repo isn't a git checkout with a commit"
+    else
+        nocheckout="$PWD isn't in a git checkout: give --repo"
     fi
-    git_run -C "$repo" rev-parse --verify -q HEAD > /dev/null || fail 64 "--repo $repo isn't a git checkout with a commit"
+    # The checkout: the nearest folder up from --repo (or the current folder) with a .git, a folder or a linked
+    # worktree's `gitdir:` file; its shared git folder from `commondir`.
+    top=$(/usr/bin/realpath -e -- "${repo:-$PWD}" 2> /dev/null) || fail 64 "$nocheckout"
+    while [[ ! -e $top/.git ]]; do
+        [[ $top != / ]] || fail 64 "$nocheckout"
+        top=${top%/*}
+        top=${top:-/}
+    done
+    gitdir=$top/.git
+    if [[ -f $top/.git ]]; then
+        IFS= read -r line < "$top/.git" || fail 64 "$nocheckout"
+        [[ $line == "gitdir: "?* ]] || fail 64 "$nocheckout"
+        gitdir=${line#gitdir: }
+        [[ $gitdir == /* ]] || gitdir=$top/$gitdir
+    fi
+    [[ -d $gitdir && -f $gitdir/HEAD ]] || fail 64 "$nocheckout"
+    common=$gitdir
+    if [[ -f $gitdir/commondir ]]; then
+        IFS= read -r line < "$gitdir/commondir" || fail 64 "$nocheckout"
+        if [[ $line == /* ]]; then common=$line; else common=$gitdir/$line; fi
+    fi
+    # HEAD: a hash, or a branch's, from its loose ref or packed-refs.
+    IFS= read -r head < "$gitdir/HEAD" || head=""
+    if [[ $head == "ref: refs/"* ]]; then
+        ref=${head#ref: }
+        head=""
+        if [[ $ref == *..* ]]; then
+            :
+        elif [[ -f $common/$ref ]]; then
+            IFS= read -r head < "$common/$ref" || head=""
+        elif [[ -f $common/packed-refs ]]; then
+            head=$(/usr/bin/awk -v r="$ref" '$2 == r { print $1; exit }' "$common/packed-refs")
+        fi
+    fi
+    [[ $head =~ ^[0-9a-f]{40}$ ]] || fail 64 "$nocheckout (its HEAD names no commit the script can read)"
+    local -r check=$early/check
+    /bin/mkdir -m 700 -- "$check" "$check/refs" "$check/info" || fail 1 "can't make $check"
+    printf '%s\n' "$head" > "$check/HEAD" \
+        && printf '[core]\n\trepositoryformatversion = 0\n\tbare = false\n' > "$check/config" \
+        || fail 1 "can't write $check"
+    local key value
+    # `git config --file` reads the one file as data and follows no include.
+    for key in core.filemode core.symlinks core.ignorecase core.autocrlf core.eol core.checkstat core.trustctime; do
+        value=$(git_run -C / config --file "$common/config" --get "$key" 2> /dev/null) || continue
+        git_run -C / config --file "$check/config" "$key" "$value" || fail 65 "can't tell whether $top is clean (its $key)"
+    done
+    if [[ -f $gitdir/index ]]; then
+        /bin/cp -- "$gitdir/index" "$check/index" || fail 65 "can't tell whether $top is clean (can't copy its index)"
+    fi
+    for line in "$gitdir"/sharedindex.*; do
+        [[ ! -f $line ]] || /bin/cp -- "$line" "$check/" || fail 65 "can't tell whether $top is clean (can't copy $line)"
+    done
+    if [[ -f $common/info/exclude ]]; then
+        /bin/cp -- "$common/info/exclude" "$check/info/exclude" || fail 65 "can't tell whether $top is clean (can't copy its info/exclude)"
+    fi
+    check_git() {
+        /usr/bin/env -i HOME="$git_home" PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_DIR="$check" GIT_WORK_TREE="$top" \
+            GIT_OBJECT_DIRECTORY="$common/objects" /usr/bin/git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+            -c protocol.allow=never -C "$top" "$@"
+    }
+    check_git rev-parse --verify -q "$head^{commit}" > /dev/null || fail 64 "$nocheckout"
     local changed untracked dirty
-    changed=$(git_run -C "$repo" diff --name-only --no-ext-diff --no-textconv HEAD --) \
-        || fail 65 "can't tell whether $repo is clean (git diff failed)"
-    untracked=$(git_run -C "$repo" ls-files --others --exclude-standard) \
-        || fail 65 "can't tell whether $repo is clean (git ls-files failed)"
+    changed=$(check_git diff --name-only --no-ext-diff --no-textconv --ignore-submodules=all HEAD --) \
+        || fail 65 "can't tell whether $top is clean (git diff failed)"
+    untracked=$(check_git ls-files --others --exclude-standard) \
+        || fail 65 "can't tell whether $top is clean (git ls-files failed)"
+    /bin/rm -rf -- "$check"
     dirty=$(printf '%s\n%s\n' "$changed" "$untracked" | /usr/bin/sed '/^$/d' | /usr/bin/head -n 5 | /usr/bin/paste -sd ' ')
-    [[ -z $dirty ]] || fail 65 "$repo isn't clean: $dirty (commit or remove, then install)"
+    [[ -z $dirty ]] || fail 65 "$top isn't clean: $dirty (commit or remove, then install)"
 
     # --- 3. The toolchain: root's all the way up, nothing in it the user can write -----------------------------------
     # root_only PATH: PATH and every folder up to / owned by root and writable by nobody else, or the first that isn't.
@@ -218,8 +299,6 @@ install_node_main() {
     fi
 
     # --- 4. A fresh repository, and the fetch ---------------------------------------------------------------------
-    early=$(/usr/bin/mktemp -d /tmp/install-node-early.XXXXXX) || fail 1 "can't make a scratch folder under /tmp"
-    early_ours=1
     local -r fresh=$early/repo
     git_run init -q --template= "$fresh" || fail 1 "git init $fresh failed"
 
@@ -360,14 +439,30 @@ install_node_main() {
         bin=$test_products
     fi
 
-    # --- 9. The linked-library check (ST-D12) -------------------------------------------------------------------------
+    # --- 9. The products, copied once into the staging folder, and the linked-library check there (ST-D12) ----------
+    # Each product is read once by its path (the security follow-ups' item 28): copied into <commit>.partial/bin, this
+    # run's own folder (0700 until the layout is done), and everything after (the link check, the hashes,
+    # install-record, the rename) is of that copy, never of the products' folder again. The copy is hashed before its
+    # check and again after it.
     local writable
     writable=$(root_only "$interpreter") || fail 69 "the interpreter $interpreter isn't root's alone: $writable"
-    local product file headers dynamic line lib listing target needed missing
+    [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
+    /bin/rm -rf -- "$partial"
+    # A refusal from here on leaves no half-made build behind.
+    install_partial=$partial
+    on_exit install_node_drop_partial
+    /bin/mkdir -m 700 -- "$partial" "$partial/bin" || fail 1 "can't make $partial"
+    local product file installed headers dynamic lib listing target needed missing
     local -A product_sha=()
     for product in "${products[@]}"; do
-        file=$bin/$product
-        [[ -f $file && ! -L $file ]] || fail 69 "$product: $file isn't a regular file"
+        installed=$product
+        [[ $product == vibeswitcher-cli ]] && installed=vibeswitcher
+        [[ -f $bin/$product && ! -L $bin/$product ]] || fail 69 "$product: $bin/$product isn't a regular file"
+        file=$partial/bin/$installed
+        /bin/cp -- "$bin/$product" "$file" || fail 1 "can't copy $product into $partial/bin"
+        [[ -f $file && ! -L $file ]] || fail 69 "$product: its copy $file isn't a regular file"
+        line=$(/usr/bin/sha256sum -- "$file") || fail 1 "$product: can't hash $file"
+        product_sha[$product]=${line%% *}
         headers=$(/usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/readelf -lW "$file" 2> /dev/null) \
             || fail 69 "$product: readelf -l can't read $file"
         line=$(printf '%s\n' "$headers" | /usr/bin/sed -n 's/.*\[Requesting program interpreter: \(.*\)\]$/\1/p')
@@ -412,35 +507,34 @@ install_node_main() {
             target=$(/usr/bin/realpath -e -- "$target") || fail 69 "$product: can't resolve $target"
             writable=$(root_only "$target") || fail 69 "$product: it loads $target, which the user can write: $writable"
         done <<< "$listing"
-        # What was checked, to compare with what build-info records.
+        # What was checked, to compare with what build-info records: the copy, unchanged through its check.
         line=$(/usr/bin/sha256sum -- "$file") || fail 1 "$product: can't hash $file"
-        product_sha[$product]=${line%% *}
+        [[ ${line%% *} == "${product_sha[$product]}" ]] \
+            || fail 69 "$product: its copy $file changed during its check (sha256 ${line%% *}, not ${product_sha[$product]})"
     done
 
-    # The checkout is still the commit's: its HEAD, its tree and no tracked file changed (a change left in place since
-    # the "checked out" line).
+    # The test hold (--test-hold, a scratch prefix only): what a worker could change here, a test changes.
+    if [[ -n $test_hold && -p $test_hold/checked.go ]]; then
+        local go
+        printf 'src=%s\npartial=%s\nbin=%s\n' "$src" "$partial" "$bin" > "$test_hold/checked.at.new" \
+            && /bin/mv -- "$test_hold/checked.at.new" "$test_hold/checked.at" \
+            && exec {go}<> "$test_hold/checked.go" || fail 1 "--test-hold: can't hold in $test_hold"
+        IFS= read -r -t 120 -u "$go" line || fail 1 "--test-hold: no line on $test_hold/checked.go in 120 s"
+        exec {go}<&-
+    fi
+
+    # The checkout is still the commit's: its HEAD, its tree, no tracked file changed and no file added, untracked or
+    # ignored (a change left in place since the "checked out" line; the security follow-ups' item 27).
     [[ $(git_run -C "$src" rev-parse HEAD 2> /dev/null) == "$commit" \
         && $(git_run -C "$src" rev-parse "HEAD^{tree}" 2> /dev/null) == "$tree" ]] \
         || fail 1 "the checkout in $src isn't $commit tree $tree any more"
-    changed=$(git_run -C "$src" status --porcelain --untracked-files=no --ignore-submodules=none 2> /dev/null) \
+    changed=$(git_run -C "$src" status --porcelain --untracked-files=all --ignored --ignore-submodules=none 2> /dev/null) \
         || fail 1 "can't tell whether the checkout in $src changed"
     [[ -z $changed ]] || fail 1 "the checkout in $src changed since it was checked out: ${changed%%$'\n'*}"
 
     # --- 10. The layout: <prefix>/<commit>.partial, its record, then the rename (under the lock) -----------------------
-    [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
-    /bin/rm -rf -- "$partial"
-    # A refusal from here on leaves no half-made build behind.
-    install_partial=$partial
-    on_exit install_node_drop_partial
-    /bin/mkdir -m 755 -- "$partial" "$partial/bin" "$partial/Resources" "$partial/Resources/bin" "$partial/Resources/lib" \
-        || fail 1 "can't make $partial"
-    local installed
-    for product in "${products[@]}"; do
-        installed=$product
-        [[ $product == vibeswitcher-cli ]] && installed=vibeswitcher
-        /bin/cp -- "$bin/$product" "$partial/bin/$installed" && /bin/chmod 0755 -- "$partial/bin/$installed" \
-            || fail 1 "can't copy $product into $partial/bin"
-    done
+    /bin/mkdir -m 755 -- "$partial/Resources" "$partial/Resources/bin" "$partial/Resources/lib" \
+        || fail 1 "can't make $partial/Resources"
     for file in "$src"/Resources/bin/vs-*; do
         [[ -f $file && ! -L $file ]] || fail 1 "$commit's ${file#"$src/"} isn't a regular file"
         /bin/cp -- "$file" "$partial/Resources/bin/" && /bin/chmod 0755 -- "$partial/Resources/bin/${file##*/}" \
@@ -450,6 +544,18 @@ install_node_main() {
         && /bin/chmod 0755 -- "$partial/Resources/install-node.sh" \
         && /bin/cp -- "$src/scripts/lib/scratch.sh" "$src/scripts/lib/swift-jobs.sh" "$partial/Resources/lib/" \
         || fail 1 "can't copy the install script and its libraries into $partial"
+    # Before anything in the staging folder runs (the security follow-ups' item 26): each program is still the copy the
+    # link check hashed, by its own hash here, never by what the build's command line says of itself.
+    for product in "${products[@]}"; do
+        installed=$product
+        [[ $product == vibeswitcher-cli ]] && installed=vibeswitcher
+        file=$partial/bin/$installed
+        [[ -f $file && ! -L $file ]] || fail 1 "$file isn't a regular file any more: refused before it runs"
+        /bin/chmod 0755 -- "$file" || fail 1 "can't make $file 0755"
+        line=$(/usr/bin/sha256sum -- "$file") || fail 1 "can't hash $file"
+        [[ ${line%% *} == "${product_sha[$product]}" ]] \
+            || fail 1 "$file changed since its check (sha256 ${line%% *}, not ${product_sha[$product]}): refused before it runs"
+    done
     local recorded
     recorded=$(/usr/bin/env -i HOME="$tool_scratch/home" PATH=/usr/bin:/bin "$partial/bin/vibeswitcher" install-record \
         "$partial" --commit "$commit" --swift-version-output "$swift_version_file" --resolved "$src/Package.resolved" 2>&1) \
@@ -468,6 +574,7 @@ install_node_main() {
             || fail 1 "$partial/build-info records $installed as ${sha:-nothing}, not the checked ${product_sha[$product]}"
     done
     [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
+    /bin/chmod 0755 -- "$partial" "$partial/bin" || fail 1 "can't make $partial 0755"
     /bin/mv -T -- "$partial" "$final" || fail 1 "can't rename $partial to $final"
     install_partial=""
 

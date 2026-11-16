@@ -661,6 +661,43 @@ extension InstallTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: markers.path).isEmpty, "a hook or filter ran")
     }
 
+    /// The courtesy check reads nothing of `--repo`'s own git configuration (the security follow-ups' item 25): a clean
+    /// filter, then a process filter, that its `.git/config` defines and its committed `.gitattributes` applies to every
+    /// file never runs, though a file's stat changed so git compares its bytes. The check still passes a clean checkout
+    /// (on to the link check, 69) and still refuses a changed file (65).
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aFilterInTheCheckoutsOwnConfigNeverRuns() async throws {
+        let world = try await world(extra: [".gitattributes": "* filter=marker\n"])
+        let markers = world.root.appendingPathComponent("markers")
+        try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
+        let version = world.clone.appendingPathComponent(".swift-version")
+        let text = try String(contentsOf: version, encoding: .utf8)
+        for (kind, other) in [("clean", "process"), ("process", "clean")] {
+            try await world.git(["config", "filter.marker.\(kind)", ": > '\(markers.path)/\(kind)'; cat"], in: world.clone)
+            _ = try? await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", world.clone.path, "config", "--unset", "filter.marker.\(other)"],
+                               environment: ["HOME": world.gitHome.path, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1",
+                                             "GIT_CONFIG_GLOBAL": "/dev/null"])
+            // The same bytes in a new file: its stat changed, so a diff reads it through the filter.
+            try text.write(to: version, atomically: true, encoding: .utf8)
+            // The fixture fires: a plain diff in the clone runs the filter.
+            _ = try? await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", world.clone.path, "diff", "--name-only", "HEAD", "--"],
+                               environment: ["HOME": world.gitHome.path, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1",
+                                             "GIT_CONFIG_GLOBAL": "/dev/null"])
+            #expect(FileManager.default.fileExists(atPath: markers.appendingPathComponent(kind).path), "\(kind): the fixture's filter never ran")
+            try FileManager.default.removeItem(at: markers)
+            try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
+            try text.write(to: version, atomically: true, encoding: .utf8)
+
+            let ran = try await world.install(try world.arguments(world.base, products: true))
+            #expect(ran.status == 69, "\(kind): \(ran.status) \(ran.errors)")
+            #expect(try FileManager.default.contentsOfDirectory(atPath: markers.path).isEmpty, "\(kind): the checkout's own filter ran")
+        }
+        // A changed file is still found, and still nothing of the checkout's runs.
+        try "0.0.0\n".write(to: version, atomically: true, encoding: .utf8)
+        let changed = try await world.install(try world.arguments(world.base, products: true))
+        #expect(changed.status == 65 && changed.errors.contains(".swift-version"), "\(changed.status) \(changed.errors)")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: markers.path).isEmpty, "the checkout's own filter ran")
+    }
+
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aBinaryWithARunpathIsRefused() async throws {
         let world = try await world()
         let ran = try await world.install(try world.arguments(world.base, products: true))
@@ -868,6 +905,156 @@ extension InstallTests {
         #expect(waiting, "vibeswitcher-mcp isn't reading stdin: \((try? String(contentsOfFile: "/proc/\(pid)/syscall", encoding: .utf8)) ?? "gone") \((try? String(contentsOf: work.appendingPathComponent("mcp.err"), encoding: .utf8)) ?? "")")
         let mcpMaps = try maps(pid)
         #expect(Self.disallowedMaps(mcpMaps, own: mcp).isEmpty, "\(Self.disallowedMaps(mcpMaps, own: mcp))")
+    }
+
+    /// A folder of hard links to the static products (copies where a link can't be made) and their `swift-version`, as
+    /// `--test-products` takes it. A case swaps a file there only by a rename, never by a write into the link, so the
+    /// spike's folder never changes.
+    fileprivate func linkedStaticProducts(_ world: InstallScript.World) throws -> URL {
+        let given = try #require(Self.staticProducts)
+        let folder = world.root.appendingPathComponent("static-products")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for name in ["vibeswitcher-host", "vibeswitcher-server", "vibeswitcher-cli", "vibeswitcher-hook", "vibeswitcher-mcp", "swift-version"] {
+            let source = given.appendingPathComponent(name).path, target = folder.appendingPathComponent(name).path
+            if link(source, target) != 0 { try copyClosedOnExec(source, to: target) }
+        }
+        return folder
+    }
+
+    /// Each file's sha256 by its name, `sha256sum`'s (the products are too big to read whole here).
+    fileprivate func sha256s(_ files: [URL]) async throws -> [String: String] {
+        let ran = try await run(URL(fileURLWithPath: "/usr/bin/sha256sum"), files.map(\.path), environment: ["PATH": "/usr/bin:/bin"])
+        try #require(ran.status == 0, "sha256sum: \(ran.status) \(ran.errors)")
+        var hashes: [String: String] = [:]
+        for line in ran.output.split(separator: "\n") {
+            let words = line.split(separator: " ", maxSplits: 1)
+            guard words.count == 2 else { continue }
+            hashes[(String(words[1]).trimmingCharacters(in: CharacterSet(charactersIn: " *")) as NSString).lastPathComponent] = String(words[0])
+        }
+        return hashes
+    }
+
+    /// A command line that attests itself: run as `install-record FOLDER …`, it leaves `marker` and writes into FOLDER
+    /// the `build-info` the real one would write for the products whose hashes (by build name) are `hashes`. Its text.
+    fileprivate func forgingCLI(_ world: InstallScript.World, hashes: [String: String], products: URL, marker: URL) throws -> String {
+        var binaries: [String: String] = [:]
+        for name in BuildRecord.installedNames {
+            binaries[name] = hashes[name == NodeFolders.installedCLI ? "vibeswitcher-cli" : name]
+        }
+        let swift = try String(contentsOf: products.appendingPathComponent("swift-version"), encoding: .utf8)
+        let resolved = try Data(contentsOf: InstallScript.workingCopy.appendingPathComponent("Package.resolved"))
+        let info = BuildInfo(commit: world.base, binaries: binaries, swift: swift.trimmingCharacters(in: .newlines),
+                             resolved: BuildInfo.sha256(of: resolved))
+        let forged = world.root.appendingPathComponent("forged-build-info")
+        try info.encoded.write(to: forged)
+        return "#!/bin/sh\n: > '\(marker.path)'\n/bin/cp '\(forged.path)' \"$2/build-info\"\n"
+    }
+
+    /// `text` as an executable script put in place of `file` by a rename: the old file (a link to the spike's product,
+    /// say) is unlinked, never written.
+    fileprivate func swapIn(_ text: String, for file: URL) throws {
+        let swapped = file.deletingLastPathComponent().appendingPathComponent(".swapped-" + file.lastPathComponent)
+        try ScratchNode.script(text, at: swapped)
+        try #require(rename(swapped.path, file.path) == 0, "rename over \(file.path): errno \(errno)")
+    }
+
+    /// `world.base` installed from `products` with `--test-hold`: once the products are checked, `act` gets where the
+    /// install is (`src`, `partial`, `bin`, from `checked.at`) and changes what a worker could there; then the install
+    /// goes on. The run.
+    fileprivate func heldInstall(_ world: InstallScript.World, products: URL,
+                                 act: ([String: String]) throws -> Void) async throws -> CommandRun {
+        let hold = world.root.appendingPathComponent("hold-" + UUID().uuidString.prefix(8))
+        try FileManager.default.createDirectory(at: hold, withIntermediateDirectories: true)
+        let go = hold.appendingPathComponent("checked.go"), at = hold.appendingPathComponent("checked.at")
+        try #require(mkfifo(go.path, 0o600) == 0, "mkfifo: errno \(errno)")
+        let arguments = try world.arguments(world.base) + ["--test-products", products.path, "--test-hold", hold.path]
+        async let installed = world.install(arguments, limit: 300)
+        let held = await eventually(timeout: 240) { FileManager.default.fileExists(atPath: at.path) }
+        var failure: Error?
+        if held {
+            do {
+                var place: [String: String] = [:]
+                for line in try String(contentsOf: at, encoding: .utf8).split(separator: "\n") {
+                    guard let equals = line.firstIndex(of: "=") else { continue }
+                    place[String(line[..<equals])] = String(line[line.index(after: equals)...])
+                }
+                try act(place)
+            } catch { failure = error }
+        }
+        // Let it go on (it holds the FIFO open for reading and writing, so this open doesn't wait).
+        let fd = Sys.open(go.path, O_WRONLY | O_NONBLOCK | O_CLOEXEC)
+        if fd >= 0 {
+            _ = "go\n".withCString { write(fd, $0, 3) }
+            Sys.close(fd)
+        }
+        let ran = try await installed
+        if let failure { throw failure }
+        try #require(held, "the install never held: \(ran.status) \(ran.errors)")
+        return ran
+    }
+
+    /// A product swapped in the products' folder after its check isn't what's installed (the security follow-ups'
+    /// items 28 and 26): each product is read once, into the staging folder, and only that copy is checked and
+    /// installed. Here the command line is swapped for one that attests itself (it writes the `build-info` the checked
+    /// products would get): it never runs, and the installed command line is the checked one.
+    @Test(NodeTraits.linuxOnly, InstallTests.staticBuilt, .timeLimit(.minutes(10)))
+    func aProductSwappedAfterItsCheckIsNotWhatsInstalled() async throws {
+        let world = try await world()
+        let products = try linkedStaticProducts(world)
+        let names = ["vibeswitcher-host", "vibeswitcher-server", "vibeswitcher-cli", "vibeswitcher-hook", "vibeswitcher-mcp"]
+        let hashes = try await sha256s(names.map { products.appendingPathComponent($0) })
+        let marker = world.root.appendingPathComponent("marker-forged")
+        let forging = try forgingCLI(world, hashes: hashes, products: products, marker: marker)
+        let ran = try await heldInstall(world, products: products) { _ in
+            try swapIn(forging, for: products.appendingPathComponent("vibeswitcher-cli"))
+        }
+        #expect(ran.status == 0, "\(ran.status) \(ran.errors)")
+        #expect(!FileManager.default.fileExists(atPath: marker.path), "the swapped command line ran")
+        let build = world.prefix.appendingPathComponent(world.base)
+        let installed = try await sha256s([build.appendingPathComponent("bin/" + NodeFolders.installedCLI)])
+        #expect(installed[NodeFolders.installedCLI] == hashes["vibeswitcher-cli"], "the installed command line isn't the checked one")
+        let info = try BuildInfo.read(buildFolder: build.path).get()
+        #expect(info.binaries[NodeFolders.installedCLI] == hashes["vibeswitcher-cli"])
+    }
+
+    /// A program in the staging folder changed after its check is refused before it runs (the security follow-ups'
+    /// item 26): each copy is hashed again before the command line runs `install-record`, so a command line that
+    /// attests itself (writing the `build-info` the checked products would get) never runs, and nothing is installed.
+    @Test(NodeTraits.linuxOnly, InstallTests.staticBuilt, .timeLimit(.minutes(10)))
+    func aStagedProgramChangedBeforeItRunsIsRefused() async throws {
+        let world = try await world()
+        let products = try linkedStaticProducts(world)
+        let names = ["vibeswitcher-host", "vibeswitcher-server", "vibeswitcher-cli", "vibeswitcher-hook", "vibeswitcher-mcp"]
+        let hashes = try await sha256s(names.map { products.appendingPathComponent($0) })
+        let marker = world.root.appendingPathComponent("marker-forged")
+        let forging = try forgingCLI(world, hashes: hashes, products: products, marker: marker)
+        let ran = try await heldInstall(world, products: products) { place in
+            let partial = try #require(place["partial"])
+            try swapIn(forging, for: URL(fileURLWithPath: partial).appendingPathComponent("bin/" + NodeFolders.installedCLI))
+        }
+        #expect(ran.status == 1, "\(ran.status) \(ran.errors)")
+        #expect(ran.errors.contains("bin/\(NodeFolders.installedCLI) changed since its check") && ran.errors.contains("refused before it runs"),
+                "\(ran.errors)")
+        #expect(!FileManager.default.fileExists(atPath: marker.path), "the changed command line ran")
+        #expect(world.prefixIsEmpty, "\((try? FileManager.default.contentsOfDirectory(atPath: world.prefix.path)) ?? [])")
+    }
+
+    /// A file planted in the build's checkout after its checkout, untracked or ignored, is refused before the layout
+    /// (the security follow-ups' item 27): the re-check lists untracked and ignored files too.
+    @Test(NodeTraits.linuxOnly, InstallTests.staticBuilt, .timeLimit(.minutes(10)))
+    func aFilePlantedInTheBuildTreeIsRefused() async throws {
+        let world = try await world(extra: [".gitignore": "*.o\n"])
+        let products = try linkedStaticProducts(world)
+        for planted in ["Sources/Planted.swift", "planted.o"] {
+            let ran = try await heldInstall(world, products: products) { place in
+                let file = URL(fileURLWithPath: try #require(place["src"])).appendingPathComponent(planted)
+                try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try "planted\n".write(to: file, atomically: true, encoding: .utf8)
+            }
+            #expect(ran.status == 1, "\(planted): \(ran.status) \(ran.errors)")
+            #expect(ran.errors.contains("changed since it was checked out") && ran.errors.contains(planted), "\(planted): \(ran.errors)")
+            #expect(world.prefixIsEmpty, "\(planted): \((try? FileManager.default.contentsOfDirectory(atPath: world.prefix.path)) ?? [])")
+        }
     }
 
     /// The gated build: the real build through the script, with M3's root toolchain, on a `git clone --no-local` of

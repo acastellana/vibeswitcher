@@ -1399,9 +1399,12 @@ what it needs.
   package caches, the built products and the staging folder are all in folders the user can write (mode 0700 keeps out
   other users, not the user's own processes), and nothing holds teams before the builds folder changes. Such a worker
   can change what is built and installed; `build-info` then vouches for it, and the `vs config accept` the install asks
-  for accepts it with the install's own change. The install checks the checkout again (its HEAD, its tree, no tracked
-  file changed) and compares `build-info` with the products the link check hashed, which catches a change left in
-  place, not one made and undone during the build. The root-owned toolchain reduces the risk only when no worker runs
+  for accepts it with the install's own change. The install reads each product once, into its staging folder, and
+  checks, hashes and installs only that copy, hashing it again before it first runs; it checks the checkout again (its
+  HEAD, its tree, no tracked file changed, no file untracked or ignored) and compares `build-info` with the hashes the
+  link check took, which catches a change left in place, not one made and undone during the build (the security
+  follow-ups' items 26 to 28, 2026-11-16). Its courtesy check of the user's clone reads nothing of the clone's git
+  configuration, so a filter a worker defines there doesn't run (item 25). The root-owned toolchain reduces the risk only when no worker runs
   during the install (the start plan's S4b, 2026-11-16, with its review). The install also trusts the environment it
   is started with: bash runs exported functions, `SHELLOPTS` with `PS4`, `BASH_ENV` and `LD_PRELOAD` before the
   script's first line, so the user runs it as `/usr/bin/env -i HOME=<home> PATH=/usr/bin:/bin /bin/bash <its path>`.
@@ -1523,6 +1526,12 @@ otherwise: an install lays out the five programs, `build-info`, `current` and `i
 from the installed folder passes its `build-info` check and refuses a server one byte off; the installed host, a held
 launcher and the tool server map only root's files, their own installed file and sealed copies, and the server's maps
 are refused, 2026-11-16; planned: `InstallTests.anInstallBuildsWithTheRootToolchain`, written and skipped until M3);
+`InstallTests.aFilterInTheCheckoutsOwnConfigNeverRuns`, `InstallTests.aProductSwappedAfterItsCheckIsNotWhatsInstalled`,
+`InstallTests.aStagedProgramChangedBeforeItRunsIsRefused`, `InstallTests.aFilePlantedInTheBuildTreeIsRefused` (the
+security follow-ups' items 25 to 28, 2026-11-16: the courtesy check runs no filter the clone's own configuration
+defines; a product swapped after its check isn't what's installed, a staged program changed after its check is refused
+before it runs, and a file planted in the build's checkout, untracked or ignored, is refused; the last three on the
+static products, as S4c's);
 `LinuxSealListTests.aWriteToEachItemOfTheLinuxListIsHeld`, `LinuxSealListTests.aSourcedFileIsWatched`,
 `LinuxSealListTests.aListingNeverReadsContents`, `LinuxSealListTests.aListingIsNotCut`,
 `LinuxSealListTests.theWindowsFilesAreWatchedOnlyWhileMounted`,

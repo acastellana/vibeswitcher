@@ -1344,6 +1344,45 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
   whose script had no link check: installed, `build-info` matching, `current` and `installs` written, the same commit
   again refused ("is there already"), and the next install from `current/Resources/install-node.sh` installed.
 
+*2026-11-16, the security follow-ups' items 25 to 28 (committed as "v2 step 8: install-node security follow-ups,
+the courtesy check's git folder and products read once"):*
+- **The courtesy check reads nothing of `--repo`'s git configuration** (item 25; closes the S4b executor's "Not
+  closed" note above). git runs on a git folder of the script's own in the early folder (made before the check now,
+  removed with it): a configuration of its own, plus `core.filemode`, `core.symlinks`, `core.ignorecase`,
+  `core.autocrlf`, `core.eol`, `core.checkstat` and `core.trustctime` read as data by `git config --file` (no include
+  followed; none names a command); HEAD the checkout's resolved by hand (a hash, or the branch's loose ref or
+  `packed-refs` line); a copy of its index (and `sharedindex.*`) and `info/exclude`; `GIT_OBJECT_DIRECTORY` its objects
+  (their `info/alternates` read with them); `GIT_WORK_TREE` the checkout. The checkout is found without git: the nearest
+  folder up with a `.git`, a linked worktree's `gitdir:` file and its `commondir` followed. Submodules aren't looked
+  into (`--ignore-submodules=all`: a submodule's own git folder would be read). A checkout git can't read that way (a
+  reftable or SHA-256 repository) exits 64. Held by `InstallTests.aFilterInTheCheckoutsOwnConfigNeverRuns`: a clean
+  filter, then a process filter, in the clone's `.git/config`, applied by the commit's `.gitattributes`, on a file
+  whose stat changed (the case first checks a plain `git diff` in the clone runs it) never runs; the check still passes
+  a clean clone (69) and refuses a changed file (65).
+- **Each product is read once** (item 28). Before the link check the script makes `<commit>.partial` and its `bin/`
+  0700 (made 0755 just before the rename), copies each product there under its installed name, and checks and hashes
+  only that copy, before its check and after it (a difference: 69). The layout no longer copies the products: the copies
+  are the install. The staging folder is dropped on exit as before, so a link-check refusal still leaves the prefix
+  empty.
+- **The copies are hashed again before anything in the staging folder runs** (item 26): before `install-record`, each
+  program's sha256 must still be the checked one, or the install exits 1 ("changed since its check … refused before it
+  runs"); `build-info` is then compared with those same hashes, as before.
+- **The checkout's re-check sees untracked and ignored files** (item 27): `git status --porcelain
+  --untracked-files=all --ignored`. Not yet run on the real build (M3): if SwiftPM writes into `--package-path`, the
+  gated `anInstallBuildsWithTheRootToolchain` names the file.
+- **`--test-hold DIR`**, a test flag (a scratch prefix only, as the others): once the products are checked, where the
+  FIFO `DIR/checked.go` is there, the script writes `DIR/checked.at` (the checkout, the staging folder, the products'
+  folder) and waits for a line on the FIFO (120 s at most). It runs nothing a test gives. Held by, on the static
+  products (gated as S4c's): `InstallTests.aProductSwappedAfterItsCheckIsNotWhatsInstalled` (the products' command line
+  swapped after its check for one that writes the checked products' `build-info`: it never runs, and the installed one
+  is the checked one), `InstallTests.aStagedProgramChangedBeforeItRunsIsRefused` (the same swap in the staging folder:
+  refused before it runs, nothing installed), `InstallTests.aFilePlantedInTheBuildTreeIsRefused` (an untracked
+  `Sources/Planted.swift`, then an ignored `planted.o`). Each new case failed on the script before these changes (with
+  only the hold added), and item 26's case also with only the re-hash removed.
+- Residual: the `Resources/` files (`vs-*`, the script, its libraries) and `Package.resolved` are still read from the
+  checkout by path after its re-check; a change made and undone between them isn't seen (as S9's `Doesn't promise`
+  says of a worker live during an install). Copying them from the fetched commit's blobs instead would close it.
+
 - [ ] **Step 4:** commit ("v2: the node's install script"). Push, both green.
 
 **Done when:** the ungated cases pass on Linux.
