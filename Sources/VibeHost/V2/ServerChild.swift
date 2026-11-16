@@ -470,7 +470,7 @@ public final class ServerChild {
             self.due = due.map { (pid, $0) }
         }
         Self.say(server, "server child pid \(pid) carried over from the build before, connector \(record.connector)")
-        if due != nil { replaceWhenIdle(pid) }
+        if due != nil { replaceWhenIdle(pid, carriedAt: Date()) }
     }
 
     /// The child `pid` ended: its connector closed (its connections with it), it reaped, and started again. On `queue`.
@@ -503,12 +503,21 @@ public final class ServerChild {
     /// it still runs `replaceLimit` later. `ended` then starts it again at once from this child's copy, the new build's
     /// server. Nothing once `pid` isn't the child running (it ended meanwhile, and its start again was from `copy`).
     /// A scratch host's `replaceHoldTestFlag` holds the first look until its file exists. On `queue`.
-    func replaceWhenIdle(_ pid: pid_t, firstLook: Date? = nil) {
+    ///
+    /// `carriedAt`: when `resume` took the child. The exec ended every connection it had, so "none open" doesn't say it
+    /// is idle until it has connected again: a request it was answering may wait for its link's next welcome to reply
+    /// (`build.switch`, which says how the switch went from the new image's welcome and notes: the start plan's S8b).
+    /// The first look waits until a connection was made through its connector since, or `reconnectGrace`.
+    func replaceWhenIdle(_ pid: pid_t, firstLook: Date? = nil, carriedAt: Date? = nil) {
         guard let server, !lock.withLock({ stopped }), let running = lock.withLock({ child }), running.pid == pid else { return }
         let again = { (since: Date?) in
-            self.queue.asyncAfter(deadline: .now() + Self.idleLook) { [weak self] in self?.replaceWhenIdle(pid, firstLook: since) }
+            self.queue.asyncAfter(deadline: .now() + Self.idleLook) { [weak self] in self?.replaceWhenIdle(pid, firstLook: since, carriedAt: carriedAt) }
         }
         if let hold = Self.replaceHold, access(hold, F_OK) != 0 { return again(nil) }
+        if firstLook == nil, let carriedAt, server.appConnectionsMade(through: running.connector) == 0,
+           Date().timeIntervalSince(carriedAt) < Self.reconnectGrace {
+            return again(nil)
+        }
         let since = firstLook ?? Date()
         let open = server.appConnectionsOpen(through: running.connector)
         guard open == 0 || Date().timeIntervalSince(since) >= Self.idleLimit else { return again(since) }
@@ -528,6 +537,10 @@ public final class ServerChild {
     /// anyway, and how long a child it ended may take to go before SIGKILL.
     static let idleLook: TimeInterval = 0.2
     static let idleLimit: TimeInterval = 30
+    /// How long the first look at a child just carried over waits for it to connect again (`replaceWhenIdle`'s
+    /// `carriedAt`): a server's link tries again 0.2 s after its connection was lost, and its request waits in the
+    /// connector until this image takes it.
+    static let reconnectGrace: TimeInterval = 10
     static let replaceLimit: TimeInterval = 10
 
     /// A scratch host's test flag: `replaceWhenIdle` doesn't look until PATH exists (a test's switch left pending).

@@ -456,12 +456,41 @@ extension HostServer {
         let description: String
     }
 
+    /// A handover refused by the rule on switches (`teamsWorking`).
+    struct TeamsWorking: Error, CustomStringConvertible {
+        let description: String
+    }
+
+    /// The rule on switches as the node's host holds it (decision 6, the start plan's ST-D15; the server refuses
+    /// `build.switch` first, from the labels it sees): with an install root, a handover is refused while a live session
+    /// was started by another session (`startedBy`: a lead's worker or verifier, whatever label it was given) or is
+    /// labelled a worker's or a verifier's. Asked before the probe and again in the turn that executes, so a worker a
+    /// lead starts during the probe refuses it too. Nil: none is, or no install root (the app's host, a scratch host
+    /// without one).
+    func teamsWorking(_ state: HostHandover.State) -> TeamsWorking? {
+        guard config.installRoot != nil else { return nil }
+        return Self.teamsWorking(state.sessions)
+    }
+
+    /// `teamsWorking` on a state's sessions: the live ones started by a session or labelled a worker's or verifier's,
+    /// named by their tty and label.
+    static func teamsWorking(_ sessions: [HostHandover.Session]) -> TeamsWorking? {
+        let working = sessions.filter { session in
+            session.info.isLive && (session.startedBy != nil || LeadTeams.role(label: session.info.label).map { $0 != .lead } ?? false)
+        }
+        guard !working.isEmpty else { return nil }
+        return TeamsWorking(description: "no switch of builds while a worker or verifier runs (decision 6, the rule on switches): "
+                            + working.map { "\($0.info.tty) (\(ConfigSeal.inert($0.info.label, limit: 80)))" }.joined(separator: ", ")
+                            + " live; switch once they have ended (a lead may stay)")
+    }
+
     /// `handOver(to:)` on Linux (its one hook): the target loaded into a sealed copy before anything else, probed from
     /// that copy with a state of its own in sealed memory, then, on the queue, the secrets and the state written into
     /// sealed memory and the process replaced by the copy, keeping both, the images and every session's descriptor.
     /// No file is written. Anything failing before the exec leaves this host as it was, and closes what it made. The
     /// lock it would carry is checked before the probe and again just before the exec (`carriedLockRefusal`), and so is
-    /// the server child (`ServerChild.handoverRefusal`: refused while one is being ended to start again).
+    /// the server child (`ServerChild.handoverRefusal`: refused while one is being ended to start again), and with an
+    /// install root the rule on switches (`teamsWorking`).
     func handOverThroughMemory(to executable: String, reply: @escaping (HostEvent) -> Void) {
         // A server child being ended to start again can't be carried (ServerChild.handoverRefusal).
         if let why = serverChild?.handoverRefusal {
@@ -498,6 +527,7 @@ extension HostServer {
         let probeState: Int32
         do {
             let state = handoverState(secretFD: nil)
+            if let working = teamsWorking(state) { throw working }
             if let why = carriedLockRefusal(state.lockFD) { throw refusedForItsLock(why, executable) }
             probeState = try HandoverMemory.seal(HandoverMemory.encoded(state), name: "vibeswitcher-handover-probe")
         } catch {
@@ -527,6 +557,8 @@ extension HostServer {
                     self.sessions.values.forEach { $0.finishNow() }
                     let fallback = HostImages.ownCopy
                     var state = self.handoverState(secretFD: secretFD)
+                    // Asked again here: a lead may have started a worker during the probe.
+                    if let working = self.teamsWorking(state) { throw working }
                     state.images = HandoverImages(own: target.fd, fallback: fallback?.fd, server: serverCopy?.fd)
                     state.ownsLaunchers = HandoverMemory.ownsLaunchers
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }

@@ -847,3 +847,32 @@ extension HandoverLinuxTests {
         }
     }
 }
+
+// MARK: The start plan's S8b review: the rule on switches in the node's host
+
+extension HandoverLinuxTests {
+    /// The node's host holds the rule on switches itself (decision 6, ST-D15), on the sessions its handover would save,
+    /// failing closed: a live session started by another session blocks whatever its label says (a lead's worker named
+    /// `Lead · decoy`, or no role at all), and so does one labelled a worker's or a verifier's. A lead, a user's own
+    /// session and a worker that has ended don't. Pure: both systems.
+    @Test func theNodesHostRefusesAHandoverWhileATeamWorks() {
+        func session(_ label: String, tty: String, startedBy: UUID? = nil, ended: Bool = false) -> HostHandover.Session {
+            let info = HostSession(id: UUID(), tty: tty, childPID: 1, cwd: "/nonexistent", command: "sleep 600", label: label, agent: nil,
+                                   title: "", startedAt: Date(), cols: 80, rows: 24,
+                                   exit: ended ? HostSession.Exit(status: 0, at: Date()) : nil)
+            return HostHandover.Session(info: info, masterFD: nil, output: Data(), pendingInput: Data(), startedBy: startedBy)
+        }
+        let lead = session("Lead · project", tty: "pts/1")
+        let mine = session("Test", tty: "pts/2")
+        #expect(HostServer.teamsWorking([lead, mine]) == nil)
+        #expect(HostServer.teamsWorking([lead, session("Worker: done", tty: "pts/3", startedBy: lead.info.id, ended: true)]) == nil)
+        let decoy = HostServer.teamsWorking([lead, session("Lead · decoy", tty: "pts/4", startedBy: lead.info.id)])?.description ?? ""
+        #expect(decoy.hasPrefix("no switch of builds while a worker or verifier runs (decision 6") && decoy.contains("pts/4 (Lead · decoy)"), "\(decoy)")
+        #expect(!decoy.contains("pts/1"), "\(decoy)")
+        let unnamed = HostServer.teamsWorking([session("x", tty: "pts/5", startedBy: lead.info.id)])?.description ?? ""
+        #expect(unnamed.contains("pts/5 (x)"), "\(unnamed)")
+        let labelled = HostServer.teamsWorking([mine, session("Verifier: t", tty: "pts/6"), session("Worker: \u{1b}[2Jt", tty: "pts/7")])?.description ?? ""
+        #expect(labelled.contains("pts/6 (Verifier: t)") && labelled.contains("pts/7") && !labelled.contains("\u{1b}") && !labelled.contains("pts/2"),
+                "\(labelled)")
+    }
+}

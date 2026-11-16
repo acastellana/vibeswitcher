@@ -400,8 +400,9 @@ struct SwitchTests {
         #expect(!said(nil, refusal: "no\u{1b}[2J").contains("\u{1b}"))
     }
 
-    /// A link on a stand-in host whose pid is 31589 and whose notes name build `A`, a scratch install root holding
-    /// `A` and `B` (folders only: the stand-in never runs them), and a switch on it whose notes are kept.
+    /// A link on a stand-in host whose pid is 31589, whose notes name build `A` and which lists one live session (as the
+    /// app's `FakeHost` welcomes with one), a scratch install root holding `A` and `B` (folders only: the stand-in never
+    /// runs them), and a switch on it whose notes are kept.
     final class StubWorld: @unchecked Sendable {
         let stub: StubHost
         let link: HostLink
@@ -410,7 +411,8 @@ struct SwitchTests {
 
         init(_ scratch: Scratch, onHandover: StubHost.OnHandover) async throws {
             stub = try StubHost(scratch, capabilities: [HostProtocol.Capability.inputUnits, HostProtocol.Capability.vaultV2,
-                                                        HostProtocol.Capability.hostNotes, HostProtocol.Capability.handover])
+                                                        HostProtocol.Capability.hostNotes, HostProtocol.Capability.handover],
+                            sessions: [StubHost.session()])
             stub.pid = 31589
             stub.build = SwitchTests.a
             stub.onHandover = onHandover
@@ -439,6 +441,8 @@ struct SwitchTests {
         var handover: [String] { notes.value.filter { $0.contains("handed over") || $0.contains("handover failed") } }
         /// What it said of its wait.
         var waiting: [String] { notes.value.filter { $0.hasPrefix("build.switch: waiting") || $0.hasPrefix("build.switch: no answer") } }
+        /// How many sessions the link has live.
+        var live: Int { link.queue.sync { link.sessions.filter(\.isLive).count } }
         /// Whether the stand-in was asked to hand over.
         var askedToHandOver: Bool { stub.requests.contains { if case .handover = $0 { true } else { false } } }
 
@@ -467,6 +471,8 @@ struct SwitchTests {
         #expect(value["outcome"]?.string == "handed-over" && value["commit"]?.string == Self.b && value["pid"]?.int == 31589, "\(value)")
         #expect(value["from"]?.string == Self.a && value["afterTheWait"]?.bool == false, "\(value)")
         #expect(world.handover == ["build.switch: handed over (pid 31589, build \(Self.b))"], "\(world.notes.value)")
+        // The app's `client.sessions.count == 1`: the session is kept across the handover.
+        #expect(world.live == 1)
     }
 
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func theOldBuildAnsweringIsAFailure() async throws {
@@ -475,6 +481,8 @@ struct SwitchTests {
         let failed = "handover failed: the old build answered (pid 31589, build \(Self.a); asked for \(Self.b))"
         #expect(answer == .refused(.refused, failed))
         #expect(world.handover == ["build.switch: " + failed], "\(world.notes.value)")
+        // The app's `outdated(live: 1, …)`: the old build keeps its session.
+        #expect(world.live == 1)
     }
 
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aDifferentHostAnsweringIsAFailure() async throws {
@@ -483,16 +491,23 @@ struct SwitchTests {
         let failed = "handover failed: a different host answered (pid 40000, build \(Self.b); was pid 31589)"
         #expect(answer == .refused(.refused, failed))
         #expect(world.handover == ["build.switch: " + failed], "\(world.notes.value)")
+        #expect(world.live == 1)
     }
 
+    /// The host goes, socket and all: the link's end answers the switch's wait for a welcome at once (the switch's own
+    /// waits are on a clock the test never moves, so only the link's end can), and the session it listed is ended.
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aHostThatGoesAwayIsAFailure() async throws {
         let world = try await StubWorld(scratch, onHandover: .quit)
-        let answer = await Self.answer(world.run())
+        #expect(world.live == 1)
+        let clock = ManualClock()
+        var timing = SwitchRequest.Timing()
+        timing.later = clock.schedule
+        let answer = await Self.answer(world.run(timing))
         let failed = "handover failed: the host (pid 31589) went away and no build answered"
         #expect(answer == .refused(.refused, failed))
         #expect(world.handover == ["build.switch: " + failed], "\(world.notes.value)")
         let link = world.link
-        #expect(link.queue.sync { link.sessions.allSatisfy { !$0.isLive } })
+        #expect(link.queue.sync { link.sessions.count == 1 && link.sessions.allSatisfy { !$0.isLive } })
     }
 
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aRefusalIsAFailure() async throws {
@@ -500,9 +515,29 @@ struct SwitchTests {
         let answer = await Self.answer(world.run())
         #expect(answer == .refused(.refused, "handover failed: Couldn't hand over: probe failed."))
         #expect(world.handover == ["build.switch: handover failed: Couldn't hand over: probe failed."], "\(world.notes.value)")
-        // The host carried on: the link was never dropped.
+        // The host carried on: the link was never dropped, and its session is kept.
         let link = world.link
         #expect(link.queue.sync { link.welcomes } == 1)
+        #expect(world.live == 1)
+    }
+
+    /// The handover's connection closes before the handover was sent (another switch's exec, or a host that went before
+    /// it welcomed it): nothing was asked, so it is no outcome. The switch says the host couldn't be asked, and doesn't
+    /// take the link's next welcome as the handover's.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aCloseBeforeTheHandoverIsAskedIsNoOutcome() async throws {
+        let world = try await StubWorld(scratch, onHandover: .reExec(build: Self.b))
+        let hellos = { world.stub.requests.filter { if case .hello = $0 { true } else { false } }.count }
+        #expect(hellos() == 1)
+        world.stub.welcomes = false
+        let answer = world.run()
+        #expect(await eventually { hellos() == 2 }, "\(world.stub.requests)")
+        world.stub.welcomes = true
+        world.stub.dropConnections()
+        let said = Self.said(await Self.answer(answer)) ?? ""
+        #expect(said == "the host couldn't be asked to hand over: the host closed the connection before the handover was asked",
+                "\(said)\n\(world.notes.value)")
+        #expect(!world.askedToHandOver && world.handover.isEmpty, "\(world.notes.value)")
+        #expect(world.live == 1)
     }
 
     /// The host's probe of the new build takes past a request's 15 s: the handover is waited for, noted every 15 s, and
@@ -539,6 +574,7 @@ struct SwitchTests {
         #expect(value["said"]?.string == "handed over after the wait (pid 31589, build \(Self.b))" && value["afterTheWait"]?.bool == true, "\(value)")
         #expect(world.waiting == ["build.switch: waiting for the new build's probe, 1 s",
                                   "build.switch: no answer in 2 s; the connection stays open 60 s more"], "\(world.notes.value)")
+        #expect(world.live == 1)
     }
 
     /// The host refuses after the switch stopped waiting: that's the handover failing, and the old build carries on.
@@ -554,6 +590,7 @@ struct SwitchTests {
         #expect(world.handover == ["build.switch: handover failed: Couldn't hand over: probe failed."], "\(world.notes.value)")
         let link = world.link
         #expect(link.queue.sync { link.welcomes } == 1)
+        #expect(world.live == 1)
     }
 
     // MARK: build.switch on a scratch node (S8, the rule on switches; the app's HostClientSlowProbeTests, row 99)
@@ -636,8 +673,8 @@ struct SwitchTests {
     }
 
     /// The app's `aNewBuildWhoseProbeTakesTwentySecondsIsHandedOverWithNoFalseFailure`: the host holds the handover
-    /// before its probe (`--handover-test-hold`) until the test releases it, 20 s after the host said it hands over. The
-    /// switch waits past a request's 15 s, saying so, and the outcome is handed over; the live lead is kept.
+    /// before its probe (`--handover-test-hold`) until the test releases it, once the switch has noted its wait past a
+    /// request's 15 s. The outcome is handed over, never failed first; the live lead is kept.
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aSwitchWhoseProbeTakesTwentySecondsIsWaitedForWithNoFalseFailure() async throws {
         let builds = scratch.url("builds")
         let a = try ScratchBuilds.install(commit: Self.a, into: builds)
@@ -652,14 +689,77 @@ struct SwitchTests {
         func said() -> String { node.said + ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "") }
         async let asked = offPool { WireClient.reply(client.request("build.switch", args: ["commit": .string(Self.b)], timeout: SwitchRequest.longestWait)) }
         #expect(await eventually(timeout: 120) { said().contains("handing over to") }, "\(said())")
-        try await Task.sleep(nanoseconds: 20_000_000_000)
+        #expect(await eventually(timeout: 60) { said().contains("build.switch: waiting for the new build's probe, 15 s") }, "\(said())")
+        #expect(!said().contains("handover failed"), "\(said())")
         FileManager.default.createFile(atPath: hold.path, contents: nil)
         let reply = try #require(await asked, "\(said())")
         #expect(reply.ok && reply.result?["outcome"]?.string == "handed-over" && reply.result?["afterTheWait"]?.bool == false, "\(reply)\n\(said())")
-        #expect(said().contains("build.switch: waiting for the new build's probe, 15 s"), "\(said())")
         #expect(!said().contains("handover failed"), "\(said())")
         #expect(try node.sessions().contains { $0.id == lead.id && $0.isLive })
         #expect(Self.host(client).build == Self.b)
+    }
+
+    /// The rule on switches past the plan (ST-D15): a worker started while the host probes the target (held there by
+    /// `--handover-test-hold`, as a lead's tool server can start one then) refuses the handover in the host's turn that
+    /// would execute. The reply names decision 6 and the worker; the host's pid and build are unchanged, and both
+    /// sessions are kept.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aWorkerStartedDuringTheProbeRefusesTheSwitch() async throws {
+        let builds = scratch.url("builds")
+        let a = try ScratchBuilds.install(commit: Self.a, into: builds)
+        try ScratchBuilds.install(commit: Self.b, into: builds)
+        let hold = try scratch.shortFolder("vsh-hold").appendingPathComponent("release")
+        let node = try await ScratchNode(scratch, build: a, hostArguments: ["--handover-test-hold", hold.path], installRoot: builds)
+        defer { node.stop() }
+        let lead = try await node.spawn("sleep 600", label: "Lead · project")
+        let client = try WireClient(node)
+        #expect(await eventually { Self.host(client).live == 1 })
+        let log = node.root.appendingPathComponent("host.log").path
+        func said() -> String { node.said + ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "") }
+        async let asked = offPool { WireClient.reply(client.request("build.switch", args: ["commit": .string(Self.b)], timeout: SwitchRequest.longestWait)) }
+        #expect(await eventually(timeout: 120) { said().contains("handing over to") }, "\(said())")
+        let worker = try await node.spawn("sleep 600", label: "Worker: task-2")
+        FileManager.default.createFile(atPath: hold.path, contents: nil)
+        let reply = try #require(await asked, "\(said())")
+        #expect(!reply.ok && reply.error?.code == "refused", "\(reply)\n\(said())")
+        let message = reply.error?.message ?? ""
+        #expect(message.hasPrefix("handover failed: Couldn't hand over: no switch of builds while a worker or verifier runs (decision 6"), "\(message)")
+        #expect(message.contains(worker.tty) && message.contains("Worker: task-2") && !message.contains(lead.tty), "\(message)")
+        let after = Self.host(client)
+        #expect(after.pid == Int(node.hostPID) && after.build == Self.a && after.live == 2, "\(after)")
+    }
+
+    /// A switch to a build whose server's bytes differ (the node's every switch between commits; `ScratchBuilds` gives
+    /// `B` the built server with one byte more): the new image ends the server child it carried, to start it again from
+    /// `B`'s server, but only once that server has reconnected and replied: the reply reaches the command line, and
+    /// the server is replaced after it, the lead kept.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aSwitchToAnotherServerRepliesBeforeTheServerIsReplaced() async throws {
+        let builds = scratch.url("builds")
+        let a = try ScratchBuilds.install(commit: Self.a, into: builds)
+        var bytes = try Data(contentsOf: builtProducts.appendingPathComponent(BuildInfo.server))
+        bytes.append(0)
+        let padded = scratch.url("padded-server")
+        try bytes.write(to: padded)
+        try ScratchBuilds.install(commit: Self.b, into: builds, replacing: [BuildInfo.server: padded.path])
+        let node = try await ScratchNode(scratch, build: a, installRoot: builds)
+        defer { node.stop() }
+        let lead = try await node.spawn("sleep 600", label: "Lead · project")
+        let client = try WireClient(node)
+        #expect(await eventually { Self.host(client).live == 1 })
+        let server = try #require(node.serverPID)
+        let log = node.root.appendingPathComponent("host.log").path
+        func said() -> String { node.said + ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "") }
+        let reply = try #require(WireClient.reply(client.request("build.switch", args: ["commit": .string(Self.b)], timeout: SwitchRequest.longestWait)),
+                                 "no reply\n\(said())")
+        #expect(reply.ok && reply.result?["outcome"]?.string == "handed-over" && reply.result?["commit"]?.string == Self.b, "\(reply)\n\(said())")
+        #expect(said().contains("server child pid \(server) carried over from the build before"), "\(said())")
+        // Then it is replaced, from B's server: a new server answers.
+        let replaced = await eventually(timeout: ServerChild.idleLimit + ServerChild.reconnectGrace + 60) {
+            ((try? WireClient(node).hello).map { $0.server.pid != server }) == true
+        }
+        #expect(replaced, "\(said())")
+        #expect(said().contains("server child pid \(server) ended for the new build's server"), "\(said())")
+        #expect(try node.sessions().contains { $0.id == lead.id && $0.isLive })
+        #expect(Self.host(try WireClient(node)).build == Self.b)
     }
 
     /// A rollback the host refuses: the node runs `B`, and `A` (the rollback's target in `status`) is a build whose probe

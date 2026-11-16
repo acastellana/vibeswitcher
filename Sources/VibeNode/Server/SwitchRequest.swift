@@ -22,7 +22,14 @@ import VibeCore
 ///   a failure, said so.
 ///
 /// The server replies with the outcome before its own replacement: a switch to a build whose server's bytes differ
-/// ends the running server child once it is idle, or `ServerChild.idleLimit` after the switch (stage 2's 9d).
+/// ends the running server child once it is idle, or `ServerChild.idleLimit` after the first look (stage 2's 9d), and
+/// that first look waits until this server's link has connected again to the new image (at most
+/// `ServerChild.reconnectGrace`), so the welcome and the notes this reply waits for come first. The link stays open,
+/// so in practice the server is replaced `idleLimit` after it reconnected.
+///
+/// The rule on switches is the server's first, from the labels it sees, and the node's host holds it too, before its
+/// probe and again in the turn that executes (`HostServer.teamsWorking`): a worker a lead starts while the probe runs,
+/// or one a lead started under a lead's label, refuses the handover there, and the reply says the host's words.
 public struct SwitchRequest {
     /// The host's probe limit (`HostHandover.probeLimit`, internal to `VibeHost`; a test ties the two).
     public static let probeLimit: TimeInterval = 180
@@ -297,7 +304,11 @@ private final class HandoverCall: @unchecked Sendable {
             let made: HostConnection
             do { made = try dialer.connect(queue: queue, patience: 5) } catch { return finish(.unreachable("\(error)")) }
             connection = made
-            made.onClose = { [self] in finish(.closed(afterTheWait: afterTheWait)) }
+            // A close before the handover was sent is no outcome: nothing was asked (another switch's exec, or a host
+            // that went before it welcomed this connection).
+            made.onClose = { [self] in
+                finish(seq == nil ? .unreachable("the host closed the connection before the handover was asked") : .closed(afterTheWait: afterTheWait))
+            }
             made.onEvent = { [self] envelope in
                 if case .welcome = envelope.event, seq == nil {
                     do { seq = try made.send(.handover(executable: executable)) } catch { finish(.unreachable("the handover wasn't sent: \(error)")) }

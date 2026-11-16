@@ -2015,6 +2015,31 @@ inventory. The Mac runs `theMacsListIsEmpty`.
   bytes are the target's and `ServerChild` keeps it running (it is replaced only when the bytes differ): its
   `server.commit` stays `A`. "server build `B` once the server is restarted" needs builds whose server bytes differ.
 
+*2026-11-16, S8b's review:*
+- **The reply before the replacement.** A switch to a build whose server's bytes differ (every switch between commits
+  on the node) lost its reply: the new image's `ServerChild.resume` looked at once for an idle child, found no
+  connection open (the exec had ended them, and the link hadn't reconnected yet), and ended the server while
+  `build.switch` waited for the link's next welcome. Now the first look at a carried child waits until it has made a
+  connection through its connector since the resume, or `ServerChild.reconnectGrace` (10 s)
+  (`AppConnector.madeCount`, `HostServer.appConnectionsMade(through:)`; `V2/` files only). The link stays open, so the
+  switched server is ended `idleLimit` after its link reconnected: the reply comes first.
+  `SwitchTests.aSwitchToAnotherServerRepliesBeforeTheServerIsReplaced` (`B`'s server the built one with a byte more,
+  through `ScratchBuilds.install(replacing:)`) holds it. The stage 2 helpers that never reconnect are ended
+  `reconnectGrace` later than before.
+- **The rule on switches past the plan.** The server's check ran once, from labels, and the host took spawns through
+  the whole probe. The node's host (one with an install root) now holds the rule too, on the sessions its handover
+  would save, before the probe and again in the turn that executes (`HostServer.teamsWorking`, in
+  `V2/HandoverMemory.swift`): a live session started by another session (`startedBy`, whatever its label, so a decoy
+  `Lead · x` or no role fails closed) or labelled a worker's or a verifier's refuses the handover, and the reply says
+  the host's words. `SwitchTests.aWorkerStartedDuringTheProbeRefusesTheSwitch`,
+  `HandoverLinuxTests.theNodesHostRefusesAHandoverWhileATeamWorks`. The server keeps its label check (a fast refusal
+  with nothing asked of the host); it can't see `startedBy`, which `HostSession` doesn't carry.
+- A close of the handover's connection before the handover was sent is `unreachable`, not the host executing
+  (`aCloseBeforeTheHandoverIsAskedIsNoOutcome`). `StubWorld`'s stand-in lists one live session, and the ported cases
+  assert it kept (none live after `.quit`), as the app's did. `aHostThatGoesAwayIsAFailure` runs the switch's waits
+  on a clock it never moves, so only the link's end answers it. The probe case releases the hold on the switch's
+  15 s note, not after a fixed 20 s.
+
 - [x] **Step 1: Failing tests** (`SwitchTests`, linuxOnly unless pure):
   - `aSwitchWhileAWorkerRunsIsRefused` (S8): on a `ScratchNode` with a fake lead and worker, `build.switch` is
     refused, naming decision 6 and the worker. The host's pid and build are unchanged. With only the lead live, it
@@ -2047,7 +2072,8 @@ inventory. The Mac runs `theMacsListIsEmpty`.
   - The server sends the handover through the connector with the target
     `<installRoot>/<commit>/bin/vibeswitcher-host`. Its install root is `NodeFolders.defaultPrefix` from `getpwuid` on
     the node, or `--test-install-root` on a scratch node.
-  - It reads the host's notes after the reply to decide the outcome, and replies before its own replacement.
+  - It reads the host's notes after the reply to decide the outcome, and replies before its own replacement. *2026-11-16, S8b's
+    review:* it didn't when the server's bytes differ; it does now (the review's note above).
 - [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter 'SwitchTests|ServerTests|HostLinkTests'`
   - the lints

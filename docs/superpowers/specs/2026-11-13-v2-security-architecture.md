@@ -1204,7 +1204,14 @@ memory and writes no file.
   switched server on the grounds that no switch happens while a worker or verifier runs, and counting the requests in
   flight in `HostServer.handle` is left to after the bootstrap. The rule is lifted then, with that count. The server
   refuses `build.switch` while a worker or verifier session is live, naming decision 6 and each live one, with nothing
-  asked of the host; the lead may stay (the start plan's S8b, `SwitchRequest`).
+  asked of the host; the lead may stay (the start plan's S8b, `SwitchRequest`). The server reads roles from labels,
+  which their spawner picks, and only when the switch is planned, while a lead can start a worker through the host
+  during the probe (up to 180 s). So the node's host (one with an install root) holds the rule too, on the sessions its
+  handover would save, before the probe and again in the turn that executes (`HostServer.teamsWorking`): a live
+  session another session started (whatever its label) or one labelled a worker's or a verifier's refuses the handover
+  (2026-11-16, S8b's review). A switched server is replaced only after its link has reconnected to the new image (at
+  most `ServerChild.reconnectGrace`, 10 s) and then once idle or `idleLimit` later, so `build.switch` replies before
+  it is replaced.
 
 The Mac keeps its state file and socket channel, unchanged.
 
@@ -1260,7 +1267,11 @@ worker or verifier is live); `SwitchTests.aSwitchWhileAWorkerRunsIsRefused` (S8b
 switch with a worker live is refused naming decision 6 and the worker, the host's pid and build unchanged, and with
 only the lead live it hands over, keeping the lead); `SwitchTests.aSwitchWhoseProbeTakesTwentySecondsIsWaitedForWithNoFalseFailure`
 and `SwitchTests.aRollbackTheHostRefusesSaysWhy` (S8b: the server waits past a slow probe, and a target the host
-refuses leaves the running build, the reply naming the host's reason).
+refuses leaves the running build, the reply naming the host's reason); `SwitchTests.aWorkerStartedDuringTheProbeRefusesTheSwitch`,
+`HandoverLinuxTests.theNodesHostRefusesAHandoverWhileATeamWorks` (S8b's review: the node's host holds the rule in the
+turn that executes, and counts a session another session started whatever its label),
+`SwitchTests.aSwitchToAnotherServerRepliesBeforeTheServerIsReplaced` (S8b's review: a switch whose server's bytes
+differ replies before the server is replaced).
 
 ## S9. What the host executes
 
@@ -1338,7 +1349,8 @@ refuses leaves the running build, the reply naming the host's reason).
   A lead started before a switch names its own tool server's path for the workers and verifiers it starts
   (`LeadToolset`), so **a team keeps its build until its lead restarts** (the start plan's ST-D16): with the rule on
   switches no worker runs at a switch, but the lead may stay, and a worker it starts after the switch runs the old
-  commit's tool server. `switch`'s confirmation says so (`NodeTexts.switch`).
+  commit's tool server. `switch`'s confirmation says so (`NodeTexts.switch`; held by
+  `SwitchTests.aSwitchSaysItKeepsSessions`, the start plan's S8a).
 - **The install** (the bootstrap path's steps 8 and 10) builds from a clean, detached `git worktree add` of a commit on
   `origin/v2` that both CI runners passed (it refuses a dirty tree), with a toolchain the user installed outside
   `$HOME` (root's, decision 12) and a fresh package cache, records `swift --version` and `Package.resolved`'s hash in
@@ -1462,6 +1474,8 @@ unit's wants, requires or upholds folder, or a directive start didn't write, ref
 `SwitchTests.aUnitsEditedHomeOrPathIsNotCarriedThroughASwitch` (the start plan's S8a: the switch's rewrite keeps the
 commit-folder `ExecStart`, checks the target's `bin` against its `build-info` and the host first, and writes HOME and
 PATH as `start` does, never a unit's edited ones back; 2026-11-16, with the review of S8a);
+`SwitchTests.aSwitchSaysItKeepsSessions` (the start plan's S8a: `switch`'s confirmation says a running team keeps its
+build until its lead restarts, ST-D16; 2026-11-16, with the review of S8b);
 `InstallTests.aRecordNamesItsToolchainAndResolvedFile`, `InstallTests.aRecordHashesEveryProgramAndRefusesALink`,
 `InstallTests.aRecordForAFolderNamedOtherThanItsCommitIsRefused`, `InstallTests.theCommandLineWritesTheRecord` (the start
 plan's S4a: build-info records the toolchain's swift --version text and Package.resolved's hash, and hashes only
@@ -1504,7 +1518,8 @@ flag, read as GitGuard reads the record, is no change; a scratch home's seal rea
 doesn't hold its team; 2026-11-16, with the review of S7).
 
 **Tests to write:** Step 8: `InstallTests.anInstallBuildsWithTheRootToolchain` (written, gated on M3's toolchain: run
-once after M3), `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds`. After
+once after M3), `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds`,
+`aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild` (ST-D16's companion case, S8c). After
 the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts`.
 
 ## S10. The sessions' environment
@@ -2048,7 +2063,7 @@ are written in the task named.
 | Nothing the host runs comes from a file changed after it loaded it, or from a folder the user can write | `SealedCopyTests.aSealedCopyRunsAfterItsFileIsRewrittenInPlace`; `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts`; `HostHardeningTests.aSessionStartedAfterTheHostsFileWasReplacedRunsThisBuild`; `HandoverLinuxTests.aFailedTakeOverGoesBackThroughTheSealedCopy`, `aFallbackImageRewrittenInPlaceIsNotWhatRuns`; `InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` | Tasks 3, 8, 9; step 8 |
 | The user's host hands over only to an installed build whose hash matches, and runs what it checked | `HandoverLinuxTests.aHandoverToAPathInsideAWorktreeIsRefused`, `aTargetRenamedOverAfterItsCheckIsNotWhatRuns` and the five beside them | Task 9 |
 | A handover writes no file and keeps the vault on fallback | `HandoverLinuxTests.aHandoverWritesNoFile`, `theStateAndSecretsAreSealed`, `aFallbackAfterAFailedRestoreKeepsTheVault`, `aFallbackAfterAFailedRestoreKeepsEverySession`, `aDowngradeIsRefused`; `HostHardeningTests.theUsersHostIgnoresTestSecretFlags`; `HostHandoverStateTests.aStateOfAnotherFormatIsRefused` (now) | Tasks 8, 9 |
-| No switch while a worker or verifier runs, until the in-flight count after the bootstrap | `aSwitchWhileAWorkerRunsIsRefused` | step 8 |
+| No switch while a worker or verifier runs, until the in-flight count after the bootstrap | `aSwitchWhileAWorkerRunsIsRefused`, `aWorkerStartedDuringTheProbeRefusesTheSwitch` | step 8 |
 | A fresh memory vault takes nothing as baseline a worker could write | `ConfigSealFirstLookTests.*`; E4's `aLeadIsRefusedOnAFreshVaultUntilAccepted`; E8's `configAcceptSealsOnlyWhatItShowed`, `baseAcceptAfterARestartShowsWhatMoved` | Task 10, E4, E8 |
 | Sessions get no agent socket, interop, bus or runtime dir, and their shell is `bash --noprofile --norc` (the agent's Bash tool still sources `~/.bashrc` and the login files: S10, measured in Task 12b) | `SessionEnvironmentTests.*` | Task 10 |
 | Roles on Linux, the lead included, are denied tracers, the user's manager, Windows and `gh` (slips) | `LeadLaunchTests.aRoleOnLinuxIsDeniedTracersTheUsersManagerWindowsAndGh`, `theLeadOnLinuxGetsTheTracerRules`, `theMacsDenyRulesAreTodays` | Task 10 |

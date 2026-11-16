@@ -32,6 +32,8 @@ final class AppConnector {
     /// The connections made through it, ended with it.
     private var made: [Made] = []
     private struct Made { weak var client: ClientConnection? }
+    /// How many connections were made through it since it was opened or adopted, closed ones too.
+    private(set) var madeCount = 0
     private(set) var closed = false
 
     init(fd: Int32, sender: Platform.PeerToken?, requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?) {
@@ -54,6 +56,7 @@ final class AppConnector {
     func made(_ client: ClientConnection) {
         made.removeAll { $0.client == nil }
         made.append(Made(client: client))
+        madeCount += 1
     }
 
     /// How many connections made through it are open now.
@@ -171,6 +174,12 @@ extension HostServer {
     /// request in flight (a request is one connection, `HostCall`). On `queue`.
     func appConnectionsOpen(through number: Int32) -> Int {
         appConnectors[number]?.openConnections ?? 0
+    }
+
+    /// How many connections were made through the connector `number` names since this image opened or adopted it,
+    /// closed ones too: a child carried across a handover has made none until it connects again. On `queue`.
+    func appConnectionsMade(through number: Int32) -> Int {
+        appConnectors[number]?.madeCount ?? 0
     }
 
     /// The test stand-in's connector, for a handover's state (see `HostHandover.State.testAppConnector`): nil when
