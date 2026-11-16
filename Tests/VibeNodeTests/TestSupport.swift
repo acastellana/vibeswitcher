@@ -107,6 +107,11 @@ let builtProducts: URL = {
     #endif
 }()
 
+/// This checkout's folder, for a test that reads the working copy's files (`InstallTests.Script` commits the working
+/// copy's install script into a scratch repository). Here, apart from the tests that run git: AgentExportLintTests reads
+/// a test file that both locates the checkout and clones as one that may write a tree into it.
+let packageFolder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+
 /// Where tests put their scratch files: `$TMPDIR` when it's an absolute path (scripts/test.sh's scratch folder), else
 /// the package's .build (as VibePlatformTests' `scratch`).
 let scratchRoot: URL = {

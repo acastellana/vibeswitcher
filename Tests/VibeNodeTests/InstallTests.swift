@@ -258,3 +258,462 @@ struct InstallTests {
         #expect(!help.output.contains("install-record"), "\(help.output)")
     }
 }
+
+extension InstallTests {
+    /// `scripts/install-node.sh` (the start plan's S4b, ST-D8 to ST-D12), run whole on a synthetic repository: one commit
+    /// of the working copy's script, its libraries, `Resources/bin/vs-*`, `.swift-version` and `Package.resolved`, in a
+    /// scratch bare "origin" that serves a commit by its hash as GitHub does, a scratch clone as `--repo`, and a stand-in
+    /// `gh` that answers from canned JSON and records each call's arguments and environment. Every run passes
+    /// `--prefix <scratch>`, `--gh <stand-in>` and `--test-origin <scratch origin>`: nothing reaches GitHub, the user's
+    /// token or the account's builds folder. The runs that get past CI pass the debug products (`--test-products`),
+    /// which the link check refuses (RUNPATH into swiftly): the static products' cases are S4c's. Linux only: the
+    /// script's tools (`readelf`, the loader's `--list`, `getent`) are Linux's.
+    @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(10)))
+    struct Script {
+        private let scratch = Scratch()
+
+        /// The repository the script names, a constant in it (ST-D10).
+        static let repository = "acastellana/vibeswitcher"
+        static let workingCopy = packageFolder
+        static let token = "stand-in-token"
+
+        /// The account's home, as the script reads it (`getent passwd`), not this process's HOME.
+        static func accountHome() -> String {
+            guard let entry = getpwuid(getuid()), let directory = entry.pointee.pw_dir else { return "/nonexistent" }
+            return String(cString: directory)
+        }
+
+        /// A git run with nothing of this process's environment or the user's git config: its output, trimmed.
+        @discardableResult
+        static func git(_ arguments: [String], in folder: URL, home: URL, replaceObjects: Bool = true, raw: Bool = false) async throws -> String {
+            var environment = ["HOME": home.path, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"]
+            if !replaceObjects { environment["GIT_NO_REPLACE_OBJECTS"] = "1" }
+            let ran = try await run(URL(fileURLWithPath: "/usr/bin/git"),
+                                    ["-c", "user.name=Install Test", "-c", "user.email=install@example.com", "-C", folder.path] + arguments,
+                                    environment: environment)
+            #expect(ran.status == 0, "git \(arguments.joined(separator: " ")): \(ran.status) \(ran.errors)")
+            return raw ? ran.output : ran.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        /// The scratch world one case runs the script in.
+        struct World {
+            let root: URL
+            let work: URL
+            let origin: URL
+            let clone: URL
+            let standIn: URL
+            let prefix: URL
+            /// The first commit, on the origin's `v2`.
+            let base: String
+
+            var gitHome: URL { root.appendingPathComponent("git-home") }
+            var home: URL { root.appendingPathComponent("home") }
+            var gh: URL { standIn.appendingPathComponent("gh") }
+            var script: URL { clone.appendingPathComponent("scripts/install-node.sh") }
+
+            @discardableResult
+            func git(_ arguments: [String], in folder: URL? = nil, replaceObjects: Bool = true, raw: Bool = false) async throws -> String {
+                try await Script.git(arguments, in: folder ?? work, home: gitHome, replaceObjects: replaceObjects, raw: raw)
+            }
+
+            /// `files` (path to text) written in the working repository and committed on its current branch: the commit.
+            func commit(_ files: [String: String], message: String) async throws -> String {
+                for (path, text) in files {
+                    let file = work.appendingPathComponent(path)
+                    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try text.write(to: file, atomically: true, encoding: .utf8)
+                }
+                try await git(["add", "-A"])
+                try await git(["commit", "-q", "-m", message])
+                return try await git(["rev-parse", "HEAD"])
+            }
+
+            /// GitHub's answers for `commit`: the compare's status, and the runs `gh run list` lists.
+            func answers(compare: String = "identical", runs: [[String: Any]]) throws {
+                try Data(#"{"status":"\#(compare)"}"#.utf8).write(to: standIn.appendingPathComponent("compare.json"))
+                try JSONSerialization.data(withJSONObject: runs).write(to: standIn.appendingPathComponent("runs.json"))
+            }
+
+            /// A run of `workflow` on `commit`, as `gh run list --json` gives it.
+            static func ciRun(_ workflow: String, on commit: String, id: Int, status: String = "completed", conclusion: String = "success",
+                            event: String = "push") -> [String: Any] {
+                ["databaseId": id, "createdAt": "2026-11-16T10:00:\(String(format: "%02d", id % 60))Z", "workflowName": workflow, "headSha": commit,
+                 "status": status, "conclusion": conclusion, "attempt": 1, "event": event]
+            }
+
+            /// Both runners passed `commit`.
+            func passing(_ commit: String) throws {
+                try answers(runs: [Self.ciRun("v2 linux", on: commit, id: 10), Self.ciRun("v2 macos", on: commit, id: 11)])
+            }
+
+            /// The build's debug products (linked to, not copied) and a `swift-version`, as `--test-products` takes them.
+            func debugProducts() throws -> URL {
+                let folder = root.appendingPathComponent("products")
+                guard !FileManager.default.fileExists(atPath: folder.path) else { return folder }
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                for name in ["vibeswitcher-host", "vibeswitcher-server", "vibeswitcher-cli", "vibeswitcher-hook", "vibeswitcher-mcp"] {
+                    let built = builtProducts.appendingPathComponent(name).path
+                    try #require(FileManager.default.isExecutableFile(atPath: built), "\(name) isn't built")
+                    let target = folder.appendingPathComponent(name).path
+                    if link(built, target) != 0 { try copyClosedOnExec(built, to: target) }
+                }
+                try Data((InstallTests.swift + "\n").utf8).write(to: folder.appendingPathComponent("swift-version"))
+                return folder
+            }
+
+            /// The script's arguments for `commit`: the scratch prefix, the clone, the stand-in and the origin.
+            func arguments(_ commit: String, products: Bool = false) throws -> [String] {
+                var arguments = [commit, "--prefix", prefix.path, "--repo", clone.path, "--gh", gh.path, "--test-origin", "file://" + origin.path]
+                if products { arguments += ["--test-products", try debugProducts().path] }
+                return arguments
+            }
+
+            /// Runs `script` (the clone's by default) with `arguments` under bash, HOME the test's own home.
+            func install(_ arguments: [String], script: URL? = nil, environment extra: [String: String] = [:]) async throws -> CommandRun {
+                try await run(URL(fileURLWithPath: "/bin/bash"), [(script ?? self.script).path] + arguments,
+                              environment: scratchEnvironment(root, extra))
+            }
+
+            /// What the stand-in `gh` was called with: each call's arguments and environment.
+            func calls() throws -> [(arguments: [String], environment: [String: String])] {
+                let folder = standIn.appendingPathComponent("calls")
+                return try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted().map { name in
+                    let call = folder.appendingPathComponent(name)
+                    let arguments = try String(contentsOf: call.appendingPathComponent("args"), encoding: .utf8).split(separator: "\n").map(String.init)
+                    var environment: [String: String] = [:]
+                    for line in try String(contentsOf: call.appendingPathComponent("env"), encoding: .utf8).split(separator: "\n") {
+                        guard let equals = line.firstIndex(of: "=") else { continue }
+                        environment[String(line[..<equals])] = String(line[line.index(after: equals)...])
+                    }
+                    return (arguments, environment)
+                }
+            }
+
+            /// Whether anything is under the prefix.
+            var prefixIsEmpty: Bool { ((try? FileManager.default.contentsOfDirectory(atPath: prefix.path)) ?? []).isEmpty }
+        }
+
+        /// The world: the working repository's one commit (`extra` files beside the working copy's), pushed to a bare
+        /// origin's `v2` that serves reachable commits by hash, its clone, the stand-in `gh` (answering that both runners
+        /// passed the commit) and a prefix not yet made.
+        func world(extra: [String: String] = [:]) async throws -> World {
+            let root = scratch.url("install")
+            let world = World(root: root, work: root.appendingPathComponent("work"), origin: root.appendingPathComponent("origin.git"),
+                              clone: root.appendingPathComponent("clone"), standIn: root.appendingPathComponent("gh"),
+                              prefix: root.appendingPathComponent("builds"), base: "")
+            for folder in [world.work, world.gitHome, world.home, world.standIn.appendingPathComponent("calls")] {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            }
+            var files = extra
+            let copied = ["scripts/install-node.sh", ".swift-version", "Package.resolved"]
+                + (try FileManager.default.contentsOfDirectory(atPath: Self.workingCopy.appendingPathComponent("scripts/lib").path))
+                .filter { $0.hasSuffix(".sh") }.map { "scripts/lib/" + $0 }
+                + (try FileManager.default.contentsOfDirectory(atPath: Self.workingCopy.appendingPathComponent("Resources/bin").path))
+                .filter { $0.hasPrefix("vs-") }.map { "Resources/bin/" + $0 }
+            for path in copied {
+                files[path] = try String(contentsOf: Self.workingCopy.appendingPathComponent(path), encoding: .utf8)
+            }
+            try await world.git(["init", "-q", "-b", "v2"])
+            let base = try await world.commit(files, message: "base")
+            try await Self.git(["init", "-q", "--bare", world.origin.path], in: root, home: world.gitHome)
+            try await world.git(["config", "uploadpack.allowReachableSHA1InWant", "true"], in: world.origin)
+            try await world.git(["push", "-q", "file://" + world.origin.path, "v2:v2"])
+            try await Self.git(["clone", "-q", "-b", "v2", "file://" + world.origin.path, world.clone.path], in: root, home: world.gitHome)
+            try ScratchNode.script("""
+                #!/bin/sh
+                d='\(world.standIn.path)'
+                c=$(/usr/bin/mktemp -d "$d/calls/call.XXXXXX") || exit 70
+                printf '%s\\n' "$@" > "$c/args"
+                /usr/bin/env > "$c/env"
+                case "$1" in
+                  auth) printf '%s\\n' '\(Self.token)' ;;
+                  api) /bin/cat "$d/compare.json" ;;
+                  run) /bin/cat "$d/runs.json" ;;
+                  *) exit 1 ;;
+                esac
+
+                """, at: world.gh)
+            let made = World(root: root, work: world.work, origin: world.origin, clone: world.clone, standIn: world.standIn,
+                             prefix: world.prefix, base: base)
+            try made.passing(base)
+            return made
+        }
+
+        @Test func anInstallFromADirtyTreeIsRefused() async throws {
+            let world = try await world()
+            // A tracked file changed.
+            try "0.0.0\n".write(to: world.clone.appendingPathComponent(".swift-version"), atomically: true, encoding: .utf8)
+            let changed = try await world.install(try world.arguments(world.base, products: true))
+            #expect(changed.status == 65, "\(changed.status) \(changed.errors)")
+            #expect(changed.errors.contains(".swift-version"), "\(changed.errors)")
+            try await world.git(["checkout", "--", ".swift-version"], in: world.clone)
+
+            // An untracked file under Sources/.
+            let sources = world.clone.appendingPathComponent("Sources")
+            try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+            try "let planted = 1\n".write(to: sources.appendingPathComponent("Planted.swift"), atomically: true, encoding: .utf8)
+            let untracked = try await world.install(try world.arguments(world.base, products: true))
+            #expect(untracked.status == 65, "\(untracked.status) \(untracked.errors)")
+            #expect(untracked.errors.contains("Sources/Planted.swift"), "\(untracked.errors)")
+
+            // Neither asked gh anything, nor made the prefix.
+            #expect(try world.calls().isEmpty)
+            #expect(!FileManager.default.fileExists(atPath: world.prefix.path))
+        }
+
+        @Test func aCommitNotOnOriginV2IsRefused() async throws {
+            let world = try await world()
+            // A commit on another branch of the origin, not reachable from its v2.
+            try await world.git(["checkout", "-q", "-b", "elsewhere"])
+            let elsewhere = try await world.commit(["ELSEWHERE": "not on v2\n"], message: "elsewhere")
+            try await world.git(["push", "-q", "file://" + world.origin.path, "elsewhere:elsewhere"])
+            try world.passing(elsewhere)
+            let refused = try await world.install(try world.arguments(elsewhere, products: true))
+            #expect(refused.status == 67, "\(refused.status) \(refused.errors)")
+            #expect(refused.errors.contains("isn't on v2"), "\(refused.errors)")
+            #expect(world.prefixIsEmpty)
+
+            // And GitHub's compare saying anything but identical or ahead, for a commit git finds on v2.
+            for status in ["diverged", "behind"] {
+                try world.answers(compare: status, runs: [World.ciRun("v2 linux", on: world.base, id: 10), World.ciRun("v2 macos", on: world.base, id: 11)])
+                let compared = try await world.install(try world.arguments(world.base, products: true))
+                #expect(compared.status == 67, "\(status): \(compared.status) \(compared.errors)")
+                #expect(compared.errors.contains(status), "\(compared.errors)")
+            }
+            #expect(world.prefixIsEmpty)
+        }
+
+        @Test func aCommitBothRunnersDidntPassIsRefused() async throws {
+            let world = try await world()
+            let commit = world.base
+            let cases: [(String, String, [[String: Any]])] = [
+                ("v2 macos missing", "v2 macos", [World.ciRun("v2 linux", on: commit, id: 10),
+                                                  World.ciRun("v2 macos", on: commit, id: 11, event: "pull_request")]),
+                ("v2 linux failed", "v2 linux", [World.ciRun("v2 linux", on: commit, id: 10, conclusion: "failure"),
+                                                 World.ciRun("v2 macos", on: commit, id: 11)]),
+                ("the latest run cancelled", "v2 linux", [World.ciRun("v2 linux", on: commit, id: 10), World.ciRun("v2 macos", on: commit, id: 11),
+                                                          World.ciRun("v2 linux", on: commit, id: 12, conclusion: "cancelled")]),
+                ("an older success under a newer failure", "v2 macos", [World.ciRun("v2 macos", on: commit, id: 13, conclusion: "failure"),
+                                                                        World.ciRun("v2 linux", on: commit, id: 10),
+                                                                        World.ciRun("v2 macos", on: commit, id: 11)]),
+            ]
+            for (what, workflow, runs) in cases {
+                try world.answers(runs: runs)
+                let refused = try await world.install(try world.arguments(commit, products: true))
+                #expect(refused.status == 67, "\(what): \(refused.status) \(refused.errors)")
+                #expect(refused.errors.contains(workflow), "\(what): \(refused.errors)")
+            }
+            #expect(world.prefixIsEmpty)
+        }
+
+        @Test func ghRunsWithNothingFromTheUsersEnvironmentOrConfig() async throws {
+            let world = try await world()
+            let config = world.home.appendingPathComponent(".config/gh")
+            try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+            try "http_unix_socket: \(world.root.path)/gh.sock\n".write(to: config.appendingPathComponent("config.yml"), atomically: true, encoding: .utf8)
+            let users = ["GH_TOKEN": "the-users-token", "GH_REPO": "someone/else", "GITHUB_TOKEN": "the-users-other-token",
+                         "HTTPS_PROXY": "http://127.0.0.1:9", "SSL_CERT_FILE": world.root.appendingPathComponent("certs.pem").path]
+            let ran = try await world.install(try world.arguments(world.base, products: true), environment: users)
+            #expect(ran.status == 69, "\(ran.status) \(ran.errors)")
+
+            let calls = try world.calls()
+            #expect(calls.count == 3, "\(calls.map(\.arguments))")
+            // Only these: what the script gives (env -i), and what the stand-in's own shell adds.
+            let allowed: Set<String> = ["HOME", "PATH", "GH_CONFIG_DIR", "GH_TOKEN", "GH_PROMPT_DISABLED", "GH_NO_UPDATE_NOTIFIER", "PWD", "OLDPWD", "SHLVL", "_"]
+            let account = Self.accountHome()
+            for call in calls {
+                #expect(Set(call.environment.keys).isSubset(of: allowed), "\(call.arguments): \(call.environment.keys.sorted())")
+                #expect(call.environment["PATH"] == "/usr/bin:/bin")
+                for name in users.keys where name != "GH_TOKEN" { #expect(call.environment[name] == nil, "\(name) reached gh") }
+                #expect(call.environment["GH_TOKEN"] != users["GH_TOKEN"])
+                guard call.arguments.first != "auth" else {
+                    // The token, read once from gh's own store of the account's home: no network call, no -R.
+                    #expect(call.arguments == ["auth", "token", "-h", "github.com"])
+                    #expect(call.environment["HOME"] == account && call.environment["GH_TOKEN"] == nil && call.environment["GH_CONFIG_DIR"] == nil,
+                            "\(call.environment)")
+                    continue
+                }
+                #expect(call.environment["GH_TOKEN"] == Self.token)
+                // HOME and GH_CONFIG_DIR: the script's own scratch folder, gone once it has ended.
+                let home = try #require(call.environment["HOME"]), configDir = try #require(call.environment["GH_CONFIG_DIR"])
+                for folder in [home, configDir] {
+                    #expect(!folder.hasPrefix(world.home.path) && !folder.hasPrefix(account + "/"), "\(folder)")
+                }
+                #expect(URL(fileURLWithPath: home).deletingLastPathComponent() == URL(fileURLWithPath: configDir).deletingLastPathComponent())
+                #expect(!FileManager.default.fileExists(atPath: home), "the scratch folder \(home) outlived the run")
+                let named = zip(call.arguments, call.arguments.dropFirst()).contains { $0 == ("-R", Self.repository) }
+                    || call.arguments.contains { $0.hasPrefix("repos/\(Self.repository)/") }
+                #expect(named, "\(call.arguments)")
+            }
+            #expect(calls.filter { $0.arguments.first == "auth" }.count == 1)
+            #expect(calls.contains { $0.arguments.starts(with: ["api", "repos/\(Self.repository)/compare/\(world.base)...v2"]) })
+            #expect(calls.contains { $0.arguments.starts(with: ["run", "list", "-R", Self.repository, "--commit", world.base]) })
+        }
+
+        @Test func aToolchainTheUserCanWriteIsRefused() async throws {
+            let world = try await world()
+            var toolchains = [world.root.appendingPathComponent("toolchain").path]
+            try FileManager.default.createDirectory(atPath: toolchains[0] + "/usr/bin", withIntermediateDirectories: true)
+            let swiftly = Self.accountHome() + "/.local/share/swiftly"
+            if FileManager.default.fileExists(atPath: swiftly) { toolchains.append(swiftly) }
+            for toolchain in toolchains {
+                // No --test-products: the toolchain is checked. An origin that isn't there: a fetch would fail (1).
+                let arguments = [world.base, "--prefix", world.prefix.path, "--repo", world.clone.path, "--gh", world.gh.path,
+                                 "--test-origin", "file://" + world.root.appendingPathComponent("no-origin.git").path, "--toolchain", toolchain]
+                let refused = try await world.install(arguments)
+                #expect(refused.status == 68, "\(toolchain): \(refused.status) \(refused.errors)")
+                #expect(refused.errors.contains(toolchain), "\(refused.errors)")
+            }
+            #expect(try world.calls().isEmpty, "gh was asked before the toolchain's check")
+            #expect(!FileManager.default.fileExists(atPath: world.prefix.path))
+        }
+
+        @Test func aFirstInstallRunsOnlyTheCommitsOwnScript() async throws {
+            let world = try await world()
+            let script = try String(contentsOf: world.script, encoding: .utf8)
+            let scratchLib = try String(contentsOf: world.clone.appendingPathComponent("scripts/lib/scratch.sh"), encoding: .utf8)
+            let swiftJobs = try String(contentsOf: world.clone.appendingPathComponent("scripts/lib/swift-jobs.sh"), encoding: .utf8)
+            // A working copy (not --repo, which stays clean) holding the script and its libraries.
+            func copy(_ name: String, script scriptText: String, scratch scratchText: String) throws -> URL {
+                let scripts = world.root.appendingPathComponent(name).appendingPathComponent("scripts")
+                try FileManager.default.createDirectory(at: scripts.appendingPathComponent("lib"), withIntermediateDirectories: true)
+                try ScratchNode.script(scriptText, at: scripts.appendingPathComponent("install-node.sh"))
+                try ScratchNode.script(scratchText, at: scripts.appendingPathComponent("lib/scratch.sh"))
+                try ScratchNode.script(swiftJobs, at: scripts.appendingPathComponent("lib/swift-jobs.sh"))
+                return scripts.appendingPathComponent("install-node.sh")
+            }
+            // The commit's own bytes, run from elsewhere: past provenance, to the link check.
+            let same = try await world.install(try world.arguments(world.base, products: true), script: try copy("same", script: script, scratch: scratchLib))
+            #expect(same.status == 69, "\(same.status) \(same.errors)")
+
+            // The script changed: refused.
+            let changedScript = try await world.install(try world.arguments(world.base, products: true),
+                                                        script: try copy("script", script: script + "# changed\n", scratch: scratchLib))
+            #expect(changedScript.status == 66, "\(changedScript.status) \(changedScript.errors)")
+            #expect(changedScript.errors.contains("install-node.sh"), "\(changedScript.errors)")
+
+            // Its scratch.sh changed with a marker write: refused, and the line never ran (nothing beside is sourced).
+            let marker = world.root.appendingPathComponent("marker-scratch")
+            let planted = scratchLib + "\n: > '\(marker.path)'\n"
+            let changedLib = try await world.install(try world.arguments(world.base, products: true),
+                                                     script: try copy("lib", script: script, scratch: planted))
+            #expect(changedLib.status == 66, "\(changedLib.status) \(changedLib.errors)")
+            #expect(changedLib.errors.contains("scratch.sh"), "\(changedLib.errors)")
+            #expect(!FileManager.default.fileExists(atPath: marker.path), "the changed scratch.sh ran")
+            #expect(world.prefixIsEmpty)
+        }
+
+        @Test func theNextInstallRunsThePreviousBuildsScript() async throws {
+            let world = try await world()
+            // The installed build: the base commit, laid out by hand; the next commit on v2 is what's installed now.
+            let next = try await world.commit(["NEXT": "the next commit\n"], message: "next")
+            try await world.git(["push", "-q", "file://" + world.origin.path, "v2:v2"])
+            try await world.git(["pull", "-q"], in: world.clone)
+            try world.passing(next)
+            let installed = world.prefix.appendingPathComponent(world.base)
+            let resources = installed.appendingPathComponent("Resources")
+            try FileManager.default.createDirectory(at: resources.appendingPathComponent("lib"), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: installed.appendingPathComponent("bin"), withIntermediateDirectories: true)
+            let installedScript = try await world.git(["show", "\(world.base):scripts/install-node.sh"], in: world.clone, raw: true)
+            try ScratchNode.script(installedScript, at: resources.appendingPathComponent("install-node.sh"))
+            for name in ["scratch.sh", "swift-jobs.sh"] {
+                let text = try await world.git(["show", "\(world.base):scripts/lib/\(name)"], in: world.clone, raw: true)
+                try text.write(to: resources.appendingPathComponent("lib/\(name)"), atomically: true, encoding: .utf8)
+            }
+            try Data("cli".utf8).write(to: installed.appendingPathComponent("bin/vibeswitcher"))
+            _ = try BuildRecord.write(folder: installed.path, commit: world.base, swiftVersionOutput: InstallTests.swift, resolved: InstallTests.resolved).get()
+            try FileManager.default.createSymbolicLink(atPath: world.prefix.appendingPathComponent("current").path, withDestinationPath: world.base)
+            let current = world.prefix.appendingPathComponent("current/Resources/install-node.sh")
+
+            // The repository's script: refused, naming the installed copy.
+            let fromRepository = try await world.install(try world.arguments(next, products: true))
+            #expect(fromRepository.status == 66, "\(fromRepository.status) \(fromRepository.errors)")
+            #expect(fromRepository.errors.contains(current.path), "\(fromRepository.errors)")
+
+            // The installed copy: past provenance (against the installed commit's blobs), to the link check.
+            let fromCurrent = try await world.install(try world.arguments(next, products: true), script: current)
+            #expect(fromCurrent.status == 69, "\(fromCurrent.status) \(fromCurrent.errors)")
+            #expect(fromCurrent.output.contains("checked out \(next) "), "\(fromCurrent.output)")
+
+            // The installed copy changed: refused.
+            try ScratchNode.script(installedScript + "# changed\n", at: resources.appendingPathComponent("install-node.sh"))
+            let changed = try await world.install(try world.arguments(next, products: true), script: current)
+            #expect(changed.status == 66, "\(changed.status) \(changed.errors)")
+            #expect(Set(try FileManager.default.contentsOfDirectory(atPath: world.prefix.path)) == [world.base, "current"])
+        }
+
+        @Test func theTestFlagsNeedAScratchPrefix() async throws {
+            let world = try await world()
+            // A dirty --repo: were a prefix let through, the run would stop at the courtesy check (65), writing nothing.
+            try "planted\n".write(to: world.clone.appendingPathComponent("planted"), atomically: true, encoding: .utf8)
+            let origin = "file://" + world.origin.path
+            let products = try world.debugProducts().path
+            let flags = [["--gh", world.gh.path], ["--test-origin", origin], ["--test-products", products]]
+            for flag in flags {
+                let bare = try await world.install([world.base, "--repo", world.clone.path] + flag)
+                #expect(bare.status == 64, "\(flag[0]) without --prefix: \(bare.status) \(bare.errors)")
+                // With a scratch prefix, the same flag passes the arguments.
+                let scratchPrefix = try await world.install([world.base, "--repo", world.clone.path, "--prefix", world.prefix.path] + flag)
+                #expect(scratchPrefix.status == 65, "\(flag[0]) with a scratch prefix: \(scratchPrefix.status) \(scratchPrefix.errors)")
+            }
+            // The account's default prefix through a link to it, and a prefix inside the account's .vibeswitcher.
+            let account = Self.accountHome()
+            let link = world.root.appendingPathComponent("default-builds")
+            try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: account + "/.vibeswitcher/v2/builds")
+            let inside = account + "/.vibeswitcher/v2/install-test-\(UUID().uuidString)"
+            for prefix in [link.path, inside] {
+                for flag in flags {
+                    let refused = try await world.install([world.base, "--repo", world.clone.path, "--prefix", prefix] + flag)
+                    #expect(refused.status == 64, "\(prefix) \(flag[0]): \(refused.status) \(refused.errors)")
+                }
+            }
+            #expect(!FileManager.default.fileExists(atPath: inside))
+            #expect(try world.calls().isEmpty)
+        }
+
+        @Test func nothingInTheUsersCloneOrConfigShapesTheBuild() async throws {
+            let world = try await world(extra: [".gitattributes": "* filter=marker\n"])
+            let markers = world.root.appendingPathComponent("markers")
+            try FileManager.default.createDirectory(at: markers, withIntermediateDirectories: true)
+            // Another commit to stand in for the base, in the origin and in the clone: replace refs for the base.
+            try await world.git(["checkout", "-q", "-b", "stand-in"])
+            let standIn = try await world.commit(["STAND-IN": "a replacement\n"], message: "stand-in")
+            try await world.git(["push", "-q", "file://" + world.origin.path, "stand-in:stand-in"])
+            try await world.git(["replace", world.base, standIn], in: world.origin)
+            try await world.git(["fetch", "-q", "origin", "stand-in"], in: world.clone)
+            try await world.git(["replace", world.base, standIn], in: world.clone)
+            // A post-checkout hook in the clone, and core.hooksPath naming a folder with another.
+            let hook = "#!/bin/sh\n: > '\(markers.path)/hook-$$'\n"
+            try ScratchNode.script(hook, at: world.clone.appendingPathComponent(".git/hooks/post-checkout"))
+            let hooks = world.root.appendingPathComponent("hooks")
+            try FileManager.default.createDirectory(at: hooks, withIntermediateDirectories: true)
+            try ScratchNode.script(hook, at: hooks.appendingPathComponent("post-checkout"))
+            try await world.git(["config", "core.hooksPath", hooks.path], in: world.clone)
+            // A smudge and clean filter in the test home's ~/.gitconfig, named by the commit's .gitattributes.
+            try """
+                [filter "marker"]
+                \tsmudge = ": > '\(markers.path)/smudge'; cat"
+                \tclean = ": > '\(markers.path)/clean'; cat"
+
+                """.write(to: world.home.appendingPathComponent(".gitconfig"), atomically: true, encoding: .utf8)
+
+            let tree = try await world.git(["rev-parse", "\(world.base)^{tree}"], in: world.origin, replaceObjects: false)
+            let replaced = try await world.git(["rev-parse", "\(world.base)^{tree}"], in: world.origin)
+            #expect(tree != replaced, "the origin's replace ref doesn't change what git reads")
+            let ran = try await world.install(try world.arguments(world.base, products: true))
+            #expect(ran.status == 69, "\(ran.status) \(ran.errors)")
+            #expect(ran.output.contains("checked out \(world.base) tree \(tree)\n"), "\(ran.output)")
+            #expect(try FileManager.default.contentsOfDirectory(atPath: markers.path).isEmpty, "a hook or filter ran")
+        }
+
+        @Test func aBinaryWithARunpathIsRefused() async throws {
+            let world = try await world()
+            let ran = try await world.install(try world.arguments(world.base, products: true))
+            #expect(ran.status == 69, "\(ran.status) \(ran.errors)")
+            // The first product checked, and the entry: the toolchain's library folder.
+            #expect(ran.errors.contains("vibeswitcher-host") && ran.errors.contains("RUNPATH"), "\(ran.errors)")
+            #expect(ran.errors.contains("/usr/lib/swift/linux"), "\(ran.errors)")
+            #expect(!FileManager.default.fileExists(atPath: world.prefix.path))
+        }
+    }
+}

@@ -1168,7 +1168,7 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
   - At its end the script prints: "the seal holds every team until `vs config accept` (the builds folder changed)".
   - The script logs "checked out <SHA> tree <tree>" after the checkout.
 
-- [ ] **Step 1: Failing tests** (`InstallTests`, `linuxOnly`):
+- [x] **Step 1: Failing tests** (`InstallTests`, `linuxOnly`):
   - **Fixtures.** A small synthetic repository: one commit of the working copy's `scripts/install-node.sh`,
     `scripts/lib/*.sh`, `Resources/bin/vs-*`, `.swift-version` and `Package.resolved`, made with `git -c
     user.name=… -c user.email=…`. A scratch bare "origin" whose `v2` is that commit, given as `--test-origin
@@ -1206,7 +1206,7 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
     and no hook's or filter's marker file exists.
   - `aBinaryWithARunpathIsRefused`: `--test-products <the debug products>` (RUNPATH into swiftly) exits 69, naming
     the binary and the entry. Nothing is under the prefix.
-- [ ] **Step 2: Implement** the script in this order:
+- [x] **Step 2: Implement** the script in this order:
   1. arguments;
   2. the courtesy check: `git -C repo diff --quiet HEAD` plus `ls-files --others --exclude-standard`, under ST-D9's
      environment;
@@ -1225,10 +1225,42 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
 
   The script obeys `ScriptScratchLintTests`: it calls `scratch_tmpdir` before the build, never sets `TMPDIR` and
   never traps `EXIT`.
-- [ ] **Step 3: Verify.**
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter 'InstallTests|ScriptScratchLint'`
   - the lints
   - under load (`InstallTests`)
+*Notes, 2026-11-16 (the S4b executor):*
+- **The suite is `InstallTests.Script`**, nested in an extension of `InstallTests` with `NodeTraits.linuxOnly`, so
+  `--filter InstallTests` runs it while S4a's in-process cases stay on the Mac. Its fixture is as Step 1 says; the
+  working copy is found through `packageFolder` in `Tests/VibeNodeTests/TestSupport.swift`, since `AgentExportLintTests`
+  flags a test file that both locates the checkout and runs `git clone` (the clone is under the test's scratch folder).
+- **The token's read is the one `gh` call without `-R`.** `ghRunsWithNothingFromTheUsersEnvironmentOrConfig` asserts it
+  is exactly `auth token -h github.com` with only `HOME` (the account's, from `getent passwd`, not the run's `HOME`) and
+  `PATH`; every other call carries `-R <the constant>` or `repos/<the constant>/`, the script's token, and a `HOME` and
+  `GH_CONFIG_DIR` in its scratch folder, gone once the run ends. The environment's names are a closed set.
+- **`--test-products` takes a folder holding the five products by their build names and `swift-version`.** The test
+  makes one of hard links to the debug products (a copy where a link can't be made). The script requires each product
+  to be a regular file, not a link; the link check runs on them in place, then they are copied (the plan's order).
+- The installed-build check's path half ("runs only as `<prefix>/current/Resources/install-node.sh`") is local, so it
+  runs before the fetch (ST-D8: local refusals first); the blob comparison follows the fetch. `on_exit` for `$early` is
+  registered before `scratch_tmpdir`, so an exit there leaves nothing.
+- Beyond the plan: the whole script is one function (bash reads a script as it runs, so a file changed under a running
+  install can't change what runs next); functions the caller exported are unset and `PATH` is `/usr/bin:/bin` first;
+  `git init --template=`, `GIT_TERMINAL_PROMPT=0`, and `--no-ext-diff --no-textconv` on the courtesy `diff`; the
+  toolchain may not go through a link; the interpreter, and each library by its resolved path and its `realpath`, are
+  checked root's all the way up; a test-flag prefix inside `<home>/.vibeswitcher` is refused by its spelling and by its
+  `realpath`; a refused layout removes its `<commit>.partial` (on exit).
+- Cases beyond the plan's: GitHub's compare saying `diverged` or `behind` (67); a copy of the commit's own script run
+  from another folder passes provenance (69); the installed copy changed is refused (66); in
+  `theTestFlagsNeedAScratchPrefix`, each flag with a scratch prefix passes the arguments (stopping at the dirty `--repo`,
+  65, which is also where a wrongly accepted prefix would stop, writing nothing).
+- The layout (steps 10 and 11) is S4c's to test with static products. It was run once by hand here, from a scratch
+  fixture whose committed script skipped the link check: the layout, `build-info`, `installs`, `current`, and the next
+  install from `current/Resources/install-node.sh`.
+- Not closed: the courtesy `git diff` in `--repo` runs a `filter.<name>.clean` that `--repo`'s own `.git/config` defines
+  for a path its attributes name (git has no switch to ignore a repository's local config). That is code the user's
+  clone chooses, run as the user, before any check of the script: the same footing as ST-D9's first-run residual.
+
 - [ ] **Step 4:** commit ("v2: the node's install script"). Push, both green.
 
 **Done when:** the ungated cases pass on Linux.
