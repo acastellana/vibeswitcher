@@ -74,6 +74,7 @@ struct ApprovalCardTests {
         let first = try await taskBranch(world.repo, task: "first", file: "one.txt", subject: "First change")
         let second = try await taskBranch(world.repo, task: "second", file: "two.txt", subject: "Second change")
         let lead = try await world.sleepingLead()
+        try await world.acceptBase()
         let vault = world.host.vault
 
         let asked = try await world.asked("Merge?", options: [LeadWorkflow.approval(of: first), "Not yet"], priority: .blocking, lead: lead)
@@ -112,6 +113,45 @@ struct ApprovalCardTests {
         #expect(typed.error?.code == NodeWire.Code.refused.rawValue, "\(typed)")
     }
 
+    /// The security follow-ups' item 14: the base an approval card's files and diffstat are taken against is workflow.md's
+    /// `base_branch` only while the vault records it as the user's accept, never the board's: a worker that names the
+    /// task's own branch as the base (so the card would show nothing changed) gets a problem on the card, not a shrunk
+    /// diff; and a base named like an option, even one the vault records, is never read as one by git.
+    @Test func anApprovalCardTakesOnlyTheBaseTheUserAccepted() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let commit = try await taskBranch(world.repo, task: "change", file: "parser.swift", subject: "Add the parser")
+        let lead = try await world.sleepingLead()
+        try await world.acceptBase()
+        let workflow = ConfigHoldStore.workflowPath(root: world.repo)
+        func facts(_ question: String) async throws -> CardStore.ApprovalFacts {
+            let asked = try await world.asked(question, options: [LeadWorkflow.approval(of: commit), "Not yet"], priority: .blocking, lead: lead)
+            try #require(await eventually(timeout: 60) { world.card(asked.card.id)?.approval?.subject != nil })
+            return try #require(world.card(asked.card.id)?.approval)
+        }
+        // The board names the task's own branch as the base: not taken; the base the user accepted is the main branch.
+        try BoardStore(root: world.repo).update { $0.baseBranch = "agent/change" }
+        let fromBoard = try await facts("Merge change?")
+        #expect(fromBoard.base == "main" && fromBoard.files == ["parser.swift"], "\(fromBoard)")
+        // workflow.md names it, but the vault records the main branch as the user's: a problem on the card, no files.
+        try "---\nbase_branch: agent/change\n---\n".write(toFile: workflow, atomically: true, encoding: .utf8)
+        let rewritten = try await facts("Merge change now?")
+        #expect(rewritten.base == nil && rewritten.files.isEmpty && rewritten.diffstat.isEmpty, "\(rewritten)")
+        #expect(rewritten.problems.contains { $0.contains("isn't the one the user accepted") }, "\(rewritten.problems)")
+        // An option for a name (git's --output writes a file), even recorded as accepted: no branch, and no file written.
+        let out = scratch.url("out")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        let injected = out.appendingPathComponent("injected").path
+        let option = "--output=\(injected)"
+        try "---\nbase_branch: \(option)\n---\n".write(toFile: workflow, atomically: true, encoding: .utf8)
+        try #require(LeadWorkflow.load(from: workflow).baseBranch == option)
+        try await world.acceptBase(option)
+        let asOption = try await facts("Merge change at last?")
+        #expect(asOption.files.isEmpty && asOption.problems.contains { $0.contains("isn't a branch") }, "\(asOption)")
+        let written = try FileManager.default.contentsOfDirectory(atPath: out.path)
+        #expect(written.isEmpty, "\(written)")
+    }
+
     /// S3: a board whose task title, commit and files were rewritten after the post shows git's and the vault's facts,
     /// never the board's.
     @Test func anApprovalCardIsBuiltFromGitAndTheVault() async throws {
@@ -125,6 +165,7 @@ struct ApprovalCardTests {
         let value = LeadVault.guardedValue("sensitive_paths", in: LeadWorkflow.load(from: workflow))
         let vault = world.host.vault
         try await offPool { try vault.setGuardedSettings(["sensitive_paths": LeadVault.hash(value)], root: world.repo) }
+        try await world.acceptBase()
         try BoardStore(root: world.repo).update { board in
             board.tasks.append(LeadTask(slug: "change", title: "Add the parser", contract: LeadContract(goal: "A parser.", acceptance: [], boundaries: [], context: "")))
         }

@@ -220,10 +220,14 @@ extension LeadEngine {
         let project = (root as NSString).lastPathComponent
         let vault = link.vault
         let (firstLook, nodeRoot, temporary, home) = (options.firstLook, self.root, temporaryRoot, self.home)
-        // Where the conversation of the lead this start may replace is: the new lead reads its last turns.
+        // Where the conversation of the lead this start may replace is: the new lead reads its last turns. Only a
+        // session the host started in this root (its own cwd, not the agent's): another project's conversation never
+        // goes into this lead's first prompt.
         let transcripts = Dictionary((sessions?.sessions ?? []).compactMap { session in
-            session.hostID.flatMap { id in session.transcriptPath.map { (id.uuidString, $0) } }
+            session.startFolder.map { ($0 as NSString).standardizingPath } == root
+                ? session.hostID.flatMap { id in session.transcriptPath.map { (id.uuidString, $0) } } : nil
         }, uniquingKeysWith: { $1 })
+        let hosted = link.sessions
         work.async { [weak self] in
             var issued: String?
             var waiting: [SteerMessage] = []
@@ -248,13 +252,16 @@ extension LeadEngine {
                 let grant = try vault.startLead(root: root, branch: branch, takeHead: start.takeHead)
                 issued = grant
                 // The role is the new session's from now on: the lead it replaces gets nothing more, and what waited
-                // for it goes to the new one (`LeadHandover`).
-                let handover = try LeadHandover.begin(boardStore, inbox: nodeRoot)
-                waiting = handover.waiting
+                // for it goes to the new one (`LeadHandover`). The board is the repository's, which any process of the
+                // user's can write: the lead it named is the one replaced only while the host runs it as this root's
+                // lead on that terminal (`replacedLead`), else its inbox and its turns stay where they are.
+                let named = try boardStore.update { LeadHandover.release(&$0) }
+                let verified = Self.replacedLead(named, root: root, hosted: hosted)
+                waiting = verified.map { LeadHandover.takeWaiting(for: $0, root: nodeRoot) } ?? []
                 let name = "lead-\(Slug.make(project, taken: []))"
                 var handed: (tty: String, turnsFile: String)?
-                let old = handover.replaced.flatMap { $0.session.flatMap(UUID.init(uuidString:)) } ?? running?.id
-                if let old, let tty = handover.replaced?.tty ?? running?.tty {
+                let old = verified.flatMap { $0.session.flatMap(UUID.init(uuidString:)) } ?? running?.id
+                if let old, let tty = verified?.tty ?? running?.tty {
                     replaced = old
                     let transcript = transcripts[old.uuidString]
                         ?? running.flatMap { TranscriptLocator.claude(cwd: root, name: name, startedAt: $0.startedAt, home: home) }
@@ -287,6 +294,17 @@ extension LeadEngine {
                 }
             }
         }
+    }
+
+    /// The lead the board named (`named`, as `LeadHandover.release` took it off) as the lead a start of `root` replaces:
+    /// only a session the host runs live (`hosted`), labelled as a lead, started in `root`, on the terminal the board
+    /// names. A board naming another project's session, or this one's on another terminal, replaces nothing: its inbox
+    /// isn't emptied into this lead and its conversation isn't read into this lead's first prompt.
+    static func replacedLead(_ named: LeadAgent?, root: String, hosted: [HostSession]) -> LeadAgent? {
+        guard let named, let id = named.session.flatMap(UUID.init(uuidString:)),
+              let session = hosted.first(where: { $0.id == id && $0.isLive }), LeadTeams.role(label: session.label) == .lead,
+              (session.cwd as NSString).standardizingPath == root, session.tty == named.tty else { return nil }
+        return LeadAgent(pid: named.pid, tty: session.tty, session: session.id.uuidString)
     }
 
     /// Why a vault that holds its first look doesn't start `root`'s lead yet (S7): config held from it, or no head

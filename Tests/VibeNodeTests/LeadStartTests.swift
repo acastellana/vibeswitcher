@@ -259,6 +259,35 @@ struct LeadStartTests {
         #expect(value["replaced"]?.array == [.string(NodeIds.session(host: old))])
     }
 
+    /// The security follow-ups' item 11: the board is the repository's, which any process of the user's can write. A
+    /// board naming another project's session (its id, its terminal and its agent) replaces nothing when a lead starts:
+    /// what waits in that session's inbox stays there, none of it is held for the new lead, and its conversation isn't
+    /// read into the new lead's first prompt (nothing is handed as the replaced lead's last turns).
+    @Test func aBoardNamingAnotherProjectsSessionHandsTheNewLeadNothingOfIt() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let elsewhere = world.host.folder.appendingPathComponent("elsewhere", isDirectory: true)
+        try await scratchRepository(elsewhere)
+        let other = try await NodeHarness.start(on: world.host, fake: world.fake, cwd: elsewhere.resolvingSymlinksInPath().path,
+                                                label: "Lead · elsewhere")
+        try await other.waitFor { other.agentPid != nil }
+        let pid = try #require(other.agentPid)
+        try SteerInbox.post(SteerMessage(text: "a report for the other project's lead", from: .system("worker a"), agentPid: pid),
+                            tty: other.session.tty, root: world.host.root)
+        try BoardStore(root: world.repo).prepare()
+        try BoardStore(root: world.repo).update { board in
+            board.leadSession = other.session.id.uuidString
+            board.leadPid = pid
+            board.leadTTY = other.session.tty
+        }
+        let new = try started(await world.start())
+        #expect(SteerInbox.pending(tty: other.session.tty, root: world.host.root).map(\.text) == ["a report for the other project's lead"])
+        #expect(world.held().isEmpty, "\(world.held())")
+        #expect(world.stored?.replaced[other.session.id] == nil)
+        #expect(!FileManager.default.fileExists(atPath: LeadLaunch.turnsFile(root: world.repo)))
+        #expect(world.holder() == new.uuidString)
+    }
+
     /// ReplacedLeadRoutingTests' `startsAndTheNoticesReadWhichLeadHoldsTheRoleOffTheMainThread`, the start's half: of
     /// two leads sharing the root (the replaced one and the one holding the role), a start finds the one holding the
     /// role off the engine's queue, shows it and starts nothing.

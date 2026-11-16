@@ -120,13 +120,17 @@ public enum ConfigHoldStore {
         // By the record's key, as the accept seals them (`checkConfig(root:shown:)`); the card shows each by its name.
         let hashes = ConfigSeal.heldHashes(in: record)
         let byName = Dictionary(hashes.map { (ConfigSeal.name(ofKey: $0.key), (key: $0.key, hash: $0.value)) }) { first, _ in first }
+        // "The same" only from a snapshot this host's vault sealed at the accept (the security follow-ups' item 18).
+        let vouched = AcceptedSnapshot.vouches(snapshot, root: root, vault: vault)
         let items = names.map { name in
             Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name]?.hash ?? "").prefix(12)), change: changes[name],
                  outside: outside.contains(name), files: details[name]?.files ?? [],
-                 sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot) })
+                 sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot, vouched: vouched) })
         }
         let workflow = LeadWorkflow.load(from: workflowPath(root: root))
-        let guarded = guardedValues(workflow).map { Rail(key: $0.key, value: $0.value, sinceAccept: AcceptedSnapshot.since(rail: $0.key, value: $0.value, in: snapshot)) }
+        let guarded = guardedValues(workflow).map {
+            Rail(key: $0.key, value: $0.value, sinceAccept: AcceptedSnapshot.since(rail: $0.key, value: $0.value, in: snapshot, vouched: vouched))
+        }
         return .success(Shown(items: items, hashes: hashes, floor: LeadReviewFloor.starting(from: workflow), rails: recordedHashes(workflow),
                               baseBranch: workflow.baseBranch, guarded: guarded,
                               lastAccept: snapshot?.configAt.map { Date(timeIntervalSince1970: $0) }))
@@ -153,8 +157,8 @@ public enum ConfigHoldStore {
     /// (`checkConfig(root:shown:)`, which ends the root's first-look hold), then the rails and the floor `workflow.md`
     /// proposed as the card showed them (`setReviewFloor(onlyIfUnset: true)`, which the vault refuses while the first
     /// look still holds). Then the snapshot (`snapshotRoot`, E8's `AcceptedSnapshot`) keeps what the vault records now of
-    /// the watched things, the rails' values and the floor the card showed: a diff aid for the next `config held`, not
-    /// written when nothing was sealed. Fails when the vault can't be asked.
+    /// the watched things, the rails' values and the floor the card showed, with the vault's seal of them: a diff aid for
+    /// the next `config held`, not written when nothing was sealed. Fails when the vault can't be asked.
     public static func accept(_ shown: Shown, root: String, vault: LeadVault, snapshotRoot: URL? = nil) -> Result<Accepted, Error> {
         do {
             let check = try vault.checkConfig(root: root, shown: shown.hashes)
@@ -169,6 +173,8 @@ public enum ConfigHoldStore {
                     project.hashes = project.hashes.merging(recorded) { $1 }
                     project.guarded = Dictionary(shown.guarded.map { ($0.key, $0.value) }) { first, _ in first }
                     project.floor = floor ?? shown.floor
+                    // Sealed by this vault: "the same" is said from it only while the seal checks.
+                    project.seal = try? vault.seal(AcceptedSnapshot.sealMessage(project, root: root))
                 }
             }
             return .success(.sealed(names: check.resealed.isEmpty ? shown.items.map(\.name) : check.resealed, floor: floor))

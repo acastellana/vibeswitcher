@@ -476,7 +476,8 @@ struct RestartTests {
     }
 
     /// The snapshot of the last accept turns "everything is new" into what changed: after the restart the held list
-    /// says of each thing whether it's the same as at the last accept or changed since, and of a guard rail what it was.
+    /// says of each thing whether it changed since the last accept, and of a guard rail what it was; what the snapshot
+    /// lists as it is now is said to be not known to be the same (the old host's vault sealed the snapshot).
     @Test func theSnapshotTurnsEverythingNewIntoWhatChanged() async throws {
         let (node, repo) = try await hostRestarted(leadBefore: false) { node, repo in
             try #"{"env":{"CHANGED":"between the hosts"}}"#.write(to: node.homeSettings, atomically: true, encoding: .utf8)
@@ -487,11 +488,14 @@ struct RestartTests {
         let lines = held.output.components(separatedBy: "\n")
         let settings = try #require(lines.first { $0.hasPrefix("    ~/.claude/settings.json, ") }, "\(held.output)")
         #expect(settings.contains("changed since your last accept"), "\(settings)")
-        let same = lines.filter { $0.hasPrefix("    ") && $0.contains("the same as at your last accept") }
-        #expect(!same.isEmpty, "\(held.output)")
+        // The snapshot's seal is the old host's vault's: nothing is said to be the same, only not known to be (the
+        // security follow-ups' item 18).
+        #expect(!lines.contains { $0.contains("; the same as at your last accept") }, "\(held.output)")
+        let unknown = lines.filter { $0.hasPrefix("    ") && $0.contains("not known to be the same as at your last accept") }
+        #expect(!unknown.isEmpty, "\(held.output)")
         #expect(lines.contains { $0.hasPrefix("    test_command: make test; changed since your last accept") && $0.contains("from “make check”") },
                 "\(held.output)")
-        #expect(lines.contains { $0.hasPrefix("    merge_policy: ask_all; the same as at your last accept") }, "\(held.output)")
+        #expect(lines.contains { $0.hasPrefix("    merge_policy: ask_all; not known to be the same as at your last accept") }, "\(held.output)")
         #expect(held.output.contains("compared with your last accept"), "\(held.output)")
     }
 
@@ -671,7 +675,7 @@ extension ScratchNode {
     /// `config held FOLDER`, then `config accept CARD` with the code typed, which says `says`.
     func acceptConfig(_ repo: URL, says: String = "accepted") async throws {
         let held = try await run(["config", "held", repo.path])
-        try #require(held.status == 0, "\(held.output)\(held.errors)")
+        try #require(held.status == 0, "\(held.output)\(held.errors)\n\(said)")
         let card = try #require(Self.card(held.output, "config accept"), "\(held.output)")
         let accepted = try await runOnTerminal(["config", "accept", card])
         try #require(accepted.status == 0 && accepted.output.contains(says), "\(accepted.output)\n\(said)")

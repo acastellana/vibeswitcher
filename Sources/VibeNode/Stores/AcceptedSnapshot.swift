@@ -6,9 +6,12 @@ import VibeCore
 /// sealed config's hashes (every watched thing the vault records once it sealed the card's), the guard rails' values
 /// and the review floor the card showed; `base accept` keeps the base's head. After a host restart, whose vault starts
 /// over, `config held` then says of each held thing whether it is the same as at the last accept, changed, or new
-/// (`since`), and `base show` takes the snapshot's head as "from", marked unverified. It is unsealed: a worker of the
+/// (`since`), and `base show` takes the snapshot's head as "from", marked unverified. The file is unsealed: a worker of the
 /// user's uid can rewrite it, so the user reads the values, not just the marks, and nothing here is ever taken as
-/// accepted (the vault's record is).
+/// accepted (the vault's record is). Its config part carries the vault's seal from the accept (`Project.seal`, the
+/// security follow-ups' item 18): a held thing is said to be "the same as at your last accept" only while that seal checks
+/// with this host's vault (`vouches`); rewritten, or after a host restart (whose vault never sealed it), it is said only
+/// to have changed or to be new, never the same.
 public struct AcceptedSnapshot: Codable, Equatable, Sendable {
     public static let currentFormat = 1
 
@@ -24,6 +27,9 @@ public struct AcceptedSnapshot: Codable, Equatable, Sendable {
         /// When `base accept` last ran for it, and the head it recorded, by branch.
         public var headsAt: Double?
         public var heads: [String: String]
+        /// The vault's seal of `configAt`, `hashes` and `guarded` as `config accept` left them (`sealMessage`); none
+        /// from a file written before it, or a vault that didn't seal.
+        public var seal: String?
 
         public init(configAt: Double? = nil, hashes: [String: String] = [:], guarded: [String: String] = [:], floor: LeadReviewFloor? = nil,
                     headsAt: Double? = nil, heads: [String: String] = [:]) {
@@ -78,12 +84,37 @@ public struct AcceptedSnapshot: Codable, Equatable, Sendable {
         }
     }
 
+    /// Who the vault seals a project's last config accept as: VibeSwitcher's own, which only the app may seal (no worker,
+    /// verifier or lead seals a `system` sender of this name).
+    public static let sealSender = "vibeswitcher accepted-snapshot"
+
+    /// What the vault seals of `project`'s last config accept in `root` (its time, the watched things' hashes and the
+    /// guard rails' values, as a digest), as a message no agent's inbox takes (agent pid 0), with its seal.
+    public static func sealMessage(_ project: Project, root: String) -> SteerMessage {
+        let fields = [root, project.configAt.map { String($0) } ?? ""]
+            + project.hashes.sorted { $0.key < $1.key }.flatMap { [$0.key, $0.value] } + ["guarded"]
+            + project.guarded.sorted { $0.key < $1.key }.flatMap { [$0.key, $0.value] }
+        let digest = BuildInfo.sha256(of: (try? JSONEncoder().encode(fields)) ?? Data())
+        var message = SteerMessage(id: "accepted-snapshot", text: digest, from: .system(sealSender), agentPid: 0, at: project.configAt ?? 0)
+        message.seal = project.seal
+        return message
+    }
+
+    /// Whether `vault` (this host's) sealed `project`'s config part as it reads now: false for a rewritten one, one
+    /// with no seal, and after a host restart (another vault's key). Reads the vault.
+    public static func vouches(_ project: Project?, root: String, vault: LeadVault) -> Bool {
+        guard let project, project.seal != nil else { return false }
+        return (try? vault.verify([sealMessage(project, root: root)])) == [true]
+    }
+
     /// What a held thing (`key`, the vault's, with the `hash` it's held at) is against the last accept, in words: the
-    /// same, changed, or not in it; nil when no accept is known for the project.
-    public static func since(key: String, hash: String, in project: Project?) -> String? {
+    /// same (only when `vouched`: the vault sealed the snapshot, `vouches`), changed, or not in it; nil when no accept
+    /// is known for the project.
+    public static func since(key: String, hash: String, in project: Project?, vouched: Bool = false) -> String? {
         guard let project, let at = project.configAt else { return nil }
         let when = NodeWire.dateText(Date(timeIntervalSince1970: at))
         switch project.hashes[key] {
+        case hash? where !vouched: return unvouched(when)
         case hash?: return "the same as at your last accept (\(when))"
         case .some: return "changed since your last accept (\(when))"
         case nil: return "not in your last accept (\(when))"
@@ -91,13 +122,21 @@ public struct AcceptedSnapshot: Codable, Equatable, Sendable {
     }
 
     /// The same for a guard rail's value now.
-    public static func since(rail key: String, value: String, in project: Project?) -> String? {
+    public static func since(rail key: String, value: String, in project: Project?, vouched: Bool = false) -> String? {
         guard let project, let at = project.configAt else { return nil }
         let when = NodeWire.dateText(Date(timeIntervalSince1970: at))
         switch project.guarded[key] {
+        case value? where !vouched: return unvouched(when)
         case value?: return "the same as at your last accept (\(when))"
         case .some(let before): return "changed since your last accept (\(when)), from “\(ConfigSeal.inert(before, limit: 200))”"
         case nil: return "not in your last accept (\(when))"
         }
+    }
+
+    /// What a held thing or rail the snapshot lists as it is now is said to be when the vault didn't seal the snapshot:
+    /// nothing reassuring (the security follow-ups' item 18).
+    static func unvouched(_ when: String) -> String {
+        "not known to be the same as at your last accept (\(when)): the snapshot that lists it isn't sealed by this host's vault "
+            + "(a host restart since, or it was rewritten), so read it"
     }
 }

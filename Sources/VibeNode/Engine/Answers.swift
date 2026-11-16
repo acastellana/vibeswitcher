@@ -9,6 +9,20 @@ public struct VaultUserActions: UserActions {
     public func holds(action: String, digest: String) -> Bool? { try? client.holds(action: action, digest: digest) }
 }
 
+/// A `.user` message the server posted into a lead's inbox (`LeadEngine.postedUser`): the terminal, its text's digest
+/// and the agent it is for, as posted.
+struct PostedUser: Equatable, Sendable {
+    var tty: String
+    var digest: String
+    var agentPid: Int32
+
+    /// Whether `line`, read from the inbox under the posted id, is still the message the server posted: the user's, for
+    /// the same agent, with the same text (the security follow-ups' item 16: only that line's seal is renewed).
+    func isPosted(_ line: SteerMessage) -> Bool {
+        line.from == .user && line.agentPid == agentPid && LeadVaultV2.digest(line.text) == digest
+    }
+}
+
 /// Questions, answers, cards and holds (the engine plan's E6; the app's `LeadController.answer`, `hold`, `runTimers` and
 /// `tell(timers:)`, 1118-1201, with `ConfigHolds` and `BaseMoves` as stores): every card is made by the engine (a
 /// question from the lead's tool server's post, an approval's facts from git and the vault, held config from the vault,
@@ -136,28 +150,56 @@ extension LeadEngine {
         } else {
             facts.problems.append("which task's branch is at \(commit.prefix(8)) couldn't be read")
         }
-        let base = BaseMoveStore.base(root: root)
-        facts.base = base
         let subject = Git.run(["log", "-1", "--format=%s", commit], in: root)
         if subject.ok { facts.subject = subject.output } else { facts.problems.append("\(commit.prefix(8)) isn't a commit of the repository") }
-        let files = Git.run(["diff", "--name-only", "\(base)...\(commit)"], in: root)
-        if files.ok { facts.files = files.output.split(whereSeparator: \.isNewline).map(String.init) }
-        let stat = Git.run(["diff", "--shortstat", "\(base)...\(commit)"], in: root)
-        if stat.ok { facts.diffstat = stat.output.trimmingCharacters(in: .whitespaces) }
+        let workflow = LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: root))
+        let record = (try? vault.guardedRecord(root: root)) ?? nil
+        switch Self.acceptedBase(workflow: workflow, record: record, root: root) {
+        case .failure(let why):
+            facts.problems.append(why.description)
+        case .success(let base):
+            facts.base = base.branch
+            let files = Git.run(["diff", "--name-only", "--end-of-options", "\(base.head)...\(commit)"], in: root)
+            if files.ok { facts.files = files.output.split(whereSeparator: \.isNewline).map(String.init) }
+            let stat = Git.run(["diff", "--shortstat", "--end-of-options", "\(base.head)...\(commit)"], in: root)
+            if stat.ok { facts.diffstat = stat.output.trimmingCharacters(in: .whitespaces) }
+        }
         for task in facts.tasks {
             if let verdict = vault.verdict(root: root, task: task) {
                 facts.verdicts[task] = "\(verdict.completion.rawValue), \(verdict.integrity.rawValue) at \(verdict.commit.prefix(8))"
                     + (verdict.commit.lowercased() == commit ? "" : " (not this commit)")
             }
         }
-        let workflow = LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: root))
-        let recorded = (try? vault.guardedRecord(root: root))??["sensitive_paths"]
-        if let recorded, recorded == LeadVault.hash(LeadVault.guardedValue("sensitive_paths", in: workflow)) {
+        if let recorded = record?["sensitive_paths"], recorded == LeadVault.hash(LeadVault.guardedValue("sensitive_paths", in: workflow)) {
             facts.sensitive = facts.files.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
         } else {
             facts.problems.append("workflow.md's sensitive_paths isn't what the vault records, so the sensitive files aren't named")
         }
         return facts
+    }
+
+    /// The base an approval card's files and diffstat are taken against (the security follow-ups' item 14): workflow.md's
+    /// `base_branch` (the main branch when it names none) only while its hash is the one the user's `config accept`
+    /// recorded (`ConfigHoldStore.baseBranchKey`, `BaseMoveStore.show`'s gate), never the board's (a worker can write
+    /// both files; the vault's record it can't), and resolved to the commit its branch is at (`refs/heads/<branch>`: a
+    /// name is never read as an option). Else why not, said on the card.
+    static func acceptedBase(workflow: LeadWorkflow, record: [String: String]?, root: String) -> Result<(branch: String, head: String), Refused> {
+        let named = workflow.baseBranch ?? ""
+        guard let recorded = record?[ConfigHoldStore.baseBranchKey] else {
+            return .failure(Refused("workflow.md's base branch isn't accepted yet (`vibeswitcher config held`, then `config accept`), so the files "
+                + "and diffstat aren't shown"))
+        }
+        guard recorded == LeadVault.hash(named) else {
+            return .failure(Refused("workflow.md's base_branch isn't the one the user accepted (`config held`, then `config accept` again), so the "
+                + "files and diffstat aren't shown"))
+        }
+        let branch = named.isEmpty ? Worktrees.mainBranch(root: root) : named
+        let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)^{commit}"], in: root)
+        guard head.ok, !head.output.isEmpty else {
+            return .failure(Refused("the base branch \(ConfigSeal.inert(branch, limit: 80)) isn't a branch of the repository, so the files and "
+                + "diffstat aren't shown"))
+        }
+        return .success((branch, head.output))
     }
 
     // MARK: answer, hold, timers
@@ -297,26 +339,28 @@ extension LeadEngine {
     }
 
     /// A `.user` message posted to a lead's inbox: retired once its delivered record shows it. On `queue`.
-    func postedAsUser(_ id: String, tty: String) {
-        postedUser[id] = tty
+    func postedAsUser(_ id: String, tty: String, text: String, agentPid: Int32) {
+        postedUser[id] = PostedUser(tty: tty, digest: LeadVaultV2.digest(text), agentPid: agentPid)
     }
 
     /// Retires in the vault each `.user` message the lead took (its inbox's delivered record shows it): its seal verifies
     /// false from then on, so a copy put back in the inbox arrives as unverified (T41). Each one still waiting in the
     /// inbox has its seal renewed (`renewUserSeals`: its life counts from now), so an answer that waits while the lead's
     /// tool call runs long (a merge's tests) is still the user's when the lead takes it; the vault renews none a check
-    /// has passed, and the server none it no longer sees waiting. On `queue`, at each `look`.
+    /// has passed nor any past `LeadVaultV2.renewedLifeCap` from its first seal, and the server none it no longer sees
+    /// waiting as it posted it (`PostedUser.isPosted`: the inbox is a file any process of the user's can rewrite, and a
+    /// line rewritten under a posted id keeps no seal alive). On `queue`, at each `look`.
     func retireTaken() {
         guard !postedUser.isEmpty, !retiring else { return }
         retiring = true
         let (posted, inbox, client, note) = (postedUser, root, link.vaultV2, self.note)
         reads.async({ _ -> (taken: [String], waiting: [String]) in
             var taken: [String] = [], waiting: [String] = []
-            for (tty, entries) in Dictionary(grouping: posted, by: \.value) {
+            for (tty, entries) in Dictionary(grouping: posted, by: \.value.tty) {
                 let delivered = SteerInbox.delivered(tty: tty, root: inbox)
-                let pending = Set(SteerInbox.pending(tty: tty, root: inbox).map(\.id))
-                for id in entries.map(\.key).sorted() {
-                    if delivered.contains(id) { taken.append(id) } else if pending.contains(id) { waiting.append(id) }
+                let pending = Dictionary(SteerInbox.pending(tty: tty, root: inbox).map { ($0.id, $0) }) { first, _ in first }
+                for (id, was) in entries.sorted(by: { $0.key < $1.key }) {
+                    if delivered.contains(id) { taken.append(id) } else if let line = pending[id], was.isPosted(line) { waiting.append(id) }
                 }
             }
             return (taken, waiting)

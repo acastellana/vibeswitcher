@@ -507,6 +507,26 @@ memory, never to text in `board.json` (which any session can write, `LeadVaultAp
 the server from the lead's tool server through the server's own socket, not by reading the board back. The lead's
 question text is still the lead's (S1, item 3).
 
+**(call, 2026-11-16)** **The diff's base is the one the user accepted.** The files and diffstat are git's of
+`<base>...<commit>`, and the base is `workflow.md`'s `base_branch` (the main branch when it names none) only while its
+hash is the one `config accept` recorded (`ConfigHoldStore.baseBranchKey`, `base show`'s gate), never the board's
+`baseBranch`: both files are any session's to write, and a base moved onto the task's own branch would show the user
+an approval with nothing changed. Otherwise the card says why and shows no files. The base is resolved to its commit
+as `refs/heads/<base>^{commit}` and the range follows `--end-of-options`, so no name is read as an option (git's
+`--output` writes a file). A revised question that offers another commit's approval rebuilds the facts for that
+commit, and an answer approving a commit the card doesn't show is refused (the E6 review, verified 2026-11-16). The
+security follow-ups' items 14 and 15.
+
+**(call, 2026-11-16)** **A `.user` seal is renewed only for the line the server posted, and not for ever.** The server
+renews the seal of a `.user` message it still sees waiting in the lead's inbox only while the line under that id is
+the one it posted (the user's, for the same agent, with the same text's digest): the inbox is a file any process of
+the user's can rewrite, and a line left under a posted id while the sealed one is kept aside would keep that seal alive
+for a replay later. The vault renews none more than two hours after the seal was first made (`Book.first`,
+`LeadVaultV2.renewedLifeCap`), so a seal lives two hours and one life at most. And only a taking marks a seal checked
+(after which it is renewed no more): the app's (a handover) or a session holding a lead's role (its hook taking its
+inbox); a worker's or an outsider's check of the same message reads and changes nothing, so it can't end a waiting
+answer's renewal and let it arrive unverified. The security follow-ups' items 16 and 17.
+
 **(call, new)** **Answers at rest.** A user's-voice request the server accepts is recorded in the host's vault (an
 app-only write) before it is acted on, and a restarted server takes answers and holds only from there, asking again
 for anything it can't find. Nothing in a file the server or the engine keeps is taken as the user's answer.
@@ -568,6 +588,8 @@ process that a process of the user can't change.
 - Under the weaker rule (no user systemd), a session's process that left the host's tree, unset its marker and holds
   a terminal of its own (`script`, a pty it opened and made its controlling terminal) passes as the user's voice.
 - The text of the lead's questions: a turned lead asks what it likes. Only the card's facts are the engine's.
+- A lead (or a process inside its session) can record a `base_branch` hash of its own (`setGuarded` takes the lead's),
+  and an approval card's diff is then taken against that base; the card names the base.
 
 Acceptable only on VibeSwitcher's own repository, with interop off, until stage 4's signed approvals.
 
@@ -619,7 +641,11 @@ Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path
 `VaultV2HostTests.theHostListsV2AndAnswersTheAppAlone`, `ServerTests.theFreshVaultOrderAcceptsThenStartsTheLead`, and the
 answer in `ServerTests.anAcceptedRequestIsShownByStatus` and `ServerTests.everyHostCallInTheServerGoesThroughTheConnector`.
 The engine's E8: `RestartTests.anAnswerWrittenToTheServersFilesIsNotTakenAfterARestart`,
-`RestartTests.aHeldUserMessageIsTheUsersAfterARestartOnlyFromTheVault`.
+`RestartTests.aHeldUserMessageIsTheUsersAfterARestartOnlyFromTheVault`. The security follow-ups (2026-11-16):
+`ApprovalCardTests.anApprovalCardTakesOnlyTheBaseTheUserAccepted` (item 14),
+`ApprovalCardTests.aRevisedApprovalShowsTheNewCommitsFactsAndApprovesOnlyThat` (item 15, verified),
+`UserSealTests.aLineRewrittenUnderAPostedIdKeepsNoSealAlive`, `LeadVaultV2Tests.aUserSealIsRenewedNoLongerThanItsCap`
+(item 16), `LeadVaultV2Tests.onlyATakingMarksAUserSealChecked` (item 17).
 
 **Tests to write:** Step 8: `aSessionsProcessCannotInstallHooks`.
 
@@ -940,7 +966,13 @@ the branch is at. So on Linux, **(call, extended)**:
   head marked unverified. `base accept CARD` records the head that card showed.
 - **A diff aid, not a lock**: an unsealed "last accepted" snapshot under `~/.vibeswitcher/v2` (hashes, guarded values,
   the floor, each lead's last head), written at each accept. It turns "everything is new" into "these three changed";
-  a worker can rewrite it, so the user reads the values, not just the marks.
+  a worker can rewrite it, so the user reads the values, not just the marks. **(2026-11-16)** Its config part carries
+  the vault's seal from the accept (a VibeSwitcher message only the app may have sealed, over the accept's time, the
+  hashes and the rails' values), and a held thing or a rail is said to be "the same as at your last accept" only while
+  that seal checks with the host's vault now; rewritten, or after a host restart (a vault with another key), it is
+  said to have changed, to be new, or not to be known to be the same, never the same: no reassuring mark from data
+  nothing vouches for (the security follow-ups' item 18). So after a host restart, when the snapshot matters, the
+  user reads every value the list shows; the app has no snapshot (its vault survives on the Mac).
 - Workers, verifiers and merges wait until the accept, as the plan says.
 
 Strong mode (after the bootstrap): a 0600 key file under `~/.vibeswitcher/keys`, never mounted into a sandbox, so the
@@ -983,7 +1015,8 @@ engine's E4: `lead` refused, no floor seeded); `RestartTests.aHostRestartSaysThe
 `RestartTests.baseAcceptAfterARestartShowsWhatMoved`, `RestartTests.configAcceptRecordsTheFloorWorkflowProposes`,
 `RestartTests.theSnapshotTurnsEverythingNewIntoWhatChanged`, `RestartTests.theRestartNoticeSaysWhatWasResetAndHowTheHostEnded`,
 `RestartTests.aHandoverKeepsTheServerAndItsLeads`, `EngineStateTests.theSnapshotSaysOfEachThingWhetherItsTheSameChangedOrNew`
-(the engine's E8: the restart path, the two-step accept, the snapshot).
+(the engine's E8: the restart path, the two-step accept, the snapshot); `ConfigHoldStoreTests.aSnapshotThisHostsVaultDidntSealNeverSaysTheSame`
+(the security follow-ups' item 18, 2026-11-16: "the same" only from a snapshot the host's vault sealed).
 
 **Tests to write:** none left: E8's are under Held by.
 
@@ -1443,7 +1476,14 @@ against it. Each line says what reduces it now, if anything.
    commit's folder, which its `BinaryWatch` switches to or its keeper restarts (decision 18; the seal watches the
    install folder, and an install never writes there, S9); branch code rewriting its bash wrapper's argv (S4); and
    `board.json` naming a worker's session as the lead, which would receive the user's answers but for the engine
-   delivering only to the session the vault binds to the lead role (EN-D14).
+   delivering only to the session the vault binds to the lead role (EN-D14), on the terminal the host runs it on, to
+   an agent there (the board's pid is checked to have that terminal). **(2026-11-16)** A board naming another
+   project's session when a lead starts would have handed that session's inbox and last turns to the new lead (a leak
+   between projects, and a prompt-injection path): the start takes the board's lead as the one it replaces only when
+   the host runs it live, labelled as a lead, started in this root and on the board's terminal, and reads last turns
+   only from a session started in this root. A held message `engine.json` keeps (any process of the user's can write
+   it) goes after a restart from an unverified sender (EN-D9) and only for a repository's top folder. The security
+   follow-ups' items 11 to 13.
 8. A worker can replace what every agent runs (the hook, the agents' settings and hooks, `claude`'s versions, the shell
    startup files Claude Code's Bash tool sources, folders on the PATH; measured 2026-11-14: `~/.bashrc` in every Bash
    command's shell, and in its snapshot the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` there is,
@@ -1542,8 +1582,9 @@ against it. Each line says what reduces it now, if anything.
     the user's earlier sealed message back into the lead's inbox gets it delivered again, verified as the user's.
     From the engine's E6, a `.user` seal verifies false once the server retired it or 15 minutes after it was made or
     last renewed (EN-D11; the server renews the seal of each of the user's messages it still sees waiting in the
-    lead's inbox, and the vault renews none a check has passed, so an answer that waits through a long tool call stays
-    the user's), so a replay is delivered at most once, inside that window; signed approvals close it.
+    lead's inbox as it posted it, the vault renews none a lead's or the app's check has passed nor any two hours after
+    it was first made, so an answer that waits through a long tool call stays the user's: S3, 2026-11-16), so a replay
+    is delivered at most once, inside that window; signed approvals close it.
 30. Until the handover through sealed memory is built (Task 9), nothing; after it, no handover state on disk. A stale
     Mac-format file is removed by a fresh host (S8).
 
@@ -1592,7 +1633,11 @@ plan's E1; `doctor`'s summary after the bootstrap.
 **The user confirms:** the allow-list's place, and that the user (not an agent) writes its one line for the bootstrap
 clone.
 
-**Held by:** `ProjectAllowListTests.aSpawnOutsideTheListIsRefusedWithItsReason`,
+**Held by:** `LeadStartTests.aBoardNamingAnotherProjectsSessionHandsTheNewLeadNothingOfIt` (item 7: the security
+follow-ups' item 11, 2026-11-16), `DeliveryTests.aBoardNamingTheBoundSessionOnAWorkersTerminalGetsNothing`,
+`DeliveryTests.aBoardNamingTheBoundSessionWithAnotherAgentsPidGetsNothing` (item 12, verified),
+`EngineStateTests.noHeldMessagesSenderIsTakenFromTheFile`, `DeliveryTests.aHeldMessageForAFolderThatIsNoRepositoryIsDroppedAtARestart`
+(item 13); `ProjectAllowListTests.aSpawnOutsideTheListIsRefusedWithItsReason`,
 `ProjectAllowListTests.aWorktreeOfAnAllowedRepositoryIsAllowed`, `ProjectAllowListTests.aForgedGitFileIsRefused`,
 `ProjectAllowListTests.aForgedWorktreePairPassesAsKnown`, `ProjectAllowListTests.aScratchHostHasNoList`,
 `ProjectAllowListTests.aMissingListRefusesEverySpawnAndSaysWhereTheListGoes`,
@@ -1713,7 +1758,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T38 | worker | get a genuine approval for its commit through a card it wrote on the board | refused | cards built from git and the vault, bound to their id | holds |
 | T39 | worker | open a window on the Windows desktop asking for a password | works while WSLg is on | decision 9 | sandbox |
 | T40 | worker | reach Windows-side localhost services (mirrored networking) | works | none | egress proxy |
-| T41 | worker | replay a sealed message of the user's into the lead's inbox | works until E6; from E6, at most once within a seal's 15 minutes | E6: a `.user` seal verifies false once retired or 15 minutes after it was made or renewed while untaken (EN-D11) | signed approvals |
+| T41 | worker | replay a sealed message of the user's into the lead's inbox | works until E6; from E6, at most once within a seal's 15 minutes | E6: a `.user` seal verifies false once retired or 15 minutes after it was made or renewed while untaken (EN-D11); renewed only for the line the server posted, never two hours past its first making (2026-11-16) | signed approvals |
 | T42 | worker | take a new session's terminal before its launcher does | refused (Task 6) | launcher checks `TIOCSCTTY`; host checks `TIOCGSID` | holds |
 
 ## The Mac and Linux

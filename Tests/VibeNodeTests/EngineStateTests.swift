@@ -180,7 +180,10 @@ import VibeCore
         #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int == 0o600)
         let project = try #require(AcceptedSnapshot.load(root: root).projects["/r"])
         #expect(project.heads == ["main": "abc"] && project.hashes.count == 2)
-        #expect(AcceptedSnapshot.since(key: "k.same", hash: "A", in: project)?.hasPrefix("the same as at your last accept") == true)
+        #expect(AcceptedSnapshot.since(key: "k.same", hash: "A", in: project, vouched: true)?.hasPrefix("the same as at your last accept") == true)
+        // Unsealed by this host's vault (a rewritten file, a host restart): never the same (the security follow-ups' item 18).
+        #expect(AcceptedSnapshot.since(key: "k.same", hash: "A", in: project)?.hasPrefix("not known to be the same") == true)
+        #expect(AcceptedSnapshot.since(rail: "test_command", value: "make check", in: project)?.hasPrefix("not known to be the same") == true)
         #expect(AcceptedSnapshot.since(key: "k.changed", hash: "C", in: project)?.hasPrefix("changed since your last accept") == true)
         #expect(AcceptedSnapshot.since(key: "k.new", hash: "D", in: project)?.hasPrefix("not in your last accept") == true)
         #expect(AcceptedSnapshot.since(rail: "test_command", value: "make test", in: project)?.contains("from “make check”") == true)

@@ -47,6 +47,14 @@ final class CardWorld: @unchecked Sendable {
 
     var project: String { NodeIds.project(root: repo) }
 
+    /// The host's vault records `named` as workflow.md's accepted base branch (what `config accept` records under
+    /// `ConfigHoldStore.baseBranchKey`; "" for none named: the main branch), which an approval card's files and diffstat
+    /// are taken against.
+    func acceptBase(_ named: String = "") async throws {
+        let (vault, repo) = (host.vault, repo)
+        try await offPool { try vault.setGuardedSettings([ConfigHoldStore.baseBranchKey: LeadVault.hash(named)], root: repo) }
+    }
+
     // MARK: Asking
 
     /// `kind` with `args`, from `facts` (the user by default), with a new action id unless given: its reply.

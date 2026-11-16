@@ -216,7 +216,9 @@ extension LeadEngine {
                         }) { [weak self] posted in
                             guard let self else { return }
                             // The user's, posted again under a new id: renewed while it waits, retired once taken.
-                            for message in posted where message.from == .user { self.postedAsUser(message.id, tty: agent.tty) }
+                            for message in posted where message.from == .user {
+                                self.postedAsUser(message.id, tty: agent.tty, text: message.text, agentPid: message.agentPid)
+                            }
                             let back = posted.count
                             self.wakeStep(.notTyped(session: id, why: Self.notTaken))
                             self.note("lead: what was typed into session \(id) didn't go in: \(back) of \(waiting.taken.count) message(s) wait in its inbox again")

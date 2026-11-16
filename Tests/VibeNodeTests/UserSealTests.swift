@@ -95,6 +95,33 @@ struct UserSealTests {
         #expect(answer.from == .user, "\(answer.from)")
     }
 
+    /// The security follow-ups' item 16: the server renews only a waiting line that is still what it posted (the user's,
+    /// for the same agent, with the same text). A process that takes the sealed answer out of the inbox and leaves a line
+    /// of its own under the answer's id keeps no seal alive: the sealed copy it puts back after the seal's life is not the
+    /// user's.
+    @Test func aLineRewrittenUnderAPostedIdKeepsNoSealAlive() async throws {
+        let life = 6
+        let node = try await ScratchNode(scratch, sealLife: life)
+        defer { node.stop() }
+        let (lead, message, line) = try await answered(node)
+        let inbox = node.root.appendingPathComponent("steer/\(lead.session.tty).jsonl")
+        func replace(with data: Data) throws {
+            let handle = try FileHandle(forWritingTo: inbox)
+            try handle.truncate(atOffset: 0)
+            try handle.write(contentsOf: data + Data("\n".utf8))
+            try handle.close()
+        }
+        var other = message
+        other.text = "Answer to your question: Reader"
+        try replace(with: try JSONEncoder().encode(other))
+        // The event: twice the seal's life has gone by since it was sealed, the server looking all the while.
+        try #require(await eventually(timeout: 60) { Date().timeIntervalSince1970 > message.at + Double(2 * life) })
+        try replace(with: line)
+        let taken = take(node, lead)
+        let copy = try #require(taken.first { $0.id == message.id }, "\(taken) \(node.said)")
+        #expect(copy.from != .user, "\(copy.from)")
+    }
+
     @Test func aReplayIsRefusedEvenWithTheDeliveredRecordRemoved() async throws {
         let node = try await ScratchNode(scratch, sealLife: 5)
         defer { node.stop() }

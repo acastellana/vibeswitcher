@@ -138,7 +138,7 @@ extension LeadEngine {
         }) { [weak self] target, posted, text in
             guard let self else { return }
             self.noted(target, root: root)
-            if posted, sender == .user, case .lead(let lead) = target { self.postedAsUser(id, tty: lead.tty) }
+            if posted, sender == .user, case .lead(let lead) = target { self.postedAsUser(id, tty: lead.tty, text: text, agentPid: lead.pid) }
             if posted { self.wake(root: root) }
             then(posted, text)
         }
@@ -200,9 +200,15 @@ extension LeadEngine {
 
     /// The held messages `engine.json` held when the engine started, taken back (EN-D9; `restoreState` reads the file):
     /// a `.user` message stays the user's only when the vault's record of the user's actions vouches for it; any other
-    /// goes as from an unverified sender, said in the log.
+    /// goes as from an unverified sender, said in the log. One for a root that is no repository's top folder here (a
+    /// lead's root is one: `git rev-parse --show-toplevel`, standardized) is dropped, said in the log: the file is any
+    /// process of the user's to write (the security follow-ups' item 13).
     func restoreHeld(_ held: [EngineState.Held]) {
-        let restored = EngineState.restored(held, actions: options.userActions)
+        let known = held.filter { Self.isRepositoryRoot($0.root) }
+        if known.count < held.count {
+            note("engine state: \(held.count - known.count) held message(s) for a folder that is no repository's top folder were dropped")
+        }
+        let restored = EngineState.restored(known, actions: options.userActions)
         if restored.notVouched > 0 {
             note("engine state: \(restored.notVouched) held message(s) marked as the user's weren't vouched for by the vault's record of "
                  + "the user's actions: they go as from an unverified sender, not the user's")
@@ -215,6 +221,12 @@ extension LeadEngine {
             leads.hold(.init(id: message.id ?? UUID().uuidString, text: message.text, from: message.from, order: message.order, action: message.action),
                        root: message.root)
         }
+    }
+
+    /// Whether `root` can be a lead's root: absolute, standardized, and the top folder of a repository (it holds `.git`).
+    static func isRepositoryRoot(_ root: String) -> Bool {
+        root.hasPrefix("/") && (root as NSString).standardizingPath == root
+            && FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent(".git"))
     }
 
     /// What's held now, as `engine.json` keeps it (`saveState` writes it with the rest). On `queue`.

@@ -132,9 +132,9 @@ public final class LeadEngine: @unchecked Sendable {
     public let cards = CardStore()
     /// Each lead's base, watched (`BaseMoveStore`): a move nobody accounts for becomes a card.
     public private(set) lazy var baseMoves: BaseMoveStore = makeBaseMoves()
-    /// The `.user` messages posted to a lead's inbox, by id, with the terminal: retired in the vault (`retireUserSeals`)
-    /// once its delivered record shows them.
-    var postedUser: [String: String] = [:]
+    /// The `.user` messages posted to a lead's inbox, by id, with the terminal and what was posted: retired in the vault
+    /// (`retireUserSeals`) once its delivered record shows them, renewed while that same line waits (`retireTaken`).
+    var postedUser: [String: PostedUser] = [:]
     var retiring = false
     /// The user's messages being recorded in the vault before they're delivered (`tellAsUser`), by root: what's sent to
     /// that lead meanwhile waits behind them.

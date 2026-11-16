@@ -178,6 +178,43 @@ struct ConfigHoldStoreTests {
         #expect(ConfigSeal.held(in: try team.app.guardedRecord(root: team.root)).isEmpty)
     }
 
+    /// The security follow-ups' item 18: "the same as at your last accept" comes only from a snapshot this host's vault
+    /// sealed at the accept. Rewritten (any process of the user's can write the file), or read after a host restart (a
+    /// vault that never sealed it), the snapshot never says a held thing or a guard rail is the same.
+    @Test func aSnapshotThisHostsVaultDidntSealNeverSaysTheSame() throws {
+        let team = try team()
+        let workflow = ConfigHoldStore.workflowPath(root: team.root)
+        try FileManager.default.createDirectory(atPath: (workflow as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try "---\ntest_command: make check\n---\n".write(toFile: workflow, atomically: true, encoding: .utf8)
+        try "name: browser\nnew\nend\n".write(toFile: team.skill, atomically: true, encoding: .utf8)
+        _ = try team.asLead.checkConfig(root: team.root)
+        let node = scratch.url("node")
+        try FileManager.default.createDirectory(at: node, withIntermediateDirectories: true)
+        let card = try ConfigHoldStore.held(root: team.root, vault: team.app, home: team.home, look: false).get()
+        guard case .sealed = try ConfigHoldStore.accept(card, root: team.root, vault: team.app, snapshotRoot: node).get() else {
+            Issue.record("the card didn't seal")
+            return
+        }
+        let snapshot = try #require(AcceptedSnapshot.load(root: node).projects[team.root])
+        func rail(_ project: AcceptedSnapshot.Project?, _ vault: LeadVault) throws -> String? {
+            try ConfigHoldStore.held(root: team.root, vault: vault, home: team.home, look: false, snapshot: project).get()
+                .guarded.first { $0.key == "test_command" }?.sinceAccept
+        }
+        // As accepted, sealed by this host's vault: the same.
+        #expect(try rail(snapshot, team.app)?.hasPrefix("the same as at your last accept") == true)
+        // Rewritten (another watched thing put in as accepted): never the same.
+        var rewritten = snapshot
+        rewritten.hashes[ConfigSeal.keyPrefix + "~/.claude/settings.json"] = "planted"
+        let said = try rail(rewritten, team.app)
+        #expect(said != nil && said?.hasPrefix("the same") == false, "\(String(describing: said))")
+        // After a host restart: a vault that never sealed it.
+        let restarted = LeadVault.Book()
+        restarted.configHome = team.home
+        let fresh = restarted.vault(folder: scratch.url("vault-after-restart"), as: { .app })
+        let afterRestart = try rail(snapshot, fresh)
+        #expect(afterRestart != nil && afterRestart?.hasPrefix("the same") == false, "\(String(describing: afterRestart))")
+    }
+
     /// The app's `theCardDrawsChangedFileTextVerbatim`: what the card shows of a changed file (its name, what changed,
     /// its files) reaches the terminal with control and bidirectional characters stripped (`ConfigSeal.inert`).
     @Test func heldTextIsPrintedInert() throws {

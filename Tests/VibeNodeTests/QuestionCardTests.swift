@@ -188,6 +188,7 @@ struct QuestionCardTests {
         let bidi = "\u{202E}txt.exe"
         let commit = try await taskBranch(world.repo, task: "change", file: "evil\(bidi)", subject: "Fix \(escape)typo\(bidi)")
         let lead = try await world.sleepingLead()
+        try await world.acceptBase()
         let asked = try await world.asked("Merge? \(escape)\(bidi)", options: [LeadWorkflow.approval(of: commit), "No \(escape)"], lead: lead)
         #expect(await eventually(timeout: 60) { world.card(asked.card.id)?.approval?.files.isEmpty == false })
         let all = try #require(await world.ask("questions", ["all": .bool(true)]))

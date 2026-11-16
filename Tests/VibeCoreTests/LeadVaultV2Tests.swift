@@ -124,6 +124,52 @@ struct LeadVaultV2Tests {
         #expect(try JSONDecoder().decode(LeadVaultV2.Book.self, from: older).seals == ["x": made])
     }
 
+    /// The security follow-ups' item 16: a waiting `.user` message's seal is renewed while it waits, but never past
+    /// `renewedLifeCap` from its first making: a line kept "waiting" for a day (renewed at every look) verifies false by
+    /// then, so a sealed copy put back a day later isn't the user's.
+    @Test(.enabled(if: linux, "Linux: the record is kept there only")) func aUserSealIsRenewedNoLongerThanItsCap() {
+        var book: LeadVaultV2.Book?
+        var changed = false
+        let life = LeadVaultV2.defaultSealLife
+        let made = 1_800_000_000.0
+        let answer = SteerMessage(text: "yes", from: .user, agentPid: 1, at: made)
+        LeadVaultV2.sealed(answer, book: &book, changed: &changed, now: made)
+        // The server's looks renew it every half life while it waits, for a day.
+        var now = made
+        while now < made + 86_400 {
+            now += life / 2
+            #expect(LeadVaultV2.answer(.renewUserSeals([answer.id]), from: .app, book: &book, now: now) == .ok)
+        }
+        let renewed = book?.seals[answer.id] ?? .infinity
+        #expect(renewed > made + life && renewed < made + 3 * 3_600, "\(renewed - made)")
+        #expect(LeadVaultV2.verified([answer], [true], book: &book, changed: &changed, now: now) == [false])
+    }
+
+    /// The security follow-ups' item 17: a seal check is a read for anyone but the app (a handover) and a lead's own
+    /// session (its hook taking its inbox). A worker's or an outsider's check of a waiting answer passes but leaves it
+    /// unchecked, so the server's renewal of it goes on; the lead's check marks it.
+    @Test(.enabled(if: linux, "Linux: the record is kept there only")) func onlyATakingMarksAUserSealChecked() throws {
+        let home = scratch.url("home").resolvingSymlinksInPath().path
+        let folder = scratch.url("vault")
+        let root = (home as NSString).appendingPathComponent("repo")
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let book = LeadVault.Book()
+        book.configHome = home
+        let app = book.vault(folder: folder, as: { .app })
+        try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "lead-session")
+        let lead = book.vault(folder: folder, as: { .session("lead-session") })
+        try lead.bind(try lead.issue(role: .worker, root: root, task: "parser"), root: root, session: "worker-session")
+        var answer = SteerMessage(text: "Answer to your question: yes", from: .user, agentPid: 42)
+        answer.seal = try app.seal(answer)
+        for caller in [LeadVault.Caller.session("worker-session"), .session("someone-else"), .unknown] {
+            #expect(try book.vault(folder: folder, as: { caller }).verify([answer]) == [true], "\(caller)")
+        }
+        #expect(book.v2 { $0?.checked[answer.id] } == nil)
+        #expect(try lead.verify([answer]) == [true])
+        #expect(book.v2 { $0?.checked[answer.id] } != nil)
+    }
+
     /// A vault saved before the field (no `v2` key) reads as before, and one without anything recorded saves none.
     @Test func aBookWithoutTheV2FieldReadsAsBefore() throws {
         let folder = scratch.url("vault")
