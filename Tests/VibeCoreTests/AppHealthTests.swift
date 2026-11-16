@@ -616,7 +616,7 @@ struct AppHealthTests: LeadTeamFixture {
     }
 
     /// A vs-shell card's normal end ("ended by itself" after its command went well, "ended by Close Finished Shells") isn't
-    /// an error line, nor a cause the watcher proposes a task for. A shell whose command really failed still is.
+    /// an error line, nor a cause the watcher proposes a task for (a command's exit status: `ShellDeskTests`).
     @Test func shellCardsEndingNormallyAreNotErrorLines() throws {
         let ends = ["09:12:01.123 shell: 5D9B6333 (Shell: Install VibeSwitcher from main) ended by itself: its command went well 10m ago and nobody used it since",
                     "09:40:00.000 shell: 99ACD251 (Shell: Install VibeSwitcher from main) ended by Close Finished Shells"]
