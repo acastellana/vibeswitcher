@@ -174,6 +174,20 @@ import Testing
         #expect(RestartReopen.load(from: offer.file).map(\.cols) == [120])
     }
 
+    /// The heading says the Mac restarted only when it started after the record was written: a host that ended on
+    /// its own (crashed, killed while the app was closed) is offered too, as sessions that ended.
+    @Test func theCardSaysTheMacRestartedOnlyWhenItBootedAfterTheRecord() throws {
+        let file = temp.url("restart").appendingPathComponent("open-sessions.json")
+        try RestartReopen.save([entry("mine", folder: "/f")], to: file, at: Date(timeIntervalSince1970: 0))
+        let beforeBoot = RestartOffer(file: file)
+        beforeBoot.decide(hostSessions: nil)
+        #expect(beforeBoot.offered.count == 1 && beforeBoot.macRestarted)
+        try RestartReopen.save([entry("mine", folder: "/f")], to: file)
+        let sinceBoot = RestartOffer(file: file)
+        sinceBoot.decide(hostSessions: nil)
+        #expect(sinceBoot.offered.count == 1 && !sinceBoot.macRestarted)
+    }
+
     @Test func aNewHostWithoutTheRecordedSessionsShowsTheCard() async throws {
         let host = try host()
         try host.start()

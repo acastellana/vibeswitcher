@@ -1520,7 +1520,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             let entries = [entry("example-payouts", role: .lead), entry("example-site", name: "Billing redesign"),
                            entry("old-prototype", agent: .codex)]
             let file = URL(fileURLWithPath: driver.home + "/restart-card/open-sessions.json")
-            try? RestartReopen.save(entries, to: file)
+            // Written before the Mac started: the card says it restarted.
+            try? RestartReopen.save(entries, to: file, at: Date(timeIntervalSince1970: 0))
             let offer = RestartOffer(file: file)
             offer.folderExists = { !$0.hasSuffix("/old-prototype") }
             offer.resumeSession = { [weak driver] request in driver?.refuse("reopening \(request.label)") }

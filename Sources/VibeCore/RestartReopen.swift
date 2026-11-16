@@ -181,9 +181,10 @@ public enum RestartReopen {
     }
 
     /// Writes the record (0600, atomically, flushed: it has to be there after a power cut).
-    public static func save(_ entries: [Entry], to file: URL = RestartReopen.file) throws {
+    /// `at`: when it says it was written (a sample's, before the Mac started).
+    public static func save(_ entries: [Entry], to file: URL = RestartReopen.file, at: Date = Date()) throws {
         try VibePaths.ensurePrivate(file.deletingLastPathComponent())
-        try VibePaths.writePrivate(try encoder.encode(Record(entries: entries)), to: file, syncing: { fsync($0) == 0 })
+        try VibePaths.writePrivate(try encoder.encode(Record(entries: entries, updatedAt: at)), to: file, syncing: { fsync($0) == 0 })
     }
 
     /// Writes the record off the caller's thread (an fsync can take a while, and the sessions change on every resize):
