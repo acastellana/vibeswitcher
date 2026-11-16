@@ -24,7 +24,9 @@ public enum BuildRecord {
     /// `swiftVersionOutput` is what the toolchain's `swift --version` said, `resolved` the bytes of the commit's
     /// `Package.resolved`. Refused, with nothing written, when `commit` isn't 40 lowercase hex digits, `folder` isn't
     /// named `commit` (or `<commit>.partial`) or is a link, `bin/` is missing, a link or empty, an entry of it isn't a
-    /// regular file or can't be read, or the version text is blank.
+    /// regular file, has a name that isn't UTF-8 or that Swift takes as another entry's (an NFC and an NFD spelling), or
+    /// the version text is blank. Those refusals exit 77 (`StartRefusal`'s default); a disk failure (an entry or input
+    /// that can't be opened or read, a listing that stops, `build-info` not written) exits 1, a failure.
     public static func write(folder: String, commit: String, swiftVersionOutput: String, resolved: Data) -> Result<BuildInfo, StartRefusal> {
         guard isCommit(commit) else { return refused("the commit \(ConfigSeal.inert(commit, limit: .max)) isn't 40 lowercase hex digits") }
         // Only trailing slashes go: no link in the path is resolved, so the name checked is the name given.
@@ -47,7 +49,7 @@ public enum BuildRecord {
         do {
             try VibePaths.writePrivate(info.encoded, to: file, syncing: VibePaths.syncToDisk)
         } catch {
-            return refused("\(ConfigSeal.inert(file.path, limit: .max)) can't be written: \(error.localizedDescription)")
+            return failed("\(ConfigSeal.inert(file.path, limit: .max)) can't be written: \(error.localizedDescription)")
         }
         return .success(info)
     }
@@ -91,11 +93,15 @@ public enum BuildRecord {
         }
     }
 
-    /// The whole contents of the regular file at `path`, opened without following a link. Refused naming the path
-    /// otherwise.
+    /// The whole contents of the regular file at `path`, opened without following a link. Refused naming the path when
+    /// it is a link or not a regular file; a failure when it can't be opened or read.
     static func readRegular(_ path: String) -> Result<Data, StartRefusal> {
         let fd = Sys.open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY | O_CLOEXEC)
-        guard fd >= 0 else { return refused("\(ConfigSeal.inert(path, limit: .max)) can't be read: \(describe(errno))") }
+        guard fd >= 0 else {
+            let code = errno
+            let named = ConfigSeal.inert(path, limit: .max)
+            return code == ELOOP ? refused("\(named) is a link, not a regular file") : failed("\(named) can't be read: \(describe(code))")
+        }
         defer { Sys.close(fd) }
         return contents(fd, path: path)
     }
@@ -105,16 +111,16 @@ public enum BuildRecord {
     /// is what the listing named.
     private static func hashes(folder: String) -> Result<[String: String], StartRefusal> {
         let top = Sys.open(folder, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NOCTTY | O_CLOEXEC)
-        guard top >= 0 else { return refused("\(ConfigSeal.inert(folder, limit: .max)) isn't a folder (or is a link): \(describe(errno))") }
+        guard top >= 0 else { return unopened(errno, ConfigSeal.inert(folder, limit: .max)) }
         defer { Sys.close(top) }
         let binPath = (folder as NSString).appendingPathComponent("bin")
         let bin = openat(top, "bin", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NOCTTY | O_CLOEXEC)
-        guard bin >= 0 else { return refused("\(ConfigSeal.inert(binPath, limit: .max)) isn't a folder (or is a link): \(describe(errno))") }
+        guard bin >= 0 else { return unopened(errno, ConfigSeal.inert(binPath, limit: .max)) }
         defer { Sys.close(bin) }
         let names: [[UInt8]]
         switch entries(bin) {
         case .success(let found): names = found
-        case .failure(let failure): return refused("\(ConfigSeal.inert(binPath, limit: .max)) can't be listed: \(describe(failure.code))")
+        case .failure(let failure): return failed("\(ConfigSeal.inert(binPath, limit: .max)) can't be listed: \(describe(failure.code))")
         }
         guard !names.isEmpty else { return refused("\(ConfigSeal.inert(binPath, limit: .max)) holds no program") }
         var found: [String: String] = [:]
@@ -122,10 +128,13 @@ public enum BuildRecord {
             let name = String(decoding: raw, as: UTF8.self)
             let entry = ConfigSeal.inert((binPath as NSString).appendingPathComponent(name), limit: .max)
             guard Array(name.utf8) == raw else { return refused("\(entry) has a name that isn't UTF-8") }
+            // Swift's strings compare by canonical equivalence: an NFC and an NFD spelling are one key, which would stand
+            // for two files, paired with the second one's hash.
+            guard found[name] == nil else { return refused("\(entry) has the same name as another entry of bin/ (another spelling of it)") }
             let fd = openat(bin, raw.map { CChar(bitPattern: $0) } + [0], O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY | O_CLOEXEC)
             guard fd >= 0 else {
                 let code = errno
-                return refused("\(entry) \(code == ELOOP ? "is a link, not a regular file" : "can't be read: \(describe(code))")")
+                return code == ELOOP ? refused("\(entry) is a link, not a regular file") : failed("\(entry) can't be read: \(describe(code))")
             }
             defer { Sys.close(fd) }
             switch contents(fd, path: entry) {
@@ -165,14 +174,14 @@ public enum BuildRecord {
     /// The bytes of the open `fd`, refused unless it is a regular file. `path` is already made inert.
     private static func contents(_ fd: Int32, path: String) -> Result<Data, StartRefusal> {
         var info = stat()
-        guard fstat(fd, &info) == 0 else { return refused("\(path) can't be read: \(describe(errno))") }
+        guard fstat(fd, &info) == 0 else { return failed("\(path) can't be read: \(describe(errno))") }
         guard info.st_mode & S_IFMT == S_IFREG else { return refused("\(path) isn't a regular file") }
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 1 << 20)
         while true {
             let count = buffer.withUnsafeMutableBytes { Sys.read(fd, $0.baseAddress, $0.count) }
             if count < 0, errno == EINTR { continue }
-            guard count >= 0 else { return refused("\(path) can't be read: \(describe(errno))") }
+            guard count >= 0 else { return failed("\(path) can't be read: \(describe(errno))") }
             if count == 0 { return .success(data) }
             data.append(contentsOf: buffer[0..<count])
         }
@@ -182,7 +191,18 @@ public enum BuildRecord {
         text.utf8.count == 40 && text.utf8.allSatisfy { (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0) || (UInt8(ascii: "a")...UInt8(ascii: "f")).contains($0) }
     }
 
+    /// A build that isn't the shape the record vouches for: 77.
     private static func refused<T>(_ text: String) -> Result<T, StartRefusal> { .failure(StartRefusal("install-record: " + text)) }
+
+    /// A disk failure: 1.
+    private static func failed<T>(_ text: String) -> Result<T, StartRefusal> { .failure(StartRefusal("install-record: " + text, exitCode: 1)) }
+
+    /// A folder (the build's or its `bin/`) that didn't open: refused when it is missing, a link or not a folder, a
+    /// failure otherwise. `path` is already made inert.
+    private static func unopened<T>(_ code: Int32, _ path: String) -> Result<T, StartRefusal> {
+        [ENOENT, ENOTDIR, ELOOP].contains(code)
+            ? refused("\(path) isn't a folder (or is a link): \(describe(code))") : failed("\(path) can't be opened: \(describe(code))")
+    }
 
     private static func describe(_ code: Int32) -> String { String(cString: strerror(code)) }
 }

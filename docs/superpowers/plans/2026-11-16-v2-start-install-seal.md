@@ -1121,6 +1121,19 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
   writes; `help` doesn't list it). The suite has no `linuxOnly`: the Mac runs it. Its name also matches the existing
   `ToolInstallTests`, so `--filter InstallTests` runs both; the load run used `VibeNodeTests.InstallTests`.
 - An earlier draft (another worktree, removed before it committed) was the start; it is reconciled with S1's names here.
+
+*Notes, 2026-11-16 (the review of S4a):*
+- **Exit codes split:** a refusal (a build not the shape the record vouches for: a wrong name or commit, a missing or
+  linked folder or `bin/`, an entry or input that is a link or not a regular file, an empty `bin/`, a bad name, a blank
+  version) exits 77; a disk failure (an entry or input that can't be opened or read, a listing that stops, `build-info`
+  not written) exits 1, `StartRefusal`'s failure. A missing input file is now 1, not 77 as the note above says. S4b's
+  script lists no 77, so it maps a non-zero `install-record` to 1 ("other") and prints its line.
+- **Two names Swift takes as one** (an NFC and an NFD spelling, which Linux keeps as two files) are refused: the
+  record's `[String: String]` would hold one key for two files, paired with the second's hash.
+- New cases: a FIFO in `bin/`, a name that isn't UTF-8 and the NFC/NFD pair in
+  `aRecordHashesEveryProgramAndRefusesALink` (the last two only where the filesystem holds such names: the Mac's APFS
+  doesn't); `aRecordThatCantBeReadOrWrittenIsAFailureNotARefusal`; a linked and a FIFO input (77) and a missing one (1)
+  in `theCommandLineWritesTheRecord`. S9's `Held by:` names S4a's cases.
 - [ ] **Step 4:** commit ("v2: the install's build record"). Push, both green.
 
 **Done when:** the cases pass on both runners.
@@ -1141,7 +1154,8 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
   - `scripts/install-node.sh COMMIT [--prefix DIR] [--repo DIR] [--toolchain DIR]`, with the test-only `[--gh PATH]
     [--test-origin URL] [--test-products DIR]` (ST-D8). Exit codes: 0; 64 usage; 65 dirty; 66 provenance; 67 not on
     `v2` or CI not passed; 68 toolchain; 69 link check; 1 other (a failed fetch included). Each refusal is one line on
-    stderr naming what failed.
+    stderr naming what failed. (2026-11-16, the review of S4a: `install-record` exits 77 or 1; the script maps either
+    to 1.)
   - The layout, under `<prefix>/<commit>/`:
     - `bin/` holds exactly `BuildRecord.installedNames`: regular files, 0755;
     - `Resources/bin/vs-*` (0755), `Resources/install-node.sh` and `Resources/lib/scratch.sh` and `swift-jobs.sh`,

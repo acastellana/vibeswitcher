@@ -1400,7 +1400,12 @@ unit's wants, requires or upholds folder, or a directive start didn't write, ref
 `SwitchTests.aSwitchRewritesOnlyExecStartAndReloads`, `SwitchTests.aFollowUpChecksTheTargetAndTheHostFirst`,
 `SwitchTests.aUnitsEditedHomeOrPathIsNotCarriedThroughASwitch` (the start plan's S8a: the switch's rewrite keeps the
 commit-folder `ExecStart`, checks the target's `bin` against its `build-info` and the host first, and writes HOME and
-PATH as `start` does, never a unit's edited ones back; 2026-11-16, with the review of S8a).
+PATH as `start` does, never a unit's edited ones back; 2026-11-16, with the review of S8a);
+`InstallTests.aRecordNamesItsToolchainAndResolvedFile`, `InstallTests.aRecordHashesEveryProgramAndRefusesALink`,
+`InstallTests.aRecordForAFolderNamedOtherThanItsCommitIsRefused`, `InstallTests.theCommandLineWritesTheRecord` (the start
+plan's S4a: build-info records the toolchain's swift --version text and Package.resolved's hash, and hashes only
+regular files in bin, each once under one name; a link, a folder, a FIFO, or a build folder named other than its
+commit is refused; 2026-11-16, with the review of S4a).
 
 **Tests to write:** Step 8: a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,
