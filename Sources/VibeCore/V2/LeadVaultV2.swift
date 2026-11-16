@@ -79,7 +79,8 @@ public enum LeadVaultV2 {
         /// `engine.json` still holds after a restart is vouched for no more.
         public var spent: [String: Double] = [:]
         /// Each `.user` seal's recipient, by the message's id: the session the host found its agent pid running in when
-        /// it sealed it (the security follow-ups' item 19). Only that session's own check, as a lead's, is a taking.
+        /// it sealed it (the security follow-ups' item 19). Only that session's own check, as a lead's, is a taking. None
+        /// once a seal under the id was made for another while its earlier one lived (see `sealed`).
         public var targets: [String: String] = [:]
 
         public init() {}
@@ -178,14 +179,19 @@ public enum LeadVaultV2 {
 
     /// The `.seal` hook: a `.user` seal the host is about to make for `message` is recorded with its time and its
     /// recipient, `target`: the session the host found the message's agent pid running in (`agentSession`; nil: none it
-    /// runs, so no session's check takes it), Linux only.
+    /// runs, so no session's check takes it), Linux only. The record is by the message's id, and an id can come back (a
+    /// held message's, restored from `engine.json` after a server restart, which a same-uid process can rewrite): a seal
+    /// under an id whose live seal was made for another recipient leaves it with none (the follow-up 19 review), so
+    /// neither lead's check takes it; nor after any later seal under it while one lives (a recipient differs from none).
+    /// Its renewal goes on until `renewedLifeCap`, and the app's check (a handover) still takes it.
     public static func sealed(_ message: SteerMessage, target: String? = nil, book: inout Book?, changed: inout Bool,
                               now: Double = Date().timeIntervalSince1970) {
         guard isOn, message.from == .user else { return }
         var record = book ?? Book()
+        let contested = record.seals[message.id].map { now - $0 <= sealLife } == true && record.targets[message.id] != target
         record.seals[message.id] = now
         if record.first[message.id] == nil { record.first[message.id] = now }
-        record.targets[message.id] = target
+        record.targets[message.id] = contested ? nil : target
         prune(&record, now: now)
         book = record
         changed = true

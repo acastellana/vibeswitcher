@@ -213,6 +213,51 @@ struct LeadVaultV2Tests {
         #expect(book.v2 { $0?.checked[nobodys.id] != nil && $0?.checked[forB.id] != nil })
     }
 
+    /// The follow-up 19 review: a seal's recipient is tied to its message id, and an id can come back (a held message's,
+    /// restored from `engine.json` after a server restart, is a same-uid process's to rewrite). A later seal of B's
+    /// waiting answer's id for A's lead leaves the id with no recipient: A's taking of its copy, and every later one,
+    /// leaves B's answer unchecked, so its renewal goes on; a seal again for the same recipient keeps it.
+    @Test(.enabled(if: linux, "Linux: the record is kept there only")) func aSealAgainUnderAnIdForAnotherLeadTakesItsRecipient() throws {
+        let home = scratch.url("home").resolvingSymlinksInPath().path
+        let folder = scratch.url("vault")
+        let rootA = (home as NSString).appendingPathComponent("repo-a")
+        let rootB = (home as NSString).appendingPathComponent("repo-b")
+        for root in [rootA, rootB] { try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let book = LeadVault.Book()
+        book.configHome = home
+        let sessions: [Int32: String] = [41: "lead-a", 42: "lead-b"]
+        let app = book.vault(folder: folder, as: { .app }, agentSession: { sessions[$0] })
+        try app.bind(try app.startLead(root: rootA, branch: "main"), root: rootA, session: "lead-a")
+        try app.bind(try app.startLead(root: rootB, branch: "main"), root: rootB, session: "lead-b")
+        let leadA = book.vault(folder: folder, as: { .session("lead-a") })
+        let leadB = book.vault(folder: folder, as: { .session("lead-b") })
+        var answer = SteerMessage(text: "Answer to your question: yes", from: .user, agentPid: 42)
+        answer.seal = try app.seal(answer)
+        // A held message for A's project, its id rewritten to B's answer's, posted to A's lead after a restart.
+        var copy = SteerMessage(text: "Hold: carry on", from: .user, agentPid: 41)
+        copy.id = answer.id
+        copy.seal = try app.seal(copy)
+        #expect(book.v2 { $0?.targets[answer.id] } == nil)
+        #expect(try leadA.verify([copy]) == [true])
+        #expect(book.v2 { $0?.checked[answer.id] } == nil)
+        // Sealed for A once more: still no recipient, so A's taking still leaves B's answer unchecked.
+        copy.seal = try app.seal(copy)
+        #expect(try leadA.verify([copy]) == [true])
+        #expect(book.v2 { $0?.checked[answer.id] } == nil)
+        // B's own answer still passes; the app's check (a handover) takes it.
+        #expect(try leadB.verify([answer]) == [true])
+        #expect(try app.verify([answer]) == [true])
+        #expect(book.v2 { $0?.checked[answer.id] } != nil)
+        // A message sealed again for the same lead keeps its recipient: that lead's check takes it.
+        var again = SteerMessage(text: "Answer: no", from: .user, agentPid: 42)
+        again.seal = try app.seal(again)
+        again.seal = try app.seal(again)
+        #expect(book.v2 { $0?.targets[again.id] } == "lead-b")
+        #expect(try leadB.verify([again]) == [true])
+        #expect(book.v2 { $0?.checked[again.id] } != nil)
+    }
+
     /// A vault saved before the field (no `v2` key) reads as before, and one without anything recorded saves none.
     @Test func aBookWithoutTheV2FieldReadsAsBefore() throws {
         let folder = scratch.url("vault")

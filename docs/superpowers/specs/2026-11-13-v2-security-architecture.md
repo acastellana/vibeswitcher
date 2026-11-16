@@ -544,7 +544,10 @@ inbox); a worker's or an outsider's check of the same message reads and changes 
 answer's renewal and let it arrive unverified. A lead's check takes only its own messages, each decided alone: the
 vault records each `.user` seal's recipient as it seals it (the session the host finds the message's agent pid in),
 and only that session's check, as a lead's, marks it; another project's lead checking the same message reads only.
-The security follow-ups' items 16, 17 and 19 (2026-11-16).
+The record is by message id, and an id can come back (a held message's, restored from `engine.json` after a restart,
+which a same-uid process can rewrite to a waiting answer's id): a seal under an id whose live seal was made for another
+recipient leaves it with none, so no lead's check takes it from then on, and its renewal runs to the cap (the follow-up
+19 review). The security follow-ups' items 16, 17 and 19 (2026-11-16).
 
 **(call, new)** **Answers at rest.** A user's-voice request the server accepts is recorded in the host's vault (an
 app-only write) before it is acted on, and a restarted server takes answers and holds only from there, asking again
@@ -671,7 +674,8 @@ The engine's E8: `RestartTests.anAnswerWrittenToTheServersFilesIsNotTakenAfterAR
 `ApprovalCardTests.aRevisedApprovalShowsTheNewCommitsFactsAndApprovesOnlyThat` (item 15, verified),
 `UserSealTests.aLineRewrittenUnderAPostedIdKeepsNoSealAlive`, `LeadVaultV2Tests.aUserSealIsRenewedNoLongerThanItsCap`
 (item 16), `LeadVaultV2Tests.onlyATakingMarksAUserSealChecked` (item 17), `LeadVaultV2Tests.aLeadTakesOnlyTheMessagesSealedForIt`
-(item 19: another project's lead's check takes nothing). The close-out review (2026-11-16):
+(item 19: another project's lead's check takes nothing), `LeadVaultV2Tests.aSealAgainUnderAnIdForAnotherLeadTakesItsRecipient`
+(its review: an id sealed again for another lead keeps no recipient). The close-out review (2026-11-16):
 `AnswerTests.anAnswerGoesToTheLeadAsTheCardShowedTheQuestionNeverAsTheBoardSays`, `AnswerTests.aHoldQuotesTheCardsQuestionAndProposal`,
 `AnswerTests.onlyAPostedQuestionsOwnTimerRunsOut`, `ApprovalCardTests.anApprovalCardDiffsAgainstTheHeadTheVaultRecords`,
 `ApprovalCardTests.anEmptyBaseBranchTakesTheBranchTheLeadStartedOn`,
