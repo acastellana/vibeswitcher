@@ -140,7 +140,7 @@ import Testing
 
     /// An Apple-menu Restart whose session exits reach the app before the Mac says it's shutting down: the record
     /// still names them when it freezes, and the next launch offers them.
-    @Test func sessionsEndingBeforeThePowerOffNoticeStayInTheRecord() throws {
+    @Test func sessionsEndingBeforeThePowerOffNoticeStayInTheRecord() async throws {
         let mine = entry("mine", folder: "/f"), lead = entry("acme", role: .lead, folder: "/r")
         let (offer, _) = try offer([])
         // The ended sessions' graces, apart from the freeze's own wait (which passing means the shutdown was cancelled).
@@ -159,7 +159,33 @@ import Testing
         #expect(Set(RestartReopen.load(from: offer.file).map(\.id)) == [mine.id, lead.id])
         let relaunched = RestartOffer(file: offer.file)
         relaunched.decide(hostSessions: nil)
-        #expect(relaunched.offered.map(\.id) == [lead.id, mine.id])
+        #expect(await until { relaunched.offered.map(\.id) == [lead.id, mine.id] })
+    }
+
+    /// A lead its board no longer names (replaced, still live until closed) isn't recorded: reopened after a restart,
+    /// its stale conversation could take the project back from the lead that replaced it.
+    @Test func aReplacedLeadIsntRecorded() throws {
+        let old = entry("acme", role: .lead, folder: "/r"), new = entry("acme", role: .lead, folder: "/r")
+        let (offer, _) = try offer([])
+        offer.decide(hostSessions: [])
+        offer.record(hosted: [hosted(old), hosted(new)], sessions: [], replacedLeads: [old.id])
+        offer.flushRecord()
+        #expect(RestartReopen.load(from: offer.file).map(\.id) == [new.id])
+    }
+
+    /// Your quit settles the sessions still in their grace (no card for them at the next launch); a SIGTERM's (a
+    /// shutdown sends one) keeps them.
+    @Test func yourQuitSettlesEndedSessionsAndASignalsKeepsThem() throws {
+        for yours in [true, false] {
+            let mine = entry("mine", folder: "/f"), ended = entry("ended", folder: "/g")
+            let (offer, _) = try offer([])
+            offer.later = { _, _ in }
+            offer.decide(hostSessions: [])
+            offer.record(hosted: [hosted(mine), hosted(ended)], sessions: [])
+            offer.record(hosted: [hosted(mine), hosted(ended, ended: true)], sessions: [])
+            offer.atQuit(yours: yours)
+            #expect(RestartReopen.load(from: offer.file).map(\.id) == (yours ? [mine.id] : [mine.id, ended.id]))
+        }
     }
 
     /// A resize (each step of it) isn't written: only what reopening needs changing is.
@@ -176,16 +202,18 @@ import Testing
 
     /// The heading says the Mac restarted only when it started after the record was written: a host that ended on
     /// its own (crashed, killed while the app was closed) is offered too, as sessions that ended.
-    @Test func theCardSaysTheMacRestartedOnlyWhenItBootedAfterTheRecord() throws {
+    @Test func theCardSaysTheMacRestartedOnlyWhenItBootedAfterTheRecord() async throws {
         let file = temp.url("restart").appendingPathComponent("open-sessions.json")
         try RestartReopen.save([entry("mine", folder: "/f")], to: file, at: Date(timeIntervalSince1970: 0))
         let beforeBoot = RestartOffer(file: file)
         beforeBoot.decide(hostSessions: nil)
-        #expect(beforeBoot.offered.count == 1 && beforeBoot.macRestarted)
+        #expect(await until { beforeBoot.offered.count == 1 })
+        #expect(beforeBoot.macRestarted)
         try RestartReopen.save([entry("mine", folder: "/f")], to: file)
         let sinceBoot = RestartOffer(file: file)
         sinceBoot.decide(hostSessions: nil)
-        #expect(sinceBoot.offered.count == 1 && !sinceBoot.macRestarted)
+        #expect(await until { sinceBoot.offered.count == 1 })
+        #expect(!sinceBoot.macRestarted)
     }
 
     @Test func aNewHostWithoutTheRecordedSessionsShowsTheCard() async throws {
@@ -198,7 +226,7 @@ import Testing
         client.connectIfRunning()
         offer.watchLaunch(client)
         #expect(await until { offer.decided })
-        #expect(shown() == 1)
+        #expect(await until { shown() == 1 })
         #expect(offer.offered.map(\.id) == [lead.id, mine.id])
     }
 
@@ -210,7 +238,7 @@ import Testing
         client.connectIfRunning()
         offer.watchLaunch(client)
         #expect(offer.decided)
-        #expect(shown() == 1)
+        #expect(await until { shown() == 1 })
         #expect(offer.offered.map(\.id) == [mine.id])
     }
 
@@ -271,10 +299,10 @@ import Testing
     }
 
     /// Asked once: answered (here dismissed) with no session opened since, a relaunch doesn't ask again.
-    @Test func anAnsweredCardDoesntComeBackAtTheNextLaunch() throws {
+    @Test func anAnsweredCardDoesntComeBackAtTheNextLaunch() async throws {
         let (offer, shown) = try offer([entry("mine", folder: "/f"), entry("acme", role: .lead, folder: "/r")])
         offer.decide(hostSessions: nil)
-        #expect(shown() == 1)
+        #expect(await until { shown() == 1 })
         offer.dismiss()
         offer.flushRecord()
         // The app relaunched, still no host running.
@@ -320,7 +348,7 @@ import Testing
         var calls: [String] = []
     }
 
-    func reopening(_ entries: [RestartReopen.Entry]) throws -> (RestartOffer, Reopened) {
+    func reopening(_ entries: [RestartReopen.Entry]) async throws -> (RestartOffer, Reopened) {
         let (offer, _) = try offer(entries)
         let reopened = Reopened()
         offer.resumeSession = { request in reopened.calls.append("session \(request.cwd) \(request.command ?? "")") }
@@ -329,13 +357,14 @@ import Testing
         offer.close = { closed += 1 }
         offer.folderExists = { $0 != "/gone" }
         offer.decide(hostSessions: nil)
+        #expect(await until { offer.offered.count == entries.count })
         return (offer, reopened)
     }
 
-    @Test func reopenAllResumesEachLeadsFirstAndSkipsWhatCantBeResumed() throws {
+    @Test func reopenAllResumesEachLeadsFirstAndSkipsWhatCantBeResumed() async throws {
         let mine = entry("mine", conversation: "c-1", folder: "/f"), lead = entry("acme", role: .lead, conversation: "c-2", folder: "/r")
         let noID = entry("no-id", conversation: nil, folder: "/f"), gone = entry("gone", conversation: "c-3", folder: "/gone")
-        let (offer, reopened) = try reopening([mine, noID, gone, lead])
+        let (offer, reopened) = try await reopening([mine, noID, gone, lead])
         #expect(offer.offered.count == 4)
         #expect(offer.blocker(noID) == .noConversation && offer.blocker(gone) == .folderGone)
         // Choose starts with only those that can be reopened ticked.
@@ -345,18 +374,18 @@ import Testing
         #expect(offer.offered.isEmpty)
     }
 
-    @Test func chooseResumesOnlyTheTickedOnes() throws {
+    @Test func chooseResumesOnlyTheTickedOnes() async throws {
         let mine = entry("mine", conversation: "c-1", folder: "/f"), other = entry("other", conversation: "c-4", folder: "/g")
         let lead = entry("acme", role: .lead, conversation: "c-2", folder: "/r")
-        let (offer, reopened) = try reopening([mine, other, lead])
+        let (offer, reopened) = try await reopening([mine, other, lead])
         offer.choosing = true
         offer.chosen = [other.id]
         offer.reopenChosen()
         #expect(reopened.calls == ["session /g claude --resume 'c-4'"])
     }
 
-    @Test func dismissingReopensNothing() throws {
-        let (offer, reopened) = try reopening([entry("mine", folder: "/f"), entry("acme", role: .lead, folder: "/r")])
+    @Test func dismissingReopensNothing() async throws {
+        let (offer, reopened) = try await reopening([entry("mine", folder: "/f"), entry("acme", role: .lead, folder: "/r")])
         offer.dismiss()
         #expect(reopened.calls.isEmpty)
         #expect(offer.offered.isEmpty)

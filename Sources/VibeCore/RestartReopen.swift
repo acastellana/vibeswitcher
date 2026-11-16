@@ -53,8 +53,9 @@ public enum RestartReopen {
     /// The live sessions to record, from the host's list and the store's sessions (which carry the agent's session id,
     /// your name for it and its role). `previous`: the record so far, whose agent session id and name a session keeps
     /// while a scan doesn't say them (its hooks not read yet). Ended sessions, plain shells and the leads' workers and
-    /// verifiers aren't recorded.
-    public static func entries(hosted: [HostSession], sessions: [Session], previous: [Entry]) -> [Entry] {
+    /// verifiers aren't recorded. Nor a lead its board no longer names (`replacedLeads`: replaced, still live until
+    /// you close it): reopened, its stale conversation could take the project back from the lead that replaced it.
+    public static func entries(hosted: [HostSession], sessions: [Session], previous: [Entry], replacedLeads: Set<UUID> = []) -> [Entry] {
         let known = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { $1 })
         let agents = Dictionary(sessions.compactMap { session in session.hostID.map { ($0, session) } }, uniquingKeysWith: { $1 })
         return hosted.filter(\.isLive).compactMap { host in
@@ -63,7 +64,9 @@ public enum RestartReopen {
             let role: Role
             switch session?.teamRole ?? LeadTeams.role(label: host.label) {
             case .worker?, .verifier?: return nil
-            case .lead?: role = .lead
+            case .lead?:
+                guard !replacedLeads.contains(host.id) else { return nil }
+                role = .lead
             case nil: role = .user
             }
             let project = session?.project ?? before?.project ?? SessionNaming.name(forProjectRoot: host.cwd)

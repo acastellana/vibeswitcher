@@ -51,8 +51,11 @@ final class RestartOffer: ObservableObject {
     var later: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
     /// Each freeze counts up: a cancelled shutdown's wait says nothing about a later one.
     private var freezes = 0
-    /// The live sessions as last seen from a host that welcomed this app (frozen or not): what a thaw records.
-    private var lastSeen: (hosted: [HostSession], sessions: [Session])?
+    /// The live sessions as last seen from a host that welcomed this app (frozen or not), with the leads replaced
+    /// then: what a thaw records.
+    private var lastSeen: (hosted: [HostSession], sessions: [Session], replacedLeads: Set<UUID>)?
+    /// Where the folder checks run (a stat can hang on a volume that isn't back yet after a restart).
+    private let checking = DispatchQueue(label: "vibeswitcher.restart-folders", qos: .userInitiated)
     private var watching: Set<AnyCancellable> = []
 
     init(file: URL = RestartReopen.file) {
@@ -90,14 +93,17 @@ final class RestartOffer: ObservableObject {
 
     /// The record kept up to date from the host's live sessions and the store's (`sessions`), written as they change,
     /// only while the host has welcomed this app: a host that's gone (or not yet answered) says nothing about them.
-    func watchRecord(_ host: HostClient, sessions: AnyPublisher<[Session], Never>) {
-        host.$sessions.combineLatest(sessions, host.$state, host.$proofRefusal)
+    /// `replacedLeads`: the lead sessions their boards no longer name (`LeadController.replacedLeads`), never recorded.
+    func watchRecord(_ host: HostClient, sessions: AnyPublisher<[Session], Never>,
+                     replacedLeads: AnyPublisher<Set<UUID>, Never> = Just([]).eraseToAnyPublisher()) {
+        host.$sessions.combineLatest(sessions, host.$state, host.$proofRefusal).combineLatest(replacedLeads)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] hosted, sessions, state, refusal in
+            .sink { [weak self] seen, replaced in
+                let (hosted, sessions, state, refusal) = seen
                 // Nor a host that didn't take this app's proof: it shows the app none of its sessions.
                 guard refusal == nil else { return }
                 switch state {
-                case .connected, .outdated: self?.record(hosted: hosted, sessions: sessions)
+                case .connected, .outdated: self?.record(hosted: hosted, sessions: sessions, replacedLeads: replaced)
                 case .notRunning, .connecting, .failed: break
                 }
             }
@@ -111,15 +117,24 @@ final class RestartOffer: ObservableObject {
     func decide(hostSessions: [HostSession]?) {
         guard !decided else { return }
         decided = true
-        offered = RestartReopen.offer(record: recorded, hostSessions: hostSessions)
-        blockers = Dictionary(uniqueKeysWithValues: offered.compactMap { entry in
-            RestartReopen.blocker(entry, folderExists: folderExists).map { (entry.id, $0) }
-        })
-        chosen = Set(offered.filter { blocker($0) == nil }.map(\.id))
-        if let recordedAt, let boot = RestartReopen.bootTime() { macRestarted = boot > recordedAt }
-        if !offered.isEmpty {
-            Breadcrumbs.shared.note("restart: \(offered.count) session(s) that were open are gone with the host; the card offers them")
-            show()
+        let offering = RestartReopen.offer(record: recorded, hostSessions: hostSessions)
+        guard !offering.isEmpty else { return }
+        // Which can be reopened, off the main thread (a stat per folder); then the card.
+        let folderExists = folderExists
+        checking.async { [weak self] in
+            let blockers = Dictionary(uniqueKeysWithValues: offering.compactMap { entry in
+                RestartReopen.blocker(entry, folderExists: folderExists).map { (entry.id, $0) }
+            })
+            let boot = RestartReopen.bootTime()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.offered = offering
+                self.blockers = blockers
+                self.chosen = Set(offering.filter { blockers[$0.id] == nil }.map(\.id))
+                if let recordedAt = self.recordedAt, let boot { self.macRestarted = boot > recordedAt }
+                Breadcrumbs.shared.note("restart: \(offering.count) session(s) that were open are gone with the host; the card offers them")
+                self.show()
+            }
         }
     }
 
@@ -133,16 +148,25 @@ final class RestartOffer: ObservableObject {
     /// The live sessions from a host that welcomed this app. A session that started, or changed what reopening it
     /// takes, is written at once; one that ended stays for `departureGrace` first. At a restart the host's sessions can
     /// end before the Mac says it's shutting down, or after: either way they're still in the record when it freezes.
-    func record(hosted: [HostSession], sessions: [Session]) {
-        lastSeen = (hosted, sessions)
+    func record(hosted: [HostSession], sessions: [Session], replacedLeads: Set<UUID> = []) {
+        lastSeen = (hosted, sessions, replacedLeads)
         update(graceful: true)
+    }
+
+    /// The app is quitting. Your own quit (not the Mac's shutdown, which freezes the record first, nor a SIGTERM, which
+    /// a shutdown sends too): the sessions that ended in their grace leave the record now, as they would have had the
+    /// app stayed. Either way, what's handed to the writer is on disk before the app ends.
+    func atQuit(yours: Bool) {
+        if yours { update(graceful: false) }
+        writer.flush()
     }
 
     /// The record from the live sessions as last seen. `graceful`: sessions that ended wait out their grace (otherwise
     /// they leave at once).
     private func update(graceful: Bool) {
         guard decided, !frozen, let lastSeen else { return }
-        let fresh = RestartReopen.entries(hosted: lastSeen.hosted, sessions: lastSeen.sessions, previous: recorded)
+        let fresh = RestartReopen.entries(hosted: lastSeen.hosted, sessions: lastSeen.sessions, previous: recorded,
+                                          replacedLeads: lastSeen.replacedLeads)
         let live = Set(fresh.map(\.id))
         departing = departing.filter { !live.contains($0.key) }
         var kept: [RestartReopen.Entry] = []

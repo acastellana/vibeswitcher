@@ -212,6 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// Gives malloc's free pages back as the footprint grows (see `FootprintRelief`).
     private let footprintRelief = FootprintRelief()
     private var terminationSignal: DispatchSourceSignal?
+    private var terminatedBySignal = false
     /// VibeSwitcher's own freezes, crashes and error lines, told to the lead of the project with watch_app_logs on.
     private var appHealth: AppHealthWatcher?
     private static let statusItemName = "VibeSwitcher"
@@ -235,7 +236,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // through a normal quit so hidden windows come back and today's stats are saved.
         signal(SIGTERM, SIG_IGN)
         terminationSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        terminationSignal?.setEventHandler { NSApp.terminate(nil) }
+        terminationSignal?.setEventHandler { [weak self] in
+            // A shutdown sends it too: the restart card's record keeps the sessions it ends (`RestartOffer.atQuit`).
+            self?.terminatedBySignal = true
+            NSApp.terminate(nil)
+        }
         terminationSignal?.resume()
         // Before the state folder is created below: its absence is part of what makes this a first run.
         let firstRun = FirstRun.shouldWelcome(
@@ -250,7 +255,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         HookBinary.atLaunch(connect: { hostClient.connectIfRunning() })
         // The live window sessions' record, kept as they start and end; and, once the host is known (none running, or
         // its welcome), the restart card if the sessions it names went with a restart.
-        restartOffer.watchRecord(hostClient, sessions: store.$sessions.eraseToAnyPublisher())
+        restartOffer.watchRecord(hostClient, sessions: store.$sessions.eraseToAnyPublisher(),
+                                 replacedLeads: leadController.$replacedLeads.map { Set($0.keys) }.eraseToAnyPublisher())
         restartOffer.watchLaunch(hostClient)
         // Leads' witness and questions work with the window closed too.
         _ = leadController
@@ -966,6 +972,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     func applicationWillTerminate(_ notification: Notification) {
         Breadcrumbs.shared.note("app: quitting")
+        restartOffer.atQuit(yours: !terminatedBySignal)
         // Never leave the Mac silent behind a dictation that was recording (a device that doesn't answer in time: put
         // back at the next launch, from the marker).
         if !outputSilencer.unsilence(waitingAtMost: 1) {
