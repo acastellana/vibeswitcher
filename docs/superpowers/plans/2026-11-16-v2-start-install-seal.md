@@ -1509,6 +1509,26 @@ inventory. The Mac runs `theMacsListIsEmpty`.
   `anOlderHostKeepsItsSessionsUntilTheyEnd` as `aSwitchWhileWorkersOrVerifiersAreLiveIsRefused`. The app's "no
   confirmation" (`!needsConfirmation`) becomes `NodeWire.changesState("build.switch")` in `aSwitchSaysItKeepsSessions`.
 
+*2026-11-16, the review of S8a:*
+- The follow-up builds the switched unit as `start` does (ST-D3, ST-D4), never writing the unit's HOME or PATH back:
+  `apply(tools:prefix:accountHome:commit:hostPid:hostCheck:)` takes the account's home (`getpwuid`'s; S8c passes it),
+  and swiftly's and node's folders come from `NodeFolders.toolFolders(accountHome:nodeVersion: nil, existingUnit:)`,
+  which takes only the unit's node folder and checks it. A worker's edited HOME or swift folder is undone; a node
+  folder outside `<home>/.nvm/versions/node/v*/bin`, or a folder start wouldn't take, is refused before anything is
+  written, called or moved (`aUnitsEditedHomeOrPathIsNotCarriedThroughASwitch`).
+- The way back from a follow-up a failure left unfinished (the host runs the target; the unit or `current` don't name
+  it): `vs switch <target>` again, which each refusal past the handover names. *For S8c:* when the server answers that
+  the host runs the target already, in node mode, the CLI asks `SwitchFollowUp.isDone(tools:prefix:commit:)` and, when
+  it says no, runs `apply` with the welcome's pid as `hostPid` (its host check passes: the same pid, on the target).
+  `aReloadThatFailsLeavesCurrentAndSaysTheUnitChanged` runs the follow-up again after the failed reload, and
+  `theFollowUpIsDoneOnlyWhenTheUnitAndCurrentNameTheTarget` holds `isDone`.
+- `switch`'s confirmation now names who keeps the old tool server (ST-D16): "a lead started before the switch keeps
+  starting its workers with the old build's tool server" (asserted in `aSwitchSaysItKeepsSessions`).
+- The security document gains S8a's cases under `Held by:` (S9: the rewrite and its checks; S7: the seal's hold,
+  ST-D23; S8: the plan's rule on switches), beyond S8a's Files list, as S1 to S3 did for theirs.
+- `StartCommandTests.makeFolder(_:below:)` and `makeProgram(_:_:)` are internal (were private), for `SwitchTests.World`'s
+  tool folders.
+
 - [x] **Step 1: Failing tests** (`SwitchTests`, pure unless said):
   - The `HostClientPlanTests` port (row 99) on `SwitchPlan`:
     - the running commit gives `.already`;
@@ -1631,6 +1651,9 @@ inventory. The Mac runs `theMacsListIsEmpty`.
     `NodeTexts.switch`. Then the typed code, then `build.switch`.
   - After the server's reply, in node mode only, `SwitchFollowUp.apply`. Its `hostCheck` connects again, runs
     `ServerCheck`, and compares the welcome's pid and `HostNotes.build`.
+    *2026-11-16 (the review of S8a):* `apply` takes `accountHome:` (`getpwuid`'s). When the server answers that the
+    host runs the target already, in node mode, `SwitchFollowUp.isDone` is asked and, when it says no, `apply` runs
+    with the welcome's pid: the way back every follow-up refusal names ("`vs switch <target>` again finishes this").
   - Then the journal's start line (ST-D24) read back and shown.
   - A scratch CLI skips the follow-up, saying "scratch node: no unit to rewrite".
 

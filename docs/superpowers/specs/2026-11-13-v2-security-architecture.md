@@ -1100,7 +1100,9 @@ engine's E4: `lead` refused, no floor seeded); `RestartTests.aHostRestartSaysThe
 `ConfigSealFirstLookTests.aLookThatShowsNothingNeverEndsTheFirstLook`,
 `ConfigHoldStoreTests.onlyAnAcceptEndsAFirstLookThatHoldsNothing`,
 `LeadStartTests.aStartsLookLeavesTheFirstLookHeldWithNothingHeld`, `LeadStartTests.aStartAfterAHoldSealsNothingHeld`
-(the security follow-ups' item 20, 2026-11-16: a look seals nothing and never ends a held first look).
+(the security follow-ups' item 20, 2026-11-16: a look seals nothing and never ends a held first look);
+`SwitchTests.aSwitchLeavesTheSealHoldingUntilAccepted` (the start plan's S8a, its ST-D23: a switch's follow-up changes
+the builds folder and the unit folder, so the seal's next look holds every team until `config accept`).
 
 **Tests to write:** none left: E8's are under Held by.
 
@@ -1227,7 +1229,9 @@ secrets, the target, the fallback, formats, flags, stale files); the rule on swi
 `ServerChildTests.aSwitchReplacesAServerThatHoldsAConnection` (the 9d review);
 `ServerChildTests.aHandoverWhileTheServerChildIsReplacedIsRefused`,
 `ServerChildTests.aServerChildEndedDuringTheHandoversProbeIsRefusedBeforeTheExec` (a server child being ended, which no
-record can carry, refuses a handover before its probe and again just before the exec: the stage 2 sweep).
+record can carry, refuses a handover before its probe and again just before the exec: the stage 2 sweep);
+`SwitchTests.aSwitchWhileWorkersOrVerifiersAreLiveIsRefused` (the start plan's S8a: the switch's plan refuses while a
+worker or verifier is live; S8b's server case below holds it end to end).
 
 **Tests to write:** Step 8: `aSwitchWhileAWorkerRunsIsRefused`.
 
@@ -1392,7 +1396,11 @@ unit's wants, requires or upholds folder, or a directive start didn't write, ref
 `StartCommandTests.theDetachedHostGetsOnlyTheListedEnvironment`,
 `StartCommandTests.stoppingByAStalePidLeavesTheProcessNowUnderItAlone`,
 `StartCommandTests.aHostThatExitsBeforeItIsWaitedForLeavesNoZombie`, `StartCommandTests.stopWithNoServerStopsTheUnit`
-(the start plan's S3: the detached start's session and environment, and a stop that signals only the recorded host).
+(the start plan's S3: the detached start's session and environment, and a stop that signals only the recorded host);
+`SwitchTests.aSwitchRewritesOnlyExecStartAndReloads`, `SwitchTests.aFollowUpChecksTheTargetAndTheHostFirst`,
+`SwitchTests.aUnitsEditedHomeOrPathIsNotCarriedThroughASwitch` (the start plan's S8a: the switch's rewrite keeps the
+commit-folder `ExecStart`, checks the target's `bin` against its `build-info` and the host first, and writes HOME and
+PATH as `start` does, never a unit's edited ones back; 2026-11-16, with the review of S8a).
 
 **Tests to write:** Step 8: a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,

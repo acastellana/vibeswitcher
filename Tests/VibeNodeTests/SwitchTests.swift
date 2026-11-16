@@ -99,6 +99,8 @@ struct SwitchTests {
         let count = try Regex("\\b[0-9]+ sessions?\\b")
         #expect(!text.contains("ends") && !text.contains(count), "\(text)")
         #expect(text.contains("a running team keeps its build until its lead restarts"), "\(text)")
+        // ST-D16: who runs the old build's tool server after the switch (no worker is live at one: ST-D15).
+        #expect(text.contains("a lead started before the switch keeps starting its workers with the old build's tool server"), "\(text)")
         #expect(text.contains("the seal holds every team until `vs config accept`") && text.contains("builds folder") && text.contains("unit"), "\(text)")
         // The code is still typed (EN-D5): `build.switch` is a state change in the user's voice.
         #expect(NodeWire.kinds["build.switch"] == .user && NodeWire.changesState("build.switch"))
@@ -119,7 +121,8 @@ struct SwitchTests {
     // MARK: The follow-up (Linux: a scratch prefix and a recording systemctl)
 
     /// A recording manager (`StartCommandTests.Manager`) whose home holds the prefix, builds `A` and `B` in it,
-    /// `current` naming `A`, and the unit `NodeUnit.text` wrote for `A`.
+    /// `current` naming `A`, swiftly's folder holding `swift` and nvm's `v22.1.0` holding `node` (as
+    /// `NodeFolders.toolFolders` takes them), and the unit `NodeUnit.text` wrote for `A` from those.
     struct World {
         let manager: StartCommandTests.Manager
         let home: URL
@@ -132,12 +135,17 @@ struct SwitchTests {
             prefix = home.appendingPathComponent(".vibeswitcher/v2/builds")
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: manager.unitFolder, withIntermediateDirectories: true)
+            chmod(home.path, 0o700)
+            let swiftBin = home.appendingPathComponent(".local/share/swiftly/bin")
+            let nodeBin = home.appendingPathComponent(".nvm/versions/node/v22.1.0/bin")
+            for (folder, program) in [(swiftBin, "swift"), (nodeBin, "node")] {
+                try StartCommandTests.makeFolder(folder, below: home)
+                try StartCommandTests.makeProgram(folder.appendingPathComponent(program))
+            }
             try StartCommandTests.makeBuild(prefix: prefix, commit: SwitchTests.a)
             try StartCommandTests.makeBuild(prefix: prefix, commit: SwitchTests.b)
             try FileManager.default.createSymbolicLink(atPath: prefix.appendingPathComponent("current").path, withDestinationPath: SwitchTests.a)
-            unit = NodeUnit.Inputs(prefix: prefix.path, commit: SwitchTests.a, home: home.path,
-                                   swiftBin: home.appendingPathComponent(".local/share/swiftly/bin").path,
-                                   nodeBin: home.appendingPathComponent(".nvm/versions/node/v22.1.0/bin").path)
+            unit = NodeUnit.Inputs(prefix: prefix.path, commit: SwitchTests.a, home: home.path, swiftBin: swiftBin.path, nodeBin: nodeBin.path)
             try NodeUnit.text(unit).get().write(to: manager.unitFile, atomically: true, encoding: .utf8)
         }
 
@@ -145,8 +153,16 @@ struct SwitchTests {
 
         /// The follow-up to `commit`, the host seen by `seen` (its pid unchanged and on `commit` by default).
         func apply(_ commit: String, seen: SwitchFollowUp.Host? = nil, hostCheck: (() -> Result<SwitchFollowUp.Host, StartRefusal>)? = nil) -> Result<Void, StartRefusal> {
-            SwitchFollowUp.apply(tools: manager.tools, prefix: prefix.path, commit: commit, hostPid: Self.hostPid,
+            SwitchFollowUp.apply(tools: manager.tools, prefix: prefix.path, accountHome: home.path, commit: commit, hostPid: Self.hostPid,
                                  hostCheck: hostCheck ?? { .success(seen ?? SwitchFollowUp.Host(pid: Self.hostPid, build: commit)) })
+        }
+
+        /// `SwitchFollowUp.isDone` for `commit` here.
+        func isDone(_ commit: String) -> Bool { SwitchFollowUp.isDone(tools: manager.tools, prefix: prefix.path, commit: commit) }
+
+        /// Writes the unit `NodeUnit.text` makes of `inputs`, as a worker could.
+        func writeUnit(_ inputs: NodeUnit.Inputs) throws {
+            try NodeUnit.text(inputs).get().write(to: manager.unitFile, atomically: true, encoding: .utf8)
         }
 
         var unitText: String { (try? String(contentsOf: manager.unitFile, encoding: .utf8)) ?? "" }
@@ -249,6 +265,74 @@ struct SwitchTests {
         guard case .failure(let refusal) = world.apply(Self.b) else { Issue.record("a failed reload went"); return }
         #expect(refusal.text.contains("daemon-reload") && refusal.text.contains(Self.b), "\(refusal)")
         #expect(world.manager.calls == ["--user daemon-reload"] && world.current == Self.a)
+        // The way back the refusal names: once the manager reloads, the follow-up again (S8c runs it when the server
+        // says the host runs B already and `isDone` says no) finishes it.
+        #expect(refusal.text.contains("`vs switch \(Self.b)` again"), "\(refusal)")
+        #expect(!world.isDone(Self.b))
+        try FileManager.default.removeItem(at: world.manager.folder.appendingPathComponent("fail"))
+        try world.apply(Self.b).get()
+        #expect(world.manager.calls == ["--user daemon-reload", "--user daemon-reload"] && world.current == Self.b, "\(world.manager.calls)")
+        #expect(world.isDone(Self.b) && !world.isDone(Self.a))
+    }
+
+    /// `isDone`: the unit, in start's form, names the commit, and so does `current`; a unit or `current` that lags
+    /// behind, or a unit that isn't start's or isn't there, isn't done.
+    @Test(NodeTraits.linuxOnly) func theFollowUpIsDoneOnlyWhenTheUnitAndCurrentNameTheTarget() throws {
+        let world = try World(scratch)
+        #expect(world.isDone(Self.a) && !world.isDone(Self.b))
+        // current moved by an install, the unit still on A.
+        try FileManager.default.removeItem(at: world.prefix.appendingPathComponent("current"))
+        try FileManager.default.createSymbolicLink(atPath: world.prefix.appendingPathComponent("current").path, withDestinationPath: Self.b)
+        #expect(!world.isDone(Self.a) && !world.isDone(Self.b))
+        try world.apply(Self.b).get()
+        #expect(world.isDone(Self.b))
+        try world.unitText.replacingOccurrences(of: "--server", with: "--server-x").write(to: world.manager.unitFile, atomically: true, encoding: .utf8)
+        #expect(!world.isDone(Self.b))
+        try FileManager.default.removeItem(at: world.manager.unitFile)
+        #expect(!world.isDone(Self.b))
+    }
+
+    /// The review of S8a: the follow-up writes the unit as `start` does (ST-D3, ST-D4): the account's home and swiftly's
+    /// folder from where `start` takes them, the node folder only through `NodeFolders.toolFolders`, never a unit's
+    /// edited HOME or PATH written back for a switch the user then accepts.
+    @Test(NodeTraits.linuxOnly) func aUnitsEditedHomeOrPathIsNotCarriedThroughASwitch() throws {
+        let world = try World(scratch)
+        // A worker's HOME and swift folder, in start's form: the unit for B is start's, from the account's values.
+        var edited = world.unit
+        edited.home = "/var/tmp/elsewhere"
+        edited.swiftBin = "/var/tmp/planted/bin"
+        try world.writeUnit(edited)
+        try world.apply(Self.b).get()
+        var forB = world.unit
+        forB.commit = Self.b
+        #expect(world.unitText == (try NodeUnit.text(forB).get()), "\(world.unitText)")
+        #expect(!world.unitText.contains("/var/tmp"), "\(world.unitText)")
+
+        // A worker's node folder outside nvm's: refused before anything is written, called or moved.
+        func refused(_ unit: NodeUnit.Inputs, _ expected: String, sourceLocation: SourceLocation = #_sourceLocation) throws {
+            try world.writeUnit(unit)
+            let before = world.unitText, calls = world.manager.calls, current = world.current
+            guard case .failure(let refusal) = world.apply(Self.a) else {
+                Issue.record("the follow-up went", sourceLocation: sourceLocation); return
+            }
+            #expect(refusal.text.contains(expected), "\(refusal)", sourceLocation: sourceLocation)
+            #expect(refusal.text.contains("nothing was rewritten"), "\(refusal)", sourceLocation: sourceLocation)
+            #expect(world.unitText == before && world.manager.calls == calls && world.current == current, sourceLocation: sourceLocation)
+            #expect(world.unitEntries == [NodeUnit.fileName], "\(world.unitEntries)", sourceLocation: sourceLocation)
+        }
+        var planted = forB
+        planted.nodeBin = "/var/tmp/planted/nbin"
+        try refused(planted, "/var/tmp/planted/nbin")
+        // The node folder in nvm's form, but under the HOME a worker wrote: not the account's.
+        planted = forB
+        planted.home = "/var/tmp/elsewhere"
+        planted.nodeBin = "/var/tmp/elsewhere/.nvm/versions/node/v22.1.0/bin"
+        try refused(planted, "/var/tmp/elsewhere/.nvm")
+        // A swift folder start wouldn't take (group-writable): refused too, as start would.
+        let swiftBin = world.home.appendingPathComponent(".local/share/swiftly/bin").path
+        chmod(swiftBin, 0o775)
+        try refused(forB, swiftBin)
+        chmod(swiftBin, 0o755)
     }
 
     /// ST-D23: after the follow-up in a scratch home, the seal's entries for the builds folder and the unit folder both

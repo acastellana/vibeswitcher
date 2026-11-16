@@ -94,7 +94,7 @@ public enum NodeTexts {
         let commit = ConfigSeal.inert(to, limit: 64)
         return [
             "  the host hands over to \(commit)'s host, which keeps every session",
-            "  a running team keeps its build until its lead restarts: the workers a lead started before the switch start the old build's tool server",
+            "  a running team keeps its build until its lead restarts: a lead started before the switch keeps starting its workers with the old build's tool server",
             "  your unit's ExecStart is rewritten to \(commit) and `current` names it, so the next start runs it",
             "  the seal holds every team until `vs config accept`, since the builds folder and the unit change (`vs config held` shows them)",
         ]

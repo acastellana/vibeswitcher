@@ -342,7 +342,7 @@ extension StartCommandTests {
     }
 
     /// A folder made with every folder from `base` down to it 0755 (the scratch home is 0700).
-    private static func makeFolder(_ url: URL, below base: URL) throws {
+    static func makeFolder(_ url: URL, below base: URL) throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         var folder = url.standardizedFileURL
         while folder.path.count > base.standardizedFileURL.path.count {
@@ -352,7 +352,7 @@ extension StartCommandTests {
     }
 
     /// An executable file at `url` holding `text`.
-    private static func makeProgram(_ url: URL, _ text: String = "#!/bin/sh\nexit 0\n") throws {
+    static func makeProgram(_ url: URL, _ text: String = "#!/bin/sh\nexit 0\n") throws {
         try text.write(to: url, atomically: true, encoding: .utf8)
         chmod(url.path, 0o755)
     }
