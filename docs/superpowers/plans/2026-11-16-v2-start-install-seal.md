@@ -1819,6 +1819,40 @@ landed; otherwise it uses E9's.
 - The residual above now reads: a new entry in a snapshots folder or `run` is never held; in `git-hooks`, only a
   fresh baseline.
 
+*2026-11-16, the security follow-ups' items 23 and 24 (committed as "v2 step 8: S7 security follow-ups, launch folders
+and unreadable folders"):*
+- **A new launch folder comes only as a launch the vault recorded** (item 23). `~/.vibeswitcher/lead/run` was free to
+  grow, so a worker could plant a launch folder or file there. Now, in `run` only, an added entry comes as no change
+  only when it's a repository's folder holding a recorded launch, a recorded launch's folder, or a file a launcher
+  writes in one (`prompt.md`, `mcp.json`, `settings.json`, `codex-config.json`, or `VibePaths.writePrivate`'s
+  `.<name>.<UUID>` until its rename): `LinuxSealList.launchEntryMayCome`. The recorded launches are the vault's own
+  members and former members (`Team.members`, `Team.formerRoles`), named as the launchers name them
+  (`<LeadVault.key(root)>/lead-<Slug of the project>`, `worker-<task>`, `verify-<task>`, `finder<n>-<task>`; a former
+  verifier's finder isn't kept, so any of an audit's): `LinuxSealList.launches`. The binding is sound because the vault
+  records a grant before its launch writes the folder (`LeadToolset.launch`: `vault.issue`, then `prepare`;
+  `LeadStart` likewise) and only the app or a lead is granted one. The vault's look passes them in one hook line, the
+  `guard let hashes` line of `sealConfig` (`LinuxSealList.withLaunches`, which puts them under the vault key
+  `config:#launches`, never a watched key and never sealed, set only by the vault: whatever a caller sent there is
+  dropped; it adds nothing where the hashes hold no `run` key, so never on the Mac). `judge` is unchanged. Anything
+  else added under `run` holds the team, as a `.folder`'s change would; `aWorkersStartDoesNotHoldItsTeam` still
+  passes (the lead's and both workers' folders are recorded launches). Held by
+  `LinuxSealVaultTests.aLaunchEntryNoLaunchMadeHoldsTheTeam` and `LinuxSealListTests.aLaunchFolderComesOnlyAsARecordedLaunch`.
+- **An unreadable folder is an unseen read; a folder's mode is read** (item 24). `walkEntries` marks each folder it
+  can't list with a per-path entry `/unreadable/<relative>` (`LinuxSealList.unreadablePrefix`; the watched folder
+  itself `/unreadable/`), and `cameOrWent` returns nil when either side has it or the cut (`isUnseen`), so a worker's
+  `chmod 000` that hides what's under a folder holds the team. Each `d` line carries `st_mode & 0o7777` (as
+  `listingHash`'s), and the watched folder's own mode is a per-path entry `.` (`ownEntry`), so a folder's mode changed
+  in place is a change in place. So an `.entries` read's hash is no longer `ConfigSeal.readFolder`'s
+  (`anEntriesFolderCountsOnlyEntriesChangedInPlace` now checks it's stable instead); `readFolder` itself (the `.folder`
+  kind, shared with the Mac) is unchanged. Held by `LinuxSealVaultTests.aWatchedSubfolderMadeUnreadableHoldsTheTeam` and
+  `LinuxSealVaultTests.aFoldersModeChangeHoldsTheTeam`.
+- Residuals for the lead: a `.folder` item on Linux (`~/bin`, the systemd folders) still reads through
+  `ConfigSeal.readFolder`, whose `d` lines carry no mode: a folder's mode changed in place there isn't seen (an
+  unreadable folder there is, as its entries go from the hash). Fixing it changes every Mac seal's hash once, so it's
+  the lead's call. A file planted in a recorded launch's folder with a launcher's name comes (each is rewritten whole
+  at the launch's start, or on Linux given inline and removed, so nothing reads a planted one). A seal recorded before
+  this change sees each `.entries` folder's lines change once (the modes), so it holds once; S7 isn't on a node yet.
+
 - [x] **Step 0: Check the real startup files** (an agent step, read only, outside the suite). List every `.` and
   `source` target in `~/.bashrc`, `~/.profile`, `~/.bash_profile` and `~/.bash_login`. Record in the inventory that
   each user-writable target is in `homeEntries` or found by `sourced`. Targets under root-owned folders

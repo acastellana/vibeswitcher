@@ -15,7 +15,8 @@ import Foundation
 ///
 /// Large folders are read by their metadata (`Kind.listing`, ST-D18), never their contents; the folders every session's
 /// start writes into take `Kind.entries` (ST-D19): an entry added or removed is no change (`cameOrWent`), but in the
-/// lead's accepted hooks only a fresh repository's baseline comes so (`hookEntryMayCome`).
+/// lead's accepted hooks only a fresh repository's baseline comes so (`hookEntryMayCome`), and in the roles' launch
+/// folders only a launch the vault recorded (`launchEntryMayCome`).
 public enum LinuxSealList {
     /// The home's entries, by path under it.
     public static let homeEntries: [(String, ConfigSeal.Watched.Kind)] = [
@@ -211,8 +212,21 @@ public enum LinuxSealList {
     /// cut an entry is unseen, so a folder read so is judged as ever (`cameOrWent`), never as entries come and gone.
     static let cutEntry = "/cut"
 
-    /// A folder of `.entries`, read as `ConfigSeal.readFolder` reads a folder (the same lines, so the same hash), in one
-    /// walk that also says when it was cut (`cutEntry`); the hooks record's per-path hash is taken as `GitGuard` reads
+    /// The per-path entry a folder that couldn't be listed carries, followed by its relative path (`/unreadable/` for
+    /// the watched folder itself): what's under it is unseen, as past a cut (a worker's `chmod 000` hides it, then puts
+    /// the mode back), so it's judged as ever too.
+    static let unreadablePrefix = "/unreadable/"
+
+    /// The per-path entry of the watched folder itself (no entry is named "."): its mode, so a change of it is a change in
+    /// place.
+    static let ownEntry = "."
+
+    /// Whether the per-path entry `path` marks a read that didn't see everything (`cutEntry`, `unreadablePrefix`).
+    static func isUnseen(_ path: String) -> Bool { path == cutEntry || path.hasPrefix(unreadablePrefix) }
+
+    /// A folder of `.entries`, read as `ConfigSeal.readFolder` reads a folder, in one walk that also says when it was cut
+    /// (`cutEntry`) or a folder in it couldn't be listed (`unreadablePrefix`); unlike that read, the folder's own mode
+    /// (`ownEntry`) and each folder's are in its lines (`walkEntries`); the hooks record's per-path hash is taken as `GitGuard` reads
     /// it, without its `told` flag (`acceptedRecord`), so that alone is no change in place.
     static func readEntries(_ watched: ConfigSeal.Watched) -> ConfigSeal.FolderRead {
         var hasher = SHA256()
@@ -224,12 +238,18 @@ public enum LinuxSealList {
         }
         var entries: [String: String] = [:]
         var count = 0
-        let cut = walkEntries(watched.path, relative: "", count: &count) { text, path, mtime in
+        var unreadable: [String] = []
+        let add = { (text: String, path: String?, mtime: Int) in
             let line = Data((text + "\n").utf8)
             hasher.update(data: line)
             if let path { entries[path] = ConfigSeal.hex(SHA256.hash(data: line).prefix(8)) + " \(text.prefix(1)) \(mtime)" }
         }
+        add("d \(ownEntry) \(info.st_mode & 0o7777)", ownEntry, Int(Platform.Files.modified(info).tv_sec))
+        let cut = walkEntries(watched.path, relative: "", count: &count, unreadable: &unreadable, add)
         if cut { entries[cutEntry] = ConfigSeal.hex(SHA256.hash(data: Data("cut".utf8)).prefix(8)) + " o 0" }
+        for relative in unreadable {
+            entries[unreadablePrefix + relative] = ConfigSeal.hex(SHA256.hash(data: Data("unreadable \(relative)".utf8)).prefix(8)) + " o 0"
+        }
         let hash = ConfigSeal.hex(hasher.finalize())
         var read = ConfigSeal.FolderRead(hash: hash, countingHash: hash, entries: entries)
         guard watched.name == hooksName else { return read }
@@ -254,11 +274,15 @@ public enum LinuxSealList {
         return read
     }
 
-    /// `ConfigSeal.readFolder`'s walk, line for line: each entry under `folder` in name order (`.DS_Store` left out), one
-    /// line each, links read and never followed, at most `ConfigSeal.maxEntries`; true when it was cut there.
-    private static func walkEntries(_ folder: String, relative: String, count: inout Int, _ line: (String, String?, Int) -> Void) -> Bool {
+    /// `ConfigSeal.readFolder`'s walk: each entry under `folder` in name order (`.DS_Store` left out), one line each,
+    /// links read and never followed, at most `ConfigSeal.maxEntries`; true when it was cut there. A folder's line also
+    /// carries its mode (`st_mode & 0o7777`, as `listingHash`'s), and each folder that can't be listed is added to
+    /// `unreadable`.
+    private static func walkEntries(_ folder: String, relative: String, count: inout Int, unreadable: inout [String],
+                                    _ line: (String, String?, Int) -> Void) -> Bool {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else {
             line("unreadable \(relative)", nil, 0)
+            unreadable.append(relative)
             return false
         }
         for name in names.sorted() where name != ".DS_Store" {
@@ -274,8 +298,8 @@ public enum LinuxSealList {
             let mtime = Int(Platform.Files.modified(info).tv_sec)
             switch info.st_mode & S_IFMT {
             case S_IFDIR:
-                line("d \(shown)", shown, mtime)
-                if walkEntries(path, relative: shown, count: &count, line) { return true }
+                line("d \(shown) \(info.st_mode & 0o7777)", shown, mtime)
+                if walkEntries(path, relative: shown, count: &count, unreadable: &unreadable, line) { return true }
             case S_IFLNK:
                 line("l \(shown) -> " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""), shown, mtime)
             case S_IFREG:
@@ -295,21 +319,29 @@ public enum LinuxSealList {
 
     /// For the vault's look (`LeadVault`'s `judge`): when `key` names a folder of `.entries` that `recorded` has sealed
     /// and that changed by entries added or removed only (none of the ones in both changed in place, by their
-    /// `FolderRead.entries` hashes; in the accepted hooks, only what `hookEntryMayCome` lets come), the per-path hashes
+    /// `FolderRead.entries` hashes; in the accepted hooks, only what `hookEntryMayCome` lets come; in the launch folders,
+    /// only what `launchEntryMayCome` lets come, by the launches `now` names under `launchesKey`), the per-path hashes
     /// to record with `now`'s hash: `now`'s, with the removed ones kept, so one that comes back changed is a change. nil
-    /// otherwise, and for a read cut on either side (`cutEntry`): judged as ever.
+    /// otherwise, and for a read that didn't see everything on either side (`isUnseen`: cut, or a folder unreadable):
+    /// judged as ever.
     static func cameOrWent(key: String, recorded: [String: String], now: [String: String]) -> String? {
         let name = ConfigSeal.name(ofKey: key)
         guard entriesNames.contains(name), let was = recorded[key], let hash = now[key], was != hash,
               let before = recorded[ConfigSeal.keysKey(of: key)], let after = now[ConfigSeal.keysKey(of: key)] else { return nil }
         let old = ConfigSeal.decode(before), new = ConfigSeal.decode(after)
-        guard old[cutEntry] == nil, new[cutEntry] == nil else { return nil }
+        guard !old.keys.contains(where: isUnseen), !new.keys.contains(where: isUnseen) else { return nil }
         for (path, entry) in old {
             if let current = new[path], ConfigSeal.entryHash(current) != ConfigSeal.entryHash(entry) { return nil }
         }
         if name == hooksName {
             for (path, entry) in new where old[path] == nil {
                 guard hookEntryMayCome(path, entry: entry, old: old) else { return nil }
+            }
+        }
+        if name == runName {
+            let launches = Set((now[launchesKey] ?? "").split(separator: "\n").map(String.init))
+            for (path, entry) in new where old[path] == nil {
+                guard launchEntryMayCome(path, entry: entry, launches: launches) else { return nil }
             }
         }
         return ConfigSeal.encode(old.merging(new) { $1 })
@@ -362,5 +394,78 @@ public enum LinuxSealList {
             let digest = ConfigSeal.hex(SHA256.hash(data: Data(GitGuard.shim(running: runs).utf8)))
             return ConfigSeal.hex(SHA256.hash(data: Data("f \(path) \(0o700) \(digest)\n".utf8)).prefix(8))
         })
+    }
+
+    // MARK: Launch folders
+
+    /// The roles' launch folders (`LeadVault.runFolder`: `run/<repository key>/<name>/`).
+    static var runName: String { "~/.vibeswitcher/lead/run" }
+
+    /// Where the vault's look puts the launches it recorded (`withLaunches`), beside the hashes it made itself: one
+    /// `<repository key>/<name>` per line. A vault key (`#`), so never a watched thing, never sealed.
+    static let launchesKey = ConfigSeal.keyPrefix + "#launches"
+
+    /// What `LeadLaunch.prepare` and `prepareCodex` write in a launch folder (on Linux `prepare` then removes the ones it
+    /// gave inline).
+    static let launchFiles: Set<String> = ["prompt.md", "mcp.json", "settings.json", "codex-config.json"]
+
+    /// The vault's hook (`LeadVault`'s `sealConfig`): `hashes` with the launches `teams` recorded under `launchesKey`
+    /// when it holds the launch folders' hash (Linux's list; never on the Mac), and without that key otherwise, whoever
+    /// sent it.
+    static func withLaunches(_ hashes: [String: String], teams: [String: LeadVault.Book.Team]) -> [String: String] {
+        var hashes = hashes
+        hashes[launchesKey] = nil
+        guard hashes[ConfigSeal.keyPrefix + runName] != nil else { return hashes }
+        hashes[launchesKey] = launches(teams).sorted().joined(separator: "\n")
+        return hashes
+    }
+
+    /// Each launch folder (`<repository key>/<name>`) the vault's records name, by the names the launchers give: the
+    /// lead's `lead-<the project's slug>` (`LeadStart`), a worker's `worker-<task>`, a verifier's `verify-<task>` and an
+    /// audit's other finders' `finder<n>-<task>` (`LeadToolset`). Each member holding its role, and each former one
+    /// (`Team.formerRoles`, its finder not kept: any of an audit's). The vault records a grant before its launch writes
+    /// its folder (`LeadToolset.launch`, `LeadStart`), and only a lead or the app is granted one.
+    static func launches(_ teams: [String: LeadVault.Book.Team]) -> Set<String> {
+        var names = Set<String>()
+        for (key, team) in teams {
+            let former = (team.formerRoles ?? [:]).values.map { ($0.role, $0.task, [1] + Array(2...LeadWorkflow.maxFinders)) }
+            for (role, task, finders) in team.members.map({ ($0.role, $0.task, [$0.finder?.index ?? 1]) }) + former {
+                switch role {
+                case .lead: names.insert(key + "/lead-" + Slug.make(LeadMail.project(of: team.root), taken: []))
+                case .worker: if let task { names.insert(key + "/worker-" + task) }
+                case .verifier:
+                    guard let task else { continue }
+                    for index in finders { names.insert(key + (index <= 1 ? "/verify-" : "/finder\(index)-") + task) }
+                }
+            }
+        }
+        return names
+    }
+
+    /// Whether `path`, an entry of the launch folders that wasn't there, comes as no change: a repository's folder that
+    /// holds a recorded launch, a recorded launch's folder (`launches`), or a file a launcher writes in one (or
+    /// `VibePaths.writePrivate`'s temporary file for it, there until its rename). Anything else (a launch no launch
+    /// made, another file, a link, a folder deeper down) holds the team, as a `.folder`'s change would.
+    static func launchEntryMayCome(_ path: String, entry: String, launches: Set<String>) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        let kind = ConfigSeal.entryKind(entry)
+        if path == ownEntry { return kind == "d" }  // The folder itself, made.
+        guard !parts.contains(""), !parts.contains("."), !parts.contains("..") else { return false }
+        switch parts.count {
+        case 1: return kind == "d" && launches.contains { $0.hasPrefix(parts[0] + "/") }
+        case 2: return kind == "d" && launches.contains(path)
+        case 3: return kind == "f" && launches.contains(parts[0] + "/" + parts[1]) && isLaunchFile(parts[2])
+        default: return false
+        }
+    }
+
+    /// A file a launcher writes, or `VibePaths.writePrivate`'s temporary one for it (`.<name>.<UUID>`).
+    static func isLaunchFile(_ name: String) -> Bool {
+        if launchFiles.contains(name) { return true }
+        guard name.hasPrefix(".") else { return false }
+        let rest = name.dropFirst()
+        return launchFiles.contains { file in
+            rest.hasPrefix(file + ".") && UUID(uuidString: String(rest.dropFirst(file.count + 1))) != nil
+        }
     }
 }

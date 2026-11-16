@@ -279,13 +279,13 @@ struct LinuxSealListTests {
         #expect(look() != nil)
         try write("planted again\n", snapshots + "/snapshot-bash-2-b.sh")
         #expect(look() == nil, "a removed entry back changed")
-        // A read cut at the walk's cap: entries past it are unseen, so it's judged as ever (held), and the hash is the
-        // plain folder read's.
+        // A read cut at the walk's cap: entries past it are unseen, so it's judged as ever (held). Its hash is its own
+        // (folders' lines carry their mode, unlike the plain folder read's), and the same at each read.
         recorded = ConfigSeal.hashes(of: [item])
         try Self.pad(snapshots, ConfigSeal.maxEntries + 1)
         let cut = ConfigSeal.hashes(of: [item])
         #expect(ConfigSeal.decode(cut[ConfigSeal.keysKey(of: key)] ?? "")[LinuxSealList.cutEntry] != nil)
-        #expect(cut[key] == ConfigSeal.readFolder(ConfigSeal.Watched(name: "a folder", path: snapshots, kind: .folder)).hash)
+        #expect(cut[key] == ConfigSeal.hashes(of: [item])[key])
         #expect(look() == nil, "padded past the cap")
         // Not a folder of entries: judged as ever.
         let bin = ConfigSeal.Watched(name: "~/bin", path: home + "/bin", kind: .folder)
@@ -293,6 +293,43 @@ struct LinuxSealListTests {
         let was = ConfigSeal.hashes(of: [bin])
         try write("x\n", home + "/bin/x")
         #expect(LinuxSealList.cameOrWent(key: binKey, recorded: was, now: ConfigSeal.hashes(of: [bin])) == nil)
+    }
+
+    /// In the launch folders, only a launch the vault recorded comes: its repository's folder, its own, and the files a
+    /// launcher writes there (or `writePrivate`'s temporary one); a name no launch has, another repository's key, a
+    /// file the launcher doesn't write, a link, or anything deeper doesn't. The names are the launchers', from the
+    /// vault's members and former members.
+    @Test func aLaunchFolderComesOnlyAsARecordedLaunch() throws {
+        let key = String(repeating: "a", count: 20)
+        let launches: Set<String> = [key + "/worker-fix", key + "/lead-repo"]
+        let may = { (path: String, kind: String) in LinuxSealList.launchEntryMayCome(path, entry: "0123abcd \(kind) 0", launches: launches) }
+        #expect(may(key, "d") && may(key + "/worker-fix", "d") && may(key + "/lead-repo", "d"))
+        for file in ["prompt.md", "mcp.json", "settings.json", "codex-config.json", ".settings.json.\(UUID().uuidString)"] {
+            #expect(may(key + "/worker-fix/" + file, "f"), "\(file)")
+        }
+        #expect(!may(key + "/worker-other", "d"), "a launch no launch made")
+        #expect(!may(key + "/worker-fix/hooks.sh", "f"), "a file the launcher doesn't write")
+        #expect(!may(key + "/worker-fix/settings.json", "l"), "a link")
+        #expect(!may(key + "/worker-fix/settings.json/x", "f"), "deeper")
+        #expect(!may(key + "/worker-fix", "f") && !may(key, "l"), "not a folder")
+        #expect(!may(String(repeating: "b", count: 20), "d") && !may(String(repeating: "b", count: 20) + "/worker-fix", "d"), "another key")
+        #expect(!may(key + "/worker-fix/.settings.json.x", "f") && !may(key + "/./worker-fix", "d"))
+
+        let issued = 0.0, lead = LeadVault.Caller.app
+        let member = { (role: LeadLaunch.Role, task: String?, finder: Int?) in
+            LeadVault.Member(id: UUID().uuidString, role: role, task: task, session: nil, auditing: nil,
+                             finder: finder.map { LeadVault.Finder(panel: "p", index: $0, size: 3, focus: "", nitCap: 0) }, issuedAt: issued, issuer: lead)
+        }
+        var team = LeadVault.Book.Team(root: "/somewhere/My Repo")
+        team.members = [member(.lead, nil, nil), member(.worker, "fix", nil), member(.verifier, "fix", 1), member(.verifier, "fix", 2)]
+        team.formerRoles = ["s1": LeadVault.Former(role: .verifier, task: "old"), "s2": LeadVault.Former(role: .worker, task: "gone")]
+        #expect(LinuxSealList.launches([key: team]) == Set([
+            "lead-my-repo", "worker-fix", "verify-fix", "finder2-fix", "verify-old", "finder2-old", "finder3-old", "worker-gone",
+        ].map { key + "/" + $0 }))
+        // Only where the hashes hold the launch folders' (never on the Mac), and never as sent.
+        let run = ConfigSeal.keyPrefix + LinuxSealList.runName
+        #expect(LinuxSealList.withLaunches([LinuxSealList.launchesKey: key + "/planted"], teams: [key: team]) == [:])
+        #expect(LinuxSealList.withLaunches([run: "h", LinuxSealList.launchesKey: key + "/planted"], teams: [:]) == [run: "h", LinuxSealList.launchesKey: ""])
     }
 
     /// `count` empty files in `folder`, named to sort before everything else there.
@@ -490,5 +527,61 @@ struct LinuxSealVaultTests: LeadTeamFixture {
         try FileManager.default.createDirectory(atPath: hooks + "/fedcba9876543210/copy/hooks", withIntermediateDirectories: true)
         try installScript("#!/bin/sh\necho planted\n", atPath: hooks + "/fedcba9876543210/copy/hooks/post-merge", mode: 0o700)
         #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/git-hooks"], "a planted repository")
+    }
+
+    /// The roles' launch folders (`~/.vibeswitcher/lead/run`, `.entries`): a launch the vault recorded (the lead's, a
+    /// worker it issued a grant to) comes as entries added; a launch folder no launch made, a file the launcher doesn't
+    /// write in a recorded one, or one under another repository's key is held.
+    @Test(LinuxSealListTests.linux) func aLaunchEntryNoLaunchMadeHoldsTheTeam() throws {
+        let run = home + "/.vibeswitcher/lead/run"
+        let (root, lead) = try team()
+        let key = LeadVault.key(root)
+        let leadName = "lead-" + Slug.make(LeadMail.project(of: root), taken: [])
+        try write("the lead's prompt\n", "\(run)/\(key)/\(leadName)/prompt.md")
+        #expect(try lead.checkConfig(root: root).held.isEmpty, "the lead's own launch")
+        _ = try lead.issue(role: .worker, root: root, task: "fix")
+        try write("prompt\n", "\(run)/\(key)/worker-fix/prompt.md")
+        try write("{}\n", "\(run)/\(key)/worker-fix/settings.json")
+        #expect(try lead.checkConfig(root: root).held.isEmpty, "a worker the lead started")
+        for (planted, what) in [("\(key)/worker-planted/settings.json", "a launch no launch made"),
+                                ("\(key)/worker-fix/hooks.sh", "a file the launcher doesn't write"),
+                                ("\(String(repeating: "0", count: 20))/worker-fix/settings.json", "another repository's key")] {
+            try write("{\"hooks\": {}}\n", run + "/" + planted)
+            #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/run"], "\(what)")
+            #expect(try vault.checkConfig(root: root).resealed == ["~/.vibeswitcher/lead/run"], "the app's accept")
+        }
+    }
+
+    /// A watched folder made unreadable mid-walk (`chmod 000`) hides what's under it: held, as a cut read is, not
+    /// taken as its entries gone.
+    @Test(LinuxSealListTests.linux) func aWatchedSubfolderMadeUnreadableHoldsTheTeam() throws {
+        let hooks = home + "/.vibeswitcher/lead/git-hooks"
+        try LinuxSealListTests.baseline(in: hooks, store: "0123456789abcdef", hooks: ["pre-commit"])
+        let copy = hooks + "/0123456789abcdef/copy"
+        try #require(chmod(copy, 0o700) == 0 && chmod(hooks, 0o700) == 0)
+        let (root, lead) = try team()
+        try #require(chmod(copy, 0) == 0)
+        defer { chmod(copy, 0o700) }
+        #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/git-hooks"], "the copy unreadable")
+        // Its mode put back: as sealed, and the app's look clears the hold. The watched folder itself, too.
+        chmod(copy, 0o700)
+        _ = try vault.checkConfig(root: root)
+        #expect(try lead.checkConfig(root: root).held.isEmpty, "put back")
+        try #require(chmod(hooks, 0) == 0)
+        defer { chmod(hooks, 0o700) }
+        #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/git-hooks"], "the folder unreadable")
+    }
+
+    /// A folder's mode changed in place, under a watched folder or of the folder itself, is a change.
+    @Test(LinuxSealListTests.linux) func aFoldersModeChangeHoldsTheTeam() throws {
+        let hooks = home + "/.vibeswitcher/lead/git-hooks"
+        try LinuxSealListTests.baseline(in: hooks, store: "0123456789abcdef", hooks: ["pre-commit"])
+        try #require(chmod(hooks + "/0123456789abcdef/copy/hooks", 0o700) == 0 && chmod(hooks, 0o700) == 0)
+        let (root, lead) = try team()
+        try #require(chmod(hooks + "/0123456789abcdef/copy/hooks", 0o777) == 0)
+        #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/git-hooks"], "a subfolder's mode")
+        #expect(try vault.checkConfig(root: root).resealed == ["~/.vibeswitcher/lead/git-hooks"])
+        try #require(chmod(hooks, 0o777) == 0)
+        #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/git-hooks"], "the folder's own mode")
     }
 }

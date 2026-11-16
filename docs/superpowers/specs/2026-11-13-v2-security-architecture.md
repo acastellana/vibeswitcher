@@ -1416,7 +1416,12 @@ what it needs.
   `~/.vibeswitcher/lead/git-hooks`, `~/.local/bin`, `~/.local/share/claude/versions`, the toolchain's `usr/bin`, every
   other user-writable folder on the unit's PATH, and, while `/mnt/c` is mounted, `.wslconfig` and the Windows Startup
   folder) and holds workers and merges once one changes: a detector at points in time, reset to "held until accepted"
-  by a host restart. A detached node's record and log (`~/.vibeswitcher/v2/node.pid`, `host.log`) aren't on the list:
+  by a host restart. In the folders every session's start writes into (`.entries`), an entry added or removed alone is
+  no change, but in `~/.vibeswitcher/lead/run` only a launch the vault recorded comes so (its repository's key, the
+  launcher's name for a member or former member, the files a launcher writes); anything else there holds the team.
+  A folder in a watched folder that can't be listed is held as a cut read is, and a folder's mode is part of what's
+  read, so a `chmod 000` that hides what's under it, or a mode changed in place, holds the team (2026-11-16, the
+  security follow-ups' items 23 and 24). A detached node's record and log (`~/.vibeswitcher/v2/node.pid`, `host.log`) aren't on the list:
   each detached start rewrites them, and the record's readers check the process it names instead (S3; 2026-11-16, the
   review of the start plan's S3).
 - What a switch or rollback goes to (the review of the start plan's S8c, 2026-11-16). `build.switch` isn't refused
@@ -1526,13 +1531,17 @@ are refused, 2026-11-16; planned: `InstallTests.anInstallBuildsWithTheRootToolch
 `LinuxSealListTests.theHooksRecordsToldFlagIsNoChange`, `LinuxSealListTests.aScratchHomeReadsNothingOutsideIt`,
 `LinuxSealListTests.aNewNodeVersionOrTheDefaultAliasIsAChange`, `LinuxSealVaultTests.aSnapshotRemovedAndBackChangedIsHeld`,
 `LinuxSealVaultTests.aSnapshotsFolderPaddedPastItsCapIsHeld`, `LinuxSealVaultTests.aHookAddedToTheAcceptedHooksIsHeld`,
+`LinuxSealVaultTests.aLaunchEntryNoLaunchMadeHoldsTheTeam`, `LinuxSealListTests.aLaunchFolderComesOnlyAsARecordedLaunch`,
+`LinuxSealVaultTests.aWatchedSubfolderMadeUnreadableHoldsTheTeam`, `LinuxSealVaultTests.aFoldersModeChangeHoldsTheTeam`,
 `FakeClaudeTests.theFakeWritesItsShellSnapshot` (the start plan's S7: a write to each item of the seal's Linux list
 changes its fingerprint, the big folders read by their metadata with no cap; a folder of `.entries` is held for an
 entry changed in place, removed and back changed, or a read cut at its cap, while an entry added or removed alone is
 no change, except in the lead's accepted hooks, where only GitGuard's baseline of a repository the seal hasn't seen
 (folders, run copies, exact shims, its record) comes so and a hook added to a copy is held; the hooks record's `told`
 flag, read as GitGuard reads the record, is no change; a scratch home's seal reads nothing outside it; a worker's start
-doesn't hold its team; 2026-11-16, with the review of S7);
+doesn't hold its team; 2026-11-16, with the review of S7; and, the security follow-ups' items 23 and 24: in the
+roles' launch folders only a launch the vault recorded comes, and a folder unreadable mid-walk or a folder's mode
+changed holds the team);
 `SwitchTests.aRunningToolServerKeepsItsBuildAcrossASwitch`, `SwitchTests.aToolServerStartedAfterASwitchIsTheNewBuilds`,
 `SwitchTests.aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild` (the start plan's S8c: a running tool server keeps its
 build, one started after the switch is the new build's, and a worker a pre-switch lead starts keeps the old build's
@@ -1573,7 +1582,8 @@ once after M3). After the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhil
   doesn't bind Bash, and nothing watches the folder), making a verifier's `vibeswitcher` server its own script. On
   Linux the settings and the MCP config go to `claude` as JSON strings on its command line (`--settings`,
   `--mcp-config`; nothing secret in them); the prompt too, when it fits, else its file is named in S11. The folder goes
-  on the seal's list as a detector. Every role's launch also names its permission mode, on both systems
+  on the seal's list as a detector: a new entry there comes as no change only as a launch the vault recorded
+(`LinuxSealList.launchEntryMayCome`; 2026-11-16, the security follow-ups' item 23). Every role's launch also names its permission mode, on both systems
   (`--permission-mode auto`, the mode a launch that named none ran in: Claude Code's default since 2.1.284, still
   2.1.323's), so the mode no longer follows Claude Code's default or a `defaultMode` in the user's settings, which a
   worker's shell can write; a project whose Claude command names a mode keeps it (stage 2's Task 10b).

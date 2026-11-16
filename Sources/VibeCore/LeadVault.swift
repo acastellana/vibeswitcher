@@ -1365,7 +1365,7 @@ extension LeadVault {
                     changed = true
                 }
             }
-            guard let hashes else { return nil }
+            guard let hashes = hashes.map({ LinuxSealList.withLaunches($0, teams: state.teams) }) else { return nil }  // + the launches recorded (Linux)
             let inUse = state.teams.filter { $0.key == own || !Self.retired($0.value, live: ids, now: now) }.map(\.value)
             // Quiet since `sealedAt`: no team's branch code ran at or after it (a run as it was sealed is as new).
             func quiet(since sealedAt: Double?) -> Bool { !inUse.contains { ($0.branchCodeAt ?? -1) >= (sealedAt ?? 0) } }
