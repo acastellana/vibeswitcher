@@ -743,6 +743,43 @@ struct LeadStartTests {
         #expect(ConfigSeal.held(in: try vault.guardedRecord(root: world.repo)) == held)
     }
 
+    /// The security follow-ups' item 20: a lead start's look never ends a root's held first look, though it finds
+    /// nothing held: only your accept does. The project's config was sealed by an accept that left your home held (a
+    /// home file changed after its card was drawn), and your home was then accepted through another root's first look,
+    /// so this root's look judges both as sealed. workflow.md's floor is still not recorded for the root afterwards.
+    @Test func aStartsLookLeavesTheFirstLookHeldWithNothingHeld() async throws {
+        let world = try await world(holdsFirstLook: true, firstLook: true)
+        defer { world.stop() }
+        let vault = world.host.vault
+        _ = try vault.checkConfig(root: world.repo, shown: LeadVaultV2.configLook)
+        let card = ConfigSeal.heldHashes(in: try vault.guardedRecord(root: world.repo))
+        // A home file changes after the card was drawn: its accept seals the project's, and your home stays held.
+        let file = world.host.home.appendingPathComponent(".claude/CLAUDE.md")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("Be brief.\n".utf8).write(to: file)
+        let partly = try vault.checkConfig(root: world.repo, shown: card).held
+        try #require(partly.contains("~/.claude/CLAUDE.md") && !partly.contains { $0.hasSuffix("(main checkout)") }, "\(partly)")
+        // Your home accepted through another root's first look.
+        let other = world.host.folder.appendingPathComponent("other", isDirectory: true)
+        try await scratchRepository(other)
+        let otherRoot = other.resolvingSymlinksInPath().path
+        _ = try vault.checkConfig(root: otherRoot, shown: LeadVaultV2.configLook)
+        let otherCard = ConfigSeal.heldHashes(in: try vault.guardedRecord(root: otherRoot))
+        try #require(try vault.checkConfig(root: otherRoot, shown: otherCard).held.isEmpty)
+        let floor = LeadReviewFloor.starting(from: LeadWorkflow())
+        try #require(try vault.setReviewFloor(floor, root: world.repo, onlyIfUnset: true) == nil, "not held before the start")
+
+        // The start's look finds nothing held here, and leaves the first look held: refused for the head alone.
+        let refused = await world.start()
+        guard case .refused(let why) = refused else { Issue.record("not refused: \(refused)"); return }
+        #expect(why.contains("base accept") && !why.contains("config held"), "\(why)")
+        #expect(try vault.setReviewFloor(floor, root: world.repo, onlyIfUnset: true) == nil)
+        #expect(try vault.reviewFloor(root: world.repo) == nil)
+        // Your accept of the card that showed nothing ends it.
+        #expect(try vault.checkConfig(root: world.repo, shown: [:]).held.isEmpty)
+        #expect(try vault.setReviewFloor(floor, root: world.repo, onlyIfUnset: true) == floor)
+    }
+
     /// S3: a session's process can't start a lead: the command line run in a scratch node's session, the code typed
     /// into its terminal, is refused for its voice by the server, and nothing starts.
     @Test func aSessionsProcessCannotStartALead() async throws {

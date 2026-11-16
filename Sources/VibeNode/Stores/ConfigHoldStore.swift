@@ -99,16 +99,17 @@ public enum ConfigHoldStore {
         (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md")
     }
 
-    /// What the vault holds for `root` now, as a card shows it. `look`: the vault looks at the config first, as an
-    /// accept of a card that showed nothing (`checkConfig(root:shown: [:])`), so a fresh vault's first look holds what
-    /// it has nothing recorded for and what changed since the last look is held, while nothing is sealed: an app's look
-    /// with no card (`checkConfig(root:)`) would seal everything held that didn't move since, as an older app's Accept
-    /// does (the E6 review), and the app's `ConfigHolds.look` only reads the record. A look the vault refuses is only
+    /// What the vault holds for `root` now, as a card shows it. `look`: the vault looks at the config first, as a card
+    /// that showed nothing but a look's own key would (`checkConfig(root:shown: LeadVaultV2.configLook)`), so a fresh
+    /// vault's first look holds what it has nothing recorded for and what changed since the last look is held, while
+    /// nothing is sealed and a held first look stays held (the security follow-ups' item 20: only your accept ends it):
+    /// an app's look with no card (`checkConfig(root:)`) would seal everything held that didn't move since, as an older
+    /// app's Accept does (the E6 review), and the app's `ConfigHolds.look` only reads the record. A look the vault refuses is only
     /// said. `snapshot`: the project's last accepts (E8's `AcceptedSnapshot`), which say of each held thing and guard rail
     /// whether it's the same, changed or new since. Fails when the record can't be read.
     public static func held(root: String, vault: LeadVault, home: String, look: Bool = true,
                             snapshot: AcceptedSnapshot.Project? = nil) -> Result<Shown, Error> {
-        if look { _ = try? vault.checkConfig(root: root, shown: [:]) }
+        if look { _ = try? vault.checkConfig(root: root, shown: LeadVaultV2.configLook) }
         let record: [String: String]?
         do { record = try vault.guardedRecord(root: root) } catch { return .failure(error) }
         let names = ConfigSeal.held(in: record)

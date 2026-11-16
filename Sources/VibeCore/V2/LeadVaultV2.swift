@@ -110,6 +110,16 @@ public enum LeadVaultV2 {
     /// waits through a long tool call (a merge's tests), never for ever.
     public static let renewedLifeCap: TimeInterval = 2 * 60 * 60
 
+    /// What a look at the config passes as what its card showed (`LeadVault.checkConfig(root:shown:)`): the server's
+    /// look before `config held` and before a lead start. Its one key is never a watched thing's
+    /// (`ConfigSeal.isWatchedKey`), so the look seals nothing; and it's a look, not your accept, so it never ends a
+    /// root's held first look, even with nothing held after it (the security follow-ups' item 20: an accept of a card
+    /// that showed nothing, `shown: [:]`, still does).
+    public static let configLook: [String: String] = [ConfigSeal.keyPrefix + "#look": "1"]
+
+    /// Whether `shown` is a look's (`configLook`), not a card's.
+    public static func isLook(_ shown: [String: String]?) -> Bool { shown?[ConfigSeal.keyPrefix + "#look"] != nil }
+
     private static let lifeLock = NSLock()
     nonisolated(unsafe) private static var life = defaultSealLife
 

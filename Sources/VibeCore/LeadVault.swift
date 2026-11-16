@@ -1389,7 +1389,7 @@ extension LeadVault {
             guarded[ConfigSeal.heldKey] = projectHeld
             // The user's accept of a held first look (the card's hashes), sealed with nothing held again: the root's
             // floor and rails are recorded from then on.
-            if shown != nil, home, project, isHeld(root: root) {
+            if shown != nil, !LeadVaultV2.isLook(shown), home, project, isHeld(root: root) {
                 state.firstLookAccepted = (state.firstLookAccepted ?? []).union([own])
             }
             // Sealed, or found as sealed, now: what ran before is seen. A session still running is as new (not quiet).
