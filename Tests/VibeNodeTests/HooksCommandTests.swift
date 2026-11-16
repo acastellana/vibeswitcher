@@ -1,9 +1,16 @@
 import Foundation
 import Testing
-import VibeCore
+@testable import VibeCore
+import VibeNode
 
-/// `vibeswitcher hooks install|remove`, run as built in a scratch home, with the agents' config folders given by
-/// CLAUDE_CONFIG_DIR and CODEX_HOME inside it: never the user's own ~/.claude, ~/.codex or ~/.vibeswitcher.
+/// `vibeswitcher hooks install|remove` through a scratch node's server (the start plan's S6, ST-D17): the server writes
+/// in its own home (the scratch home), as the app, so the change is sealed; the command line writes nothing and its
+/// `CLAUDE_CONFIG_DIR` plays no part. Never the user's own ~/.claude, ~/.codex or ~/.vibeswitcher.
+///
+/// `ScratchNode` links its build's `bin/` to the built products; the server opens the programs it installs without
+/// following a link, so each case first puts a copy of the two in place of their links (`ownPrograms`). The built
+/// products themselves are never written.
+@Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(10)))
 struct HooksCommandTests {
     private let scratch = Scratch()
 
@@ -11,14 +18,28 @@ struct HooksCommandTests {
     static let claudeEvents: Set<String> = ["SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse",
                                             "PermissionRequest", "Notification", "Stop", "PreCompact"]
 
-    /// A scratch folder and its environment, with Claude Code's config folder at `claude-config` in it.
-    private func setUp() throws -> (folder: URL, environment: [String: String], settings: URL) {
-        let folder = scratch.url("hooks")
-        let config = folder.appendingPathComponent("claude-config")
-        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: folder.appendingPathComponent("home"), withIntermediateDirectories: true)
-        return (folder, scratchEnvironment(folder, ["CLAUDE_CONFIG_DIR": config.path]), config.appendingPathComponent("settings.json"))
+    static let programs = ["vibeswitcher-hook", "vibeswitcher-mcp"]
+
+    // MARK: Helpers
+
+    /// The node's build's `bin/<name>` for each of the two programs: a copy of the built product in place of the link.
+    private func ownPrograms(_ node: ScratchNode) throws {
+        for name in Self.programs { try replace(node.nodeRoot.appendingPathComponent("bin/" + name), withCopyOf: builtProducts.appendingPathComponent(name)) }
     }
+
+    /// `target` replaced (renamed over) with a closed copy of `source`.
+    private func replace(_ target: URL, withCopyOf source: URL) throws {
+        let copy = target.deletingLastPathComponent().appendingPathComponent(".\(target.lastPathComponent).copy")
+        try copyClosedOnExec(source.path, to: copy.path)
+        guard rename(copy.path, target.path) == 0 else { throw Platform.Errno(code: errno) }
+    }
+
+    private func settings(_ node: ScratchNode) -> URL { node.home.appendingPathComponent(".claude/settings.json") }
+    private func codexHooks(_ node: ScratchNode) -> URL { node.home.appendingPathComponent(".codex/hooks.json") }
+    /// `<home>/.vibeswitcher/bin`, as the seal spells it (a link to the root's `bin` on a scratch node).
+    private func bin(_ node: ScratchNode) -> URL { node.home.appendingPathComponent(".vibeswitcher/bin") }
+    /// The hook as the configs name it.
+    private func hook(_ node: ScratchNode) -> String { bin(node).appendingPathComponent("vibeswitcher-hook").path }
 
     private func object(_ url: URL) throws -> [String: Any] {
         try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
@@ -37,40 +58,81 @@ struct HooksCommandTests {
         return found
     }
 
-    @Test func installWritesOurHandlersIntoTheConfigFolderGiven() async throws {
-        let (folder, environment, settings) = try setUp()
-        let ran = try await run(commandLine, ["hooks", "install", "--agent", "claude"], environment: environment)
-        #expect(ran.status == 0, "\(ran.output)\(ran.errors)")
+    private func names(_ folder: URL) -> [String] { ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted() }
 
-        let hook = URL(fileURLWithPath: environment["VIBESWITCHER_HOME"]!).appendingPathComponent("bin/vibeswitcher-hook").path
-        let found = commands(try object(settings))
+    /// The server's accepted requests, as `status` gives them.
+    private func accepted(_ node: ScratchNode) throws -> [String] {
+        let status = try #require(WireClient.reply(try WireClient(node).request("status", action: nil))?.result)
+        return (status["accepted"]?.array ?? []).compactMap { $0["kind"]?.string }
+    }
+
+    /// A node holding its first look (as the user's does), its scratch repository's config accepted.
+    private func acceptedNode() async throws -> (node: ScratchNode, repo: URL) {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        let repo = node.root.appendingPathComponent("repo")
+        try await scratchRepository(repo)
+        try EngineEndToEndTests.workflow(repo)
+        try ownPrograms(node)
+        return (node, repo)
+    }
+
+    /// What the app's look (`config held`) holds now, by name.
+    private func held(_ node: ScratchNode, _ repo: URL) async throws -> [String] {
+        let held = try await node.run(["config", "held", repo.path])
+        try #require(held.status == 0, "\(held.output)\(held.errors)\n\(node.said)")
+        return held.output.components(separatedBy: "\n").filter { $0.hasPrefix("    ~/") }
+            .map { String($0.dropFirst(4).prefix { $0 != "," && $0 != " " }) }
+    }
+
+    // MARK: The five, restated
+
+    @Test func installWritesOurHandlersIntoTheNodesHome() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        // A config folder the command line is given: it plays no part.
+        let given = node.root.appendingPathComponent("claude-config")
+        try FileManager.default.createDirectory(at: given, withIntermediateDirectories: true)
+        let ran = try await ScratchNodes.onTerminal(commandLine.path, ["hooks", "install", "--agent", "claude"],
+                                                    environment: node.environment(["CLAUDE_CONFIG_DIR": given.path]), answer: { $0 })
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(ran.output.contains("CLAUDE_CONFIG_DIR plays no part"), "\(ran.output)")
+
+        let found = commands(try object(settings(node)))
         #expect(Set(found.keys) == Self.claudeEvents)
-        for event in Self.claudeEvents { #expect(found[event] == ["\(hook) claude"], "\(event)") }
-        // Nothing in the home's own folders: the config folder given is the one.
-        let home = folder.appendingPathComponent("home")
-        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude").path))
-        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".codex").path))
+        for event in Self.claudeEvents { #expect(found[event] == ["\(hook(node)) claude"], "\(event)") }
+        #expect(names(given).isEmpty, "\(names(given))")
+        #expect(!FileManager.default.fileExists(atPath: node.home.appendingPathComponent(".codex").path))
+        #expect(ran.output.contains("Claude: hooks installed in \(settings(node).path)"), "\(ran.output)")
     }
 
     @Test func installCopiesBothBinariesExecutable() async throws {
-        let (_, environment, _) = try setUp()
-        let ran = try await run(commandLine, ["hooks", "install", "--agent", "claude"], environment: environment)
-        #expect(ran.status == 0, "\(ran.output)\(ran.errors)")
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        let ran = try await node.runOnTerminal(["hooks", "install", "--agent", "claude"])
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
 
-        let bin = URL(fileURLWithPath: environment["VIBESWITCHER_HOME"]!).appendingPathComponent("bin")
-        for name in ["vibeswitcher-hook", "vibeswitcher-mcp"] {
-            let installed = bin.appendingPathComponent(name)
-            let mode = try #require(try FileManager.default.attributesOfItem(atPath: installed.path)[.posixPermissions] as? Int, "\(name)")
-            #expect(mode & 0o777 == 0o755, "\(name): \(String(mode, radix: 8))")
-            #expect(try Data(contentsOf: installed) == Data(contentsOf: builtProducts.appendingPathComponent(name)), "\(name)")
+        for name in Self.programs {
+            let installed = bin(node).appendingPathComponent(name)
+            var info = stat()
+            try #require(lstat(installed.path, &info) == 0, "\(name)")
+            #expect(info.st_mode & S_IFMT == S_IFREG, "\(name): a file, not a link")
+            #expect(info.st_mode & 0o777 == 0o755, "\(name): \(String(info.st_mode & 0o777, radix: 8))")
+            // Byte-equal to the node's build's.
+            #expect(try Data(contentsOf: installed) == Data(contentsOf: node.nodeRoot.appendingPathComponent("bin/" + name)), "\(name)")
         }
-        // Nothing half-written left beside them.
-        #expect(try FileManager.default.contentsOfDirectory(atPath: bin.path).sorted() == ["vibeswitcher-hook", "vibeswitcher-mcp"])
+        // Nothing half-written left beside them, nor in the folder above.
+        #expect(names(bin(node)) == Self.programs)
+        #expect(!names(node.home.appendingPathComponent(".vibeswitcher")).contains { $0.hasSuffix(".tmp") })
     }
 
     @Test func removeLeavesTheUsersOwnHandlers() async throws {
-        let (_, environment, settings) = try setUp()
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
         let own = "/usr/local/bin/notify-me done"
+        try FileManager.default.createDirectory(at: settings(node).deletingLastPathComponent(), withIntermediateDirectories: true)
         try """
         {
           "model": "sonnet",
@@ -78,47 +140,221 @@ struct HooksCommandTests {
             "Stop": [{"hooks": [{"type": "command", "command": "\(own)"}]}]
           }
         }
-        """.write(to: settings, atomically: true, encoding: .utf8)
+        """.write(to: settings(node), atomically: true, encoding: .utf8)
 
-        let install = try await run(commandLine, ["hooks", "install", "--agent", "claude"], environment: environment)
-        #expect(install.status == 0, "\(install.output)\(install.errors)")
-        #expect(commands(try object(settings))["Stop"]?.count == 2)
-        let remove = try await run(commandLine, ["hooks", "remove", "--agent", "claude"], environment: environment)
-        #expect(remove.status == 0, "\(remove.output)\(remove.errors)")
+        let install = try await node.runOnTerminal(["hooks", "install", "--agent", "claude"])
+        #expect(install.status == 0, "\(install.output)\n\(node.said)")
+        #expect(commands(try object(settings(node)))["Stop"]?.count == 2)
+        let remove = try await node.runOnTerminal(["hooks", "remove", "--agent", "claude"])
+        #expect(remove.status == 0, "\(remove.output)\n\(node.said)")
 
-        let config = try object(settings)
+        let config = try object(settings(node))
         #expect(commands(config) == ["Stop": [own]])
         #expect(config["model"] as? String == "sonnet")
     }
 
-    /// With no `--agent`, both agents' hooks go in, Codex's into CODEX_HOME's hooks.json.
+    /// With no `--agent`, both agents' hooks go in, in one request under one code, Codex's into the home's
+    /// `.codex/hooks.json`.
     @Test func withNoAgentBothAreInstalledEachInItsOwnFolder() async throws {
-        let (folder, given, settings) = try setUp()
-        let codex = folder.appendingPathComponent("codex-home")
-        try FileManager.default.createDirectory(at: codex, withIntermediateDirectories: true)
-        let environment = given.merging(["CODEX_HOME": codex.path]) { $1 }
-        let ran = try await run(commandLine, ["hooks", "install"], environment: environment)
-        #expect(ran.status == 0, "\(ran.output)\(ran.errors)")
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        let ran = try await node.runOnTerminal(["hooks", "install"])
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(ran.output.components(separatedBy: "and Enter to go on").count == 2, "one code: \(ran.output)")
+        #expect(try accepted(node) == ["hooks.install"])
 
-        let hook = URL(fileURLWithPath: environment["VIBESWITCHER_HOME"]!).appendingPathComponent("bin/vibeswitcher-hook").path
-        #expect(commands(try object(settings))["Stop"] == ["\(hook) claude"])
-        #expect(commands(try object(codex.appendingPathComponent("hooks.json")))["Stop"] == ["\(hook) codex"])
-        #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("home/.codex").path))
+        #expect(commands(try object(settings(node)))["Stop"] == ["\(hook(node)) claude"])
+        #expect(commands(try object(codexHooks(node)))["Stop"] == ["\(hook(node)) codex"])
 
-        let removed = try await run(commandLine, ["hooks", "remove"], environment: environment)
-        #expect(removed.status == 0, "\(removed.output)\(removed.errors)")
-        #expect(commands(try object(settings)).isEmpty)
-        #expect(commands(try object(codex.appendingPathComponent("hooks.json"))).isEmpty)
+        let removed = try await node.runOnTerminal(["hooks", "remove"])
+        #expect(removed.status == 0, "\(removed.output)\n\(node.said)")
+        #expect(commands(try object(settings(node))).isEmpty)
+        #expect(commands(try object(codexHooks(node))).isEmpty)
+        #expect(try accepted(node) == ["hooks.install", "hooks.remove"])
     }
 
     @Test func aWrongCommandSaysHowAndChangesNothing() async throws {
-        let (folder, environment, settings) = try setUp()
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
         for arguments in [["hooks"], ["hooks", "add"], ["hooks", "install", "--agent", "gemini"], ["hooks", "install", "--agent"]] {
-            let ran = try await run(commandLine, arguments, environment: environment)
+            let ran = try await node.run(arguments)
             #expect(ran.status == 64, "\(arguments)")
             #expect(ran.errors.contains("usage: vibeswitcher hooks install|remove"), "\(arguments): \(ran.errors)")
         }
-        #expect(!FileManager.default.fileExists(atPath: settings.path))
-        #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("vibeswitcher/bin").path))
+        #expect(!FileManager.default.fileExists(atPath: settings(node).path))
+        #expect(!FileManager.default.fileExists(atPath: bin(node).path))
+        #expect(try accepted(node).isEmpty)
+    }
+
+    // MARK: The voice and the code
+
+    @Test func aSessionsProcessCannotInstallHooks() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        let out = node.root.appendingPathComponent("hooks.out").path
+        let command = "VIBESWITCHER_HOME='\(node.root.path)' '\(commandLine.path)' hooks install --agent claude >'\(out)' 2>&1; echo \"exit $?\" >>'\(out)'"
+        let session = try await node.spawn(command)
+        // The code is typed on the session's terminal, so the server judges the request.
+        var code = ""
+        let asked = await eventually(timeout: 60) {
+            guard let screen = HostCall.styledScreen(session.id, socket: node.socket, appKey: nil)?.text,
+                  let range = screen.range(of: #"Type ([A-Z]{4}) and Enter"#, options: .regularExpression) else { return false }
+            code = String(screen[range].dropFirst(5).prefix(4))
+            return true
+        }
+        try #require(asked, "the command line never asked: \(String(describing: HostCall.styledScreen(session.id, socket: node.socket, appKey: nil)?.text))")
+        try HostCall.send(.input(id: session.id, bytes: Data((code + "\r").utf8), reply: false), socket: node.socket, appKey: nil)
+        let ended = await eventually(timeout: 60) { ((try? String(contentsOfFile: out, encoding: .utf8)) ?? "").contains("exit ") }
+        let said = (try? String(contentsOfFile: out, encoding: .utf8)) ?? ""
+        #expect(ended, "\(said)")
+        #expect(said.contains("exit 77"), "\(said)")
+        #expect(said.contains("voice: not the user's voice"), "\(said)")
+        // Nothing written, nothing accepted.
+        #expect(!FileManager.default.fileExists(atPath: settings(node).path))
+        #expect(!FileManager.default.fileExists(atPath: bin(node).path))
+        #expect(try accepted(node).isEmpty)
+    }
+
+    @Test func aHooksInstallWithNoTerminalIsRefused() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        // stdin from /dev/null, in a session of its own: no /dev/tty.
+        let ran = try await run(URL(fileURLWithPath: "/usr/bin/setsid"), ["--wait", commandLine.path, "hooks", "install"], environment: node.environment())
+        #expect(ran.status == 77, "\(ran.output)\(ran.errors)")
+        #expect(ran.errors.contains(TypedOutcome.noTerminal.refusal), "\(ran.errors)")
+        #expect(try accepted(node).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: settings(node).path))
+        #expect(!FileManager.default.fileExists(atPath: bin(node).path))
+    }
+
+    // MARK: Sealed as the app's
+
+    @Test func hooksInstallWritesAsTheAppAndSealsIt() async throws {
+        let (node, repo) = try await acceptedNode()
+        defer { node.stop() }
+        try await node.acceptConfig(repo)
+        #expect(try await held(node, repo).isEmpty)
+
+        let ran = try await node.runOnTerminal(["hooks", "install"])
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(ran.output.components(separatedBy: "and Enter to go on").count == 2, "one code: \(ran.output)")
+        #expect(commands(try object(settings(node)))["Stop"] == ["\(hook(node)) claude"])
+        #expect(commands(try object(codexHooks(node)))["Stop"] == ["\(hook(node)) codex"])
+        for name in Self.programs {
+            #expect(try Data(contentsOf: bin(node).appendingPathComponent(name)) == Data(contentsOf: node.nodeRoot.appendingPathComponent("bin/" + name)), "\(name)")
+        }
+        // Sealed as the app's write: the next look holds nothing.
+        #expect(try await held(node, repo).isEmpty)
+
+        // The same edit made here, not through the server, is held.
+        let removed = try await node.runOnTerminal(["hooks", "remove", "--agent", "claude"])
+        #expect(removed.status == 0, "\(removed.output)\n\(node.said)")
+        #expect(try await held(node, repo).isEmpty)
+        try HookInstaller.install(agent: .claude, at: settings(node), hookBinary: hook(node))
+        #expect(try await held(node, repo) == ["~/.claude/settings.json"])
+    }
+
+    /// S9's card order is accept first; this pins the other.
+    @Test func aHooksInstallBeforeTheFirstAcceptIsSealedToo() async throws {
+        let (node, repo) = try await acceptedNode()
+        defer { node.stop() }
+        let ran = try await node.runOnTerminal(["hooks", "install"])
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        try await node.acceptConfig(repo)
+        #expect(try await held(node, repo).isEmpty)
+        // Sealed from then on: a change made here is held.
+        try HookInstaller.uninstall(agent: .codex, at: codexHooks(node))
+        #expect(try await held(node, repo) == ["~/.codex/hooks.json"])
+    }
+
+    /// ST-D17's note of the review of S5: the host's `binaries` hold against a rewrite after its start only, so an
+    /// install waits while the builds folder has a change the user hasn't accepted.
+    @Test func aChangeInTheBuildsFolderNotAcceptedRefusesTheInstall() async throws {
+        let (node, repo) = try await acceptedNode()
+        defer { node.stop() }
+        try await node.acceptConfig(repo)
+        let builds = node.home.appendingPathComponent(".vibeswitcher/v2/builds")
+        try FileManager.default.createDirectory(at: builds, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: builds.appendingPathComponent("installs"))
+        let refused = try await node.runOnTerminal(["hooks", "install"])
+        #expect(refused.status == 77, "\(refused.output)\n\(node.said)")
+        #expect(refused.output.contains("~/.vibeswitcher/v2/builds") && refused.output.contains("config held"), "\(refused.output)")
+        #expect(!FileManager.default.fileExists(atPath: settings(node).path))
+        #expect(!FileManager.default.fileExists(atPath: bin(node).path))
+
+        try await node.acceptConfig(repo)
+        let ran = try await node.runOnTerminal(["hooks", "install"])
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+    }
+
+    // MARK: Only the build's bytes
+
+    @Test func aNodeRootProgramThatDiffersFromBuildInfoIsNotInstalled() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        let program = node.nodeRoot.appendingPathComponent("bin/vibeswitcher-hook")
+        // One byte appended to the copy (the built product is never written).
+        let handle = try FileHandle(forWritingTo: program)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data([0]))
+        try handle.close()
+        let ran = try await node.runOnTerminal(["hooks", "install"])
+        #expect(ran.status == 77, "\(ran.output)\n\(node.said)")
+        #expect(ran.output.contains("vibeswitcher-hook") && ran.output.contains("SHA-256 differs"), "\(ran.output)")
+        #expect(!FileManager.default.fileExists(atPath: bin(node).path))
+        #expect(!FileManager.default.fileExists(atPath: settings(node).path))
+        #expect(!FileManager.default.fileExists(atPath: codexHooks(node).path))
+
+        // A link in its place, to the very bytes the build-info names: refused, not followed.
+        try FileManager.default.removeItem(at: program)
+        try FileManager.default.createSymbolicLink(atPath: program.path, withDestinationPath: builtProducts.appendingPathComponent("vibeswitcher-hook").path)
+        let linked = try await node.runOnTerminal(["hooks", "install"])
+        #expect(linked.status == 77, "\(linked.output)\n\(node.said)")
+        #expect(linked.output.contains("vibeswitcher-hook") && linked.output.contains("is a link"), "\(linked.output)")
+        #expect(!FileManager.default.fileExists(atPath: bin(node).path))
+        #expect(!FileManager.default.fileExists(atPath: settings(node).path))
+    }
+
+    @Test func noTemporaryIsLeftInTheWatchedFolder() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        // Watched while the install runs: every name the folder ever shows.
+        let folder = bin(node)
+        let seen = Locked<Set<String>>([])
+        let done = Locked(false)
+        let watcher = Thread {
+            while !done.value {
+                for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] { seen.mutate { _ = $0.insert(name) } }
+            }
+        }
+        watcher.start()
+        let ran = try await node.runOnTerminal(["hooks", "install"])
+        done.value = true
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(seen.value.isSubset(of: Set(Self.programs)), "\(seen.value)")
+        #expect(names(folder) == Self.programs)
+        #expect(!names(node.home.appendingPathComponent(".vibeswitcher")).contains { $0.hasSuffix(".tmp") })
+    }
+
+    @Test func hooksRemoveTakesThemOut() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        let install = try await node.runOnTerminal(["hooks", "install"])
+        #expect(install.status == 0, "\(install.output)\n\(node.said)")
+        #expect(HookInstaller.isInstalled(in: try object(settings(node))))
+        #expect(HookInstaller.isInstalled(in: try object(codexHooks(node))))
+        let remove = try await node.runOnTerminal(["hooks", "remove"])
+        #expect(remove.status == 0, "\(remove.output)\n\(node.said)")
+        #expect(remove.output.contains("Claude: hooks removed from \(settings(node).path)"), "\(remove.output)")
+        #expect(!HookInstaller.isInstalled(in: try object(settings(node))))
+        #expect(!HookInstaller.isInstalled(in: try object(codexHooks(node))))
+        // The programs stay.
+        #expect(names(bin(node)) == Self.programs)
     }
 }

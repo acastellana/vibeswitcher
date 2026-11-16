@@ -3,8 +3,8 @@ import Testing
 import VibeCore
 
 /// A real Claude Code session on a terminal this test owns goes from working to needs-you to done in
-/// `vibeswitcher status`, through the hooks `vibeswitcher hooks install` put in its config folder. On demand only: it
-/// spends the account's usage (one short prompt, on sonnet), and needs a throwaway Claude Code config folder the user
+/// `vibeswitcher status`, through the hooks put in its config folder (with `HookInstaller`, as `hooks install` writes
+/// them). On demand only: it spends the account's usage (one short prompt, on sonnet), and needs a throwaway Claude Code config folder the user
 /// logged in once (`CLAUDE_CONFIG_DIR=<folder> claude`, then `/login`; an agent never logs in or copies credentials):
 /// `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<that folder> bash scripts/test.sh --filter RealClaudeStatusTests`.
 ///
@@ -55,9 +55,10 @@ struct RealClaudeStatusTests {
         let version = try await run(URL(fileURLWithPath: claude), ["--version"], environment: Self.agentEnvironment(folder, config: config))
         print("R10: \(claude) --version: \(version.output.trimmingCharacters(in: .whitespacesAndNewlines))")
 
-        // 1. The hooks, into the config folder given.
-        let install = try await run(commandLine, ["hooks", "install", "--agent", "claude"], environment: commands)
-        try #require(install.status == 0, "hooks install: \(install.output)\(install.errors)")
+        // 1. The hooks, into the config folder given, with `HookInstaller` (`hooks install` writes the node's own home
+        // only, the start plan's ST-D17), running the built hook.
+        try HookInstaller.install(agent: .claude, at: config.appendingPathComponent("settings.json"),
+                                  hookBinary: builtProducts.appendingPathComponent("vibeswitcher-hook").path)
         var session: RealSession?
         do {
             // 2. The project trusted, or Claude Code shows its trust dialog first and no hook runs.
@@ -116,11 +117,9 @@ struct RealClaudeStatusTests {
     private static func cleanUp(_ session: RealSession?, project: String, config: URL, commands: [String: String]) async {
         await session?.quit()
         do { try trust(project, in: config, false) } catch { Issue.record("the trust entry stayed: \(error)") }
-        guard let remove = try? await run(commandLine, ["hooks", "remove", "--agent", "claude"], environment: commands) else {
-            Issue.record("hooks remove didn't run")
-            return
+        do { try HookInstaller.uninstall(agent: .claude, at: config.appendingPathComponent("settings.json")) } catch {
+            Issue.record("the hooks stayed in \(config.path)/settings.json: \(error)")
         }
-        #expect(remove.status == 0, "hooks remove: \(remove.output)\(remove.errors)")
     }
 
     /// Claude Code's environment: the scratch home's, the config folder given, a terminal it can draw on, and nothing of

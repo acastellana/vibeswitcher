@@ -1531,7 +1531,7 @@ added. The Mac runs `theMacStillReadsOnlyTheAppBundle`, the gate's Mac case and 
   - The wire: `hooks.install` / `hooks.remove`, args `agents` (a list of `claude`|`codex`); voice the user's; code
     "own".
 
-- [ ] **Step 1: Failing tests:**
+- [x] **Step 1: Failing tests:**
   - `aSessionsProcessCannotInstallHooks` (S3): the request from a scratch session's process is refused `voice`, and
     the config file is unchanged.
   - `aHooksInstallWithNoTerminalIsRefused`: `setsid --wait` with no controlling terminal. The CLI refuses with
@@ -1553,14 +1553,54 @@ added. The Mac runs `theMacStillReadsOnlyTheAppBundle`, the gate's Mac case and 
   - `hooksRemoveTakesThemOut`.
   - The five `HooksCommandTests` restated against a `ScratchNode` (the scratch home's config, not `CLAUDE_CONFIG_DIR`).
   - `ServerTests.anUnlistedRequestIsRefused`: `build.switch` alone answers `unknown-kind`.
-- [ ] **Step 2: Implement.** The programs are written as temporaries beside `<home>/.vibeswitcher/bin` (the app's way,
+- [x] **Step 2: Implement.** The programs are written as temporaries beside `<home>/.vibeswitcher/bin` (the app's way,
   `AppDelegate.swift:1229`), then renamed in. The config writes and the renames run inside one `appWrite` naming every
   path as `homeWatched` spells it, then `sealAppWrites()`. The handler runs on the engine's read queue.
-- [ ] **Step 3: Verify.**
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter 'HooksCommandTests|ServerTests|RequestsTests|VoiceRuleTests|EngineEndToEndTests'`
   - the lints
   - under load (`HooksCommandTests|ServerTests`)
 - [ ] **Step 4:** commit ("v2: hooks install through the server, sealed as the app's"). Push, both green.
+  *2026-11-16:* committed on `v2-step8` as "v2 step 8: S6, hooks install through the server"; the push and both jobs
+  are the lead's.
+
+*2026-11-16, S6 as made (committed; the push is the lead's):*
+- **Test first.** With the source changes stashed, the new `HooksCommandTests` and `anUnlistedRequestIsRefused` fail
+  (35 issues: the command line still writes locally, the server answers `unknown-kind`). With `appWrite` given no
+  paths (the write unsealed), `hooksInstallWritesAsTheAppAndSealsIt` fails at its "the next look holds nothing".
+- **Names as made.** `HooksRequest` as planned, plus `binFolder` (`<home>/.vibeswitcher/bin`, as the seal spells it),
+  `configPath(_:)`, `programs` and `buildsName`. `remove(agents:)` returns `Result<Void, StartRefusal>` as planned; the
+  reply's `configs` comes from `configPath(_:)`. `Requests` gains `nodeRoot` (set by `ServerStart` from
+  `ServerArguments.nodeRoot`) and `home` (`VibePaths.home`: `getpwuid`'s on the node, the scratch home on a scratch
+  node); `hooks.install` asks the host's notes again first (`refreshNotes`), then runs on the engine's read queue
+  (`LeadEngine.reads`, `BoardReads.queue`; a global queue for a server with no engine). The configs' hook command names
+  `<home>/.vibeswitcher/bin/vibeswitcher-hook` (on a scratch node the old CLI wrote `$VIBESWITCHER_HOME/bin/…`, the
+  same file through the link; on the user's node the same path). A refusal after the vault's record is `refused`, and
+  the command line journals it as accepted, as `lead` does.
+- **ST-D17's builds-folder check is made**, not left: `hooks.install` is refused while the seal holds
+  `~/.vibeswitcher/v2/builds`, or while its fingerprint now differs from the one the vault recorded (a change no look
+  has held yet). With nothing recorded (a fresh vault before its first accept) there is nothing to compare and the
+  install goes on: that accept then shows the folder as it is. New case
+  `aChangeInTheBuildsFolderNotAcceptedRefusesTheInstall`.
+- Also refused: a `<home>/.vibeswitcher/bin` that is a link or not a folder (the renames would land where it points).
+  The bin folder is made through `VibePaths.ensurePrivate` (0700); a program already there with the same bytes and 0755
+  isn't rewritten.
+- **The tests.** `HooksCommandTests` is `NodeTraits.linuxOnly` (every case runs a `ScratchNode`). `ScratchNode` links
+  its build's `bin/` to the built products, which the server's `O_NOFOLLOW` refuses, so each case first renames a
+  closed copy of the two programs over their links (`ownPrograms`); `ScratchNode` itself is unchanged. "The vault's next
+  look" is the app's look, `config held`. "The same edit made directly" is: `hooks remove --agent claude` through the
+  server (sealed, nothing held), then the test's own `HookInstaller.install` of the same hooks, which is held. The five
+  restated: `installWritesOurHandlersIntoTheConfigFolderGiven` is now `installWritesOurHandlersIntoTheNodesHome` (with
+  `CLAUDE_CONFIG_DIR` given to the command line, untouched, and said to play no part); the other four keep their names.
+- `EngineEndToEndTests.aRealLeadOnSonnetAsksAndIsAnswered` and `RealClaudeStatusTests` (both gated, not run here)
+  write and remove their hooks with `HookInstaller` directly (the scratch node's build's hook; the built hook), and
+  `ScratchNodes.removeHooks` is gone. `RequestsTests` and `VoiceRuleTests` needed no change.
+- The security document's S3 `Held by:` names the S6 cases (its Step 8 "Tests to write" is empty now); port-map row 55
+  is `ported`. No shared file is edited.
+- Verified: `HooksCommandTests|ServerTests|RequestsTests|VoiceRuleTests|EngineEndToEndTests|NodeWireTests` (100
+  cases), the lints (`HomePathLint` took `buildsName` for a home path kept once: it is a computed name now),
+  `VibeNodeTests|VibeCoreTests|VibePlatformTests` under `vs-heavy` (3389 cases, green), and `HooksCommandTests|ServerTests`
+  under load (24, 3 runs, nothing left behind).
 
 **Done when:** the cases pass on Linux, E9 Step 1 still passes, and row 55 is `ported`.
 

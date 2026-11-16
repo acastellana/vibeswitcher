@@ -724,9 +724,13 @@ The engine's E8: `RestartTests.anAnswerWrittenToTheServersFilesIsNotTakenAfterAR
 `AnswerTests.onlyAPostedQuestionsOwnTimerRunsOut`, `ApprovalCardTests.anApprovalCardDiffsAgainstTheHeadTheVaultRecords`,
 `ApprovalCardTests.anEmptyBaseBranchTakesTheBranchTheLeadStartedOn`,
 `DeliveryTests.aUsersMessageAtRestIsVouchedForOnceAndOnlyForItsOwnProject`,
-`DeliveryTests.aHeldMessagesIdInTheDeliveredRecordDoesntDropIt`.
+`DeliveryTests.aHeldMessagesIdInTheDeliveredRecordDoesntDropIt`. Step 8's `hooks install` through the server (the start
+plan's S6, 2026-11-16): `HooksCommandTests.aSessionsProcessCannotInstallHooks`,
+`HooksCommandTests.aHooksInstallWithNoTerminalIsRefused`, `HooksCommandTests.hooksInstallWritesAsTheAppAndSealsIt`,
+`HooksCommandTests.aNodeRootProgramThatDiffersFromBuildInfoIsNotInstalled`,
+`HooksCommandTests.aChangeInTheBuildsFolderNotAcceptedRefusesTheInstall`.
 
-**Tests to write:** Step 8: `aSessionsProcessCannotInstallHooks`.
+**Tests to write:** none left: Step 8's are under Held by.
 
 ## S4. Session identity
 

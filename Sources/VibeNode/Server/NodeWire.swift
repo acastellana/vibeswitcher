@@ -265,9 +265,11 @@ public enum NodeWire {
     /// missing from `kinds` needs the user's voice, as `Requests.handle` reads it, so it changes state too.
     public static func changesState(_ kind: String) -> Bool { (kinds[kind] ?? .user) == .user && !changesNothing.contains(kind) }
 
-    /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6).
+    /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6; the hooks
+    /// from the start plan's S6).
     public static let taken = ["status", "start", "stop", "lead", "questions", "answer", "hold", "config.held", "config.accept",
-                               "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw"]
+                               "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
+                               "hooks.install", "hooks.remove"]
 
     // MARK: Lines
 

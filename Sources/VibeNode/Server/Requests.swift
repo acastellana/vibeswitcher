@@ -61,6 +61,12 @@ public final class Requests: @unchecked Sendable {
     private var replyOrder: [String] = []
     /// Each request as it is acted on, after the voice, the code and the vault's record (for tests). On `queue`.
     public var acting: (NodeWire.Request) -> Void = { _ in }
+    /// The build's folder (`ServerArguments.nodeRoot`): where `hooks.install` reads the programs it installs; none:
+    /// `hooks.install` is refused.
+    public var nodeRoot: String?
+    /// The home `hooks.install` and `hooks.remove` write in: the server's own (`getpwuid`'s on the node, the scratch home
+    /// on a scratch node).
+    public var home = VibePaths.home
     /// The repository a request's folder is in (`repository(_:)`, git: never on `queue`); a test's instead.
     var repositoryOf: @Sendable (String) -> String = { Requests.repository($0) }
 
@@ -106,7 +112,8 @@ public final class Requests: @unchecked Sendable {
     }
 
     /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
-    public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep"]
+    public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
+                                               "hooks.install", "hooks.remove"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -181,6 +188,7 @@ public final class Requests: @unchecked Sendable {
         case "config.accept": configAccept(request, reply: reply)
         case "base.show": baseShow(request, reply: reply)
         case "base.accept", "base.keep": baseAnswer(request, reply: reply)
+        case "hooks.install", "hooks.remove": hooks(request, reply: reply)
         default: reply(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)")))
         }
     }
@@ -317,6 +325,62 @@ public final class Requests: @unchecked Sendable {
     /// `needs-you`, `working`, …: the glossary's word in kebab case, as `LocalSession.statusWord`.
     public static func statusWord(_ status: SessionStatus) -> String {
         status.word.rawValue.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1-$2", options: .regularExpression).lowercased()
+    }
+
+    // MARK: hooks
+
+    /// `hooks.install` / `hooks.remove` with `agents`, a list of `claude` and `codex` (the start plan's S6, ST-D17): the
+    /// hooks written in the server's home as the app, then sealed (`HooksRequest`), on the engine's read queue (the vault's
+    /// calls block on the host), the programs checked against the host's notes' `binaries` as last asked. The result
+    /// names what was written: `programs` (install) and `configs`.
+    private func hooks(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        let names = request.args?["agents"]?.array?.compactMap(\.string) ?? []
+        let agents = Agent.allCases.filter { agent in names.contains(agent.rawValue) }
+        guard !names.isEmpty, names.allSatisfy({ Agent(rawValue: $0) != nil }) else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs agents, a list of claude and codex")))
+        }
+        let install = request.kind == "hooks.install"
+        guard !install || nodeRoot != nil else {
+            return reply(.init(re: request.id, error: .init(.refused, "this server has no build folder to install the hooks' programs from")))
+        }
+        let (nodeRoot, home, vault) = (self.nodeRoot ?? "", self.home, link.vault)
+        let work = { (binaries: [String: String]?) -> NodeWire.Reply in
+            let hooks = HooksRequest(nodeRoot: nodeRoot, home: home, binaries: binaries, vault: vault)
+            let configs = NodeWire.Value.array(agents.map { .string(hooks.configPath($0)) })
+            if install {
+                switch hooks.install(agents: agents) {
+                case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
+                case .success(let installed):
+                    return .init(re: request.id, result: .object(["programs": .array(installed.programs.map(NodeWire.Value.string)),
+                                                                 "configs": .array(installed.configs.map(NodeWire.Value.string))]))
+                }
+            }
+            switch hooks.remove(agents: agents) {
+            case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
+            case .success: return .init(re: request.id, result: .object(["configs": configs]))
+            }
+        }
+        let note = self.note
+        let said = { (answer: NodeWire.Reply) in
+            note("\(request.kind) \(names.joined(separator: ",")): \(answer.ok ? "done" : answer.error?.message ?? "refused")")
+            reply(answer)
+        }
+        // On `queue`: the notes as last asked.
+        let run = { [weak self] in
+            guard let self else { return }
+            let binaries = self.notes?.notes.binaries
+            if let engine = self.engine {
+                engine.reads.async({ _ in work(binaries) }, then: said)
+            } else {
+                DispatchQueue.global(qos: .userInitiated).async { [queue = self.queue] in
+                    let answer = work(binaries)
+                    queue.async { said(answer) }
+                }
+            }
+        }
+        // The host's notes asked again first: the programs are checked against its `binaries` as it says them now.
+        guard install else { return run() }
+        refreshNotes(run)
     }
 
     // MARK: start

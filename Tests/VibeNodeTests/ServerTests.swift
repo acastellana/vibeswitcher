@@ -111,13 +111,13 @@ struct ServerTests {
         let node = try await ScratchNode(scratch)
         let client = try WireClient(node)
         // Kinds the protocol names that this server doesn't take yet, and kinds no list names (`lead` is taken from E4,
-        // the cards and the lead's questions from E6).
-        for kind in ["hooks.install", "hooks.remove", "build.switch", "shell", "exec", ""] {
+        // the cards and the lead's questions from E6, the hooks from the start plan's S6).
+        for kind in ["build.switch", "shell", "exec", ""] {
             let reply = try #require(WireClient.reply(client.request(kind, args: ["folder": .string("/")])), "\(kind)")
             #expect(reply.ok == false && reply.error?.code == "unknown-kind", "\(kind): \(reply)")
         }
         #expect(client.hello.kinds == NodeWire.taken)
-        #expect(Set(NodeWire.taken) == Set(NodeWire.kinds.keys).subtracting(["hooks.install", "hooks.remove", "build.switch"]))
+        #expect(Set(NodeWire.taken) == Set(NodeWire.kinds.keys).subtracting(["build.switch"]))
         let status = try #require(WireClient.reply(client.request("status", action: nil))?.result)
         #expect(status["accepted"]?.array?.isEmpty == true, "\(status)")
     }

@@ -250,8 +250,10 @@ struct EngineEndToEndTests {
             if trustWritten {
                 do { try RealClaudeStatusTests.trust(repo.resolvingSymlinksInPath().path, in: config, false) } catch { Issue.record("the trust entry stayed: \(error)") }
             }
-            if hooksWritten, (try? ScratchNodes.removeHooks(node, config: config)) != true {
-                Issue.record("the hooks stayed in \(config.path)/settings.json: run hooks remove --agent claude with CLAUDE_CONFIG_DIR set")
+            if hooksWritten {
+                do { try HookInstaller.uninstall(agent: .claude, at: config.appendingPathComponent("settings.json")) } catch {
+                    Issue.record("the hooks stayed in \(config.path)/settings.json: \(error)")
+                }
             }
         }
         try await scratchRepository(repo)
@@ -273,12 +275,13 @@ struct EngineEndToEndTests {
         let link = node.testFolder.appendingPathComponent("claude")
         try FileManager.default.removeItem(at: link)
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: script.path)
-        // Its status hooks (the user's settings' on the user's node, `hooks install`): in the config folder, running this
-        // node's copy of the hook, which writes the lead's state under the node's root (the lead has its
+        // Its status hooks (the user's settings' on the user's node, `hooks install`): in the config folder, written here
+        // with `HookInstaller` (`hooks install` writes the node's own home only, the start plan's ST-D17), running this
+        // node's build's hook, which writes the lead's state under the node's root (the lead has its
         // `VIBESWITCHER_HOME`). Without them the engine never sees the lead between turns, and types nothing into it.
         hooksWritten = true
-        let install = try await node.run(["hooks", "install", "--agent", "claude"], ["CLAUDE_CONFIG_DIR": config.path])
-        try #require(install.status == 0, "hooks install: \(install.output)\(install.errors)")
+        try HookInstaller.install(agent: .claude, at: config.appendingPathComponent("settings.json"),
+                                  hookBinary: node.nodeRoot.appendingPathComponent("bin/vibeswitcher-hook").path)
         trustWritten = true
         try RealClaudeStatusTests.trust(project, in: config, true)
 
@@ -438,24 +441,6 @@ struct EngineEndToEndTests {
             if listed == nil { try await Task.sleep(nanoseconds: 300_000_000) }
         }
         return listed
-    }
-}
-
-extension ScratchNodes {
-    /// `hooks remove --agent claude` on `node`, with `config` as the Claude config folder, from a deferred cleanup (it
-    /// waits, off the pool, for the command line): whether it took them out.
-    static func removeHooks(_ node: ScratchNode, config: URL) throws -> Bool {
-        let process = Process()
-        process.executableURL = commandLine
-        process.arguments = ["hooks", "remove", "--agent", "claude"]
-        process.environment = node.environment(["CLAUDE_CONFIG_DIR": config.path])
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        let deadline = MacTime.real.awake() + 60
-        while process.isRunning, MacTime.real.awake() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        return !process.isRunning && process.terminationStatus == 0
     }
 }
 
