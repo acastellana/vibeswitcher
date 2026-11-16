@@ -287,8 +287,7 @@ struct EngineEndToEndTests {
     /// read): `maxSessions` team sessions at most, and no load or memory hold (the test machine's own load isn't the
     /// case's).
     static func limits(_ node: ScratchNode, maxSessions: Int) throws {
-        try MacLimits(maxSessions: maxSessions, loadThreshold: 1_000_000, memoryPressure: "off", swapOutRate: 0)
-            .save(to: node.root.appendingPathComponent("mac-limits.json"))
+        try node.noLoadHold(maxSessions: maxSessions)
     }
 
     /// A fake's state file, read now.

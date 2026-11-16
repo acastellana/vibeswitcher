@@ -445,6 +445,8 @@ struct RestartTests {
     @Test func aHostRestartHoldsWorkersUntilTheConfigIsAccepted() async throws {
         let (node, repo) = try await hostRestarted(leadBefore: false, serverKnowsFirstLook: false)
         defer { node.stop() }
+        // Refused by the vault alone, never by the machine's load (the case's is the config's, not the room's).
+        try node.noLoadHold()
         let started = try await node.runOnTerminal(["lead", repo.path, "--goal", "plan the work"])
         #expect(started.status == 0 && started.output.contains("the lead started"), "\(started.output)\n\(node.said)")
         let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") })

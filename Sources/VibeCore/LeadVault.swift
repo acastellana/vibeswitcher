@@ -1388,8 +1388,10 @@ extension LeadVault {
                                      sessions: sessions, sessionsKnown: ids != nil, firstLook: firstLook)
             guarded[ConfigSeal.heldKey] = projectHeld
             // The user's accept of a held first look (the card's hashes), sealed with nothing held again: the root's
-            // floor and rails are recorded from then on.
-            if shown != nil, !LeadVaultV2.isLook(shown), home, project, isHeld(root: root) {
+            // floor and rails are recorded from then on. A look that shows nothing (`shown` empty or absent) never
+            // is, even with nothing held: an accept names what its card showed, a card of nothing by a mark (a key no
+            // watched thing has).
+            if let shown, !shown.isEmpty, home, project, isHeld(root: root) {
                 state.firstLookAccepted = (state.firstLookAccepted ?? []).union([own])
             }
             // Sealed, or found as sealed, now: what ran before is seen. A session still running is as new (not quiet).

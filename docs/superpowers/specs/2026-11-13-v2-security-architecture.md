@@ -1003,6 +1003,13 @@ the branch is at. So on Linux, **(call, extended)**:
   (an unreadable `~/.claude.json`) is no baseline at a later look (Task 10e's review, approved by the lead
   2026-11-14). It is kept in the vault's state, so a handover before the first look keeps it; it
   is true when the vault holds no restored secrets (`main.swift` on Linux), false by default (the Mac is unchanged).
+  **(2026-11-16)** Only an accept ends a root's held first look, never a look: the vault ends it only at a check whose
+  `shown` has something in it, so the server's look before `config held` and before a lead start
+  (`checkConfig(root:shown: [:])`, asked with the user's voice but no typed code) leaves it held even when it finds
+  nothing held, and `config accept` sends its card's hashes with a mark no watched thing has
+  (`ConfigHoldStore.acceptMark`), so the accept of a card that showed nothing still ends it (the security follow-ups'
+  item 20). The mark is no secret and proves nothing by itself: what keeps the accept the user's is `config accept`'s
+  typed card (S3).
 - **The user accepts in two steps.** `vibeswitcher config held` lists everything held, each with its change time
   (ctime, which `touch` can't set back), size, hash prefix and, where a previous accept is known, what changed
   (below); a guarded key shows its value (the `test_command` text, the `merge_policy`); the floor shows the values
@@ -1068,7 +1075,11 @@ engine's E4: `lead` refused, no floor seeded); `RestartTests.aHostRestartSaysThe
 `RestartTests.aHandoverKeepsTheServerAndItsLeads`, `EngineStateTests.theSnapshotSaysOfEachThingWhetherItsTheSameChangedOrNew`
 (the engine's E8: the restart path, the two-step accept, the snapshot); `ConfigHoldStoreTests.aSnapshotThisHostsVaultDidntSealNeverSaysTheSame`
 (the security follow-ups' item 18, 2026-11-16: "the same" only from a snapshot the host's vault sealed);
-`ConfigHoldStoreTests.anEarlierSealedSnapshotDoesntSpeakForALaterAccept` (the close-out review: only the last accept's).
+`ConfigHoldStoreTests.anEarlierSealedSnapshotDoesntSpeakForALaterAccept` (the close-out review: only the last accept's);
+`ConfigSealFirstLookTests.aLookThatShowsNothingNeverEndsTheFirstLook`,
+`ConfigHoldStoreTests.onlyAnAcceptEndsAFirstLookThatHoldsNothing`,
+`LeadStartTests.aStartsLookLeavesTheFirstLookHeldWithNothingHeld`, `LeadStartTests.aStartAfterAHoldSealsNothingHeld`
+(the security follow-ups' item 20, 2026-11-16: a look seals nothing and never ends a held first look).
 
 **Tests to write:** none left: E8's are under Held by.
 

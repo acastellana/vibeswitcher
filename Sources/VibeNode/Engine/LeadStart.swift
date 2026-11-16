@@ -329,15 +329,16 @@ extension LeadEngine {
     }
 
     /// Why a vault that holds its first look doesn't start `root`'s lead yet (S7): config held from it, or no head
-    /// recorded for `branch`; nil once both are done. The look is made here first, as `config held` makes it
-    /// (`LeadVaultV2.configLook`), so nothing is sealed and the first look stays held whatever the look finds (the
-    /// security follow-ups' item 20: an accept of a card that showed nothing, `shown: [:]`, would end it with nothing
-    /// held, a home already accepted for another root and a project with nothing watched). The vault holds what it has
-    /// nothing recorded for only once something looked, so a config never looked at isn't taken as accepted; and an
-    /// app's look with no card (`checkConfig(root:)`) would seal everything held that didn't move since (the E6
-    /// review), a change a look held after the first accept among it. Throws when the vault can't be asked.
+    /// recorded for `branch`; nil once both are done. The look is made here first, as `config held` makes it (a card
+    /// that showed nothing, `shown: [:]`), so nothing is sealed and the first look stays held whatever the look finds
+    /// (the security follow-ups' item 20: the vault ends it only for a `shown` with something in it, an accept's hashes
+    /// with `ConfigHoldStore.acceptMark`, never for a look, even with nothing held, a home already accepted for another
+    /// root and a project with nothing watched). The vault holds what it has nothing recorded for only once something
+    /// looked, so a config never looked at isn't taken as accepted; and an app's look with no card
+    /// (`checkConfig(root:)`) would seal everything held that didn't move since (the E6 review), a change a look held
+    /// after the first accept among it. Throws when the vault can't be asked.
     static func firstLookRefusal(vault: LeadVault, root: String, branch: String) throws -> String? {
-        let check = try vault.checkConfig(root: root, shown: LeadVaultV2.configLook)
+        let check = try vault.checkConfig(root: root, shown: [:])
         var held = ConfigSeal.held(in: try vault.guardedRecord(root: root))
         for name in check.held where !held.contains(name) { held.append(name) }
         let head = try vault.head(root: root, branch: branch)

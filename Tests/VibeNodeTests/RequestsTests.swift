@@ -11,9 +11,9 @@ import VibeCore
 struct RequestsTests {
     private let scratch = Scratch()
 
-    /// A peer that is the user's voice under the weaker rule (no cgroup read).
-    private static let user = PeerFacts(pid: 900, uid: getuid(), cgroup: nil, ancestry: [.init(pid: 900, startTicks: 5)],
-                                        terminal: .named("ttypts0"), sessionMarker: false, underRunner: false)
+    /// A peer that is the user's voice under the weaker rule (no cgroup read), on no real process's terminal
+    /// (`CardWorld.user`).
+    private static let user = CardWorld.user
     private static let rule = VoiceRule(mode: .weaker, scopes: [], uid: getuid(), says: "a test's")
 
     /// A link on `stub`, started, and the server's requests on it, whose host shutdown is `shutdown`.

@@ -100,16 +100,17 @@ public enum ConfigHoldStore {
     }
 
     /// What the vault holds for `root` now, as a card shows it. `look`: the vault looks at the config first, as a card
-    /// that showed nothing but a look's own key would (`checkConfig(root:shown: LeadVaultV2.configLook)`), so a fresh
-    /// vault's first look holds what it has nothing recorded for and what changed since the last look is held, while
-    /// nothing is sealed and a held first look stays held (the security follow-ups' item 20: only your accept ends it):
-    /// an app's look with no card (`checkConfig(root:)`) would seal everything held that didn't move since, as an older
-    /// app's Accept does (the E6 review), and the app's `ConfigHolds.look` only reads the record. A look the vault refuses is only
+    /// that showed nothing (`checkConfig(root:shown: [:])`), so a fresh vault's first look holds what it has nothing
+    /// recorded for and what changed since the last look is held, while nothing is sealed and a held first look stays
+    /// held (the security follow-ups' item 20: a `shown` with nothing in it never ends it, only `accept`'s marked hashes
+    /// do): an app's look with no card (`checkConfig(root:)`) would seal everything held that didn't move since, as an
+    /// older app's Accept does (the E6 review), and the app's `ConfigHolds.look` only reads the record. A look the vault
+    /// refuses is only
     /// said. `snapshot`: the project's last accepts (E8's `AcceptedSnapshot`), which say of each held thing and guard rail
     /// whether it's the same, changed or new since. Fails when the record can't be read.
     public static func held(root: String, vault: LeadVault, home: String, look: Bool = true,
                             snapshot: AcceptedSnapshot.Project? = nil) -> Result<Shown, Error> {
-        if look { _ = try? vault.checkConfig(root: root, shown: LeadVaultV2.configLook) }
+        if look { _ = try? vault.checkConfig(root: root, shown: [:]) }
         let record: [String: String]?
         do { record = try vault.guardedRecord(root: root) } catch { return .failure(error) }
         let names = ConfigSeal.held(in: record)
@@ -146,6 +147,10 @@ public enum ConfigHoldStore {
         }
     }
 
+    /// The key an accept adds to the hashes its card showed (`accept`): a vault mark (`ConfigSeal.keyPrefix` then `#`),
+    /// so no watched thing's, which the vault's judge never seals or compares; it makes an accept's `shown` never empty.
+    static let acceptMark = ConfigSeal.keyPrefix + "#accept"
+
     /// What an accept did.
     public enum Accepted: Equatable, Sendable {
         /// Sealed what the card showed (the names the vault sealed anew, else the card's), then recorded the floor (the
@@ -160,10 +165,12 @@ public enum ConfigHoldStore {
     /// proposed as the card showed them (`setReviewFloor(onlyIfUnset: true)`, which the vault refuses while the first
     /// look still holds). Then the snapshot (`snapshotRoot`, E8's `AcceptedSnapshot`) keeps what the vault records now of
     /// the watched things, the rails' values and the floor the card showed, with the vault's seal of them: a diff aid for
-    /// the next `config held`, not written when nothing was sealed. Fails when the vault can't be asked.
+    /// the next `config held`, not written when nothing was sealed. The hashes go with `acceptMark`, so the vault tells
+    /// this accept from `held`'s look even for a card that showed nothing (the look's `shown` is empty, and never ends
+    /// the first-look hold). Fails when the vault can't be asked.
     public static func accept(_ shown: Shown, root: String, vault: LeadVault, snapshotRoot: URL? = nil) -> Result<Accepted, Error> {
         do {
-            let check = try vault.checkConfig(root: root, shown: shown.hashes)
+            let check = try vault.checkConfig(root: root, shown: shown.hashes.merging([acceptMark: "1"]) { first, _ in first })
             guard check.held.isEmpty else { return .success(.changedSince(held: check.held)) }
             if !shown.rails.isEmpty { try vault.setGuardedSettings(shown.rails, root: root) }
             var floor: LeadReviewFloor?

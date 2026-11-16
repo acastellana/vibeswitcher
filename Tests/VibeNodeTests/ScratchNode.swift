@@ -291,6 +291,15 @@ final class ScratchNode: @unchecked Sendable {
     /// The host's sessions now.
     func sessions() throws -> [HostSession] { try HostCall.sessions(socket: socket, appKey: nil) }
 
+    /// The machine's limits under the node's root (`mac-limits.json`, which the leads' tool servers and the room watch
+    /// read at each call): `maxSessions` team sessions at most, and no load or memory hold. A case that starts a
+    /// worker or a verifier and isn't about the machine's room sets it: the test machine's own load isn't the case's
+    /// (a CI runner's 4 cores under the suite run past twice their count, and `start_worker` refuses there).
+    func noLoadHold(maxSessions: Int = MacLimits.defaultMaxSessions) throws {
+        try MacLimits(maxSessions: maxSessions, loadThreshold: 1_000_000, memoryPressure: "off", swapOutRate: 0)
+            .save(to: root.appendingPathComponent("mac-limits.json"))
+    }
+
     // MARK: The build folder and the stand-ins
 
     /// The built products this node's `bin/` links to.

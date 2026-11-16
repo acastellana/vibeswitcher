@@ -368,6 +368,8 @@ struct ServerTests {
     /// resolved `claude`, not what a presets file under the node's root names.
     @Test func aStopWhileALeadSpawnsStillEndsTheHost() async throws {
         let node = try await ScratchNode(scratch)
+        // Its workers start whatever the machine's load (the case's is stop's, not the room's).
+        try node.noLoadHold()
         let repo = node.root.appendingPathComponent("repo")
         try await scratchRepository(repo)
         // A presets file a worker could write, naming another Claude command: never read on Linux.

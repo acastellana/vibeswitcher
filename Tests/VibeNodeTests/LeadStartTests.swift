@@ -751,7 +751,7 @@ struct LeadStartTests {
         let world = try await world(holdsFirstLook: true, firstLook: true)
         defer { world.stop() }
         let vault = world.host.vault
-        _ = try vault.checkConfig(root: world.repo, shown: LeadVaultV2.configLook)
+        _ = try vault.checkConfig(root: world.repo, shown: [:])
         let card = ConfigSeal.heldHashes(in: try vault.guardedRecord(root: world.repo))
         // A home file changes after the card was drawn: its accept seals the project's, and your home stays held.
         let file = world.host.home.appendingPathComponent(".claude/CLAUDE.md")
@@ -763,7 +763,7 @@ struct LeadStartTests {
         let other = world.host.folder.appendingPathComponent("other", isDirectory: true)
         try await scratchRepository(other)
         let otherRoot = other.resolvingSymlinksInPath().path
-        _ = try vault.checkConfig(root: otherRoot, shown: LeadVaultV2.configLook)
+        _ = try vault.checkConfig(root: otherRoot, shown: [:])
         let otherCard = ConfigSeal.heldHashes(in: try vault.guardedRecord(root: otherRoot))
         try #require(try vault.checkConfig(root: otherRoot, shown: otherCard).held.isEmpty)
         let floor = LeadReviewFloor.starting(from: LeadWorkflow())
@@ -775,8 +775,8 @@ struct LeadStartTests {
         #expect(why.contains("base accept") && !why.contains("config held"), "\(why)")
         #expect(try vault.setReviewFloor(floor, root: world.repo, onlyIfUnset: true) == nil)
         #expect(try vault.reviewFloor(root: world.repo) == nil)
-        // Your accept of the card that showed nothing ends it.
-        #expect(try vault.checkConfig(root: world.repo, shown: [:]).held.isEmpty)
+        // Your accept of the card that showed nothing ends it (`config accept` sends its mark).
+        #expect(try vault.checkConfig(root: world.repo, shown: [ConfigHoldStore.acceptMark: "1"]).held.isEmpty)
         #expect(try vault.setReviewFloor(floor, root: world.repo, onlyIfUnset: true) == floor)
     }
 
