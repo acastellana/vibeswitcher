@@ -594,10 +594,13 @@ forged entry naming the action never hides the "accepted with no journal entry" 
 **(call)** **The command line checks the server it reached**: on Linux, the listener (`SO_PEERCRED` on the client's
 end) must be non-dumpable (`/proc/<pid>/fd` is root's), in the node's unit's cgroup (read from `/proc/<pid>/cgroup`,
 not by running `systemctl` from PATH), and a child of the unit's `MainPID` (read with `/usr/bin/systemctl` by its
-absolute path). A session's program is a child of the host too, but it is dumpable, so it fails the first check, and a
-program a worker starts with `spawn` is refused before that: on Linux the user's host takes `spawn` only from the app
-and from a session holding the lead role (S2). A worker that restarted the unit into its own server passes: that is
-T3's route.
+absolute path), in that process's POSIX session (`getsid`). A session's program is a child of the host too, and being
+dumpable is no proof (any process can make itself non-dumpable, `PR_SET_DUMPABLE`: a session's `claude` a worker
+ptraced where no Yama stops it, S11 item 6, or replaced, S11 item 8). **(2026-11-16)** It fails the session check: the
+host starts each session's program in a session of its own (`PTYSpawn`, `setsid`) and its server child in the host's
+(`ServerChild`, a group of its own only), and a session leader can never leave its session. A program a worker starts
+with `spawn` is refused before that: on Linux the user's host takes `spawn` only from the app and from a session holding
+the lead role (S2). A worker that restarted the unit into its own server passes: that is T3's route.
 
 **Why.** Until stage 4's signed approvals there is no key the user holds that a worker can't read, so the user's voice
 is told from the process. On the Mac the same answer comes from the app's window, which a worker can't drive without
@@ -616,6 +619,10 @@ process that a process of the user can't change.
 - A worker can replace the command line itself: `~/.vibeswitcher/v2/builds/<commit>/bin/vibeswitcher` is the user's
   file, and running it by absolute path (the bootstrap path's machine steps) only defeats PATH.
 - A worker that restarted the unit with its own files is the server, and the check above passes.
+- The host's other children in its own session: its parsers (the host's code, non-dumpable from their exec, S6) and
+  the `/bin/sh` that finds where the host's orphans go (dumpable, alive for the few milliseconds of its probe). A
+  worker that took one over in that time (ptrace, where no Yama stops it) would pass. The check reads the facts by the
+  listener's pid, after `SO_PEERCRED`: no start ticks are compared.
 - Under the weaker rule (no user systemd), a session's process that left the host's tree, unset its marker and holds
   a terminal of its own (`script`, a pty it opened and made its controlling terminal) passes as the user's voice.
 - The text of the lead's questions: a turned lead asks what it likes. Only the card's facts are the engine's.
@@ -636,6 +643,7 @@ Acceptable only on VibeSwitcher's own repository, with interop off, until stage 
 `ServerTests.aRequestFromAnotherSenderOnTheServersSocketIsRefused`, `ServerTests.theServersSocketIsTheUsersAlone`,
 `ServerTests.aStopFromTheUserEndsEverySessionThenTheHost`, `ServerTests.twoScratchNodesInOneRunUseTheirOwnSockets`,
 `ServerCheckTests.theCommandLineRefusesAServerThatIsntTheHostsChild`, `ServerCheckTests.theCommandLineRefusesADumpableListener`,
+`ServerCheckTests.theCommandLineRefusesAHostsChildInASessionOfItsOwn`,
 `ServerCheckTests.theCommandLineWithNoNodeSaysSoNotConnectionRefused`, `ServerCheckTests.aScratchNodeIsNamedOnStderr`,
 `ServerCheckTests.aScratchHomeThatIsTheAccountsOwnGetsTheNodesCheck`, `ServerCheckTests.aListenersCgroupIsPrintedInert`,
 `RequestsTests.aStateChangeBeforeTheWelcomeIsAnsweredNotYet`, `RequestsTests.aStopTheHostRefusesIsRefusedAndRequestsAreTakenAgain`,
@@ -1769,7 +1777,7 @@ a worker that tries; every row is refused or caught for a worker that slips unle
 | T6 | worker | write over a running tool server's `vibeswitcher-mcp` in its commit's folder; its `BinaryWatch` switches to it, or its keeper restarts it | works, caught at the seal's next look | installs never write a running commit's folder; the seal watches the install folder | sandbox (install folder read-only); keeper's copy (S12 item 14) |
 | T7 | worker | replace the hook, the agents' settings, `claude`, shell startup files, a PATH folder | works, caught at the seal's next look (swap-and-restore missed) | config seal holds workers and merges | sandbox |
 | T8 | worker | bind its own socket at the host's path | fools sessions for seconds; the server never sees it | host binds the path again (folder watch); server's connector | sandbox (no `~/.vibeswitcher`) |
-| T9 | worker | bind its own socket at the server's path, directly or from a program it had the host spawn | refused † | the command line's check (non-dumpable listener, the unit's cgroup, child of `MainPID`); `spawn` only from the app and a lead | holds †, short of T3 |
+| T9 | worker | bind its own socket at the server's path, directly or from a program it had the host spawn | refused † | the command line's check (non-dumpable listener, the unit's cgroup, child of `MainPID` in its session); `spawn` only from the app and a lead | holds †, short of T3 |
 | T10 | worker | escape its session (double fork, `setsid`, `systemd-run`, `at`, cron) and send `answer`, `config accept` | refused | the cgroup rule (S3) | holds; signed approvals |
 | T11 | worker | drive the user's shell or command line (ptrace, `/dev/pts`, PATH, aliases) | works | absolute path (PATH only); journal echo | sandbox; signed approvals |
 | T12 | worker | replace the command line's binary | works | seal watches the builds folder (shown through the command line itself) | sandbox; signed releases |

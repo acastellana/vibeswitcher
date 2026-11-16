@@ -70,6 +70,42 @@ struct ServerCheckTests {
         #expect(unheld.status == 77 && unheld.errors.contains("no process holds the scratch node's lock"), "\(unheld.errors)")
     }
 
+    /// S3: a child of the node's host that is non-dumpable but in a session of its own is refused: what a session's
+    /// program is (the host starts each with `setsid`), however it made itself non-dumpable (`PR_SET_DUMPABLE`, after
+    /// a worker ptraced it or replaced its binary). Here the host is the scratch lock's holder and the listener the
+    /// built server, started under it by `setsid`.
+    @Test func theCommandLineRefusesAHostsChildInASessionOfItsOwn() async throws {
+        let (root, environment) = try self.root("vss")
+        let lock = root.appendingPathComponent(NodeCheck.scratchLock).path
+        FileManager.default.createFile(atPath: lock, contents: nil)
+        guard let (serverEnd, testEnd) = Platform.Sockets.pair(type: Platform.Sockets.seqpacket) else { throw CancellationError() }
+        defer { Sys.close(testEnd) }
+        let holder = Process()
+        holder.executableURL = URL(fileURLWithPath: "/usr/bin/flock")
+        // `-o`: the lock stays flock's own; its child, `setsid`'s server, is in a session of its own (flock's child
+        // leads no group, so `setsid` execs it in place: a child of the lock's holder).
+        holder.arguments = ["-o", lock, "/usr/bin/setsid", builtProducts.appendingPathComponent("vibeswitcher-server").path,
+                            "--host-connector", "0", "--host-socket", root.appendingPathComponent("host.sock").path, "--root", root.path]
+        holder.environment = ["PATH": "/usr/bin:/bin", "HOME": root.path]
+        holder.standardInput = FileHandle(fileDescriptor: serverEnd, closeOnDealloc: false)
+        holder.standardOutput = FileHandle.nullDevice
+        holder.standardError = FileHandle.nullDevice
+        try holder.run()
+        Sys.close(serverEnd)
+        defer {
+            for child in Platform.Processes.children(holder.processIdentifier) { kill(child, SIGKILL) }
+            kill(holder.processIdentifier, SIGKILL)
+        }
+        try #require(await eventually(timeout: 30) { Platform.Processes.lockHolder(path: lock) == holder.processIdentifier })
+        try #require(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: root.appendingPathComponent("v2/server.sock").path) })
+        let server = try #require(Platform.Processes.children(holder.processIdentifier).first)
+        #expect(Platform.Processes.isDumpable(server) == false)
+        #expect(getsid(server) == server && getsid(server) != getsid(holder.processIdentifier))
+        let ran = try await run(commandLine, ["status"], environment: environment)
+        #expect(ran.status == 77, "\(ran.output)\(ran.errors)")
+        #expect(ran.errors.contains("isn't in the node's host's session"), "\(ran.errors)")
+    }
+
     @Test func theCommandLineWithNoNodeSaysSoNotConnectionRefused() async throws {
         let (root, environment) = try self.root("vsx")
         for arguments in [["status"], ["stop"], ["start", "--interop-is-on"]] {
@@ -117,28 +153,38 @@ struct ServerCheckTests {
         #expect(NodeCheck.mode(vibeswitcherHome: "/home/someone/.build/scratchhome", accountHome: account) == .scratch(root: "/home/someone/.build/scratchhome"))
         // The node's check: non-dumpable, in the node's unit, a child of the unit's main process.
         let unit = ["0::/user.slice/user-1000.slice/user@1000.service/app.slice/vibeswitcher-node.service"]
-        let good = NodeCheck.Listener(pid: 50, dumpable: false, parent: 40, cgroup: unit)
-        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: 40) == nil)
-        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: 41) != nil)
-        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: nil) != nil)
+        let good = NodeCheck.Listener(pid: 50, dumpable: false, parent: 40, cgroup: unit, session: 40)
+        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: 40, parentSession: 40) == nil)
+        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: 41, parentSession: 41) != nil)
+        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: nil, parentSession: nil) != nil)
         var outside = good
         outside.cgroup = ["0::/init.scope"]
-        #expect(NodeCheck.refusal(outside, mode: .node, expectedParent: 40)?.contains("isn't in vibeswitcher-node.service") == true)
+        #expect(NodeCheck.refusal(outside, mode: .node, expectedParent: 40, parentSession: 40)?.contains("isn't in vibeswitcher-node.service") == true)
         // A scratch node doesn't ask the cgroup; both ask dumpable and the parent.
-        #expect(NodeCheck.refusal(outside, mode: .scratch(root: "/srv/x"), expectedParent: 40) == nil)
+        #expect(NodeCheck.refusal(outside, mode: .scratch(root: "/srv/x"), expectedParent: 40, parentSession: 40) == nil)
         var dumpable = good
         dumpable.dumpable = true
-        #expect(NodeCheck.refusal(dumpable, mode: .scratch(root: "/srv/x"), expectedParent: 40) != nil)
+        #expect(NodeCheck.refusal(dumpable, mode: .scratch(root: "/srv/x"), expectedParent: 40, parentSession: 40) != nil)
         dumpable.dumpable = nil
-        #expect(NodeCheck.refusal(dumpable, mode: .node, expectedParent: 40) != nil)
+        #expect(NodeCheck.refusal(dumpable, mode: .node, expectedParent: 40, parentSession: 40) != nil)
+        // A child of the host in a session of its own (a session's program, non-dumpable by its own prctl), or whose
+        // session or the host's can't be read: refused, on both.
+        var session = good
+        session.session = 50
+        for mode in [NodeCheck.Mode.node, .scratch(root: "/srv/x")] {
+            #expect(NodeCheck.refusal(session, mode: mode, expectedParent: 40, parentSession: 40)?.contains("isn't in the node's host's session") == true)
+            #expect(NodeCheck.refusal(good, mode: mode, expectedParent: 40, parentSession: nil) != nil)
+        }
+        session.session = nil
+        #expect(NodeCheck.refusal(session, mode: .node, expectedParent: 40, parentSession: 40) != nil)
     }
 
     @Test func aListenersCgroupIsPrintedInert() {
         // Any process of the user's can make a cgroup under its manager named as it likes and move into it: the name
         // the refusal prints is the listener's, so it acts on no terminal.
         let named = "/user.slice/user-1000.slice/user@1000.service/app.slice/\u{1B}]0;owned\u{07}\u{1B}[2J\u{202E}x.scope"
-        let listener = NodeCheck.Listener(pid: 50, dumpable: false, parent: 40, cgroup: ["0::" + named])
-        let refusal = NodeCheck.refusal(listener, mode: .node, expectedParent: 40)
+        let listener = NodeCheck.Listener(pid: 50, dumpable: false, parent: 40, cgroup: ["0::" + named], session: 40)
+        let refusal = NodeCheck.refusal(listener, mode: .node, expectedParent: 40, parentSession: 40)
         #expect(refusal?.contains("isn't in vibeswitcher-node.service") == true, "\(String(describing: refusal))")
         #expect(refusal?.unicodeScalars.contains { $0 == "\u{1B}" || $0 == "\u{07}" || $0 == "\u{202E}" } == false,
                 "\(String(describing: refusal?.debugDescription))")
