@@ -17,22 +17,31 @@
 #
 # Exit codes: 0 installed; 64 usage; 65 your checkout isn't clean; 66 provenance (this script, or a library beside it,
 # isn't the expected commit's); 67 COMMIT isn't on v2 or CI didn't pass it; 68 the toolchain; 69 the linked-library
-# check; 1 anything else (a failed fetch, a failed build, install-record's refusal). Each refusal is one line on stderr
-# naming what failed. Every local refusal comes before any network call, and every refusal before any build.
+# check; 1 anything else (another install running on the prefix, COMMIT installed already, a failed fetch, a failed
+# build, install-record's refusal). Each refusal is one line on stderr naming what failed. Every local refusal comes
+# before any network call, and every refusal before any build. One install runs at a time on a prefix (a lock on it).
 #
-# What it trusts (ST-D9): nothing in --repo, nothing in your environment or your git and gh configuration. Every git and
-# gh runs under `env -i`; COMMIT and v2 are fetched from the constant repository below, never from your `origin`.
-# Before it sources anything, it checks its own bytes and those of lib/scratch.sh and lib/swift-jobs.sh beside it
-# against the expected commit's blobs: COMMIT on the first install; once <prefix>/current exists, the commit
-# current/build-info names, and it then runs only as <prefix>/current/Resources/install-node.sh. So a change to this
-# script takes effect one install later: the install after the one that installed it.
+# What it trusts (ST-D9): nothing in --repo, and nothing in your git and gh configuration: every git and gh runs under
+# `env -i`, gh with a configuration folder no process of yours can make; COMMIT and v2 are fetched from the constant
+# repository below, never from your `origin`. Before it sources anything, it checks its own bytes and those of
+# lib/scratch.sh and lib/swift-jobs.sh beside it against the expected commit's blobs, and it sources the blob, never the
+# file: COMMIT on the first install; once <prefix>/current exists, the commit current/build-info names, and it then runs
+# only as <prefix>/current/Resources/install-node.sh. So a change to this script takes effect one install later: the
+# install after the one that installed it.
+# It does trust the environment it is started with: bash runs what that environment tells it to (exported functions,
+# SHELLOPTS, PS4, BASH_ENV, LD_PRELOAD) before this script's first line. Run it as
+#   /usr/bin/env -i HOME=<home> PATH=/usr/bin:/bin /bin/bash <its absolute path> COMMIT …
+# Nor does it hold off a worker live while it runs: the scratch checkout, its vs-heavy, the fresh caches and the products
+# are the user's to write until they are copied and recorded (the security document's S9 and S11). Run it with no team
+# running; the checkout and the products are checked again before the layout, which catches a change left in place.
 #
 # At its end it prints that the seal holds every team until `vs config accept` (the builds folder changed, ST-D23).
 
 # The whole script is one function, read whole before it runs: bash reads a script as it goes, so a file changed
 # under a running install would otherwise change what runs next.
 install_node_main() {
-    # Nothing from the caller's shell shapes a command: functions it exported, its PATH, its IFS.
+    # What the caller's shell left that would shape a command: functions it exported, its PATH, its IFS. (Not all of
+    # it: an exported `local` or `builtin`, or SHELLOPTS, runs before this; the header says how to run it.)
     local name
     for name in $(builtin compgen -A function); do
         case $name in
@@ -59,7 +68,7 @@ install_node_main() {
     local early="" early_ours=0
     # fail CODE TEXT: TEXT on stderr, the early folder removed while on_exit can't yet, exit CODE.
     fail() {
-        printf 'install-node: %s\n' "$2" >&2
+        printf 'install-node: %s\n' "${2//$'\n'/ }" >&2
         if (( early_ours )) && [[ -n $early ]]; then /bin/rm -rf -- "$early"; fi
         exit "$1"
     }
@@ -81,7 +90,7 @@ install_node_main() {
                     --test-products) test_products=$2 ;;
                 esac
                 shift 2 ;;
-            -h|--help) /usr/bin/sed -n '2,24p' "${BASH_SOURCE[0]}" | /usr/bin/sed 's/^# \{0,1\}//'; exit 0 ;;
+            -h|--help) /usr/bin/sed -n '2,38p' "${BASH_SOURCE[0]}" | /usr/bin/sed 's/^# \{0,1\}//'; exit 0 ;;
             -*) fail 64 "unknown option $1" ;;
             *) [[ -z $commit ]] || fail 64 "one COMMIT only (also given: $1)"; commit=$1; shift ;;
         esac
@@ -117,8 +126,9 @@ install_node_main() {
     fi
 
     # Every git: nothing from the caller's environment, the system's or the user's config, replace refs, hooks or the
-    # fsmonitor; https only (file:// too under --test-origin). HOME is the scratch folder's once there is one.
-    local git_home=/nonexistent
+    # fsmonitor; https only (file:// too under --test-origin). HOME is a folder no process of the user's can make, so
+    # neither git's ~/.config/git (attributes, ignore) nor curl's ~/.netrc is read.
+    local -r git_home=/nonexistent
     local git_test=()
     [[ -z $test_origin ]] || git_test=(-c protocol.file.allow=always)
     git_run() {
@@ -170,7 +180,24 @@ install_node_main() {
         [[ -z $found ]] || fail 68 "the user can write the toolchain $toolchain: $found"
         swift=$toolchain/usr/bin/swift
         [[ -f $swift && -x $swift ]] || fail 68 "the toolchain $toolchain has no usr/bin/swift"
+    else
+        # --test-products stands for the build: checked with the local refusals.
+        [[ -f $test_products/swift-version ]] || fail 64 "--test-products $test_products has no swift-version"
+        for name in "${products[@]}"; do
+            [[ -f $test_products/$name && ! -L $test_products/$name ]] \
+                || fail 69 "$name: $test_products/$name isn't a regular file"
+        done
     fi
+
+    # One install at a time on the prefix: the staging folder and current.new have fixed names. The lock is on the
+    # prefix folder itself (no file of its own in the builds folder), held by this shell's descriptor until it exits.
+    local -r final=$prefix/$commit
+    local -r partial=$final.partial
+    /bin/mkdir -p -- "$prefix" || fail 1 "can't make $prefix"
+    local lock
+    exec {lock}< "$prefix" || fail 1 "can't open $prefix"
+    /usr/bin/flock -n "$lock" || fail 1 "another install is running on $prefix: try again once it has ended"
+    [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
 
     # Once a build is installed, only its copy of this script installs the next (ST-D9).
     local current_commit=""
@@ -192,8 +219,6 @@ install_node_main() {
     # --- 4. A fresh repository, and the fetch ---------------------------------------------------------------------
     early=$(/usr/bin/mktemp -d /tmp/install-node-early.XXXXXX) || fail 1 "can't make a scratch folder under /tmp"
     early_ours=1
-    /bin/mkdir -m 700 "$early/home" "$early/gh" "$early/lib" || fail 1 "can't make folders in $early"
-    git_home=$early/home
     local -r fresh=$early/repo
     git_run init -q --template= "$fresh" || fail 1 "git init $fresh failed"
 
@@ -201,8 +226,10 @@ install_node_main() {
     local token
     token=$(/usr/bin/env -i HOME="$home" PATH=/usr/bin:/bin "$gh" auth token -h github.com 2> /dev/null) || token=""
     [[ -n $token ]] || fail 1 "gh has no token for github.com (the bootstrap path's M2: gh auth login)"
+    # HOME and GH_CONFIG_DIR: a folder no process of the user's can make (inside root's /), so no config.yml (an
+    # http_unix_socket that would answer the CI check) is read; gh 2.45 runs `api` and `run list` without one.
     gh_run() {
-        /usr/bin/env -i HOME="$early/home" PATH=/usr/bin:/bin GH_CONFIG_DIR="$early/gh" GH_TOKEN="$token" \
+        /usr/bin/env -i HOME=/nonexistent PATH=/usr/bin:/bin GH_CONFIG_DIR=/nonexistent GH_TOKEN="$token" \
             GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 "$gh" "$@"
     }
 
@@ -216,7 +243,7 @@ install_node_main() {
     fi
     fetch_git() {
         /usr/bin/env -i HOME="$git_home" PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-            GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GH_CONFIG_DIR="$early/gh" GH_TOKEN="$token" /usr/bin/git \
+            GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GH_CONFIG_DIR=/nonexistent GH_TOKEN="$token" /usr/bin/git \
             -c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.allow=never -c protocol.https.allow=always \
             ${git_test[@]+"${git_test[@]}"} ${fetch[@]+"${fetch[@]}"} -C "$fresh" fetch -q --no-tags "$url" "$@"
     }
@@ -228,40 +255,48 @@ install_node_main() {
     fi
 
     # --- 5. Provenance: this script and its libraries are the expected commit's, byte for byte (ST-D9) -------------
-    local expected=${current_commit:-$commit} self here
+    local expected=${current_commit:-$commit} self here blob scratch_lib=""
     self=$(/usr/bin/realpath -e -- "${BASH_SOURCE[0]}") || fail 66 "can't resolve this script's path"
     here=${self%/*}
-    git_run -C "$fresh" cat-file blob "$expected:scripts/install-node.sh" > "$early/install-node.sh" 2> /dev/null \
-        || fail 66 "$expected has no scripts/install-node.sh"
-    /usr/bin/cmp -s -- "$self" "$early/install-node.sh" \
+    # blob PATH: the expected commit's PATH, byte for byte (the x keeps its last line ends), in $blob; held in memory,
+    # never in a file another process could change between the comparison and the source.
+    read_blob() {
+        blob=$(git_run -C "$fresh" cat-file blob "$expected:$1" 2> /dev/null && printf x) || return 1
+        blob=${blob%x}
+    }
+    read_blob scripts/install-node.sh || fail 66 "$expected has no scripts/install-node.sh"
+    /usr/bin/cmp -s -- "$self" <(printf '%s' "$blob") \
         || fail 66 "$self isn't $expected's scripts/install-node.sh: run the copy that commit holds"
     for name in scratch.sh swift-jobs.sh; do
-        git_run -C "$fresh" cat-file blob "$expected:scripts/lib/$name" > "$early/lib/$name" 2> /dev/null \
-            || fail 66 "$expected has no scripts/lib/$name"
-        /usr/bin/cmp -s -- "$here/lib/$name" "$early/lib/$name" \
+        read_blob "scripts/lib/$name" || fail 66 "$expected has no scripts/lib/$name"
+        /usr/bin/cmp -s -- "$here/lib/$name" <(printf '%s' "$blob") \
             || fail 66 "$here/lib/$name isn't $expected's scripts/lib/$name: run the copy that commit holds"
+        [[ $name != scratch.sh ]] || scratch_lib=$blob
     done
-    # The verified copies, never the files beside this script.
+    # The verified blob, through a pipe: never the file beside this script, nor a copy of it on disk.
     # shellcheck source=lib/scratch.sh
-    source "$early/lib/scratch.sh" || fail 1 "can't read $early/lib/scratch.sh"
+    source <(printf '%s' "$scratch_lib") || fail 1 "can't read $expected's scripts/lib/scratch.sh"
     on_exit "/bin/rm -rf -- '$early'"
     early_ours=0
     scratch_tmpdir install-node
     /bin/mkdir -m 700 "$tool_scratch/home" || fail 1 "can't make $tool_scratch/home"
+    # What every swift run gets, and nothing else: the scratch HOME, the toolchain's PATH, and the TMPDIR scratch_tmpdir
+    # set (passed on by name: only the helper sets it), where SwiftPM's leftovers are removed with the scratch folder.
+    local tool_env=(HOME="$tool_scratch/home" PATH="$toolchain/usr/bin:/usr/bin:/bin")
+    name=TMPDIR
+    tool_env+=("$name=${!name}")
 
     # The toolchain says the commit's .swift-version.
     local swift_version_file
     if [[ -z $test_products ]]; then
         local wanted said
         wanted=$(git_run -C "$fresh" cat-file blob "$commit:.swift-version" 2> /dev/null) || fail 68 "$commit has no .swift-version"
-        said=$(/usr/bin/env -i HOME="$tool_scratch/home" PATH="$toolchain/usr/bin:/usr/bin:/bin" "$swift" --version 2> /dev/null) \
-            || fail 68 "$swift --version failed"
+        said=$(/usr/bin/env -i "${tool_env[@]}" "$swift" --version 2> /dev/null) || fail 68 "$swift --version failed"
         [[ $said == *"Swift version $wanted "* ]] || fail 68 "the toolchain $toolchain isn't Swift $wanted (the commit's .swift-version): $said"
         swift_version_file=$tool_scratch/swift-version
         printf '%s\n' "$said" > "$swift_version_file" || fail 1 "can't write $swift_version_file"
     else
         swift_version_file=$test_products/swift-version
-        [[ -f $swift_version_file ]] || fail 64 "--test-products $test_products has no swift-version"
     fi
 
     # --- 6. On v2, and both runners passed (ST-D10) ------------------------------------------------------------------
@@ -301,19 +336,21 @@ install_node_main() {
             -Xswiftc -no-toolchain-stdlib-rpath --only-use-versions-from-resolved-file --package-path "$src"
             --scratch-path "$tool_scratch/build" --cache-path "$tool_scratch/cache"
             --config-path "$tool_scratch/config" --security-path "$tool_scratch/security")
-        local unset_names=()
+        # vs-heavy gets only what it needs: PATH, the account's HOME (where it reads the slots' count), TMPDIR, and the
+        # run's VIBESWITCHER_TEST_LOCK* (under a holder it takes no second slot). The build gets only tool_env, and -j
+        # from the VS_HEAVY_CORES vs-heavy sets.
+        local heavy_env=(PATH=/usr/bin:/bin HOME="$home")
         for name in $(builtin compgen -e); do
             case $name in
-                TMPDIR|VIBESWITCHER_TEST_LOCK*|VS_HEAVY_CORES) ;;
-                *) unset_names+=(-u "$name") ;;
+                TMPDIR|VIBESWITCHER_TEST_LOCK*) heavy_env+=("$name=${!name}") ;;
             esac
         done
-        "$src/Resources/bin/vs-heavy" --as scripts/install-node.sh /usr/bin/env ${unset_names[@]+"${unset_names[@]}"} \
-            HOME="$tool_scratch/home" PATH="$toolchain/usr/bin:/usr/bin:/bin" \
-            /bin/bash -c '"$0" build "$@" ${VS_HEAVY_CORES:+-j "$VS_HEAVY_CORES"}' "$swift" "${flags[@]}" \
+        /usr/bin/env -i "${heavy_env[@]}" "$src/Resources/bin/vs-heavy" --as scripts/install-node.sh /bin/bash -c '
+            cores=${VS_HEAVY_CORES:-}
+            exec /usr/bin/env -i "$1" "$2" "$3" "$4" build "${@:5}" ${cores:+-j "$cores"}' \
+            install-node "${tool_env[@]}" "$swift" "${flags[@]}" \
             || fail 1 "the build of $commit failed"
-        bin=$(/usr/bin/env -i HOME="$tool_scratch/home" PATH="$toolchain/usr/bin:/usr/bin:/bin" \
-            "$swift" build --show-bin-path "${flags[@]}" 2> /dev/null | /usr/bin/tail -n 1) \
+        bin=$(/usr/bin/env -i "${tool_env[@]}" "$swift" build --show-bin-path "${flags[@]}" 2> /dev/null | /usr/bin/tail -n 1) \
             || fail 1 "can't find the build's products"
     else
         bin=$test_products
@@ -322,7 +359,8 @@ install_node_main() {
     # --- 9. The linked-library check (ST-D12) -------------------------------------------------------------------------
     local writable
     writable=$(root_only "$interpreter") || fail 69 "the interpreter $interpreter isn't root's alone: $writable"
-    local product file headers dynamic line lib listing target
+    local product file headers dynamic line lib listing target needed missing
+    local -A product_sha=()
     for product in "${products[@]}"; do
         file=$bin/$product
         [[ -f $file && ! -L $file ]] || fail 69 "$product: $file isn't a regular file"
@@ -340,13 +378,21 @@ install_node_main() {
                     fail 69 "$product: ${line%%)*} ${lib%\]}, in $file" ;;
             esac
         done <<< "$dynamic"
+        needed=" "
         while IFS= read -r line; do
             [[ $line == *"(NEEDED)"* ]] || continue
             lib=${line#*\[}
             lib=${lib%\]}
             [[ $lib != */* ]] || fail 69 "$product: NEEDED $lib names a path, in $file"
             [[ $allowed_needed == *" $lib "* ]] || fail 69 "$product: NEEDED $lib, outside$allowed_needed(in $file)"
+            needed+="$lib "
         done <<< "$dynamic"
+        # The set exactly (ST-D12): nothing missing either.
+        missing=""
+        for lib in $allowed_needed; do
+            [[ $needed == *" $lib "* ]] || missing+=" $lib"
+        done
+        [[ -z $missing ]] || fail 69 "$product: NEEDED lacks$missing (the set is exactly$allowed_needed), in $file"
         # Resolved by the loader itself, never ldd (which runs the binary's own interpreter).
         listing=$(/usr/bin/env -i PATH=/usr/bin:/bin "$interpreter" --list "$file" 2> /dev/null) \
             || fail 69 "$product: $interpreter --list can't resolve $file"
@@ -362,13 +408,22 @@ install_node_main() {
             target=$(/usr/bin/realpath -e -- "$target") || fail 69 "$product: can't resolve $target"
             writable=$(root_only "$target") || fail 69 "$product: it loads $target, which the user can write: $writable"
         done <<< "$listing"
+        # What was checked, to compare with what build-info records.
+        line=$(/usr/bin/sha256sum -- "$file") || fail 1 "$product: can't hash $file"
+        product_sha[$product]=${line%% *}
     done
 
-    # --- 10. The layout: <prefix>/<commit>.partial, its record, then the rename -------------------------------------
-    local -r final=$prefix/$commit
-    local -r partial=$final.partial
+    # The checkout is still the commit's: its HEAD, its tree and no tracked file changed (a change left in place since
+    # the "checked out" line).
+    [[ $(git_run -C "$src" rev-parse HEAD 2> /dev/null) == "$commit" \
+        && $(git_run -C "$src" rev-parse "HEAD^{tree}" 2> /dev/null) == "$tree" ]] \
+        || fail 1 "the checkout in $src isn't $commit tree $tree any more"
+    changed=$(git_run -C "$src" status --porcelain --untracked-files=no --ignore-submodules=none 2> /dev/null) \
+        || fail 1 "can't tell whether the checkout in $src changed"
+    [[ -z $changed ]] || fail 1 "the checkout in $src changed since it was checked out: ${changed%%$'\n'*}"
+
+    # --- 10. The layout: <prefix>/<commit>.partial, its record, then the rename (under the lock) -----------------------
     [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
-    /bin/mkdir -p -- "$prefix" || fail 1 "can't make $prefix"
     /bin/rm -rf -- "$partial"
     # A refusal from here on leaves no half-made build behind.
     install_partial=$partial
@@ -396,6 +451,18 @@ install_node_main() {
         "$partial" --commit "$commit" --swift-version-output "$swift_version_file" --resolved "$src/Package.resolved" 2>&1) \
         || fail 1 "the build's record wasn't written: ${recorded//$'\n'/ }"
     [[ -f $partial/build-info ]] || fail 1 "install-record wrote no $partial/build-info"
+    # build-info records what the link check checked, and only that.
+    local count sha
+    count=$(jq_run -r '.binaries | length' "$partial/build-info" 2> /dev/null) || fail 1 "can't read $partial/build-info"
+    [[ $count == "${#products[@]}" ]] || fail 1 "$partial/build-info records $count programs, not ${#products[@]}"
+    for product in "${products[@]}"; do
+        installed=$product
+        [[ $product == vibeswitcher-cli ]] && installed=vibeswitcher
+        sha=$(jq_run -r --arg n "$installed" '.binaries[$n] // empty' "$partial/build-info" 2> /dev/null) \
+            || fail 1 "can't read $partial/build-info"
+        [[ $sha == "${product_sha[$product]}" ]] \
+            || fail 1 "$partial/build-info records $installed as ${sha:-nothing}, not the checked ${product_sha[$product]}"
+    done
     [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
     /bin/mv -T -- "$partial" "$final" || fail 1 "can't rename $partial to $final"
     install_partial=""

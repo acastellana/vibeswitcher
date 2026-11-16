@@ -1330,6 +1330,16 @@ what it needs.
   (`~/.cache/org.swift.swiftpm`, `~/.swiftpm`): a worker that patches the compiler, `swift-test` or a cached
   dependency makes every audit's and merge's tests pass and the next install build its code, which `build-info` then
   vouches for.
+- A worker live while an install runs. The install's scratch checkout, the `vs-heavy` it runs from it, its fresh
+  package caches, the built products and the staging folder are all in folders the user can write (mode 0700 keeps out
+  other users, not the user's own processes), and nothing holds teams before the builds folder changes. Such a worker
+  can change what is built and installed; `build-info` then vouches for it, and the `vs config accept` the install asks
+  for accepts it with the install's own change. The install checks the checkout again (its HEAD, its tree, no tracked
+  file changed) and compares `build-info` with the products the link check hashed, which catches a change left in
+  place, not one made and undone during the build. The root-owned toolchain reduces the risk only when no worker runs
+  during the install (the start plan's S4b, 2026-11-16, with its review). The install also trusts the environment it
+  is started with: bash runs exported functions, `SHELLOPTS` with `PS4`, `BASH_ENV` and `LD_PRELOAD` before the
+  script's first line, so the user runs it as `/usr/bin/env -i HOME=<home> PATH=/usr/bin:/bin /bin/bash <its path>`.
 - The files every agent runs, the lead's included: `~/.vibeswitcher/bin/vibeswitcher-hook`, the agents' settings and
   hooks, `~/.local/share/claude/versions/*`, the shell startup files Claude Code's Bash tool sources. The config seal
   watches them (the bootstrap path's step 8 adds the Linux list: `~/.bash_profile`, `~/.bash_login`, `~/.profile` and
@@ -1406,6 +1416,19 @@ PATH as `start` does, never a unit's edited ones back; 2026-11-16, with the revi
 plan's S4a: build-info records the toolchain's swift --version text and Package.resolved's hash, and hashes only
 regular files in bin, each once under one name; a link, a folder, a FIFO, or a build folder named other than its
 commit is refused; 2026-11-16, with the review of S4a);
+`InstallTests.anInstallFromADirtyTreeIsRefused`, `InstallTests.aCommitNotOnOriginV2IsRefused`,
+`InstallTests.aCommitBothRunnersDidntPassIsRefused`, `InstallTests.ghRunsWithNothingFromTheUsersEnvironmentOrConfig`,
+`InstallTests.aToolchainTheUserCanWriteIsRefused`, `InstallTests.aTestProductsFolderIsCheckedBeforeAnyFetch`,
+`InstallTests.aFirstInstallRunsOnlyTheCommitsOwnScript`, `InstallTests.theNextInstallRunsThePreviousBuildsScript`,
+`InstallTests.aSecondInstallOnTheSamePrefixIsRefused`, `InstallTests.anInstalledCommitIsRefusedBeforeAnyFetch`,
+`InstallTests.theTestFlagsNeedAScratchPrefix`, `InstallTests.nothingInTheUsersCloneOrConfigShapesTheBuild`,
+`InstallTests.aBinaryWithARunpathIsRefused`, `InstallTests.aBinaryWhoseNeededSetIsntExactIsRefused` (the start plan's
+S4b: the install refuses a dirty checkout, a commit not on v2 or that both runners didn't pass, a toolchain the user
+can write, a script or library that isn't the expected commit's (the commit's on a first install, the installed
+build's after it, whichever branch holds it), a second install on the same builds folder and a commit installed
+already; git and gh run with nothing of the user's environment or configuration, gh's configuration folder one the
+user can't make; a binary with a RUNPATH, or a NEEDED set other than exactly the decided one, is refused; 2026-11-16,
+with the review of S4b);
 `LinuxSealListTests.aWriteToEachItemOfTheLinuxListIsHeld`, `LinuxSealListTests.aSourcedFileIsWatched`,
 `LinuxSealListTests.aListingNeverReadsContents`, `LinuxSealListTests.aListingIsNotCut`,
 `LinuxSealListTests.theWindowsFilesAreWatchedOnlyWhileMounted`,
@@ -1422,8 +1445,7 @@ no change, except in the lead's accepted hooks, where only GitGuard's baseline o
 flag, read as GitGuard reads the record, is no change; a scratch home's seal reads nothing outside it; a worker's start
 doesn't hold its team; 2026-11-16, with the review of S7).
 
-**Tests to write:** Step 8: `InstallTests.anInstallFromADirtyTreeIsRefused`,
-`anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (also reads `/proc/<pid>/maps` of the installed host, server
+**Tests to write:** Step 8: `InstallTests.anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (also reads `/proc/<pid>/maps` of the installed host, server
 and a parser), `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds`. After
 the bootstrap: `MCPKeeperTests.aToolServerFileReplacedWhileKeptIsNotWhatRestarts`.
 
@@ -1569,7 +1591,8 @@ against it. Each line says what reduces it now, if anything.
 
 3. A worker can restart the host at will (a signal; `systemctl --user stop|start|restart`), after editing what the
    restart runs: the unit, its drop-ins, `environment.d`, the install folder and `build-info`, and what the install
-   builds with (the toolchain and package caches, if the user's). The restarted host and its server are then the
+   builds with (the toolchain and package caches, if the user's; while an install runs, its scratch checkout, caches
+   and products, S9). The restarted host and its server are then the
    worker's. Reduced by `UnsetEnvironment=` (the manager's environment no longer reaches the host), the commit-folder
    `ExecStart`, the start check (a slip caught), the seal (a detector) and the journal's record of starts no
    `vibeswitcher start` explains, which the command line reads itself. Starting the host's image itself with a
@@ -1642,7 +1665,7 @@ against it. Each line says what reduces it now, if anything.
     holds, is what every agent's commands run; and a function a worker adds to a startup file (item 8) runs ahead of
     any PATH. It
     is no session's to the host, and can do everything in this list. Reduced for installs by a root-owned toolchain
-    (decision 12), not for tests.
+    (decision 12) when no worker runs during the install (S9), not for tests.
 11. Writing a terminal query to a session's `/dev/pts/N` makes the host type the headless terminal's reply into that
     session (an escape sequence, ESC included): it can interrupt the lead's turn. The reply grammar keeps it to
     replies. Turning focus events on there (`CSI ? 1004 h`) also types the 3-byte focus report `CSI I` (Task 12a),

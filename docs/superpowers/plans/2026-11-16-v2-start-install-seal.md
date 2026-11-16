@@ -1261,6 +1261,55 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
   for a path its attributes name (git has no switch to ignore a repository's local config). That is code the user's
   clone chooses, run as the user, before any check of the script: the same footing as ST-D9's first-run residual.
 
+*Notes, 2026-11-16 (the review of S4b):*
+- **The cases are `InstallTests`' own** (each `@Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10)))` in an extension),
+  no longer a nested `InstallTests.Script`: `SecurityDocumentLintTests` indexes a case under its innermost type, so the
+  security document's `InstallTests.<case>` names didn't resolve. The fixture is a file-private `InstallScript`. S9's
+  `Held by:` now names the S4b cases. S4c's `anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` goes in the same
+  extension.
+- **One install at a time on a prefix.** After the local checks and before any network call, the script makes the
+  prefix, takes `flock -n` on the prefix folder itself (no lock file in the builds folder) and holds it to its end; a
+  second install exits 1 ("another install is running"). The `<prefix>/<commit>` check moved there too (ST-D8: a local
+  refusal), re-checked before the rename. So the prefix exists (empty) after a refusal from the fetch on. So do the
+  `--test-products` checks (`swift-version` there, each product a regular file). Cases:
+  `aSecondInstallOnTheSamePrefixIsRefused`, `anInstalledCommitIsRefusedBeforeAnyFetch`,
+  `aTestProductsFolderIsCheckedBeforeAnyFetch`.
+- **gh and git read no configuration a worker could plant** (differs from ST-D10's `GH_CONFIG_DIR=<scratch>/gh` and
+  ST-D9's `HOME=<scratch>`): every gh call and the fetch's credential helper run with `HOME=/nonexistent
+  GH_CONFIG_DIR=/nonexistent`, and every git with `HOME=/nonexistent`, a folder inside root's `/` that no process of the
+  user's can make. A `config.yml` with `http_unix_socket` in the old scratch folder answered the CI check (the reviewer
+  measured it with gh 2.45); gh 2.45 runs `api` and `run list` with no configuration folder (checked here against a
+  local server). `ghRunsWithNothingFromTheUsersEnvironmentOrConfig` asserts the user can make or write neither.
+- **The verified `scratch.sh` is sourced from its blob through a pipe** (differs from ST-D9's "written into its 0700
+  scratch folder"): the blobs are read into memory and compared with the files beside the script by `cmp` against a
+  process substitution; no copy is written to `/tmp`.
+- **The build's environment is explicit** (differs from ST-D11's `-u` list): `vs-heavy` runs under `env -i` with
+  `PATH=/usr/bin:/bin`, the account's `HOME`, `TMPDIR` and the run's `VIBESWITCHER_TEST_LOCK*`; inside it, the build
+  runs under `env -i` with the scratch `HOME`, the toolchain's `PATH` and `TMPDIR`, `-j` from `VS_HEAVY_CORES`. `swift
+  --version` and `swift build --show-bin-path` get the same three, so SwiftPM's leftovers land in the scratch folder.
+  `TMPDIR` is passed on by name (`"$name=${!name}"`): `ScriptScratchLintTests` flags any `TMPDIR=` spelled out, and
+  only the helper sets it.
+- **The `NEEDED` set is checked exactly** (ST-D12), missing names included: `aBinaryWhoseNeededSetIsntExactIsRefused`
+  copies `/usr/bin/true` (libc alone) and `/usr/bin/ls` (libselinux too) as the products.
+- **Every refusal is one line**: `fail` turns line ends in its text into spaces (a two-line compare status is refused on
+  one line, in `aCommitNotOnOriginV2IsRefused`).
+- **A worker live during an install** can change the scratch checkout, its `vs-heavy`, the caches, the products and the
+  staging folder (all the user's to write). Code now checks the checkout again before the layout (HEAD, tree, no tracked
+  file changed), hashes each product after its link check and requires `build-info` to record exactly those five
+  hashes. That catches a change left in place, not one made and undone; S9's `Doesn't promise` and S11 items 3 and 10
+  now say so, and that the root toolchain helps only with no worker running. Refusing an install while teams run (as
+  switch does) needs the node, which the script doesn't contact: not done.
+- **The caller's environment is trusted**: an exported `local` or `builtin`, `SHELLOPTS` with `PS4`, `BASH_ENV` or
+  `LD_PRELOAD` act before the script's first line. The header now says so and gives the `env -i` way to run it; the
+  earlier note's "functions the caller exported are unset" holds only for functions that don't shadow what the unset
+  loop uses.
+- `theNextInstallRunsThePreviousBuildsScript`'s next commit changes the script too, so only a comparison against the
+  installed commit's blob passes the installed copy; and an installed commit on a branch v2 doesn't reach is fetched by
+  its hash (both mutations, `expected=$commit` and dropping that fetch, now fail it).
+- The layout (steps 10 and 11), with the hash comparison and the lock, was run once more by hand from a fixture commit
+  whose script had no link check: installed, `build-info` matching, `current` and `installs` written, the same commit
+  again refused ("is there already"), and the next install from `current/Resources/install-node.sh` installed.
+
 - [ ] **Step 4:** commit ("v2: the node's install script"). Push, both green.
 
 **Done when:** the ungated cases pass on Linux.
