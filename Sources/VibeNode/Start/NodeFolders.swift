@@ -99,8 +99,10 @@ public enum NodeFolders {
     }
 
     /// The installed build at `folder`, or why it isn't one `start` starts: a direct child of `prefix` (both by
-    /// `realpath`), named for a commit (40 hex digits), whose `build-info` names that commit, and whose `bin/` holds
-    /// exactly the regular files `build-info` records, each with the hash recorded (ST-D3).
+    /// `realpath`), itself a folder and not a link (a link `<prefix>/A` to a sibling `<prefix>/B` would have B checked
+    /// and run under A's name: the review of S1), named for a commit (40 hex digits), whose `build-info` names that
+    /// commit, and whose `bin/` holds exactly the regular files `build-info` records, each with the hash recorded
+    /// (ST-D3). The commit returned is the folder's own name.
     public static func verifyBuild(folder: String, prefix: String) -> Result<BuildInfo, StartRefusal> {
         guard let resolvedPrefix = resolved(prefix) else {
             return .failure(StartRefusal("the prefix \(ConfigSeal.inert(prefix, limit: .max)) can't be resolved"))
@@ -110,6 +112,10 @@ public enum NodeFolders {
         }
         guard (resolvedFolder as NSString).deletingLastPathComponent == resolvedPrefix else {
             return .failure(StartRefusal("the build \(ConfigSeal.inert(folder, limit: .max)) resolves to \(ConfigSeal.inert(resolvedFolder, limit: .max)), not a folder directly in the prefix \(ConfigSeal.inert(resolvedPrefix, limit: .max))"))
+        }
+        guard let own = fileStatus(folder), own.mode & S_IFMT == S_IFDIR,
+              (folder as NSString).lastPathComponent == (resolvedFolder as NSString).lastPathComponent else {
+            return .failure(StartRefusal("the build \(ConfigSeal.inert(folder, limit: .max)) is a link (to \(ConfigSeal.inert(resolvedFolder, limit: .max))), not a commit's own folder"))
         }
         let name = (resolvedFolder as NSString).lastPathComponent
         guard NodeUnit.isCommit(name) else {
@@ -163,8 +169,13 @@ public enum NodeFolders {
     }
 
     /// The build an existing unit runs, or why `start` won't start it (ST-D3): its text in `start`'s form
-    /// (`NodeUnit.inputs(parsing:prefix:)`) for a commit `verifyBuild` takes. Every refusal says that removing the
-    /// unit file lets `start` run `current`.
+    /// (`NodeUnit.inputs(parsing:prefix:)`) for a commit `verifyBuild` takes, the commit it verified being the one the
+    /// unit names. Every refusal says that removing the unit file lets `start` run `current`.
+    ///
+    /// Only the commit (and, through `toolFolders(existingUnit:)`, the node folder, checked there) is taken from what
+    /// this returns. Its `home` and `swiftBin` are the unit's text, checked only for what a unit can hold: `start`
+    /// rewrites the unit from `getpwuid`'s home and `toolFolders`' result, never writing these back (ST-D3's "restores
+    /// every other line"; the review of S1).
     public static func unitBuild(unitText: String, prefix: String) -> Result<NodeUnit.Inputs, StartRefusal> {
         func refused(_ refusal: StartRefusal) -> Result<NodeUnit.Inputs, StartRefusal> {
             .failure(StartRefusal("the unit's build isn't started: \(refusal.text); removing the unit file lets `start` run `current`"))
@@ -172,18 +183,48 @@ public enum NodeFolders {
         switch NodeUnit.inputs(parsing: unitText, prefix: prefix) {
         case .failure(let refusal): return refused(refusal)
         case .success(let inputs):
-            if case .failure(let refusal) = verifyBuild(folder: join(prefix, inputs.commit), prefix: prefix) { return refused(refusal) }
-            return .success(inputs)
+            switch verifyBuild(folder: join(prefix, inputs.commit), prefix: prefix) {
+            case .failure(let refusal): return refused(refusal)
+            case .success(let info) where info.commit != inputs.commit:
+                return refused(StartRefusal("the unit names the commit \(inputs.commit), and its folder holds \(info.commit)'s build"))
+            case .success: return .success(inputs)
+            }
         }
     }
 
     /// Why `start` refuses the user manager's environment (a `systemctl --user show-environment` text), or nil (ST-D2):
     /// each name outside `NodeFacts.expectedManagerEnvironment` but those the unit unsets for a desktop session
     /// (`NodeUnit.unsetFromManager`), and how to clear it.
+    ///
+    /// S2 runs it twice: in the facts (ST-D5 step 3), and again on a fresh `show-environment` after its own
+    /// `daemon-reload` and right before `start` (step 10). A `daemon-reload` re-reads `user.conf`'s
+    /// `DefaultEnvironment=` and runs the `environment.d` generators again, so a name written there after step 3
+    /// shows only then (the review of S1). A `set-environment` between that read and `start` is still a race only the
+    /// host started with `--node` can close, by checking its own environment.
     public static func managerRefusal(showEnvironment text: String) -> StartRefusal? {
         let names = NodeFacts.extraVariables(showEnvironment: text).filter { !NodeUnit.unsetFromManager.contains($0) }
         guard !names.isEmpty else { return nil }
         return StartRefusal("the user manager's environment holds what start doesn't expect: \(names.map { ConfigSeal.inert($0, limit: .max) }.joined(separator: ", ")). The manager gives these to what it starts, and the host runs git; clear each with `systemctl --user unset-environment NAME`, and look in ~/.config/environment.d for what set it")
+    }
+
+    /// Why `start` refuses the user manager's own configuration in the home, or nil: `<home>/.config/systemd/user.conf`
+    /// or a `user.conf.d/*.conf` there that sets `DefaultEnvironment=` (given to every unit) or `ManagerEnvironment=`
+    /// (the manager's own, which its generators read), naming the file and the key. Any worker can write these, and
+    /// the manager applies them at the next `daemon-reload` or login, past what `show-environment` said before
+    /// (the review of S1). An empty assignment (a reset) and a commented line are taken.
+    public static func managerConfigRefusal(accountHome: String) -> StartRefusal? {
+        let systemd = join(accountHome, ".config/systemd")
+        let dropIns = join(systemd, "user.conf.d")
+        let files = [join(systemd, "user.conf")] + ((try? FileManager.default.contentsOfDirectory(atPath: dropIns)) ?? [])
+            .filter { $0.hasSuffix(".conf") }.sorted().map { join(dropIns, $0) }
+        for file in files {
+            guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { continue }
+            let unit = NodeUnit.parse(text)
+            for key in ["DefaultEnvironment", "ManagerEnvironment"] where (unit[key] ?? []).contains(where: { !$0.isEmpty }) {
+                return StartRefusal("\(ConfigSeal.inert(file, limit: .max)) sets \(key)=, which the user manager gives to what it starts at its next daemon-reload or login, past start's check of its environment; remove that line (and run `systemctl --user daemon-reload`)")
+            }
+        }
+        return nil
     }
 
     // MARK: - Helpers

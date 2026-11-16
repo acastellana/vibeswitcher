@@ -224,6 +224,21 @@ extension StartCommandTests {
         relative.nodeBin = "home/u/node/bin"
         guard case .failure(let notAbsolute) = NodeUnit.text(relative) else { Issue.record("a relative node folder was taken"); return }
         #expect(notAbsolute.text.contains("home/u/node/bin"), "\(notAbsolute)")
+        // A path Linux reads as another one: `//mnt/c/…` is `/mnt/c/…`; an empty name or a trailing `/` isn't the
+        // path's own form either (the review of S1).
+        for (bad, named) in [("//mnt/c/Users/u/swift/bin", "/mnt/"), ("/home/u//swift/bin", "empty name"), ("/home/u/swift/bin/", "empty name")] {
+            var odd = Self.inputs
+            odd.swiftBin = bad
+            guard case .failure(let refused) = NodeUnit.text(odd) else { Issue.record("the swift folder \(bad) was taken"); continue }
+            #expect(refused.text.contains(bad) && refused.text.contains(named), "\(bad): \(refused)")
+        }
+        // A unit someone else wrote with such a folder in its PATH isn't read as start's.
+        let written = try NodeUnit.text(Self.inputs).get()
+        let windows = written.replacingOccurrences(of: Self.inputs.swiftBin + ":", with: "//mnt/c/x:")
+        guard case .failure(let read) = NodeUnit.inputs(parsing: windows, prefix: Self.inputs.prefix) else {
+            Issue.record("a unit whose PATH holds //mnt/c/x was read as start's"); return
+        }
+        #expect(read.text.contains("//mnt/c/x"), "\(read)")
     }
 
     @Test func aPathSystemdWouldExpandIsRefused() {
@@ -276,6 +291,31 @@ extension StartCommandTests {
         #expect(refused.text.contains("GIT_CONFIG_GLOBAL") && refused.text.contains("XDG_CONFIG_HOME"), "\(refused)")
         #expect(refused.text.contains("systemctl --user unset-environment") && refused.text.contains("environment.d"), "\(refused)")
         #expect(!refused.text.contains("SSH_AUTH_SOCK"), "\(refused)")
+    }
+
+    /// `~/.config/systemd/user.conf` (and `user.conf.d`) setting `DefaultEnvironment=` reaches every unit after the
+    /// next `daemon-reload` or login, past a `show-environment` read before it (the review of S1): refused, naming the
+    /// file and the key.
+    @Test(NodeTraits.linuxOnly) func aManagerConfigThatSetsAnEnvironmentRefusesStart() throws {
+        let home = scratch.url("confhome")
+        let systemd = home.appendingPathComponent(".config/systemd")
+        try FileManager.default.createDirectory(at: systemd.appendingPathComponent("user.conf.d"), withIntermediateDirectories: true)
+        #expect(NodeFolders.managerConfigRefusal(accountHome: home.path) == nil)
+        let conf = systemd.appendingPathComponent("user.conf")
+        // Stock lines, commented out, and a key that sets no environment: taken.
+        try "[Manager]\n#DefaultEnvironment=\n;ManagerEnvironment=\nLogLevel=info\nDefaultEnvironment=\n".write(to: conf, atomically: true, encoding: .utf8)
+        #expect(NodeFolders.managerConfigRefusal(accountHome: home.path) == nil)
+        try "[Manager]\nDefaultEnvironment=GIT_CONFIG_GLOBAL=/srv/evil.gitconfig XDG_CONFIG_HOME=/srv/x\n".write(to: conf, atomically: true, encoding: .utf8)
+        let refused = try #require(NodeFolders.managerConfigRefusal(accountHome: home.path))
+        #expect(refused.text.contains(conf.path) && refused.text.contains("DefaultEnvironment"), "\(refused)")
+        try FileManager.default.removeItem(at: conf)
+        let dropIn = systemd.appendingPathComponent("user.conf.d/10-x.conf")
+        try "[Manager]\n ManagerEnvironment = XDG_CONFIG_HOME=/srv/x\n".write(to: dropIn, atomically: true, encoding: .utf8)
+        let fromDropIn = try #require(NodeFolders.managerConfigRefusal(accountHome: home.path))
+        #expect(fromDropIn.text.contains(dropIn.path) && fromDropIn.text.contains("ManagerEnvironment"), "\(fromDropIn)")
+        // A file there not named *.conf is one the manager doesn't read.
+        try FileManager.default.moveItem(at: dropIn, to: systemd.appendingPathComponent("user.conf.d/10-x.conf.off"))
+        #expect(NodeFolders.managerConfigRefusal(accountHome: home.path) == nil)
     }
 
     @Test(NodeTraits.linuxOnly) func aMissingManagerSocketOnASystemdMachineRefusesNotDetaches() throws {
@@ -479,6 +519,19 @@ extension StartCommandTests {
         // An extra argument.
         let extra = refusal(execStart + " --lock /srv/l")
         #expect(extra?.text.contains("ExecStart") == true && extra?.text.contains("--lock") == true, "\(String(describing: extra))")
+        // A commit folder that is a link to a sibling build: the unit would say one commit and run another's bytes
+        // (the review of S1). Refused, naming the link.
+        let third = "fedcba9876543210fedcba9876543210fedcba98"
+        try FileManager.default.createSymbolicLink(atPath: prefix.appendingPathComponent(third).path, withDestinationPath: Self.commit)
+        var sibling = inputs
+        sibling.commit = third
+        guard case .failure(let alias) = NodeFolders.unitBuild(unitText: try NodeUnit.text(sibling).get(), prefix: prefix.path) else {
+            Issue.record("a commit folder linked to a sibling build was taken"); return
+        }
+        #expect(alias.text.contains(third) && alias.text.contains("link"), "\(alias)")
+        guard case .failure = NodeFolders.verifyBuild(folder: prefix.appendingPathComponent(third).path, prefix: prefix.path) else {
+            Issue.record("verifyBuild took a commit folder that is a link"); return
+        }
         // A host whose bytes aren't the ones build-info records.
         try Self.append("changed\n", to: folder.appendingPathComponent("bin/vibeswitcher-host"))
         guard case .failure(let host) = NodeFolders.unitBuild(unitText: text, prefix: prefix.path) else {

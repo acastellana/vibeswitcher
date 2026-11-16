@@ -236,15 +236,17 @@ public enum NodeUnit {
 
     /// Why a path can't be written into the unit, or nil: a character systemd reads (`%` specifiers, whitespace it
     /// splits on, quotes, a backslash, `$`) or a control character, checked first; then not absolute, a `.` or `..`
-    /// in it, or a folder under `/mnt/` (a Windows drive: the unit's PATH holds none, S9).
+    /// in it, an empty name (`//`, a trailing `/`: Linux reads `//mnt/c` as `/mnt/c`), or a folder under `/mnt/` (a
+    /// Windows drive: the unit's PATH holds none, S9), judged on its names, not its text.
     static func pathRefusal(_ path: String) -> String? {
         if let character = unsafeCharacter(in: path) {
             return "it holds \(character) (systemd expands % specifiers, splits on whitespace and reads quotes, backslashes and $)"
         }
         guard path.hasPrefix("/") else { return "it isn't an absolute path" }
-        let names = path.split(separator: "/")
+        let names = path.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
         guard !names.contains("."), !names.contains("..") else { return "it names . or .." }
-        guard path != "/mnt", !path.hasPrefix("/mnt/") else { return "it is under /mnt/ (a Windows drive; the unit holds no /mnt/ folder)" }
+        guard !names.contains("") else { return "it holds an empty name (// or a trailing /), which Linux reads as another path" }
+        guard names.first != "mnt" else { return "it is under /mnt/ (a Windows drive; the unit holds no /mnt/ folder)" }
         return nil
     }
 

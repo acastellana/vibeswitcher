@@ -633,6 +633,23 @@ The port map's rows 223 and 224 become `made`, and the new rows are added. `Pack
     `LoadHarnessTests.itsBuildRunsOnItsSlotsShareOfTheCores` (its `build-homes-…` folder gone), passed alone; S1
     touches nothing it runs.
 
+  *2026-11-16, S1's review fixes (committed; the push is the lead's):*
+  - `verifyBuild` refuses a commit folder that is a link (`lstat` a folder, and its own name the resolved one's): a
+    link `<prefix>/A` to a sibling build `<prefix>/B` had B checked and A's name returned. `unitBuild` also requires
+    the commit it verified to be the one the unit names. `theUnitsBuildIsCheckedBeforeItIsStarted` gains the sibling
+    link.
+  - `NodeUnit.pathRefusal` judges a path on its names: an empty name (`//`, a trailing `/`) is refused, and `/mnt`
+    is the first name, so `//mnt/c/…` no longer passes (`theUnitsPathIsQuotedAndHasNoMnt`).
+  - `unitBuild`'s doc says only its commit (and, through `toolFolders`, its node folder) is taken; S2 rebuilds the
+    unit's `Inputs` from `getpwuid`'s home and `toolFolders`, never from the unit's own `HOME` or swift folder.
+  - Added `NodeFolders.managerConfigRefusal(accountHome:)`: `~/.config/systemd/user.conf` or `user.conf.d/*.conf`
+    setting `DefaultEnvironment=` or `ManagerEnvironment=` refuses start, naming the file
+    (`aManagerConfigThatSetsAnEnvironmentRefusesStart`). The manager applies them at its next `daemon-reload` or
+    login, past a `show-environment` read before.
+  - `managerRefusal`'s doc states S2's contract (S2's steps below): run again on a fresh `show-environment` after
+    start's own `daemon-reload`, right before `start`.
+  - `StartCommandTests`' five unit cases moved into the security document's S9 `Held by:`.
+
 **Done when:** the cases pass on Linux. The Mac runs the pure cases (unit text, parse, disjointness, refusals, the
 manager refusal).
 
@@ -666,6 +683,17 @@ manager refusal).
       `NodeClock`'s `now`);
     - `func startUnit(_ unit: NodeUnit.Inputs, atLogin: Bool) -> Result<Started, StartRefusal>`: write, then
       `daemon-reload`, then the `show` check, then `enable` (only `atLogin`), then `start`, then the wait;
+      - *2026-11-16, from S1's review:* after the `show` check and before `enable`/`start`, `startUnit` reads
+        `show-environment` again and refuses on `NodeFolders.managerRefusal` (a `daemon-reload` applies `user.conf`'s
+        `DefaultEnvironment=` and `environment.d`, so a name written after step 3 shows only now; a case for it, with
+        the stand-in's second `show-environment` answer holding `GIT_CONFIG_GLOBAL`, and no `start` called). Step 3's
+        facts also run `NodeFolders.managerConfigRefusal`. The `Inputs` passed are built from `getpwuid`'s home,
+        `toolFolders` and the commit (`unitBuild`'s or `installedBuild`'s), never from an existing unit's `HOME` or
+        swift folder.
+      - *For the lead:* a `set-environment` between that read and `start` is still a race no `systemctl` read
+        closes, and the unit started at login (`--at-login`) has no start check at all. Only the host started with
+        `--node` can close both, by checking its own environment against `expectedManagerEnvironment` plus the
+        unit's names before it runs git. No task of this plan does that yet.
     - `enum Probe { case listening, notYet, refusedByCheck(String), unitEnded(result: String) }`;
     - `static let listenLimit: TimeInterval = 180` (the app's `hostStartLimit`).
   - The CLI's probe: `NodeClient.connect` followed by `ServerCheck` gives `.listening` or `.refusedByCheck`. `/usr/bin/systemctl

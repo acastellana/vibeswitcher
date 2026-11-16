@@ -1345,10 +1345,13 @@ tool server across a switch). The keeper's copy: after the bootstrap (S12 item 1
 `ServerChildTests.aServerFileRewrittenInPlaceIsNotWhatRestarts` (Task 8; S2 names it too);
 `HandoverLinuxTests.aFailedTakeOverGoesBackThroughTheSealedCopy`,
 `HandoverLinuxTests.aFallbackImageRewrittenInPlaceIsNotWhatRuns` (Task 9c; S8 names them too);
-`LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath` (the engine's E4: `claude` by its resolved path).
+`LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath` (the engine's E4: `claude` by its resolved path);
+`StartCommandTests.theUnitStartsTheCommitsFolderNotCurrent`,
+`StartCommandTests.theUnitIsRestartNoKillModeControlGroupWithATimeout`,
+`StartCommandTests.theUnitUnsetsTheListedNamesAndSetsBacktraceOff`, `StartCommandTests.noNameIsBothUnsetAndAssigned`,
+`StartCommandTests.theUnitsPathIsQuotedAndHasNoMnt` (the start plan's S1).
 
-**Tests to write:** Step 8: `StartCommandTests` (the unit written,
-`Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, the commit's folder), `noNameIsBothUnsetAndAssigned`, a write
+**Tests to write:** Step 8: a write
 to each folder of the seal's Linux list held, `InstallTests.anInstallFromADirtyTreeIsRefused`,
 `anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (also reads `/proc/<pid>/maps` of the installed host, server
 and a parser), `aRunningToolServerKeepsItsBuildAcrossASwitch`, `aToolServerStartedAfterASwitchIsTheNewBuilds`. After
