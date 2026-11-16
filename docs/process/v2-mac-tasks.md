@@ -111,6 +111,19 @@ and its [attack review](reviews/v2-security-review-2026-11-13.md), fixed on Linu
   (`ServerChildHost(usersHost:)` throws there). A scratch host's test secret across a handover on the Mac stays
   `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`'s. A process test of the Mac's user's host needs a
   Keychain stand-in first.
+- **A `.user` seal never expires and is never retired on the Mac** (the security document's T41 and S11 item 29):
+  delivery records (`<tty>.delivered`) are outside the seal and the inbox is a file any process of the user's can
+  write, so a worker that copies a sealed line of the user's back into the lead's inbox has it delivered as the
+  user's, there at any time later. On Linux `LeadVaultV2` (engine E6, EN-D11) limits it: a `.user` seal verifies false
+  once the server retired it (it saw the lead take it) or 15 minutes after it was made or last renewed, renewed only
+  while the line the server posted waits untaken and never two hours past its first making (`renewedLifeCap`); a
+  replay still works inside that life (S11 item 29). On the Mac the vault's hooks do nothing (`LeadVaultV2.isOn` is
+  `!Platform.CodeIdentity.isAvailable`; the host lists no `vaultV2`), as
+  `LeadVaultV2Tests.theMacsVaultHooksDoNothing` pins: a day-old seal named retired verifies true. The candidate for
+  main is that record (retire, the life, the renewal and its cap), with the app as the one that retires and renews.
+  Check on a real Mac (a scratch host, the sandbox app): an answer the app sends a scratch lead, taken, then its line
+  copied back into the inbox an hour later is delivered as the user's (expected today); then whether to port the
+  record to main, and that an answer waiting through a long tool call is still the user's once it is.
 
 ## Owed on the Mac
 
@@ -128,9 +141,17 @@ it. Each is done once the Mac work begins.
 - **The Mac's `LeadController` handover** ([the port map's](v2-port-map.md) E4 row for `LeadController.swift`,
   starting): `LeadController` (1041-1052) still calls `LeadHandover.begin`, which empties whatever inbox the board
   names into the new lead, and reads `transcripts[old.uuidString]` for any session the board names, so a forged board
-  hands another project's inbox and conversation to the new lead. The node checks first (`LeadEngine.replacedLead`:
-  the host's session list and the vault's binding, the security follow-ups' item 11); the Mac's fix is the same check
-  before `takeWaiting`, in `Sources/VibeSwitcher`, which `v2` doesn't edit.
+  hands another project's inbox and conversation to the new lead. The node checks first (`LeadEngine.replacedLead`,
+  the security follow-ups' item 11): the session the board names is replaced only when the host lists it labelled as
+  a lead, started in this root, on the board's terminal, and live, or ended and the session the vault binds this
+  root's lead role to, its terminal taken by no live session since; the replaced lead's last turns are read only from
+  a session started in this root; a board naming any other leaves that inbox where it is, its count said. The Mac's
+  fix is the same check before `takeWaiting` and the transcript read, in `Sources/VibeSwitcher`, which `v2` doesn't
+  edit. Check on a real Mac (a scratch host and scratch projects, the sandbox app): a project's board edited to name
+  another project's running lead, with a message waiting in that lead's inbox; starting the first project's lead
+  again in the app (replacing it) then empties that inbox into the new lead and puts the other lead's last turns in its first
+  prompt (expected today); with the check ported to main, that inbox keeps its message, no turns are read, and a
+  board naming this project's own lead on its terminal still hands over as before.
 - **The Mac's `LeadController` delivery, wake and flush** ([the port map's](v2-port-map.md) E5 row for
   `LeadController.swift`, delivery): `deliver` (1225) takes the lead `LeadHandover.named(board)` gives and checks only
   that its pid runs an agent on the board's terminal (`leadRuns`, 593); the wake (1339, 1384) and the flush (1432)
