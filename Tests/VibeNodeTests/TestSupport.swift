@@ -341,7 +341,7 @@ func runToEnd(_ executable: String, _ arguments: [String], environment: [String:
 /// Collects child `pid`, asking every few milliseconds (a blocking call: off the pool) until `deadline`; still there
 /// then, it's killed and asked for 10 s more. Its wait status, or nil when it was never collected (nor by anyone else:
 /// one no child of this process any more is nil too).
-private func collected(_ pid: pid_t, by deadline: TimeInterval) -> Int32? {
+func collected(_ pid: pid_t, by deadline: TimeInterval) -> Int32? {
     var raw: Int32 = 0
     var pause: useconds_t = 500
     var limit = deadline, killed = false

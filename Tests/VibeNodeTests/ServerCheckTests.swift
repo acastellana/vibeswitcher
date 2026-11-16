@@ -80,27 +80,34 @@ struct ServerCheckTests {
         FileManager.default.createFile(atPath: lock, contents: nil)
         guard let (serverEnd, testEnd) = Platform.Sockets.pair(type: Platform.Sockets.seqpacket) else { throw CancellationError() }
         defer { Sys.close(testEnd) }
-        let holder = Process()
-        holder.executableURL = URL(fileURLWithPath: "/usr/bin/flock")
         // `-o`: the lock stays flock's own; its child, `setsid`'s server, is in a session of its own (flock's child
-        // leads no group, so `setsid` execs it in place: a child of the lock's holder).
-        holder.arguments = ["-o", lock, "/usr/bin/setsid", builtProducts.appendingPathComponent("vibeswitcher-server").path,
-                            "--host-connector", "0", "--host-socket", root.appendingPathComponent("host.sock").path, "--root", root.path]
-        holder.environment = ["PATH": "/usr/bin:/bin", "HOME": root.path]
-        holder.standardInput = FileHandle(fileDescriptor: serverEnd, closeOnDealloc: false)
-        holder.standardOutput = FileHandle.nullDevice
-        holder.standardError = FileHandle.nullDevice
-        try holder.run()
+        // leads no group, so `setsid` execs it in place: a child of the lock's holder). Started with `Platform.Spawn`
+        // (no descriptor of this process but the three given) and collected by its pid.
+        let flock = "/usr/bin/flock"
+        var spawn = Platform.Spawn(executable: flock, arguments: [flock, "-o", lock, "/usr/bin/setsid",
+                                                                  builtProducts.appendingPathComponent("vibeswitcher-server").path,
+                                                                  "--host-connector", "0", "--host-socket", root.appendingPathComponent("host.sock").path,
+                                                                  "--root", root.path])
+        spawn.environment = ["PATH=/usr/bin:/bin", "HOME=\(root.path)"]
+        spawn.stdin = .descriptor(serverEnd)
+        spawn.stdout = .path("/dev/null", flags: O_WRONLY)
+        spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        let holder: pid_t
+        do { holder = try await startRetrying(spawn) } catch {
+            Sys.close(serverEnd)
+            throw error
+        }
         Sys.close(serverEnd)
         defer {
-            for child in Platform.Processes.children(holder.processIdentifier) { kill(child, SIGKILL) }
-            kill(holder.processIdentifier, SIGKILL)
+            for child in Platform.Processes.children(holder) { kill(child, SIGKILL) }
+            kill(holder, SIGKILL)
+            _ = collected(holder, by: MacTime.real.awake() + 10)
         }
-        try #require(await eventually(timeout: 30) { Platform.Processes.lockHolder(path: lock) == holder.processIdentifier })
+        try #require(await eventually(timeout: 30) { Platform.Processes.lockHolder(path: lock) == holder })
         try #require(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: root.appendingPathComponent("v2/server.sock").path) })
-        let server = try #require(Platform.Processes.children(holder.processIdentifier).first)
+        let server = try #require(Platform.Processes.children(holder).first)
         #expect(Platform.Processes.isDumpable(server) == false)
-        #expect(getsid(server) == server && getsid(server) != getsid(holder.processIdentifier))
+        #expect(getsid(server) == server && getsid(server) != getsid(holder))
         let ran = try await run(commandLine, ["status"], environment: environment)
         #expect(ran.status == 77, "\(ran.output)\(ran.errors)")
         #expect(ran.errors.contains("isn't in the node's host's session"), "\(ran.errors)")
