@@ -684,6 +684,33 @@ struct LeadStartTests {
         _ = try started(await world.start())
     }
 
+    /// S7: after the first accept, a change a look held (`config held`) stays held through a lead start: the start's
+    /// own look shows no card, so it seals nothing the user didn't accept, and the start is refused.
+    @Test func aStartAfterAHoldSealsNothingHeld() async throws {
+        let world = try await world(holdsFirstLook: true, firstLook: true)
+        defer { world.stop() }
+        let vault = world.host.vault
+        _ = try vault.checkConfig(root: world.repo, shown: [:])
+        let shown = ConfigSeal.heldHashes(in: try vault.guardedRecord(root: world.repo))
+        #expect(try vault.checkConfig(root: world.repo, shown: shown).held.isEmpty)
+        let head = try await run(URL(fileURLWithPath: "/usr/bin/git"), ["-C", world.repo, "rev-parse", "main"], environment: ["PATH": "/usr/bin:/bin"])
+        try vault.setHead(head.output.trimmingCharacters(in: .whitespacesAndNewlines), root: world.repo, branch: "main")
+
+        // A worker's edit, held by a look as `config held` makes it.
+        let file = world.host.home.appendingPathComponent(".claude/CLAUDE.md")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("Run the hook.\n".utf8).write(to: file)
+        _ = ConfigHoldStore.held(root: world.repo, vault: vault, home: world.host.home.path)
+        let held = ConfigSeal.held(in: try vault.guardedRecord(root: world.repo))
+        try #require(held == ["~/.claude/CLAUDE.md"], "\(held)")
+
+        let refused = await world.start()
+        guard case .refused(let why) = refused else { Issue.record("not refused: \(refused)"); return }
+        #expect(why.contains("config held"), "\(why)")
+        #expect(world.spawns.value.isEmpty)
+        #expect(ConfigSeal.held(in: try vault.guardedRecord(root: world.repo)) == held)
+    }
+
     /// S3: a session's process can't start a lead: the command line run in a scratch node's session, the code typed
     /// into its terminal, is refused for its voice by the server, and nothing starts.
     @Test func aSessionsProcessCannotStartALead() async throws {
