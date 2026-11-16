@@ -153,14 +153,8 @@ struct FakeClaudeTests {
                 do {
                     let fake = try FakeClaude.install(in: scratch.url("fake-\(index)"))
                     // Exec'd at once; it starts and ends at once (no terminal): what matters is that it started.
-                    let process = Process()
-                    process.executableURL = fake.launcher
-                    process.environment = ["PATH": "/usr/bin:/bin"]
-                    process.standardInput = FileHandle.nullDevice
-                    process.standardOutput = FileHandle.nullDevice
-                    process.standardError = FileHandle.nullDevice
-                    try process.run()
-                    process.waitUntilExit()
+                    try runToEnd(fake.launcher.path, [], environment: ["PATH": "/usr/bin:/bin"],
+                                 output: .path("/dev/null", flags: O_WRONLY))
                 } catch {
                     refused.append("\(index): \(error)")
                 }

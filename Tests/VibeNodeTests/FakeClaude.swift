@@ -52,13 +52,7 @@ enum FakeClaude {
         exec \(quoted(py.appendingPathComponent("claude").path)) -I -u \(quoted(file.path)) --fake-folder \(quoted(sessions.path)) "$@"
 
         """.write(to: text, atomically: true, encoding: .utf8)
-        let copy = Process()
-        copy.executableURL = URL(fileURLWithPath: "/bin/cp")
-        copy.arguments = [text.path, launcher.path]
-        copy.standardInput = FileHandle.nullDevice
-        try copy.run()
-        copy.waitUntilExit()
-        guard copy.terminationStatus == 0 else {
+        guard try runToEnd("/bin/cp", [text.path, launcher.path]) == 0 else {
             throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: launcher.path])
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcher.path)

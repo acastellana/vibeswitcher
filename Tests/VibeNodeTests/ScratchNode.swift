@@ -348,12 +348,9 @@ final class ScratchNode: @unchecked Sendable {
     static func script(_ text: String, at url: URL) throws {
         let source = url.appendingPathExtension("txt")
         try text.write(to: source, atomically: true, encoding: .utf8)
-        let copy = Process()
-        copy.executableURL = URL(fileURLWithPath: "/bin/cp")
-        copy.arguments = [source.path, url.path]
-        copy.standardInput = FileHandle.nullDevice
-        try copy.run()
-        copy.waitUntilExit()
+        guard try runToEnd("/bin/cp", [source.path, url.path]) == 0 else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
+        }
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
     }
 }

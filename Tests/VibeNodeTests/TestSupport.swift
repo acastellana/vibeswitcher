@@ -312,6 +312,30 @@ func startRetrying(_ spawn: Platform.Spawn) async throws -> pid_t {
     }
 }
 
+/// Runs `executable` with `arguments` to its end, on the calling thread (a blocking call: for a helper that isn't
+/// async, or off the pool): its exit status (the signal's number when one ended it). Started by `Platform.Spawn` (stdin
+/// /dev/null, no other descriptor of this process) and collected by its pid with bounded waits, killed past `limit`:
+/// never Foundation's `Process` and its unbounded `waitUntilExit` (`run(_:_:environment:)`'s note; on the Mac's CI it
+/// hung). Throws what its start throws (ETXTBSY too, not tried again), and when it was never collected.
+@discardableResult
+func runToEnd(_ executable: String, _ arguments: [String], environment: [String: String]? = nil,
+              output: Platform.Spawn.Stdio = .inherit, limit: TimeInterval = 120) throws -> Int32 {
+    var spawn = Platform.Spawn(executable: executable, arguments: [executable] + arguments)
+    spawn.environment = environment.map { $0.map { "\($0.key)=\($0.value)" } }
+    spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+    spawn.stdout = output
+    spawn.stderr = output
+    let pid: pid_t
+    switch spawn.start() {
+    case .failure(let failure): throw failure
+    case .success(let started): pid = started
+    }
+    guard let raw = collected(pid, by: MacTime.real.awake() + limit) else {
+        throw CocoaError(.executableLoad, userInfo: [NSFilePathErrorKey: executable, NSLocalizedDescriptionKey: "\(executable) never ended"])
+    }
+    return raw & 0x7f == 0 ? (raw >> 8) & 0xff : raw & 0x7f
+}
+
 /// Collects child `pid`, asking every few milliseconds (a blocking call: off the pool) until `deadline`; still there
 /// then, it's killed and asked for 10 s more. Its wait status, or nil when it was never collected (nor by anyone else:
 /// one no child of this process any more is nil too).
