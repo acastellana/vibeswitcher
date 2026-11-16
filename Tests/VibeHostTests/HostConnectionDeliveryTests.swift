@@ -178,7 +178,9 @@ import Testing
     }
 
     /// The challenge is decoded and answered on the reader's queue: a caller's queue held the whole time (the main thread
-    /// of a loaded Mac) doesn't hold up the proof, and gets the events once it's free.
+    /// of a loaded Mac) doesn't hold up the proof, and gets the events once it's free. The reader answers the challenge
+    /// before it hands the event over, so the proof can reach the host, and the queue be let go and drained, before the
+    /// event is on it (linux CI 43840361847, 4 cores: `[]`): the test waits for the event, not for the drain.
     @Test func theChallengeIsAnsweredWhileTheCallersQueueIsHeld() async throws {
         let host = try StandIn()
         let queue = callersQueue()
@@ -196,7 +198,7 @@ import Testing
             Issue.record("the challenge wasn't answered while the caller's queue was held: \(asked.map(\.request))")
             return queue.sync { connection.close() }
         }
-        queue.sync {}
+        #expect(await eventually { !log.items.isEmpty }, "the challenge never reached the caller's queue")
         #expect(log.items == [.event(challenge)])
         queue.sync { connection.close() }
     }
