@@ -18,7 +18,7 @@ bash scripts/worktree-init.sh                       # first, in a new worktree
 bash scripts/test.sh --filter LeadBoardTests        # focused tests on a scratch home (a bare swift test refuses to run)
 vs-heavy bash scripts/test.sh                       # full suite, only when asked; vs-heavy: Mac-wide slots for heavy work
 bash scripts/test.sh --filter 'LintTests/'          # every lint suite, before reporting done
-scripts/test-under-load.sh --load 24 -r 3 -f 'NewTests'   # new or changed tests, under load, before reporting done
+scripts/test-under-load.sh --load $((2 * $(getconf _NPROCESSORS_ONLN))) -r 3 -f 'NewTests'   # new or changed tests, under load (2 × cores, the script's cap), before reporting done
 bash scripts/test.sh --perf                         # benches, only on a calm Mac
 bash scripts/e2e/wallet-e2e.sh                      # on demand: sandbox → loop passage → ~/dev/wallet-manager and back, 5 cases
 ```

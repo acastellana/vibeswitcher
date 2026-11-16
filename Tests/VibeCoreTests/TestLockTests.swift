@@ -801,8 +801,8 @@ struct TestLockTests {
 
     // MARK: scripts/test.sh
 
-    /// A folder with a fake `swift` (it logs "<RUN> <verb> start|end" around a sleep of SWIFT_SLEEP seconds) and a
-    /// fake `node` in bin/, and the log they write.
+    /// A folder with a fake `swift` (it logs "<RUN> <verb> start|end" around a sleep of SWIFT_SLEEP seconds, and when
+    /// SWIFT_GATE names a file, first waits for that file) and a fake `node` in bin/, and the log they write.
     func fakes() throws -> (bin: String, log: String) {
         let bin = url("bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
@@ -812,6 +812,7 @@ struct TestLockTests {
             echo "$TMPDIR" > \(RecentProjects.shellQuote(log)).$RUN.tmpdir
             echo "$RUN $*" >> \(RecentProjects.shellQuote(log)).args
             echo "$RUN $1 start" >> \(RecentProjects.shellQuote(log))
+            if [ -n "$SWIFT_GATE" ]; then while [ ! -e "$SWIFT_GATE" ]; do sleep 0.05; done; fi
             sleep "${SWIFT_SLEEP:-1}"
             echo "$RUN $1 end" >> \(RecentProjects.shellQuote(log))
             """
@@ -856,9 +857,13 @@ struct TestLockTests {
 
     @Test func twoRunsOfTheScriptRunOneAfterTheOtherTheSecondSayingWhoHoldsTheLock() async throws {
         let (bin, log) = try fakes()
-        let a = try start("A", bin: bin)
+        // A holds the lock until B says it's waiting for it: a sleep alone ends before B starts on a busy Mac.
+        let gate = url("gate").path
+        let a = try start("A", bin: bin, environment: ["SWIFT_GATE": gate])
         #expect(await eventually { lines(log).contains("A build start") })
         let b = try start("B", bin: bin)
+        #expect(await eventually { lines(b.output).joined().contains("waiting for the Mac-wide test and build lock") })
+        FileManager.default.createFile(atPath: gate, contents: nil)
         #expect(await exited(a.process), "pid \(a.process.processIdentifier) still running")
         #expect(await exited(b.process), "pid \(b.process.processIdentifier) still running")
         #expect(a.process.terminationStatus == 0 && b.process.terminationStatus == 0, "\(lines(a.output)) \(lines(b.output))")
@@ -874,9 +879,13 @@ struct TestLockTests {
     /// `--perf` (the benches alone) takes the same lock: a default run waits for it, and it runs no web tests.
     @Test func aPerfRunHoldsTheLockToo() async throws {
         let (bin, log) = try fakes()
-        let a = try start("A", bin: bin, arguments: ["--perf"])
+        // A holds the lock until B says it's waiting for it: a sleep alone ends before B starts on a busy Mac.
+        let gate = url("gate").path
+        let a = try start("A", bin: bin, arguments: ["--perf"], environment: ["SWIFT_GATE": gate])
         #expect(await eventually { lines(log).contains("A build start") })
         let b = try start("B", bin: bin)
+        #expect(await eventually { lines(b.output).joined().contains("waiting for the Mac-wide test and build lock") })
+        FileManager.default.createFile(atPath: gate, contents: nil)
         #expect(await exited(a.process), "pid \(a.process.processIdentifier) still running")
         #expect(await exited(b.process), "pid \(b.process.processIdentifier) still running")
         #expect(a.process.terminationStatus == 0 && b.process.terminationStatus == 0, "\(lines(a.output)) \(lines(b.output))")

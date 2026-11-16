@@ -430,6 +430,19 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if preferences.walletPeerID.isEmpty { preferences.walletPeerID = Driver.walletPeers[0].peerID }
         return desk
     }()
+    /// The reminders to run /doctor prompt-audit in the fake leads' projects (`prompt-audit`), kept in the sandbox's
+    /// state; it reads the sandbox home's transcripts only.
+    lazy var promptAudit: PromptAuditDesk = {
+        let desk = PromptAuditDesk(file: state.appendingPathComponent("prompt-audit.json"), home: home)
+        desk.roots = { [weak self] in self.map { Array($0.leads.boards.keys) } ?? [] }
+        preferences.$promptAuditReminders.combineLatest(preferences.$promptAuditDays)
+            .sink { [weak desk] on, days in
+                desk?.enabled = on
+                desk?.intervalDays = days
+            }
+            .store(in: &cancellables)
+        return desk
+    }()
     /// The shells fake agents ask for (`shell-ask`), stamped by the sandbox's vault as the host would for the selected
     /// fake session. Run starts a shell session in the sandbox's own host (its own home), never the user's.
     lazy var shellDesk: ShellDesk = {
@@ -630,6 +643,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // Its fake `passage listen`, ended by its pid.
         walletDesk.close()
         shellDesk.close()
+        promptAudit.close()
         shellTidier.close()
         Breadcrumbs.shared.flush()
         RunnableCommand.Script.removeAll()
@@ -1329,7 +1343,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // The sandbox's finished Run-card shells leave as the app's do (and typing into one is recorded from now on).
         shellTidier.start(interval: 5)
         let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
-                                              dictation: dictation, wallet: walletDesk, boost: boostWatch, shells: shellDesk)
+                                              dictation: dictation, wallet: walletDesk, boost: boostWatch, shells: shellDesk,
+                                              promptAudit: promptAudit)
         controller.onBoostMark = { [weak self] in self?.showSettings(.performance, reveal: .boost) }
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
@@ -1425,6 +1440,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
         ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh); --data makes it a contract call (an approve's calldata, say)"),
         ("shell-ask [COMMAND]", "the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in its folder, as vs-shell run does: its card shows in that chat, waiting for Run"),
+        ("prompt-audit due|model|snooze|off", "the selected fake lead's project as due for a /doctor prompt-audit (due: 15 days since VibeSwitcher first saw it; model: its sessions now answer on another model than the last run's), its card shown in the lead's chat; snooze and off press Remind Me in a Week and Not for This Project"),
         ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it, and prints ran or the card's \"Not run: …\" line)"),
         ("shell-tidy SECONDS", "how long a handled shell card (started, declined, expired) shows before it leaves by itself, for cards handled from now on (4 by default); a long time keeps one on screen for a shot"),
         ("shell-idle SECONDS", "how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and looks now: a shell finished that long ago, back at its prompt and not typed into, moves under Ended"),
@@ -1703,6 +1719,27 @@ private final class Driver: NSObject, NSApplicationDelegate {
     private var walletCard: WalletCardModel? {
         guard let id = model.selectedRow?.hostID?.uuidString.lowercased() else { return nil }
         return walletDesk.cards.last { walletDesk.sessions[$0.id] == id }
+    }
+
+    /// `prompt-audit due|model|snooze|off`: the selected lead's project made due (its record set, as if VibeSwitcher had
+    /// seen it 15 days ago, or with a model change), or its card's snooze or off pressed. Nothing is typed anywhere.
+    private func promptAuditCard(_ rest: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let root = model.selectedRow.flatMap({ leads.lead(for: $0) })?.root else { return reply(false, "no lead selected: lead first") }
+        let now = Date()
+        var project = PromptAudit.Project(firstSeen: now.addingTimeInterval(-15 * 86_400))
+        project.models = ["claude-opus-5-5"]
+        switch rest.isEmpty ? "due" : rest {
+        case "due": break
+        case "model":
+            let ran = now.addingTimeInterval(-3 * 86_400).timeIntervalSince1970
+            (project.lastRun, project.since) = (ran, ran)
+            project.sessions = ["lead.jsonl": PromptAudit.Seen(model: "claude-fable-5-2", last: now.timeIntervalSince1970 - 600)]
+        case "snooze": promptAudit.snooze(root); return settle { reply(true, "snoozed a week: \(self.promptAudit.due[root] == nil ? "no card" : "card still shown")") }
+        case "off": promptAudit.turnOff(root); return settle { reply(true, "off for this project: \(self.promptAudit.due[root] == nil ? "no card" : "card still shown")") }
+        default: return reply(false, "prompt-audit due|model|snooze|off")
+        }
+        promptAudit.set(root, project)
+        settle { reply(self.promptAudit.due[root] != nil, self.promptAudit.due[root].map { PromptAudit.reason($0, now: now) } ?? "no card") }
     }
 
     /// `shell-ask [COMMAND]`: the selected fake session's agent asks for a shell, as `vs-shell run` does (`ShellAsk.run`,
@@ -2665,6 +2702,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             default: return reply(false, "boost off|on|away|present|battery|battery-on|battery-low|veto|mark")
             }
             boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }
+        case "prompt-audit": promptAuditCard(rest, reply)
         case "shell-ask": shellAsk(rest, reply)
         case "shell-click": shellClick(rest, reply)
         case "shell-fail":

@@ -40,6 +40,8 @@ struct ChatContainer: View {
     var wallet: WalletDesk? = nil
     /// The shells agents asked for: the selected session's cards, beside its wallet cards.
     var shells: ShellDesk? = nil
+    /// The reminders to run /doctor prompt-audit: the lead's project's card, pinned in its chat while due.
+    var promptAudit: PromptAuditDesk? = nil
     /// The answer card's keys: the composer hands it ⌘1–⌘9, ↩ and ↑ / ↓ while it's empty. Held, not observed.
     @State private var cardKeys = AnswerCardKeys()
     /// What you were writing under the lead's questions, kept when one closes (it moves into the conversation).
@@ -59,6 +61,7 @@ struct ChatContainer: View {
                 BaseMovePrompt(moves: leads.baseMoves, root: lead.root)
                 PushRequestPrompt(pushes: leads.pushes, root: lead.root)
                 ConfigHeldPrompt(holds: leads.configHolds, root: lead.root)
+                if let promptAudit { PromptAuditPrompt(desk: promptAudit, root: lead.root, send: composer.send) }
             } else if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) {
                 TodoPanel(todos: todos)
             }
