@@ -6,8 +6,7 @@ import Testing
 /// T41 narrowed (the engine plan's EN-D11, the security architecture document's S11 item 29): the user's answer reaches
 /// the lead as a `.user` message the host seals for the server (whose root is the node's: its seals go to the host's
 /// vault through the connector), and a copy of that sealed line put back into the lead's inbox arrives as unverified once
-/// the server saw the lead take it (it retires the seal), or, with the delivered record gone, once the seal's life is
-/// over. Against a `ScratchNode`, the lead started from the command line and asking through its tool server.
+/// the server saw the lead take it or the line gone (it retires the seal), or else once the seal's life is over. Against a `ScratchNode`, the lead started from the command line and asking through its tool server.
 @Suite(NodeTraits.linuxOnly, .serialized, .timeLimit(.minutes(10)))
 struct UserSealTests {
     private let scratch = Scratch()
@@ -122,16 +121,28 @@ struct UserSealTests {
         #expect(copy.from != .user, "\(copy.from)")
     }
 
+    /// A seal the server never retires still ends with its life: taken with no delivered record left behind and a copy
+    /// put straight back (so the server sees its id waiting, never gone, and never taken), the copy is the user's no
+    /// more once the seal's life is over (the take's check passed it, so it isn't renewed). Expired, not retired: it
+    /// verifies until its life from its sealing (no earlier than the message's time) is over, longer than the server's
+    /// looks would take to retire it.
     @Test func aReplayIsRefusedEvenWithTheDeliveredRecordRemoved() async throws {
-        let node = try await ScratchNode(scratch, sealLife: 5)
+        let life = 12.0
+        let node = try await ScratchNode(scratch, sealLife: Int(life))
         defer { node.stop() }
         let (lead, message, line) = try await answered(node)
-        // Taken with no delivered record left behind: the server never sees it taken.
         let first = take(node, lead, recordDelivered: false)
         #expect(first.contains { $0.id == message.id && $0.from == .user }, "\(first)")
-        // Inside its life a copy is still the user's (S11 item 29: as often as it is copied back); past it, not.
-        #expect(await eventually(timeout: 60) { verifies(node, message) == false }, "\(node.said)")
         try putBack(line, node, lead)
+        // Inside its life a copy is still the user's (S11 item 29: as often as it is copied back); past it, not.
+        let ended = Locked<Double?>(nil)
+        #expect(await eventually(timeout: 60) {
+            guard verifies(node, message) == false else { return false }
+            ended.value = Date().timeIntervalSince1970
+            return true
+        }, "\(node.said)")
+        let at = try #require(ended.value)
+        #expect(at >= message.at + life, "verified false \(at - message.at) s after the message's time: retired, not expired")
         let replayed = take(node, lead)
         let copy = try #require(replayed.first { $0.id == message.id }, "\(replayed)")
         #expect(copy.from != .user, "\(copy.from)")

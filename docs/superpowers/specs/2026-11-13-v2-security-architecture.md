@@ -1634,11 +1634,12 @@ against it. Each line says what reduces it now, if anything.
     lead's inbox as it posted it, the vault renews none its own lead's or the app's check has passed nor any two hours after
     it was first made, so an answer that waits through a long tool call stays the user's: S3, 2026-11-16), so a replay
     works only inside that window: up to 15 minutes after the seal's last renewal, and never more than two hours plus
-    one life after it was first made. Inside it a replay is not once only: the server retires a seal only when it sees
-    the line gone and its id in `<tty>.delivered`, and nothing checks the delivered record before a delivery, so a
-    worker that copies the line back (several copies, or one at a time with the id taken out of the delivered record)
-    has it delivered as the user's each time until the seal's life ends (2026-11-16, the engine sweep). Signed
-    approvals close it.
+    one life after it was first made. Inside it a replay is not once only: the server retires a seal when it sees the
+    line gone and its id in `<tty>.delivered`, when a lead start's handover withdrew it, or once the line has been out
+    of a readable inbox at two of its looks (an empty or unreadable inbox counts at none: a rewriter empties it for a
+    moment), and nothing checks the delivered record before a delivery, so a worker that copies the line back (several
+    copies, or one put back before the server's looks see it gone) has it delivered as the user's each time until the
+    seal's life ends (2026-11-16, the engine sweep). Signed approvals close it.
 30. Until the handover through sealed memory is built (Task 9), nothing; after it, no handover state on disk. A stale
     Mac-format file is removed by a fresh host (S8).
 

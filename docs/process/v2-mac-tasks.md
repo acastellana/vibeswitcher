@@ -115,7 +115,8 @@ and its [attack review](reviews/v2-security-review-2026-11-13.md), fixed on Linu
   delivery records (`<tty>.delivered`) are outside the seal and the inbox is a file any process of the user's can
   write, so a worker that copies a sealed line of the user's back into the lead's inbox has it delivered as the
   user's, there at any time later. On Linux `LeadVaultV2` (engine E6, EN-D11) limits it: a `.user` seal verifies false
-  once the server retired it (it saw the lead take it) or 15 minutes after it was made or last renewed, renewed only
+  once the server retired it (it saw the lead take it, a lead start's handover withdrew it, or its line was out of
+  the readable inbox at two looks) or 15 minutes after it was made or last renewed, renewed only
   while the line the server posted waits untaken and never two hours past its first making (`renewedLifeCap`); a
   replay still works inside that life (S11 item 29). On the Mac the vault's hooks do nothing (`LeadVaultV2.isOn` is
   `!Platform.CodeIdentity.isAvailable`; the host lists no `vaultV2`), as
