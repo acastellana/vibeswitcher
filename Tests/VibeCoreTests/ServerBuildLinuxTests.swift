@@ -50,6 +50,43 @@ struct ServerBuildLinuxTests {
         #expect(ServerBuild.read(executable: root.appendingPathComponent("missing/bin/x").path) == nil)
     }
 
+    /// The review of S5 (2026-11-16): a build its `build-info` doesn't vouch for says why, not the Mac's "changes not
+    /// committed"; is named by no commit in a receipt; and a record whose commit isn't its folder's name (only `commit`
+    /// rewritten, to the base's head) doesn't vouch for it. The bytes hashed are the running image's when the path is
+    /// this process's own executable (`/proc/self/exe`: a file renamed over the path later isn't what runs).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux: the build-info read"))
+    func aLinuxBuildItsRecordDoesntVouchForSaysWhy() throws {
+        let (root, executable) = try installed()
+        try Data("a tool server!".utf8).write(to: executable)
+        let tampered = try #require(ServerBuild.read(executable: executable.path))
+        #expect(tampered.changed && tampered.changedWhy?.contains("SHA-256") == true, "\(tampered)")
+        #expect(tampered.label.hasPrefix("unknown (") && !tampered.label.contains("not committed"), "\(tampered.label)")
+        #expect(SetupInstalls.commit(ofBuild: tampered.label) == nil)
+        #expect(LeadProvenance.buildText(tampered).hasPrefix("unknown (") && !LeadProvenance.buildText(tampered).contains("not committed"))
+        let other = executable.deletingLastPathComponent().appendingPathComponent("vibeswitcher-other")
+        try Data("other".utf8).write(to: other)
+        #expect(ServerBuild.read(executable: other.path)?.changedWhy?.contains("vibeswitcher-other") == true)
+        // Only the record's commit rewritten (to another commit, the program's hash kept): it doesn't vouch.
+        let bytes = Data("a tool server".utf8)
+        try bytes.write(to: executable)
+        let head = String(repeating: "d", count: 40)
+        let rewritten = BuildInfo(commit: head, binaries: [Self.program: BuildInfo.sha256(of: bytes)], swift: "test",
+                                  resolved: String(repeating: "0", count: 64))
+        try rewritten.encoded.write(to: root.appendingPathComponent(Self.commit).appendingPathComponent(BuildInfo.fileName))
+        let moved = try #require(ServerBuild.read(executable: executable.path))
+        #expect(moved.changed && moved.changedWhy?.contains("folder") == true, "\(moved)")
+        // The bytes hashed are the image's: another file's than the path's is changed.
+        let record = BuildInfo(commit: Self.commit, binaries: [Self.program: BuildInfo.sha256(of: bytes)], swift: "test",
+                               resolved: String(repeating: "0", count: 64))
+        try record.encoded.write(to: root.appendingPathComponent(Self.commit).appendingPathComponent(BuildInfo.fileName))
+        #expect(ServerBuild.read(executable: executable.path)?.changed == false)
+        #expect(ServerBuildLinux.read(executable: executable.path, image: other.path)?.changed == true)
+        // This process's own executable is read through /proc/self/exe; any other path as itself.
+        let own = try FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/exe")
+        #expect(ServerBuildLinux.image(of: own) == "/proc/self/exe")
+        #expect(ServerBuildLinux.image(of: executable.resolvingSymlinksInPath().path) == executable.resolvingSymlinksInPath().path)
+    }
+
     @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's"))
     func theMacStillReadsOnlyTheAppBundle() throws {
         let (_, executable) = try installed()
@@ -88,5 +125,22 @@ struct ServerBuildLinuxTests {
         newer.binaries = [Self.program: String(repeating: "1", count: 64)]
         let again = try JSONDecoder().decode(HostNotes.self, from: JSONEncoder().encode(newer))
         #expect(again == newer)
+    }
+}
+
+extension LeadRemoteTests {
+    /// The review of S5 (2026-11-16): a build `changed` for another reason than changes not committed (on Linux, its
+    /// `build-info` doesn't vouch for its program) fails the gate closed saying that reason.
+    @Test func aBuildChangedForAnotherReasonIsSaidSoByTheGate() throws {
+        let scene = try makeScene()
+        let lead = try lead(scene.root, FakeRuntime())
+        lead.power = { nil }
+        try gateCommit(scene)
+        let why = "its program's SHA-256 isn't the one its build-info records"
+        lead.runningBuild = { ServerBuild(commit: self.head(scene.root), changed: true, builtAt: nil, changedWhy: why) }
+        let status = lead.call("status", [:]).text
+        #expect(status.contains("couldn't be compared with the installed build (unknown (\(why))): \(why), so its commit doesn't say what it holds"),
+                "\(status)")
+        #expect(!status.contains("not committed"), "\(status)")
     }
 }

@@ -129,8 +129,8 @@ enum StatusCommand {
         if let state, let result = state.result {
             lines.append("the node's unit last ended: \(inert(result)), status \(inert(state.execMainStatus)), started \(inert(state.execMainStartTimestamp))")
         }
-        // Each start with the host's line, taken only from the unit's main pid (ST-D24, the start plan's S5).
-        let events = NodeJournal.events(entries, mainPID: state?.execMainPID)
+        // Each start with the host's line, taken only from the unit's main pid and the user (ST-D24, the start plan's S5).
+        let events = NodeJournal.events(entries, mainPID: state?.execMainPID, uid: rule.uid)
         if let last = events.last(where: { $0.kind == .start }), let detail = last.detail {
             lines.append("journal: the node's last start at \(NodeWire.dateText(last.at)): \(inert(detail))")
         }

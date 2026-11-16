@@ -19,9 +19,12 @@ struct NodeJournalTests {
     }
 
     /// systemd's line for the node's unit's start (or stop).
-    static func job(_ type: String, at date: Date) -> String {
-        line(["USER_UNIT": "vibeswitcher-node.service", "JOB_TYPE": type, "JOB_RESULT": "done", "MESSAGE": "Started vibeswitcher-node.service.",
-              "_UID": "1000", "_SYSTEMD_CGROUP": "/user.slice/user-1000.slice/user@1000.service/init.scope"], at: date)
+    static func job(_ type: String, boot: String? = nil, at date: Date) -> String {
+        var fields: [String: Any] = ["USER_UNIT": "vibeswitcher-node.service", "JOB_TYPE": type, "JOB_RESULT": "done",
+                                     "MESSAGE": "Started vibeswitcher-node.service.", "_UID": "1000",
+                                     "_SYSTEMD_CGROUP": "/user.slice/user-1000.slice/user@1000.service/init.scope"]
+        if let boot { fields["_BOOT_ID"] = boot }
+        return line(fields, at: date)
     }
 
     /// An entry of the command line's, from `cgroup`.
@@ -83,10 +86,60 @@ struct NodeJournalTests {
     }
 
     /// The host's start line (the start plan's S5, ST-D24), as journald records it from `pid` over `transport`.
-    static func startLine(pid: Int, build: String = String(repeating: "a", count: 40), transport: String = "stdout", at date: Date) -> String {
-        line(["MESSAGE": "vibeswitcher-host: started pid \(pid) build \(build) SWIFT_BACKTRACE=enable=no", "_PID": String(pid),
-              "_TRANSPORT": transport, "_UID": "1000",
-              "_SYSTEMD_CGROUP": "/user.slice/user-1000.slice/user@1000.service/app.slice/vibeswitcher-node.service"], at: date)
+    static func startLine(pid: Int, build: String = String(repeating: "a", count: 40), transport: String = "stdout", uid: String = "1000",
+                          cgroup: String = "/user.slice/user-1000.slice/user@1000.service/app.slice/vibeswitcher-node.service",
+                          boot: String? = nil, at date: Date) -> String {
+        var fields: [String: Any] = ["MESSAGE": "vibeswitcher-host: started pid \(pid) build \(build) SWIFT_BACKTRACE=enable=no",
+                                     "_PID": String(pid), "_TRANSPORT": transport, "_UID": uid, "_SYSTEMD_CGROUP": cgroup]
+        if let boot { fields["_BOOT_ID"] = boot }
+        return line(fields, at: date)
+    }
+
+    /// The review of S5 (2026-11-16): a line with the unit's main pid counts only from the unit's own cgroup, from the
+    /// user, from the start's boot and from the start on. A pid outlives nothing: with `Restart=no` the unit's
+    /// `ExecMainPID` names a dead pid once the host ends, which another process can be given, and a user unit started
+    /// at login gets nearly the same pid each boot.
+    @Test func aStartLineFromOutsideTheUnitOrBeforeItsStartIsNotTheHosts() throws {
+        let host = 4242
+        let at = Self.start.addingTimeInterval(1)
+        let forged = String(repeating: "f", count: 40)
+        let outside = [
+            // From a scope outside the unit (`systemd-cat` in a terminal, given the dead host's pid).
+            Self.startLine(pid: host, build: forged, cgroup: "/user.slice/user-1000.slice/user@1000.service/app.slice/app-term.scope", boot: "b1", at: at),
+            // From another user.
+            Self.startLine(pid: host, build: forged, uid: "1001", boot: "b1", at: at),
+            // From another boot than the start's.
+            Self.startLine(pid: host, build: forged, boot: "b2", at: at),
+        ]
+        // The same line from the unit, the user and the start's boot is the host's.
+        let ours = Self.read([Self.job("start", boot: "b1", at: Self.start), Self.startLine(pid: host, boot: "b1", at: at)])
+        #expect(NodeJournal.events(ours, mainPID: Int32(host), uid: Self.uid).first?.detail?.hasPrefix("pid \(host) ") == true)
+        for line in outside {
+            let events = NodeJournal.events(Self.read([Self.job("start", boot: "b1", at: Self.start), line]), mainPID: Int32(host), uid: Self.uid)
+            #expect(events.count == 1 && events[0].detail == nil, "\(events)")
+        }
+        // Journald's `_SYSTEMD_USER_UNIT` names the unit too.
+        let named = Self.read([Self.job("start", at: Self.start),
+                               Self.line(["MESSAGE": "vibeswitcher-host: started pid \(host) build \(forged) SWIFT_BACKTRACE=unset", "_PID": String(host),
+                                          "_TRANSPORT": "stdout", "_UID": "1000", "_SYSTEMD_USER_UNIT": "vibeswitcher-node.service"], at: at)])
+        #expect(NodeJournal.events(named, mainPID: Int32(host), uid: Self.uid).first?.detail?.contains(forged) == true)
+        // The earlier invocation's line with the same pid (a reboot gave it again), and the latest start with none
+        // (refused, crashed early, or still hashing its images): the latest start has no line.
+        let later = Self.start.addingTimeInterval(600)
+        let reused = Self.read([Self.job("start", at: Self.start), Self.startLine(pid: host, at: at), Self.job("start", at: later)])
+        let starts = NodeJournal.events(reused, mainPID: Int32(host), uid: Self.uid)
+        #expect(starts.count == 2)
+        #expect(starts.last?.detail == nil, "\(starts)")
+        // Only one start in the entries, and a line with its pid from before it: not its line.
+        let before = Self.read([Self.startLine(pid: host, at: Self.start.addingTimeInterval(-3600)), Self.job("start", at: Self.start)])
+        #expect(NodeJournal.events(before, mainPID: Int32(host), uid: Self.uid).first?.detail == nil)
+        // An earlier start's unchecked line is still only one from the unit.
+        let unchecked = Self.read([Self.job("start", at: Self.start), Self.startLine(pid: 1, build: forged, uid: "1001", at: at),
+                                   Self.job("start", at: later)])
+        #expect(NodeJournal.events(unchecked, mainPID: Int32(host), uid: Self.uid).first?.detail == nil)
+        // Without the user, nothing is taken.
+        #expect(NodeJournal.events(Self.read([Self.job("start", at: Self.start), Self.startLine(pid: host, at: at)]), mainPID: Int32(host))
+            .first?.detail == nil)
     }
 
     /// Every session is in the unit's cgroup, so a `logger` there lands under the unit too: a start line is the host's
@@ -96,7 +149,7 @@ struct NodeJournalTests {
         let host = 4242
         let at = Self.start.addingTimeInterval(1)
         let ours = Self.read([Self.job("start", at: Self.start), Self.startLine(pid: host, at: at)])
-        let event = try #require(NodeJournal.events(ours, mainPID: Int32(host)).first)
+        let event = try #require(NodeJournal.events(ours, mainPID: Int32(host), uid: Self.uid).first)
         #expect(event.kind == .start)
         #expect(event.detail == "pid \(host) build \(String(repeating: "a", count: 40)) SWIFT_BACKTRACE=enable=no", "\(event)")
         // From another pid in the unit (a session's `logger -t vibeswitcher-host`), or through syslog: not the host's.
@@ -105,27 +158,27 @@ struct NodeJournalTests {
                       [Self.job("start", at: Self.start), Self.startLine(pid: host, build: forged, transport: "syslog", at: at)],
                       [Self.job("start", at: Self.start), Self.startLine(pid: host, build: forged, transport: "journal", at: at)]] {
             let entries = Self.read(lines)
-            let events = NodeJournal.events(entries, mainPID: Int32(host))
+            let events = NodeJournal.events(entries, mainPID: Int32(host), uid: Self.uid)
             #expect(events.count == 1 && events[0].kind == .start)
             #expect(events[0].detail == nil, "\(events)")
         }
         // A forged line beside the host's own: the host's is the one taken, whichever came last.
         let both = Self.read([Self.job("start", at: Self.start), Self.startLine(pid: host, at: at),
                               Self.startLine(pid: 777, build: forged, at: at.addingTimeInterval(1))])
-        #expect(NodeJournal.events(both, mainPID: Int32(host)).first?.detail?.contains(forged) == false)
+        #expect(NodeJournal.events(both, mainPID: Int32(host), uid: Self.uid).first?.detail?.contains(forged) == false)
         // Without the unit's main pid, nothing is taken.
         #expect(NodeJournal.events(ours).first?.detail == nil)
         // An earlier invocation's line: shown, as not checked (its pid was another main pid's).
         let later = Self.start.addingTimeInterval(600)
         let two = Self.read([Self.job("start", at: Self.start), Self.startLine(pid: 1111, at: at),
                              Self.job("start", at: later), Self.startLine(pid: host, at: later.addingTimeInterval(1))])
-        let starts = NodeJournal.events(two, mainPID: Int32(host))
+        let starts = NodeJournal.events(two, mainPID: Int32(host), uid: Self.uid)
         #expect(starts.count == 2)
         #expect(starts.first?.detail?.hasSuffix("(not checked)") == true, "\(starts)")
         #expect(starts.first?.detail?.contains("pid 1111") == true, "\(starts)")
         #expect(starts.last?.detail == "pid \(host) build \(String(repeating: "a", count: 40)) SWIFT_BACKTRACE=enable=no", "\(starts)")
         // Not a start event itself: the job's line is.
-        #expect(NodeJournal.events(Self.read([Self.startLine(pid: host, at: at)]), mainPID: Int32(host)).isEmpty)
+        #expect(NodeJournal.events(Self.read([Self.startLine(pid: host, at: at)]), mainPID: Int32(host), uid: Self.uid).isEmpty)
         // The unit's main pid as `systemctl --user show` gives it.
         #expect(NodeJournal.unitState(show: "Result=success\nExecMainPID=4242\n").execMainPID == 4242)
         #expect(NodeJournal.unitState(show: "ExecMainPID=0\n").execMainPID == nil)

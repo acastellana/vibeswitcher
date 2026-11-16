@@ -47,9 +47,11 @@ public enum LeadProvenance {
         return "audit (\(verdict) at \(commit.prefix(12)))"
     }
 
-    /// The build's value: its source commit in full (" (with changes not committed)" beside), else what's known.
+    /// The build's value: its source commit in full (" (with changes not committed)" beside), else what's known (a
+    /// build `changed` for another reason, `changedWhy`: unknown, with that reason).
     public static func buildText(_ build: ServerBuild?) -> String {
         guard let build else { return "unknown (not an app build)" }
+        if build.changed, let why = build.changedWhy { return "unknown (\(why))" }
         guard let commit = build.commit else { return "unknown (no commit recorded)" }
         return commit + (build.changed ? " (with changes not committed)" : "")
     }

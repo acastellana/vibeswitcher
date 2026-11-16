@@ -350,11 +350,17 @@ socket's path is ever the app.
 - **(call)** **What happened is written where the server can't unwrite it.** The host writes its starts, the server
   child's exits and restarts, refused app connections and replaced paths to stderr, which the unit sends to the user
   journal. The command line reads `journalctl --user -u vibeswitcher-node` itself (with systemd's own start and stop
-  lines and `systemctl --user show -p Result,ExecMainStatus,ExecMainStartTimestamp`) and shows starts, stops and
+  lines and `systemctl --user show -p Result,ExecMainStatus,ExecMainStartTimestamp,ExecMainPID`) and shows starts, stops and
   server restarts that no `vibeswitcher start` or `stop` entry explains, and how the previous host ended (signal,
   OOM, exit code), until the user acknowledges them (`status --ack`, a journal entry the command line writes, never a
   server request). What the server says about itself is no
   mitigation once the server is seized; the journal is. Task 8 (stderr lines); E1 and E8 (the command line).
+  Each start shows the host's start line (`vibeswitcher-host: started pid P build C SWIFT_BACKTRACE=…`, the start
+  plan's S5 and ST-D24), which counts only on journald's trusted fields: `_TRANSPORT=stdout`, the user's `_UID`, the
+  node's unit (`_SYSTEMD_USER_UNIT`, else `_SYSTEMD_CGROUP`), its start's `_BOOT_ID`, at its start or after, and for
+  the last start a `_PID` equal to the unit's `ExecMainPID`. Every session is in the unit's cgroup, so a `logger -t
+  vibeswitcher-host` from a worker lands under the unit too; with `Restart=no` a dead host's pid can be given to
+  another process, and the journal holds every boot's lines. An earlier start's line is shown "(not checked)".
 - The Mac is unchanged: `identify` still asks `AppCode.runs` (cdhash) and the app's HMAC proof; there is no connector
   there.
 
@@ -438,7 +444,10 @@ stopped); and the server's half from the engine's E1: `ServerTests.everyHostCall
 `PlatformLintTests.theServersHardeningStatementsComeFirstInTheirOrder` (its first statements); the journal the command
 line reads and writes: `NodeJournalTests.aStartTheJournalDoesntExplainIsMarkedUntilAcknowledged`,
 `NodeJournalTests.aForgedStartEntryFromAUserUnitDoesntClearTheMark`, `NodeJournalTests.anAckSurvivesAServerRestart`,
-`JournalTests.anEntryCarriesIdsAndNoText`.
+`JournalTests.anEntryCarriesIdsAndNoText`; the host's start line (the start plan's S5, ST-D24):
+`NodeJournalTests.aStartLineFromASessionIsNotTheHosts`,
+`NodeJournalTests.aStartLineFromOutsideTheUnitOrBeforeItsStartIsNotTheHosts`,
+`ScratchNodeTests.theHostSaysItsBuildAndBacktraceAtItsStart`.
 
 **Tests to write:** none left: Tasks 4b's, 8a's and 8b's are under Held by.
 

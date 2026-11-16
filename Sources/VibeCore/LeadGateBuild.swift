@@ -14,17 +14,23 @@ public struct ServerBuild: Equatable, Sendable {
     public var changed: Bool
     /// The executable's modification time.
     public var builtAt: Date?
+    /// Why it's `changed` when that isn't a build with changes not committed: on Linux, what its `build-info` doesn't
+    /// vouch for (`ServerBuildLinux.read`); nil for the Mac's `VSSourceChanged`.
+    public var changedWhy: String?
 
-    public init(commit: String?, changed: Bool = false, builtAt: Date?) {
+    public init(commit: String?, changed: Bool = false, builtAt: Date?, changedWhy: String? = nil) {
         self.commit = commit
         self.changed = changed
         self.builtAt = builtAt
+        self.changedWhy = changedWhy
     }
 
     /// How a receipt and a progress line name it: the commit's first 12 characters. A build that recorded none is
     /// unknown: its executable's date (the host log's build id) is when it was copied into place, not what it holds
-    /// (install-app.sh's `cp -R` dates the copy), so it's only said beside.
+    /// (install-app.sh's `cp -R` dates the copy), so it's only said beside. One `changed` for another reason
+    /// (`changedWhy`, Linux) is unknown too, with that reason: its commit doesn't say what it holds.
     public var label: String {
+        if changed, let changedWhy { return "unknown (\(changedWhy))" }
         if let commit { return String(commit.prefix(12)) + (changed ? " with changes not committed" : "") }
         guard let builtAt else { return "unknown (no commit recorded)" }
         return "unknown (no commit recorded; its files dated \(Self.date(builtAt)), \(Int(builtAt.timeIntervalSince1970)))"
@@ -136,7 +142,7 @@ extension LeadToolset {
             }
             // Built from more than (or other than) its commit: what it holds can't be told from the commit.
             if build.changed {
-                return GateLag(build: build, uncompared: "it was built with changes not committed in Sources/, or its checkout moved while it compiled, so its commit doesn't say what it holds")
+                return GateLag(build: build, uncompared: (build.changedWhy ?? "it was built with changes not committed in Sources/, or its checkout moved while it compiled") + ", so its commit doesn't say what it holds")
             }
             let log = Git.run(["log", "--format=%h%x09%s", "\(commit)..\(head)"] + paths, in: root)
             guard log.ok else { return failed("\(commit.prefix(8))..\(workflow.base)", log) }

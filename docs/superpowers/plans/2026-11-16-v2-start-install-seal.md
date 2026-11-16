@@ -382,6 +382,15 @@ accepted every recommendation so far. Each can be overruled before its task star
       `ConfigSeal.homeWatched(home:)`, so the paths are passed as it spells them: `<home>/.vibeswitcher/bin/…` and
       `<home>/.claude/settings.json`, never `VibePaths.binDir` (on a scratch node that is `<root>/bin`, reached through
       the `<home>/.vibeswitcher` link).
+    - *2026-11-16, the review of S5:* `HostNotes.binaries` is the `build-info` the host's image read from disk at
+      its last start or handover (`HostImages.load` runs in each new image, `HostStartLine.record`), and only its
+      `vibeswitcher-host` and `vibeswitcher-server` entries were checked against bytes then. Its hook and mcp
+      entries are as written: a worker that rewrites a build's `bin/vibeswitcher-hook` and its `build-info` entry
+      together before a start or a `vs switch` to that build gets them past this check. That is the security
+      document's "Doesn't promise" (the install folder and `build-info` are the user's to write before the sandbox),
+      so this decision claims no more than that: the notes' copy holds against a rewrite after the start, not before
+      it. S6 also refuses while the seal holds an unaccepted change under `.vibeswitcher/v2/builds` (S7's `.listing`
+      sees a rewrite by its `ctime`), or says here why not.
     - The command line no longer writes locally, and its `CLAUDE_CONFIG_DIR` is ignored.
     - Harnesses that prepare a real-agent folder (E9 Step 2, S10) write its hooks with
       `HookInstaller.install(agent:at:hookBinary:)` directly.
@@ -445,6 +454,14 @@ accepted every recommendation so far. Each can be overruled before its task star
     when journald's trusted `_PID` equals the unit's `ExecMainPID` (`systemctl --user show -p ExecMainPID`) and
     `_TRANSPORT` is `stdout`. A handover keeps the pid. Lines from an earlier invocation are shown as "not checked".
     A process that inherited the host's stderr would pass. `CloseOnExecLintTests` keeps that fd out of sessions.
+    *2026-11-16, the review of S5:* the pid alone isn't enough. With `Restart=no` the unit's `ExecMainPID` names a
+    dead pid once the host ends, which a process outside the unit can be given (`systemd-cat -t vibeswitcher` then
+    writes a stdout line with that `_PID`), and `journalctl --user -u` reads every boot, where a unit started at login
+    gets nearly the same pid. So a line (an earlier start's unchecked one too) also needs the user's `_UID`, the node's
+    unit (`_SYSTEMD_USER_UNIT`, else the last part of `_SYSTEMD_CGROUP`), its start's `_BOOT_ID`, and a time at its
+    start or after (not after the start before it). `NodeJournal.events(_:mainPID:uid:)`;
+    `NodeJournalTests.aStartLineFromOutsideTheUnitOrBeforeItsStartIsNotTheHosts`. The rule and its tests are in the
+    security document's S2 now (S5's review), not left to S4c or S8b.
 
 ## Review Focus
 
@@ -522,6 +539,9 @@ scripts/install-node.sh   S4b
 | `Sources/VibeCore/HostProtocol.swift`, `HostNotes` | `build: String?` and `binaries: [String: String]?`, from the `build-info` the host loaded | 6 | S5 |
 | `Sources/VibeHost/HostServer.swift` (where notes are made) | one hook line filling both from `HostStartLine` (*2026-11-16, S5: not needed; the notes are made in `V2/HostNotesAnswer.swift`*) | 4 | S5 |
 | `Sources/vibeswitcher-host/main.swift` | one hook line after the start checks: `HostStartLine.say(config:)` (Linux only) | 4 | S5 |
+| `Sources/VibeCore/LeadGateBuild.swift`, `ServerBuild` (*2026-11-16, S5's review*) | `changedWhy: String?` (nil by default, an `init` argument defaulting to nil), filled only by `ServerBuildLinux.read` | 6 | S5 |
+| `Sources/VibeCore/LeadGateBuild.swift`, `ServerBuild.label` and `gateLag` (*2026-11-16, S5's review*) | one hook line in `label` (a build with `changedWhy`: "unknown (<why>)") and one hook expression in `gateLag`'s changed text (`changedWhy` before ", so its commit doesn't say what it holds", else today's text) | 4 | S5 |
+| `Sources/VibeCore/LeadProvenance.swift`, `buildText` (*2026-11-16, S5's review*) | one hook line: a build with `changedWhy` is "unknown (<why>)" in `VS-Build` | 4 | S5 |
 | `Sources/VibeCore/ConfigSeal.swift`, `homeWatched(home:)` | one hook line appending `LinuxSealList.watched(home:uid:)` | 4 | S7 |
 | `Sources/VibeCore/ConfigSeal.swift`, `Watched.Kind` and its read | `.listing` (ST-D18), and `.entries` if ST-D19's measurement needs it; one read branch each, into `LinuxSealList` | lead-approved | S7 |
 | `Sources/VibeCore/ConfigSeal.swift`, `isHome(key:)` | names starting `/mnt/` and `/run/user/` (ST-D20) | lead-approved | S7 |
@@ -1457,6 +1477,27 @@ waiting on M3).
   is `changed`.
 - [ ] **Step 4:** commit ("v2: the host, the server and the tool server name their build"). Push, both green.
 
+*Notes, 2026-11-16 (S5's review fixes):*
+- **The journal's start line** (two findings): `NodeJournal.events(_:mainPID:uid:)` takes a line only from the user
+  (`_UID`, `Status` passes `journalRule.uid`), from the node's unit (`_SYSTEMD_USER_UNIT`, else `_SYSTEMD_CGROUP`'s
+  last part), from its start's `_BOOT_ID`, and for the last start from that start on (it began at the start before).
+  ST-D24 has a dated note.
+- **The Linux build's reason:** `ServerBuild.changedWhy` (kind 6, nil on the Mac) says why `ServerBuildLinux.read`
+  marks a build `changed`: the program's SHA-256 isn't its entry, `build-info` has no entry for it, or the record's
+  commit isn't its folder's name (a record whose `commit` alone was rewritten). `label` and `LeadProvenance.buildText`
+  say "unknown (<why>)" for it (so `SetupInstalls` counts no commit from it), and `gateLag` gives that reason instead
+  of the Mac's "changes not committed". Three Non-seam rows and port-map rows added. The bytes hashed are
+  `/proc/self/exe`'s when the path is this process's own executable (`ServerBuildLinux.image(of:)`). Not done: a
+  check that the folder is under the install prefix (`VibeCore` doesn't know the node's prefix, and the name check
+  already ties the record to its folder), and reading `ServerBuild.running` at the tool server's start (an edit to
+  `vibeswitcher-mcp/main.swift`; the image's own bytes make a later read safe against a file renamed over the path).
+- **`HostNotes.binaries` after a handover:** documented in ST-D17 (the copy is the last start's or handover's, its
+  hook and mcp entries as written), with S6 to refuse while the seal holds a change under `.vibeswitcher/v2/builds`.
+  Hashing every entry at load wouldn't help: a worker rewrites the program and its entry together.
+- Tests: `NodeJournalTests.aStartLineFromOutsideTheUnitOrBeforeItsStartIsNotTheHosts`,
+  `ServerBuildLinuxTests.aLinuxBuildItsRecordDoesntVouchForSaysWhy` (linuxOnly),
+  `LeadRemoteTests.aBuildChangedForAnotherReasonIsSaidSoByTheGate` (in `ServerBuildLinuxTests.swift`, both platforms).
+
 **Done when:** the cases pass. The port map's row 223 is `made`, and the `HostNotes`, gate-text and start-line rows are
 added. The Mac runs `theMacStillReadsOnlyTheAppBundle`, the gate's Mac case and `anOlderHostsNotesWithoutABuildStillRead`.
 
@@ -2101,7 +2142,8 @@ decision. S4c and S8b write them into those documents.
 - The rule on switches stays after Task 3b's measurement, until the in-flight count (ST-D15).
 - A team keeps its build until its lead restarts (ST-D16).
 - A switch, a rollback and an install leave the seal holding every team until `config accept` (ST-D23).
-- The host's start line counts only from the unit's main pid on stdout (ST-D24).
+- The host's start line counts only from the unit's main pid on stdout (ST-D24). *2026-11-16: also only from the
+  user, the unit, its start's boot and from its start on; S5's review wrote it into the security document's S2.*
 - The seal's list adds what this machine's startup files source (`.bash_aliases`, nvm's scripts, rally's aliases),
   swiftly's `config.json`, systemd's other unit and drop-in folders, and `~/.config/gh` (S7).
 - `~/.config/systemd/user` is no longer empty here: it holds the user's `home-net-review` units, so the seal's first

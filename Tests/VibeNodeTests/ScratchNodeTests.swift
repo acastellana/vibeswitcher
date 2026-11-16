@@ -56,9 +56,10 @@ struct ScratchNodeTests {
         let entries = NodeJournal.entries(json: [
             #"{"__REALTIME_TIMESTAMP":"1800000000000000","USER_UNIT":"vibeswitcher-node.service","JOB_TYPE":"start","JOB_RESULT":"done"}"#,
             String(decoding: try JSONSerialization.data(withJSONObject: ["__REALTIME_TIMESTAMP": "1800000001000000", "MESSAGE": line,
-                                                                          "_PID": String(node.hostPID), "_TRANSPORT": "stdout"]), as: UTF8.self),
+                                                                          "_PID": String(node.hostPID), "_TRANSPORT": "stdout", "_UID": String(getuid()),
+                                                                          "_SYSTEMD_USER_UNIT": "vibeswitcher-node.service"]), as: UTF8.self),
         ].joined(separator: "\n"))
-        let start = try #require(NodeJournal.events(entries, mainPID: node.hostPID).first)
+        let start = try #require(NodeJournal.events(entries, mainPID: node.hostPID, uid: getuid()).first)
         #expect(start.detail == "pid \(node.hostPID) build \(ScratchNode.commit) SWIFT_BACKTRACE=enable=no")
     }
 

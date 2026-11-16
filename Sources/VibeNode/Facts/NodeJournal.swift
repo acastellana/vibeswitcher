@@ -108,42 +108,49 @@ public enum NodeJournal {
     ///
     /// Each start carries the host's start line as its `detail` (ST-D24). Every session is in the unit's cgroup, so a
     /// `logger -t vibeswitcher-host` from a worker lands under the unit too: a line counts only when journald's
-    /// trusted `_TRANSPORT` is `stdout` (the host's stderr, as the unit gives it), and for the last start only when its
-    /// trusted `_PID` is the unit's `mainPID` (`ExecMainPID`; a handover keeps the pid, so the newest such line is the
-    /// build that runs now). An earlier start's pid can't be checked any more: the newest stdout line between it and
-    /// the next start is shown, said "(not checked)". Without `mainPID`, no line is taken.
-    public static func events(_ entries: [JournalEntry], mainPID: Int32? = nil) -> [Event] {
-        var events = entries.compactMap { entry -> Event? in
+    /// trusted fields say the host could have sent it: `_TRANSPORT` is `stdout` (the host's stderr, as the unit gives
+    /// it), `_UID` is `uid`, the sender was in the node's unit (`_SYSTEMD_USER_UNIT`, else the last part of
+    /// `_SYSTEMD_CGROUP`), its `_BOOT_ID` is its start's, and it came at its start or after (the host writes it after its
+    /// start's job line). For the last start, also only when its trusted `_PID` is the unit's `mainPID` (`ExecMainPID`;
+    /// a handover keeps the pid, so the newest such line is the build that runs now). The pid alone isn't enough: with
+    /// `Restart=no` the unit's `ExecMainPID` names a dead pid once the host ends, which another process can be given,
+    /// and the journal holds every boot's lines (the review of S5). An earlier start's pid can't be checked any more:
+    /// the newest such line between it and the next start is shown, said "(not checked)". Without `mainPID` and `uid`,
+    /// no line is taken.
+    public static func events(_ entries: [JournalEntry], mainPID: Int32? = nil, uid: uid_t? = nil) -> [Event] {
+        let found = entries.compactMap { entry -> (event: Event, boot: String?)? in
             guard let at = entry.time else { return nil }
             let unit = entry.fields["USER_UNIT"] ?? entry.fields["UNIT"]
             if unit == VoiceRule.nodeUnit, entry.fields["JOB_RESULT"] == "done" {
                 switch entry.fields["JOB_TYPE"] {
-                case "start": return Event(kind: .start, at: at)
-                case "stop": return Event(kind: .stop, at: at)
+                case "start": return (Event(kind: .start, at: at), entry.fields["_BOOT_ID"])
+                case "stop": return (Event(kind: .stop, at: at), nil)
                 default: return nil
                 }
             }
             if let message = entry.message, message.hasPrefix("vibeswitcher-host: server child pid"), message.contains(" ended after ") {
-                return Event(kind: .serverRestart, at: at)
+                return (Event(kind: .serverRestart, at: at), nil)
             }
             return nil
-        }.sorted { $0.at < $1.at }
-        guard let mainPID else { return events }
-        let lines = entries.compactMap { entry -> (at: Date, pid: Int32?, text: String)? in
-            guard entry.fields["_TRANSPORT"] == "stdout", let at = entry.time, let message = entry.message,
-                  message.hasPrefix(startLine) else { return nil }
-            return (at, entry.fields["_PID"].flatMap { Int32($0) }, String(message.dropFirst("vibeswitcher-host: started ".count)))
+        }.sorted { $0.event.at < $1.event.at }
+        var events = found.map(\.event)
+        guard let mainPID, let uid else { return events }
+        let lines = entries.compactMap { entry -> (at: Date, pid: Int32?, boot: String?, text: String)? in
+            guard entry.fields["_TRANSPORT"] == "stdout", entry.uid == uid,
+                  (entry.fields["_SYSTEMD_USER_UNIT"] ?? entry.cgroup.map { ($0 as NSString).lastPathComponent }) == VoiceRule.nodeUnit,
+                  let at = entry.time, let message = entry.message, message.hasPrefix(startLine) else { return nil }
+            return (at, entry.fields["_PID"].flatMap { Int32($0) }, entry.fields["_BOOT_ID"],
+                    String(message.dropFirst("vibeswitcher-host: started ".count)))
         }.sorted { $0.at < $1.at }
         let starts = events.indices.filter { events[$0].kind == .start }
         for (order, index) in starts.enumerated() {
-            let from = events[index].at
+            let from = events[index].at, boot = found[index].boot
             if order == starts.count - 1 {
-                // The invocation that runs now (or ran last): its main pid's line, the newest after the start before it.
-                let after = order > 0 ? events[starts[order - 1]].at : .distantPast
-                events[index].detail = lines.last { $0.pid == mainPID && $0.at >= after }.map(\.text)
+                // The invocation that runs now (or ran last): its main pid's newest line from its start on.
+                events[index].detail = lines.last { $0.pid == mainPID && $0.boot == boot && $0.at >= from }.map(\.text)
             } else {
                 let until = events[starts[order + 1]].at
-                events[index].detail = lines.last { $0.at >= from && $0.at < until }.map { $0.text + " (not checked)" }
+                events[index].detail = lines.last { $0.boot == boot && $0.at >= from && $0.at < until }.map { $0.text + " (not checked)" }
             }
         }
         return events
