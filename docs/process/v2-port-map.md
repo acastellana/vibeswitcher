@@ -137,6 +137,21 @@ The engine's own change to a `v2` test: `Tests/VibeNodeTests/StatusCommandTests.
 | Date | Main commits | File | Outcome |
 | --- | --- | --- | --- |
 
+*Owed, found 2026-11-16 (the engine sweep):* main hasn't been merged since `77e673c3` (2026-11-12), past
+[v2-branch.md](v2-branch.md)'s every working day. `git merge-tree --write-tree` of GitHub's main at `2404fe5e` (87
+commits past the merge base `f2ebe92b`) with `v2-engine-sweep` stops on three conflicts, each between a stage 0-2 edit
+and main's, none the engine's (the other shared files merge clean):
+
+- `Sources/VibeCore/LeadMergeBatch.swift`, the batch's test failure: main passes `redOnBase: Array(redOnMain)` to
+  `MergeFailure.reason(in:redOnBase:)` and splits with `components(separatedBy: "\n")`; `v2` calls `reason(in:)` and
+  splits with `Platform.lines`. Take main's call with `v2`'s `Platform.lines`.
+- `Sources/VibeHost/HostedSession.swift`, the read loop: main's new `captureOutput(chunk)` against `v2`'s
+  `parserReplies.noteQueries(in: chunk)`. Keep both lines.
+- `Tests/VibeCoreTests/DevPreviewTests.swift`: main's new `connectLoopback` (Network.framework) against `v2`'s
+  `#if canImport(Darwin)`. Keep both, with `connectLoopback` inside the `#if`.
+
+Not built yet: the merge is the lead's, on `v2` after a fetch, and its rows go in the table above.
+
 ## Non-seam edits
 
 Rows marked *planned* are the ones the plans expect, listed before they are made so an executor doesn't stop to ask;
