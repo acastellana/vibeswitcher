@@ -3455,3 +3455,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 16:49 Automatically fetched origin/main at d515b522: 0 commits from the other Mac at origin/main (d515b522be0e47506634c6e3cdaf612d460db198): merge_remote would do nothing: main has everything origin/main has.
 - 2026-11-16 18:21 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
 Seen again, already reported, so only counted (the daily trend has the counts): error kind app: failed ×1
+- 2026-11-16 20:55 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Seen again, already reported, so only counted (the daily trend has the counts): error kind app: failed ×1
