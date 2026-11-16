@@ -310,8 +310,9 @@ timer", and stage 3's stores remove it after the bootstrap.
   between the server's death and its restart, which a worker could take (the command line's check of the server
   refuses such a listener; the security document's T9).
 - **`vibeswitcher-server`**: the stores, the lead engine, the live protocol to clients and, later, peers. It can
-  crash and be restarted without a session ending or an approval being forgeable. It makes itself non-dumpable as
-  its first statement.
+  crash and be restarted without a session ending or an approval being forgeable. It hardens itself in its first
+  statements, in the order the engine plan's E1 gives: the image it was started from closed, then non-dumpable (it is
+  non-dumpable from its exec already, started from a sealed copy), then the traced check.
 - **`vibeswitcher`** (the `vibeswitcher-cli` target): `start`, `stop`, `status`, `attach ID`, `lead FOLDER --goal
   "…"`, `pair`, `doctor`, `report`, `update`, `uninstall`. A client like any other, and the first one built. In stage 1
   `status` and `hooks` read local files, as a probe; from the engine on, every command goes through the server.
