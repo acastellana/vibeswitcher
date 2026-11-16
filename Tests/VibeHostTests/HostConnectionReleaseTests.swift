@@ -29,6 +29,9 @@ import Testing
         }
         #expect(await offPool { answered.wait(timeout: .now() + hangGuard) } == .success)
         queue.sync { released?.close() }
-        #expect(queue.sync { released } == nil, "the closed connection is still held by its handlers")
+        // The reader holds the connection for the rest of its turn (`self?.readAvailable()`), which goes on past handing
+        // over the answer: a reader thread put off just then (linux CI 43840361847, 4 cores) still held it after the
+        // close. Its turn ends on its own; only handlers that hold it hold it for good.
+        #expect(await eventually { queue.sync { released } == nil }, "the closed connection is still held by its handlers")
     }
 }
