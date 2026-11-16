@@ -3357,3 +3357,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 10:41 Released after-a-mac-restart's worker (idle since its done report on 52270c53) while its audit runs
 - 2026-11-16 10:41 Automatically (auto_advance): Released after-a-mac-restart's worker, idle since its done report on 52270c53, while its audit runs (ended pid 86007 (Worker: After a Mac restart, a card offers to reopen the sessions that were open)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-16 10:44 Audit of after-a-mac-restart: complete, clean, round 2: 1 Important closed, 5 Nit (2 open)
+- 2026-11-16 10:49 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: 1 task paused since 10:49 (0 planned, 1 in review).
+- 2026-11-16 11:04 Pipeline held: after-a-mac-restart ready to merge with none landing; cause: the load hold
+- 2026-11-16 11:07 Automatically (auto_advance): Released: on AC power, after 18 min.
+- 2026-11-16 11:10 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Error lines in app.log within 10 min, by kind: app: failed ×1
+Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-16 11:42 Pipeline held: after-a-mac-restart ready to merge with none landing; cause: the load hold
+- 2026-11-16 12:14 Pipeline held: after-a-mac-restart ready to merge with none landing; cause: the load hold
+- 2026-11-16 12:15 Merged after-a-mac-restart: After a Mac restart, a card offers to reopen the sessions that were open (build 64a972289c0f with changes not committed)
+- 2026-11-16 12:15 Flaky in after-a-mac-restart's merge: aFailedReadFallsBackOnTheParsersLines(hook:), aFailedReadFallsBackOnTheParsersLines(hook:) with 2 test cases, escCancelsTheRecordingAndNothingLands(), escAndTheCrossCancelWhileHeldWaitingAndProcessing(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun

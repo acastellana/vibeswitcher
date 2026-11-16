@@ -405,6 +405,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `review-floor` — ReviewFloorSection — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
 - `sleep-notice` — SleepNoticeBanner — `Sources/VibeSwitcher/Sandbox.swift`
 - `toolchain-note` — ToolchainNoteView — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
+- `restart-card` — RestartCardView — `Sources/VibeSwitcher/RestartCard.swift`
 - `new-project` — NewProjectSheet — `Sources/VibeSwitcher/MainWindow/NewProject/NewProjectSheet.swift`
 - `menu-bar` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`
 - `menu-bar-dots` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`
