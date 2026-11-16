@@ -321,6 +321,97 @@ extension StartCommandTests {
         #expect(NodeFolders.managerConfigRefusal(accountHome: home.path) == nil)
     }
 
+    /// Security follow-up 21: the manager config is read as systemd reads it, backslash continuations joined, so a
+    /// `DefaultEnvironment=` can't hide behind one; and fail-closed, so one can't hide in a file `start` can't read
+    /// whole (unreadable, not UTF-8, not a regular file, a drop-in that is a link). Each refuses, naming the file.
+    @Test(NodeTraits.linuxOnly) func aManagerConfigStartCantReadAsSystemdDoesRefusesStart() throws {
+        let home = scratch.url("confhome21")
+        let systemd = home.appendingPathComponent(".config/systemd")
+        let dropIns = systemd.appendingPathComponent("user.conf.d")
+        try FileManager.default.createDirectory(at: dropIns, withIntermediateDirectories: true)
+        let conf = systemd.appendingPathComponent("user.conf")
+        func refusal() -> StartRefusal? { NodeFolders.managerConfigRefusal(accountHome: home.path) }
+        func write(_ text: String, to url: URL? = nil) throws { try Data(text.utf8).write(to: url ?? conf) }
+        // Each case checked on its own (no `#require`), so each one this misses is its own issue.
+        func expectRefused(naming file: URL, saying words: String, _ comment: Comment, sourceLocation: SourceLocation = #_sourceLocation) {
+            let refused = refusal()
+            #expect(refused?.text.contains(file.path) == true && refused?.text.contains(words) == true,
+                    "\(comment): \(String(describing: refused))", sourceLocation: sourceLocation)
+        }
+
+        // Each sets DefaultEnvironment= as systemd reads it.
+        let hidden = [
+            // The key's line continued: systemd reads `DefaultEnvironment =GIT_CONFIG_GLOBAL=…`.
+            "[Manager]\nDefaultEnvironment\\\n=GIT_CONFIG_GLOBAL=/srv/evil.gitconfig\n",
+            "[Manager]\nDefaultEnvironment\\\r\n=GIT_CONFIG_GLOBAL=/srv/evil.gitconfig\r\n",
+            "[Manager]\nDefaultEnvironment=\\\nGIT_CONFIG_GLOBAL=/srv/evil.gitconfig\n",
+            // Newer systemd skips a comment line inside a continuation.
+            "[Manager]\nDefaultEnvironment\\\n# a comment\n=GIT_CONFIG_GLOBAL=/srv/evil.gitconfig\n",
+            // A continuation still open at the end is read.
+            "[Manager]\nDefaultEnvironment=GIT_CONFIG_GLOBAL=/srv/evil.gitconfig\\",
+            // A NUL ends a line; a byte-order mark is dropped.
+            "[Manager]\nLogLevel=info\u{0}DefaultEnvironment=GIT_CONFIG_GLOBAL=/srv/evil.gitconfig\n",
+            "\u{FEFF}[Manager]\nLogLevel=info\n\u{FEFF}DefaultEnvironment=GIT_CONFIG_GLOBAL=/srv/evil.gitconfig\n",
+        ]
+        for text in hidden {
+            try write(text)
+            expectRefused(naming: conf, saying: "sets DefaultEnvironment=", "\(text.debugDescription)")
+        }
+        // None of these does: a continued empty value (a reset), an escaped backslash (no continuation), and a
+        // continuation into another key's value (systemd reads `LogLevel=info  DefaultEnvironment=X`).
+        for text in ["[Manager]\nDefaultEnvironment=\\\n", "[Manager]\nLogLevel=info\\\\\n", "[Manager]\nLogLevel=info \\\nDefaultEnvironment=X\n"] {
+            try write(text)
+            #expect(refusal() == nil, "\(text.debugDescription)")
+        }
+        try FileManager.default.removeItem(at: conf)
+        #expect(refusal() == nil)
+
+        // A user.conf that isn't UTF-8.
+        try Data("[Manager]\nLogLevel=info\n".utf8 + [0xFF, 0xFE, 0x0A]).write(to: conf)
+        expectRefused(naming: conf, saying: "isn't UTF-8", "notUTF8")
+        // One that can't be read (as root, mode 000 still reads).
+        try write("[Manager]\nLogLevel=info\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: conf.path)
+        if geteuid() != 0 {
+            expectRefused(naming: conf, saying: "can't be opened", "unreadable")
+        }
+        try FileManager.default.removeItem(at: conf)
+        // A folder named user.conf.
+        try FileManager.default.createDirectory(at: conf, withIntermediateDirectories: false)
+        expectRefused(naming: conf, saying: "isn't a regular file", "folderConf")
+        try FileManager.default.removeItem(at: conf)
+        #expect(refusal() == nil)
+
+        // A folder named x.conf in user.conf.d.
+        let folderDropIn = dropIns.appendingPathComponent("x.conf")
+        try FileManager.default.createDirectory(at: folderDropIn, withIntermediateDirectories: false)
+        expectRefused(naming: folderDropIn, saying: "isn't a regular file", "refusedFolder")
+        try FileManager.default.removeItem(at: folderDropIn)
+        // A drop-in that is a link, even to a harmless file.
+        let target = scratch.url("harmless.conf")
+        try write("[Manager]\nLogLevel=info\n", to: target)
+        let link = dropIns.appendingPathComponent("20-link.conf")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        expectRefused(naming: link, saying: "is a link", "refusedLink")
+        try FileManager.default.removeItem(at: link)
+        // An unreadable drop-in and one that isn't UTF-8.
+        let dropIn = dropIns.appendingPathComponent("30-x.conf")
+        try Data([0xC3, 0x28]).write(to: dropIn)
+        expectRefused(naming: dropIn, saying: "isn't UTF-8", "dropInNotUTF8")
+        try write("[Manager]\nLogLevel=info\n", to: dropIn)
+        #expect(refusal() == nil)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: dropIn.path)
+        if geteuid() != 0 {
+            expectRefused(naming: dropIn, saying: "can't be opened", "dropInUnreadable")
+        }
+        try FileManager.default.removeItem(at: dropIn)
+        // A continuation-hidden key in a drop-in.
+        try write("[Manager]\nManagerEnvironment\\\n  =XDG_CONFIG_HOME=/srv/x\n", to: dropIn)
+        expectRefused(naming: dropIn, saying: "ManagerEnvironment=", "a continued key in a drop-in")
+        try FileManager.default.removeItem(at: dropIn)
+        #expect(refusal() == nil)
+    }
+
     @Test(NodeTraits.linuxOnly) func aMissingManagerSocketOnASystemdMachineRefusesNotDetaches() throws {
         let folder = scratch.url("mode")
         let system = folder.appendingPathComponent("run-systemd-system"), comm = folder.appendingPathComponent("comm")

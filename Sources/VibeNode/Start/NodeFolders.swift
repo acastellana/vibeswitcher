@@ -215,20 +215,11 @@ public enum NodeFolders {
     /// or a `user.conf.d/*.conf` there that sets `DefaultEnvironment=` (given to every unit) or `ManagerEnvironment=`
     /// (the manager's own, which its generators read), naming the file and the key. Any worker can write these, and
     /// the manager applies them at the next `daemon-reload` or login, past what `show-environment` said before
-    /// (the review of S1). An empty assignment (a reset) and a commented line are taken.
+    /// (the review of S1). An empty assignment (a reset) and a commented line are taken. Read as systemd reads it,
+    /// backslash continuations joined, and fail-closed: a file there it can't read whole, or a drop-in that is a link
+    /// or no regular file, refuses, naming it (`ManagerConfig`; security follow-up 21).
     public static func managerConfigRefusal(accountHome: String) -> StartRefusal? {
-        let systemd = join(accountHome, ".config/systemd")
-        let dropIns = join(systemd, "user.conf.d")
-        let files = [join(systemd, "user.conf")] + ((try? FileManager.default.contentsOfDirectory(atPath: dropIns)) ?? [])
-            .filter { $0.hasSuffix(".conf") }.sorted().map { join(dropIns, $0) }
-        for file in files {
-            guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { continue }
-            let unit = NodeUnit.parse(text)
-            for key in ["DefaultEnvironment", "ManagerEnvironment"] where (unit[key] ?? []).contains(where: { !$0.isEmpty }) {
-                return StartRefusal("\(ConfigSeal.inert(file, limit: .max)) sets \(key)=, which the user manager gives to what it starts at its next daemon-reload or login, past start's check of its environment; remove that line (and run `systemctl --user daemon-reload`)")
-            }
-        }
-        return nil
+        ManagerConfig.refusal(accountHome: accountHome)
     }
 
     // MARK: - Helpers
