@@ -504,38 +504,80 @@ enum ScratchNodes {
     private static func killAll() { for pid in lock.withLock({ running }) { kill(pid, SIGKILL) } }
 
     /// `program` with `arguments` on a pty of its own (util-linux `script`), its terminal's output read as it comes;
-    /// when it shows "Type CODE and Enter", `answer(CODE)` is typed (nothing when nil). Its status and what it showed.
+    /// when it shows "Type CODE and Enter", `answer(CODE)` is typed (nothing when nil). Its status (the signal's number
+    /// when one ended it, as Foundation's `terminationStatus`) and what it showed.
+    ///
+    /// `script` is started by `Platform.Spawn` (close-on-exec pipes as its stdin and output, nothing else of this
+    /// process inherited, "Text file busy" tried again) and collected here by its pid with bounded waits off the pool
+    /// (`SpawnedHost`, `exited`): not Foundation's `Process` (`run(_:_:environment:)`'s note). Past a guard of 120 s
+    /// it is killed, and what it showed is read for 10 s more at most.
     static func onTerminal(_ program: String, _ arguments: [String], environment: [String: String],
                            answer: @escaping @Sendable (String) -> String?) async throws -> CommandRun {
-            let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
         let line = ([program] + arguments).map(FakeClaude.quoted).joined(separator: " ")
-        process.arguments = ["-q", "-e", "-c", line, "/dev/null"]
-        process.environment = environment.merging(["SHELL": "/bin/sh"]) { $1 }
-        let input = Pipe(), output = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = output
-        try process.run()
+        var input: [Int32] = [-1, -1], output: [Int32] = [-1, -1]
+        guard Sys.pipeClosedOnExec(&input) == 0 else { throw Platform.Errno(code: errno) }
+        guard Sys.pipeClosedOnExec(&output) == 0 else {
+            let code = errno
+            input.forEach { Sys.close($0) }
+            throw Platform.Errno(code: code)
+        }
+        var spawn = Platform.Spawn(executable: "/usr/bin/script", arguments: ["/usr/bin/script", "-q", "-e", "-c", line, "/dev/null"])
+        spawn.environment = environment.merging(["SHELL": "/bin/sh"]) { $1 }.map { "\($0.key)=\($0.value)" }
+        spawn.stdin = .descriptor(input[0])
+        spawn.stdout = .descriptor(output[1])
+        spawn.stderr = .descriptor(output[1])
+        let terminal: SpawnedHost
+        do { terminal = SpawnedHost(pid: try await startRetrying(spawn)) } catch {
+            (input + output).forEach { Sys.close($0) }
+            throw error
+        }
+        // The child's ends are its own now.
+        Sys.close(input[0])
+        Sys.close(output[1])
+        let (writing, reading) = (input[1], output[0])
         let shown = await offPool { () -> String in
+            defer { Sys.close(reading) }
             var seen = Data()
-            var answered = false
+            var answered = false, killed = false
+            var deadline = MacTime.real.awake() + 120
+            var chunk = [UInt8](repeating: 0, count: 64 * 1024)
             while true {
-                let chunk = output.fileHandleForReading.availableData
-                if chunk.isEmpty { break }
-                seen.append(chunk)
+                let now = MacTime.real.awake()
+                if now >= deadline {
+                    guard !killed else { break }
+                    Sys.kill(terminal.processIdentifier, SIGKILL)
+                    killed = true
+                    deadline = now + 10
+                }
+                var watched = [pollfd(fd: reading, events: Int16(POLLIN), revents: 0)]
+                guard poll(&watched, 1, 100) > 0 else { continue }
+                let count = Sys.read(reading, &chunk, chunk.count)
+                if count < 0, errno == EINTR || errno == EAGAIN { continue }
+                if count <= 0 { break }
+                seen.append(contentsOf: chunk[0..<count])
                 let text = String(decoding: seen, as: UTF8.self)
                 if !answered, let range = text.range(of: #"Type ([A-Z]{4}) and Enter"#, options: .regularExpression) {
                     answered = true
                     let code = String(text[range].dropFirst(5).prefix(4))
-                    if let typed = answer(code) { try? input.fileHandleForWriting.write(contentsOf: Data((typed + "\r").utf8)) }
+                    if let typed = answer(code) {
+                        let bytes = Array((typed + "\r").utf8)
+                        var done = 0
+                        while done < bytes.count {
+                            let wrote = bytes.withUnsafeBytes { Sys.write(writing, $0.baseAddress! + done, bytes.count - done) }
+                            if wrote < 0, errno == EINTR { continue }
+                            guard wrote > 0 else { break }
+                            done += wrote
+                        }
+                    }
                 }
             }
             return String(decoding: seen, as: UTF8.self)
         }
-        try? input.fileHandleForWriting.close()
-        #expect(await exited(process, within: 120), "\(arguments.joined(separator: " ")) on a terminal never ended")
-        return CommandRun(status: process.terminationStatus, output: shown, errors: "")
+        Sys.close(writing)
+        #expect(await exited(terminal, within: 120), "\(arguments.joined(separator: " ")) on a terminal never ended")
+        let raw = terminal.waitStatus ?? -1
+        let status = raw < 0 ? -1 : raw & 0x7f == 0 ? (raw >> 8) & 0xff : raw & 0x7f
+        return CommandRun(status: status, output: shown, errors: "")
     }
 }
 

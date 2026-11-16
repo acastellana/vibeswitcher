@@ -202,7 +202,7 @@ func run(_ executable: URL, _ arguments: [String], environment: [String: String]
     spawn.stdout = .descriptor(output[1])
     spawn.stderr = .descriptor(errors[1])
     let pid: pid_t
-    do { pid = try await started(spawn) } catch {
+    do { pid = try await startRetrying(spawn) } catch {
         (output + errors).forEach { Sys.close($0) }
         throw error
     }
@@ -255,7 +255,7 @@ func run(_ executable: URL, _ arguments: [String], environment: [String: String]
 /// Starts `spawn`: its pid. "Text file busy" (a program a test has just copied, while a child another test forked
 /// during the copy still holds it open until its exec) lasts a moment and no event says when it's over, so the start
 /// is tried again, for at most 10 s.
-private func started(_ spawn: Platform.Spawn) async throws -> pid_t {
+func startRetrying(_ spawn: Platform.Spawn) async throws -> pid_t {
     let giveUp = MacTime.real.awake() + 10
     while true {
         switch spawn.start() {

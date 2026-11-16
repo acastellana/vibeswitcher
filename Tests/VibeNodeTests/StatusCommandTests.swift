@@ -5,9 +5,17 @@ import VibeCore
 /// A fake `claude` on a terminal of its own: a copy of `sleep` named `claude` (the process table knows an agent by its
 /// name), exec'd by a shell that `script` runs on a new pty, in `folder`. The app's `FakeClaude` isn't this target's,
 /// and nothing here needs more than a process that is named so and sits on a terminal.
+///
+/// `script` is started by `Platform.Spawn` (its stdin a close-on-exec pipe this holds open, nothing else of this
+/// process inherited) and collected here by its pid with bounded waits off the pool (`SpawnedHost`, `exited`): not
+/// Foundation's `Process`, whose start crashed the test process under load (`run(_:_:environment:)`'s note) and whose
+/// waits the repo doesn't trust unbounded. A terminal that ends before the fake shows on it (the copy just made, held
+/// open for writing by a child another test forked meanwhile, refuses its exec: "Text file busy") is started again,
+/// until the guard.
 final class FakeAgent {
-    let terminal = Process()
-    private let input = Pipe()
+    private var terminal = SpawnedHost(pid: 0)
+    /// The writing end of `script`'s stdin, held so that it never reads an end; -1 once stopped.
+    private var input: Int32 = -1
     private(set) var pid: pid_t = 0
     private(set) var tty = ""
 
@@ -15,33 +23,68 @@ final class FakeAgent {
         let bin = scratch.appendingPathComponent("fake-bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let claude = bin.appendingPathComponent("claude")
-        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath(), to: claude)
+        try Self.copyClosedOnExec(URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path, to: claude.path)
         let command = "cd '\(folder.path)' && exec '\(claude.path)' 600"
-        terminal.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-        #if os(Linux)
-        // util-linux's script: the file last, and the command one word after -c, run by $SHELL.
-        terminal.arguments = ["-q", "-c", command, "/dev/null"]
-        terminal.environment = ProcessInfo.processInfo.environment.merging(["SHELL": "/bin/sh"]) { $1 }
-        #else
-        terminal.arguments = ["-q", "/dev/null", "/bin/sh", "-c", command]
-        #endif
-        terminal.standardInput = input
-        terminal.standardOutput = FileHandle.nullDevice
-        terminal.standardError = FileHandle.nullDevice
-        try terminal.run()
-        let found = await eventually(timeout: 30) { [self] in
-            for child in descendants() {
-                guard let info = ProcessTable.info(pid: child), info.comm == "claude", let tty = info.tty else { continue }
-                (pid, self.tty) = (child, tty)
-                return true
+        let deadline = MacTime.real.awake() + 60
+        while pid == 0, MacTime.real.awake() < deadline, !Task.isCancelled {
+            try await start(command)
+            // Until the fake is on a terminal, or the terminal has ended without it (then started again).
+            _ = await eventually(timeout: max(0, deadline - MacTime.real.awake())) { [self] in
+                for child in descendants() {
+                    guard let info = ProcessTable.info(pid: child), info.comm == "claude", let tty = info.tty else { continue }
+                    (pid, self.tty) = (child, tty)
+                    return true
+                }
+                return !terminal.isRunning
             }
-            return false
+            if pid == 0 { await stop() }
         }
-        if !found { await stop() }
-        try #require(found, "the fake claude never showed on a terminal")
+        try #require(pid != 0, "the fake claude never showed on a terminal")
     }
 
+    /// `script` running `command` on a new pty, its stdin a pipe whose writing end this holds.
+    private func start(_ command: String) async throws {
+        var ends: [Int32] = [-1, -1]
+        guard Sys.pipeClosedOnExec(&ends) == 0 else { throw Platform.Errno(code: errno) }
+        #if os(Linux)
+        // util-linux's script: the file last, and the command one word after -c, run by $SHELL.
+        var spawn = Platform.Spawn(executable: "/usr/bin/script", arguments: ["/usr/bin/script", "-q", "-c", command, "/dev/null"])
+        spawn.environment = ProcessInfo.processInfo.environment.merging(["SHELL": "/bin/sh"]) { $1 }.map { "\($0.key)=\($0.value)" }
+        #else
+        var spawn = Platform.Spawn(executable: "/usr/bin/script", arguments: ["/usr/bin/script", "-q", "/dev/null", "/bin/sh", "-c", command])
+        #endif
+        spawn.stdin = .descriptor(ends[0])
+        spawn.stdout = .path("/dev/null", flags: O_WRONLY)
+        spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        defer { Sys.close(ends[0]) }
+        do {
+            terminal = SpawnedHost(pid: try await startRetrying(spawn))
+        } catch {
+            Sys.close(ends[1])
+            throw error
+        }
+        input = ends[1]
+    }
+
+    /// `source` copied to `target` (made, mode 0755) through a descriptor that is close-on-exec, so that no program
+    /// another test starts holds it open for writing, which would refuse the copy's exec ("Text file busy").
+    private static func copyClosedOnExec(_ source: String, to target: String) throws {
+        let bytes = [UInt8](try Data(contentsOf: URL(fileURLWithPath: source)))
+        let fd = open(target, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o755)
+        guard fd >= 0 else { throw Platform.Errno(code: errno) }
+        defer { Sys.close(fd) }
+        var done = 0
+        while done < bytes.count {
+            let wrote = bytes.withUnsafeBytes { Sys.write(fd, $0.baseAddress! + done, bytes.count - done) }
+            if wrote < 0, errno == EINTR { continue }
+            guard wrote > 0 else { throw Platform.Errno(code: errno) }
+            done += wrote
+        }
+    }
+
+    /// The processes under the terminal; none before it started or once it was collected (its pid may be another's).
     private func descendants() -> [pid_t] {
+        guard terminal.processIdentifier > 0, terminal.waitStatus == nil else { return [] }
         var found: [pid_t] = []
         var next = [terminal.processIdentifier]
         while let parent = next.popLast() {
@@ -52,11 +95,13 @@ final class FakeAgent {
         return found
     }
 
-    /// Ends the fake and its terminal, and waits for both.
+    /// Ends the fake and its terminal, and waits for the terminal (collected here, its wait bounded).
     func stop() async {
         for child in descendants() { kill(child, SIGKILL) }
         if terminal.isRunning { kill(terminal.processIdentifier, SIGKILL) }
         _ = await exited(terminal, within: 30)
+        if input >= 0 { Sys.close(input) }
+        input = -1
     }
 }
 
