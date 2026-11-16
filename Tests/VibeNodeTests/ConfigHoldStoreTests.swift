@@ -155,6 +155,31 @@ struct ConfigHoldStoreTests {
         #expect(status.result?["cards"]?["config"]?.int == 1, "\(status)")
     }
 
+    /// The security follow-ups' item 20: `config held`'s look shows the vault nothing, so it never ends a root's held
+    /// first look (a voice asks it, no typed code), even with nothing held; `config accept` of the card that showed
+    /// nothing does (`acceptMark`), and the floor the card proposed is recorded. Nothing held while the first look
+    /// holds: everything recorded before the vault held it.
+    @Test func onlyAnAcceptEndsAFirstLookThatHoldsNothing() throws {
+        let home = scratch.url("home").resolvingSymlinksInPath().path
+        let root = ((home as NSString).appendingPathComponent("repo") as NSString).standardizingPath
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let floor = LeadReviewFloor(sensitivePaths: ["src/vault/"], auditFinders: 2)
+        let book = LeadVault.Book()
+        book.configHome = home
+        let app = book.vault(folder: scratch.url("vault"), as: { .app })
+        try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "lead-session")
+        #expect(try app.checkConfig(root: root).held.isEmpty)
+        book.holdsFirstLook = true
+
+        var card = try ConfigHoldStore.held(root: root, vault: app, home: home).get()
+        #expect(card.items.isEmpty && card.hashes.isEmpty)
+        #expect(try app.setReviewFloor(floor, root: root, onlyIfUnset: true) == nil)
+        card.floor = floor
+        card.rails = [:]
+        #expect(try ConfigHoldStore.accept(card, root: root, vault: app).get() == .sealed(names: [], floor: floor))
+        #expect(try app.reviewFloor(root: root) == floor)
+    }
+
     /// An accept seals what the card showed: a file that changed after the card was drawn, even one a look has held
     /// since, isn't sealed, and it says so; a card drawn again seals it.
     @Test func acceptOnAListDrawnBeforeAChangeSealsNothing() throws {

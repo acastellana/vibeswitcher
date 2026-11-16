@@ -217,6 +217,26 @@ struct ConfigSealFirstLookTests {
         #expect(try lead.checkConfig(root: root).held.isEmpty)
     }
 
+    /// The security follow-ups' item 20: a look that shows nothing (`checkConfig(root:shown: [:])`, v2's `config held`,
+    /// which no typed code guards) never ends a root's held first look, even when nothing is held; only an accept does,
+    /// naming what its card showed (a card of nothing by a mark no watched thing has). Nothing held while the first
+    /// look holds: every watched thing recorded before the vault held it (the only way a test can, the state a look
+    /// must not take as an accept).
+    @Test func aLookThatShowsNothingNeverEndsTheFirstLook() throws {
+        let root = try repo()
+        let book = Self.book(home: temp.url("recorded-home").path, holds: false)
+        let app = book.vault(folder: folder, as: { .app })
+        try app.bind(try app.startLead(root: root, branch: "main"), root: root, session: "lead-session")
+        #expect(try app.checkConfig(root: root).held.isEmpty)
+        book.holdsFirstLook = true
+        #expect(try app.checkConfig(root: root, shown: [:]).held.isEmpty)
+        #expect(try app.setReviewFloor(Self.floor, root: root, onlyIfUnset: true) == nil)
+        #expect(try app.reviewFloor(root: root) == nil)
+        // The user's accept of the card that showed nothing.
+        #expect(try app.checkConfig(root: root, shown: [ConfigSeal.keyPrefix + "#accept": "1"]).held.isEmpty)
+        #expect(try app.setReviewFloor(Self.floor, root: root, onlyIfUnset: true) == Self.floor)
+    }
+
     @Test func aRootsAcceptLetsItsFloorBeRecordedAndHoldsTheNext() throws {
         let a = try repo("a")
         let b = try repo("b")
