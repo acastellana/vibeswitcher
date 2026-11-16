@@ -3323,3 +3323,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-16 07:23 Automatically (auto_advance): Started a worker on ui-journeys-select-copy (UI journeys: select-copy reports all shots changed on a second back-to-back run), its after tasks done (ui-journeys-a-run, dark-mode-the-code).
 - 2026-11-16 07:23 Automatically (auto_advance): Overlap for ui-journeys-select-copy's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ui-journeys-b-team (kept: its branch changes it); scripts/ui-journeys.sh: ui-journeys-b-team (kept: its branch changes it).
 - 2026-11-16 07:23 Automatically (auto_advance): Cleaned up dark-mode-the-code (freed 2.6 GB of build output and temporary folders). It stays done.
+- 2026-11-16 07:29 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 07:29.
