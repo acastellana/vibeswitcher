@@ -394,7 +394,9 @@ public final class Requests: @unchecked Sendable {
     // MARK: build.switch
 
     /// `build.switch` with `commit` (the start plan's S8b): `SwitchRequest`'s plan, handover and outcome, on the
-    /// install root's builds. The host's notes are asked again after it, so `status` names the build that runs.
+    /// install root's builds, a handover refused while the seal holds a change under the builds folder or the unit's
+    /// folder in this server's home (`HeldChange`). The host's notes are asked again after it, so `status` names the
+    /// build that runs.
     private func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let commit = request.args?["commit"]?.string else {
             return reply(.init(re: request.id, error: .init(.badArgs, "build.switch needs commit, 40 lowercase hex digits")))
@@ -402,7 +404,12 @@ public final class Requests: @unchecked Sendable {
         guard let installRoot else {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no install root to switch builds in")))
         }
-        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, note: note).run(commit: commit) { [weak self] answer in
+        // A change under the builds folder or the unit's folder nobody accepted refuses the handover (`SwitchRequest`).
+        let (home, vault) = (self.home, link.vault)
+        let held: @Sendable () -> String? = {
+            HeldChange.refusal(SwitchRequest.heldNames, home: home, vault: vault, accept: SwitchRequest.acceptFirst)?.text
+        }
+        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, note: note).run(commit: commit) { [weak self] answer in
             switch answer {
             case .done(let value): reply(.init(re: request.id, result: value))
             case .refused(let code, let why): reply(.init(re: request.id, error: .init(code, why)))

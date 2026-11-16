@@ -30,7 +30,17 @@ import VibeCore
 /// The rule on switches is the server's first, from the labels it sees, and the node's host holds it too, before its
 /// probe and again in the turn that executes (`HostServer.teamsWorking`): a worker a lead starts while the probe runs,
 /// or one a lead started under a lead's label, refuses the handover there, and the reply says the host's words.
+///
+/// A handover is also refused while the seal has a change nobody accepted under the builds folder or the unit's folder
+/// (`held`, `HeldChange` on `heldNames`; the lead's call of 2026-11-16 on the S8c review's finding 5): a switch then goes
+/// only to a build folder the user looked at. Asked after the plan, so `already` (the way a follow-up the command line
+/// didn't finish is finished, which itself changed the unit's folder) is never refused by it.
 public struct SwitchRequest {
+    /// The watched things a handover waits on the user's accept for: the builds folder and the unit's folder.
+    public static var heldNames: [String] { [HooksRequest.buildsName, "~/.config/systemd/user"] }
+    /// What a switch refused for one of them says to do first.
+    public static let acceptFirst = "accept the held config first (vibeswitcher config held / config accept)"
+
     /// The host's probe limit (`HostHandover.probeLimit`, internal to `VibeHost`; a test ties the two).
     public static let probeLimit: TimeInterval = 180
     /// How long the handover's reply is waited for: the host's probe limit, and a margin for saving the sessions and the
@@ -114,13 +124,19 @@ public struct SwitchRequest {
     public var timing: Timing
     let dialer: HostDialer
     let note: (String) -> Void
+    /// Why a handover is refused now for a change the seal holds (`HeldChange`), or nil; none: not asked. Blocking (the
+    /// vault's calls go to the host): run off the link's queue.
+    let held: (@Sendable () -> String?)?
 
-    /// A switch on `link`'s host between the builds of `installRoot`, asked through the link's own dialer.
-    public init(link: HostLink, installRoot: String, timing: Timing = Timing(), note: @escaping (String) -> Void = { _ in }) {
+    /// A switch on `link`'s host between the builds of `installRoot`, asked through the link's own dialer; `held` asked
+    /// before a handover.
+    public init(link: HostLink, installRoot: String, timing: Timing = Timing(), held: (@Sendable () -> String?)? = nil,
+                note: @escaping (String) -> Void = { _ in }) {
         self.link = link
         self.installRoot = installRoot
         self.timing = timing
         dialer = link.dialer
+        self.held = held
         self.note = note
     }
 
@@ -147,7 +163,18 @@ public struct SwitchRequest {
                 reply(.refused(.refused, "no switch of builds while a worker or verifier runs (decision 6, the rule on switches): "
                                + working.joined(separator: ", ") + " live; switch once they have ended (a lead may stay)"))
             case .handOver(let target):
-                handOver(to: target, before: (link.hostPID, running), reply: reply)
+                guard let held else { return handOver(to: target, before: (link.hostPID, running), reply: reply) }
+                let queue = link.queue
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let refusal = held()
+                    queue.async {
+                        if let refusal {
+                            note("build.switch \(commit) refused: \(refusal)")
+                            return reply(.refused(.refused, refusal))
+                        }
+                        handOver(to: target, before: (link.hostPID, running), reply: reply)
+                    }
+                }
             }
         }
     }

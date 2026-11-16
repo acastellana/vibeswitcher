@@ -1056,6 +1056,45 @@ struct SwitchTests {
         #expect(host.pid == Int(node.hostPID) && host.build == Self.a, "\(host)")
     }
 
+    /// The lead's call of 2026-11-16 (the S8c review's finding 5): while the seal holds a change under the builds folder
+    /// that nobody accepted, `switch` is refused after its code with "accept the held config first", and the host stays
+    /// on `A`; a change in the unit's folder likewise. Once accepted, the same switch hands over.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aSwitchWhileABuildsFolderChangeIsHeldIsRefused() async throws {
+        let builds = try twoBuilds(paddedServer: false)
+        let node = try await ScratchNode(scratch, holdFirstLook: true, build: builds.a, installRoot: builds.root)
+        defer { node.stop() }
+        let repo = node.root.appendingPathComponent("repo")
+        try await scratchRepository(repo)
+        try EngineEndToEndTests.workflow(repo)
+        try await node.acceptConfig(repo)
+        func refused(_ name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+            let switched = try await node.runOnTerminal(["switch", Self.b])
+            #expect(switched.status == 77, "\(switched.output)\n\(node.said)", sourceLocation: sourceLocation)
+            #expect(switched.output.contains(name) && switched.output.contains(SwitchRequest.acceptFirst), "\(switched.output)",
+                    sourceLocation: sourceLocation)
+            let host = Self.host(try WireClient(node))
+            #expect(host.pid == Int(node.hostPID) && host.build == Self.a, "\(host)", sourceLocation: sourceLocation)
+        }
+
+        // The builds folder (in the server's home: the user's node's install root).
+        let held = node.home.appendingPathComponent(".vibeswitcher/v2/builds")
+        try FileManager.default.createDirectory(at: held, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: held.appendingPathComponent("installs"))
+        try await refused("~/.vibeswitcher/v2/builds")
+        try await node.acceptConfig(repo)
+
+        // The unit's folder.
+        let units = node.home.appendingPathComponent(".config/systemd/user")
+        try FileManager.default.createDirectory(at: units, withIntermediateDirectories: true)
+        try Data("[Service]\n".utf8).write(to: units.appendingPathComponent("other.service"))
+        try await refused("~/.config/systemd/user")
+        try await node.acceptConfig(repo)
+
+        let switched = try await node.runOnTerminal(["switch", Self.b])
+        #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
+        #expect(switched.output.contains("handed over") && switched.output.contains("build \(Self.b)"), "\(switched.output)")
+    }
+
     /// A tool server started from `A/bin/vibeswitcher-mcp` before the switch (S9) still runs `A` after it: the same
     /// process, its image `A`'s, answering; its `BinaryWatch` sees no new build (the switch rewrites no build's files),
     /// so it never switches in place, and the build it reported is `A`.

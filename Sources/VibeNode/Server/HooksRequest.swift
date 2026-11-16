@@ -133,22 +133,9 @@ public struct HooksRequest {
 
     // MARK: The checks
 
-    /// Refused while the builds folder has a change the seal holds, or one since the vault recorded it.
+    /// Refused while the builds folder has a change the seal holds, or one since the vault recorded it (`HeldChange`).
     func buildsRefusal() -> StartRefusal? {
-        guard let builds = ConfigSeal.homeWatched(home: home).first(where: { $0.name == Self.buildsName }) else { return nil }
-        let record: [String: String]?
-        do { record = try vault.guardedRecord(root: home) } catch {
-            return StartRefusal("the vault can't be asked what it holds of \(Self.buildsName): \(ConfigSeal.inert("\(error)", limit: .max))", exitCode: 1)
-        }
-        let accept = "look with `vibeswitcher config held FOLDER` and accept it first"
-        if ConfigSeal.held(in: record).contains(Self.buildsName) {
-            return StartRefusal("\(Self.buildsName) holds a change not accepted: \(accept)")
-        }
-        guard let recorded = record?[ConfigSeal.keyPrefix + Self.buildsName] else { return nil }
-        guard ConfigSeal.fingerprint(builds) == recorded else {
-            return StartRefusal("\(Self.buildsName) changed since the vault recorded it: \(accept)")
-        }
-        return nil
+        HeldChange.refusal([Self.buildsName], home: home, vault: vault, accept: "look with `vibeswitcher config held FOLDER` and accept it first")
     }
 
     /// `<home>/.vibeswitcher/bin` must be a folder or absent, never a link (the writes would land where it points).

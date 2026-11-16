@@ -181,7 +181,10 @@ place first (that defeats PATH only: the binary is still your file, S11 item 15)
   install`; the WSL measurement (note `vs status`'s host start time, close every Windows Terminal and WSL window for
   10 minutes, reopen one, `vs status` again: the same start time and the agent's test session still live mean WSL keeps
   the node up; if not, keep a terminal open during the bootstrap or set up a Windows-side keep-alive yourself); then
-  `vs switch COMMIT` (a commit the agent installed), `vs status`, `vs rollback`.
+  `vs config held` / `vs config accept CARD` (the install's change), `vs switch COMMIT` (a commit the agent
+  installed), `vs status`, `vs config held` / `accept` again (the switch's change), `vs rollback`, and `config held` /
+  `accept` once more. *2026-11-16, the lead's call:* the server refuses a switch or rollback while the builds folder
+  or the unit's folder holds a change not accepted, so each comes after an accept (the start plan's S9 card).
 - **M8. Step 10, before the lead's first start** [D9, D10, D13]: `systemctl --user disable --now
   gpg-agent-ssh.socket` (or `gpgconf --kill gpg-agent` before each team start); `printf '%s\n'
   "$HOME/projects/vibeswitcher-v2-lead" > ~/.vibeswitcher/v2/projects`; read the floor lines of the clone's
