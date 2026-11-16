@@ -112,6 +112,39 @@ and its [attack review](reviews/v2-security-review-2026-11-13.md), fixed on Linu
   `HostHandoverTests.secretsReachTheNewBuildAndNeverTheStateFile`'s. A process test of the Mac's user's host needs a
   Keychain stand-in first.
 
+## Owed on the Mac
+
+Work `v2` leaves undone because it is shared with main (a change to the Mac's behaviour), or because only a Mac runs
+it. Each is done once the Mac work begins.
+
+- **Two waits on Foundation's `Process.waitUntilExit()` in VibeCore**: `Shell.run`'s, after a run is stopped or ends
+  (`Sources/VibeCore/Worktrees.swift` ~337), and `PassageListener.stop(grace:)`'s (`Sources/VibeCore/PassageLink.swift`
+  ~243). On the hosted Mac that wait never returned for a child that had ended and been collected (no zombie left,
+  nothing else in the process collecting it), and the run sat at no CPU until vs-heavy's timeout (GitHub run
+  43717393732, 2026-11-15; `ProcessesTests.Child`'s note). The tests no longer wait so (`ProcessesTests.Child`,
+  VibeNodeTests' `run(_:_:environment:)`, `SpawnedHost`), but these two are product code shared with main. To do: start
+  each child by `Platform.Spawn` and collect it by its pid with bounded `waitpid(WNOHANG)` waits, as those do; a change
+  on main.
+- **The Mac's `LeadController` handover** ([the port map's](v2-port-map.md) E4 row for `LeadController.swift`,
+  starting): `LeadController` (1041-1052) still calls `LeadHandover.begin`, which empties whatever inbox the board
+  names into the new lead, and reads `transcripts[old.uuidString]` for any session the board names, so a forged board
+  hands another project's inbox and conversation to the new lead. The node checks first (`LeadEngine.replacedLead`:
+  the host's session list and the vault's binding, the security follow-ups' item 11); the Mac's fix is the same check
+  before `takeWaiting`, in `Sources/VibeSwitcher`, which `v2` doesn't edit.
+- **The three Mac-only lints**: `AccessibilityLintTests`, `DebugAidsLintTests` and `ElapsedTimeLintTests` are in
+  `Tests/VibeSwitcherTests` (the app's target), which Linux doesn't build, so `v2`'s lint runs on Linux never ran
+  them. Run them on the Mac (`bash scripts/test.sh --filter 'AccessibilityLint|DebugAidsLint|ElapsedTimeLint'`) over
+  the branch's shared code, and fix what they find there.
+- **`LeadLaunch.userSettings`' three `Write(…)` deny rules** (`Write(~/.vibeswitcher/mac-limits.json)`,
+  `Write(~/.vibeswitcher/boost.json)`, `Write(~/.vibeswitcher/policy.md)`; `Sources/VibeCore/LeadLaunch.swift` 82-84):
+  Claude Code 2.1.325 says each "never matches · use Edit(…)", and its rule check names why (a `Write`, `MultiEdit` or
+  `NotebookEdit` rule with a path "is not matched by file permission checks — only Edit(path) rules are … Edit rules
+  cover all file-editing tools", read from the 2.1.325 binary's own validator). Each has its `Edit(…)` twin, so nothing
+  is open; they are only redundant. Linux's five (`Platform.Tools.roleDenyRules`) are dropped on `v2`; these three are
+  every role's on the Mac too (shared, a behaviour change there by the letter), so they go on main, with
+  `LeadLaunchTests.noRoleMayWriteTheUsersMacWideSettings`' list. The same holds for the workers' and verifiers'
+  `Write(~/.claude/**)` (`claudeHome`) and `Write(<records>/**)` (`deny`'s worker case), which the lead doesn't carry.
+
 ## Also to check
 
 - **`Package.resolved`** pins swift-crypto 3.15.1 and swift-asn1 1.7.4 for the Mac too (`923a43b9`), though only Linux
