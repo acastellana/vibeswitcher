@@ -1508,6 +1508,27 @@ private final class Driver: NSObject, NSApplicationDelegate {
             after.commandLineTools = "27.2"
             return AnyView(ToolchainNoteView(note: LeadWitness.toolchainText(before: before, after: after)!))
         }),
+        // The restart card on three made-up sessions (on a record file of the sandbox's own; nothing reopens): a lead,
+        // one of your own you renamed, and one whose folder is gone, shown as such.
+        ("restart-card", { driver in
+            let projects = driver.home + "/projects"
+            func entry(_ project: String, name: String? = nil, role: RestartReopen.Role = .user, agent: Agent = .claude) -> RestartReopen.Entry {
+                RestartReopen.Entry(id: UUID(), folder: projects + "/" + project, agent: agent, agentSessionID: UUID().uuidString, role: role,
+                                    project: project, name: name ?? project, command: nil, label: role == .lead ? "Lead · \(project)" : "Claude",
+                                    cols: 120, rows: 36)
+            }
+            let entries = [entry("example-payouts", role: .lead), entry("example-site", name: "Billing redesign"),
+                           entry("old-prototype", agent: .codex)]
+            let file = URL(fileURLWithPath: driver.home + "/restart-card/open-sessions.json")
+            try? RestartReopen.save(entries, to: file)
+            let offer = RestartOffer(file: file)
+            offer.folderExists = { !$0.hasSuffix("/old-prototype") }
+            offer.resumeSession = { [weak driver] request in driver?.refuse("reopening \(request.label)") }
+            offer.reopenLead = { [weak driver] root, _ in driver?.refuse("reopening the lead of \(root)") }
+            offer.close = { [weak driver] in driver?.closeSheet() }
+            offer.decide(hostSessions: nil)
+            return AnyView(RestartCardView(offer: offer))
+        }),
         ("new-project", { driver in
             AnyView(NewProjectSheet(model: NewProjectModel(location: driver.home + "/projects"),
                                     created: { [weak driver] folder, _ in driver?.refuse("starting a lead in \(folder)") },
