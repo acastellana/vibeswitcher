@@ -49,32 +49,8 @@ public enum SwitchFollowUp {
     /// account's home from `getpwuid` (a test's scratch home).
     public static func apply(tools: NodeStarter.Tools, prefix: String, accountHome: String, commit: String, hostPid: pid_t,
                              hostCheck: () -> Result<Host, StartRefusal>) -> Result<Void, StartRefusal> {
-        /// What each refusal past the handover says: the host runs the target, and how to finish.
-        let again = "`vs switch \(commit)` again finishes this"
-        // 1. The target.
-        guard NodeUnit.isCommit(commit) else {
-            return .failure(StartRefusal("the switch's target \(ConfigSeal.inert(commit, limit: 64)) isn't a commit (40 hex digits): nothing was rewritten"))
-        }
-        if case .failure(let refused) = NodeFolders.verifyBuild(folder: NodeFolders.join(prefix, commit), prefix: prefix) {
-            return .failure(StartRefusal("the switch's target isn't an installed build: \(refused.text); nothing was rewritten"))
-        }
-        // 2. The host that handed over.
-        let seen: Host
-        switch hostCheck() {
-        case .failure(let refused):
-            return .failure(StartRefusal("the host couldn't be checked after the switch: \(refused.text); nothing was rewritten. `vs status` shows the host's build: once it is \(commit), \(again)", exitCode: refused.exitCode))
-        case .success(let host): seen = host
-        }
-        let checkStatus = "nothing was rewritten. `vs status` shows the host: once it runs \(commit), \(again)"
-        guard seen.pid == hostPid else {
-            return .failure(StartRefusal("the host answering after the switch is pid \(seen.pid), not the one that handed over (pid \(hostPid)): \(checkStatus)", exitCode: 1))
-        }
-        guard let build = seen.build else {
-            return .failure(StartRefusal("the host's notes name no build after the switch to \(commit): \(checkStatus)", exitCode: 1))
-        }
-        guard build == commit else {
-            return .failure(StartRefusal("the host runs the build of \(ConfigSeal.inert(build, limit: 64)) after the switch, not \(commit): \(checkStatus)", exitCode: 1))
-        }
+        if let refused = check(prefix: prefix, commit: commit, hostPid: hostPid, hostCheck: hostCheck) { return .failure(refused) }
+        let again = again(commit)
         let runs = "the host runs \(commit) already"
         // 3. The unit, for the target.
         let starter = NodeStarter(tools: tools, listen: { .notYet })
@@ -115,6 +91,40 @@ public enum SwitchFollowUp {
         return .success(())
     }
 
+    /// What each refusal past the handover says: the host runs the target, and how to finish.
+    static func again(_ commit: String) -> String { "`vs switch \(commit)` again finishes this" }
+
+    /// Steps 1 and 2 (the type's comment), which `apply` and `applyDetached` run before anything is written, called or
+    /// moved: the target an installed build in the prefix, and the host that handed over on it. nil when both pass.
+    static func check(prefix: String, commit: String, hostPid: pid_t, hostCheck: () -> Result<Host, StartRefusal>) -> StartRefusal? {
+        let again = again(commit)
+        // 1. The target.
+        guard NodeUnit.isCommit(commit) else {
+            return StartRefusal("the switch's target \(ConfigSeal.inert(commit, limit: 64)) isn't a commit (40 hex digits): nothing was rewritten")
+        }
+        if case .failure(let refused) = NodeFolders.verifyBuild(folder: NodeFolders.join(prefix, commit), prefix: prefix) {
+            return StartRefusal("the switch's target isn't an installed build: \(refused.text); nothing was rewritten")
+        }
+        // 2. The host that handed over.
+        let seen: Host
+        switch hostCheck() {
+        case .failure(let refused):
+            return StartRefusal("the host couldn't be checked after the switch: \(refused.text); nothing was rewritten. `vs status` shows the host's build: once it is \(commit), \(again)", exitCode: refused.exitCode)
+        case .success(let host): seen = host
+        }
+        let checkStatus = "nothing was rewritten. `vs status` shows the host: once it runs \(commit), \(again)"
+        guard seen.pid == hostPid else {
+            return StartRefusal("the host answering after the switch is pid \(seen.pid), not the one that handed over (pid \(hostPid)): \(checkStatus)", exitCode: 1)
+        }
+        guard let build = seen.build else {
+            return StartRefusal("the host's notes name no build after the switch to \(commit): \(checkStatus)", exitCode: 1)
+        }
+        guard build == commit else {
+            return StartRefusal("the host runs the build of \(ConfigSeal.inert(build, limit: 64)) after the switch, not \(commit): \(checkStatus)", exitCode: 1)
+        }
+        return nil
+    }
+
     /// Whether the follow-up to `commit` is done: the unit file, in start's form (`NodeUnit.inputs(parsing:prefix:)`),
     /// names `commit`, and `<prefix>/current` is a link naming it. S8c asks this when the server answers that the host
     /// runs `commit` already, and runs `apply` again when it isn't (a follow-up a failure left unfinished).
@@ -122,21 +132,41 @@ public enum SwitchFollowUp {
         let unitFile = NodeFolders.join(tools.unitFolder, NodeUnit.fileName)
         guard let unitText = try? String(contentsOfFile: unitFile, encoding: .utf8),
               case .success(let read) = NodeUnit.inputs(parsing: unitText, prefix: prefix), read.commit == commit else { return false }
-        return (try? FileManager.default.destinationOfSymbolicLink(atPath: NodeFolders.join(prefix, currentLink))) == commit
+        return isCurrent(prefix: prefix, commit: commit)
+    }
+
+    /// Whether `<prefix>/current` is a link naming `commit`.
+    public static func isCurrent(prefix: String, commit: String) -> Bool {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: NodeFolders.join(prefix, currentLink))) == commit
+    }
+
+    /// The follow-up on a node started detached (no systemd, ST-D6; S8c, 2026-11-16): there is no unit, and its `start`
+    /// starts the build `vs` runs from (`current/bin/vibeswitcher`), so after the same checks as `apply` (1 and 2) only
+    /// `current` is moved (5). Nothing is called. Its way back is `apply`'s: the server answers that the host runs the
+    /// target already, and the command line runs this again while `isCurrent` says no.
+    public static func applyDetached(prefix: String, commit: String, hostPid: pid_t,
+                                     hostCheck: () -> Result<Host, StartRefusal>) -> Result<Void, StartRefusal> {
+        if let refused = check(prefix: prefix, commit: commit, hostPid: hostPid, hostCheck: hostCheck) { return .failure(refused) }
+        if let refused = moveCurrent(prefix: prefix, to: commit, unit: false) {
+            return .failure(StartRefusal("\(refused.text); the host runs \(commit) already: \(again(commit))", exitCode: refused.exitCode))
+        }
+        return .success(())
     }
 
     /// Points `<prefix>/current` at `commit` (a relative link): made as a temporary beside it, then renamed over it, so
     /// `current` always names one build. nil, or why not.
-    static func moveCurrent(prefix: String, to commit: String) -> StartRefusal? {
+    /// `unit`: whether a unit was rewritten and reloaded first (`apply`), which the refusal says.
+    static func moveCurrent(prefix: String, to commit: String, unit: Bool = true) -> StartRefusal? {
+        let done = unit ? ": the unit names \(commit) and the manager has read it" : ""
         let current = NodeFolders.join(prefix, currentLink)
         let temporary = NodeFolders.join(prefix, ".\(currentLink).\(getpid()).\(UUID().uuidString.prefix(8)).tmp")
         guard symlink(commit, temporary) == 0 else {
-            return StartRefusal("\(ConfigSeal.inert(current, limit: .max)) can't be moved to \(commit) (\(String(cString: strerror(errno)))): the unit names \(commit) and the manager has read it", exitCode: 1)
+            return StartRefusal("\(ConfigSeal.inert(current, limit: .max)) can't be moved to \(commit) (\(String(cString: strerror(errno))))\(done)", exitCode: 1)
         }
         guard rename(temporary, current) == 0 else {
             let failed = errno
             unlink(temporary)
-            return StartRefusal("\(ConfigSeal.inert(current, limit: .max)) can't be moved to \(commit) (\(String(cString: strerror(failed)))): the unit names \(commit) and the manager has read it", exitCode: 1)
+            return StartRefusal("\(ConfigSeal.inert(current, limit: .max)) can't be moved to \(commit) (\(String(cString: strerror(failed))))\(done)", exitCode: 1)
         }
         return nil
     }

@@ -330,7 +330,7 @@ public enum NodeUnit {
     }
 
     /// 40 lowercase hex digits.
-    static func isCommit(_ text: String) -> Bool {
+    public static func isCommit(_ text: String) -> Bool {
         text.utf8.count == 40 && text.utf8.allSatisfy { (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0) || (UInt8(ascii: "a")...UInt8(ascii: "f")).contains($0) }
     }
 }

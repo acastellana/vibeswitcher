@@ -2107,7 +2107,38 @@ inventory. The Mac runs `theMacsListIsEmpty`.
   - Then the journal's start line (ST-D24) read back and shown.
   - A scratch CLI skips the follow-up, saying "scratch node: no unit to rewrite".
 
-- [ ] **Step 1: Failing tests:**
+*2026-11-16, as built:*
+- `SwitchCommand.run(_:rollback:)` in `Switch.swift`. `switch` with anything but one commit (40 lowercase hex digits)
+  is a usage error (64); `rollback` with no `builds.rollback` in `status` is refused (77), naming the install record.
+  On the user's node the command line first requires an installed build (ST-D3, `NodeFolders.installedBuild`), before
+  it connects: its follow-up writes the unit and moves `current`. The reply is waited for `SwitchRequest.longestWait`
+  + 30 s; the accepted request is journaled as `hooks` does.
+- `hostCheck` connects again (`NodeClient.connect`, so `ServerCheck`) and reads `status`'s `host.pid` (the welcome's)
+  and `host.notes.build`. While no server answers it asks again for up to 60 s (`hostCheckPatience`): the switched
+  server is started again from the target's. A server that fails the check refuses at once.
+- A node started detached (no systemd, ST-D6) gets `SwitchFollowUp.applyDetached(prefix:commit:hostPid:hostCheck:)`:
+  `apply`'s checks (now `SwitchFollowUp.check`), then only `current` moved, since its `start` starts the build `vs`
+  runs from. `isCurrent(prefix:commit:)` is its `isDone`. `aDetachedNodesFollowUpMovesOnlyCurrent` holds it (beyond
+  the Files list). `NodeUnit.isCommit` is public, for the command line.
+- The journal's start line: the newest start's detail from `NodeJournal.events` (the unit's main pid, ST-D24), waited
+  for at most 10 s until it names the target. A scratch node's stand-in journal has no unit start: it says so.
+- **A scratch host switches as an installed build only once.** Its `--install-root` is a test flag it doesn't carry
+  across a handover (stage 2's design: `HandoverLinuxTests.aHandoverToAnInstalledBuildIsAllowed` and
+  `ServerChildTests.aFallbackToTheSwitchedBuildStillReplacesTheOldServer` rely on it), so its second switch is by path,
+  keeping the first build's `--node-root`, and its host goes on naming that build ("the old build answered"). The
+  node's host takes its root from `--node`, so it isn't affected. `aSwitchHandsOverToTheInstalledBuildAndEverythingNamesIt`
+  so runs its `rollback` on a second node started on `B` (the `installs` record `A`, `B`), not after its switch.
+- The cases: `B`'s server is the built one with a byte more wherever the server must run `B`, as S8b's note says.
+  `status` is the command line's `status --json`. The fake starts a fresh tool server for each call, so
+  `aRunningToolServerKeepsItsBuildAcrossASwitch` starts its own from `A/bin/vibeswitcher-mcp` (`ToolServer`).
+  "`BinaryWatch` reports no change" is a watch made before the switch answering no update after it, with no
+  "switching to the build at" in the tool server's log. Each tool server's commit is its log's `source: build` line
+  (`ServerBuild.running`'s label). The lead's and the worker's tool servers are named by their session's command and
+  by their logs.
+- The confirmation still says the unit's `ExecStart` is rewritten on a node started detached, which has none (S8a's
+  text).
+
+- [x] **Step 1: Failing tests:**
   - `aSwitchHandsOverToTheInstalledBuildAndEverythingNamesIt`:
     - Two `ScratchBuilds` (`A`, `B`) under a scratch install root; the node runs `A`.
     - `switch B` on a pty, then `status` shows host build `B` and server build `B` once the server is restarted
@@ -2122,13 +2153,14 @@ inventory. The Mac runs `theMacsListIsEmpty`.
   - `aToolServerStartedAfterASwitchIsTheNewBuilds` (S9): a lead started after `switch B` has a tool server from
     `B/bin`, whose commit is `B`.
   - `aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild` (ST-D16): its MCP config names `A`.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Verify.**
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter 'SwitchTests|RestartTests'`
   - the lints
   - under load (`SwitchTests`)
 - [ ] **Step 4:** commit ("v2: switch and rollback between installed builds"). Push, both green. This commit is
-  **C1** for S9.
+  **C1** for S9. *2026-11-16:* committed on `v2-step8` as "v2 step 8: S8c, switch and rollback in the
+  command line"; the push and both jobs are the lead's.
 
 **Done when:** the cases pass on Linux. Rows 99 and 100 are `ported` (with `not needed` for the app's replace and
 restart offer, saying why). Row 52 is `ported` whole.

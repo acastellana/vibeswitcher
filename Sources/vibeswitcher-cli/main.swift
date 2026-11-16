@@ -14,6 +14,7 @@ let usage = """
     usage: vibeswitcher status [--json] | status --probe [--json] | status --ack
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
+           vibeswitcher switch COMMIT | rollback
            vibeswitcher lead FOLDER [--goal TEXT] [--take-head] [--replace]
            vibeswitcher questions [FOLDER] [--all] [--json]
            vibeswitcher answer CARD TEXT | hold CARD
@@ -30,6 +31,10 @@ case "start":
     exit(StartCommand.run(Array(words.dropFirst())))
 case "stop":
     exit(StopCommand.run(Array(words.dropFirst())))
+case "switch":
+    exit(SwitchCommand.run(Array(words.dropFirst()), rollback: false))
+case "rollback":
+    exit(SwitchCommand.run(Array(words.dropFirst()), rollback: true))
 case "lead":
     exit(LeadCommand.run(Array(words.dropFirst())))
 case "questions":

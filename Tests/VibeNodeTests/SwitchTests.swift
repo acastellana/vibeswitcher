@@ -16,6 +16,10 @@ import Testing
 /// 97) is pure, and its waits and who answered run against a stand-in host (`StubHost`, as the app's `FakeHost`); the
 /// rule on switches, the probe's wait (the app's `HostClientSlowProbeTests`, row 99) and a refused rollback run on a
 /// scratch node switching between two installed builds (`ScratchBuilds`).
+///
+/// S8c's cases: `switch` and `rollback` from the built command line on such a node, on a pty of its own (the code
+/// typed), or with no terminal; the builds the host, the server, a running tool server and the ones started after name;
+/// and the follow-up of a node started detached (`SwitchFollowUp.applyDetached`), in process.
 @Suite
 struct SwitchTests {
     private let scratch = Scratch()
@@ -301,6 +305,31 @@ struct SwitchTests {
     /// The review of S8a: the follow-up writes the unit as `start` does (ST-D3, ST-D4): the account's home and swiftly's
     /// folder from where `start` takes them, the node folder only through `NodeFolders.toolFolders`, never a unit's
     /// edited HOME or PATH written back for a switch the user then accepts.
+    /// A node started detached (no systemd, ST-D6; S8c) has no unit, and its `start` starts the build `vs` runs from: its
+    /// follow-up checks the target and the host as `apply` does, then moves only `current`, calling nothing and leaving
+    /// the unit folder as it was.
+    @Test(NodeTraits.linuxOnly) func aDetachedNodesFollowUpMovesOnlyCurrent() throws {
+        let world = try World(scratch)
+        let unitBefore = world.unitText
+        func applyDetached(_ commit: String, seen: SwitchFollowUp.Host) -> Result<Void, StartRefusal> {
+            SwitchFollowUp.applyDetached(prefix: world.prefix.path, commit: commit, hostPid: World.hostPid, hostCheck: { .success(seen) })
+        }
+        // The host still on A, or another host: nothing moved.
+        for seen in [SwitchFollowUp.Host(pid: World.hostPid, build: Self.a), SwitchFollowUp.Host(pid: World.hostPid + 1, build: Self.b)] {
+            guard case .failure(let refusal) = applyDetached(Self.b, seen: seen) else { Issue.record("went with \(seen)"); continue }
+            #expect(refusal.text.contains("nothing was rewritten") && refusal.text.contains("`vs switch \(Self.b)` again"), "\(refusal)")
+            #expect(world.current == Self.a && !SwitchFollowUp.isCurrent(prefix: world.prefix.path, commit: Self.b))
+        }
+        // A target that isn't an installed build.
+        guard case .failure = applyDetached(Self.c, seen: SwitchFollowUp.Host(pid: World.hostPid, build: Self.c)) else {
+            Issue.record("a build not installed was taken"); return
+        }
+        try applyDetached(Self.b, seen: SwitchFollowUp.Host(pid: World.hostPid, build: Self.b)).get()
+        #expect(world.current == Self.b && SwitchFollowUp.isCurrent(prefix: world.prefix.path, commit: Self.b))
+        #expect(world.unitText == unitBefore && world.manager.calls.isEmpty, "\(world.manager.calls)")
+        #expect(world.prefixEntries == [Self.a, Self.b, "current"].sorted(), "\(world.prefixEntries)")
+    }
+
     @Test(NodeTraits.linuxOnly) func aUnitsEditedHomeOrPathIsNotCarriedThroughASwitch() throws {
         let world = try World(scratch)
         // A worker's HOME and swift folder, in start's form: the unit for B is start's, from the account's values.
@@ -782,5 +811,242 @@ struct SwitchTests {
         #expect(message.hasPrefix("handover failed: Couldn't hand over: the new build can't take over: it exited with status"), "\(message)\n\(node.said)")
         let after = Self.host(client)
         #expect(after.pid == Int(node.hostPID) && after.build == Self.b, "\(after)")
+    }
+
+
+    // MARK: switch and rollback from the command line (S8c)
+
+    /// B's server: the built one with a byte more, so a switch between `A` and `B` replaces the server, as every switch
+    /// between commits on the node does (`aSwitchToAnotherServerRepliesBeforeTheServerIsReplaced`).
+    private func paddedServer() throws -> String {
+        var bytes = try Data(contentsOf: builtProducts.appendingPathComponent(BuildInfo.server))
+        bytes.append(0)
+        let padded = scratch.url("padded-server")
+        try bytes.write(to: padded)
+        return padded.path
+    }
+
+    /// `A` and `B` installed under a scratch install root (`B`'s server padded when `paddedServer`): the root, and each
+    /// build's folder.
+    private func twoBuilds(paddedServer padded: Bool) throws -> (root: URL, a: URL, b: URL) {
+        let root = scratch.url("builds")
+        let a = try ScratchBuilds.install(commit: Self.a, into: root)
+        let b = try ScratchBuilds.install(commit: Self.b, into: root, replacing: padded ? [BuildInfo.server: try paddedServer()] : [:])
+        return (root, a, b)
+    }
+
+    /// The server's and the host's builds as `status --json` names them (`server.commit`, `host.notes.build`).
+    private static func named(_ status: [String: Any]) -> (server: String?, host: String?) {
+        ((status["server"] as? [String: Any])?["commit"] as? String,
+         ((status["host"] as? [String: Any])?["notes"] as? [String: Any])?["build"] as? String)
+    }
+
+    /// Whether `status` names `commit` for the server and the host, within the time a switched server is replaced in
+    /// (`ServerChild.idleLimit` after its link reconnected, and its new start).
+    private static func everythingNames(_ node: ScratchNode, _ commit: String) async -> Bool {
+        let deadline = MacTime.real.awake() + ServerChild.idleLimit + ServerChild.reconnectGrace + 90
+        while MacTime.real.awake() < deadline {
+            if let status = try? await node.statusJSON(), named(status).server == commit, named(status).host == commit { return true }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        return false
+    }
+
+    /// The lines of the tool servers' logs under the node's root (`MCPLog`, `debug/mcp-<role>-<pid>.log`) for `role`.
+    private static func toolServerLogs(_ node: ScratchNode, role: String) -> [String] {
+        let folder = node.root.appendingPathComponent("debug")
+        return ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).filter { $0.hasPrefix("mcp-\(role)-") }.sorted()
+            .map { (try? String(contentsOf: folder.appendingPathComponent($0), encoding: .utf8)) ?? "" }
+    }
+
+    /// What a tool server logs of the build it runs (`ServerBuild.running`'s label: the commit's first 12 digits).
+    private static func source(_ commit: String) -> String { "source: build \(commit.prefix(12))" }
+
+    /// `switch B` on a pty, the code typed: the host hands over to `B`, and `status` names `B` for the host and, once the
+    /// server is replaced from `B`'s, for the server; the host said `B`'s start line, with the unit's
+    /// `SWIFT_BACKTRACE=enable=no` (ScratchNode gives it as the unit does). A scratch node has no unit to rewrite. Then
+    /// `rollback` (its target `A`, shown with its `installs` line) restores all of `A`: on a node started on `B`, since a
+    /// scratch host's handover doesn't carry its `--install-root` (stage 2's), so a scratch host hands over as an
+    /// installed build only once.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aSwitchHandsOverToTheInstalledBuildAndEverythingNamesIt() async throws {
+        let builds = try twoBuilds(paddedServer: true)
+        let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
+        defer { node.stop() }
+        #expect(await Self.everythingNames(node, Self.a), "\(node.said)")
+        let switched = try await node.runOnTerminal(["switch", Self.b])
+        #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
+        #expect(switched.output.contains("This switches the node from the build of commit \(Self.a) to the build of commit \(Self.b)"), "\(switched.output)")
+        #expect(switched.output.contains("handed over") && switched.output.contains("build \(Self.b)"), "\(switched.output)")
+        #expect(switched.output.contains("scratch node: no unit to rewrite"), "\(switched.output)")
+        #expect(await Self.everythingNames(node, Self.b), "\(node.said)")
+        // The host's start line, its pid kept, its build B's, with the unit's SWIFT_BACKTRACE.
+        let startedB = HostStartLine.text(pid: node.hostPID, commit: Self.b, backtrace: "enable=no")
+        #expect(node.said.contains(startedB), "\(node.said)")
+        node.stop()
+
+        // rollback, on a node running B: back to A, the installs record's line shown.
+        let onB = try await ScratchNode(scratch, build: builds.b, installRoot: builds.root)
+        defer { onB.stop() }
+        #expect(await Self.everythingNames(onB, Self.b), "\(onB.said)")
+        let installs = try String(contentsOf: builds.root.appendingPathComponent("installs"), encoding: .utf8)
+        let lineA = try #require(installs.split(separator: "\n").first { $0.hasPrefix(Self.a) }.map(String.init))
+        let back = try await onB.runOnTerminal(["rollback"])
+        #expect(back.status == 0, "\(back.output)\n\(onB.said)")
+        #expect(back.output.contains("This rolls the node back from the build of commit \(Self.b) to the build of commit \(Self.a)"), "\(back.output)")
+        #expect(back.output.contains(lineA), "\(back.output)")
+        #expect(back.output.contains("handed over") && back.output.contains("build \(Self.a)"), "\(back.output)")
+        #expect(await Self.everythingNames(onB, Self.a), "\(onB.said)")
+        #expect(onB.said.contains(HostStartLine.text(pid: onB.hostPID, commit: Self.a, backtrace: "enable=no")), "\(onB.said)")
+        // Nothing before A to roll back to.
+        let none = try await onB.runOnTerminal(["rollback"])
+        #expect(none.status == 77 && none.output.contains("no build to roll back to"), "\(none.output)")
+    }
+
+    /// The reply reaches the command line before its server is replaced: `switch B` (`B`'s server's bytes differ, so
+    /// the server is started again from `B`'s) exits 0 with the handover named while the server it asked still runs,
+    /// and that server is replaced afterwards.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func theSwitchsReplyReachesTheCommandLineBeforeTheServerIsReplaced() async throws {
+        let builds = try twoBuilds(paddedServer: true)
+        let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
+        defer { node.stop() }
+        let server = try #require(node.serverPID)
+        let ended = "server child pid \(server) ended for the new build's server"
+        let switched = try await node.runOnTerminal(["switch", Self.b])
+        #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
+        #expect(switched.output.contains("handed over") && switched.output.contains("build \(Self.b)"), "\(switched.output)")
+        #expect(!node.said.contains(ended), "the server was replaced before the command line had its reply: \(node.said)")
+        let replaced = await eventually(timeout: ServerChild.idleLimit + ServerChild.reconnectGrace + 60) {
+            ((try? WireClient(node).hello).map { $0.server.pid != server }) == true
+        }
+        #expect(replaced && node.said.contains(ended), "\(node.said)")
+    }
+
+    /// No controlling terminal (`setsid --wait`, stdin /dev/null): refused before anything is asked; the server records
+    /// no request, and the host's pid and build are unchanged.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(5))) func aSwitchWithNoTerminalIsRefused() async throws {
+        let builds = try twoBuilds(paddedServer: false)
+        let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
+        defer { node.stop() }
+        let ran = try await run(URL(fileURLWithPath: "/usr/bin/setsid"), ["--wait", commandLine.path, "switch", Self.b], environment: node.environment())
+        #expect(ran.status == 77, "\(ran.output)\(ran.errors)")
+        #expect(ran.errors.contains(TypedOutcome.noTerminal.refusal), "\(ran.errors)")
+        let client = try WireClient(node)
+        let accepted = (Self.status(client)?["accepted"]?.array ?? []).compactMap { $0["kind"]?.string }
+        #expect(!accepted.contains("build.switch"), "\(accepted)")
+        let host = Self.host(client)
+        #expect(host.pid == Int(node.hostPID) && host.build == Self.a, "\(host)")
+    }
+
+    /// A tool server started from `A/bin/vibeswitcher-mcp` before the switch (S9) still runs `A` after it: the same
+    /// process, its image `A`'s, answering; its `BinaryWatch` sees no new build (the switch rewrites no build's files),
+    /// so it never switches in place, and the build it reported is `A`.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(5))) func aRunningToolServerKeepsItsBuildAcrossASwitch() async throws {
+        let builds = try twoBuilds(paddedServer: false)
+        let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
+        defer { node.stop() }
+        let program = builds.a.appendingPathComponent("bin/vibeswitcher-mcp")
+        let identity = BinaryWatch.identity(of: program.path)
+        let project = node.root.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let tools = try ToolServer(program, root: project, environment: node.environment(), log: node.root.appendingPathComponent("tool-server.err"))
+        defer { tools.stop() }
+        try tools.send(["jsonrpc": "2.0", "id": 1, "method": "initialize",
+                        "params": ["protocolVersion": "2025-06-18", "capabilities": [:] as [String: Any], "clientInfo": ["name": "SwitchTests", "version": "1"]]])
+        try #require(await tools.reply(1, within: 30) != nil, "\(tools.errors)")
+        try tools.send(["jsonrpc": "2.0", "method": "notifications/initialized"])
+        let pid = tools.process.processIdentifier
+        let log = node.root.appendingPathComponent("debug/mcp-lead-\(pid).log")
+        func logged() -> String { (try? String(contentsOf: log, encoding: .utf8)) ?? "" }
+        #expect(await eventually { logged().contains(Self.source(Self.a)) }, "\(logged())")
+
+        let switched = try await node.runOnTerminal(["switch", Self.b])
+        try #require(switched.status == 0, "\(switched.output)\n\(node.said)")
+        #expect(Self.host(try WireClient(node)).build == Self.b)
+        // It answers after the switch, the same process on A's image.
+        try tools.send(["jsonrpc": "2.0", "id": 2, "method": "tools/list"])
+        #expect(await tools.reply(2, within: 30) != nil, "\(tools.errors)")
+        #expect(tools.process.isRunning)
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/exe")) == program.resolvingSymlinksInPath().path)
+        #expect(BinaryWatch(path: program.path, running: identity).update() == nil)
+        #expect(!logged().contains("switching to the build at"), "\(logged())")
+        #expect(logged().contains(Self.source(Self.a)) && !logged().contains(Self.source(Self.b)), "\(logged())")
+    }
+
+    /// A node holding its first look, a scratch repository's config and base accepted, room for a team: what a lead
+    /// needs to start from the command line (`EngineEndToEndTests`).
+    private func leadReadyNode(_ builds: (root: URL, a: URL, b: URL)) async throws -> (node: ScratchNode, repo: URL) {
+        let node = try await ScratchNode(scratch, holdFirstLook: true, build: builds.a, installRoot: builds.root)
+        let repo = node.root.appendingPathComponent("repo")
+        try await scratchRepository(repo)
+        try EngineEndToEndTests.workflow(repo)
+        try await node.acceptConfig(repo)
+        try await node.acceptBase(repo, from: Git.run(["rev-parse", "main"], in: repo.path).output)
+        try node.noLoadHold(maxSessions: 10)
+        return (node, repo)
+    }
+
+    /// The lead `lead FOLDER` starts, once the host lists it.
+    private static func startLead(_ node: ScratchNode, _ repo: URL) async throws -> HostSession {
+        let started = try await node.runOnTerminal(["lead", repo.path, "--goal", "a switch"])
+        try #require(started.status == 0 && started.output.contains("the lead started"), "\(started.output)\n\(node.said)")
+        var lead: HostSession?
+        _ = await eventually(timeout: 60) {
+            lead = (try? node.sessions())?.first { $0.isLive && $0.label.hasPrefix("Lead · ") }
+            return lead != nil
+        }
+        return try #require(lead, "no live lead: \(node.said)")
+    }
+
+    /// A lead started after `switch B` (S9), once the server runs `B`'s, has its tool server from `B/bin`, and that
+    /// tool server's build is `B`.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aToolServerStartedAfterASwitchIsTheNewBuilds() async throws {
+        let builds = try twoBuilds(paddedServer: true)
+        let (node, repo) = try await leadReadyNode(builds)
+        defer { node.stop() }
+        let switched = try await node.runOnTerminal(["switch", Self.b])
+        try #require(switched.status == 0, "\(switched.output)\n\(node.said)")
+        try #require(await Self.everythingNames(node, Self.b), "\(node.said)")
+        let lead = try await Self.startLead(node, repo)
+        let command = lead.command ?? ""
+        #expect(command.contains("\(Self.b)/bin/vibeswitcher-mcp") && !command.contains("\(Self.a)/bin/"), "\(command.prefix(2000))")
+        // Its tool server, started by its first call, is B's.
+        let files = node.fake.files(terminal: lead.tty)
+        try #require(await eventually(timeout: 60) { EngineEndToEndTests.state(files)["pid"] != nil }, "\(node.said)")
+        try files.call("status", [:])
+        #expect(await eventually(timeout: 120) { files.calls().count == 1 }, "\(EngineEndToEndTests.state(files))")
+        let logs = Self.toolServerLogs(node, role: "lead")
+        #expect(logs.contains { $0.contains(Self.source(Self.b)) } && !logs.contains { $0.contains(Self.source(Self.a)) || $0.contains("\(Self.a)/bin/") },
+                "\(logs)")
+    }
+
+    /// ST-D16: a lead started before the switch keeps starting its workers with the old build's tool server: after
+    /// `switch B`, its `start_worker` starts a worker whose MCP config names `A`'s tool server, which reports `A`.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild() async throws {
+        let builds = try twoBuilds(paddedServer: false)
+        let (node, repo) = try await leadReadyNode(builds)
+        defer { node.stop() }
+        let lead = try await Self.startLead(node, repo)
+        #expect((lead.command ?? "").contains("\(Self.a)/bin/vibeswitcher-mcp"), "\((lead.command ?? "").prefix(2000))")
+        let tools = node.fake.files(terminal: lead.tty)
+        try #require(await eventually(timeout: 60) { EngineEndToEndTests.state(tools)["pid"] != nil }, "\(node.said)")
+        try tools.call("add_task", ["title": "Write the parser", "goal": "Write the parser.", "acceptance": ["it builds"], "auto_advance": false])
+        try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(tools.calls())")
+
+        // The switch, with only the lead live.
+        let switched = try await node.runOnTerminal(["switch", Self.b])
+        try #require(switched.status == 0, "\(switched.output)\n\(node.said)")
+        #expect(Self.host(try WireClient(node)).build == Self.b)
+
+        try tools.call("start_worker", ["task": "write-the-parser"])
+        let worker = try await EngineEndToEndTests.connected(node, label: "Worker: Write the parser", calling: "progress",
+                                                             ["task": "write-the-parser", "text": "starting"])
+        try #require(await eventually(timeout: 120) { tools.calls().count == 2 }, "\(tools.calls())")
+        #expect(tools.text(of: tools.calls()[1]).contains("Worker started on write-the-parser"), "\(tools.calls()[1])")
+        let command = worker.command ?? ""
+        #expect(command.contains("\(Self.a)/bin/vibeswitcher-mcp") && !command.contains("\(Self.b)/bin/"), "\(command.prefix(2000))")
+        // Its tool server (and the keeper in front of it, whose log names the program it keeps) are A's.
+        let logs = Self.toolServerLogs(node, role: "worker")
+        #expect(logs.contains { $0.contains(Self.source(Self.a)) } && !logs.contains { $0.contains(Self.source(Self.b)) || $0.contains("\(Self.b)/bin/") },
+                "\(logs)")
     }
 }
