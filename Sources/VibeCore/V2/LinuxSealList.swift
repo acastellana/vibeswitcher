@@ -5,20 +5,25 @@ import Foundation
 /// tools run. One hook line in `ConfigSeal.homeWatched(home:)` appends it; it is empty on the Mac
 /// (`Platform.CodeIdentity.isAvailable`), so the Mac's seal is today's.
 ///
-/// - The home's entries (`homeEntries`), what the startup files source (`sourced`), and node's version folder (the
-///   parent of the unit's node `bin`, else each of nvm's versions).
+/// - The home's entries (`homeEntries`, nvm's node versions and its alias among them) and what the startup files source
+///   (`sourced`).
 /// - Outside the home, only for the account's own home (the user database's; a scratch home's seal reads nothing
-///   outside it): `/run/user/<uid>/systemd/transient` and `user.control` (the manager's drop-ins of the highest
-///   priority, ST-D20), and while `/mnt/c` is a 9p or drvfs mount, each Windows user's `.wslconfig` and Startup folder.
+///   outside it): `/run/user/<uid>/systemd/transient`, `user.control` and `user` (the manager's runtime units and
+///   drop-ins, on its search path ahead of `~/.local/share/systemd/user`, ST-D20), and while `/mnt/c` is a 9p or drvfs
+///   mount, each Windows user's `.wslconfig` and Startup folder.
 /// - Every entry executes: none is in `ConfigSeal.instructions`, so a change waits for the user's accept whoever made it.
 ///
 /// Large folders are read by their metadata (`Kind.listing`, ST-D18), never their contents; the folders every session's
-/// start writes into take `Kind.entries` (ST-D19): an entry added or removed is no change (`cameOrWent`).
+/// start writes into take `Kind.entries` (ST-D19): an entry added or removed is no change (`cameOrWent`), but in the
+/// lead's accepted hooks only a fresh repository's baseline comes so (`hookEntryMayCome`).
 public enum LinuxSealList {
     /// The home's entries, by path under it.
     public static let homeEntries: [(String, ConfigSeal.Watched.Kind)] = [
         // What the startup files source here (Step 0's check, the Linux inventory), and swiftly's choice of toolchain.
         (".bash_aliases", .file), (".nvm/nvm.sh", .file), (".nvm/bash_completion", .file),
+        // nvm's node versions, all of them (a new one is a change), and its alias: `nvm.sh` uses `alias/default`'s in
+        // every new shell, so it picks the node, npm and global CLIs each session runs.
+        (".nvm/versions/node", .listing), (".nvm/alias", .listing),
         ("projects/rally/.rally-aliases", .file), (".local/share/swiftly/env.sh", .file),
         (".local/share/swiftly/config.json", .file),
         // First on the PATH of the shells that read `.profile`.
@@ -46,12 +51,6 @@ public enum LinuxSealList {
     /// The startup files whose `.` and `source` targets are watched (`sourced`).
     public static let startupFiles = [".bashrc", ".profile", ".bash_profile", ".bash_login"]
 
-    /// The unit `vs start` writes, whose PATH names node's `bin` (`NodeStarter.unitName`, in `VibeNode`).
-    static let unitFile = ".config/systemd/user/vibeswitcher-node.service"
-
-    /// Where nvm keeps node's versions.
-    static let nvmVersions = ".nvm/versions/node"
-
     /// The Windows users not watched: shared folders, no one's own.
     static let notUsers: Set<String> = ["Public", "Default", "All Users"]
 
@@ -73,7 +72,6 @@ public enum LinuxSealList {
                 if names.insert(watched.name).inserted { items.append(watched) }
             }
         }
-        items += nodeFolders(home: home).map { ConfigSeal.Watched(name: ConfigSeal.shown($0, home: home), path: $0, kind: .listing) }
         if let root = outside ?? (isAccountHome(home, uid: uid) ? "/" : nil) {
             items += outsideEntries(uid: uid, mounts: mounts, root: root)
         }
@@ -112,33 +110,11 @@ public enum LinuxSealList {
         return found
     }
 
-    /// Node's version folder: the parent of each node `bin` under nvm's versions on the unit's PATH when the unit
-    /// exists and names one, else each of nvm's versions (`v*`).
-    static func nodeFolders(home: String) -> [String] {
-        let versions = (home as NSString).appendingPathComponent(nvmVersions)
-        if let data = ConfigSeal.regularContents((home as NSString).appendingPathComponent(unitFile), limit: 1 << 20) {
-            var folders: [String] = []
-            for line in String(decoding: data, as: UTF8.self).split(separator: "\n") where line.hasPrefix("Environment=") {
-                let words = line.dropFirst("Environment=".count).replacingOccurrences(of: "\"", with: "").split(whereSeparator: \.isWhitespace)
-                for word in words where word.hasPrefix("PATH=") {
-                    for folder in word.dropFirst("PATH=".count).split(separator: ":").map(String.init)
-                    where folder.hasPrefix(versions + "/") && folder.hasSuffix("/bin") {
-                        let parent = (folder as NSString).deletingLastPathComponent
-                        if !folders.contains(parent) { folders.append(parent) }
-                    }
-                }
-            }
-            if !folders.isEmpty { return folders }
-        }
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: versions)) ?? []
-        return names.filter { $0.hasPrefix("v") }.sorted().map { (versions as NSString).appendingPathComponent($0) }
-    }
-
-    /// The entries outside the home, read under `root` ("/" on the node): the manager's runtime drop-ins, and the
-    /// Windows files while `/mnt/c` is mounted.
+    /// The entries outside the home, read under `root` ("/" on the node): the manager's runtime units and drop-ins, and
+    /// the Windows files while `/mnt/c` is mounted. Its generator folders aren't: the manager empties them at each reload.
     static func outsideEntries(uid: uid_t, mounts: String, root: String) -> [ConfigSeal.Watched] {
         let at = { (name: String) in root == "/" ? name : (root as NSString).appendingPathComponent(name) }
-        var items = ["transient", "user.control"].map { folder in
+        var items = ["transient", "user.control", "user"].map { folder in
             let name = "/run/user/\(uid)/systemd/\(folder)"
             return ConfigSeal.Watched(name: name, path: at(name), kind: .folder)
         }
@@ -224,25 +200,52 @@ public enum LinuxSealList {
     /// The names of the folders read as `.entries`.
     static var entriesNames: Set<String> { Set(homeEntries.filter { $0.1 == .entries }.map { "~/" + $0.0 }) }
 
+    /// The lead's accepted hooks (`GitGuard.store`): `<repository key>/accepted.json` and `<repository key>/copy/`.
+    static var hooksName: String { "~/.vibeswitcher/lead/git-hooks" }
+
     /// The lead's accepted hooks record (`GitGuard.Accepted`, `<git-hooks>/<repository key>/accepted.json`): its `told`
     /// flag, which the lead's tool server sets once it told the lead of a baseline, isn't a change of what runs.
     static let acceptedRecord = "accepted.json"
 
-    /// A folder of `.entries`, read as `ConfigSeal.readFolder` reads a folder (its hash is that one's), with the hooks
-    /// record's per-path hash taken without its `told` flag (`acceptedRecord`), so that alone is no change in place.
+    /// The per-path entry a read cut at `ConfigSeal.maxEntries` carries (no relative path starts with "/"): past the
+    /// cut an entry is unseen, so a folder read so is judged as ever (`cameOrWent`), never as entries come and gone.
+    static let cutEntry = "/cut"
+
+    /// A folder of `.entries`, read as `ConfigSeal.readFolder` reads a folder (the same lines, so the same hash), in one
+    /// walk that also says when it was cut (`cutEntry`); the hooks record's per-path hash is taken as `GitGuard` reads
+    /// it, without its `told` flag (`acceptedRecord`), so that alone is no change in place.
     static func readEntries(_ watched: ConfigSeal.Watched) -> ConfigSeal.FolderRead {
-        var read = ConfigSeal.readFolder(watched)
-        guard watched.name == "~/.vibeswitcher/lead/git-hooks" else { return read }
+        var hasher = SHA256()
+        var info = stat()
+        guard lstat(watched.path, &info) == 0 else {
+            hasher.update(data: Data("absent".utf8))
+            let absent = ConfigSeal.hex(hasher.finalize())
+            return ConfigSeal.FolderRead(hash: absent, countingHash: absent, entries: [:])
+        }
+        var entries: [String: String] = [:]
+        var count = 0
+        let cut = walkEntries(watched.path, relative: "", count: &count) { text, path, mtime in
+            let line = Data((text + "\n").utf8)
+            hasher.update(data: line)
+            if let path { entries[path] = ConfigSeal.hex(SHA256.hash(data: line).prefix(8)) + " \(text.prefix(1)) \(mtime)" }
+        }
+        if cut { entries[cutEntry] = ConfigSeal.hex(SHA256.hash(data: Data("cut".utf8)).prefix(8)) + " o 0" }
+        let hash = ConfigSeal.hex(hasher.finalize())
+        var read = ConfigSeal.FolderRead(hash: hash, countingHash: hash, entries: entries)
+        guard watched.name == hooksName else { return read }
         for (path, entry) in read.entries {
             let parts = path.split(separator: "/")
-            guard parts.count == 2, parts[1] == Substring(acceptedRecord), entry.split(separator: " ").dropFirst().first == "f" else { continue }
+            guard parts.count == 2, parts[1] == Substring(acceptedRecord), ConfigSeal.entryKind(entry) == "f" else { continue }
             let file = (watched.path as NSString).appendingPathComponent(path)
             var info = stat()
             guard lstat(file, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
                   let data = ConfigSeal.regularContents(file, limit: 1 << 20, followLink: false),
-                  var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-            object["told"] = nil
-            guard let canonical = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else { continue }
+                  var record = try? JSONDecoder().decode(GitGuard.Accepted.self, from: data) else { continue }
+            // What GitGuard reads (a key given twice: its decoder's choice, not another parser's), told left out.
+            record.told = nil
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            guard let canonical = try? encoder.encode(record) else { continue }
             let line = "f \(path) \(info.st_mode & 0o777) told-free " + ConfigSeal.hex(SHA256.hash(data: canonical))
             var words = entry.split(separator: " ").map(String.init)
             words[0] = ConfigSeal.hex(SHA256.hash(data: Data(line.utf8)).prefix(8))
@@ -251,17 +254,113 @@ public enum LinuxSealList {
         return read
     }
 
+    /// `ConfigSeal.readFolder`'s walk, line for line: each entry under `folder` in name order (`.DS_Store` left out), one
+    /// line each, links read and never followed, at most `ConfigSeal.maxEntries`; true when it was cut there.
+    private static func walkEntries(_ folder: String, relative: String, count: inout Int, _ line: (String, String?, Int) -> Void) -> Bool {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else {
+            line("unreadable \(relative)", nil, 0)
+            return false
+        }
+        for name in names.sorted() where name != ".DS_Store" {
+            count += 1
+            guard count <= ConfigSeal.maxEntries else {
+                line("cut", nil, 0)
+                return true
+            }
+            let path = (folder as NSString).appendingPathComponent(name)
+            let shown = relative.isEmpty ? name : relative + "/" + name
+            var info = stat()
+            guard lstat(path, &info) == 0 else { continue }
+            let mtime = Int(Platform.Files.modified(info).tv_sec)
+            switch info.st_mode & S_IFMT {
+            case S_IFDIR:
+                line("d \(shown)", shown, mtime)
+                if walkEntries(path, relative: shown, count: &count, line) { return true }
+            case S_IFLNK:
+                line("l \(shown) -> " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""), shown, mtime)
+            case S_IFREG:
+                let digest: String
+                switch ConfigSeal.contentsDigest(path, followLink: false) {
+                case .digest(let hex): digest = hex
+                case .other: digest = "other"
+                case .unreadable: digest = "unreadable"
+                }
+                line("f \(shown) \(info.st_mode & 0o777) \(digest)", shown, mtime)
+            default:
+                line("o \(shown)", shown, mtime)
+            }
+        }
+        return false
+    }
+
     /// For the vault's look (`LeadVault`'s `judge`): when `key` names a folder of `.entries` that `recorded` has sealed
     /// and that changed by entries added or removed only (none of the ones in both changed in place, by their
-    /// `FolderRead.entries` hashes), the per-path hashes to record with `now`'s hash: `now`'s, with the removed ones
-    /// kept, so one that comes back changed is a change. nil otherwise: judged as ever.
+    /// `FolderRead.entries` hashes; in the accepted hooks, only what `hookEntryMayCome` lets come), the per-path hashes
+    /// to record with `now`'s hash: `now`'s, with the removed ones kept, so one that comes back changed is a change. nil
+    /// otherwise, and for a read cut on either side (`cutEntry`): judged as ever.
     static func cameOrWent(key: String, recorded: [String: String], now: [String: String]) -> String? {
-        guard entriesNames.contains(ConfigSeal.name(ofKey: key)), let was = recorded[key], let hash = now[key], was != hash,
+        let name = ConfigSeal.name(ofKey: key)
+        guard entriesNames.contains(name), let was = recorded[key], let hash = now[key], was != hash,
               let before = recorded[ConfigSeal.keysKey(of: key)], let after = now[ConfigSeal.keysKey(of: key)] else { return nil }
         let old = ConfigSeal.decode(before), new = ConfigSeal.decode(after)
+        guard old[cutEntry] == nil, new[cutEntry] == nil else { return nil }
         for (path, entry) in old {
             if let current = new[path], ConfigSeal.entryHash(current) != ConfigSeal.entryHash(entry) { return nil }
         }
+        if name == hooksName {
+            for (path, entry) in new where old[path] == nil {
+                guard hookEntryMayCome(path, entry: entry, old: old) else { return nil }
+            }
+        }
         return ConfigSeal.encode(old.merging(new) { $1 })
+    }
+
+    /// The vault's look: each `.entries` key of `now` not `held` whose change is entries added or removed only
+    /// (`cameOrWent`) is recorded in `recorded` as it is, its removed entries kept, and its per-path hashes in `hashes`
+    /// set the same, so what the rest of the look seals from `hashes` keeps them too.
+    static func recordCameOrWent(_ now: [String: String], hashes: inout [String: String], recorded: inout [String: String], held: Set<String>) {
+        for key in now.keys where !held.contains(key) {
+            guard let kept = cameOrWent(key: key, recorded: recorded, now: hashes) else { continue }
+            recorded[key] = now[key]
+            recorded[ConfigSeal.keysKey(of: key)] = kept
+            hashes[ConfigSeal.keysKey(of: key)] = kept
+        }
+    }
+
+    /// Whether `path`, an entry of the accepted hooks that wasn't there (`old`, as sealed), comes as no change. Git takes
+    /// the lead's hooks from `<key>/copy/hooks` (`GitGuard.command`'s core.hooksPath): a file there that isn't a shim
+    /// would run as the lead's tool server. So only GitGuard's baseline of a repository the seal hasn't seen comes (its
+    /// folders, its copies in `run`, which a shim runs as branch code, its shims, and its record); and the record of
+    /// one already there (written after its copy). Anything else added under a repository's folder waits for the user.
+    static func hookEntryMayCome(_ path: String, entry: String, old: [String: String]) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        let kind = ConfigSeal.entryKind(entry)
+        guard let store = parts.first, !store.isEmpty, !parts.contains("") else { return false }
+        if parts.count == 2, parts[1] == acceptedRecord { return kind == "f" }
+        guard !old.keys.contains(where: { $0 == store || $0.hasPrefix(store + "/") }) else { return false }
+        let rest = Array(parts.dropFirst())
+        switch rest.count {
+        case 0: return kind == "d"
+        case 1: return rest[0] == "copy" && kind == "d"
+        case 2: return rest[0] == "copy" && (rest[1] == "hooks" || rest[1] == "run") && kind == "d"
+        default:
+            guard rest[0] == "copy" else { return false }
+            if rest[1] == "run" { return true }
+            return rest[1] == "hooks" && rest.count == 3 && kind == "f"
+                && shimHashes(store: store, hook: rest[2], path: path).contains(ConfigSeal.entryHash(entry) ?? "")
+        }
+    }
+
+    /// The per-path hashes (`FolderRead.entries`') a shim GitGuard writes at `path` for `hook` of repository `store`
+    /// would have: `GitGuard.shim` running that hook's copy (`GitGuard.runCopy`, under this process's `VibePaths.root`,
+    /// as written or with its links resolved), mode 0700. Whatever a shim runs, it runs as branch code.
+    static func shimHashes(store: String, hook: String, path: String) -> Set<String> {
+        let roots = [VibePaths.root, VibePaths.root.resolvingSymlinksInPath()]
+        return Set(roots.map { root in
+            let runs = root.appendingPathComponent("lead/git-hooks/\(store)", isDirectory: true).appendingPathComponent("copy", isDirectory: true)
+                .appendingPathComponent("run", isDirectory: true).appendingPathComponent(hook).path
+            let digest = ConfigSeal.hex(SHA256.hash(data: Data(GitGuard.shim(running: runs).utf8)))
+            return ConfigSeal.hex(SHA256.hash(data: Data("f \(path) \(0o700) \(digest)\n".utf8)).prefix(8))
+        })
     }
 }

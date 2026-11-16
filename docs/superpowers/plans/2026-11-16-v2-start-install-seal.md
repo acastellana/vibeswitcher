@@ -411,6 +411,9 @@ accepted every recommendation so far. Each can be overruled before its task star
     - `/run/user/<uid>/systemd/transient` and `/run/user/<uid>/systemd/user.control` (drop-ins of the highest
       priority) are watched too.
     - `ConfigSeal.isHome(key:)` accepts names starting `/mnt/` and `/run/user/`: one line, lead-approved.
+    - *2026-11-16, S7's review:* `/run/user/<uid>/systemd/user` (runtime units, above `~/.local/share/systemd/user`
+      on the manager's search path) is watched too. The generator folders aren't: the manager empties them at each
+      reload.
     - After M5 there is no `/mnt/c` mount, so those entries matter only if the user keeps automount on (D2's
       otherwise).
 21. **ST-D21: Step 9's run.**
@@ -1504,6 +1507,41 @@ landed; otherwise it uses E9's.
   team; a listing (ST-D18) misses a write in the kernel tick of the last change it recorded (ctime is coarse here);
   a new entry in an `.entries` folder is never held (a snapshot is sourced only by the session that wrote it; a role's
   launch files are written whole at its start).
+
+*2026-11-16, S7's review fixes (committed as "v2 step 8: S7 review fixes"):*
+- **The accepted hooks are no longer free to grow.** Git takes the lead's hooks from `git-hooks/<key>/copy/hooks`
+  (`GitGuard.command`'s core.hooksPath), so a file added there ran as the lead's tool server and was sealed as an entry
+  added. Now, in `~/.vibeswitcher/lead/git-hooks` only, an added entry comes as no change only when it's GitGuard's
+  baseline of a repository the seal hasn't seen (`LinuxSealList.hookEntryMayCome`): the store and `copy`, `copy/hooks`,
+  `copy/run` as real folders, anything in `copy/run` (a shim runs it as branch code), files in `copy/hooks` whose
+  contents are exactly `GitGuard.shim(running:)` of that hook's run copy (mode 0700; under this process's
+  `VibePaths.root`, as written or with its links resolved: `LinuxSealList.shimHashes`), and `accepted.json`. Anything
+  else added under a store's folder (a hook or a shim added to an accepted copy, a link, another file) holds the team.
+  The measurement still passes, now with a hook of the user's in its repository and a second repository's baseline
+  after the seal's record. The lead's choice beside this, kept for the lead: the `.folder` the plan named, which would
+  hold every repository's first baseline once (the reviewers' option (a)).
+- **The told-free record is taken as GitGuard reads it**: `JSONDecoder` into `GitGuard.Accepted`, `told` cleared,
+  re-encoded with sorted keys (a key given twice was the first for GitGuard's decoder and the last for
+  `JSONSerialization`).
+- **The removed entries are kept through the whole look**: `judge`'s hook is now `var hashes = hashes` and
+  `LinuxSealList.recordCameOrWent(_:hashes:recorded:held:)`, which writes the kept map into the look's `hashes` too, so
+  the seal at the look's end (`seal(now.keys, …)`) no longer drops it. Shown through the vault's own looks,
+  `LinuxSealVaultTests.aSnapshotRemovedAndBackChangedIsHeld` (removed, a look, back changed, held).
+- **A cut read is never entries come and gone**: `readEntries` walks the folder itself (`walkEntries`, line for line
+  `ConfigSeal.readFolder`'s, so the hash is that one's) and marks a read cut at `maxEntries` with a per-path entry
+  `/cut` (`LinuxSealList.cutEntry`); `cameOrWent` returns nil when either side has it, so padding past the cap holds
+  the team (`LinuxSealVaultTests.aSnapshotsFolderPaddedPastItsCapIsHeld`).
+- **The list**: `/run/user/<uid>/systemd/user` (`.folder`: runtime units, on the manager's search path ahead of
+  `~/.local/share/systemd/user`) beside `transient` and `user.control`; `~/.nvm/alias` (`.listing`: every new shell's
+  `nvm.sh` uses `alias/default`'s node) and all of `~/.nvm/versions/node` as one `.listing`, in place of the unit's
+  version folder or each `v*` (so a new version is a change; `nodeFolders` and the unit's PATH reading are gone;
+  `aNewNodeVersionOrTheDefaultAliasIsAChange` replaces `nodesVersionFolderIsTheUnitsOrEachOfNvms`). `~/.nvm/alias` is a
+  listing so the held-detail budget holds: 7 Mac folders (448 KiB), 7 Linux `.folder`s, 4 `.entries` and 3
+  `/run/user` folders (32 KiB each), 896 KiB of 900, which `ConfigSealCardTests` now counts as written.
+- The tests' tick probe is outside every watched thing (`temp`), so the listing cases fail without mode or ctime in
+  `LinuxSealList.line`. The gated timing also leaves out `/run/user/` (the Global Constraints).
+- The residual above now reads: a new entry in a snapshots folder or `run` is never held; in `git-hooks`, only a
+  fresh baseline.
 
 - [x] **Step 0: Check the real startup files** (an agent step, read only, outside the suite). List every `.` and
   `source` target in `~/.bashrc`, `~/.profile`, `~/.bash_profile` and `~/.bash_login`. Record in the inventory that

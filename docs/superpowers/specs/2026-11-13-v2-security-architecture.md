@@ -1410,10 +1410,17 @@ commit is refused; 2026-11-16, with the review of S4a);
 `LinuxSealListTests.aListingNeverReadsContents`, `LinuxSealListTests.aListingIsNotCut`,
 `LinuxSealListTests.theWindowsFilesAreWatchedOnlyWhileMounted`,
 `LinuxSealListTests.anEntriesFolderCountsOnlyEntriesChangedInPlace`, `LinuxSealListTests.theMacsListIsEmpty`,
-`EngineEndToEndTests.aWorkersStartDoesNotHoldItsTeam`, `SwitchTests.aSwitchLeavesTheSealHoldingUntilAccepted` (the
-start plan's S7: a write to each item of the seal's Linux list is held, the big folders read by their metadata with
-no cap, a folder of `.entries` held only for an entry changed in place or removed and back changed, and a worker's
-start doesn't hold its team; 2026-11-16).
+`EngineEndToEndTests.aWorkersStartDoesNotHoldItsTeam`, `SwitchTests.aSwitchLeavesTheSealHoldingUntilAccepted`,
+`LinuxSealListTests.theHooksRecordsToldFlagIsNoChange`, `LinuxSealListTests.aScratchHomeReadsNothingOutsideIt`,
+`LinuxSealListTests.aNewNodeVersionOrTheDefaultAliasIsAChange`, `LinuxSealVaultTests.aSnapshotRemovedAndBackChangedIsHeld`,
+`LinuxSealVaultTests.aSnapshotsFolderPaddedPastItsCapIsHeld`, `LinuxSealVaultTests.aHookAddedToTheAcceptedHooksIsHeld`,
+`FakeClaudeTests.theFakeWritesItsShellSnapshot` (the start plan's S7: a write to each item of the seal's Linux list
+changes its fingerprint, the big folders read by their metadata with no cap; a folder of `.entries` is held for an
+entry changed in place, removed and back changed, or a read cut at its cap, while an entry added or removed alone is
+no change, except in the lead's accepted hooks, where only GitGuard's baseline of a repository the seal hasn't seen
+(folders, run copies, exact shims, its record) comes so and a hook added to a copy is held; the hooks record's `told`
+flag, read as GitGuard reads the record, is no change; a scratch home's seal reads nothing outside it; a worker's start
+doesn't hold its team; 2026-11-16, with the review of S7).
 
 **Tests to write:** Step 8: `InstallTests.anInstallFromADirtyTreeIsRefused`,
 `anInstalledBinaryLoadsNothingFromAFolderTheUserCanWrite` (also reads `/proc/<pid>/maps` of the installed host, server

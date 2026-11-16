@@ -584,6 +584,10 @@ systemd and autostart folders and `user.conf`, `~/.codex/shell-snapshots`, the 5
 `/mnt/c` mounted (9p), each of 5 Windows users' `.wslconfig` and Startup folder (`CodexSandboxOffline`, `WsiAccount`,
 `kstel`, `monts`, `postgres`; `Default User` is a junction, so left out, as are `Public`, `Default` and `All Users`). The
 look reads metadata only for the listings: the swiftly toolchain and node's folder are the large ones.
+*2026-11-16, S7's review:* the gated test now also leaves out the `/run/user/<uid>/systemd` folders (the plan's Global
+Constraints: never the user's `$XDG_RUNTIME_DIR`); the run above read the 2 that were listed then, and the list now has
+a third (`user`). Node's folder is now one listing of all of `~/.nvm/versions/node` (here the same single `v22.16.0`,
+so the same entries) and `~/.nvm/alias` is a second. The look wasn't run again: the plan allows the agent one run.
 
 **The measurement (ST-D19)**, `EngineEndToEndTests.aWorkersStartDoesNotHoldItsTeam` on a scratch node with the fakes:
 on plain folders the first `start_worker` was refused for `~/.claude/shell-snapshots`, `~/.vibeswitcher/lead/run`
@@ -591,3 +595,6 @@ and `~/.vibeswitcher/lead/git-hooks` (GitGuard's baseline at the first guarded g
 `told` in `accepted.json`). On `.entries` for all four (and `told` left out of the hooks record's per-path hash) it
 passes: two workers start, and `config held` holds nothing after either. The real Claude Code's snapshot is checked
 once, at M8's first lead (S9's "Prepared for M8").
+*2026-11-16, S7's review:* the scratch repository has a hook of the user's (`pre-commit`), and after the two starts a
+second repository's first guarded git writes a new store with a shim: `config held` still holds nothing (the guard's
+baseline of a repository the seal hasn't seen comes as entries added; anything else added under `git-hooks` is held).

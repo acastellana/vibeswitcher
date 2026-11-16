@@ -157,6 +157,9 @@ struct EngineEndToEndTests {
         let repo = node.root.appendingPathComponent("repo")
         try await scratchRepository(repo)
         try Self.workflow(repo)
+        // A hook of the user's: the guard's baseline (at its first git) copies it and writes its shim, which comes as no
+        // change (`LinuxSealList.hookEntryMayCome`).
+        try ScratchNode.script("#!/bin/sh\nexit 0\n", at: repo.appendingPathComponent(".git/hooks/pre-commit"))
         let head = Git.run(["rev-parse", "main"], in: repo.path).output
         try await node.acceptConfig(repo)
         try await node.acceptBase(repo, from: head)
@@ -190,6 +193,9 @@ struct EngineEndToEndTests {
             #expect(tools.text(of: tools.calls()[index]).contains("Worker started on \(task)"), "\(tools.calls()[index])")
             try #require(await eventually(timeout: 60) { written().count == index }, "the worker's snapshot: \(written())")
             #expect(FileManager.default.fileExists(atPath: node.root.appendingPathComponent("lead/run").path))
+            let stores = (try? FileManager.default.contentsOfDirectory(atPath: node.root.appendingPathComponent("lead/git-hooks").path)) ?? []
+            #expect(stores.contains { FileManager.default.fileExists(atPath: node.root.appendingPathComponent("lead/git-hooks/\($0)/copy/hooks/pre-commit").path) },
+                    "the baseline's shim: \(stores)")
 
             // The next look, the app's: nothing held.
             let held = try await node.run(["config", "held", repo.path])
@@ -197,6 +203,21 @@ struct EngineEndToEndTests {
             #expect(!held.output.contains("shell-snapshots") && !held.output.contains("lead/run"), "\(held.output)")
             #expect(!held.output.components(separatedBy: "\n").contains { $0.hasPrefix("    ~/") }, "\(held.output)")
         }
+
+        // A second repository's first guarded git (here `base show`'s, refused after it for its unaccepted base), after
+        // the seal's record: the guard's baseline of its hook, a new store with a shim, comes as no change either.
+        let other = node.root.appendingPathComponent("other")
+        try await scratchRepository(other)
+        try Self.workflow(other)
+        try ScratchNode.script("#!/bin/sh\nexit 0\n", at: other.appendingPathComponent(".git/hooks/pre-commit"))
+        let stores = { ((try? FileManager.default.contentsOfDirectory(atPath: node.root.appendingPathComponent("lead/git-hooks").path)) ?? []).count }
+        let before = stores()
+        let shown = try await node.run(["base", "show", other.path, "--from", Git.run(["rev-parse", "main"], in: other.path).output])
+        #expect(shown.status == 77 && (shown.output + shown.errors).contains("base branch isn't accepted"), "\(shown.output)\(shown.errors)")
+        #expect(stores() == before + 1, "the second repository's baseline")
+        let held = try await node.run(["config", "held", repo.path])
+        #expect(held.status == 0, "\(held.output)\(held.errors)")
+        #expect(!held.output.components(separatedBy: "\n").contains { $0.hasPrefix("    ~/") }, "\(held.output)")
     }
 
     // MARK: A real lead

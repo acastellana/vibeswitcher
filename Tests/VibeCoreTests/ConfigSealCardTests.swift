@@ -461,8 +461,11 @@ extension ConfigSealTests {
             #expect(detail.more > 0)
             #expect(detail.files.count + detail.more == 1000)
         }
-        // Every watched home folder at once stays under the host's 1 MiB message.
-        let folders = ConfigSeal.homeWatched(home: home).filter { $0.kind == .folder }.map(\.name)
+        // Every watched home folder at once stays under the host's 1 MiB message: each with a card detail (`.folder` and
+        // Linux's `.entries`), and on Linux the account's own home's runtime folders too (read under a scratch root).
+        let outside = LinuxSealList.watched(home: home, uid: getuid(), mounts: "/dev/null", outside: temp.url("outside").path)
+            .filter { $0.name.hasPrefix("/") }
+        let folders = (ConfigSeal.homeWatched(home: home) + outside).filter { $0.kind == .folder || $0.kind == .entries }.map(\.name)
         #expect(folders.reduce(0) { $0 + ConfigSeal.detailBudget($1) } < 900 << 10)
         // Not everything listed: the source can't be said.
         let cut = ConfigSeal.heldDetail(name: Self.skillsName, from: entries(2000, "synced/acct-1/a"),
