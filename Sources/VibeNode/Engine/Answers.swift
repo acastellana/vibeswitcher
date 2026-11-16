@@ -102,11 +102,12 @@ extension LeadEngine {
         let existing = cards.card(question: question.id, root: root)
         guard existing != nil || op == .post else { return nil }
         var card = existing ?? CardStore.Card(root: root, kind: .question)
-        card.question = Self.keepingTheUsers(question, from: existing?.question)
-        card.closed = Self.closed(card.question ?? question)
+        let taken = op == .revise ? Self.revision(question, of: existing?.question) : question
+        card.question = Self.keepingTheUsers(taken, from: existing?.question)
+        card.closed = Self.closed(card.question ?? taken)
         // The commit the options approve now: a revision that names another commit (or adds or drops "Approve") makes
         // the card show that one's facts, built anew, never the earlier commit's beside the new wording.
-        let commit = Self.approvalCommit(question)
+        let commit = Self.approvalCommit(taken)
         let rebuild = commit != nil && commit != card.approval?.commit
         card.kind = commit == nil ? .question : .approval
         if commit == nil { card.approval = nil } else if rebuild, let commit { card.approval = CardStore.ApprovalFacts(commit: commit) }
@@ -114,6 +115,29 @@ extension LeadEngine {
         cardsChanged()
         if rebuild, let commit { buildApproval(card: card.id, commit: commit, root: root) }
         return card
+    }
+
+    /// The card's question `card` reworded as the revision `posted` says: its text, its options and its revisions (so its
+    /// version) alone. A revision's post is built from the board, which any session can write, so its proposal, minutes,
+    /// deadline, reason, priority and task are the board's, never taken (S3: only a posted question's timer runs out, as
+    /// posted): the card keeps its own. Its timer, when it runs, starts again from `now` (its own minutes), as
+    /// `LeadBoard.revise` does, and stops when its proposal is no longer an option or the new wording is one no timer may
+    /// carry (`timerRefusal`). `posted` itself when there's no card question.
+    static func revision(_ posted: LeadQuestion, of card: LeadQuestion?, now: Double = Date().timeIntervalSince1970) -> LeadQuestion {
+        guard var question = card else { return posted }
+        question.text = posted.text
+        question.options = posted.options
+        question.revisions = posted.revisions
+        if question.isCounting {
+            if let proposal = question.proposal, question.options.contains(proposal),
+               LeadQuestion.timerRefusal(text: question.text, options: question.options, whyNow: question.whyNow, priority: question.priority) == nil {
+                question.decideBy = now + Double(question.decideIn ?? LeadQuestion.defaultDecideIn) * 60
+            } else {
+                question.proposal = nil
+                question.decideBy = nil
+            }
+        }
+        return question
     }
 
     /// `posted` as the card keeps it: what the user did on the card (a hold, an answer) and what its timer decided stand,

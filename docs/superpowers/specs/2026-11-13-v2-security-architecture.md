@@ -516,7 +516,10 @@ with the deadline and proposal the lead's tool server posted, never on `board.js
 question or give one a deadline and a proposal of its own: otherwise VibeSwitcher's own `timer` sender would tell the
 lead to go ahead with what a worker wrote, and close the user's card as decided. The board records the decision for
 the lead's record. A server restart forgets the cards (they are memory only), so no timer runs out for a question the
-user no longer sees (the close-out review).
+user no longer sees (the close-out review). **(2026-11-16)** A revision's post is built from `board.json` (the board's
+question after the revision), so the card takes from it the new text, options and revisions alone; the proposal,
+minutes, deadline, reason, priority and task stay the card's, its timer started again from the revision with its own
+minutes, or stopped when its proposal is no longer an option (the engine sweep).
 
 **(call, 2026-11-16)** **The diff's base is the one the user accepted.** The files and diffstat are git's of
 `<base>...<commit>`, and the base is `workflow.md`'s `base_branch` only while its hash is the one `config accept`
