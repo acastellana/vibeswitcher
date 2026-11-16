@@ -124,7 +124,7 @@ struct HooksCommandTests {
         }
         // Nothing half-written left beside them, nor in the folder above.
         #expect(names(bin(node)) == Self.programs)
-        #expect(!names(node.home.appendingPathComponent(".vibeswitcher")).contains { $0.hasSuffix(".tmp") })
+        #expect(!names(node.home.appendingPathComponent(".vibeswitcher")).contains { $0.contains(".tmp") })
     }
 
     @Test func removeLeavesTheUsersOwnHandlers() async throws {
@@ -361,7 +361,7 @@ struct HooksCommandTests {
         #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
         #expect(seen.value.isSubset(of: Set(Self.programs)), "\(seen.value)")
         #expect(names(folder) == Self.programs)
-        #expect(!names(node.home.appendingPathComponent(".vibeswitcher")).contains { $0.hasSuffix(".tmp") })
+        #expect(!names(node.home.appendingPathComponent(".vibeswitcher")).contains { $0.contains(".tmp") })
     }
 
     @Test func hooksRemoveTakesThemOut() async throws {

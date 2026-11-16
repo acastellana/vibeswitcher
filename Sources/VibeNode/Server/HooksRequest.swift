@@ -9,9 +9,14 @@ import VibeCore
 /// - Install opens each of `<node-root>/bin/vibeswitcher-hook` and `vibeswitcher-mcp` once (`O_NOFOLLOW`, a regular
 ///   file) and hashes the bytes it read. Each must equal the `binaries` entry of the `build-info` the host loaded at its
 ///   start (`HostNotes.binaries`, S5): a worker can rewrite the `build-info` on disk too, so the copy on disk isn't asked.
-///   Those bytes, never a second read, are written to a temporary beside `<home>/.vibeswitcher/bin` (in
-///   `<home>/.vibeswitcher`: the bin folder is watched, and a look while a temporary is in it would hold it), flushed,
-///   and only then, inside `appWrite`, renamed in. Then each agent's config (`HookInstaller.configURL(for:home:)`) gets the hooks, running
+///   Those bytes, never a second read, are written to a file in a fresh 0700 folder of their own beside
+///   `<home>/.vibeswitcher/bin` (in `<home>/.vibeswitcher`: the bin folder is watched, and a look while a temporary is
+///   in it would hold it), flushed, its descriptor kept, and only then, inside `appWrite`, renamed in. Before the first
+///   rename each staged name must still be the file written (`fstat` of the descriptor against `lstat` of the name:
+///   device, inode, size), and after each rename the program in place is read and hashed again: a staged file another
+///   process swapped or rewrote is refused (the security follow-ups' item 29), before anything is renamed for a swap,
+///   and with the program taken out again for a rewrite, so what `appWrite` seals is never its bytes. Then each
+///   agent's config (`HookInstaller.configURL(for:home:)`) gets the hooks, running
 ///   `<home>/.vibeswitcher/bin/vibeswitcher-hook`.
 /// - Remove takes only VibeSwitcher's hooks out of each config (`HookInstaller.uninstall`); the programs stay.
 /// - Every path is passed to `appWrite` as `ConfigSeal.homeWatched(home:)` spells it (`<home>/.vibeswitcher/bin/…`,
@@ -48,6 +53,9 @@ public struct HooksRequest {
     public let home: String
     public let binaries: [String: String]?
     public let vault: LeadVault
+    /// Tests only: called inside `appWrite` with each staged program's path by name, just before the checks that
+    /// precede the first rename (what another process of the user's could do to a staged file there, a test does).
+    var beforeRenames: (([String: String]) -> Void)?
 
     public init(nodeRoot: String, home: String, binaries: [String: String]?, vault: LeadVault) {
         self.nodeRoot = nodeRoot
@@ -80,21 +88,23 @@ public struct HooksRequest {
         // The programs' bytes written and flushed before `appWrite` takes its fingerprints, so only the renames and the
         // config edits fall between those and the ones it takes after (the S6 review: what changes in between is
         // sealed with the write).
-        var staged: [String: String] = [:]
-        defer { for temporary in staged.values { unlink(temporary) } }
+        var staged: [String: Staged] = [:]
+        defer { for program in staged.values { program.discard() } }
         do {
             try VibePaths.ensurePrivate(dot)
-            for name in Self.programs { if let temporary = try stage(read[name] ?? Data(), name: name) { staged[name] = temporary } }
+            for name in Self.programs { if let program = try stage(read[name] ?? Data(), name: name) { staged[name] = program } }
         } catch {
             return .failure(StartRefusal("the hooks' programs couldn't be written: \(ConfigSeal.inert(Self.describe(error), limit: .max)): nothing was installed", exitCode: 1))
         }
         do {
             try vault.appWrite(targets + configs, home: home) {
+                beforeRenames?(staged.mapValues(\.path))
+                // Every staged name still the file written, before anything is renamed (or the bin folder made).
+                for name in Self.programs { try staged[name]?.checkUnswapped() }
                 try VibePaths.ensurePrivate(URL(fileURLWithPath: binFolder, isDirectory: true), within: dot)
                 for name in Self.programs {
-                    guard let temporary = staged[name] else { continue }
-                    guard rename(temporary, (binFolder as NSString).appendingPathComponent(name)) == 0 else { throw Platform.Errno(code: errno) }
-                    staged[name] = nil
+                    guard let program = staged[name] else { continue }
+                    try program.place(at: (binFolder as NSString).appendingPathComponent(name))
                 }
                 for agent in agents { try HookInstaller.install(agent: agent, at: URL(fileURLWithPath: configPath(agent)), hookBinary: hook) }
             }
@@ -171,18 +181,79 @@ public struct HooksRequest {
 
     // MARK: The write
 
-    /// `data` written to a new temporary in `<home>/.vibeswitcher` (0755, never following a link) and flushed: its
-    /// path, for the caller to rename over `<home>/.vibeswitcher/bin/<name>`; nil when the program there is these bytes
-    /// already, 0755.
-    func stage(_ data: Data, name: String) throws -> String? {
+    /// A program written for its rename into `<home>/.vibeswitcher/bin`: `path`, `<folder>/<name>` in a fresh 0700
+    /// folder of its own, its descriptor kept open from its write, and the SHA-256 and size of the bytes written.
+    final class Staged {
+        let folder: String
+        let path: String
+        let fd: Int32
+        let sha256: String
+        let size: Int
+
+        init(folder: String, path: String, fd: Int32, sha256: String, size: Int) {
+            self.folder = folder
+            self.path = path
+            self.fd = fd
+            self.sha256 = sha256
+            self.size = size
+        }
+
+        /// Refused unless `path` still names the file written: a regular file, the descriptor's device and inode,
+        /// its size what was written.
+        func checkUnswapped() throws {
+            var held = stat(), named = stat()
+            guard fstat(fd, &held) == 0 else { throw Platform.Errno(code: errno) }
+            guard lstat(path, &named) == 0, named.st_mode & S_IFMT == S_IFREG, named.st_dev == held.st_dev,
+                  named.st_ino == held.st_ino, named.st_size == held.st_size, Int(held.st_size) == size else {
+                throw Tampered("\(ConfigSeal.inert(path, limit: .max)) isn't the file written there any more: nothing was renamed")
+            }
+        }
+
+        /// Renamed to `target`, and the program there read and hashed again: when it isn't the bytes written (a
+        /// rewrite in place since), it is taken out again and the rename refused.
+        func place(at target: String) throws {
+            guard rename(path, target) == 0 else { throw Platform.Errno(code: errno) }
+            guard case .success(let data) = BuildRecord.readRegular(target), BuildInfo.sha256(of: data) == sha256 else {
+                unlink(target)
+                throw Tampered("\(ConfigSeal.inert(target, limit: .max)) wasn't the bytes written after its rename: it was taken out again")
+            }
+        }
+
+        /// The descriptor closed, the file (unless renamed) and its folder removed.
+        func discard() {
+            Sys.close(fd)
+            unlink(path)
+            rmdir(folder)
+        }
+    }
+
+    /// A staged program changed by someone else between its write and its rename.
+    struct Tampered: LocalizedError {
+        let text: String
+        init(_ text: String) { self.text = text }
+        var errorDescription: String? { text }
+    }
+
+    /// `data` written into a new 0700 folder in `<home>/.vibeswitcher` (the file 0755, never following a link) and
+    /// flushed, its descriptor kept: for the caller to rename over `<home>/.vibeswitcher/bin/<name>`; nil when the
+    /// program there is these bytes already, 0755.
+    func stage(_ data: Data, name: String) throws -> Staged? {
         let target = (binFolder as NSString).appendingPathComponent(name)
         var info = stat()
         if lstat(target, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_mode & 0o7777 == 0o755,
            case .success(let existing) = BuildRecord.readRegular(target), existing == data { return nil }
-        let temporary = ((binFolder as NSString).deletingLastPathComponent as NSString)
-            .appendingPathComponent(".\(name).\(getpid()).\(UUID().uuidString.prefix(8)).tmp")
-        let fd = Sys.open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o755)
-        guard fd >= 0 else { throw Platform.Errno(code: errno) }
+        var template = Array((((binFolder as NSString).deletingLastPathComponent as NSString)
+            .appendingPathComponent(".\(name).tmp.XXXXXX")).utf8CString)
+        guard let made = template.withUnsafeMutableBufferPointer({ mkdtemp($0.baseAddress!) }) else { throw Platform.Errno(code: errno) }
+        let folder = String(cString: made)
+        let path = (folder as NSString).appendingPathComponent(name)
+        let fd = Sys.open(path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o755)
+        guard fd >= 0 else {
+            let code = errno
+            rmdir(folder)
+            throw Platform.Errno(code: code)
+        }
+        let staged = Staged(folder: folder, path: path, fd: fd, sha256: BuildInfo.sha256(of: data), size: data.count)
         var failed: Int32 = 0
         if fchmod(fd, 0o755) != 0 { failed = errno }
         let bytes = [UInt8](data)
@@ -194,12 +265,11 @@ public struct HooksRequest {
             done += wrote
         }
         if failed == 0, fsync(fd) != 0 { failed = errno }
-        Sys.close(fd)
         guard failed == 0 else {
-            unlink(temporary)
+            staged.discard()
             throw Platform.Errno(code: failed)
         }
-        return temporary
+        return staged
     }
 
     static func describe(_ error: Error) -> String {

@@ -1729,6 +1729,25 @@ added. The Mac runs `theMacStillReadsOnlyTheAppBundle`, the gate's Mac case and 
   `noTerminal`'s text, nothing recorded, and the hooks stay.
 - Port map: row 55 says `HookSetup.trustCodex` isn't ported, and `HookBinaryLaunchTests` has its row.
 
+*2026-11-16, the security follow-ups' item 29 (committed as "v2 step 8: hooks install security follow-up, the staged
+programs checked at their rename"):*
+- **A staged program is checked at its rename.** `HooksRequest.stage` writes each program into a fresh 0700 folder of
+  its own (`mkdtemp`, `<home>/.vibeswitcher/.<name>.tmp.XXXXXX/<name>`), flushes it and keeps its descriptor
+  (`HooksRequest.Staged`). Inside `appWrite`, before anything is renamed (or the bin folder made), each staged name must
+  still be the file written: `fstat` of the descriptor against `lstat` of the name (a regular file, the same device,
+  inode and size, the size what was written); else the install is refused with nothing renamed, so nothing changed and
+  nothing is sealed. After each rename the program in place is read (`BuildRecord.readRegular`) and hashed again; a
+  difference (a rewrite in place, which keeps the inode) unlinks it and refuses, so `appWrite` never seals its bytes
+  (what it seals is the folder without it). The folders are removed on every path out.
+- Test hook: `HooksRequest.beforeRenames` (internal, nil outside tests), called inside `appWrite` with the staged paths
+  just before those checks. Held by `HooksStagingTests` (new, in process on a scratch book as the app's vault):
+  `anUntouchedInstallGoesInAndIsSealed` (the control: the record changes), `aStagedProgramSwappedBeforeItsRenameIsRefusedAndNothingSealed`
+  (a same-size file renamed over the staged name: refused, nothing in bin, no config, the vault's record unchanged) and
+  `aStagedProgramRewrittenInPlaceIsTakenOutAfterItsRename`. Both failed with the two checks taken out.
+  `HooksCommandTests`' leftover checks now look for `.tmp` anywhere in a name (the folders' names don't end with it).
+- Residual: a rewrite of the program in `bin/` after its re-hash and before `appWrite`'s second fingerprint is sealed
+  with the write (the window ST-D17's note of the S6 review names; its fix is the VibeCore change left to the lead).
+
 **Done when:** the cases pass on Linux, E9 Step 1 still passes, and row 55 is `ported`.
 
 ---

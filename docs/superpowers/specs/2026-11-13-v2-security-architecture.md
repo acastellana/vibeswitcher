@@ -735,7 +735,10 @@ plan's S6, 2026-11-16): `HooksCommandTests.aSessionsProcessCannotInstallHooks`,
 `HooksCommandTests.aNodeRootProgramThatDiffersFromBuildInfoIsNotInstalled`,
 `HooksCommandTests.aChangeInTheBuildsFolderNotAcceptedRefusesTheInstall`; from its review,
 `ConfigHoldStoreTests.aLookSealsTheAppsOwnWritesTheHostDidntTake` (a seal the host didn't take is asked again at the next
-look). Step 8's `switch` and `rollback` from the command line behind the typed code (the start plan's S8c, 2026-11-16):
+look); from the security follow-ups' item 29, `HooksStagingTests.aStagedProgramSwappedBeforeItsRenameIsRefusedAndNothingSealed`,
+`HooksStagingTests.aStagedProgramRewrittenInPlaceIsTakenOutAfterItsRename` (a staged program another process swaps is
+refused before anything is renamed and nothing is sealed; one rewritten in place is taken out again after its rename,
+2026-11-16). Step 8's `switch` and `rollback` from the command line behind the typed code (the start plan's S8c, 2026-11-16):
 `SwitchTests.aSwitchWithNoTerminalIsRefused`, `SwitchTests.aSwitchHandsOverToTheInstalledBuildAndEverythingNamesIt`,
 `SwitchTests.theSwitchsReplyReachesTheCommandLineBeforeTheServerIsReplaced`.
 
