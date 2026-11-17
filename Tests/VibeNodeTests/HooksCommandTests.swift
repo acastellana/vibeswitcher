@@ -345,8 +345,12 @@ struct HooksCommandTests {
         defer { node.stop() }
         try ownPrograms(node)
         // Watched while the install runs: every name made in the folder or renamed into it, as inotify tells it (a
-        // temporary made and renamed away between two listings would not be seen by a poll). The install makes it.
+        // temporary made and renamed away between two listings would not be seen by a poll). The folder is made first,
+        // as the install leaves it (0700; the install takes one that is there), so the watch is on it before the
+        // install writes anything: a temporary made in it and renamed away at once is seen too (the step 8 sweep's
+        // review: one made in a folder the install had just made could come and go before the watch was added).
         let folder = bin(node)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         let watch = try NameWatch(folder.deletingLastPathComponent(), sub: folder.lastPathComponent)
         // Stopped on every path out, and its thread waited for.
         defer { watch.stop() }
