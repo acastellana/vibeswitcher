@@ -1335,7 +1335,14 @@ differ replies before the server is replaced).
     CFFIXED_USER_HOME` and `Environment=SWIFT_BACKTRACE=enable=no`, so `systemctl --user set-environment` can't reach
     the host's start. `SWIFT_BACKTRACE` is not in `UnsetEnvironment=`: systemd applies that line after `Environment=`,
     and a name there removes the unit's own assignment too (`systemd.exec(5)`); a test refuses a name in both. `start`
-    and `status` compare `systemctl --user show-environment` with the expected set and name anything extra;
+    and `status` compare `systemctl --user show-environment` with the expected set and name anything extra. They
+    compare names, not values: the expected names' values (`SHELL`, `LANG`, `LC_*`, `USER`…) are any worker's to set
+    with `set-environment`, before the user's own start too. *(2026-11-17, the step 8 sweep)* So the host started with
+    `--node` takes what it passes to sessions from the user database, not from the manager: `SHELL` the login shell
+    when only root can change it (links resolved), else `/bin/bash`; `USER` and `LOGNAME` the account's name; and a
+    `LANG`, `LANGUAGE` or `LC_*` naming a path (a `/`) is dropped (`HostImages.nodeEnvironment`). Before, a
+    `set-environment SHELL=~/.cache/x/bash` put the worker's program under every session's Bash tool, which Claude
+    Code runs through `SHELL`, and under a verifier's branch-code prefix;
   - `Environment=HOME=…` and `Environment="PATH=/usr/local/bin:/usr/bin:/bin:<swiftly's bin>:<node's bin>"`, quoted,
     with no `/mnt/` folder: a team session's shell and its program run with this PATH and no startup file (S10), and
     so does what the program starts itself (its tool servers, and so merges' and audits' runs). So do an agent's Bash
@@ -1410,7 +1417,9 @@ what it needs.
   (a drop-in, a `vibeswitcher-node.service.wants/`, `.requires/` or `.upholds/` link, a directive start didn't
   write, a variable: the start plan's ST-D2 and the review of its S2), but a `set-environment` after its last read, or
   a unit file put in place of start's before the reload with a directive the check doesn't read, still reaches a start
-  the user typed, until the host checks its own environment.
+  the user typed, until the host checks its own environment. The check reads names, not values: an expected name's
+  value set any time before is no refusal, and the host itself fixes only `HOME`, `SHELL`, `USER`, `LOGNAME`, a
+  locale naming a path, `VIBESWITCHER_HOME` and `CFFIXED_USER_HOME` (S9; the step 8 sweep).
 - What the install builds with, if the user keeps the toolchain in `$HOME`, and the package caches
   (`~/.cache/org.swift.swiftpm`, `~/.swiftpm`): a worker that patches the compiler, `swift-test` or a cached
   dependency makes every audit's and merge's tests pass and the next install build its code, which `build-info` then
@@ -1885,7 +1894,8 @@ against it. Each line says what reduces it now, if anything.
 23. A worker can make code run later as the user: the user's crontab (`/var/spool/cron`, which the seal's file reads
     can't reach; only `crontab -l` shows it), systemd user units and timers, `~/.config/autostart`, shell startup
     files, `environment.d`, the manager's environment (`systemctl --user set-environment`, no file; `start` and
-    `status` compare it with the expected set), the Windows side (item 2). The seal watches the files. Under
+    `status` compare its names with the expected set, and the `--node` host takes `SHELL`, `USER`, `LOGNAME` and its
+    home from the user database: S9), the Windows side (item 2). The seal watches the files. Under
     `KillMode=control-group` an escaped process still in the unit's cgroup ends with the host; one started through
     `systemd-run`, `at` or cron doesn't, and the orphan sweep ends only tool servers.
 24. A session can run its own scratch host (`--lock` elsewhere): it has no allow-list and accepts the test flags, so a

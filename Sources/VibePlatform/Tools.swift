@@ -28,22 +28,44 @@ extension Platform {
         /// without following a link (`lstat`; tests give a table): a folder that is a link is passed over (Ubuntu's
         /// `/bin`, a link to `usr/bin`, is reached as `/usr/bin`), and so is a `git` that is one.
         public static func trustedGit(path: String, status: (String) -> FileStatus?) -> String? {
+            for entry in path.split(separator: ":").map(String.init) where entry.hasPrefix("/") {
+                let candidate = (entry.hasSuffix("/") ? entry : entry + "/") + "git"
+                if onlyRootCanChange(candidate, status: status) { return candidate }
+            }
+            return nil
+        }
+
+        /// Whether the program at `program` (an absolute path) only root can change: a regular file, not a link, that
+        /// someone may run, owned by root and writable by neither its group nor others, in a folder that is the same,
+        /// as is every folder above it up to `/` (each read with `status`, no link followed). A path that isn't
+        /// absolute, or names `.` or `..`, isn't.
+        public static func onlyRootCanChange(_ program: String, status: (String) -> FileStatus?) -> Bool {
             func onlyRoots(_ found: FileStatus?, isFolder: Bool) -> Bool {
                 guard let found, found.owner == 0, found.mode & (S_IWGRP | S_IWOTH) == 0 else { return false }
                 return isFolder ? found.mode & S_IFMT == S_IFDIR : found.isFile && found.mode & S_IFMT == S_IFREG && found.mode & 0o111 != 0
             }
-            for entry in path.split(separator: ":").map(String.init) where entry.hasPrefix("/") {
-                let names = entry.split(separator: "/").map(String.init)
-                guard !names.contains(".") && !names.contains("..") else { continue }
-                // `/` first, then each folder below it down to the entry's own.
-                var folder = ""
-                let folders = ["/"] + names.map { name -> String in folder += "/" + name; return folder }
-                guard folders.allSatisfy({ onlyRoots(status($0), isFolder: true) }) else { continue }
-                let candidate = (folders.last == "/" ? "" : folders.last!) + "/git"
-                if onlyRoots(status(candidate), isFolder: false) { return candidate }
-            }
-            return nil
+            guard program.hasPrefix("/") else { return false }
+            let names = program.split(separator: "/").map(String.init)
+            guard !names.isEmpty, !names.contains("."), !names.contains("..") else { return false }
+            // `/` first, then each folder below it down to the program's own.
+            var folder = ""
+            let folders = ["/"] + names.dropLast().map { name -> String in folder += "/" + name; return folder }
+            return folders.allSatisfy({ onlyRoots(status($0), isFolder: true) }) && onlyRoots(status(program), isFolder: false)
         }
+
+        /// The shell a node's host and its sessions are told is the user's (`SHELL`): `candidate` (the user database's
+        /// login shell, its links resolved) when only root can change it (`onlyRootCanChange`), else `/bin/bash`, the
+        /// shell a Linux session runs anyway (`sessionShellArguments`). Never the environment's: Claude Code runs its
+        /// Bash tool through `SHELL` when its name is bash or zsh, and so does a verifier's branch-code prefix, so a
+        /// `systemctl --user set-environment SHELL=~/x/bash` would put a worker's program under every session's
+        /// commands (the start plan's step 8 sweep, 2026-11-17).
+        public static func trustedShell(_ candidate: String?, status: (String) -> FileStatus?) -> String {
+            guard let candidate, onlyRootCanChange(candidate, status: status) else { return "/bin/bash" }
+            return candidate
+        }
+
+        /// `trustedShell` on this machine (`lstat`).
+        public static func trustedShell(_ candidate: String?) -> String { trustedShell(candidate, status: fileStatus) }
 
         /// Whether a branch's code run through a verifier's shell prefix (`BranchCode.runPrefix`) is started as a child
         /// in a POSIX session of its own, which the prefix waits for, rather than run in the prefix's place. The Mac:

@@ -21,8 +21,9 @@ import VibeCore
 /// - **`build-info`.** With `--node-root FOLDER` (a build folder: `FOLDER/bin/…`, `FOLDER/build-info`), the own copy's
 ///   SHA-256, and the `--server` image's (loaded here, so the copy checked is the copy that runs), must be what
 ///   `FOLDER/build-info` records (`BuildInfo`), or the host doesn't start, saying which binary.
-/// - **`--node`** marks the node's host, the user's: it needs `--node-root` and `--server`, takes `HOME` from the user
-///   database and unsets `VIBESWITCHER_HOME` and `CFFIXED_USER_HOME` before anything reads a path, so that
+/// - **`--node`** marks the node's host, the user's: it needs `--node-root` and `--server`, takes `HOME`, `SHELL`,
+///   `USER` and `LOGNAME` from the user database, drops a locale variable naming a path, and unsets
+///   `VIBESWITCHER_HOME` and `CFFIXED_USER_HOME` before anything reads a path (`nodeEnvironment`), so that
 ///   `VibePaths.root` is never the environment's (`startAsNode`), and takes no `--server` but its build's own, opened
 ///   once, no link followed, compared by device and inode, and copied from that same descriptor (`openServer`). The
 ///   account's own lock (`~/.vibeswitcher/host.lock`, by the user database) is held by a `--node` host and only by one
@@ -49,12 +50,44 @@ public enum HostImages {
     /// The environment a `--node` host runs with, from `environment`: `HOME` the account's own home (`accountHome`, from
     /// the user database), and neither `VIBESWITCHER_HOME` nor `CFFIXED_USER_HOME`, each of which would move
     /// `VibePaths.root` (and with it the lock `ownsLaunchers` compares) away from the account's.
-    public static func nodeEnvironment(_ environment: [String: String], accountHome: String) -> [String: String] {
+    ///
+    /// And what the host passes on to every session (`Platform.Tools.sessionEnvironmentNames`) fixed from the user
+    /// database too, not taken from the user manager's environment, whose values `start` doesn't check and any worker
+    /// can set (`systemctl --user set-environment`, the step 8 sweep): `SHELL` is `shell` (`accountShell`: the login
+    /// shell when only root can change it), which Claude Code runs its Bash tool through; `USER` and `LOGNAME` are
+    /// `accountName` (left out when there is none); and a `LANG`, `LANGUAGE` or `LC_*` whose value holds a `/` is left
+    /// out (glibc reads such a locale name as a path, to a locale or message catalogue the worker wrote).
+    public static func nodeEnvironment(_ environment: [String: String], accountHome: String, accountName: String?, shell: String) -> [String: String] {
         var node = environment
         node["HOME"] = accountHome
         node["VIBESWITCHER_HOME"] = nil
         node["CFFIXED_USER_HOME"] = nil
+        node["SHELL"] = shell
+        node["USER"] = accountName
+        node["LOGNAME"] = accountName
+        for (name, value) in environment where (name == "LANG" || name == "LANGUAGE" || name.hasPrefix("LC_")) && value.contains("/") {
+            node[name] = nil
+        }
         return node
+    }
+
+    /// The account's name in the user database (`getpwuid`), nil when it has none.
+    public static var accountName: String? {
+        guard let entry = getpwuid(getuid()), let name = entry.pointee.pw_name else { return nil }
+        let text = String(cString: name)
+        return text.isEmpty ? nil : text
+    }
+
+    /// The account's login shell in the user database, its links resolved (`realpath`), when only root can change it
+    /// (`Platform.Tools.trustedShell`); `/bin/bash` otherwise.
+    public static var accountShell: String {
+        let shell = getpwuid(getuid()).flatMap { $0.pointee.pw_shell }.map { String(cString: $0) }
+        let resolved = shell.flatMap { path -> String? in
+            guard path.hasPrefix("/"), let real = realpath(path, nil) else { return nil }
+            defer { free(real) }
+            return String(cString: real)
+        }
+        return Platform.Tools.trustedShell(resolved)
     }
 
     /// The account's own home, from the user database (`getpwuid`): never the environment's. Nil when it has none.
@@ -84,9 +117,11 @@ public enum HostImages {
             return "the account has no home in the user database"
         }
         holdServer(checked)
-        let wanted = nodeEnvironment(ProcessInfo.processInfo.environment, accountHome: home)
-        setenv("HOME", home, 1)
-        for name in ["VIBESWITCHER_HOME", "CFFIXED_USER_HOME"] where wanted[name] == nil { unsetenv(name) }
+        let given = ProcessInfo.processInfo.environment
+        let wanted = nodeEnvironment(given, accountHome: home, accountName: accountName, shell: accountShell)
+        for name in Set(given.keys).union(wanted.keys) where given[name] != wanted[name] {
+            if let value = wanted[name] { setenv(name, value, 1) } else { unsetenv(name) }
+        }
         return nil
     }
 

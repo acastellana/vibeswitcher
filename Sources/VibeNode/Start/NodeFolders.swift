@@ -208,7 +208,9 @@ public enum NodeFolders {
     /// `daemon-reload` and right before `start` (step 10). A `daemon-reload` re-reads `user.conf`'s
     /// `DefaultEnvironment=` and runs the `environment.d` generators again, so a name written there after step 3
     /// shows only then (the review of S1). A `set-environment` between that read and `start` is still a race only the
-    /// host started with `--node` can close, by checking its own environment.
+    /// host started with `--node` can close, by checking its own environment. Names only: an expected name's value
+    /// (`SHELL`, `LANG`…) isn't checked here; the `--node` host takes `SHELL`, `USER` and `LOGNAME` from the user
+    /// database and drops a locale naming a path (`HostImages.nodeEnvironment`; the step 8 sweep).
     public static func managerRefusal(showEnvironment text: String) -> StartRefusal? {
         let names = NodeFacts.extraVariables(showEnvironment: text).filter { !NodeUnit.unsetFromManager.contains($0) }
         guard !names.isEmpty else { return nil }

@@ -844,8 +844,8 @@ extension HostHardeningTests {
     @Test func theNodesRootIsNeverFromTheEnvironment() throws {
         let given = ["HOME": "/scratch/home", "VIBESWITCHER_HOME": "/scratch/root", "CFFIXED_USER_HOME": "/scratch/fixed",
                      "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash"]
-        let node = HostImages.nodeEnvironment(given, accountHome: "/home/someone")
-        #expect(node == ["HOME": "/home/someone", "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash"])
+        let node = HostImages.nodeEnvironment(given, accountHome: "/home/someone", accountName: "someone", shell: "/bin/bash")
+        #expect(node == ["HOME": "/home/someone", "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash", "USER": "someone", "LOGNAME": "someone"])
         #expect(VibePaths.root(environment: node, fallbackHome: "/elsewhere").path == "/home/someone/.vibeswitcher")
         #expect(HostImages.accountHome == VibePaths.accountHome)
         // And --node is refused without its node root and its own server, before anything is changed.
@@ -864,6 +864,52 @@ extension HostHardeningTests {
             #expect(HostImages.startAsNode(arguments: ["host", "--node", "--node-root", dir + "/node", "--server", dir + "/vibeswitcher-server"])
                 == "the server \(dir)/vibeswitcher-server isn't the node's own (\(dir)/node/bin/vibeswitcher-server)")
             #expect(ProcessInfo.processInfo.environment["HOME"] == homeBefore, "refused before anything is changed")
+        }
+    }
+
+    /// The step 8 sweep: what the node's host passes to every session comes from the user database, not from the user
+    /// manager's environment (whose values `start` checks by name only): a `SHELL` naming a program of the user's (a
+    /// `systemctl --user set-environment SHELL=~/.cache/x/bash` before the user's start) never reaches the host or a
+    /// session, nor do `USER`/`LOGNAME` it set, nor a locale variable naming a path; a locale name without one is kept.
+    @Test func theNodesShellAndLocaleNeverComeFromTheManager() throws {
+        let given = ["HOME": "/home/someone", "PATH": "/usr/local/bin:/usr/bin:/bin", "SHELL": "/home/someone/.cache/x/bash",
+                     "USER": "root", "LOGNAME": "root", "LANG": "C.UTF-8", "LANGUAGE": "../../home/someone/.cache/x",
+                     "LC_ALL": "/home/someone/.cache/locale", "LC_CTYPE": "en_US.UTF-8", "LC_MESSAGES": "x/y"]
+        let node = HostImages.nodeEnvironment(given, accountHome: "/home/someone", accountName: "someone", shell: "/usr/bin/bash")
+        #expect(node["SHELL"] == "/usr/bin/bash")
+        #expect(node["USER"] == "someone" && node["LOGNAME"] == "someone")
+        #expect(node["LANG"] == "C.UTF-8" && node["LC_CTYPE"] == "en_US.UTF-8")
+        for name in ["LANGUAGE", "LC_ALL", "LC_MESSAGES"] { #expect(node[name] == nil, "\(name)") }
+        // No name in the user database: neither is kept.
+        let nameless = HostImages.nodeEnvironment(given, accountHome: "/home/someone", accountName: nil, shell: "/bin/bash")
+        #expect(nameless["USER"] == nil && nameless["LOGNAME"] == nil)
+        // And what a session would get of it: the session's names only, the shell the user database's.
+        let session = node.filter { Platform.Tools.sessionEnvironmentNames.contains($0.key) }
+        #expect(session["SHELL"] == "/usr/bin/bash" && session["LC_ALL"] == nil, "\(session)")
+
+        // The shell: the user database's when only root can change it, else /bin/bash; a link was resolved before.
+        let user: uid_t = 1000
+        let folder = S_IFDIR, file = S_IFREG
+        let table: [String: Platform.Tools.FileStatus] = [
+            "/": (0, folder | 0o755, false), "/usr": (0, folder | 0o755, false), "/usr/bin": (0, folder | 0o755, false),
+            "/usr/bin/zsh": (0, file | 0o755, true), "/usr/bin/open-zsh": (0, file | 0o777, true),
+            "/home": (0, folder | 0o755, false), "/home/someone": (user, folder | 0o750, false),
+            "/home/someone/bash": (user, file | 0o755, true),
+        ]
+        let status = { (path: String) in table[path] }
+        #expect(Platform.Tools.trustedShell("/usr/bin/zsh", status: status) == "/usr/bin/zsh")
+        for refused in ["/home/someone/bash", "/usr/bin/open-zsh", "/usr/bin/../bin/zsh", "zsh", "/nonexistent/sh"] {
+            #expect(Platform.Tools.trustedShell(refused, status: status) == "/bin/bash", "\(refused)")
+        }
+        #expect(Platform.Tools.trustedShell(nil, status: status) == "/bin/bash")
+        // On this machine: an absolute path, root's to change or the fallback.
+        if !Platform.CodeIdentity.isAvailable {
+            let shell = HostImages.accountShell
+            #expect(shell == "/bin/bash" || Platform.Tools.onlyRootCanChange(shell, status: { path in
+                var info = stat()
+                guard lstat(path, &info) == 0 else { return nil }
+                return (info.st_uid, info.st_mode, info.st_mode & S_IFMT == S_IFREG)
+            }), "\(shell)")
         }
     }
 
