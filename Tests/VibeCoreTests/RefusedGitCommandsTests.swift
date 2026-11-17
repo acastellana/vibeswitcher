@@ -198,6 +198,17 @@ struct RefusedGitCommandsTests {
         #expect(try !worker.refuses(many + "git -P log"))
     }
 
+    /// A combining mark (U+0301) right after a space or `=` joins it in one `Character`, though the shell splits the
+    /// words there as ever: the words are compared a byte at a time, so `git push ́x` is still `git push`.
+    @Test func aCombiningMarkAfterASpaceOrEqualsHidesNothing() throws {
+        let worker = try Guard(.worker, temp: temp)
+        for line in ["git -P push \u{301}x", "git -P remote add \u{301}r u", "GIT_DIR=\u{301}x git status", "env GIT_DIR=\u{301}x git status",
+                     "export GIT_CONFIG_GLOBAL=\u{301}x; git status", "git --no-pager checkout \u{301}x main", "git -P tag \u{301}v"] {
+            #expect(try worker.refuses(line), "lets through: \(line.unicodeScalars.map { $0.isASCII ? String($0) : "\\u{\(String($0.value, radix: 16))}" }.joined())")
+        }
+        #expect(try !worker.refuses("git -P log \u{301}x"))
+    }
+
     final class Answers: @unchecked Sendable {
         private let lock = NSLock()
         private var value: [Bool] = []

@@ -44,7 +44,11 @@ public enum RefusedGit {
     public static let variables: Set<String> = ["GIT_DIR", "GIT_WORK_TREE", "GIT_EXEC_PATH", "GIT_COMMON_DIR", "GIT_CONFIG",
                                                 "GIT_CONFIG_PARAMETERS"]
 
-    static func isRefused(variable name: String) -> Bool { variables.contains(name) || name.hasPrefix("GIT_CONFIG_") }
+    static func isRefused(variable name: String) -> Bool { variables.contains(name) || starts(name, with: "GIT_CONFIG_") }
+
+    /// `hasPrefix` a byte at a time: a combining mark after the prefix (`-C\u{301}`, `push \u{301}x`) joins its last
+    /// `Character`, so `hasPrefix` says no where the shell and git see the same bytes as ever.
+    static func starts(_ text: String, with prefix: String) -> Bool { text.utf8.starts(with: prefix.utf8) }
 
     /// Why a line is refused: a git it runs takes a refused option (as written), runs a command the role's rules
     /// refuse (the rule), a refused variable is set for it (its name), or it's past what's read (nested deeper than
@@ -99,8 +103,8 @@ public enum RefusedGit {
             let text: String
             /// `X:*`: `X` alone or followed by a space.
             let prefix: Bool
-            /// The pattern split at its `*`s (the whole pattern for a prefix rule).
-            let pieces: [String]
+            /// The pattern split at its `*`s (the whole pattern for a prefix rule), as bytes (`starts(_:with:)`).
+            let pieces: [[UInt8]]
         }
         var byCommand: [String: [Rule]] = [:]
         var anyCommand: [Rule] = []
@@ -110,8 +114,9 @@ public enum RefusedGit {
                 let text = String(rule.dropFirst("Bash(".count).dropLast())
                 let prefix = text.hasSuffix(":*")
                 let pattern = prefix ? String(text.dropLast(2)) : text
-                let parsed = Rule(text: text, prefix: prefix, pieces: prefix ? [pattern] : pattern.components(separatedBy: "*"))
-                let command = RefusedGit.command(of: pattern)
+                let pieces = prefix ? [pattern] : pattern.components(separatedBy: "*")
+                let parsed = Rule(text: text, prefix: prefix, pieces: pieces.map { Array($0.utf8) })
+                let command = RefusedGit.command(of: Array(pattern.utf8))
                 if command.isEmpty || command.contains("*") {
                     anyCommand.append(parsed)
                 } else {
@@ -124,27 +129,41 @@ public enum RefusedGit {
         func candidates(_ command: String) -> [Rule] { (byCommand[command] ?? []) + anyCommand }
     }
 
-    /// The git command a `git …` text runs: its second word.
-    static func command(of text: String) -> String {
-        String(text.dropFirst("git ".count).prefix { $0 != " " })
+    /// The git command a `git …` text (its bytes) runs: its second word.
+    static func command(of text: [UInt8]) -> String {
+        String(decoding: text.dropFirst("git ".utf8.count).prefix { $0 != UInt8(ascii: " ") }, as: UTF8.self)
     }
 
     /// Whether `command` (`git` and its words after git's options) matches `rule` as Claude Code reads one: `X:*` is
     /// `X` alone or followed by a space, a `*` elsewhere any text (none included: the hook only refuses, so it takes
     /// the wider reading), and no `*` the whole command. In time linear in the command's length.
-    static func matches(_ rule: Rules.Rule, _ command: String) -> Bool {
+    /// Compared a byte at a time (`starts(_:with:)`).
+    static func matches(_ rule: Rules.Rule, _ command: [UInt8]) -> Bool {
         let pieces = rule.pieces
-        if rule.prefix { return command == pieces[0] || command.hasPrefix(pieces[0] + " ") }
-        guard pieces.count > 1 else { return command == pieces[0] }
-        if pieces.count == 2, pieces[1].isEmpty, pieces[0].hasSuffix(" "), command == pieces[0].dropLast() { return true }
-        guard let first = pieces.first, let last = pieces.last, command.hasPrefix(first) else { return false }
-        var at = command.index(command.startIndex, offsetBy: first.count)
-        for piece in pieces.dropFirst().dropLast() where !piece.isEmpty {
-            guard let found = command.range(of: piece, range: at..<command.endIndex) else { return false }
-            at = found.upperBound
+        let space = UInt8(ascii: " ")
+        if rule.prefix {
+            return command == pieces[0] || (command.starts(with: pieces[0]) && command.count > pieces[0].count && command[pieces[0].count] == space)
         }
-        guard let start = command.index(command.endIndex, offsetBy: -last.count, limitedBy: at) else { return false }
-        return command[start...] == last
+        guard pieces.count > 1 else { return command == pieces[0] }
+        if pieces.count == 2, pieces[1].isEmpty, pieces[0].last == space, command[...] == pieces[0].dropLast() { return true }
+        guard let first = pieces.first, let last = pieces.last, command.starts(with: first) else { return false }
+        var at = first.count
+        for piece in pieces.dropFirst().dropLast() where !piece.isEmpty {
+            // The first place it starts at or after `at`: each piece is a few bytes, so this stays linear in practice.
+            var found: Int?
+            var from = at
+            while from + piece.count <= command.count {
+                if command[from..<(from + piece.count)].elementsEqual(piece) {
+                    found = from
+                    break
+                }
+                from += 1
+            }
+            guard let found else { return false }
+            at = found + piece.count
+        }
+        guard command.count - last.count >= at else { return false }
+        return command[(command.count - last.count)...].elementsEqual(last)
     }
 
     /// Words that come before the program a command runs, with no effect on which it is (`time` is a wrapper, for its `-p`).
@@ -192,7 +211,7 @@ public enum RefusedGit {
             } else if let wrapper = wrappers[name] {
                 index += 1
                 // `env NAME=value git …` (and sudo's), each variable checked as one set before the command.
-                while index < words.count, words[index].hasPrefix("-") || ((name == "env" || name == "sudo") && assigned(words[index]) != nil) {
+                while index < words.count, starts(words[index], with: "-") || ((name == "env" || name == "sudo") && assigned(words[index]) != nil) {
                     budget -= 1
                     guard budget >= 0 else { return .unreadable }
                     if let variable = assigned(words[index]), isRefused(variable: variable) { return .variable(variable) }
@@ -243,13 +262,13 @@ public enum RefusedGit {
             budget -= 1
             guard budget >= 0 else { return .unreadable }
             let word = words[index]
-            guard word.hasPrefix("-"), word != "-", word != "--" else { break }
-            if options.contains(where: { word.hasPrefix($0) }) { return .option(word) }
+            guard starts(word, with: "-"), word != "-", word != "--" else { break }
+            if options.contains(where: { starts(word, with: $0) }) { return .option(word) }
             index += valued.contains(word) ? 2 : 1
         }
         guard index < words.count else { return nil }
         // Its command, without the options before it, as the rules name it: `git -P push x` is `git push x`.
-        let command = (["git"] + words[index...]).joined(separator: " ")
+        let command = Array((["git"] + words[index...]).joined(separator: " ").utf8)
         let candidates = rules.candidates(Self.command(of: command))
         budget -= command.count + candidates.count
         guard budget >= 0 else { return .unreadable }
@@ -257,14 +276,18 @@ public enum RefusedGit {
     }
 
     /// `NAME=value` (or `NAME+=value`, `NAME[i]=value`), a variable the shell sets: its name; nil for any other word.
+    /// Read a byte at a time: `=` followed by a combining mark (`GIT_DIR=\u{301}x`) is one `Character`, but the shell's
+    /// `=` all the same.
     static func assigned(_ word: String) -> String? {
-        guard let equals = word.firstIndex(of: "="), equals != word.startIndex else { return nil }
-        var name = word[..<equals]
-        if name.last == "+" { name = name.dropLast() }
-        if name.last == "]", let bracket = name.firstIndex(of: "[") { name = name[..<bracket] }
-        guard name.first.map({ $0 == "_" || ($0.isASCII && $0.isLetter) }) == true,
-              name.allSatisfy({ $0 == "_" || ($0.isASCII && ($0.isLetter || $0.isNumber)) }) else { return nil }
-        return String(name)
+        let bytes = Array(word.utf8)
+        guard let equals = bytes.firstIndex(of: UInt8(ascii: "=")), equals > 0 else { return nil }
+        var name = bytes[..<equals]
+        if name.last == UInt8(ascii: "+") { name = name.dropLast() }
+        if name.last == UInt8(ascii: "]"), let bracket = name.firstIndex(of: UInt8(ascii: "[")) { name = name[..<bracket] }
+        func letter(_ byte: UInt8) -> Bool { byte == UInt8(ascii: "_") || (byte | 0x20 >= UInt8(ascii: "a") && byte | 0x20 <= UInt8(ascii: "z")) }
+        guard let head = name.first, letter(head),
+              name.allSatisfy({ letter($0) || ($0 >= UInt8(ascii: "0") && $0 <= UInt8(ascii: "9")) }) else { return nil }
+        return String(decoding: name, as: UTF8.self)
     }
 }
 
