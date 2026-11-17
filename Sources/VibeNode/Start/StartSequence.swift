@@ -317,8 +317,11 @@ public struct StartSequence {
         let them = flags.count > 1 ? "them" : "it"
         var text = "the node runs already, so \(flags.joined(separator: " and ")) \(flags.count > 1 ? "weren't" : "wasn't") applied: "
             + "only a start of the node applies \(them); `vibeswitcher stop`, then start again with \(them)"
+        // No `systemctl --user enable` hint: that skips the checks `start --at-login` makes before it enables (the
+        // unit rewritten, daemon-reload, `show` compared, no drop-ins or wants links, the manager's variables), and the
+        // next login would start whatever the unit says then, with no check (the step 8 sweep's review).
         if arguments.atLogin, kind == .node(.systemd) {
-            text += " (`systemctl --user enable \(VoiceRule.nodeUnit)` sets start-at-login alone)"
+            text += " (start --at-login checks the unit before it enables it)"
         } else if arguments.atLogin, kind == .node(.noSystemd) {
             text += "; without systemd nothing starts the node when you log in, so --at-login never applies here"
         }
