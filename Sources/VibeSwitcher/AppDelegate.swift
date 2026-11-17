@@ -116,6 +116,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         return offer
     }()
     private var restartCard: RestartCardWindowController?
+    /// The update check, and its card: a newer VibeSwitcher on this Mac's main or on GitHub (see `UpdateChecks`).
+    private lazy var updateChecks: UpdateChecks = {
+        let checks = UpdateChecks()
+        checks.leadRoots = { [weak self] in self.map { Array($0.leadController.boards.keys) } ?? [] }
+        checks.batteryLimit = { [weak self] in self?.preferences.batteryHoldBelow ?? 0 }
+        checks.aiSummaries = { [weak self] in self?.preferences.aiSummaries ?? false }
+        checks.tellLead = { [weak self] root, text in self?.leadController.tellUpdate(text, root: root) }
+        checks.spawn = { [weak self] request, then in
+            guard let self else { return then("VibeSwitcher is quitting") }
+            // In the window's session host, as a vs-shell card's Run starts one.
+            hostClient.spawn(request) { [weak self] result in
+                switch result {
+                case .success(let session):
+                    self?.showMainWindow(select: session.id)
+                    then(nil)
+                case .failure(let error):
+                    then(error.message)
+                }
+            }
+        }
+        return checks
+    }()
     let windowModel = WindowModel()
     private var mainWindow: MainWindowController?
     private lazy var windowActions = WindowActions(
@@ -226,6 +248,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// clock, where an overflowing menu bar never hides items. ⌘-dragging the icon overrides it.
     private static let positionKey = "NSStatusItem Preferred Position VibeSwitcher"
 
+    /// VibeSwitcher › Check for Updates…: at once, and the card says what it found, nothing newer included.
+    @objc func checkForUpdates(_ sender: Any?) {
+        updateChecks.checkNow()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // First, so no window is ever drawn in the wrong look.
         AppLook.follow(preferences, on: NSApp).store(in: &cancellables)
@@ -312,6 +339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             self?.leadController.tellAppHealth(text) ?? false
         }
         appHealth?.start()
+        updateChecks.start()
         if UserDefaults.standard.bool(forKey: "windowWasOpen") {
             // Cleared until the window has been up a while: if opening it crashes the app, the next launch
             // doesn't open it again (and crash again).

@@ -1862,6 +1862,19 @@ final class LeadController: ObservableObject {
         return !roots.isEmpty
     }
 
+    /// The update check's report (`AppUpdateWatch`): GitHub has commits for the app that `root`'s main lacks, and the
+    /// update card waits on the lead's merge_remote. To that project's lead's board, whether its lead runs or not.
+    func tellUpdate(_ text: String, root: String) {
+        deliver(built: {
+            let store = BoardStore(root: root)
+            try? store.update { board in
+                board.reports = ((board.reports ?? []) + [LeadReport(about: AppUpdateWatch.sender, text: text)]).suffix(LeadBoard.keptReports)
+            }
+            try? store.appendProgress("Update check: " + text)
+            return text
+        }, from: .system(AppUpdateWatch.sender), root: root)
+    }
+
     /// The projects among `roots` whose workflow.md (the main checkout's, not a worktree's) has watch_app_logs on.
     static func appHealthRoots(_ roots: Set<String>) -> [String] {
         roots.sorted().filter { root in

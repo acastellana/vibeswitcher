@@ -1546,6 +1546,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             offer.decide(hostSessions: nil)
             return AnyView(RestartCardView(offer: offer))
         }),
+        // The update card on a made-up version of eight changes, as the update check shows it (`UpdateDesk`): ready
+        // (this Mac's main holds it), with the summary on top; Install & Restart and Later are refused (nothing builds).
+        ("update-card", { driver in AnyView(UpdateCardView(desk: Driver.updateDesk(driver, ready: true))) }),
+        // The same version while GitHub's commits wait for the lead's merge_remote: Install & Restart off.
+        ("update-card-waiting", { driver in AnyView(UpdateCardView(desk: Driver.updateDesk(driver, ready: false))) }),
         ("new-project", { driver in
             AnyView(NewProjectSheet(model: NewProjectModel(location: driver.home + "/projects"),
                                     created: { [weak driver] folder, _ in driver?.refuse("starting a lead in \(folder)") },
@@ -2279,6 +2284,36 @@ private final class Driver: NSObject, NSApplicationDelegate {
                              installedAt: index == 0 ? nil : now - Double(index + 1) * day + Double(5 + index) * 3600)
         }
         return SetupScorecard(week: week, previous: previous, installs: installs)
+    }
+
+    /// The update card's model on a made-up version: eight changes in three areas since a made-up installed build, a
+    /// summary on top, the checkout in the sandbox's home; when not `ready`, the newest two only on GitHub. Its buttons
+    /// are refused (nothing builds, installs or snoozes).
+    static func updateDesk(_ driver: Driver, ready: Bool) -> UpdateDesk {
+        let subjects = ["Chat: images attached to a prompt load at the size they show, off the main thread",
+                        "Chat: thumbnails decode two at a time",
+                        "Lead: each merge names the build that ran it",
+                        "Statistics: the scorecard counts installs by day",
+                        "Chat: a reply that streams in keeps its place when you scroll up",
+                        "Lead: merge_remote tests GitHub's commits before main moves",
+                        "Settings: the battery limit steps by 5 %",
+                        "Fix the composer losing a draft when the window closes"]
+        let changes = subjects.enumerated().map { index, subject in
+            AppUpdate.Change(id: String(repeating: String(index, radix: 16), count: 40), subject: subject)
+        }
+        let offer = AppUpdate.Offer(installed: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", head: changes[ready ? 0 : 2].id,
+                                    tip: changes[0].id, newest: changes[0].id, changes: changes, waiting: ready ? 0 : 2,
+                                    summary: "Chats with lots of images open faster and use less memory, and a long reply keeps your place as it streams. The lead now names the build behind each merge and tests commits from your other Mac before they land.")
+        let desk = UpdateDesk()
+        desk.checkout = driver.home + "/projects/vibeswitcher"
+        desk.install = { [weak driver, weak desk] _ in
+            driver?.refuse("installing an update")
+            desk?.refused("The sandbox doesn't install.")
+        }
+        desk.later = { [weak driver] _ in driver?.refuse("snoozing an update") }
+        desk.close = { [weak driver] in driver?.closeSheet() }
+        desk.present(offer)
+        return desk
     }
 
     /// The wake notice `SleepWatch` gives after a made-up 2 h 10 min sleep with three tasks in flight in two made-up
