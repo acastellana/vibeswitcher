@@ -23,6 +23,8 @@ struct WitnessWork {
     /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
     var working: Set<String> = []
     var notesWork = false
+    /// Every session the look saw at work (`LeadBudget.works`): the vault counts its workers' tasks' time from these.
+    var busySessions: Set<String> = []
     /// The machine's sleep as of the look: the count takes only time awake (`LeadBudget.awake`).
     var sleep = MacSleepLog()
     /// The stall to keep on each task (`LeadWitness.stalls`), and whether the board's change for it.
@@ -54,12 +56,15 @@ struct WitnessWork {
         if let recoveryRoot {
             // This initializer runs on the boards' queue. Never lock/read the ledger or write a nudge on the engine's.
             let recovering = LeadSleepRecovery.enqueue(sleepInterruptions, root: recoveryRoot)
-            messages = messages.filter { !$0.keys.contains(where: recovering.contains) }
+            // Workers Fable's refusal halted: the lead's loop starts each again on Opus; told by it, not here.
+            let moving = LeadUsageFallback.enqueue(LeadUsageFallback.halts(board: board, seen: seen), root: recoveryRoot)
+            messages = messages.filter { !$0.keys.contains(where: recovering.contains) && !$0.keys.contains(where: moving.contains) }
         }
         step?("stuckPrompts")
         stuckPrompts = LeadWitness.stuckPrompts(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
         step?("working")
         working = LeadBudget.working(board: board, seen: seen)
+        busySessions = Set(seen.filter { LeadBudget.works($0.value) }.keys)
         // The count not on board.json yet (`LeadBudgetClock`): a few bytes, read here off the engine's queue.
         let clock = recoveryRoot.map { BoardStore(root: $0).budgetClock() } ?? LeadBudgetClock()
         notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970, clock: clock, sleep: sleep)

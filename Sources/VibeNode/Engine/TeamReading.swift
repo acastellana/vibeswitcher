@@ -40,8 +40,8 @@ struct TeamReading {
     static func read(root: String, board: LeadBoard, hosted: [String: HostSession], sessions: [String: Session],
                      observer: LeadObserver, inbox: URL, lock: TestLock?) -> TeamReading {
         var team = TeamReading(hosted: hosted, sessions: sessions)
-        let workers = Set(board.tasks.compactMap(\.worker))
-        for id in board.tasks.flatMap(\.members) where team.watched[id] == nil {
+        let workers = workerSessions(board)
+        for id in board.tasks.flatMap(\.watched) where team.watched[id] == nil {
             guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
             team.watched[id] = observer.watching(info, agentPid: session.pid)
             if workers.contains(id) {
@@ -55,12 +55,18 @@ struct TeamReading {
         team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
         team.advancing = team.workflow.autoAdvance && board.tasks.contains { $0.status == .review } && LeadAdvance.running(BoardStore(root: root))
         // The table is read only when the scan lacks a member's agent (rare), here off the engine's queue.
-        let unseen = board.tasks.flatMap(\.members).compactMap { id in
+        let unseen = board.tasks.flatMap(\.watched).compactMap { id in
             hosted[id].flatMap { $0.isLive && sessions[id] == nil ? (id: id, session: $0) : nil }
         }
         if !unseen.isEmpty, let table = ProcessTable.trySnapshot() {
             team.agentGone = Set(unseen.filter { !$0.session.agentRuns(in: table) }.map(\.id))
         }
         return team
+    }
+
+    /// The sessions whose shells, held messages and test-lock waits are read: each task's worker and each team
+    /// member's (`LeadTask.memberSessions`), watched as the worker is.
+    static func workerSessions(_ board: LeadBoard) -> Set<String> {
+        Set(board.tasks.flatMap { task in [task.worker].compactMap { $0 } + task.memberSessions.map(\.session) })
     }
 }

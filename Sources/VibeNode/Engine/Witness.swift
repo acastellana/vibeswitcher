@@ -20,8 +20,11 @@ extension LeadEngine {
         // Before anything is judged: a look just after a sleep sees that sleep.
         macSleep.note(.real)
         let awake = MacTime.real.awake()
-        let workers = Set(board.tasks.compactMap(\.worker))
-        for id in board.tasks.flatMap(\.members) {
+        let workers = TeamReading.workerSessions(board)
+        // Each team member beside the task's worker, verifier and finders (`LeadTask.watched`): its stalls and stops are
+        // told to the lead by name (`LeadWitness.memberNotices`).
+        let roles = Set(board.tasks.flatMap(\.members))
+        for id in board.tasks.flatMap(\.watched) {
             guard let info = hosted[id] else { continue }
             let session = team.sessions[id]
             // A turn that ended on an API error reads as finished or waiting; its transcript says which it was. One that
@@ -56,7 +59,8 @@ extension LeadEngine {
             // Called gone only once its job has stayed missing (`MissingJobs`): until then, not known either way.
             look.confirmMissingJob(id, in: &missingJobs, awake: awake)
             seen[id] = look
-            if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
+            // A member's own inbox isn't typed from here: only what it was before (the worker's, verifier's, finders').
+            if info.isLive, let session, roles.contains(id) { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
         // What to tell and do is worked out on `reads` (see `WitnessWork`), with what's told and seen so far; the reads
         // queue runs one thing at a time, so each look is applied before the next refresh's.
@@ -79,7 +83,7 @@ extension LeadEngine {
     /// not yet welcomed): a board read alone doesn't forget what a live session was told. On `queue`.
     func forgetGone(root: String, board: LeadBoard, hosted: [String: HostSession]) {
         guard !hosted.isEmpty else { return }
-        let known = Set(board.tasks.flatMap(\.members).map { $0.lowercased() } + hosted.keys.map { $0.lowercased() })
+        let known = Set(board.tasks.flatMap(\.watched).map { $0.lowercased() } + hosted.keys.map { $0.lowercased() })
         let prefix = root + "|"
         func gone(_ key: String) -> Bool {
             guard key.hasPrefix(prefix) else { return false }
@@ -223,6 +227,7 @@ extension LeadEngine {
         case .user: return "the user"
         case .lead(let name): return name
         case .system(let about): return "VibeSwitcher (\(about))"
+        case .teammate(let member, let task): return "teammate \(member) on \(task)"
         }
     }
 }
