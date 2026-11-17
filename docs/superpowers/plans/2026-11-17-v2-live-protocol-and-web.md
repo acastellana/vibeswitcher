@@ -407,13 +407,20 @@ right reason before the code that passes it.
   - per connection and `sub`: the `seq` last sent; on a stream's change, to each subscriber that is `writable`, one
     delta from its last-sent `seq` to the stream's; to one that isn't, nothing until `onWritable`.
 
-- [ ] **Step 1: Failing tests** (`LiveHubTests`, on a recording `LiveTransport`): `subscribeGetsAReplyThenASnapshot`,
+- [x] **Step 1: Failing tests** (`LiveHubTests`, on a recording `LiveTransport`): `subscribeGetsAReplyThenASnapshot`,
   `aChangeIsOneDeltaWithPrevAndSeq`, `everyDeltasPrevIsTheLastSeqSent`, `aRemovalIsAValueOfNull`,
   `anEqualValueSendsNothing`, `aChangeIsWrittenWithNoTimerBetween`, `aConnectionThatCantWriteGetsOneFoldedDelta`,
   `aFoldedDeltaCoversItsRange`, `nothingIsDroppedForASlowClient`, `twoClientsSeeTheSameSeq`,
   `subscribingAgainUnderALiveSubReplacesIt`, `unsubscribeStopsTheEvents`, `aClosedConnectionIsForgotten`,
-  `aConnectionWithoutReadIsRefused`, `anUnknownCollectionIsBadArgs`, `theSessionsSnapshotIsEverySessionOnce`.
-- [ ] **Step 2:** the stream and the hub. **Step 3:** lints, under load.
+  `aConnectionWithoutReadIsRefused`, `anUnknownCollectionIsBadArgs`, `theSessionsSnapshotIsEverySessionOnce`; and
+  `aWebConnectionsTextIsARequest`, `aTextThatIsntARequestCloses` (the hub's `WebSocketHandler` side).
+- [x] **Step 2:** the stream and the hub. **Step 3:** lints, under load.
+- **As built (B1):** `handle(_:on:rights:) -> Bool`, not `-> Reply?`: the hub writes the reply itself, so the
+  subscription's first event can't reach the transport before it; false means not the hub's kind, and the caller
+  answers. `follow(_ changes:into:value:)` feeds a stream from a store (`value` nil: gone); `others` takes a
+  WebSocket's requests of other kinds (I1 wires the rights and `Requests`; none: `unknown-kind`). A delta's `changes`
+  are in the order of each id's latest change in its range, not its first (the stream keeps one `seq` an entry); the
+  contract's "in the order the ids first changed" is the integrator's to reword.
 
 ### Task B2: The node's status as a stream, and a session's whole value (lane B)
 
@@ -429,10 +436,16 @@ right reason before the code that passes it.
     `sessions` and `leads`, with `web`, sent under the node's id; `look()` on each of those streams' changes and at
     each refresh (an equal value sends nothing, `Changes`' own rule).
 
-- [ ] **Step 1: Failing tests**: `aSessionsLiveValueHasStatussEightFieldsUnchanged`, `shownStatusIsTheLeadsAsk`,
+- [x] **Step 1: Failing tests**: `aSessionsLiveValueHasStatussEightFieldsUnchanged`, `shownStatusIsTheLeadsAsk`,
   `aSessionWithNoTranscriptSaysSo`, `theNodesValueIsStatusWithoutSessionsAndLeads`, `aNewNoticeIsADelta`,
-  `aLookThatFindsNothingNewSendsNothing`, `anAcceptedRequestIsADelta`.
-- [ ] **Step 2:** both. **Step 3:** lints, under load.
+  `aLookThatFindsNothingNewSendsNothing`, `anAcceptedRequestIsADelta`; and `eachRefreshLooks`.
+- [x] **Step 2:** both. **Step 3:** lints, under load.
+- **As built (B2):** `NodeStatusStore(requests:web:)` (or `(queue:status:web:)`), `watch(_ changes:)` for each store
+  whose change can move the value (I1: `HostLink.changes`, `LeadStore.changes`, `CardStore.changes`),
+  `start(clock:)` (a look now and every `refreshEvery`, 3 s), `stop()`, `look()`. `Requests.accepted` has no change
+  stream, so I1 calls `look()` where a request is accepted (`Requests.acting` is the place). `webOff` is `web` until
+  the listener's state is wired. The hub follows it with
+  `hub.follow(status.changes, into: LiveStream(collection: "node")) { $0 }`, and sessions with `{ $0.liveValue }`.
 
 ### Task B3: Resume (lane B)
 
@@ -440,11 +453,16 @@ right reason before the code that passes it.
 
 **Interfaces:** Consumes: B1. Produces: `subscribe`'s `since`, the reply's `mode`.
 
-- [ ] **Step 1: Failing tests** (`LiveResumeTests`): `aResumeInTheSameEpochSendsNoSnapshot`,
+- [x] **Step 1: Failing tests** (`LiveResumeTests`): `aResumeInTheSameEpochSendsNoSnapshot`,
   `aResumeGetsExactlyWhatChangedSince` (entries changed after, ids removed after, nothing else),
   `aResumeThatIsCurrentSendsNothingUntilAChange`, `aResumeOlderThanTheStreamRemembersGetsASnapshot` (257 removals),
-  `aSeqAheadOfTheStreamGetsASnapshot`, `aNewEpochGetsASnapshotNotAResume`.
-- [ ] **Step 2:** the resume. **Step 3:** lints, under load.
+  `aSeqAheadOfTheStreamGetsASnapshot`, `aNewEpochGetsASnapshotNotAResume`. (The last two hold what B1 already did,
+  a snapshot, so they passed before the resume; the other four failed on `mode`.)
+- [x] **Step 2:** the resume. **Step 3:** lints, under load.
+- **As built (B3):** a `since` out of form (not `{epoch: string, seq: int ≥ 0}`) is a snapshot, not `bad-args`. A
+  one-off probe (not committed), in process on a recording transport, debug build, 8 subscribers, 40 entries: 500
+  changes from `Changes.send` to the transport's `send`, p50 0.42 ms, p95 0.70 ms, max 1.1 ms (2026-11-17, load
+  about 3). The budget's number over a real WebSocket is G1's `LiveLatencyBench`.
 
 ### Task C1: The embedded files and their headers (lane C)
 
