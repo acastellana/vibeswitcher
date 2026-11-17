@@ -674,7 +674,10 @@ extension InstallTests {
         try "planted\n".write(to: world.clone.appendingPathComponent("planted"), atomically: true, encoding: .utf8)
         let origin = "file://" + world.origin.path
         let products = try world.debugProducts().path
-        let flags = [["--gh", world.gh.path], ["--test-origin", origin], ["--test-products", products]]
+        let hold = world.root.appendingPathComponent("hold")
+        try FileManager.default.createDirectory(at: hold, withIntermediateDirectories: true)
+        let flags = [["--gh", world.gh.path], ["--test-origin", origin], ["--test-products", products],
+                     ["--test-hold", hold.path]]
         for flag in flags {
             let bare = try await world.install([world.base, "--repo", world.clone.path] + flag)
             #expect(bare.status == 64, "\(flag[0]) without --prefix: \(bare.status) \(bare.errors)")
@@ -682,12 +685,15 @@ extension InstallTests {
             let scratchPrefix = try await world.install([world.base, "--repo", world.clone.path, "--prefix", world.prefix.path] + flag)
             #expect(scratchPrefix.status == 65, "\(flag[0]) with a scratch prefix: \(scratchPrefix.status) \(scratchPrefix.errors)")
         }
-        // The account's default prefix through a link to it, and a prefix inside the account's .vibeswitcher.
+        // The account's default prefix through a link to it, a prefix inside the account's .vibeswitcher spelled
+        // there, and one inside it through a link (refused only once resolved, not as spelled nor as the builds folder).
         let account = InstallScript.accountHome()
         let link = world.root.appendingPathComponent("default-builds")
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: account + "/.vibeswitcher/v2/builds")
         let inside = account + "/.vibeswitcher/v2/install-test-\(UUID().uuidString)"
-        for prefix in [link.path, inside] {
+        let linkedInside = world.root.appendingPathComponent("vibeswitcher-v2")
+        try FileManager.default.createSymbolicLink(atPath: linkedInside.path, withDestinationPath: account + "/.vibeswitcher/v2")
+        for prefix in [link.path, inside, linkedInside.path] {
             for flag in flags {
                 let refused = try await world.install([world.base, "--repo", world.clone.path, "--prefix", prefix] + flag)
                 #expect(refused.status == 64, "\(prefix) \(flag[0]): \(refused.status) \(refused.errors)")
