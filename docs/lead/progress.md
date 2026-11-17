@@ -3526,3 +3526,6 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 10:45 Automatically (auto_advance): Released accept-claude-code-s's worker, idle since its done report on add25ef5, while its audit runs (ended pid 94904 (Worker: Accept Claude Code's own skill sync without holding the team)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-17 10:48 Audit of cut-the-app-s: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
 - 2026-11-17 10:49 Audit of accept-claude-code-s: complete, clean, round 1: 5 Nit open
+- 2026-11-17 11:13 Pipeline held: cut-the-app-s ready to merge with none landing; cause: a merge in progress
+- 2026-11-17 11:25 Merged cut-the-app-s: Cut the app's biggest memory peaks (chat loads, host selects) (in a batch, on a test run of its own) (build ec89ed431487)
+- 2026-11-17 11:25 Didn't merge accept-claude-code-s in the batch: tests fail with it on main (itWakesOnlyWhenAClientIsDue(); the run stopped partway: 745 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't sa…); back to its worker
