@@ -264,6 +264,7 @@ public enum LinuxSealList {
         }
         let hash = ConfigSeal.hex(hasher.finalize())
         var read = ConfigSeal.FolderRead(hash: hash, countingHash: hash, entries: entries)
+        if isTransient(watched.name) { markScopes(&read, folder: watched.path) }
         guard watched.name == hooksName else { return read }
         for (path, entry) in read.entries {
             let parts = path.split(separator: "/")
@@ -370,17 +371,97 @@ public enum LinuxSealList {
 
     /// Whether `path`, an entry of the manager's runtime units folder (`transient`) that wasn't there, comes as no
     /// change: a scope's unit file at its top, which the manager writes when an app registers a scope of its own (a
-    /// browser's `app-<id>-<pid>.scope`, measured on the node 2026-11-17) and removes when the scope goes. A scope is
-    /// never started from its file (the manager makes scopes only through its API). Anything else (a service, a
-    /// timer, a drop-in folder, a link, a file deeper down, a scope's file changed in place) holds, as the folder's
-    /// change did. Not held, and what bounds it (the step 8 sweep's review): only hashes are sealed, so a new scope's
-    /// content isn't read, and a scope gone and back under its name across two looks is a new one: a worker can leave
-    /// a scope file whose `[Unit]` lines (`OnFailure=`, `OnSuccess=`, `Wants=`) the manager reads at its next reload.
-    /// Those can only name units the manager has already: a unit file in a folder the seal watches (a new one there
-    /// holds) or root's. The worker could make the same scope through the manager's API (`systemd-run --user --scope
-    /// -p OnFailure=…`), which writes nothing the seal reads, and `/run` is emptied at reboot.
+    /// browser's `app-<id>-<pid>.scope`, measured on the node 2026-11-17) and removes when the scope goes, and only in
+    /// the form the manager writes for one (`scopeKind`, `hasScopeForm`: its header, and no dependency or trigger the
+    /// manager would act on at its next reload). A scope is never started from its file (the manager makes scopes
+    /// only through its API). Anything else (a file in another form, a service, a timer, a drop-in folder, a link, a
+    /// file deeper down, a scope's file changed in place) holds, as the folder's change did. What bounds the rest (the
+    /// step 8 sweep's review): the worker could make a scope with `OnFailure=` through the manager's API (`systemd-run
+    /// --user --scope -p OnFailure=…`), which writes a file of that form that holds here, or none the seal reads if the
+    /// scope is gone by the next look; `/run` is emptied at reboot.
     static func transientEntryMayCome(_ path: String, entry: String) -> Bool {
-        isScopeFile(path) && ConfigSeal.entryKind(entry) == "f"
+        isScopeFile(path) && ConfigSeal.entryKind(entry) == scopeKind
+    }
+
+    /// The per-path entry's kind (in place of `f`) of a top-level scope's file in the manager's runtime units folder
+    /// whose contents, as hashed, have the form the manager writes for a scope (`hasScopeForm`): `markScopes`.
+    static let scopeKind = "s"
+
+    /// In `read` of the manager's runtime units folder at `folder`: each top-level scope's regular file, read again
+    /// (no link followed, at most `scopeLimit` bytes), whose contents hash as the walk hashed them (its line, mode and
+    /// digest, the same per-path hash) and have the manager's form (`hasScopeForm`) takes `scopeKind`. Any other, or
+    /// one changed between the two reads, stays `f`, which never comes (`transientEntryMayCome`).
+    static func markScopes(_ read: inout ConfigSeal.FolderRead, folder: String) {
+        for (path, entry) in read.entries where isScopeFile(path) && ConfigSeal.entryKind(entry) == "f" {
+            let file = (folder as NSString).appendingPathComponent(path)
+            var info = stat()
+            guard lstat(file, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
+                  let data = ConfigSeal.regularContents(file, limit: scopeLimit, followLink: false), hasScopeForm(data) else { continue }
+            let line = "f \(path) \(info.st_mode & 0o777) " + ConfigSeal.hex(SHA256.hash(data: data))
+            guard ConfigSeal.hex(SHA256.hash(data: Data((line + "\n").utf8)).prefix(8)) == ConfigSeal.entryHash(entry) else { continue }
+            var words = entry.split(separator: " ").map(String.init)
+            words[1] = scopeKind
+            read.entries[path] = words.joined(separator: " ")
+        }
+    }
+
+    /// A scope's file read whole at most (the manager's are a few hundred bytes).
+    static let scopeLimit = 64 << 10
+
+    /// The first line the manager writes in each transient unit's file (`unit_make_transient`, systemd 255; read on
+    /// the node 2026-11-17).
+    static let transientHeader = "# This is a transient unit file, created programmatically via the systemd API. Do not edit."
+
+    /// The keys, by section, the manager writes in a scope's file for the properties an app may give a scope it makes
+    /// through the manager's API (systemd 255's `bus_unit_set_transient_property` and `bus_scope_set_property`, with
+    /// systemd.resource-control(5)'s resource-control keys and systemd.kill(5)'s): what describes the scope, its slice
+    /// (a slice runs nothing), its delegation, its limits and accounting, how it's stopped, and the ordering lines
+    /// (`After=`, `Before=`, which start and stop nothing). Never a dependency or a trigger (`Wants=`, `Requires=`,
+    /// `Requisite=`, `Upholds=`, `BindsTo=`, `PartOf=`, `Conflicts=`, `OnFailure=`, `OnSuccess=`, `PropagatesStopTo=`,
+    /// `StopPropagatedFrom=`, `JoinsNamespaceOf=`, `RequiresMountsFor=`), an action (`FailureAction=`, `SuccessAction=`,
+    /// `JobTimeoutAction=`), a condition, or a key that loads a program or names a path (`BPFProgram=`,
+    /// `IPIngressFilterPath=`, `IPEgressFilterPath=`, `NFTSet=`, `SocketBind*=`).
+    static let scopeKeys: [String: Set<String>] = [
+        "Unit": ["Description", "Documentation", "SourcePath", "DefaultDependencies", "CollectMode", "SurviveFinalKillSignal",
+                 "After", "Before"],
+        "Scope": [
+            "Slice", "Delegate", "DelegateControllers", "DelegateSubgroup", "OOMPolicy", "RuntimeMaxSec", "RuntimeRandomizedExtraSec",
+            "KillMode", "KillSignal", "RestartKillSignal", "SendSIGHUP", "SendSIGKILL", "FinalKillSignal", "WatchdogSignal",
+            "CPUAccounting", "CPUWeight", "StartupCPUWeight", "CPUShares", "StartupCPUShares", "CPUQuota", "CPUQuotaPeriodSec",
+            "AllowedCPUs", "StartupAllowedCPUs", "AllowedMemoryNodes", "StartupAllowedMemoryNodes",
+            "MemoryAccounting", "MemoryMin", "MemoryLow", "StartupMemoryLow", "MemoryHigh", "StartupMemoryHigh", "MemoryMax",
+            "StartupMemoryMax", "MemorySwapMax", "StartupMemorySwapMax", "MemoryZSwapMax", "StartupMemoryZSwapMax",
+            "MemoryZSwapWriteback", "MemoryLimit", "TasksAccounting", "TasksMax",
+            "IOAccounting", "IOWeight", "StartupIOWeight", "IODeviceWeight", "IOReadBandwidthMax", "IOWriteBandwidthMax",
+            "IOReadIOPSMax", "IOWriteIOPSMax", "IODeviceLatencyTargetSec", "BlockIOAccounting", "BlockIOWeight",
+            "StartupBlockIOWeight", "BlockIODeviceWeight", "BlockIOReadBandwidth", "BlockIOWriteBandwidth",
+            "IPAccounting", "IPAddressAllow", "IPAddressDeny", "DevicePolicy", "DeviceAllow", "DisableControllers",
+            "ManagedOOMSwap", "ManagedOOMMemoryPressure", "ManagedOOMMemoryPressureLimit", "ManagedOOMPreference",
+            "MemoryPressureWatch", "MemoryPressureThresholdSec",
+        ],
+    ]
+
+    /// Whether `data` has the form the manager writes for a scope: UTF-8 with no carriage return or NUL (which its
+    /// reader ends a line at), `transientHeader` first, then only empty lines, `[Unit]` or `[Scope]`, and `Key=value`
+    /// lines of `scopeKeys` for the section they're in, the key as written (no whitespace around it), no line
+    /// continued (a trailing backslash) and no other comment.
+    static func hasScopeForm(_ data: Data) -> Bool {
+        guard !data.contains(0x0D), !data.contains(0), let text = String(data: data, encoding: .utf8) else { return false }
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.last == "" { lines.removeLast() }
+        guard lines.first == Substring(transientHeader) else { return false }
+        var section: String?
+        for line in lines.dropFirst() {
+            if line.isEmpty { continue }
+            guard !line.hasSuffix("\\") else { return false }
+            if line.hasPrefix("[") {
+                guard line == "[Unit]" || line == "[Scope]" else { return false }
+                section = String(line.dropFirst().dropLast())
+                continue
+            }
+            guard let section, let equals = line.firstIndex(of: "="), scopeKeys[section]?.contains(String(line[..<equals])) == true else { return false }
+        }
+        return true
     }
 
     /// A top-level name `<unit>.scope`, not hidden.

@@ -375,6 +375,60 @@ struct LinuxSealListTests {
         }
     }
 
+    /// A new scope's file comes only in the form the manager writes for a scope an app made through its API (its
+    /// transient header, then `[Unit]` and `[Scope]` lines of the keys it writes for one: `scopeKeys`); a file without
+    /// the header, a dependency or trigger (`Wants=`, `Requires=`, `OnFailure=`…), a section or key systemd doesn't
+    /// write for a scope, a comment, a line it would read otherwise (a continuation, a carriage return, leading
+    /// whitespace) is held. The real form, read on the node 2026-11-17 (`/run/systemd/transient/session-2.scope`, the
+    /// system manager's; the user manager's Chrome scope was the header alone).
+    @Test(Self.linux) func aNewScopeComesOnlyInTheFormTheManagerWrites() throws {
+        let home = try home()
+        let outside = temp.url("seal-transient-form").path
+        let uid = getuid()
+        let folder = outside + "/run/user/\(uid)/systemd/transient"
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let header = "# This is a transient unit file, created programmatically via the systemd API. Do not edit.\n"
+        let item = try #require(LinuxSealList.watched(home: home, uid: uid, mounts: try mounts(windows: false), outside: outside)
+            .first { $0.name == "/run/user/\(uid)/systemd/transient" })
+        let key = ConfigSeal.keyPrefix + item.name
+        func comes(_ text: String, _ index: Int) throws -> Bool {
+            let recorded = ConfigSeal.hashes(of: [item])
+            try write(text, folder + "/app-test-\(index).scope")
+            defer { try? FileManager.default.removeItem(atPath: folder + "/app-test-\(index).scope") }
+            return LinuxSealList.cameOrWent(key: key, recorded: recorded, now: ConfigSeal.hashes(of: [item])) != nil
+        }
+        let generated = [
+            header,
+            header + "[Scope]\nSlice=app.slice\n\n[Unit]\nDescription=Application launched by gnome-shell\nCollectMode=inactive-or-failed\n"
+                + "\n[Scope]\nDelegate=yes\nDelegateSubgroup=supervisor\nSendSIGHUP=yes\nOOMPolicy=continue\nTasksMax=infinity\nMemoryMax=4G\nCPUWeight=100\n",
+        ]
+        for (index, text) in generated.enumerated() {
+            #expect(try comes(text, index), "\(text)")
+        }
+        var planted = ["[Scope]\nSlice=app.slice\n", "# A transient unit file.\n[Scope]\nSlice=app.slice\n"]
+        for directive in ["Wants", "Requires", "Requisite", "Upholds", "BindsTo", "PartOf", "OnFailure", "OnSuccess", "PropagatesStopTo",
+                          "StopPropagatedFrom", "Conflicts", "JoinsNamespaceOf", "RequiresMountsFor", "FailureAction", "SuccessAction"] {
+            planted.append(header + "[Unit]\nDescription=x\n\(directive)=planted.service\n")
+        }
+        planted += [
+            header + "[Service]\nExecStart=/bin/sh -c planted\n",
+            header + "[Scope]\nExecStart=/bin/sh -c planted\n",
+            header + "[Scope]\nBPFProgram=ingress:/sys/fs/bpf/planted\n",
+            header + "[Install]\nWantedBy=default.target\n",
+            header + "Description=before any section\n",
+            header + "[Unit]\n Wants=planted.service\n",
+            header + "[Unit]\nWants =planted.service\n",
+            header + "[Unit]\n# a comment\n",
+            header + "[Unit]\nDescription=x\\\n",
+            header + "[Unit]\nDescription=x\rWants=planted.service\n",
+            header + "[Unit]\nDescription=x\0Wants=planted.service\n",
+            header + "[unit]\nDescription=x\n",
+        ]
+        for (index, text) in planted.enumerated() {
+            #expect(try !comes(text, 100 + index), "\(text.debugDescription)")
+        }
+    }
+
     /// In the launch folders, only a launch the vault recorded comes: its repository's folder, its own, and the files a
     /// launcher writes there (or `writePrivate`'s temporary one); a name no launch has, another repository's key, a
     /// file the launcher doesn't write, a link, or anything deeper doesn't. The names are the launchers', from the
