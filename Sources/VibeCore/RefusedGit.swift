@@ -81,26 +81,62 @@ public enum RefusedGit {
         // As `ShellWords.Scanner.lookahead`: what reading the commands may cost, a word at a time (`find -exec` reads
         // each command after it, and each `find` there its own, so `find . -exec find . -exec …` costs 2^n unbounded:
         // a hook that times out lets the call through). Past it, the line is refused, not read.
+        // Each git's command is tried against the rules that name it, and those tries are charged too: a line of many
+        // short gits (`git a;` over and over, 1 MB) otherwise read every rule for each, near the hook's timeout.
         var budget = 64 * line.unicodeScalars.count + 100_000
+        let rules = Rules(rules)
         for words in commands {
             if let refusal = refusal(command: words, rules: rules, budget: &budget) { return refusal }
         }
         return nil
     }
 
-    /// Whether `command` (`git` and its words after git's options) matches `rule`, a `Bash(...)` rule, as Claude Code
-    /// reads one: `X:*` is `X` alone or followed by a space, a `*` elsewhere any text (none included: the hook only
-    /// refuses, so it takes the wider reading), and no `*` the whole command. In time linear in the command's length.
-    static func matches(_ rule: String, _ command: String) -> Bool {
-        guard rule.hasPrefix("Bash("), rule.hasSuffix(")") else { return false }
-        let pattern = String(rule.dropFirst("Bash(".count).dropLast())
-        if pattern.hasSuffix(":*") {
-            let prefix = String(pattern.dropLast(2))
-            return command == prefix || command.hasPrefix(prefix + " ")
+    /// A role's git rules, read once a line: each by the git command it names (`push` for `Bash(git push:*)`), and
+    /// those whose command has a `*` in it (`Bash(git * --output*)`) tried for every git.
+    struct Rules {
+        struct Rule {
+            /// The rule as its brief names it (`git push:*`), for the refusal's reason.
+            let text: String
+            /// `X:*`: `X` alone or followed by a space.
+            let prefix: Bool
+            /// The pattern split at its `*`s (the whole pattern for a prefix rule).
+            let pieces: [String]
         }
-        let pieces = pattern.components(separatedBy: "*")
-        guard pieces.count > 1 else { return command == pattern }
-        if pattern.hasSuffix(" *"), pieces.count == 2, command == pieces[0].dropLast() { return true }
+        var byCommand: [String: [Rule]] = [:]
+        var anyCommand: [Rule] = []
+
+        init(_ rules: [String]) {
+            for rule in rules where rule.hasPrefix("Bash(git ") && rule.hasSuffix(")") {
+                let text = String(rule.dropFirst("Bash(".count).dropLast())
+                let prefix = text.hasSuffix(":*")
+                let pattern = prefix ? String(text.dropLast(2)) : text
+                let parsed = Rule(text: text, prefix: prefix, pieces: prefix ? [pattern] : pattern.components(separatedBy: "*"))
+                let command = RefusedGit.command(of: pattern)
+                if command.isEmpty || command.contains("*") {
+                    anyCommand.append(parsed)
+                } else {
+                    byCommand[command, default: []].append(parsed)
+                }
+            }
+        }
+
+        /// The rules a git with this command (`push`) could match.
+        func candidates(_ command: String) -> [Rule] { (byCommand[command] ?? []) + anyCommand }
+    }
+
+    /// The git command a `git …` text runs: its second word.
+    static func command(of text: String) -> String {
+        String(text.dropFirst("git ".count).prefix { $0 != " " })
+    }
+
+    /// Whether `command` (`git` and its words after git's options) matches `rule` as Claude Code reads one: `X:*` is
+    /// `X` alone or followed by a space, a `*` elsewhere any text (none included: the hook only refuses, so it takes
+    /// the wider reading), and no `*` the whole command. In time linear in the command's length.
+    static func matches(_ rule: Rules.Rule, _ command: String) -> Bool {
+        let pieces = rule.pieces
+        if rule.prefix { return command == pieces[0] || command.hasPrefix(pieces[0] + " ") }
+        guard pieces.count > 1 else { return command == pieces[0] }
+        if pieces.count == 2, pieces[1].isEmpty, pieces[0].hasSuffix(" "), command == pieces[0].dropLast() { return true }
         guard let first = pieces.first, let last = pieces.last, command.hasPrefix(first) else { return false }
         var at = command.index(command.startIndex, offsetBy: first.count)
         for piece in pieces.dropFirst().dropLast() where !piece.isEmpty {
@@ -137,7 +173,7 @@ public enum RefusedGit {
     /// Why one simple command (its words, quotes taken off) is refused, if it is: a refused variable set for it or
     /// exported, or a git it runs with a refused option or command. `budget`: what reading it may still cost; `depth`:
     /// how many `find -exec` it's in (past `ShellWords.depthLimit`, refused as the scanner refuses a line nested deeper).
-    static func refusal(command words: [String], rules: [String], budget: inout Int, depth: Int = 0) -> Refusal? {
+    static func refusal(command words: [String], rules: Rules, budget: inout Int, depth: Int = 0) -> Refusal? {
         guard depth <= ShellWords.depthLimit else { return .unreadable }
         var index = 0
         while index < words.count {
@@ -214,9 +250,10 @@ public enum RefusedGit {
         guard index < words.count else { return nil }
         // Its command, without the options before it, as the rules name it: `git -P push x` is `git push x`.
         let command = (["git"] + words[index...]).joined(separator: " ")
-        budget -= command.count
+        let candidates = rules.candidates(Self.command(of: command))
+        budget -= command.count + candidates.count
         guard budget >= 0 else { return .unreadable }
-        return rules.first { matches($0, command) }.map { .command(String($0.dropFirst("Bash(".count).dropLast())) }
+        return candidates.first { matches($0, command) }.map { .command($0.text) }
     }
 
     /// `NAME=value` (or `NAME+=value`, `NAME[i]=value`), a variable the shell sets: its name; nil for any other word.

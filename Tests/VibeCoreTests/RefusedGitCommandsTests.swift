@@ -165,6 +165,39 @@ struct RefusedGitCommandsTests {
         #expect(answer.map { String(decoding: $0, as: UTF8.self) }?.contains("\"deny\"") == true)
     }
 
+    /// A worker on a base other than main: the hook's command line carries it (`LeadLaunch.hooks` → `hookOptions` →
+    /// `gitRules`), so its base is refused behind an option too, and its own steps onto it still run.
+    @Test func aWorkersHookRefusesItsOwnBaseBehindAGlobalOption() throws {
+        let hooks = LeadLaunch.hooks(.worker, server: "/opt/vibe switcher/vibeswitcher-mcp", root: "/r", base: "project-lead", records: "docs/lead")
+        let group = try #require((hooks["PreToolUse"] as? [[String: Any]])?.first)
+        let command = try #require((group["hooks"] as? [[String: Any]])?.first?["command"] as? String)
+        let words = try #require(ReadOnlyCommand.parts(of: command)?.first)
+        let options = try #require(ReadOnlyCommand.hookOptions(Array(words.dropFirst(2))))
+        #expect(options.base == "project-lead" && options.records == "docs/lead" && options.writes)
+        func denies(_ line: String) throws -> Bool {
+            let event: [String: Any] = ["hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": ["command": line]]
+            let answer = ReadOnlyCommand.hookAnswer(try JSONSerialization.data(withJSONObject: event), root: options.root,
+                                                    writes: options.writes, base: options.base, records: options.records)
+            return answer.map { String(decoding: $0, as: UTF8.self) }?.contains("\"deny\"") == true
+        }
+        for line in ["git -P checkout project-lead", "git --no-pager switch project-lead", "git -P reset --hard project-lead",
+                     "git -P add docs/lead/progress.md"] {
+            #expect(try denies(line), "lets through: \(line)")
+        }
+        for line in ["git -P merge project-lead", "git --no-pager rebase project-lead", "git -P add a.txt"] {
+            #expect(try !denies(line), "refuses: \(line)")
+        }
+    }
+
+    /// The blind check's: a long line of short gits is read to its end (each git tries only the rules naming its
+    /// command, charged to the budget), and its refused command found.
+    @Test func aLongLineOfShortGitsIsReadToItsRefusal() throws {
+        let worker = try Guard(.worker, temp: temp)
+        let many = String(repeating: "git a; ", count: 20_000)
+        #expect(try worker.refuses(many + "git -P push"))
+        #expect(try !worker.refuses(many + "git -P log"))
+    }
+
     final class Answers: @unchecked Sendable {
         private let lock = NSLock()
         private var value: [Bool] = []
