@@ -26,8 +26,9 @@ final class SessionProbe {
     var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: buffer, as: UTF8.self) }
     var lastChange: HostSession? { lock.lock(); defer { lock.unlock() }; return changes.last }
 
-    /// What was going on in a session, for failure messages.
-    /// Blocking (a failure's message, which can't await): one short ps.
+    /// What was going on in a session, for failure messages: what it printed first, as a flake's log keeps only the
+    /// start of a long line (2026-11-12's cut this off after the info). Blocking (a failure's message, which can't
+    /// await): one short ps.
     func diagnosis(_ session: HostedSession) -> String {
         let info = queue.sync { session.info }
         let ps = Process()
@@ -37,7 +38,7 @@ final class SessionProbe {
         ps.standardOutput = pipe
         try? ps.run()
         waitForEnd(ps)
-        return "info=\(info) output=\(text.debugDescription) ps=\n\(String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))"
+        return "output=\(text.debugDescription) ps=\n\(String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))info=\(info)"
     }
 }
 

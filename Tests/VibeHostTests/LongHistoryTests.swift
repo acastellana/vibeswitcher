@@ -131,7 +131,8 @@ import Testing
         guard case .historyText(_, let history, _) = client.reply(to: seq) else { Issue.record("no history reply"); return }
         let numbers = Self.numbers(history)
         #expect((1...SessionParser.scrollback).contains(numbers.count), "\(numbers.count) lines")
-        #expect(Self.consecutive(numbers), "\(history.suffix(300))")
+        // The session log's watchdog lines say which parser was replaced, how often, with how many bytes unparsed.
+        #expect(Self.consecutive(numbers), "\(history.suffix(300))\n\(log())")
         #expect(await eventually { ParserCostTests.parsers(of: host.pid).count == 1 }, "the history read's parser is left")
     }
 }
