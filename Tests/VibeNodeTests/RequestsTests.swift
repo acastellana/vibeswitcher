@@ -195,9 +195,12 @@ struct RequestsTests {
     @Test func everyKindIsClassifiedAsAReadOrAStateChange() {
         // The weaker rule's terminal check (`Voice.handsRefusal`) reads `changesState`: each kind the protocol names is
         // one or the other, every kind recorded in the vault but `start` (a running node's start says when it started)
-        // changes state, and a kind no table lists is a state change.
-        let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "question.post", "question.revise", "question.withdraw"]
-        let changes: Set<String> = ["stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch"]
+        // changes state, and a kind no table lists is a state change. The live protocol's kinds too: its reads, a web
+        // client's draft and terminal, and opening the web.
+        let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "question.post", "question.revise", "question.withdraw",
+                                  "subscribe", "unsubscribe", "chat.page"]
+        let changes: Set<String> = ["stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
+                                    "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

@@ -49,6 +49,11 @@ case "base":
     exit(BaseCommand.run(Array(words.dropFirst())))
 case "hooks":
     exit(HooksCommand.run(Array(words.dropFirst())))
+case "web":
+    exit(WebCommand.run(Array(words.dropFirst())))
+case "wire-vectors":
+    // Not in the usage text: the web client's validators and vectors are written with it (the live plan's LW-D10).
+    exit(WireCommand.run(Array(words.dropFirst())))
 case "install-record":
     // Not in the usage text: `scripts/install-node.sh` runs it from the build it has just made (the start plan's ST-D13).
     guard let arguments = BuildRecord.Arguments(Array(words.dropFirst())) else {

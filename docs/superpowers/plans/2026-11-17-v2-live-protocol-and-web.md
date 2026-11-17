@@ -34,7 +34,8 @@ protocol, driven by Node 22's built-in WebSocket, for the bench. **No new depend
 **Code references** are at `v2` `f62aef61`. Two branches are in flight and are consumed here: `v2-ws` (an RFC 6455
 codec under `Sources/VibeNode/Web/`) and `v2-web-ui` (a static mock under `WebApp/`, a `store.js` fed by `mock.js`).
 Neither had a commit when this was written, so the names this plan gives their parts are what it needs from them;
-Task W0 reconciles the names with what they made.
+Task W0 reconciles the names with what they made. **At W0 (2026-11-17) neither had a commit yet** (both at `f62aef61`),
+so this plan's names stand; the lane that lands each branch renames to them, or asks the lead.
 
 ## What exists, and what this plan builds
 
@@ -102,10 +103,10 @@ Slices 2, 3 and 4 don't depend on each other: once I1 is merged, their lanes run
 
 Numbered LW-D1 and up. Each is the author's recommendation, recorded as **the lead's call**. Those marked
 **posture** change what the node exposes or trusts and are the lead's to confirm with the user before the task that
-needs them starts.
+needs them starts. The lead accepted LW-D1, D3, D4, D5, D6 and D12 as recommended on 2026-11-17, before W0.
 
 1. **LW-D1 (posture): the server binds the loopback listener in slices 1 to 3; the host owns it before anything a
-   token can write, and before stage 6.**
+   token can write, and before stage 6.** **Accepted by the lead, 2026-11-17.**
    - The design's requirement 4 says the host owns the listeners. Today the server binds its own Unix socket, a
      recorded deviation. This extends it to the TCP port: the listener is `vibeswitcher-server`'s.
    - What it costs: while the server is down, nothing holds the port, and any local process can bind it (T9, on TCP).
@@ -122,6 +123,7 @@ needs them starts.
    Dispatch sources (`NodeServer`); the listener is the same shape. The design leaves the choice to the builder and
    asks for "pinned exact and few": none is fewer.
 3. **LW-D3 (posture): the listener is off until `vibeswitcher web`, on one fixed port, and fails closed.**
+   **Accepted by the lead, 2026-11-17.**
    - It is bound when the first pairing code is made, stays while a token or a code is alive, and is closed when the
      last is gone. After a server restart it is bound again only if `web-tokens.json` holds a live token.
    - The port is `NodeWeb.port` (47830; the Mac's phone server is 47823), one origin for bookmarks and storage. It
@@ -132,6 +134,7 @@ needs them starts.
      security document's S1 table and S11 item 22). The token is the only lock against them; the page's files are
      public and hold no secret.
 4. **LW-D4 (posture): a one-time pairing code in the URL's fragment, exchanged in the first frame for a token.**
+   **Accepted by the lead, 2026-11-17.**
    - As [the contract's §2](../specs/2026-11-17-v2-live-wire-contract.md#2-authentication): `web.open` in the user's
      voice behind the typed code; a code of 16 random bytes, 120 s, once; a token of 32 random bytes kept in the
      page's `sessionStorage`; its SHA-256 in `<root>/v2/web-tokens.json` (0600, format 1); 24 h; at most 8;
@@ -143,13 +146,13 @@ needs them starts.
      **That is why a token must never be given a right that changes anything.**
    - No cookie: cookies on `127.0.0.1` are shared across ports.
    - Deferred: device keys, signatures in the first frame, per-device rights and revocation (the design's order).
-5. **LW-D5 (posture, small): one origin, `http://127.0.0.1:<port>`; `Host` and `Origin` matched exactly.** No
-   `localhost`, no other name: one string to check, and DNS rebinding and cross-site WebSocket hijacking both fail on
-   it. `http://127.0.0.1` is a secure context in Chrome and Firefox, which the service worker and WebCrypto need.
-   **Open for stage 4:** WebAuthn takes `localhost` as a relying party id and refuses an IP address, so signed
-   approvals with a platform authenticator will move the origin to `http://localhost:<port>`.
+5. **LW-D5 (posture, small): one origin, `http://127.0.0.1:<port>`; `Host` and `Origin` matched exactly.** **Accepted by
+   the lead, 2026-11-17.** No `localhost`, no other name: one string to check, and DNS rebinding and cross-site
+   WebSocket hijacking both fail on it. `http://127.0.0.1` is a secure context in Chrome and Firefox, which the service
+   worker and WebCrypto need. **Open for stage 4:** WebAuthn takes `localhost` as a relying party id and refuses an IP
+   address, so signed approvals with a platform authenticator will move the origin to `http://localhost:<port>`.
 6. **LW-D6 (posture): no browser action is the user's voice until signed approvals; the page drafts, the command
-   line confirms.**
+   line confirms.** **Accepted by the lead, 2026-11-17.**
    - S3's rule needs a terminal in the user's scope and a typed code. A browser has neither, and a token sits in the
      browser's storage, which on WSL is a file under `/mnt/c` (S11 item 31).
    - Slices 1 and 2 are read-only. Slice 3 adds `draft`: an answer kept on the card in the server's memory, told to
@@ -180,21 +183,24 @@ needs them starts.
     when the checked-in files differ. The contract's examples are the first vectors.
 11. **LW-D11: no image bytes in slices 1 to 4.** A chat's images are their type and size. What an agent produced is
     served only from the separate origin the design asks for, which stage 5 builds.
-12. **LW-D12 (posture): the terminal spike runs on a scratch node only.** A session's screen is more than a process
-    of the user's uid gets from the host today, and input types into a session (AGENTS.md's first hard rule, and the
-    design's "reply rights type only into confined sessions; view rights get masked screens"). On the user's node a
-    token opens no terminal. What does (a right on a device key, after H1) is decided with the user after the spike's
-    numbers.
+12. **LW-D12 (posture): the terminal spike runs on a scratch node only.** **Accepted by the lead, 2026-11-17.** A
+    session's screen is more than a process of the user's uid gets from the host today, and input types into a session
+    (AGENTS.md's first hard rule, and the design's "reply rights type only into confined sessions; view rights get
+    masked screens"). On the user's node a token opens no terminal. What does (a right on a device key, after H1) is
+    decided with the user after the spike's numbers.
 13. **LW-D13: slices 1 to 3 are plain ES modules; nothing is vendored before the user says so.** The design asks for
     a spike of Preact with signals and of xterm.js before anything is built on them, and vendoring is the first thing
     this work would bring in from outside. The lists and cards of slices 1 to 3 need no library; `store.js` and
     keyed DOM updates are enough, and the bench says whether they hold the budgets. Slice 4 needs xterm.js: the
-    user's go-ahead, an exact version, its hash recorded and checked against upstream's in CI.
+    user's go-ahead, an exact version, its hash recorded and checked against upstream's in CI. **The lead, 2026-11-17:**
+    xterm.js for slice 4 is vendored at an exact version with its hash, as the design says: a file in the repo, not an
+    install. Slices 1 to 3 still vendor nothing.
 14. **LW-D14: the hub adds no delay; what precedes the store is the engine's.** The 100 ms budget is measured from
     the store's change (`Changes.send`) to the frame and to the paint. Before that, `NodeSessions` coalesces the
     hooks' writes for 0.4 s and scans every 2 s. A status change is therefore live from the store on, and up to
     0.4 s late from the agent's hook. Task B7 measures that and proposes the cut; it is the engine's file, so it is
-    the lead's to schedule.
+    the lead's to schedule. **The lead, 2026-11-17:** the 100 ms budget counts from the store's change; cutting
+    `NodeSessions`' 0.4 s coalescing is a later engine task.
 
 ## Seamless
 
@@ -279,6 +285,8 @@ public protocol LiveTransport: AnyObject, Sendable {
 public struct LiveRights: OptionSet, Sendable { public static let read, draft: LiveRights }
 
 // Sources/VibeNode/Web/WebSeams.swift
+/// The listener's one port (LW-D3); the origin is `http://127.0.0.1:<port>` (LW-D5).
+public enum NodeWeb { public static let port: UInt16 = 47830 }
 /// One file the listener may serve, with its headers ready (lane C makes them; lane A writes them).
 public struct WebAsset: Sendable { public var body: Data; public var headers: [(String, String)] }
 public protocol WebAssetSource: Sendable { func asset(path: String) -> WebAsset? }
@@ -299,8 +307,11 @@ public protocol WebSocketHandler: AnyObject, Sendable {
 
 `NodeWire` (W0): `kinds` gains `subscribe`, `unsubscribe`, `chat.page` (`.anyone`), `draft`, `draft.clear` (a new
 `Voice.webDraft`), `web.open`, `web.revoke` (`.user`), `term.open`, `term.close` (a new `Voice.webTerminal`); none is
-in `taken` until its integration task. `Bye` gains `code: String?`. `Hello` gains `auth: Value?` and `assets:
-String?`. `NodeWire.Snapshot`, `Delta` and their encoders are lane B's, in `LiveStream.swift`.
+in `taken` until its integration task. `changesState` is true for both web voices (a draft and a terminal change
+state) and false for `.anyone` and `.leadToolServer`, as before. `Bye` gains `code: String?` (`init(reason:code:)`,
+`code` defaulting to nil). `Hello` gains `auth: Value?` and `assets: String?` (both defaulting to nil in its `init`).
+A nil field is not written, so the Unix socket's lines are as before. `NodeWire.Snapshot`, `Delta` and their encoders
+are lane B's, in `LiveStream.swift`.
 
 ## Tasks
 
@@ -323,13 +334,15 @@ right reason before the code that passes it.
 - Produces: [the seams](#the-seams-w0-writes-them-every-lane-builds-against-them) above, the new kinds, `Bye.code`,
   `Hello.auth`, `Hello.assets`.
 
-- [ ] **Step 1: Failing tests** (`NodeWireTests`):
+- [x] **Step 1: Failing tests** (`NodeWireTests`):
   - `theLiveKindsAreNamedAndNotYetTaken`: each new kind is in `kinds` with its voice and not in `taken`.
   - `anOlderHelloStillDecodes`: a `hello` without `auth` and `assets`, and a `bye` without `code`, decode.
   - `aKindNobodyTakesStillChangesState`: `changesState("draft")` and `changesState("web.open")` are true.
-- [ ] **Step 2:** the seams, the kinds, the fields, the stubs. The server answers each new kind `unknown-kind`, as
-  today.
-- [ ] **Step 3:** lints; push; both jobs green. The lanes branch from this commit.
+- [x] **Step 2:** the seams, the kinds, the fields, the stubs. The server answers each new kind `unknown-kind`, as
+  today (`ServerTests.anUnlistedRequestIsRefused` asks each; `RequestsTests.everyKindIsClassifiedAsAReadOrAStateChange`
+  and `VoiceRuleTests` classify them).
+- [ ] **Step 3:** lints; push; both jobs green. The lanes branch from this commit. (Lints done in W0's commit; the
+  push and the jobs are the lead's.)
 
 ### Task A1: The RFC 6455 codec lands (lane A)
 
@@ -588,7 +601,7 @@ document (S11: the port while the server is down; the principals: a web client),
   `Platform.FolderWatch`, the ops by difference (`text` when only the text grew, else `set`, `add`), a chat stream
   with its 512 ops, `chat.page`, the `tail`. Tests (`ChatStoreTests`): the Seamless and Security names, and
   `aNewEntryIsAnAdd`, `aToolsResultIsASetOfItsRun`, `theSnapshotIsTheNewest200`, `aPageIsTheItemsJustBefore`,
-  `aStreamWithNoSubscriberIsDroppedAfter60s` (the clock injected), `aChatResumesByItsLastItemAcrossARestart`,
+  `aStreamNobodyFollowsIsDroppedAfter60s` (the clock injected), `aChatResumesByItsLastItemAcrossARestart`,
   `aSessionWithNoTranscriptIsGone`, `aTranscriptOutsideTheAgentsFoldersIsRefused` (`TranscriptReader.checkedURL`).
 - **Task D3 (lane D): the chat view.** Items rendered to DOM nodes by the client's own markdown and diff code (no
   markup from text), a windowed list, `text` ops appended in place, paging upward on scroll, the scroll kept at the
@@ -634,9 +647,10 @@ document (S11: the port while the server is down; the principals: a web client),
 
 ## Showing slice 1 to the user
 
-The fastest way to see it is the sandbox: `bash scripts/sandbox-server.sh run`, then `bash scripts/sandbox-server.sh
-url`, and the address opened in the user's browser. It is a scratch node with fake sessions, and it is on a scratch
-port.
+**The lead, 2026-11-17: the user first sees slice 1 in the sandbox, on a scratch node**, so they don't wait for an
+install. The fastest way to see it is the sandbox: `bash scripts/sandbox-server.sh run`, then
+`bash scripts/sandbox-server.sh url`, and the address opened in the user's browser. It is a scratch node with fake
+sessions, and it is on a scratch port.
 
 On the user's own node the page arrives as every build does: the commit pushed, both jobs green,
 `scripts/install-node.sh COMMIT`, `vibeswitcher switch`, then `vibeswitcher web`. Those four are the user's.
@@ -664,7 +678,7 @@ On the user's own node the page arrives as every build does: the commit pushed, 
 | B5, F3, D4 | I1 | each other; slice 2; slice 4 | — |
 | I3 | B5, F3 (D4 or the mock) | slice 2, slice 4 | answers a scratch lead's question |
 | B6 | I1 | slice 2, slice 3 | — |
-| D5 | B6 | G3 | **the go-ahead to vendor xterm.js** (LW-D13) |
+| D5 | B6 | G3 | the go-ahead to vendor xterm.js (LW-D13): given by the lead, 2026-11-17 |
 | G3, I4 | B6, D5 | slice 2, slice 3 | reads the numbers; LW-D12 |
 | B7 | B1 | everything | — |
 
@@ -710,22 +724,35 @@ Filled by G1, G2, G3 and B7, each with the date, the commit and the machine's lo
 
 ## Open, for the lead before agents start
 
+**Answered by the lead, 2026-11-17**, before W0: 1 (the posture decisions accepted as recommended), 3 (xterm.js
+vendored for slice 4), 4 (the sandbox), 5 (the client matches on project and question id; the task that touches
+`Restarts` checks whether open questions are re-posted), 6 (block by block for now; character streaming deferred) and 7
+(the budget counts from the store's change; the cut is a later engine task). 2 was answered by W0: neither branch had a
+commit, so this plan's names stand. Each answer is written under its item.
+
 1. **The posture decisions**: LW-D1 (the server binds the port for now), LW-D3 (a first TCP listener, reachable from
    Windows under mirrored networking), LW-D4 (a token's hash at rest), LW-D6 (drafts; no browser answer until signed
-   approvals), LW-D12 (the terminal on a scratch node only).
+   approvals), LW-D12 (the terminal on a scratch node only). **Accepted by the lead, 2026-11-17**, as recommended.
 2. **The in-flight branches' names.** `v2-ws` and `v2-web-ui` had no commit when this was written. W0 reads them and
-   changes this plan's names to theirs.
+   changes this plan's names to theirs. **W0, 2026-11-17:** neither had a commit (both at `f62aef61`), so this plan's
+   names stand.
 3. **Vendoring** (LW-D13): slices 1 to 3 need none. Slice 4 needs xterm.js, and the design's Preact spike is not in
-   this plan: whether it runs, and when, is the lead's.
+   this plan: whether it runs, and when, is the lead's. **The lead, 2026-11-17:** xterm.js is vendored for slice 4 at an
+   exact version with its hash, as the design says; it is a file in the repo, not an install.
 4. **How the user first sees it**: the sandbox (a scratch node, minutes after I1) or their own node (an install and a
-   switch).
+   switch). **The lead, 2026-11-17:** the sandbox script on a scratch node, so the user doesn't wait for an install.
 5. **Card ids don't survive a server restart** (the cards are memory, S3). The contract has the client match on the
    project and the question's id. If the lead's tool server doesn't post open questions again after a restart, a
-   card vanishes from the page until it does; `Restarts` should be read for that before D2.
+   card vanishes from the page until it does; `Restarts` should be read for that before D2. **The lead, 2026-11-17:**
+   the client matches on project and question id, as the contract says; the task that touches `Restarts` checks
+   whether open questions are re-posted.
 6. **A reply's text doesn't stream today.** The transcript gets a reply a block at a time, so the page shows blocks
    arriving, not letters. Letters need another source (the agent's stream output, or the host's parser), which no
-   store has. The wire is ready for it.
-7. **The hook-to-store delay** (LW-D14): up to 0.4 s before the store's change. Cutting it is an engine edit.
+   store has. The wire is ready for it. **The lead, 2026-11-17:** block by block for now; character streaming is
+   deferred.
+7. **The hook-to-store delay** (LW-D14): up to 0.4 s before the store's change. Cutting it is an engine edit. **The
+   lead, 2026-11-17:** the 100 ms budget counts from the store's change; cutting `NodeSessions`' 0.4 s coalescing is a
+   later engine task.
 8. **WebAuthn and the origin** (LW-D5): signed approvals with a platform authenticator need `localhost`, not
    `127.0.0.1`. Stage 4's design should settle the origin before a user has bookmarked this one for long.
 9. **The Chrome and Node 22 on this machine** are assumed by the design for the bench; G1's first step checks both
