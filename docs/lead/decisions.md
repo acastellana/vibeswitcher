@@ -467,3 +467,7 @@ The user chose it on 2026-11-17 (question 1EA6E8D7). The sync stalled every work
 
 The user asked for it on 2026-11-17, to replace the lead's hand-filed install cards, and chose click plus password over a stored password (question 6867BF0F).
 
+## 2026-11-17 17:02:56 flaky-host-tests-make merges with 4 of its 5 flakes fixed. The fifth, HostedSessionTests/headlessAnswersQueriesOnlyWhenNoClient (finding F1), stays open as a known flake. Its failure diagnosis now prints the probe's output first, and the next failure's log is the evidence for a fix: the flake ledger's rule (3 flakes of one test become a task) picks it up.
+
+It passed 28 of 28 runs under load in the worker's runs and 10 of 10 in the verifier's. The one failing log (2026-11-12) cut off the field that would say which side lost the byte. So another round now would be guesswork, and it would hold back four real fixes, including the app's sleep bug (a parser busy at a sleep was replaced on waking and its bytes dropped).
+
