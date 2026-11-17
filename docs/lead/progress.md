@@ -3509,3 +3509,8 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 09:19 Automatically (auto_advance): Merged merges-are-held-names ("Merges are held" names the battery hold as its cause) into main at 58f4cc64, review none: on its worker's done report on b415c0c8 and the full test run.
 - 2026-11-17 09:19 Automatically (auto_advance): Cleaned up merges-are-held-names; ended pid 81147 (Worker: "Merges are held" names the battery hold as its cause) (freed 2.5 GB of build output and temporary folders). It stays done.
 - 2026-11-17 09:37 Merged find-and-fix-the: Find and fix the app's memory growth (+74 MB/h) (build ec89ed431487)
+- 2026-11-17 09:37 Automatically (auto_advance): Merged find-and-fix-the (Find and fix the app's memory growth (+74 MB/h)) into main at 1e15e926, on its passing audit and the full test run.
+- 2026-11-17 09:37 Started a worker on cut-the-app-s (auto → Claude: Claude weekly 4%, 1 point behind pace (limits ignored), not tight; Codex 24%)
+- 2026-11-17 09:37 Automatically (auto_advance): Started a worker on cut-the-app-s (Cut the app's biggest memory peaks (chat loads, host selects)), its after tasks done (find-and-fix-the); its agent is auto, so it went to Claude: Claude weekly 4%, 1 point behind pace (limits ignored), not tight; Codex 24%.
+- 2026-11-17 09:37 Automatically (auto_advance): Cleaned up find-and-fix-the (freed 3.2 GB of build output and temporary folders). It stays done.
+- 2026-11-17 09:38 Update: Memory fix: the app gives freed memory back again on macOS 27.2 — **What changed:** after macOS 27.2 (installed Oct 31), malloc stopped giving freed pages back to the system, and the app's relief routine freed 0 bytes in about 400 tries. Every temporary peak stayed …
