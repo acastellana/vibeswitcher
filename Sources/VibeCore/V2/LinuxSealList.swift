@@ -362,9 +362,15 @@ public enum LinuxSealList {
             for (path, entry) in new where old[path] == nil {
                 guard transientEntryMayCome(path, entry: entry) else { return nil }
             }
-            // A scope gone isn't kept: one back under its name (changed or not) may come as any new scope may, and the
-            // folder would otherwise keep every app's start for good.
-            for path in old.keys where new[path] == nil && isScopeFile(path) { kept[path] = nil }
+            // A scope gone is kept as a tombstone of its last hash (`tombstone`), so one back under its name changed is
+            // held (the first loop above), for `tombstoneLooks` looks; then it goes, so the folder doesn't keep every
+            // app's start for good. A look that would keep more than `maxTombstones` is judged as ever.
+            var tombstones = 0
+            for (path, entry) in old where new[path] == nil && isScopeFile(path) {
+                kept[path] = tombstone(entry)
+                if kept[path] != nil { tombstones += 1 }
+            }
+            guard tombstones <= maxTombstones else { return nil }
         }
         return ConfigSeal.encode(kept)
     }
@@ -462,6 +468,25 @@ public enum LinuxSealList {
             guard let section, let equals = line.firstIndex(of: "="), scopeKeys[section]?.contains(String(line[..<equals])) == true else { return false }
         }
         return true
+    }
+
+    /// How many looks that record the manager's runtime units folder a scope gone stays as a tombstone of its last
+    /// hash (`cameOrWent`).
+    static let tombstoneLooks = 64
+
+    /// The most tombstones the folder's record keeps: a look that would keep more is judged as ever.
+    static let maxTombstones = 1024
+
+    /// The per-path entry's kind of a scope gone (`tombstone`): its hash, and the looks it has left in place of a time.
+    static let goneKind = "g"
+
+    /// What a look that doesn't see a scope keeps of its recorded `entry`: a tombstone of its hash with
+    /// `tombstoneLooks` looks left when it was there, one look fewer when it was a tombstone, nil past its last.
+    static func tombstone(_ entry: String) -> String? {
+        let words = entry.split(separator: " ").map(String.init)
+        guard words.count == 3 else { return nil }
+        let left = words[1] == goneKind ? (Int(words[2]) ?? 0) - 1 : tombstoneLooks
+        return left > 0 ? "\(words[0]) \(goneKind) \(left)" : nil
     }
 
     /// A top-level name `<unit>.scope`, not hidden.

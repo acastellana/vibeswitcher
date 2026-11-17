@@ -354,10 +354,10 @@ struct LinuxSealListTests {
         try FileManager.default.removeItem(atPath: scope)
         let gone = look()
         #expect(gone != nil, "a scope's file removed")
-        #expect(ConfigSeal.decode(gone ?? "")["app-com.google.Chrome-3924612.scope"] == nil, "a scope gone isn't kept")
+        #expect(ConfigSeal.entryKind(ConfigSeal.decode(gone ?? "")["app-com.google.Chrome-3924612.scope"]) == LinuxSealList.goneKind,
+                "a scope gone is kept as a tombstone")
         try write(header, scope)
-        // Back under its name comes as a new scope does, changed or not (the seal keeps hashes, not content): ST-D20's
-        // note bounds what its `[Unit]` lines can name.
+        // Back under its name as it was comes (back changed: `aScopeBackChangedUnderItsNameIsHeld`).
         #expect(look() != nil, "a scope back under its name")
         try write(header + "[Unit]\nOnFailure=planted.service\n", scope)
         #expect(look() == nil, "a scope's file changed in place")
@@ -373,6 +373,65 @@ struct LinuxSealListTests {
             try plant()
             #expect(look() == nil, "\(what)")
         }
+    }
+
+    /// A scope gone leaves a tombstone of its last hash under its name for `tombstoneLooks` looks that record the
+    /// folder: back under its name with that hash, it comes; changed, it's held, as one changed in place is. Past those
+    /// looks it's gone, and the record never keeps more than `maxTombstones` (a look that would is judged as ever).
+    @Test(Self.linux) func aScopeBackChangedUnderItsNameIsHeld() throws {
+        let home = try home()
+        let outside = temp.url("seal-transient-gone").path
+        let uid = getuid()
+        let folder = outside + "/run/user/\(uid)/systemd/transient"
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let header = "# This is a transient unit file, created programmatically via the systemd API. Do not edit.\n"
+        let item = try #require(LinuxSealList.watched(home: home, uid: uid, mounts: try mounts(windows: false), outside: outside)
+            .first { $0.name == "/run/user/\(uid)/systemd/transient" })
+        let key = ConfigSeal.keyPrefix + item.name
+        var recorded = ConfigSeal.hashes(of: [item])
+        func look() -> String? {
+            let now = ConfigSeal.hashes(of: [item])
+            guard let kept = LinuxSealList.cameOrWent(key: key, recorded: recorded, now: now) else { return nil }
+            recorded[key] = now[key]
+            recorded[ConfigSeal.keysKey(of: key)] = kept
+            return kept
+        }
+        let scope = folder + "/app-x-1.scope", other = folder + "/app-y-2.scope"
+        let first = header + "[Unit]\nDescription=one\n", second = header + "[Unit]\nDescription=two\n"
+        try write(first, scope)
+        #expect(look() != nil, "a scope added")
+        try FileManager.default.removeItem(atPath: scope)
+        #expect(look() != nil, "a scope removed")
+        try write(second, scope)
+        #expect(look() == nil, "back changed under its name")
+        try write(first, scope)
+        #expect(look() != nil, "back as it was")
+        // Gone again; the folder changes at each look after (another scope comes and goes) until the tombstone expires.
+        try FileManager.default.removeItem(atPath: scope)
+        #expect(look() != nil)
+        for index in 1..<LinuxSealList.tombstoneLooks {
+            if index % 2 == 1 { try write(header, other) } else { try FileManager.default.removeItem(atPath: other) }
+            #expect(look() != nil, "look \(index)")
+        }
+        try write(second, scope)
+        #expect(look() == nil, "back changed, the tombstone's last look")
+        try FileManager.default.removeItem(atPath: scope)
+        if FileManager.default.fileExists(atPath: other) { try FileManager.default.removeItem(atPath: other) } else { try write(header, other) }
+        #expect(look() != nil)
+        #expect(ConfigSeal.decode(recorded[ConfigSeal.keysKey(of: key)] ?? "")["app-x-1.scope"] == nil, "expired")
+        try write(second, scope)
+        #expect(look() != nil, "back changed after its tombstone expired: a new scope")
+
+        // The bound: a look that would keep more than `maxTombstones` is judged as ever.
+        let own = ConfigSeal.decode(recorded[ConfigSeal.keysKey(of: key)] ?? "")[LinuxSealList.ownEntry] ?? ""
+        func gone(_ count: Int) -> String? {
+            var before = [LinuxSealList.ownEntry: own]
+            for index in 0..<count { before["app-z-\(index).scope"] = "0123abcd s 0" }
+            return LinuxSealList.cameOrWent(key: key, recorded: [key: "a", ConfigSeal.keysKey(of: key): ConfigSeal.encode(before)],
+                                            now: [key: "b", ConfigSeal.keysKey(of: key): ConfigSeal.encode([LinuxSealList.ownEntry: own])])
+        }
+        #expect(gone(LinuxSealList.maxTombstones) != nil)
+        #expect(gone(LinuxSealList.maxTombstones + 1) == nil)
     }
 
     /// A new scope's file comes only in the form the manager writes for a scope an app made through its API (its
