@@ -1337,11 +1337,12 @@ differ replies before the server is replaced).
     host exit ends every session, as the vault's loss already ends every team; `TimeoutStopSec=` set. The comment
     "Sessions outlive the host either way" (`main.swift:146`) is the Mac's;
   - `UnsetEnvironment=LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH GCONV_PATH BASH_ENV ENV VIBESWITCHER_HOME
-    CFFIXED_USER_HOME` and `Environment=SWIFT_BACKTRACE=enable=no`, so `systemctl --user set-environment` can't reach
+    CFFIXED_USER_HOME SSH_AUTH_SOCK` (the last an agent socket measured in this manager's environment, S10; the start
+    plan's ST-D2) and `Environment=SWIFT_BACKTRACE=enable=no`, so `systemctl --user set-environment` can't reach
     the host's start. `SWIFT_BACKTRACE` is not in `UnsetEnvironment=`: systemd applies that line after `Environment=`,
     and a name there removes the unit's own assignment too (`systemd.exec(5)`); a test refuses a name in both. `start`
-    and `status` compare `systemctl --user show-environment` with the expected set and name anything extra. They
-    compare names, not values: the expected names' values (`SHELL`, `LANG`, `LC_*`, `USER`…) are any worker's to set
+    compares `systemctl --user show-environment` with the expected set and refuses anything extra, naming each and
+    how to clear it (the start plan's ST-D2; `status` names them). It compares names, not values: the expected names' values (`SHELL`, `LANG`, `LC_*`, `USER`…) are any worker's to set
     with `set-environment`, before the user's own start too. *(2026-11-17, the step 8 sweep)* So the host started with
     `--node` takes what it passes to sessions from the user database, not from the manager: `SHELL` the login shell
     when only root can change it (links resolved), else `/bin/bash`; `USER` and `LOGNAME` the account's name; and a

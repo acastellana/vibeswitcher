@@ -246,7 +246,8 @@ does it, and the node has to outlive the terminal it was started from.
 
 What this machine has (read, not changed): `/etc/wsl.conf` sets `systemd=true`; pid 1 is systemd; the user's own
 `systemd --user` runs (pid 284) and lingering is on for the user (`/var/lib/systemd/linger/albert`), so the user's
-manager runs without a login session; `~/.config/systemd/user` has no units. `claude` is in `~/.local/bin`, which the
+manager runs without a login session; `~/.config/systemd/user` has no units (*2026-11-16:* it now holds the user's
+`home-net-review` units, so the seal's first look holds them until accepted; the start plan's "Changes to the spec"). `claude` is in `~/.local/bin`, which the
 interactive shell's PATH has and a user unit's default PATH doesn't. The Windows side's `.wslconfig` sets
 `networkingMode=mirrored` and no idle timeout. WSL interop is on and `/mnt/c` is mounted (S1): until the user turns
 them off (decision 2), every lock the node has is a guard rail.
@@ -255,10 +256,16 @@ them off (decision 2), every lock the node has is a guard rail.
 
 - Before anything, it checks what is one step from root (S1): with WSL interop on it refuses, saying why, unless the
   user passes `--interop-is-on`; it reports automount and a `kernel=` line in `.wslconfig`. It compares the manager's
-  environment (`/usr/bin/systemctl --user show-environment`) with the expected set and names anything extra. The first
-  time, it prints the document's S11 (what plain mode doesn't promise) and records the user's acknowledgment.
-- Where the user's systemd answers (`$XDG_RUNTIME_DIR/systemd/private` exists), it writes
-  `$XDG_CONFIG_HOME/systemd/user/vibeswitcher-node.service` (`~/.config` when unset):
+  environment (`/usr/bin/systemctl --user show-environment`) with the expected set and refuses anything extra,
+  naming each and how to clear it (`systemctl --user unset-environment NAME`; the start plan's ST-D2: the host runs
+  git, and `GIT_CONFIG_*` isn't unset by the unit). The mode comes from what a same-uid process can't change (pid 1 is
+  systemd and `/run/systemd/system` exists); on such a machine a missing manager socket is refused, never taken as "no
+  systemd" (ST-D2, ST-D6). The first time, it prints the document's S11 (what plain mode doesn't promise) and records the user's acknowledgment.
+- Where the user's systemd answers (`/run/user/<uid>/systemd/private` exists), it writes
+  `<home>/.config/systemd/user/vibeswitcher-node.service`, the home from `getpwuid`: neither the command line's
+  `XDG_CONFIG_HOME` and `XDG_RUNTIME_DIR` nor the manager's environment chooses the folder (ST-D2). After its
+  `daemon-reload` it checks the manager's view of the unit (`FragmentPath` its file, no drop-in, every value its own)
+  and refuses otherwise:
   - `ExecStart=<prefix>/<commit>/bin/vibeswitcher-host --node --node-root <prefix>/<commit> --server
     <prefix>/<commit>/bin/vibeswitcher-server` (the commit's folder, never `current`, so a moved link changes
     nothing until the user switches);
@@ -266,13 +273,16 @@ them off (decision 2), every lock the node has is a guard rail.
   - `KillMode=control-group`, stated, with its consequence said to the user: when the host exits for any reason (a
     crash, an OOM kill, an idle exit, a failed fallback, `stop`), every session, the server and every process left in
     the unit's cgroup end with it, as the vault's loss already ends every team; and `TimeoutStopSec=`;
-  - `UnsetEnvironment=LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH GCONV_PATH BASH_ENV ENV VIBESWITCHER_HOME CFFIXED_USER_HOME`
+  - `UnsetEnvironment=LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH GCONV_PATH BASH_ENV ENV VIBESWITCHER_HOME CFFIXED_USER_HOME
+    SSH_AUTH_SOCK` (the last measured in this manager's environment, an agent socket: D9, ST-D2's note)
     and `Environment=SWIFT_BACKTRACE=enable=no`, so `systemctl --user set-environment` can't reach the host's start.
     `SWIFT_BACKTRACE` is **not** in `UnsetEnvironment=`: systemd applies that line last, after `Environment=`, and a
     bare name there removes the unit's own assignment too (`systemd.exec(5)`); the unit's `Environment=` already
     overrides the manager's value. (The security document's S9 listed it in both; corrected.)
   - `Environment=HOME=…` and `Environment="PATH=/usr/local/bin:/usr/bin:/bin:<swiftly's bin>:<node's bin>"`, quoted,
-    with no `/mnt/` folder. A team session's shell gets this PATH and no startup file (stage 2's S2-D12), and its
+    with no `/mnt/` folder. Swift's and node's folders come from fixed places, never the shell's PATH:
+    `<home>/.local/share/swiftly/bin` and the one `<home>/.nvm/versions/node/v*/bin` holding `node` (`--node-version`
+    when there are several), each the user's and writable by nobody else (ST-D4). A team session's shell gets this PATH and no startup file (stage 2's S2-D12), and its
     agent's Bash commands this PATH too, though they still source `~/.bashrc` and the login files (S10, measured in
     stage 2's 12b), so it must hold what workers build and test with: the user's Swift toolchain (`~/.local/share/swiftly/bin`) and node (`~/.nvm/…/bin`,
     which `scripts/test.sh` needs, `test.sh:28-29`). Both are folders the user, and so every worker, can write: they
@@ -295,21 +305,23 @@ them off (decision 2), every lock the node has is a guard rail.
   `vibeswitcher start` or `stop` explains, and how the previous host ended, until the user acknowledges them
   (`status --ack`). What the server says about itself is no mitigation once the server is seized; the journal is.
 - Where there is no user systemd (a container, WSL without systemd), it starts the host in a session of its own
-  (`setsid`, a double fork, its output to the host log) and records its pid; `stop` ends it. There is no cgroup to
+  (`posix_spawn` with `SETSID`, not a double fork, since the command line is multithreaded; an environment of only
+  `HOME`, the unit's `PATH` and `SWIFT_BACKTRACE=enable=no`; its output to the host log: ST-D6) and records its pid; `stop` ends it. There is no cgroup to
   tell the user's voice by, so the server uses S3's weaker rule, and `status` says so.
 - Before either, it checks that `claude` resolves to an executable file, that the PATH it will give finds `swift` and
   `node`, and that there is a `git` in a folder owned by root and writable by nobody else (`Platform.Tools.git`, stage
   2's Task 10c), and refuses, saying which is missing, when one isn't.
-- **How it is tested** without touching the user's systemd: `StartCommandTests` set `XDG_CONFIG_HOME` to a scratch
-  folder and give the start command a recording stand-in for `systemctl` (the command type takes the path it runs;
-  the installed command line always passes `/usr/bin/systemctl`, and no environment variable changes it), and check
-  the unit written (`Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, `--node`, `--node-root`, the commit's
+- **How it is tested** without touching the user's systemd: `StartCommandTests` drive the start's `VibeNode` types
+  in process, passing a scratch unit folder, runtime folder and host command and a recording stand-in for
+  `systemctl` as parameters (the installed command line always passes `/usr/bin/systemctl` and the `getpwuid`
+  folders, and no environment variable changes them; a scratch command line starts nothing: the start plan's ST-D1),
+  and check the unit written (`Restart=no`, `KillMode`, `UnsetEnvironment`, the PATH, `--node`, `--node-root`, the commit's
   folder) and the calls made; `noNameIsBothUnsetAndAssigned` reads the unit and fails if a name in
   `UnsetEnvironment=` is also set by `Environment=`. The host writes its `SWIFT_BACKTRACE` to the journal at its start
   (its environment can't be read once it is non-dumpable), which step 8's switch check reads. The no-systemd path
   takes **the host command it runs as a parameter** of the start command type (the installed command line always
   gives `<prefix>/<commit>/bin/vibeswitcher-host --node …`); the test gives a scratch host with `--lock` and no
-  `--node`, in a scratch home with `XDG_RUNTIME_DIR` pointing at an empty folder, and checks the host runs in its own
+  `--node`, in a scratch home with an empty scratch runtime folder passed as the parameter, and checks the host runs in its own
   session and `stop` ends it. That the real path carries `--node` is asserted from the arguments the command builds,
   not by starting it: a `--node` host takes the account's real `~/.vibeswitcher` (stage 2's Task 9b). Nothing in a
   test reaches the real `$XDG_RUNTIME_DIR`, the user's journal or the user's home.
