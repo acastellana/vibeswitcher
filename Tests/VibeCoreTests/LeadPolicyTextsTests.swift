@@ -205,7 +205,7 @@ struct LeadPolicyTextsTests {
             #expect(workflow.recordsDir == records)
             // Not the outside-read patterns (round 1's F8): quotes, backticks and wildcards that read as noise there. Nor the
             // refused options' other spellings (`git -C*`, `git --git-dir=*`): each option is listed once, spaced.
-            let git = rules.filter { $0.hasPrefix("Bash(git ") && !LeadLaunch.outsideReads.contains($0) 
+            let git = rules.filter { $0.hasPrefix("Bash(git ") && !LeadLaunch.outsideReads.contains($0)
                 && !$0.hasSuffix("=*)") && !["Bash(git -C*)", "Bash(git -c*)"].contains($0) }
             let lead = LeadPrompts.lead(project: "project-c", root: "/r", workflow: workflow)
             #expect(!lead.contains("git diff*`*") && !lead.contains("`git diff */..*`") && !lead.contains("git diff \"~"))
