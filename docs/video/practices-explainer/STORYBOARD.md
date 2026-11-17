@@ -12,6 +12,46 @@ voice (`NARRATION.md`), never shorter, so the film runs 6:54. Every number is fr
 `index.html`. Each fades in over 0.4 s and out over 0.4 s, with hard cuts between scenes. The kicker in the top-left
 (`NN / NAME`) numbers the chapters.
 
+## Update of 2026-11-17: what's new since the last render
+
+The last render was cc0e9da0 (2026-11-12 15:42). This inventory lists what a viewer would notice that merged since
+then, read from `git log cc0e9da0..main` (code commits, not "Lead:" ones), `docs/lead/decisions.md` entries from
+2026-11-12 on and the diff of `docs/process/product-inventory.md`. A few older features the film never showed are
+listed too, because the update's contract names them. Internal fixes (test waits, lints, prompt trimming, benches,
+sandbox commands) are left out. Sources for each line are in `sources.md`, "Added 2026-11-17".
+
+| Feature or process change | Merged | Already in the film? | Where it goes |
+| --- | --- | --- | --- |
+| Small tasks skip their audit: an audit task done in its first round in under 30 min of work, touching nothing sensitive, not raised by the risk check and not Codex's, merges on its tests; the 10 % random sample still audits some | 03d03896, 2026-11-12 | No (the 10 % sample was) | s07: a line on screen and in the narration |
+| Faster merges: a merge's test run gets the cores that are free, not only its slot's share; failing tests rerun by name; a test that's red on main too doesn't send the branch back: it merges and a fix task is filed | 64c99ed9, e0692549, 2026-11-12 | The rerun of failing tests, yes (s11); the rest no | New scene s20, "Merges keep flowing" |
+| "Merges are held" reports: a task ready 20 min with no merge landing gets the lead one report naming the cause (the battery hold, main red, its records, every slot held, the load hold, the gate not installed, a merge running), counted in the Mac's awake time, sleep named | 87ebb3e0 (2026-11-12), 268df9cb (11-16), 7d463d18 (11-17) | No | s20 |
+| Sleep shows its cost: in-flight time paused by sleep, a wake notice, status and digest lines | 93d317db, 2026-11-12 | No | s20, one line |
+| Workers told once when main turns red and again when it's green | e8d07039, 2026-11-13 | No | s20, one line on screen |
+| Fable→Opus fallback at Fable's usage limit, back at the reset | 1aab1823, c50bca46 (2026-11-12, just before the last render) | No | s15: rewritten |
+| Each role's model, built: lead on Fable, Fable advisor for hard tasks, re-rolls and sensitive or security audits on Fable, per-task effort | a3e2a30e, 2026-11-12 | Shown dashed as "being built" | s15: dashed chips become solid |
+| App-health watcher: freezes, crashes and error lines grouped by cause; a cause on 3 of 7 days, or doubling, is proposed to the lead as a task, once | a58f8d4e (2026-11-08), dd2aed86, 7f0969d2 | No | New scene s21, "The app checks itself" |
+| UI journeys: scripted runs of the real app in the sandbox, each screenshot diffed against its baseline (smoke, select-copy, run-card, dictate) | d2852803 … 3ab471b5, 2026-11-15 | No | s21 |
+| Memory: on macOS 27.2 malloc kept every freed page (+74 MB an hour); the app restarts itself with MallocLargeCache=0. Image-heavy chats: images decoded at the size shown, two at a time (+1,012 MB peak → +178 MB) | 961dda62, 1d061b10, c01ff549, 2026-11-17 | No | s21 |
+| Restart card: after a Mac restart, one card lists the sessions open at shutdown, with Reopen all and Choose…; leads reopen first with --resume | d8b85010 … 7059ab0a, 2026-11-16 | No | New scene s22, "Day to day" |
+| The chat's model chip follows /model at once, and its menu offers Fable | 8906e144, 73bbffc6, 2026-11-15 | No | s22 |
+| A reminder card to run /doctor prompt-audit every 14 days per project, or when the model changed | ce72a400, 2026-11-12 | No | s22, one line on screen |
+| A Run card tells the asking session how its command ended (exit status, last output) | 233acccc, 2026-11-12 | Run cards, yes (s17); the ending no | s22, one line on screen |
+| Workers and verifiers can't read your prompt history, other sessions' transcripts or anything in ~/.claude but skills, plugins and projects | ba88848a, 614b59e4, db598c14, f579c69b, 2026-11-14 | No | s05: one line on screen |
+| The lead's records refuse another project's name or a credential's shape | 87ebb3e0, 2026-11-12 | No | s16: one line on screen |
+| Pushing to GitHub only on your click | 2c727025 (2026-11-05) | Yes: s17's Push card and its narration | No change |
+| Claude Code's own skill sync accepted by the config seal, every other change still held | not on main at the time of writing (branch accept-claude-code-s; decision 2026-11-17 09:46) | No | s17, if it merges before the render (see the done report) |
+| Update check with a changelog card and Install & Restart | not on main at the time of writing (branch update-check-a-card; decision 2026-11-17 11:44) | No | s22, if it merges before the render (see the done report) |
+| Team mode (several workers on one task, a post wall) | 2026-11-13 … 11-15 | No | Left out: dropped as a default after its experiment (decision 2026-11-16 07:21) |
+| Floating dots panel removed | a27af4a0 | Never shown | Left out (a removal) |
+| Merge dry run; batch receipts | 9ee1c37d, 6dd2304b | No | Left out: the lead's bookkeeping, team experiment |
+
+The numbers on screen (tasks, merges, audits, findings) stay those read on 2026-11-12, as the title card says
+("17 Oct – 12 Nov 2026"); refreshing them would re-voice six scenes for no new feature.
+
+New and changed scenes, in film order: s05 (screen only), s07 (re-voiced), s11, then **s20**, s12, s13, then
+**s21**, s14, s15 (re-voiced), s16 (screen only), s17, then **s22**, s18, s19. The chapter kickers after s13 are
+renumbered (screen only). The delivered MP4 is this film sped up 1.7×, pitch kept.
+
 ## Frame 1: Title
 
 - scene: The yard draws itself, one car runs onto the main line, title lands
