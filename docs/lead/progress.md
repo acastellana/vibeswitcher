@@ -3667,3 +3667,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-17 21:47 Automatically (auto_advance): Started the audit of worker-git-guard-part at 46d6b4d5 (Its review is audit).
 - 2026-11-17 21:48 Released worker-git-guard-part's worker (idle since its done report on 46d6b4d5) while its audit runs
 - 2026-11-17 21:48 Automatically (auto_advance): Released worker-git-guard-part's worker, idle since its done report on 46d6b4d5, while its audit runs (ended pid 69880 (Worker: Worker git guard, part 2: the parsed hook also checks refused subcommands and git's environment)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-17 21:54 Audit of worker-git-guard-part: incomplete, clean, round 1: 1 Important open, 2 Pre-existing open
+- 2026-11-17 21:54 Started a worker on worker-git-guard-part
+- 2026-11-17 21:54 Automatically (auto_advance): Sent worker-git-guard-part's worker the open Important findings worker-git-guard-part:F1 from its audit at 46d6b4d5 (in a new worker: its last one was released during the audit).
