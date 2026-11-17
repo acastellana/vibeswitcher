@@ -3614,3 +3614,7 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 17:21 Automatically (auto_advance): Merged flaky-host-tests-make at 612a3ead (its passing audit), flaky-lead-and-dictation at a8a3c77d (its passing audit) into main as one batch, on 1 test run for 2 tasks.
 - 2026-11-17 17:21 Automatically (auto_advance): Cleaned up flaky-host-tests-make (freed 2.5 GB of build output and temporary folders). It stays done.
 - 2026-11-17 17:21 Automatically (auto_advance): Cleaned up flaky-lead-and-dictation (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-17 18:13 Planned code-mode-trial-does: Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster?
+- 2026-11-17 18:13 Started a worker on code-mode-trial-does (auto → Claude: Claude weekly 28%, 18 points ahead of pace (limits ignored), not tight; Codex 24%)
+- 2026-11-17 18:13 Automatically (auto_advance): Started a worker on code-mode-trial-does (Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster?); its agent is auto, so it went to Claude: Claude weekly 28%, 18 points ahead of pace (limits ignored), not tight; Codex 24%.
+- 2026-11-17 18:13 Automatically (auto_advance): Overlap for code-mode-trial-does's start (a warning only: nothing was refused or reordered). scripts/sandbox-app.sh: ui-journeys-b-team (kept: its branch changes it).
