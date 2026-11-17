@@ -262,7 +262,7 @@ at `47636aaf` (`aa9eee06` removed the three `SignalsTests`, `939ce080` three `Bo
 | `LoadReportScriptTests/itPrintsTheProfileAndFreezesPerLoadBucketForTheDays` (core) | Found: the runner's `python3` refuses a date ending in Z (`fromisoformat`) |
 | `MCPHandoverTests/anUnsignedBuildLeavesTheOldOneServing` (core) | Found: SIP off runs an unsigned build's probe, which a Mac kills |
 | `SessionStraysTests/aProcessWhoseEnvironmentIsHiddenIsTheSessionsOnlyWhenItStartedIt` (core) | Found: SIP off shows another process's environment |
-| `TestScriptWidthTests/aRunsSwiftTestGetsItsSlotsShare` (core) | Found: expects a heavy slot's width on a Mac with more cores than the runner's |
+| `TestScriptWidthTests/aRunsSwiftTestGetsTheCoresFreeAtLeastItsSlotsShare` (core) | Found: expects a heavy slot's width on a Mac with more cores than the runner's |
 | `Tests/SecurityAudit/library-injection.test.mjs` (web) | Found: SIP off lets an injected library into a Hardened Runtime binary |
 
 On a real Mac every entry is run: the two not found are owed an answer, and a found one that fails there isn't the
