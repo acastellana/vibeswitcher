@@ -127,9 +127,20 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
             return reply(.init(re: request.id, error: .init(.badArgs, "no such collection: \(ask.collection)")), on: transport)
         }
         let connection = connection(for: transport, rights: rights)
-        transport.send(NodeWire.message(NodeWire.Reply(re: request.id, result: .object(["sub": .string(ask.sub), "mode": .string("snapshot")]))))
-        connection.subs[ask.sub] = Sub(collection: ask.collection, sent: stream.seq)
-        transport.send(snapshot(of: stream, sub: ask.sub))
+        // A resume (the contract's §4, B3): the same epoch, and the stream can still say what changed after the client's
+        // `seq` (not ahead of it, not before a removal it forgot). Then no snapshot: one delta from that `seq`, or
+        // nothing until a change when the client is current. Anything else is a snapshot, which the client reconciles.
+        let resume = ask.since.flatMap { since in since.epoch == epoch ? stream.changes(since: since.seq) : nil }
+        transport.send(NodeWire.message(NodeWire.Reply(re: request.id, result: .object([
+            "sub": .string(ask.sub), "mode": .string(resume == nil ? "snapshot" : "resume"),
+        ]))))
+        if let resume {
+            connection.subs[ask.sub] = Sub(collection: ask.collection, sent: resume.prev)
+            if transport.writable { push(ask.sub, of: connection) }
+        } else {
+            connection.subs[ask.sub] = Sub(collection: ask.collection, sent: stream.seq)
+            transport.send(snapshot(of: stream, sub: ask.sub))
+        }
     }
 
     private func unsubscribe(_ request: NodeWire.Request, on transport: LiveTransport) {

@@ -453,11 +453,16 @@ right reason before the code that passes it.
 
 **Interfaces:** Consumes: B1. Produces: `subscribe`'s `since`, the reply's `mode`.
 
-- [ ] **Step 1: Failing tests** (`LiveResumeTests`): `aResumeInTheSameEpochSendsNoSnapshot`,
+- [x] **Step 1: Failing tests** (`LiveResumeTests`): `aResumeInTheSameEpochSendsNoSnapshot`,
   `aResumeGetsExactlyWhatChangedSince` (entries changed after, ids removed after, nothing else),
   `aResumeThatIsCurrentSendsNothingUntilAChange`, `aResumeOlderThanTheStreamRemembersGetsASnapshot` (257 removals),
-  `aSeqAheadOfTheStreamGetsASnapshot`, `aNewEpochGetsASnapshotNotAResume`.
-- [ ] **Step 2:** the resume. **Step 3:** lints, under load.
+  `aSeqAheadOfTheStreamGetsASnapshot`, `aNewEpochGetsASnapshotNotAResume`. (The last two hold what B1 already did,
+  a snapshot, so they passed before the resume; the other four failed on `mode`.)
+- [x] **Step 2:** the resume. **Step 3:** lints, under load.
+- **As built (B3):** a `since` out of form (not `{epoch: string, seq: int ≥ 0}`) is a snapshot, not `bad-args`. A
+  one-off probe (not committed), in process on a recording transport, debug build, 8 subscribers, 40 entries: 500
+  changes from `Changes.send` to the transport's `send`, p50 0.42 ms, p95 0.70 ms, max 1.1 ms (2026-11-17, load
+  about 3). The budget's number over a real WebSocket is G1's `LiveLatencyBench`.
 
 ### Task C1: The embedded files and their headers (lane C)
 
