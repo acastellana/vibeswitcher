@@ -17,17 +17,17 @@ So every worker, verifier and lead would quietly run without Code Mode while `sa
 With that plugin off, the answers to the four questions:
 
 1. **Chat view.** It shows a Code Mode session readably. Each tool call made from inside a snippet appears as an ordinary command, read or edit row, folded into the usual "Ran 6 commands · edited 1 file · read 2 files · used 2 tools · 5 failed" summary. The snippet itself (the `REPL` tool) and its `Poll` follow-ups count only as "used N tools", and the JavaScript isn't shown.
-2. **Resume.** It works only when the variable is set again. Without it, Claude Code refuses at once: "This session was started in Code Mode (experimental), which is off, so it can't be resumed." VibeSwitcher's host never passes the variable on its own, so Reopen all and a lead's restart would hit that refusal unless the user exports it in `~/.zshrc` or puts it in `~/.claude/settings.json`.
-3. **Guard rails.** They held. Inside one snippet, `git push`, `cd src && git push`, `git -C . push`, `git checkout main`, an Edit of the records folder, and (with a correctly written rule) a Read and a Grep of a private folder were all refused. Nothing got through. Inner calls reach `PreToolUse` hooks under their usual tool names. MCP tools (`mcp__vibeswitcher__progress`) are callable from a snippet.
+2. **Resume.** It works only when the variable is set again. Without it, Claude Code refuses at once: "This session was started in Code Mode (experimental), which is off, so it can't be resumed." VibeSwitcher's host never passes the variable on its own. A launch preset's Environment field is dropped by the sidebar's Resume and by Reopen all (`LaunchPresets.resumeRequest` sends `env: [:]`). So a resume works only when the variable is in the command text itself (`CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude`), exported in `~/.zshrc`, or set in `~/.claude/settings.json`.
+3. **Guard rails.** They held. Inside one snippet, `git push`, `cd src && git push`, `git -C . push`, `git checkout main`, an Edit of the records folder, and (with a correctly written rule) a Read and a Grep of a private folder were all refused. Nothing got through. Inner calls reach `PreToolUse` hooks under their usual tool names. They also reach the worker's `PermissionRequest` hook: it allowed a snippet's `git commit`. But a snippet's `cd src && git log` isn't one the hook allows, so it waits on a prompt nobody answers in a worker. MCP tools (`mcp__vibeswitcher__progress`) are callable from a snippet.
 4. **Speed.** No gain on a worker-sized job. Medians over 3 runs per arm: 14.6 s with Code Mode vs 13.9 s without, 4 vs 5 model turns, 162 k vs 292 k input tokens (mostly cheap cache reads). The cost-weighted input was about the same.
 
-**Recommendation: not yet for workers.** The user's own plugin blocks it, so adopting it is first the user's call about `savvy-progress`. It brings no speed gain on the jobs workers do most. And every path that restarts a session would need the variable carried, or it fails. If the user wants it anyway, adopt after fixes 1–4 below. The others are polish.
+**Recommendation: not yet for workers.** The user's own plugin blocks it, so adopting it is first the user's call about `savvy-progress`. It brings no speed gain on the jobs workers do most. And every path that restarts a session would need the variable carried, or it fails. If the user wants it anyway, adopt after fixes 1–4 and 9 below. The others are polish.
 
 ## Setup
 
 - `claude` 2.1.326, `--model opus --effort medium --permission-mode auto` (the user's default mode, which workers run in), plus the trial's `--settings` and a `--mcp-config` (the guard-rail session only).
 - **Environment.** Each process had the variables VibeSwitcher's host passes (`vibeswitcher-host/main.swift:27`: HOME, USER, LOGNAME, SHELL, LANG, a plain PATH, a scratch TMPDIR), plus `TERM=xterm-256color`, `COLORTERM`, `TERM_PROGRAM=VibeSwitcher`. It started through `/bin/zsh -l -i -c` as the host starts sessions (`HostedSession.arguments`). It got `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` for "on". For "off" the variable was absent, as a worker has it today. None of the nested-session variables of my own session were passed.
-- **Worker rules.** The `--settings` file held the worker's rules as `LeadLaunch.deny(.worker, base: "main", records: "docs/lead")` and `allow(.worker)` have them at 2c9a83d6: the git and records rules, `gitAround`, `remoteWrites` (83 rules). It also held `GIT_OPTIONAL_LOCKS=0` and `GIT_EDITOR=true`, and the worker's `PermissionRequest` hook (this worktree's `vibeswitcher-mcp --read-only-permission --root <repo> --worker`, wrapped to log its input and answer). For the private-file rules (`~/.vibeswitcher/lead/**`, `~/.claude/**`) I used a scratch canary folder instead, so a hole would leak nothing real. There was also a logging `PreToolUse` hook and a `Stop` hook that marks the end of each turn.
+- **Worker rules.** The `--settings` file held the worker's rules as `LeadLaunch.deny(.worker, base: "main", records: "docs/lead")` and `allow(.worker)` have them at 2c9a83d6: the git and records rules, `gitAround`, `remoteWrites` (83 rules). Left out: `outsideReads`, `userSettings`, `killsByName`, `debuggers`, `crossSession`, `claudeHome` and `claudeStores`. `privateFiles` was replaced by a scratch canary. It also held `GIT_OPTIONAL_LOCKS=0` and `GIT_EDITOR=true`, and the worker's `PermissionRequest` hook (this worktree's `vibeswitcher-mcp --read-only-permission --root <repo> --worker`, wrapped to log its input and answer). For the private-file rules (`~/.vibeswitcher/lead/**`, `~/.claude/**`) I used a scratch canary folder instead, so a hole would leak nothing real. There was also a logging `PreToolUse` hook and a `Stop` hook that marks the end of each turn.
 - **MCP.** A stub MCP server named `vibeswitcher` with one `progress` tool that logs each call. The real server talks to the real lead, so it wasn't used.
 - **Fixtures.**
   - The guard-rail repository was a scratch clone whose `origin` is a bare repository beside it. A push that got through would have shown up in the bare repo's refs.
@@ -39,13 +39,15 @@ With that plugin off, the answers to the four questions:
 | Session | Code Mode | What it was for |
 |---|---|---|
 | `3c0de0de-0001` | refused (plugin) | the headline banner |
-| `3c0de0de-0002` | on | guard rails, then resumed twice (resumes continue the same session and transcript) |
+| `3c0de0de-0002` | on | guard rails, then resumed three times (resumes continue the same session and transcript) |
 | six timed runs | 3 on, 3 off | point 4 |
 
 Launches that never made a model call:
 - 2 that quit at the folder-trust dialog while I fixed the driver
 - 2 no-prompt probes that answered the Code Mode confirmation (the first chose "No" by mistake; the second "Yes")
 - 1 refused resume (point 2)
+
+The fourth check was stopped by its pid after the declined prompt interrupted its turn.
 
 ## 1. How the chat view shows a Code Mode session
 
@@ -100,13 +102,17 @@ To resume it, run:
  CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --resume 3c0de0de-0002-4000-8000-000000000002
 ```
 
-**With `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1`**, same command and a new prompt: it resumed in Code Mode. The same transcript file grew, with new `repl-mode: true` lines and a new `REPL` call. The same worked again with `--permission-mode default` (the third check under point 3).
+**With `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1`**, same command and a new prompt: it resumed in Code Mode. The same transcript file grew, with new `repl-mode: true` lines and a new `REPL` call. The same worked twice more with `--permission-mode default` (the third and fourth checks under point 3). The snippet's JavaScript state doesn't carry over: on resume Claude Code warns "This REPL context is new: variables, functions and timers from earlier scripts in this conversation don't exist in it".
 
-What this means for VibeSwitcher's paths, from the code at 2c9a83d6:
+What this means for VibeSwitcher's paths, from the code at 2c9a83d6 (read, not driven through the app: the sandbox runs fake sessions only). Every `--resume` VibeSwitcher writes comes from `LaunchPresets.resumeCommand` (`<command> --resume <id>`) or `LeadLaunch.prepare(resume:)`:
 
-- **Restart card's Reopen all** (`RestartReopen`). It reopens your own sessions and leads with `entry.command` plus `--resume <id>`, through the host. `RestartReopen.Entry` keeps no environment. The host passes sessions only its fixed list (`inherited` in `vibeswitcher-host/main.swift`), then the login shell's `~/.zshrc`. So a Code Mode session started from a Terminal with the variable typed in front is refused on reopen. One started while the variable is exported in `~/.zshrc` or set in `~/.claude/settings.json`'s `env` reopens.
+- **Restart card's Reopen all and the sidebar's Resume** (`RestartReopen.spawnRequest` → `LaunchPresets.resumeRequest`). These rerun your own sessions and leads as `entry.command` plus `--resume <id>`, through the host, with `env: [:]`. `RestartReopen.Entry` keeps no environment. The host passes sessions only its fixed list (`inherited` in `vibeswitcher-host/main.swift`), then the login shell's `~/.zshrc`. So:
+  - A session started from a launch preset whose Environment field sets the variable (`AppDelegate` spawns it with `env: preset.env`) starts in Code Mode but is refused on Resume or Reopen all.
+  - The same goes for a session started from a Terminal with the variable typed in front.
+  - One whose preset command is `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude` resumes, because the command text is kept. So does one started while the variable is exported in `~/.zshrc` or set in `~/.claude/settings.json`'s `env`.
+  - Move to Window (`MoveToWindow`) keeps the preset's env.
 - **Lead restart** (`LeadController.startLead(resume:)` → `LeadLaunch.prepare(resume:)`). It has the same environment: `Prepared.environment` holds TMPDIR, the role and the vs-heavy settings, never this variable.
-- **Workers.** No path resumes one with `--resume`. `LeadLaunch.prepare` is called with `resume:` only for the lead, and the after-sleep recovery (`LeadAdvance.resumeAfterSleep`) continues the live session. So a worker restarted by the lead is a new session. It runs in Code Mode only if the variable reaches it (`~/.zshrc` or `~/.claude/settings.json`), and it then asks the first-run question only if the account hasn't answered it yet. This trial's "Yes" was saved in `~/.claude.json`.
+- **Workers.** No path resumes one with `--resume`. `LeadLaunch.prepare` is called with `resume:` only for the lead, and the after-sleep recovery (`LeadAdvance.resumeAfterSleep`) continues the live session. So a worker restarted by the lead is a new session. It runs in Code Mode only if the variable reaches it: `~/.zshrc`, `~/.claude/settings.json`, or the project's Claude command written as `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude` (`LaunchPreflight.program` looks past `FOO=1`, and `LeadLaunch.prepare` keeps the prefix). It then asks the first-run question only if the account hasn't answered it yet. This trial's "Yes" was saved in `~/.claude.json`.
 - **Other surfaces.** Per the confirmation dialog, a Code Mode session can't be continued in the Claude apps or in cloud sessions, so moving one to the desktop app doesn't work.
 
 ## 3. Guard rails inside a snippet
@@ -146,9 +152,20 @@ The prompt asked for ONE snippet that tries nine calls, each in try/catch. Claud
 **Hooks.**
 - The `PreToolUse` log shows the `REPL` call first, then every inner call under its usual name (`Bash`, `Read`, `Edit`, `mcp__vibeswitcher__progress`) with its own `tool_input`. A worker's hooks see what they see today.
 - VibeSwitcher's own user hook (`~/.vibeswitcher/bin/vibeswitcher-hook claude`) ran in the trial sessions too (the transcript's `stop_hook_summary`).
-- The worker's `PermissionRequest` hook was never called in any trial session (no log file was written). In auto mode nothing reached a prompt, so `ReadOnlyCommand` wasn't exercised. Per the docs, a call from a snippet can reach hooks as `cd '<dir>' && …`. The S1 snippet's own `cd src/sub && git status` ran without a prompt in auto mode.
+- **The worker's `PermissionRequest` hook in auto mode.** It was never called: nothing reached a prompt, and the S1 snippet's own `cd src/sub && git status` ran without one.
+- **Fourth check, default mode, same session.** One snippet ran Bash `git commit -m probe` and `cd src && git log --oneline -1`. The hook's log (`s1-permreq.jsonl`, the input and the answer of `vibeswitcher-mcp --read-only-permission --root <repo> --worker`):
+  ```
+  Bash {"command": "git commit -m probe"} -> {'hookSpecificOutput': {'decision': {'behavior': 'allow'}, 'hookEventName': 'PermissionRequest'}}
+  Bash {"command": "cd src && git log --oneline -1"} -> None
+  ```
+  - The commit ran on the hook's allow: "Exit code 1 / On branch task/probe / nothing to commit, working tree clean".
+  - The `cd` form got no answer from `ReadOnlyCommand`, so Claude Code showed its prompt: "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it. Do you want to proceed?"
+  - The driver declined it, which interrupted the turn. In a worker or verifier nobody answers that prompt.
+  - Code Mode writes `cd <dir> && …` itself whenever a snippet works in a subfolder (S1's snippets did twice). So it makes this prompt more likely than plain sessions do (fix 9).
 
-**Verdict.** No refused git command and no deny-rule'd call got through from inside a snippet. The auto-mode classifier judging the snippet as a whole is a new behaviour: one call it dislikes stops every call in that snippet (fix 8).
+**Verdict.** No refused git command and no deny-rule'd call got through from inside a snippet. Two behaviours are new:
+- The auto-mode classifier judges a snippet as a whole, so one call it dislikes stops every call in that snippet (fix 8).
+- A snippet's `cd <dir> && git …` falls outside what the worker's hook allows, so it can leave an unattended worker on a prompt (fix 9).
 
 ## 4. Timed comparison
 
@@ -185,8 +202,8 @@ The prompt asked for ONE snippet that tries nine calls, each in try/catch. Claud
 
 Names only. Found with `find ~/.claude ~/.claude.json -newer <scratch>/marker -type f`, then matched to the trial's session ids. Other sessions on this Mac wrote there too; their files aren't listed.
 
-- `~/.claude.json`: folder trust for the 8 scratch folders and the Code Mode answer. Checksum before `9259795e49326d77bed11a8248856eac7e749633`, after `07722135d229c9713848175240c6a4661b9a9cfc`; other sessions write this file too.
-- `~/.claude/projects/` — one folder per scratch project, each with its transcripts:
+- `~/.claude.json`: folder trust for the 7 scratch folders (`guard/repo` and the six job copies) and the Code Mode answer. Checksum before `9259795e49326d77bed11a8248856eac7e749633`, after `07722135d229c9713848175240c6a4661b9a9cfc`; other sessions write this file too.
+- `~/.claude/projects/` — one folder per scratch project, each with its transcripts and an empty `memory/` folder:
   - `-private-tmp-claude-501--Users-albert-dev-vibeswitcher--vibeswitcher-worktrees-code-mode-trial-does-8a58d6c2-085d-4c5d-84e6-08e81c353120-scratchpad-trial-guard-repo/`: `3c0de0de-0001-4000-8000-000000000001.jsonl`, `3c0de0de-0002-4000-8000-000000000002.jsonl`
   - `…-scratchpad-trial-job-on-1-proj/b2a18a26-b43f-4e03-b57e-6a64c61dae16.jsonl`
   - `…-job-off-1-proj/31f5ebc9-c2bf-4d48-9088-311d11837171.jsonl`
@@ -195,26 +212,36 @@ Names only. Found with `find ~/.claude ~/.claude.json -newer <scratch>/marker -t
   - `…-job-on-3-proj/578675ed-245b-4894-af93-108bb2e2671f.jsonl`
   - `…-job-off-3-proj/197450c9-4897-4f36-b652-4bcb628a890a.jsonl`
 - `~/.claude/session-env/<id>/sessionstart-hook-1.sh` for each of those 8 sessions and the 2 no-prompt probes (`1f281b0b-9673-4ac9-b1e3-38007006d917`, `6e75098b-c776-40f8-8900-821de3163bd0`).
-- Transient files that Claude Code removes itself: `~/.claude/sessions/<pid>.json` while each process ran (none left), and `~/.claude/shell-snapshots/snapshot-zsh-*.sh`.
+- `~/.claude/file-history/` — the Edit tool's backups from the three Code Mode timed runs (the off runs edited through Bash `sed`, so they left none):
+  - `b2a18a26-b43f-4e03-b57e-6a64c61dae16/a9ca949ab293c770@v1`, `@v2`
+  - `f026c6de-b638-4ed6-afeb-001a9e218ebe/f941a0e0b29d1f4c@v1`, `@v2`
+  - `578675ed-245b-4894-af93-108bb2e2671f/8a5ce18cd7b65825@v1`, `@v2`
+- `~/.claude/history.jsonl`: modified after the trial began. Interactive sessions append each prompt there, and other sessions write it too. I didn't read it: my rules refuse it.
+- `~/Library/Caches/claude-cli-nodejs/<scratch project folder name>/mcp-logs-*/…`: one folder per scratch project (the same 7 names as under `projects/`), holding MCP connection logs for the user's MCP servers and the stub. The guard-repo folder also has `mcp-logs-savvy-progress/`, from the session that ran with the plugin on.
+- Written as each process ran, not attributable by name:
+  - `~/.claude/sessions/<pid>.json`: gone after each exit, none left for a trial pid.
+  - `~/.claude/shell-snapshots/snapshot-zsh-*.sh`: one written at 18:39, during the trial's resumes, was still there at the end.
+- Not checked: whether VibeSwitcher's user hook (`~/.vibeswitcher/bin/vibeswitcher-hook`, which ran in every trial session) wrote under `~/.vibeswitcher`. My rules refused the `find` there.
 
 `~/.claude/settings.json` is unchanged: `shasum` before and after = `dea418a9307d2ec6eb6965a6a72fdc0c7703b0ae`.
 
 ## Fixes VibeSwitcher would need
 
 1. Code Mode is off for this user while `savvy-progress@claude-kit` is enabled: the user's call (disable it, wait for the plugin to support Code Mode, or let VibeSwitcher pass `enabledPlugins: {…: false}` in a role's `--settings`).
-2. Pass `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE` to workers, verifiers and the lead through `LeadLaunch.Prepared.environment` behind a setting: the host's `inherited` list drops it.
-3. Record whether a session ran in Code Mode (its transcript's `repl-mode` line) in `RestartReopen.Entry`, and set the variable when Reopen all resumes it; otherwise the reopen is refused.
+2. Pass `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE` to workers, verifiers and the lead through `LeadLaunch.Prepared.environment` behind a setting: the host's `inherited` list drops it. Until then, writing the project's Claude command as `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude` works without code.
+3. `LaunchPresets.resumeRequest` (sidebar Resume and Reopen all) spawns with `env: [:]`, dropping the preset's Environment, so a Code Mode session started from such a preset is refused on resume: keep the preset's env, or record Code Mode (the transcript's `repl-mode` line) in `RestartReopen.Entry` and set the variable.
 4. `LeadLaunch.prepare(resume:)` (lead restart) needs the same: resume a Code Mode lead with the variable set.
 5. Chat view: give `REPL` a detail that shows its JavaScript under a "Code" label, as Claude Code's transcript viewer does, instead of the generic field list.
 6. Chat view: fold `Poll` calls and the `(dispatched #N)` result into their `REPL` row instead of counting them as separate tools.
 7. Check that the model chip and usage ignore `<synthetic>` lines: each inner call adds a zero-usage `ChatUsage(model: "<synthetic>")` event.
 8. Auto mode's classifier judges a snippet as a whole: one refused call drops the rest of the snippet, so tell workers one concern per snippet, and keep the deny rules (not the classifier) as the guard.
-9. Unrelated to Code Mode: `LeadLaunch.deny(.worker, records:)` writes `Write(<records>/**)`, and Claude Code 2.1.326 warns at every worker start: "Deny rule Write(docs/lead/**) never matches · use Edit(docs/lead/**)". Drop it; `Edit(…)` already covers Write.
+9. `ReadOnlyCommand` (the worker's and verifier's `PermissionRequest` hook) doesn't accept a leading `cd <dir> &&` inside the worktree: a snippet's `cd src && git log` went to a prompt nobody answers in a worker. Accept a `cd` that stays in the root.
+10. Unrelated to Code Mode: `LeadLaunch.deny(.worker, records:)` writes `Write(<records>/**)`, and Claude Code 2.1.326 warns at every worker start: "Deny rule Write(docs/lead/**) never matches · use Edit(docs/lead/**)". Drop it; `Edit(…)` already covers Write.
 
 Also unrelated to Code Mode, seen while setting up this trial in my own worker session: `git --git-dir=<scratch>/origin.git for-each-ref` ran although the worker rules deny `Bash(git --git-dir:*)`. The `=` form doesn't match that prefix rule. It was a harmless read here, but the same form could reach a write the rules mean to stop. That deserves its own task.
 
 ## Open
 
 - **MCP.** Shown with a stub named `vibeswitcher`, not with the real tool server.
-- **Worker's `PermissionRequest` hook.** Never reached in auto mode, so whether `ReadOnlyCommand` accepts the `cd '<dir>' && …` form Code Mode can send wasn't tested.
+- **Quoted `cd` form.** The docs' `cd '<dir>' && …` (quoted, written by Claude Code itself rather than the snippet) wasn't seen in this trial. The unquoted `cd src && …` the snippet wrote was.
 - **Background snippets.** In auto mode a snippet can run for up to 2 h. I didn't check how the lead's witness reads a worker waiting on one.
