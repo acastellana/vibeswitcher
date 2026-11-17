@@ -1384,8 +1384,8 @@ differ replies before the server is replaced).
   or one since the vault recorded it (a change no look has held yet), saying "accept the held config first
   (vibeswitcher config held / config accept)" (`HeldChange`, asked by `SwitchRequest` before a handover, never for the
   build that runs already, so a follow-up the command line didn't finish is finished; `hooks install` has the same
-  check for the builds folder). So a build folder a worker changed is shown to the user before the host runs it, and
-  each switch and rollback in the start plan's S9 card comes after a `config held` / `accept`. Before the vault has
+  check for the builds folder). So a build folder a worker changed is shown to the user before a switch or a rollback
+  runs it (not before a start: "Doesn't promise"), and each switch and rollback in the start plan's S9 card comes after a `config held` / `accept`. Before the vault has
   recorded either folder (a fresh vault before its first accept) there is nothing to compare, and the first accept
   shows them as they are.
 - **The install** (the bootstrap path's steps 8 and 10) builds from a clean, detached `git worktree add` of a commit on
@@ -1421,7 +1421,12 @@ what it needs.
 
 - The install folder, `build-info`, the unit and its drop-ins, `environment.d` and the manager's environment are the
   user's to write before the sandbox; a host start a worker causes runs what they name (S2), and anything else the
-  manager starts gets the manager's environment. `start` refuses what the manager shows after its `daemon-reload`
+  manager starts gets the manager's environment. Any host start, the user's typed `start` (after a crash or a worker's
+  kill, with `Restart=no`) and the `--at-login` one included, runs what the builds folder then holds for the unit's
+  commit, with no seal check: no host or vault runs yet to compare with. `start` requires only that the folder's `bin`
+  match its `build-info` (the start plan's ST-D3), which a worker can rewrite with it (S11 item 3); a started host's
+  vault is fresh, so its first look shows the folder as it is, not as a change, after the host has run it (the step 8
+  sweep, 2026-11-17). `start` refuses what the manager shows after its `daemon-reload`
   (a drop-in, a `vibeswitcher-node.service.wants/`, `.requires/` or `.upholds/` link, a directive start didn't
   write, a variable: the start plan's ST-D2 and the review of its S2), but a `set-environment` after its last read, or
   a unit file put in place of start's before the reload with a directive the check doesn't read, still reaches a start
