@@ -1610,7 +1610,7 @@ environment is then read; failed with the host setting `HOME` alone);
 `StartCommandTests.aDetachedStartRefusesAUmaskThatLetsOthersWrite` (the step 8 sweep);
 `StartCommandTests.aStartWhileTheFirstWaitsForItsServerIsRefused` (its review: the start's lock held until the
 server answers, so a host that hasn't taken its own lock yet isn't replaced);
-`InstallTests.aFolderNoInstallRecordedIsRefusedNotAdopted` (its review: a folder at `<prefix>/<commit>` no install
+`InstallTests.aFolderNoInstallRecordedIsRefusedNotAdopted` (its review: a build folder under the prefix no install
 recorded is refused, not made current on its `build-info`'s word);
 `SwitchTests.aRunningToolServerKeepsItsBuildAcrossASwitch`, `SwitchTests.aToolServerStartedAfterASwitchIsTheNewBuilds`,
 `SwitchTests.aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild` (the start plan's S8c: a running tool server keeps its
