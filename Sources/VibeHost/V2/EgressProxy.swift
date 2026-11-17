@@ -151,11 +151,15 @@ extension EgressProxy {
         /// One accepted connection: the client's socket, and the upstream's once made. Shut both ways when its session
         /// ends, which ends the thread that carries it.
         final class Connection: @unchecked Sendable {
-            let client: Int32
             private let lock = NSLock()
+            /// The client's socket; -1 once closed here, so a number the system has given out again since is never
+            /// shut by `end()`.
+            private var clientFd: Int32
             private var upstream: Int32 = -1
             private var ended = false
-            init(client: Int32) { self.client = client }
+            init(client: Int32) { clientFd = client }
+
+            var client: Int32 { lock.withLock { clientFd } }
 
             /// Holds `fd` as the upstream; false (and it is closed) when the connection already ended.
             func hold(_ fd: Int32) -> Bool {
@@ -166,18 +170,23 @@ extension EgressProxy {
                 }
             }
 
+            /// Cuts the connection both ways: only descriptors it still owns.
             func end() {
                 lock.withLock {
                     ended = true
-                    shutdown(client, Int32(SHUT_RDWR))
+                    if clientFd >= 0 { shutdown(clientFd, Int32(SHUT_RDWR)) }
                     if upstream >= 0 { shutdown(upstream, Int32(SHUT_RDWR)) }
                 }
             }
 
+            /// Closes both descriptors and forgets their numbers: an `end()` after this touches nothing, whatever
+            /// the numbers name by then.
             func close() {
                 lock.withLock {
-                    Sys.close(client)
+                    ended = true
+                    if clientFd >= 0 { Sys.close(clientFd) }
                     if upstream >= 0 { Sys.close(upstream) }
+                    clientFd = -1
                     upstream = -1
                 }
             }
@@ -232,11 +241,12 @@ extension EgressProxy {
                 }
                 let thread = Thread { [self] in
                     carry(connection, session: session, rules: rules)
-                    connection.close()
+                    // Off the session's list first, so its end can't reach it, then closed.
                     lock.withLock {
                         total -= 1
                         sessions[session]?.open.removeAll { $0 === connection }
                     }
+                    connection.close()
                 }
                 thread.name = "egress.connection"
                 thread.start()

@@ -284,6 +284,28 @@ struct EgressProxyTests {
         #expect(await eventually(timeout: 30) { (try? box.connect()).map { Sys.close($0); return false } ?? true }, "its listener is closed")
     }
 
+    /// A connection's descriptors closed, their numbers given to another connection: ending the old one cuts nothing.
+    @Test func anEndedConnectionNeverShutsADescriptorNumberGivenOutAgain() async throws {
+        let old = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+        let connection = EgressProxy.Server.Connection(client: old.0)
+        let reused = old.0
+        connection.close()
+        Sys.close(old.1)
+        // A fresh connection on the same number, as the system hands numbers out again.
+        let fresh = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+        defer { Sys.close(fresh.1) }
+        if fresh.0 != reused {
+            #expect(dup2(fresh.0, reused) == reused)
+            Sys.close(fresh.0)
+        }
+        defer { Sys.close(reused) }
+        connection.end()
+        egressSend(fresh.1, "still")
+        #expect(egressReceive(reused, until: "still", within: 5) == "still", "the reused number was shut")
+        egressSend(reused, "both ways")
+        #expect(egressReceive(fresh.1, until: "both ways", within: 5) == "both ways")
+    }
+
     @Test func theLimitsHold() async throws {
         let world = StandInWorld()
         try world.serve("a.example", at: "203.0.113.7")
