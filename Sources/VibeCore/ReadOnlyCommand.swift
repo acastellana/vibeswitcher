@@ -162,18 +162,17 @@ public enum ReadOnlyCommand {
     /// and the prompt shows as before).
     ///
     /// The same hook is the role's `PreToolUse` hook, which Claude Code asks about every Bash call whatever the
-    /// permission mode: it refuses a line that runs git with a refused option in any spelling (`RefusedGit`), and says
+    /// permission mode: it refuses a line that runs git with a refused option in any spelling (`RefusedGit`), or one
+    /// nested too deep to read (`ShellWords.depthLimit`), and says
     /// nothing about any other (the call then goes on to the rules, and to the prompt or the `PermissionRequest` event).
     public static func hookAnswer(_ input: Data, root: String? = nil, writes: Bool = false) -> Data? {
         guard let object = try? JSONSerialization.jsonObject(with: input) as? [String: Any],
               object["tool_name"] as? String == "Bash",
               let command = (object["tool_input"] as? [String: Any])?["command"] as? String else { return nil }
         if object["hook_event_name"] as? String == "PreToolUse" {
-            guard let option = RefusedGit.refusal(in: command) else { return nil }
-            let reason = "VibeSwitcher refuses git's \(option) to every role, in every spelling: it points git at another repository, "
-                + "work tree, config or programs. Run git in your own worktree without it."
+            guard let refusal = RefusedGit.refusal(in: command) else { return nil }
             let answer: [String: Any] = ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                                                "permissionDecisionReason": reason]]
+                                                                "permissionDecisionReason": refusal.reason]]
             return try? JSONSerialization.data(withJSONObject: answer, options: [.sortedKeys])
         }
         guard allows(command, in: Scope(root: root, cwd: object["cwd"] as? String, writes: writes)) else { return nil }

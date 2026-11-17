@@ -108,6 +108,24 @@ struct RefusedGitSpellingsTests {
         // Arithmetic's `<<` is a shift: the next line is still read. Programs that run the command after them.
         "echo $((1<<2))\ngit -C x status", "echo \"$((1<<2))\"\ngit -C x status", "/usr/bin/time git -C x status",
         "git ls-files | xargs -n 1 git --git-dir=x log",
+        // Audit F1: process substitution is a command of its own, and the words after it are still read.
+        "cat <(true); git -C x status", "diff <(git show HEAD:a) <(cat a) && git --git-dir=../x/.git log",
+        "git status 2> >(cat); git -C x status", "cat <(git -C x show HEAD:a)", "git log > >(git --work-tree=x add .)",
+        "diff <(git show main:f) <(cat f) && git --git-dir=../x/.git update-ref refs/heads/main HEAD",
+        // Audit F2: an unquoted here-document's substitutions run.
+        "cat <<EOF\n$(git -C x status)\nEOF", "cat <<EOF\n`git --git-dir=x log`\nEOF",
+        "cat > notes.md <<EOF\nmain is at $(git -C ../.. rev-parse HEAD)\nEOF", "cat <<-EOF\n\t\"$(git -C x log)\"\n\tEOF",
+        "cat <<EOF\ntext\nEOF\ngit -C x status", "cat <<'EOF'\ntext\nEOF\ngit -C x status",
+        // Audit F4: an arithmetic command's `<<` is a shift; its substitutions run, and `((…) …)` is two subshells.
+        "((x = 1<<2))\ngit -C x status", "if ((1<<2)); then git -C x status; fi", "echo $(( $(git -C x rev-list --count HEAD) + 1 ))",
+        "((n = $(git --git-dir=x rev-list --count HEAD)))", "((cd src); git -C x status)",
+        // Audit F5: ANSI-C quoting, where a backslash escapes the quote.
+        "echo $'it\\'s' && git -C x status", "git $'-C' x status",
+        // Audit F6: a substitution inside `${…}` runs.
+        "echo ${x:-$(git -C x status)}", "echo \"${x:-$(git -C x status)}\"",
+        // Audit F7: the wrappers workers use.
+        "timeout 60 git -C x status", "timeout -k 5 60 git --git-dir=x log", "arch -arm64 git -C x status", "stdbuf -oL git -C x status",
+        "vs-heavy --timeout 2h git -C x status", "caffeinate -i git -C x status", "nohup git --git-dir=x log",
     ]
 
     /// The same lines' harmless neighbours: options after the subcommand, the words in a message or a pattern.
@@ -116,6 +134,11 @@ struct RefusedGitSpellingsTests {
         "git blame -C a.txt", "git log --grep=--git-dir", "git grep -e -C", "git -P log --oneline", "git --no-pager diff --stat",
         "GIT_OPTIONAL_LOCKS=0 git status", "git log --oneline -- docs/git-dir.md", "echo 'git -C x status; git --git-dir=y'",
         "cat <<'EOF'\ngit --git-dir=x status\nEOF", "grep -rn 'git -C' Sources", "cd src && git log --oneline",
+        // The audit's lines without the refused option, and quoted here-documents, whose bodies are text.
+        "diff <(git show HEAD:a) <(cat a)", "git status 2> >(cat); git log --oneline", "cat <<'EOF'\n$(git -C x status)\nEOF",
+        "cat <<\\EOF\n`git -C x status`\nEOF", "cat <<EOF\ngit -C x status is refused\nEOF\ngit log --oneline",
+        "((x = 1<<2))\ngit status", "echo $((1<<2)) && git log --oneline", "echo $'it\\'s' && git status", "echo ${x:-$(git status)}",
+        "timeout 60 git status", "vs-heavy --timeout 2h git log --oneline", "echo $(echo $(echo $(git status)))",
     ]
 
     /// A worker's own harmless writes (the lead and the verifier are refused `git switch` and `git commit` outright).
@@ -132,6 +155,22 @@ struct RefusedGitSpellingsTests {
         }
         for line in Self.harmless + (role == .worker ? Self.harmlessForAWorker : []) {
             #expect(try !guardRail.refuses(line), "\(role) refuses: \(line)")
+        }
+    }
+
+    /// Audit F3: a line nested deeper than the scanner reads is refused, not read (an unbounded read could overflow
+    /// the stack, and a crashed hook says nothing, which lets the call through); nested less, it's read as before.
+    @Test func aLineNestedTooDeepIsRefusedNotRead() throws {
+        func nested(_ levels: Int, _ inner: String) -> String {
+            String(repeating: "echo $(", count: levels) + inner + String(repeating: ")", count: levels)
+        }
+        let worker = try Guard(.worker, temp: temp)
+        #expect(try !worker.refuses(nested(10, "git status")))
+        #expect(try worker.refuses(nested(10, "git -C x status")))
+        #expect(try worker.refuses(nested(40, "git status")))
+        for deep in [nested(100_000, "git status"), String(repeating: "(", count: 100_000), String(repeating: "${", count: 100_000),
+                     String(repeating: "$((", count: 50_000), String(repeating: "<(", count: 100_000)] {
+            #expect(try worker.refuses(deep))
         }
     }
 
