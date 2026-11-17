@@ -202,6 +202,9 @@ struct LeadPipelineTests: LeadTeamFixture {
             clock = Self.t0.addingTimeInterval(minute * 60)
             let again = lead.watchPipeline()
             #expect(!again.tell, "at \(minute) min: \(String(describing: again.text))")
+            // No look armed: each would arm another wake (a new time at every look) on a Mac nearly out of charge.
+            // The witness nudges the tool server when the hold ends.
+            #expect(again.next == nil, "at \(minute) min: \(String(describing: again.next))")
         }
         #expect(lead.store.load().reports?.count == 1, "\(lead.store.load().reports ?? [])")
         // AC power returns at 310 min: merges may start again, so the next report waits 30 min from then.
