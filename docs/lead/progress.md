@@ -3606,3 +3606,8 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 17:02 Audit of flaky-host-tests-make: incomplete, clean, round 1: 1 Important open
 - 2026-11-17 17:02 Started a worker on flaky-host-tests-make (auto → Claude: a hard task (advisor fable) runs on Claude with a Fable advisor while Claude's usage allows)
 - 2026-11-17 17:02 Automatically (auto_advance): Sent flaky-host-tests-make's worker the open Important findings flaky-host-tests-make:F1 from its audit at 64df26cf (in a new worker: its last one was released during the audit).
+- 2026-11-17 17:03 Dismissed flaky-host-tests-make:F1: Accepted as a known gap per decision 2026-11-17 17:02:56: no repro (worker 28/28, verifier 10/10 under load), diagnosis now prints the output so the next failure carries the evidence; the four fixed races merge now.
+- 2026-11-17 17:04 Audit of flaky-lead-and-dictation: complete, clean, round 1: 1 Nit open
+- 2026-11-17 17:06 Audit of flaky-host-tests-make: complete, clean, round 2: 1 Important closed
+- 2026-11-17 17:21 Merged flaky-host-tests-make: Flaky host tests: make this week's five host/session flakes deterministic (in a batch: flaky-host-tests-make, flaky-lead-and-dictation landed on one test run) (build 9e4f85a8ba8c)
+- 2026-11-17 17:21 Merged flaky-lead-and-dictation: Flaky lead and dictation tests: make this week's six flakes deterministic (in a batch: flaky-host-tests-make, flaky-lead-and-dictation landed on one test run) (build 9e4f85a8ba8c)
