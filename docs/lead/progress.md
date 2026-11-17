@@ -3592,3 +3592,9 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 13:50 Automatically (auto_advance): Merged explainer-video-add-the-2 (Explainer video: add the update check and the skill-sync auto-accept) into main at 7c5e0c70, on its passing audit and the full test run.
 - 2026-11-17 13:50 Automatically (auto_advance): Cleaned up explainer-video-add-the-2 (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-17 13:50 Update: Today: memory fixed, update check built, video completed — **Landed (Nov 16–17):**
+- 2026-11-17 16:15 Planned flaky-host-tests-make: Flaky host tests: make this week's five host/session flakes deterministic
+- 2026-11-17 16:15 Started a worker on flaky-host-tests-make (auto → Claude: a hard task (advisor fable) runs on Claude with a Fable advisor while Claude's usage allows)
+- 2026-11-17 16:15 Automatically (auto_advance): Started a worker on flaky-host-tests-make (Flaky host tests: make this week's five host/session flakes deterministic); its agent is auto, so it went to Claude: a hard task (advisor fable) runs on Claude with a Fable advisor while Claude's usage allows.
+- 2026-11-17 16:15 Planned flaky-lead-and-dictation: Flaky lead and dictation tests: make this week's six flakes deterministic
+- 2026-11-17 16:15 Started a worker on flaky-lead-and-dictation (auto → Claude: Claude weekly 18%, 9 points ahead of pace (limits ignored), not tight; Codex 24%)
+- 2026-11-17 16:15 Automatically (auto_advance): Started a worker on flaky-lead-and-dictation (Flaky lead and dictation tests: make this week's six flakes deterministic); its agent is auto, so it went to Claude: Claude weekly 18%, 9 points ahead of pace (limits ignored), not tight; Codex 24%.
