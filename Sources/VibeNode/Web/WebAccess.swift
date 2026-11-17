@@ -45,6 +45,10 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     private let lock = NSLock()
     /// Each live code's digest and when it runs out, the oldest first.
     private var codes: [(digest: [UInt8], expiresAt: Date)] = []
+    /// Bumped by each `revoke`, with the codes dropped, under `lock`: an `admit` that saw another number before it took
+    /// its code than after it issued its token raced a revoke, and the token it issued is dropped (a revoke means no page
+    /// until `vibeswitcher web` again, whatever was under way).
+    private var revocations = 0
     private var listenHook: Listen = { .failure(WebTokens.Refusal("this server has no web listener")) }
     private var changeHook: (@Sendable () -> Void)?
     private var revokeHook: (@Sendable () -> Void)?
@@ -123,7 +127,10 @@ public final class WebAccess: WebGate, @unchecked Sendable {
 
     /// `web.revoke`: every code and token dropped, then `onRevoke` and `onChange`. Returns how many tokens were alive.
     public func revoke() -> Result<Int, WebTokens.Refusal> {
-        lock.withLock { codes = [] }
+        lock.withLock {
+            codes = []
+            revocations += 1
+        }
         let dropped: Int
         do { dropped = try tokens.revokeAll(now: now()) } catch let refusal as WebTokens.Refusal {
             return .failure(refusal)
@@ -161,9 +168,17 @@ public final class WebAccess: WebGate, @unchecked Sendable {
         let at = now()
         switch (pair, token) {
         case (let pair?, nil):
+            // The revocations seen before the code is taken, and again once its token is issued: a revoke between the
+            // two (it dropped every token, but not this one, issued after it) leaves this one dropped and the page out.
+            let before = lock.withLock { revocations }
             guard pair.utf8.count <= 64, take(pair, now: at) else { return refused() }
             betweenTakeAndIssue?()
             guard let issued = try? tokens.issue(now: at) else { return refused() }
+            guard lock.withLock({ revocations }) == before else {
+                try? tokens.drop(issued.token)
+                onChange?()
+                return refused()
+            }
             note("a pairing code was taken: a web token issued")
             onChange?()
             afterAdmit?()

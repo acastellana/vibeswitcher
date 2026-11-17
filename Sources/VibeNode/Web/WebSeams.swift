@@ -34,6 +34,14 @@ public protocol WebGate: AnyObject, Sendable {
     func admit(_ args: [String: NodeWire.Value]) -> WebAdmission?
     /// A pairing code or a token is alive: the listener stays up.
     var wanted: Bool { get }
+    /// Whether `token` (an admission's) is still taken: asked again after `admit` and before `hello`, so a revoke
+    /// that landed in between leaves the connection closed, never told anything.
+    func holds(_ token: String) -> Bool
+}
+
+extension WebGate {
+    /// A gate that keeps nothing past `admit` (a test's stand-in) holds what it admitted.
+    public func holds(_ token: String) -> Bool { true }
 }
 
 /// An admitted connection: what it may do, `hello`'s `auth`, and the token it came in under (to close it on revoke).

@@ -111,6 +111,18 @@ public final class WebTokens: @unchecked Sendable {
         }
     }
 
+    /// `token` dropped, when it is one's (a token issued as a revoke ran, `WebAccess.admit`): the file written without
+    /// it. Nothing happens for a token that isn't held.
+    public func drop(_ token: String) throws {
+        let candidate = Self.digest(token)
+        try lock.withLock {
+            guard newerFormat == nil, entries.contains(where: { Self.same($0.digest, candidate) }) else { return }
+            let kept = entries.filter { !Self.same($0.digest, candidate) }
+            try write(kept)
+            entries = kept
+        }
+    }
+
     /// How many tokens are alive at `now`.
     public func live(now: Date) -> Int {
         lock.withLock { newerFormat == nil ? entries.filter { $0.expiresAt > now }.count : 0 }

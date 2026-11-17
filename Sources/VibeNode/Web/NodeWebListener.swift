@@ -271,6 +271,10 @@ public final class NodeWebListener: @unchecked Sendable {
         guard let admission = gate.admit(request.args ?? [:]) else {
             return transport.close(code: "auth", reason: Self.authRefusal)
         }
+        // A revoke may have landed since the gate said yes: nothing is said to a connection whose token is gone.
+        guard gate.holds(admission.token) else {
+            return transport.close(code: "revoked", reason: "this page's access was revoked: run `vibeswitcher web` again")
+        }
         transport.admission = admission
         rearmClock()
         if let hello, let message = hello(admission) { transport.send(message) }
