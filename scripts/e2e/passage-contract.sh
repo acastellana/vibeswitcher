@@ -5,7 +5,7 @@
 # compares both with the real binary's own `help` and `version`, and says exactly what drifted. Run on demand (never
 # part of scripts/test.sh): Passage is a separate project that changes on its own.
 #
-# scripts/e2e/passage-contract.sh [--passage PATH] [--stand-in PATH] [--apps DIR:DIR…]
+# scripts/e2e/passage-contract.sh [--passage PATH] [--stand-in PATH] [--apps DIR:DIR…] [--time-limit S]
 #   --passage PATH   the Passage to check, read as Settings › Wallet reads a path (PassageCommand.forPath): an app
 #                    bundle (….app) runs its Contents/MacOS/Passage with `cli`; a file named `passage` runs as is; any
 #                    other file runs with `cli` when it is, or links to, a binary inside an app bundle, else as is.
@@ -14,6 +14,9 @@
 #   --stand-in PATH  the stand-in whose help is compared (scripts/e2e/loop-passage).
 #   --apps DIR:DIR…  the app bundles looked in after the PATH (/Applications/Passage.app:~/Applications/Passage.app);
 #                    the test gives scratch ones.
+#   --time-limit S   how long `help` and `version` may each take (20 s): a binary still running then (one that opened a
+#                    window in place of answering) is ended, and that's drift. The test's fakes answer at once and get
+#                    longer: a merge's loaded Mac once took past 20 s to start one (2026-11-14).
 #
 # What it checks, one line each (`ok` or `DRIFT`):
 #   - the version (`passage version` prints `passage <version>`; the version itself is shown, never judged)
@@ -43,14 +46,18 @@ source "$repo/scripts/lib/scratch.sh"
 passage_path=""
 stand_in=$repo/scripts/e2e/loop-passage
 apps="/Applications/Passage.app:$HOME/Applications/Passage.app"
+time_limit=20
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --passage|--stand-in|--apps)
+        --passage|--stand-in|--apps|--time-limit)
             [[ $# -ge 2 ]] || { echo "$1 needs a value (--help)"; exit 64; }
             case $1 in
                 --passage) passage_path=$2 ;;
                 --stand-in) stand_in=$2 ;;
                 --apps) apps=$2 ;;
+                --time-limit)
+                    [[ $2 =~ ^[1-9][0-9]*$ ]] || { echo "--time-limit takes whole seconds, not $2 (--help)"; exit 64; }
+                    time_limit=$2 ;;
             esac
             shift 2 ;;
         -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
@@ -116,12 +123,12 @@ fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/passage-contract.XXXXXX") || { echo "can't make a scratch folder"; exit 1; }
 on_exit 'rm -rf "$work" </dev/null'
 
-# The one place the real binary is run: `help` or `version`, nothing else, with no stdin and at most 20 s (perl's
+# The one place the real binary is run: `help` or `version`, nothing else, with no stdin and at most --time-limit (perl's
 # alarm stays set across exec, and ends a binary that opened a window in place of answering). Output in $work/$1.
 ask() {
     case $1 in help|version) ;; *) echo "passage-contract: refusing to run passage $1"; exit 1 ;; esac
     # shellcheck disable=SC2086
-    perl -e 'alarm 20; exec @ARGV or exit 127' "$exe" $leading "$1" </dev/null >"$work/$1" 2>"$work/$1.err"
+    perl -e 'alarm '"$time_limit"'; exec @ARGV or exit 127' "$exe" $leading "$1" </dev/null >"$work/$1" 2>"$work/$1.err"
 }
 
 drifts=0

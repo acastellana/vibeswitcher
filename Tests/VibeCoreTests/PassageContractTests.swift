@@ -51,11 +51,15 @@ struct PassageContractTests {
     }
 
     /// Runs the script with `arguments`; its PATH is the system's folders after `bin` (when given), and its app
-    /// bundles `apps` (none unless given), so the Passage installed on this Mac is never found.
-    func check(_ arguments: [String] = [], bin: URL? = nil, apps: [URL] = []) throws -> (status: Int32, out: String) {
+    /// bundles `apps` (none unless given), so the Passage installed on this Mac is never found. The fakes answer at
+    /// once, so each `help` and `version` may take `hangGuard` (`--time-limit`), not the real binary's 20 s: a merge's
+    /// loaded Mac took past 20 s to start one (2026-11-14: "`passage version` exited 142", perl's alarm).
+    func check(_ arguments: [String] = [], bin: URL? = nil, apps: [URL] = [],
+               timeLimit: Int = Int(hangGuard)) throws -> (status: Int32, out: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [Self.script, "--apps", apps.isEmpty ? scratch.url("no-app").path + ".app" : apps.map(\.path).joined(separator: ":")] + arguments
+        process.arguments = [Self.script, "--apps", apps.isEmpty ? scratch.url("no-app").path + ".app" : apps.map(\.path).joined(separator: ":"),
+                             "--time-limit", String(timeLimit)] + arguments
         var environment = ["PATH": (bin.map { $0.path + ":" } ?? "") + "/usr/bin:/bin", "HOME": scratch.url("home").path]
         environment["TMPDIR"] = ProcessInfo.processInfo.environment["TMPDIR"]
         process.environment = environment
@@ -144,6 +148,22 @@ struct PassageContractTests {
         #expect(ran.status == 1, "\(ran.out)")
         #expect(driftLines(ran.out) == ["DRIFT  listen: help lists no `listen` command",
                                         "DRIFT  stand-in listen: scripts/e2e/loop-passage has it, passage's help doesn't"], "\(ran.out)")
+    }
+
+    /// A binary still running at the time limit (one that opened a window in place of answering) is ended, and
+    /// that's drift; a time limit that isn't whole seconds is a usage error.
+    @Test func aPassageThatDoesntAnswerInTimeIsDrift() throws {
+        let bin = try bin()
+        let passage = bin.appendingPathComponent("passage")
+        let script = try String(contentsOf: passage, encoding: .utf8)
+        try script.replacingOccurrences(of: "version) echo", with: "version) exec sleep 600; echo")
+            .write(to: passage, atomically: true, encoding: .utf8)
+        chmod(passage.path, 0o755)
+        let ran = try check(bin: bin, timeLimit: 1)
+        #expect(ran.status == 1, "\(ran.out)")
+        #expect(driftLines(ran.out) == ["DRIFT  version: `passage version` exited 142: "], "\(ran.out)")
+        #expect(ran.out.contains("ok     help: 7 commands listed"), "\(ran.out)")
+        for limit in ["0", "1.5", "soon"] { #expect(try check(["--time-limit", limit], bin: bin).status == 64, "\(limit)") }
     }
 
     @Test func noPassageFoundHasItsOwnExitCode() throws {
