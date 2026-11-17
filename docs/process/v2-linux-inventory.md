@@ -513,7 +513,11 @@ carries `VIBESWITCHER_SESSION`).
   `_SYSTEMD_CGROUP` (`NodeJournal.passes`), and on the user's node it sent its datagram and returned: a command that
   ended right after writing (`status --ack`, `start`'s acknowledgment of S11, the stop fallback's entry, any entry
   written last) could leave an entry that never counts, and `status` then showed the user's own action as "not a
-  terminal's" or as accepted with no entry.
+  terminal's" or as accepted with no entry. Fixed the same day: the command line stays until journald has the entry
+  (`NodeContext.writeJournal`, `NodeJournal.awaitEntry`: a look for the entry's nonce with `journalctl --user`, up to
+  5 s), and `status` says "journald recorded no cgroup (the writer ended first)" of an entry of the user's uid
+  without one, which still doesn't count (the security architecture document's S3; the engine plan's E1, its Step 3
+  note of 2026-11-17).
 
 ## The user manager's environment (2026-11-17, Linux 5.15.167.4-microsoft-standard-WSL2)
 

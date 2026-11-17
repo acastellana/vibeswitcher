@@ -27,6 +27,12 @@ public struct JournalEntry: Equatable, Sendable {
 /// records an acknowledgment or records a request only when journald's own fields (`_UID`, `_SYSTEMD_CGROUP`) pass the
 /// voice rule's scope list (`passes`): an identifier the entry carries is never enough. The server reports only what
 /// it holds; what it says about itself is never the record.
+///
+/// journald reads a writer's cgroup from `/proc/<pid>` when it takes the datagram, so an entry whose writer had ended
+/// by then has no `_SYSTEMD_CGROUP` (measured, the bootstrap path's M4, 2026-11-17: `logger`'s entry had none). Such
+/// an entry of the user's uid never counts (`passes` fails closed: any process of the user's can write one and end),
+/// and is said for what it is (`hasNoCgroup`, `noCgroupSaid`), not as an entry from another cgroup. So that the
+/// command line's own entries don't end so, it stays until journald has each (`awaitEntry`).
 public enum NodeJournal {
     /// The command line's `SYSLOG_IDENTIFIER`.
     public static let identifier = "vibeswitcher"
@@ -184,6 +190,16 @@ public enum NodeJournal {
         return rule.cgroupRefusal(["0::" + cgroup]) == nil
     }
 
+    /// Whether `entry` is one of the user's uid that journald recorded no cgroup for: its writer had ended before
+    /// journald read `/proc/<pid>/cgroup` (a command that exits right after its datagram, as `logger` does). It doesn't
+    /// pass: nothing says where it came from, and any process of the user's can write one so.
+    public static func hasNoCgroup(_ entry: JournalEntry, rule: VoiceRule) -> Bool {
+        entry.uid == rule.uid && entry.cgroup == nil
+    }
+
+    /// What `status` and the command line say of such an entry.
+    public static let noCgroupSaid = "journald recorded no cgroup (the writer ended first)"
+
     /// The command line's own entries that count (`passes`), of `event` (and `kind`, when given), in time order.
     static func own(_ entries: [JournalEntry], rule: VoiceRule, where wanted: (JournalEntry) -> Bool) -> [JournalEntry] {
         entries.filter { $0.identifier == identifier && wanted($0) && passes($0, rule: rule) }
@@ -217,20 +233,33 @@ public enum NodeJournal {
     /// identifier and field with `logger -t vibeswitcher`: only journald's own fields say who sent it), its event is
     /// `request`, and its action and kind are the request's; given the server's `epoch` (`status`'s), its epoch is
     /// that one too (the command line writes the epoch of the server it asked).
+    ///
+    /// An entry of the user's uid with no `_SYSTEMD_CGROUP` (`hasNoCgroup`) is marked too, since it doesn't count, but
+    /// as what it is, `noCgroupSaid`, never as "came from no cgroup, not a terminal's": and an accepted request whose
+    /// only entry is such a one is said to have that entry, not none (once, not once for the request and again for
+    /// the entry). The words vouch for nothing: who wrote such an entry can't be told.
     public static func marks(accepted: [(kind: String, action: String?, at: Date?)], epoch: String? = nil, entries: [JournalEntry],
                              rule: VoiceRule) -> [String] {
         var marks: [String] = []
         let recording = own(entries, rule: rule) { $0.event == "request" && (epoch == nil || $0.epoch == epoch) }
         let recorded = Set(recording.compactMap { entry in entry.action.flatMap { action in entry.kind.map { "\(action)|\($0)" } } })
+        let uncounted = entries.filter {
+            $0.identifier == identifier && hasNoCgroup($0, rule: rule) && $0.event == "request" && (epoch == nil || $0.epoch == epoch)
+        }
+        var said: [JournalEntry] = []
         for request in accepted where !(request.action.map { recorded.contains("\($0)|\(request.kind)") } ?? false) {
+            let its = uncounted.filter { $0.action != nil && $0.action == request.action && $0.kind == request.kind }
+            said += its
             marks.append("the server accepted \(ConfigSeal.inert(request.kind, limit: 40))"
                          + (request.at.map { " at \(NodeWire.dateText($0))" } ?? "")
-                         + " (action \(ConfigSeal.inert(request.action ?? "none", limit: 40))) and the journal has no entry for it")
+                         + " (action \(ConfigSeal.inert(request.action ?? "none", limit: 40))) and "
+                         + (its.isEmpty ? "the journal has no entry for it" : "its journal entry isn't counted as yours: \(noCgroupSaid)"))
         }
-        for entry in entries where entry.identifier == identifier && !passes(entry, rule: rule) {
-            marks.append("a journal entry of the command line's (\(ConfigSeal.inert(entry.event ?? "?", limit: 40))"
-                         + (entry.time.map { " at \(NodeWire.dateText($0))" } ?? "")
-                         + ") came from \(ConfigSeal.inert(entry.cgroup ?? "no cgroup", limit: 200)), not a terminal's")
+        for entry in entries where entry.identifier == identifier && !passes(entry, rule: rule) && !said.contains(entry) {
+            let what = "a journal entry of the command line's (\(ConfigSeal.inert(entry.event ?? "?", limit: 40))"
+                + (entry.time.map { " at \(NodeWire.dateText($0))" } ?? "") + ")"
+            marks.append(hasNoCgroup(entry, rule: rule) ? what + " isn't counted as yours: \(noCgroupSaid)"
+                         : what + " came from \(ConfigSeal.inert(entry.cgroup ?? "no cgroup", limit: 200)), not a terminal's")
         }
         return marks
     }
@@ -249,5 +278,59 @@ public enum NodeJournal {
         if let digest { fields.append(("VIBESWITCHER_DIGEST", digest)) }
         if let epoch { fields.append(("VIBESWITCHER_EPOCH", epoch)) }
         return fields
+    }
+
+    /// The field the command line names each entry it sends by: a nonce of its own, so it can find that entry again.
+    public static let entryField = "VIBESWITCHER_ENTRY"
+
+    /// The `journalctl` arguments that read the one entry sent with `nonce` (`NodeContext.writeJournal`, on the
+    /// user's node): the user's journal, as JSON, matched on the nonce and the user's `_UID`.
+    public static func entryArguments(nonce: String, uid: uid_t) -> [String] {
+        ["--user", "-o", "json", "--no-pager", "\(entryField)=\(nonce)", "_UID=\(uid)"]
+    }
+
+    /// What became of an entry the command line sent.
+    public enum Written: Equatable, Sendable {
+        /// The journal holds it, with the cgroup journald read for its writer.
+        case recorded
+        /// The journal holds it, but journald recorded no cgroup for it: it will never count.
+        case noCgroup
+        /// The journal didn't show it within the wait.
+        case missing
+    }
+
+    /// What `entries` say of the entry sent with `nonce`; nil while none of them is it.
+    public static func written(nonce: String, in entries: [JournalEntry]) -> Written? {
+        let sent = entries.filter { $0.fields[entryField] == nonce }
+        guard !sent.isEmpty else { return nil }
+        return sent.allSatisfy { $0.cgroup != nil } ? .recorded : .noCgroup
+    }
+
+    /// Waits until the journal holds the entry sent with `nonce`, so the command line is still there when journald
+    /// reads its `/proc/<pid>/cgroup`: journald stamps `_SYSTEMD_CGROUP` as it takes the datagram, and a writer gone by
+    /// then leaves an entry that never counts (the type's comment). `read` gives the journal's entries now (nil when
+    /// it can't be read this time), and is asked again every `pause` until the entry is there or `patience` has
+    /// passed on `awake` (seconds awake). A poll on what it waits for, never a fixed sleep: it returns as soon as the
+    /// entry is read, and journald writes an entry once, so one found without a cgroup is not waited on.
+    public static func awaitEntry(nonce: String, patience: TimeInterval, pause: TimeInterval, awake: () -> TimeInterval,
+                                  sleep: (TimeInterval) -> Void, read: () -> [JournalEntry]?) -> Written {
+        let deadline = awake() + patience
+        while true {
+            if let found = read().flatMap({ written(nonce: nonce, in: $0) }) { return found }
+            guard awake() < deadline else { return .missing }
+            sleep(pause)
+        }
+    }
+
+    /// What the command line says when an entry it sent won't count (nil when it will): `event` is the entry's.
+    public static func notCounted(_ written: Written, event: String, patience: TimeInterval) -> String? {
+        switch written {
+        case .recorded: return nil
+        case .noCgroup:
+            return "the journal entry for this (\(ConfigSeal.inert(event, limit: 40))) isn't counted as yours: \(noCgroupSaid)"
+        case .missing:
+            return "the journal entry for this (\(ConfigSeal.inert(event, limit: 40))) was sent, but the journal didn't show it within "
+                + "\(Int(patience)) s, so it isn't taken as written"
+        }
     }
 }

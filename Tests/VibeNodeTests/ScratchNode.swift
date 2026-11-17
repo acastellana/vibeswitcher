@@ -12,7 +12,8 @@ import VibeNode
 ///   takes `--node-root <root>/build`, whose `bin/` holds links to the built products and whose `build-info` records
 ///   each one's SHA-256 (stage 2's `BuildInfo`), so the host's start check (Task 9b) passes and stays exercised.
 /// - `<root>/v2/test/` holds the stand-ins of the Global Constraints: a recording journal socket (`journal.sock`,
-///   each datagram recorded with its sender's credentials as journald stamps them, in `journal.jsonl`), a stand-in
+///   each datagram recorded with its sender's credentials as journald stamps them, in `journal.jsonl`; without a
+///   cgroup, as for a writer that ended first, while `recorder.writersEnded`), a stand-in
 ///   `journalctl` (that record) and `systemctl` (how the unit last ended from `unit-state` when a test writes it, E8),
 ///   `claude` linked to `FakeClaude`'s launcher (EN-D13), and
 ///   `user-scopes`, the test's scopes for the command line's journal check.
@@ -426,12 +427,21 @@ enum ScratchBuilds {
 /// form, `Platform.Journal.decode`) recorded as one JSON line in `<folder>/journal.jsonl` with the fields journald
 /// stamps from the sender's credentials (`_UID`, `_PID`, `_SYSTEMD_CGROUP`, read as the datagram comes) and
 /// `__REALTIME_TIMESTAMP`, as `journalctl -o json` writes them.
+///
+/// `writersEnded`: while set, each entry is recorded as journald records one whose writer had ended before it read
+/// `/proc/<pid>` (measured on the node, the bootstrap path's M4, 2026-11-17: `logger`'s entry): the credentials'
+/// `_PID` and `_UID`, and no `_SYSTEMD_CGROUP`.
 final class JournalRecorder: @unchecked Sendable {
     let path: String
     let record: String
     private let fd: Int32
     private let lock = NSLock()
     private var stopping = false
+    private var ended = false
+    var writersEnded: Bool {
+        get { lock.withLock { ended } }
+        set { lock.withLock { ended = newValue } }
+    }
     private let done = DispatchSemaphore(value: 0)
 
     init(folder: URL) throws {
@@ -464,7 +474,8 @@ final class JournalRecorder: @unchecked Sendable {
             if let sender {
                 entry["_PID"] = String(sender.pid)
                 if case .record(let record) = Platform.Processes.record(sender.pid), let uid = record.uid { entry["_UID"] = String(uid) }
-                if let lines = Platform.Processes.cgroup(sender.pid), let cgroup = PeerFacts.unifiedPath(lines) ?? PeerFacts.systemdPath(lines) {
+                if !writersEnded, let lines = Platform.Processes.cgroup(sender.pid),
+                   let cgroup = PeerFacts.unifiedPath(lines) ?? PeerFacts.systemdPath(lines) {
                     entry["_SYSTEMD_CGROUP"] = cgroup
                 }
             }

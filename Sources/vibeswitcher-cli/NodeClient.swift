@@ -109,23 +109,50 @@ struct NodeContext {
         return NodeJournal.unitState(show: ran.output)
     }
 
-    /// Writes an entry of the command line's; false when there is no journal or it didn't go. A scratch node's
-    /// stand-in records each entry as journald would (with the sender's credentials, read as the datagram comes):
-    /// the command line waits, up to 10 s, until the entry is in its record (`journal.jsonl`), so the stand-in reads
-    /// this process's credentials before it ends.
+    /// How long the user's node's command line waits for journald to show an entry it sent, and how long between two
+    /// looks (each a `journalctl` run).
+    static let journalPatience: TimeInterval = 5
+    static let journalPause: TimeInterval = 0.02
+
+    /// Writes an entry of the command line's, and stays until the journal holds it: true only when it does, with the
+    /// cgroup journald read for this process. journald reads a writer's `/proc/<pid>/cgroup` as it takes the datagram,
+    /// not as the datagram is sent, and an entry counts only by that cgroup (`NodeJournal.passes`): a command line
+    /// that ended right after its datagram left an entry that never counted (measured, the bootstrap path's M4,
+    /// 2026-11-17). So the entry carries a nonce (`NodeJournal.entryField`) and is looked for again, up to
+    /// `journalPatience` (`NodeJournal.awaitEntry`): on the user's node with `journalctl --user` on the nonce
+    /// (`NodeJournal.entryArguments`); on a scratch node in its stand-in's record (`journal.jsonl`, up to 10 s), which
+    /// stamps each entry with the sender's credentials as the datagram comes, as journald does.
+    ///
+    /// False when there is no journal or the datagram didn't go; false too, with a line on stderr saying which
+    /// (`NodeJournal.notCounted`), when the entry never showed or journald recorded no cgroup for it.
     @discardableResult
     func writeJournal(_ fields: [(name: String, value: String)]) -> Bool {
         guard let socket = journalSocket else { return false }
-        guard isScratch else { return Platform.Journal.send(fields, to: socket) }
         let nonce = UUID().uuidString.lowercased()
-        guard Platform.Journal.send(fields + [("VIBESWITCHER_ENTRY", nonce)], to: socket) else { return false }
-        let record = testFolder.appendingPathComponent("journal.jsonl").path
-        let deadline = Date().addingTimeInterval(10)
-        while Date() < deadline {
-            if let text = FileManager.default.contents(atPath: record), String(decoding: text, as: UTF8.self).contains(nonce) { return true }
-            usleep(10_000)
+        guard Platform.Journal.send(fields + [(NodeJournal.entryField, nonce)], to: socket) else { return false }
+        let patience = isScratch ? 10 : Self.journalPatience
+        let written = NodeJournal.awaitEntry(nonce: nonce, patience: patience, pause: isScratch ? 0.01 : Self.journalPause,
+                                             awake: MacTime.real.awake, sleep: { usleep(useconds_t($0 * 1_000_000)) },
+                                             read: { sentEntries(nonce: nonce) })
+        let event = fields.first { $0.name == "VIBESWITCHER_EVENT" }?.value ?? "?"
+        if let why = NodeJournal.notCounted(written, event: event, patience: patience) { Say.err("vibeswitcher: \(why)") }
+        return written == .recorded
+    }
+
+    /// The journal's entries that carry `nonce`, as it holds them now; nil when it can't be read this time. The user's
+    /// node's: `journalctl --user` matched on the nonce, by its fixed path and with the tools' environment
+    /// (`toolEnvironment`), whatever its status (one that finds nothing prints no entry).
+    /// A scratch node's: its stand-in's record, the lines naming the nonce.
+    private func sentEntries(nonce: String) -> [JournalEntry]? {
+        if isScratch {
+            guard let text = FileManager.default.contents(atPath: testFolder.appendingPathComponent("journal.jsonl").path) else { return nil }
+            let lines = String(decoding: text, as: UTF8.self).split(whereSeparator: \.isNewline).filter { $0.contains(nonce) }
+            return NodeJournal.entries(json: lines.joined(separator: "\n"))
         }
-        return false
+        // One look is bounded by the wait's own patience, not the minute a tool gets elsewhere.
+        guard let journalctl, let ran = NodeStarter.run(journalctl, NodeJournal.entryArguments(nonce: nonce, uid: getuid()),
+                                                        environment: toolEnvironment, timeout: Self.journalPatience) else { return nil }
+        return NodeJournal.entries(json: ran.output)
     }
 
     /// Runs `program` (by its absolute path, never looked up) with `arguments`, stdin /dev/null, with `toolEnvironment`;

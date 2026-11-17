@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import VibeCore
 import VibeNode
 
 /// The journal as the command line reads it (`NodeJournal`, the engine plan's EN-D15), on a stand-in `journalctl -o
@@ -27,11 +28,14 @@ struct NodeJournalTests {
         return line(fields, at: date)
     }
 
-    /// An entry of the command line's, from `cgroup`.
-    static func own(_ event: String, kind: String? = nil, action: String? = nil, epoch: String? = nil, cgroup: String = "/init.scope",
-                    uid: String = "1000", at date: Date) -> String {
+    /// An entry of the command line's, from `cgroup` (nil: journald recorded none, its writer had ended), sent with
+    /// the nonce `entry` when given.
+    static func own(_ event: String, kind: String? = nil, action: String? = nil, epoch: String? = nil, cgroup: String? = "/init.scope",
+                    uid: String = "1000", entry: String? = nil, at date: Date) -> String {
         var fields: [String: Any] = ["SYSLOG_IDENTIFIER": "vibeswitcher", "VIBESWITCHER_EVENT": event, "MESSAGE": "vibeswitcher \(event)",
-                                     "_UID": uid, "_SYSTEMD_CGROUP": cgroup]
+                                     "_UID": uid]
+        if let cgroup { fields["_SYSTEMD_CGROUP"] = cgroup }
+        if let entry { fields[NodeJournal.entryField] = entry }
         if let kind { fields["VIBESWITCHER_KIND"] = kind }
         if let epoch { fields["VIBESWITCHER_EPOCH"] = epoch }
         if let action { fields["VIBESWITCHER_ACTION"] = action }
@@ -194,6 +198,107 @@ struct NodeJournalTests {
             ["--user", "-o", "json", "--no-pager", "SYSLOG_IDENTIFIER=vibeswitcher", "_UID=1000"],
         ])
         #expect(NodeJournal.readArguments(uid: 1234).allSatisfy { $0.last == "_UID=1234" && $0.first == "--user" })
+    }
+
+    /// journald reads a writer's cgroup as it takes the datagram, so an entry whose writer had ended has no
+    /// `_SYSTEMD_CGROUP` (the bootstrap path's M4, 2026-11-17: `logger`'s entry). It never counts, whoever wrote it
+    /// (any process of the user's can write one and end); `status` says it for what it is, once, never as an entry
+    /// "from no cgroup, not a terminal's" nor its request as one with no entry.
+    @Test func anEntryJournaldRecordedNoCgroupForNeverCountsAndIsSaidSo() throws {
+        let said = "journald recorded no cgroup (the writer ended first)"
+        #expect(NodeJournal.noCgroupSaid == said)
+        let ended = try #require(Self.read([Self.own("ack", cgroup: nil, at: Self.start)]).first)
+        #expect(ended.cgroup == nil && !NodeJournal.passes(ended, rule: Self.rule) && NodeJournal.hasNoCgroup(ended, rule: Self.rule))
+        // Only the user's, and only with none: an entry from a cgroup, or another user's, is the old case.
+        for line in [Self.own("ack", at: Self.start), Self.own("ack", cgroup: "/system.slice/cron.service", at: Self.start),
+                     Self.own("ack", cgroup: nil, uid: "1001", at: Self.start)] {
+            #expect(!NodeJournal.hasNoCgroup(try #require(Self.read([line]).first), rule: Self.rule), "\(line)")
+        }
+        // It explains no start and acknowledges none.
+        let start = Self.read([Self.own("request", kind: "start", cgroup: nil, at: Self.start.addingTimeInterval(-5)), Self.job("start", at: Self.start),
+                               Self.own("ack", cgroup: nil, at: Self.start.addingTimeInterval(30))])
+        let events = NodeJournal.events(start)
+        #expect(NodeJournal.unexplained(starts: events, entries: start, rule: Self.rule) == events)
+        #expect(!NodeJournal.acknowledged(try #require(events.first), entries: start, rule: Self.rule))
+        // An ack: one mark, saying so.
+        let ack = NodeJournal.marks(accepted: [], entries: [ended], rule: Self.rule)
+        #expect(ack.count == 1 && ack.first?.hasPrefix("a journal entry of the command line's (ack at ") == true, "\(ack)")
+        #expect(ack.first?.hasSuffix("isn't counted as yours: \(said)") == true && ack.first?.contains("not a terminal's") == false, "\(ack)")
+        // An accepted request's entry: the request is still marked (the entry records nothing), as having that entry,
+        // and the entry isn't marked a second time.
+        let request = Self.read([Self.own("request", kind: "stop", action: "a1", epoch: "e1", cgroup: nil, at: Self.start)])
+        for epoch in ["e1", nil] as [String?] {
+            let marks = NodeJournal.marks(accepted: [("stop", "a1", Self.start)], epoch: epoch, entries: request, rule: Self.rule)
+            #expect(marks.count == 1, "\(marks)")
+            let mark = marks.first ?? ""
+            #expect(mark.contains("accepted stop") && mark.contains("a1") && mark.hasSuffix("its journal entry isn't counted as yours: \(said)"), "\(mark)")
+            #expect(!mark.contains("no entry") && !mark.contains("not a terminal's"), "\(mark)")
+        }
+        // One naming the action for another kind, or another server's epoch, isn't the request's entry: the request
+        // has none, and the entry is marked on its own.
+        for (kind, epoch) in [("start", "e1"), ("stop", "e0")] {
+            let other = Self.read([Self.own("request", kind: kind, action: "a1", epoch: epoch, cgroup: nil, at: Self.start)])
+            let marks = NodeJournal.marks(accepted: [("stop", "a1", Self.start)], epoch: "e1", entries: other, rule: Self.rule)
+            #expect(marks.count == 2 && marks.first?.hasSuffix("the journal has no entry for it") == true, "\(kind) \(epoch): \(marks)")
+            #expect(marks.last?.hasSuffix("(request at \(NodeWire.dateText(Self.start))) isn't counted as yours: \(said)") == true, "\(marks)")
+        }
+        // Another user's entry with none is still "not a terminal's", and hides no request.
+        let foreign = Self.read([Self.own("request", kind: "stop", action: "a1", cgroup: nil, uid: "1001", at: Self.start)])
+        let foreignMarks = NodeJournal.marks(accepted: [("stop", "a1", Self.start)], entries: foreign, rule: Self.rule)
+        #expect(foreignMarks.count == 2 && foreignMarks.first?.contains("no entry") == true, "\(foreignMarks)")
+        #expect(foreignMarks.last?.hasSuffix("came from no cgroup, not a terminal's") == true, "\(foreignMarks)")
+        // Beside the user's own entry that counts, the request is recorded, and the one without is still marked.
+        let both = Self.read([Self.own("request", kind: "stop", action: "a1", at: Self.start),
+                              Self.own("request", kind: "stop", action: "a1", cgroup: nil, at: Self.start.addingTimeInterval(1))])
+        let bothMarks = NodeJournal.marks(accepted: [("stop", "a1", Self.start)], entries: both, rule: Self.rule)
+        #expect(bothMarks.count == 1 && bothMarks.first?.hasPrefix("a journal entry of the command line's (request at ") == true, "\(bothMarks)")
+    }
+
+    /// The command line stays until the journal holds the entry it sent (`NodeContext.writeJournal` on both nodes), so
+    /// journald reads its cgroup while it is there: a poll on the entry, by its nonce, on an injected clock.
+    @Test func theCommandLineWaitsUntilTheJournalHoldsItsEntry() {
+        let nonce = "3f0c1d52-6f0e-4c53-9d0b-0d6c6a7b9a11"
+        let mine = Self.read([Self.own("ack", entry: nonce, at: Self.start)])
+        let others = Self.read([Self.own("ack", entry: "another", at: Self.start), Self.own("request", kind: "stop", at: Self.start)])
+        final class World {
+            var now: TimeInterval = 1_000, reads = 0, slept: [TimeInterval] = []
+        }
+        func wait(patience: TimeInterval = 5, _ world: World, read: @escaping (Int) -> [JournalEntry]?) -> NodeJournal.Written {
+            NodeJournal.awaitEntry(nonce: nonce, patience: patience, pause: 0.02, awake: { world.now },
+                                   sleep: { world.slept.append($0); world.now += $0 }, read: { world.reads += 1; return read(world.reads) })
+        }
+        // Not there for three looks (the journal unread once, then others' entries only), then there: returned at that
+        // look, after three pauses and no more.
+        let late = World()
+        #expect(wait(late) { $0 == 1 ? nil : $0 < 4 ? others : others + mine } == .recorded)
+        #expect(late.reads == 4 && late.slept == [0.02, 0.02, 0.02], "\(late.reads) \(late.slept)")
+        // There at the first look: no pause at all.
+        let first = World()
+        #expect(wait(first) { _ in mine } == .recorded)
+        #expect(first.reads == 1 && first.slept.isEmpty)
+        // There with no cgroup: said at once (journald writes an entry once), not waited on.
+        let ended = World()
+        #expect(wait(ended) { _ in Self.read([Self.own("ack", cgroup: nil, entry: nonce, at: Self.start)]) } == .noCgroup)
+        #expect(ended.reads == 1 && ended.slept.isEmpty)
+        // Never there: looked for until the patience has passed, by the clock given, then missing.
+        let never = World()
+        #expect(wait(never) { $0 % 2 == 0 ? nil : others } == .missing)
+        #expect(never.now >= 1_005 && never.now < 1_005.1 && (250...252).contains(never.reads), "\(never.now) \(never.reads)")
+        #expect(never.slept.allSatisfy { $0 == 0.02 })
+        // The entry is the one carrying the nonce, whatever else names it; one of the two without a cgroup is said.
+        #expect(NodeJournal.written(nonce: nonce, in: others) == nil)
+        #expect(NodeJournal.written(nonce: nonce, in: Self.read([Self.own("ack", action: nonce, at: Self.start)])) == nil)
+        #expect(NodeJournal.written(nonce: nonce, in: mine + Self.read([Self.own("ack", cgroup: nil, entry: nonce, at: Self.start)])) == .noCgroup)
+        // How the user's node asks for it, and the name is one a sender may write.
+        #expect(NodeJournal.entryArguments(nonce: nonce, uid: 1000)
+            == ["--user", "-o", "json", "--no-pager", "VIBESWITCHER_ENTRY=\(nonce)", "_UID=1000"])
+        #expect(Platform.Journal.mayName(NodeJournal.entryField))
+        // What the command line says of each.
+        #expect(NodeJournal.notCounted(.recorded, event: "ack", patience: 5) == nil)
+        #expect(NodeJournal.notCounted(.noCgroup, event: "ack", patience: 5)
+            == "the journal entry for this (ack) isn't counted as yours: journald recorded no cgroup (the writer ended first)")
+        #expect(NodeJournal.notCounted(.missing, event: "request", patience: 5)
+            == "the journal entry for this (request) was sent, but the journal didn't show it within 5 s, so it isn't taken as written")
     }
 
     @Test func anAckSurvivesAServerRestart() throws {

@@ -290,6 +290,57 @@ struct ServerTests {
         #expect(node.recorder?.entries.contains { $0.event == "request" && $0.kind == "answer" && $0.action == answer["action"] as? String } == true)
     }
 
+    /// journald stamps an entry's cgroup from `/proc/<pid>` as it takes the datagram: one whose writer had ended has
+    /// none (the bootstrap path's M4, 2026-11-17), and never counts. The command line stays until the journal holds
+    /// its entry and says at once when it holds it without a cgroup; `status` says the same of the entry, not "not a
+    /// terminal's", and of its request, not "no entry". The stand-in records so while `writersEnded`.
+    @Test func anEntryJournaldRecordedNoCgroupForIsSaidAtOnceAndNeverCounts() async throws {
+        let node = try await ScratchNode(scratch)
+        let recorder = try #require(node.recorder)
+        let said = "isn't counted as yours: journald recorded no cgroup (the writer ended first)"
+        // A start of the node's unit nobody typed, before anything else: something to acknowledge.
+        recorder.append(["USER_UNIT": VoiceRule.nodeUnit, "JOB_TYPE": "start", "JOB_RESULT": "done", "MESSAGE": "Started the node.",
+                         "__REALTIME_TIMESTAMP": String(Int64(Date().timeIntervalSince1970 * 1_000_000))])
+        // S11 acknowledged and a first `start` recorded as journald records a writer it can read.
+        let first = try await node.runOnTerminal(["start"])
+        #expect(first.status == 0 && !first.output.contains("journald recorded no cgroup"), "\(first.output)")
+
+        recorder.writersEnded = true
+        // A request the server accepts: it goes, and the command line says its entry won't count.
+        let second = try await node.run(["start"])
+        #expect(second.status == 0, "\(second.errors)")
+        #expect(second.errors.contains("vibeswitcher: the journal entry for this (request) \(said)"), "\(second.errors)")
+        // An acknowledgment that won't count isn't said "acknowledged".
+        let refused = try await node.runOnTerminal(["status", "--ack"])
+        #expect(refused.status == 1 && !refused.output.contains("acknowledged\r\n"), "\(refused.output)")
+        #expect(refused.output.contains("vibeswitcher: the journal entry for this (ack) \(said)"), "\(refused.output)")
+        #expect(refused.output.contains("the acknowledgment couldn't be written to the journal"), "\(refused.output)")
+        // Both entries are in the journal, the user's, with no cgroup.
+        let without = recorder.entries.filter { $0.identifier == NodeJournal.identifier && $0.cgroup == nil }
+        #expect(without.map(\.event) == ["request", "ack"] && without.allSatisfy { $0.uid == getuid() }, "\(without)")
+
+        // `status`: the start is still not acknowledged; the request has its entry, not counted; the ack likewise;
+        // nothing is "not a terminal's" and nothing has "no entry".
+        let shown = try await node.run(["status", "--json"])
+        let report = try #require(try JSONSerialization.jsonObject(with: Data(shown.output.utf8)) as? [String: Any])
+        let journal = report["journal"] as? [String] ?? []
+        let accepted = try #require(report["accepted"] as? [[String: Any]])
+        let action = try #require(accepted.last?["action"] as? String)
+        #expect(accepted.count == 2 && journal.contains { $0.hasPrefix("journal: a start at ") }, "\(accepted) \(journal)")
+        #expect(journal.filter { $0.contains("the server accepted start") } .count == 1, "\(journal)")
+        #expect(journal.contains { $0.contains("the server accepted start") && $0.contains("(action \(action)) and its journal entry \(said)") }, "\(journal)")
+        #expect(journal.contains { $0.hasPrefix("journal: a journal entry of the command line's (ack at ") && $0.hasSuffix(said) }, "\(journal)")
+        #expect(journal.filter { $0.contains("journald recorded no cgroup") }.count == 2, "\(journal)")
+        #expect(!journal.contains { $0.contains("not a terminal's") || $0.contains("no entry") }, "\(journal)")
+
+        // Recorded as journald records a writer it can read again: the acknowledgment counts.
+        recorder.writersEnded = false
+        let acked = try await node.runOnTerminal(["status", "--ack"])
+        #expect(acked.status == 0 && acked.output.contains("acknowledged"), "\(acked.output)")
+        let after = try await node.run(["status"])
+        #expect(!after.output.contains("journal: a start at "), "\(after.output)")
+    }
+
     @Test func everyHostCallInTheServerGoesThroughTheConnector() async throws {
         let node = try await ScratchNode(scratch, housekeeping: 1)
         _ = try WireClient(node)
