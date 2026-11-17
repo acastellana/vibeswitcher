@@ -244,7 +244,7 @@ public enum ConfigSeal {
     /// (`LeadVault.Book`); the rest is the main checkout's, sealed per team.
     public static func isHome(key: String) -> Bool {
         let rest = key.hasPrefix(keysPrefix) ? key.dropFirst(keysPrefix.count) : key.hasPrefix(gonePrefix) ? key.dropFirst(gonePrefix.count)
-            : key.hasPrefix(keyPrefix) ? key.dropFirst(keyPrefix.count) : ""
+            : key.hasPrefix(bookkeepingPrefix) ? key.dropFirst(bookkeepingPrefix.count) : key.hasPrefix(keyPrefix) ? key.dropFirst(keyPrefix.count) : ""
         return rest.hasPrefix("~/")
     }
 
@@ -272,7 +272,9 @@ public enum ConfigSeal {
 
     /// Whether `key` is one of the vault's own notes beside a watched thing's hash (`keysPrefix`, `gonePrefix`,
     /// `comesAndGoesSince`): never in its `guarded` answer.
-    static func isVaultNote(_ key: String) -> Bool { key.hasPrefix(keysPrefix) || key.hasPrefix(gonePrefix) || key == comesAndGoesSince }
+    static func isVaultNote(_ key: String) -> Bool {
+        key.hasPrefix(keysPrefix) || key.hasPrefix(gonePrefix) || key.hasPrefix(bookkeepingPrefix) || key == comesAndGoesSince
+    }
 
     /// Where a look's hashes say what a folder hashes to with the sync bookkeeping counted (`isSyncBookkeeping`), as
     /// versions before it was left out did: only to carry a seal they made over, never recorded.
@@ -292,6 +294,110 @@ public enum ConfigSeal {
         guard name == "~/.claude/skills" else { return false }
         let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
         return parts.count == 3 && parts[0] == "synced" && syncBookkeeping.contains(String(parts[2]))
+    }
+
+    // MARK: A round of Claude Code's skill sync, finished (2026-11-17)
+
+    /// Where the vault keeps the sync's bookkeeping files of `~/.claude/skills` as sealed (`FolderRead.bookkeeping`),
+    /// beside its per-path hashes: the baseline a round is told by (`finishedSyncRound`). Only the vault reads it.
+    static let bookkeepingPrefix = keyPrefix + "#bookkeeping "
+
+    static func bookkeepingKey(of key: String) -> String { bookkeepingPrefix + name(ofKey: key) }
+
+    /// The bookkeeping read for its shape at most (Claude Code reads its manifest up to 4 MB); past it, it's hashed as
+    /// any file and isn't shaped.
+    static let syncBookkeepingLimit = 4 << 20
+
+    /// Whether `data`, the bookkeeping file `name`, is shaped as Claude Code (2.1.3xx) writes it: the round marker one
+    /// line, "<a 36-character token of hex digits and dashes> <the kinds it listed, comma-separated>", at most 1 KB; the
+    /// manifest a JSON object with a `skills` array. Shape only, a cheap tie to the real sync: anyone can write it.
+    static func syncShaped(_ data: Data, name: String) -> Bool {
+        switch name {
+        case ".last-complete-round":
+            guard data.count <= 1024, let text = String(data: data, encoding: .utf8) else { return false }
+            return text.range(of: #"^[0-9a-f-]{36}( [A-Za-z0-9_.,-]*)?$"#, options: .regularExpression) != nil
+        case "manifest.json":
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return object?["skills"] is [Any]
+        default:
+            return false
+        }
+    }
+
+    /// Whether `name` is a bucket's folder as Claude Code names it: "<org id>_<account id or unbound>", lowercase UUIDs.
+    static func isSyncBucket(_ name: String) -> Bool {
+        let uuid = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+        return name.range(of: "^\(uuid)_(\(uuid)|unbound)$", options: .regularExpression) != nil
+    }
+
+    /// The paths a finished round of Claude Code's skill sync changed in the watched thing `key`, between its per-path
+    /// hashes and bookkeeping as sealed (`recorded`) and as they are (`now`), each "<path> <added, changed or
+    /// removed>"; nil when the change since the seal is anything else, which is judged as ever. A round, all of:
+    /// - it's `~/.claude/skills`, with per-path hashes (with kinds) and bookkeeping recorded at the seal;
+    /// - every changed path is under a bucket folder (`synced/<bucket>/<name>/…`, `isSyncBucket`, never a dot name
+    ///   straight in it: `.staging`, `.trash`), a bucket that was sealed, as a folder, with its `synced/.bucket-<bucket>`
+    ///   marker a file sealed and unchanged: not a new bucket, nothing straight in `synced/`, nothing outside it;
+    /// - what's added or changed is a file or a folder: no link, nothing else;
+    /// - in each bucket touched, the round marker and the manifest were both rewritten since the seal (contents or
+    ///   time), both shaped as Claude Code writes them (`syncShaped`), and the marker is no older than anything added
+    ///   or changed there: the round finished after them.
+    /// Shape and times, not proof: a shell that forges all of it is taken for the sync. What it can't do is slip a
+    /// skill in beside a round without forging one (a skill elsewhere, a link, a write after the marker).
+    static func finishedSyncRound(key: String, recorded: [String: String], now: [String: String]) -> [String]? {
+        guard name(ofKey: key) == copiedFolder,
+              let sealedText = recorded[keysKey(of: key)], let nowText = now[keysKey(of: key)],
+              let sealedBooks = recorded[bookkeepingKey(of: key)].map(decode), let nowBooks = now[bookkeepingKey(of: key)].map(decode) else { return nil }
+        let before = decode(sealedText), after = decode(nowText)
+        var newest: [String: Double] = [:]
+        var changed = false
+        for path in Set(before.keys).union(after.keys) where entryHash(before[path]) != entryHash(after[path]) {
+            let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 3, parts[0] == syncFolder, isSyncBucket(parts[1]), !parts.contains(where: \.isEmpty),
+                  !parts[2].hasPrefix(".") else { return nil }
+            let bucket = syncFolder + "/" + parts[1], marker = syncFolder + "/.bucket-" + parts[1]
+            guard entryKind(before[syncFolder]) == "d", entryKind(after[syncFolder]) == "d",
+                  entryKind(before[bucket]) == "d", entryKind(after[bucket]) == "d",
+                  entryKind(before[marker]) == "f", entryKind(after[marker]) == "f", entryHash(before[marker]) == entryHash(after[marker]) else { return nil }
+            var at = newest[parts[1]] ?? -.infinity
+            if let entry = after[path] {
+                guard ["f", "d"].contains(entryKind(entry)), let time = entryTime(entry) else { return nil }
+                at = max(at, time)
+            }
+            newest[parts[1]] = at
+            changed = true
+        }
+        guard changed else { return nil }
+        for (bucket, at) in newest {
+            let round = syncFolder + "/" + bucket + "/.last-complete-round", manifest = syncFolder + "/" + bucket + "/manifest.json"
+            for file in [round, manifest] {
+                guard let entry = nowBooks[file], entryKind(entry) == "f" else { return nil }
+                let was = sealedBooks[file]
+                guard was == nil || entryHash(was) != entryHash(entry) || entryTime(was) != entryTime(entry) else { return nil }
+            }
+            guard let finished = entryTime(nowBooks[round]), finished >= at else { return nil }
+        }
+        return changedEntries(from: sealedText, to: after).map { "\($0.path) \($0.word)" }
+    }
+
+    /// Where the vault notes the last round of the sync it accepted by itself (`finishedSyncRound`), in the Mac-wide
+    /// seal: "<when, seconds>" and a line per changed path, the bucket's folder never named. In what the vault answers,
+    /// so the look that accepted it can tell (`LeadVault.ConfigCheck.syncAccepted`).
+    public static let syncRoundKey = keyPrefix + "#sync round"
+
+    static func syncRoundValue(_ changed: [String], at time: Double) -> String {
+        ([String(time)] + changed.map(withoutBucket)).joined(separator: "\n")
+    }
+
+    /// The paths of the last round accepted by itself, as `syncRoundValue` noted them; empty when none is.
+    public static func syncRound(in record: [String: String]?) -> [String] {
+        Array((record?[syncRoundKey] ?? "").split(separator: "\n").dropFirst().map(String.init))
+    }
+
+    /// `path` with its bucket's folder (an account's ids) as "<account>".
+    static func withoutBucket(_ path: String) -> String {
+        var parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        if parts.count >= 2, parts[0] == syncFolder, isSyncBucket(parts[1]) { parts[1] = "<account>" }
+        return parts.joined(separator: "/")
     }
 
     /// The key VibeSwitcher sends after writing watched things itself (`appWrite`): lines "<name>\t<before>\t<after>",
@@ -448,6 +554,7 @@ public enum ConfigSeal {
                 all[keyPrefix + item.name] = folder.hash
                 all[keysPrefix + item.name] = encode(folder.entries)
                 all[countingPrefix + item.name] = folder.countingHash
+                if item.name == copiedFolder { all[bookkeepingKey(of: keyPrefix + item.name)] = encode(folder.bookkeeping) }
                 continue
             }
             guard let hash = fingerprint(item) else { continue }
@@ -793,6 +900,9 @@ public enum ConfigSeal {
         /// What a held folder's card names comes from these (`changedFiles`, `heldDetail`): paths, hashes and times,
         /// never contents.
         var entries: [String: String]
+        /// The sync's bookkeeping files, by relative path: "<its line's hash> <f when it's shaped as Claude Code writes
+        /// it (`syncShaped`), else x> <mtime, seconds>", for the vault's look at a round (`finishedSyncRound`).
+        var bookkeeping: [String: String] = [:]
     }
 
     /// Reads the folder `watched` (`Kind.folder`). The lines are the hash's since before the bookkeeping was left out,
@@ -805,16 +915,19 @@ public enum ConfigSeal {
             let absent = hex(hasher.finalize())
             return FolderRead(hash: absent, countingHash: absent, entries: [:])
         }
-        var entries: [String: String] = [:]
+        var entries: [String: String] = [:], bookkeeping: [String: String] = [:]
         var count = 0
         walk(watched.path, relative: "", name: watched.name, count: &count) { line in
             let text = Data((line.text + "\n").utf8)
             counting.update(data: text)
-            guard !line.bookkeeping else { return }
+            guard !line.bookkeeping else {
+                if let path = line.path { bookkeeping[path] = hex(SHA256.hash(data: text).prefix(8)) + (line.shaped ? " f " : " x ") + "\(line.mtime)" }
+                return
+            }
             hasher.update(data: text)
             if let path = line.path { entries[path] = hex(SHA256.hash(data: text).prefix(8)) + " \(line.text.prefix(1)) \(line.mtime)" }
         }
-        return FolderRead(hash: hex(hasher.finalize()), countingHash: hex(counting.finalize()), entries: entries)
+        return FolderRead(hash: hex(hasher.finalize()), countingHash: hex(counting.finalize()), entries: entries, bookkeeping: bookkeeping)
     }
 
     /// One of `walk`'s lines: what's hashed, and for an entry its path and mtime (`FolderRead.entries`).
@@ -823,6 +936,8 @@ public enum ConfigSeal {
         var path: String?
         var mtime = 0
         var bookkeeping = false
+        /// Bookkeeping shaped as Claude Code writes it (`syncShaped`), from the same read that hashed it.
+        var shaped = false
     }
 
     /// Each entry under `folder` (of the watched thing `name`) in name order, one line each: links read, never followed.
@@ -849,14 +964,21 @@ public enum ConfigSeal {
             case S_IFLNK:
                 line(FolderLine(text: "l \(shown) -> " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""), path: shown, mtime: mtime))
             case S_IFREG:
-                let digest: String
-                switch contentsDigest(path, followLink: false) {
-                case .digest(let hex): digest = hex
-                case .other: digest = "other"
-                case .unreadable: digest = "unreadable"
+                let bookkeeping = isSyncBookkeeping(shown, in: watchedName)
+                var digest: String
+                var shaped = false
+                // The bookkeeping is read whole, once (it's small), for its hash and its shape alike.
+                if bookkeeping, let data = regularContents(path, limit: syncBookkeepingLimit, followLink: false) {
+                    digest = hex(SHA256.hash(data: data))
+                    shaped = syncShaped(data, name: (shown as NSString).lastPathComponent)
+                } else {
+                    switch contentsDigest(path, followLink: false) {
+                    case .digest(let hex): digest = hex
+                    case .other: digest = "other"
+                    case .unreadable: digest = "unreadable"
+                    }
                 }
-                line(FolderLine(text: "f \(shown) \(info.st_mode & 0o777) \(digest)", path: shown, mtime: mtime,
-                                bookkeeping: isSyncBookkeeping(shown, in: watchedName)))
+                line(FolderLine(text: "f \(shown) \(info.st_mode & 0o777) \(digest)", path: shown, mtime: mtime, bookkeeping: bookkeeping, shaped: shaped))
             default:
                 line(FolderLine(text: "o \(shown)", path: shown, mtime: mtime))
             }
@@ -1035,6 +1157,9 @@ extension LeadVault {
         public var resealed: [String] = []
         /// Of `held`, what changed outside a team session (code that runs: only your Accept seals it).
         public var outside: [String] = []
+        /// What a finished round of Claude Code's skill sync changed, accepted by itself at this look
+        /// (`ConfigSeal.finishedSyncRound`): "<path> <added, changed or removed>", the bucket's folder never named.
+        public var syncAccepted: [String] = []
     }
 
     /// VibeSwitcher's own write of watched things (`paths`: files, or what's in a watched folder, in your home): runs
@@ -1112,6 +1237,11 @@ extension LeadVault {
         check.resealed = after.keys.filter { key in
             ConfigSeal.isWatchedKey(key) && before[key] != after[key] && (before[key] != nil || wasHeld[key] != nil)
         }.sorted().map(ConfigSeal.name(ofKey:))
+        // A round of the sync accepted by itself is the sync's, not a change of yours sealed.
+        if before[ConfigSeal.syncRoundKey] != after[ConfigSeal.syncRoundKey], after[ConfigSeal.syncRoundKey] != nil {
+            check.syncAccepted = ConfigSeal.syncRound(in: after)
+            check.resealed.removeAll { $0 == ConfigSeal.copiedFolder }
+        }
         return check
     }
 

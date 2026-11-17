@@ -1389,7 +1389,7 @@ extension LeadVault {
             var guarded = team.guarded ?? [:]
             let home = Self.judge(watchedNow.filter { ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &mac.hashes, held: &mac.held,
                                   quiet: quiet(since: mac.sealedAt), caller: caller, home: true, shown: shown,
-                                  sessions: sessions, sessionsKnown: ids != nil)
+                                  sessions: sessions, sessionsKnown: ids != nil, at: now)
             var projectHeld = guarded[ConfigSeal.heldKey]
             let project = Self.judge(watchedNow.filter { !ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &guarded, held: &projectHeld,
                                      quiet: quiet(since: team.configSealedAt), caller: caller, home: false, shown: shown,
@@ -1417,7 +1417,8 @@ extension LeadVault {
         /// when nothing is held: all of it sealed or found as sealed.
         private static func judge(_ now: [String: String], hashes: [String: String], recorded: inout [String: String], held: inout String?,
                                   quiet: Bool, caller: Caller, home: Bool, shown: [String: String]? = nil,
-                                  sessions: [ConfigSeal.TeamSession] = [], sessionsKnown: Bool = false) -> Bool {
+                                  sessions: [ConfigSeal.TeamSession] = [], sessionsKnown: Bool = false,
+                                  at time: Double = Date().timeIntervalSince1970) -> Bool {
             // A seal made while the sync bookkeeping still counted, of a folder as it is now: the same folder, carried
             // over to the hash that leaves it out, so that alone holds nothing. Whatever else moved doesn't match, and
             // is judged as ever.
@@ -1448,7 +1449,20 @@ extension LeadVault {
             let firstSeen = Set(now.keys.filter { key in
                 recorded[key] == nil && ConfigSeal.comesAndGoes(key: key) && !(hashes[ConfigSeal.keysKey(of: key)].map(ConfigSeal.decode)?.isEmpty ?? false)
             })
-            let differ = now.filter { firstSeen.contains($0.key) || (recorded[$0.key] != nil && recorded[$0.key] != $0.value) }
+            var differ = now.filter { firstSeen.contains($0.key) || (recorded[$0.key] != nil && recorded[$0.key] != $0.value) }
+            // A round Claude Code's skill sync finished (`ConfigSeal.finishedSyncRound`), judged on the whole change since
+            // the seal: the sync's, accepted as it is at anyone's look, quiet or not, and a hold a look made mid-round
+            // lifts with it. Noted (`syncRoundKey`), never shown as a card. Anything else in the change, it's no round.
+            if home {
+                for key in Array(differ.keys) {
+                    guard let changed = ConfigSeal.finishedSyncRound(key: key, recorded: recorded, now: hashes) else { continue }
+                    seal([key], from: hashes, into: &recorded)
+                    recorded[ConfigSeal.goneKey(of: key)] = nil
+                    recorded[ConfigSeal.syncRoundKey] = ConfigSeal.syncRoundValue(changed, at: time)
+                    differ[key] = nil
+                    if before.removeValue(forKey: key) != nil { held = Self.heldValue(before) }
+                }
+            }
             // Your click seals only what its card showed you: each held thing as it was when held. One that moved
             // since (or changed and was never shown) is held anew, for the card to show. For the lead: a change while
             // the seal was quiet is yours and sealed, unless it executes: that waits for your click whoever made it.
@@ -1514,7 +1528,11 @@ extension LeadVault {
                 }
             }
             seal(sealed.keys, from: hashes, into: &recorded)
-            for key in now.keys where recorded[key] == now[key] { recorded[ConfigSeal.goneKey(of: key)] = nil }
+            for key in now.keys where recorded[key] == now[key] {
+                recorded[ConfigSeal.goneKey(of: key)] = nil
+                // Found as sealed: its bookkeeping as it is now, so a round only it saw isn't taken for the next one's.
+                recorded[ConfigSeal.bookkeepingKey(of: key)] = hashes[ConfigSeal.bookkeepingKey(of: key)]
+            }
             held = ConfigSeal.heldValue(holding.merging(unread.mapValues(\.hash)) { $1 }, outside: outside.union(unread.filter(\.value.outside).keys),
                                         changes: changes.merging(unread.mapValues(\.changes)) { $1 },
                                         times: times.merging(unread.compactMapValues(\.at)) { $1 },
@@ -1610,6 +1628,7 @@ extension LeadVault {
             for key in keys {
                 guarded[key] = now[key]
                 guarded[ConfigSeal.keysKey(of: key)] = now[ConfigSeal.keysKey(of: key)]
+                guarded[ConfigSeal.bookkeepingKey(of: key)] = now[ConfigSeal.bookkeepingKey(of: key)]
             }
         }
 

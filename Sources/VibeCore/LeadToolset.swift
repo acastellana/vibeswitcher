@@ -5764,6 +5764,11 @@ public final class LeadToolset: MCPToolset {
         if !found.resealed.isEmpty {
             try? store.appendProgress("Agents' config changed while no worker or verifier ran (the user's), sealed as they are: \(ConfigSeal.list(found.resealed))")
         }
+        if !found.syncAccepted.isEmpty {
+            let shown = found.syncAccepted.prefix(8).joined(separator: ", ")
+                + (found.syncAccepted.count > 8 ? " and \(found.syncAccepted.count - 8) more" : "")
+            try? store.appendProgress("Claude Code's skill sync finished a round in ~/.claude/skills/synced, accepted by itself (nothing held): \(shown)")
+        }
         guard found.held.isEmpty else { throw Problem(text: ConfigSeal.refusal(found.held, outside: found.outside, not: not)) }
     }
 
