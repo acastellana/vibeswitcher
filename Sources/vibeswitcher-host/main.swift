@@ -12,6 +12,8 @@ PTYSpawn.execIfLaunched(CommandLine.arguments)
 SessionParser.runIfAsked(CommandLine.arguments)
 // As the probe of a handover (see `HostHandover`): only whether this build can take over.
 HostHandover.probeIfAsked(CommandLine.arguments)
+// As the node's egress proxy for its confined sessions (the session sandbox plan's SB9, `EgressProxy`). Hardened first.
+EgressProxy.runIfAsked(CommandLine.arguments)
 
 signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)

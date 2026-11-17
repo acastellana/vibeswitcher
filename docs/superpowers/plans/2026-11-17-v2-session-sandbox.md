@@ -1134,15 +1134,24 @@ SB0's prototype. **Worktree:** `sb-attack`.
 - It logs a line per refused request: the session, the host and port asked, the reason. Never a header or a byte of
   the tunnel.
 
-- [ ] **Step 1: Failing tests.** `EgressRulesTests`: `aNameOffTheListIsRefused`,
+- [x] **Step 1: Failing tests.** `EgressRulesTests`: `aNameOffTheListIsRefused`,
   `loopbackTheTailnetLinkLocalAndMetadataAreRefusedWhateverTheListSays`,
   `aListedNameThatResolvesToARefusedAddressIsRefused`, `privateRangesNeedTheProjectsWord`,
   `anAddressLiteralIsRefused`, `onlyPort443UnlessTheEntryNamesAnother`, `aWildcardCoversSubdomainsAndNotTheNameItself`.
-- [ ] **Step 2:** `EgressProxyTests`: `aTunnelToAListedHostCarriesBytesBothWays`,
+- [x] **Step 2:** `EgressProxyTests`: `aTunnelToAListedHostCarriesBytesBothWays`,
   `aRefusedRequestGets403AndALogLineWithNoPayload`, `eachListenerHasItsOwnList`,
   `aSlowOrSilentClientHoldsUpNoOther`, `theProxyIsNotDumpableAndIsStartedAgain`,
   `plainHttpIsCarriedOnlyToAListedHost`, `aSessionsListenerIsClosedWithItsSession`.
-- [ ] **Step 3:** Implementation.
+- [x] **Step 3:** Implementation.
+
+**As built (2026-11-17, `v2-sandbox-b`):** `EgressRules` has `privateHosts` beside `hosts` (the project's word for
+private ranges), `admits(host:port:)` (the name judged before anything resolves it) and `defaultHosts` (SB-D7's list as
+data, the recommended value until the user settles it: `api.anthropic.com`, `console.anthropic.com`). The proxy
+connects only to the addresses the rules judged, rewrites a plain request's Host to the URL's and adds `Connection:
+close`. `Dialer` is a struct of two closures. TCP is `Platform.TCP` (Linux only; the Mac's forms fail). Added tests:
+`EgressProxyTests.theLimitsHold`, `theProxyEndsWithItsControlAndTakesOnlyWellFormedMessages`,
+`EgressRulesTests.theDefaultListIsDataAndNamesOnlyTheAgentsHosts`, `addressesReadAsTheyAreWritten`. Not stopped
+by any list: TLS fronting through a listed host's address (the proxy doesn't read inside a tunnel).
 
 ### Task SB10: Boxes on their own network
 
