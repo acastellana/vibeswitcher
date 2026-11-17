@@ -40,6 +40,8 @@ struct CloseOnExecLintTests {
          "the Mac's folder watch's wake pipe, marked close-on-exec after, as it always was: the Mac has no pipe2"),
         ("Sources/VibePlatform/SocketMaking+Darwin.swift", "socket(",
          "the Mac's `makeSocket`: socket, then FD_CLOEXEC, the Mac having no SOCK_CLOEXEC"),
+        ("Sources/VibePlatform/TCP+Darwin.swift", "socket(",
+         "the Mac's TCP socket (`Platform.TCP.makeSocket`): socket, then FD_CLOEXEC, the Mac having no SOCK_CLOEXEC"),
         ("Sources/VibePlatform/SocketMaking+Darwin.swift", "Darwin.accept(",
          "the Mac's `accept`: accept, then FD_CLOEXEC, the Mac having no accept4"),
         ("Sources/VibePlatform/SocketMaking+Darwin.swift", "socketpair(",
