@@ -722,3 +722,102 @@ the build's environment. glibc 2.39 (Ubuntu 24.04).
   `VIBESWITCHER_STATIC_PRODUCTS=<that folder> vs-heavy bash scripts/test.sh --filter InstallTests`.
 - **Not yet measured:** the gated build with the root toolchain (`InstallTests.anInstallBuildsWithTheRootToolchain`),
   waiting on M3. Its sizes, time and link-check output go here when it has run.
+
+## The session sandbox, measured (the session sandbox plan's SB0, 2026-11-17, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+Ubuntu 24.04.1 under WSL2, glibc 2.39, util-linux 2.39.3, uid 1000. The first table is the plan's, measured read-only
+before SB0 (docs/superpowers/plans/2026-11-17-v2-session-sandbox.md, "Measured on this machine"); the rest is SB0's,
+in the prototype box `Tests/Fixtures/sandbox/prototype.sh` (unshare(1) over scratch folders; nothing in the product
+runs it). Rows that a test can hold are held by `SandboxPrototypeTests` and SB1's `SandboxFactsTests`,
+`SandboxShimTests` and `SandboxSeccompTests`.
+
+| What | Command or call | Output | What follows |
+| --- | --- | --- | --- |
+| User namespaces | `unshare -U true`; `unshare -Ur id` | exit 0; `uid=0(root) gid=0(root) groups=0(root),65534(nogroup)` | Works without root |
+| Debian's knob | `/proc/sys/kernel/unprivileged_userns_clone` | No such file or directory | Nothing here to turn them off with |
+| Limits | `/proc/sys/user/max_user_namespaces` (and `max_mnt_`, `max_pid_`, `max_net_`, `max_cgroup_namespaces`) | 384738 each | No practical limit |
+| AppArmor's restriction | `/proc/sys/kernel/apparmor_restrict_unprivileged_userns`; `aa-status` | No such file or directory; `apparmor not present.` (`# CONFIG_SECURITY_APPARMOR is not set`, `# CONFIG_SECURITYFS is not set`: there is no `/sys/kernel/security`) | No profile is needed here. Ubuntu 24.04 on bare metal, and GitHub's hosted runner, refuse them (SB-D15, SB-D18) |
+| bubblewrap | `bwrap --version` | `bwrap: command not found` | Not used (SB-D1) |
+| Landlock | `/sys/kernel/security/landlock`; `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` | the path doesn't exist (no securityfs); the call returns `1` (`CONFIG_SECURITY_LANDLOCK=y`, first in `CONFIG_LSM`) | Landlock is on, at ABI 1 |
+| Landlock ABI 1 and renames | a process restricted with every ABI-1 right allowed under a scratch folder, and another with every right allowed under `/` | rename within one directory: ok; rename across two allowed directories: `EXDEV`; hard link across them: `EXDEV`; read `~/.profile` outside the rule: `EACCES`; read the parent's `/proc/PID/environ`: `EACCES` | Under ABI 1 any restricted process loses renames and links between folders (ABI 2, kernel 5.19, adds `REFER`). Package managers and builds rename between folders, so **Landlock is not the file lock on this kernel** (SB-D1). It does scope ptrace |
+| seccomp | `/proc/sys/kernel/seccomp/actions_avail`; `/proc/1/status` | `kill_process kill_thread trap errno user_notif trace log allow`; `Seccomp: 2`, `Seccomp_filters: 1` on pid 1 and on every process | Filters work, and WSL already puts one on everything: ours stacks on it |
+| Yama | `/proc/sys/kernel/yama/ptrace_scope`; `prctl(PR_SET_PTRACER)` | No such file or directory (`# CONFIG_SECURITY_YAMA is not set`); `EINVAL` | No ptrace scope: only a pid namespace keeps one session out of another |
+| pidfds | `pidfd_open`, `pidfd_send_signal`, `pidfd_getfd` of a child of the same uid, `waitid(P_PIDFD)` | an fd; 0; an fd; ok | All there. `pidfd_getfd` of a dumpable process of the user works, which is S11 item 6's route |
+| Peer pidfds | `getsockopt(SO_PEERPIDFD)`, `setsockopt(SO_PASSPIDFD)` | `ENOPROTOOPT` both (kernel 6.5) | 5.15 lacks them, and `PIDFD_THREAD` (6.9: `EINVAL`). A peer is a pid number here; this plan's identity needs no pid (SB-D4) |
+| Other calls | `clone3`, `close_range`, `openat2`, `mount_setattr`, `memfd_secret` | present; present; present; present; `ENOSYS` | Enough for the shim; idmapped mounts need root, and aren't needed |
+| cgroups | `/proc/self/cgroup`; `/sys/fs/cgroup/unified/cgroup.controllers`; `systemctl show user@1000.service -p Delegate,DelegateControllers`; `ls -ld` of the v1 `pids` and `memory` folders of `user@1000.service` | `0::/init.scope` from a terminal; empty; `Delegate=yes`, `DelegateControllers=cpu memory pids`; both `root root` | Hybrid: the user owns its subtree in the v2 tree (`cgroup.procs`, `cgroup.kill`, `cgroup.freeze`), which has no controller, and the v1 controllers are root's. **No pids or memory limit can be set for a box here** (SB-D13). From a terminal there is no delegated cgroup at all |
+| overlayfs in a user namespace | `mount -t overlay overlay -o lowerdir=…,upperdir=…,workdir=…` as mapped root | mounted; the lower file read through it | `private` mounts work (`CONFIG_OVERLAY_FS=y`) |
+| The other mounts | tmpfs; `mount --rbind /usr` then `remount,bind,ro`; `proc`; `devpts -o newinstance`; `pivot_root`; `umount -l` of the old root | each ok; `touch /usr/x`: `Read-only file system` | The whole shape can be built without root |
+| A whole box, with `unshare(1)` | user, mount, pid, net, ipc, uts and cgroup namespaces, a tmpfs root, `/usr` and `/etc` read-only, a scratch worktree read-write, then a second user namespace mapping uid 1000 and `setpriv --no-new-privs` | `id: 1000:1000  caps: 0000000000000000  NoNewPrivs: 1`; 4 processes visible, pid 1 the shell; `~/.ssh`, `~/.config`, `~/.vibeswitcher`, `~/.claude`, `~/projects`, `/run/user/1000/bus`, `/run/user/1000/systemd/private`, `/run/systemd/journal/socket`, `/run/WSL`, `/init`, `/mnt/c`, `/tmp/.X11-unix`, the docker socket and `/sys/fs/cgroup` all absent; the worktree writable; `net links: lo`; `curl https://1.1.1.1`: `000`; a service on the host's loopback: refused; `systemctl --user`: `offline`; `kill -0` of a process outside: `No such process`; a new pty inside: `/dev/pts/0`; `unshare -Ur true` inside: allowed | The file, process and network halves of S12 item 1 hold as built by hand. Nested user namespaces work, which SB6 and the project's own tests need (SB-D10) |
+| Lifting a cover from a nested namespace | a tmpfs mounted over a folder with a file in it; then, in a second user and mount namespace made inside the first, `umount` and `umount -l` of that tmpfs | `not mounted` both times (how `umount` words the kernel's `EINVAL` for a locked mount); the folder still empty | A mount the box inherited can't be taken off from a namespace nested in it: what the plan covers stays covered (SB-D10) |
+| WSL interop | `cat /proc/sys/fs/binfmt_misc/WSLInterop*`; `ls -la /run/WSL /init` | two entries, both `interpreter /init`, `magic 4d5a`, flags `PF` and `P`; the sockets `srwxrwxrwx`; `/init` `-rwxrwxrwx root` | Interop is on today (M5 isn't done yet) |
+| A Windows program from inside | a copy of `cmd.exe` run outside any namespace; inside a box (no `/init`, no `/run/WSL`); with only `/run/WSL` covered | it runs; `failed to run command './cmd.exe': No such file or directory`; `/init` starts, finds no socket and fails (`UtilGetPpid … Failed to parse: /proc/1/stat`) | A box with neither path runs no Windows program. Here the missing `/init` was enough, because the entry tried first names it by path. The other entry holds the interpreter open (flag `F`), so where that one is tried only the missing `/run/WSL` stops it: the box hides both, and the attack checks both |
+| Hyper-V sockets | `socket(AF_VSOCK, SOCK_STREAM)` in the host's network namespace, and inside a new one | `ok` both (`CONFIG_HYPERV_VSOCKETS=y`) | **A network namespace doesn't cover `AF_VSOCK`**: a box could still talk to the Windows side over a Hyper-V socket. The filter refuses the family (SB1). New for S11 |
+| Other families | `AF_PACKET`, raw `AF_INET`; `AF_ALG`, `NETLINK_NETFILTER` | `EPERM`; `ok` | The filter leaves `AF_UNIX`, `AF_INET`, `AF_INET6` and route netlink only |
+| nftables | `nft list tables` as the user; `nft add table …` in an own user and network namespace | `Operation not permitted (you must be root)`; a ruleset listed | A rule for the uid in the host's network needs root, so egress isn't filtered that way. Inside a namespace of its own any process can load netfilter rules: kernel surface the filter cuts |
+| slirp4netns, pasta | `command -v` | missing both (`/dev/net/tun` is `crw-rw-rw-`, and a tap device can be made in an own namespace, so either would work if installed) | Not needed (below) |
+| Egress with nothing installed | a TCP listener bound to `127.0.0.1:3128` inside a new network namespace, its descriptor passed out with `SCM_RIGHTS`, accepted by a process outside that answers `CONNECT` | outside: `bound to ('127.0.0.1', 3128)` while its own namespace has 9 links; inside: `links = lo`; `curl -x http://127.0.0.1:3128 https://example.com/`: `200`; with no proxy: `Could not resolve host` | **A socket belongs to the namespace it was made in, whoever holds it.** The proxy needs no tap device and no relay (SB-D7) |
+| Unix sockets across namespaces | a path socket bound outside, connected from inside a user, net and pid namespace; an abstract one | connected; `SO_PEERCRED` gives the connector's pid as the listener numbers it, whose `/proc/<pid>/ns/pid` differs from the listener's; the abstract one: `Connection refused` | A path socket is reachable exactly when it is in the mount view: hiding is the lock. Abstract sockets stay behind with the network namespace |
+| A terminal made outside | the slave of a pty as stdin of a process whose `/dev/pts` is a devpts of its own | `isatty(0)`: True; `ttyname(0)`: `ENODEV` (`tty` says `not a tty`); `/proc/self/fd/0`: `/dev/pts/5`; `/dev/tty` opens; `getsid(0)`: 0; a new pty inside: `/dev/pts/0`; `tty_nr`: `136:5`; an interactive bash turns job control on | The session keeps its host terminal number (`ttypts5`), so every tty-keyed record still matches. Programs that ask the terminal's name get none: SB0 measures Claude Code |
+| Writing the uid map | a non-dumpable process after `unshare(CLONE_NEWUSER)`; a dumpable one, made non-dumpable after | `EACCES`; written | The launcher runs from an unreadable copy, so it must be dumpable while it writes its maps, which it already is before its exec (`HostImages.beforeProgram`). Init hardens again afterwards |
+| Claude Code 2.1.326 | the loader's `--list` of the binary; `stat` of `~/.claude.json` five minutes apart; the files beside it | `librt`, `libc`, `libpthread`, `libdl`, `libm` from `/lib/x86_64-linux-gnu`; inode 1789508, then 771029; seven `~/.claude.json.tmp.<pid>.<ms>` files; `.credentials.json` unchanged | The agent needs `/usr` and its own file. It replaces `~/.claude.json` by a temporary file and a rename beside it, so that file can't be a single bound file: the home inside is a folder of the session's own |
+| Around it | `kernel.unprivileged_bpf_disabled`; `perf_event_paranoid`; `vm.unprivileged_userfaultfd`; `/proc` | 2; 2; 0; no `hidepid` | The filter refuses `bpf`, `perf_event_open` and `userfaultfd` anyway |
+| This network | `/etc/resolv.conf`; `ip -o addr`; `ss -ltn` | the tailnet's resolver (`100.100.100.100`); a `tailscale0` link beside the LAN's; three listeners on loopback | What the proxy must refuse is really here |
+
+### SB0's prototype, ungated
+
+The prototype builds the worker's box of the plan's tables: a tmpfs root, `/usr`, `/etc` and `/opt` read-only (every
+mount under them too), `/bin`, `/lib`, `/lib64`, `/sbin` as links, its own `/proc`, `/dev` (six nodes, a devpts of its
+own, `shm`), `/tmp` and `/var/tmp`, the scratch home and worktree read-write, the user's uid mapped to itself, no
+capability in any set, `no_new_privs`. It refuses a `HOME` that is or holds the account's home
+(`SandboxPrototypeTests.thePrototypeRefusesTheAccountsHome`), and its box shows a program the user with no capability
+and nothing else of the home (`aProgramInThePrototypeIsTheUserWithNoCapabilityAndSeesOnlyItsBox`).
+
+| What | Command | Output | What follows |
+| --- | --- | --- | --- |
+| A recursive bind of `/usr` | `mount --rbind /usr R/usr`, then `mount -o remount,bind,ro` of the top | `R/usr` `ro`; below it `/usr/lib/wsl/drivers` `ro,noatime` (9p), `/usr/lib/wsl/lib` **`rw`**,`noatime` and `/usr/lib/modules/5.15.167.4-microsoft-standard-WSL2` **`rw`** (both overlays WSL mounts) | A read-only bind must make every mount under it read-only (the shim: `mount_setattr` with `AT_RECURSIVE`), keeping each one's atime flag, which the kernel locks. A non-recursive bind of `/usr` is refused in a user namespace (`EINVAL`: it would uncover what the locked mounts under it hide). util-linux's `-o ro=recursive` left the lower ones `rw` here |
+| `swift build` and `swift test` of a package with no dependency | inside, swiftly's folder read-only on PATH, `~/.swiftpm` private | `Build complete!`, `1 test passed`; it wrote `~/.cache/org.swift.swiftpm/manifests/manifest.db`, `~/.cache/org.swift.foundation.URLCache`, `~/.cache/clang/ModuleCache` in the box's home | A build needs its home's `.cache` writable: `own` (or `private`) |
+| Dependencies with no network | a package naming `swift-crypto` 3.15.1, `--net none`, `HOME` the real path with `~/.swiftpm` and `~/.cache` private | `swift package resolve`: "Computed … at 1.7.4", working copies of swift-crypto and swift-asn1, status 0 | Private caches spare the network for what is already cached |
+| git with the common folder read-only | a scratch repository; `.git` `ro`, with `objects/`, `worktrees/w1/`, `refs/heads/agent/`, `logs/refs/heads/agent/` `rw` (`LeadLaunch.codexWritableRoots`'s list); `gc.auto=0` | `commit`, `status`, `log`: ok; `rebase main`: "Successfully rebased", after "error: Unable to create '…/.git/packed-refs.lock': Read-only file system"; `branch -f main`: refused (`main` is checked out elsewhere); `tag`: `refs/tags/t1.lock` read-only; `config x.y`: "could not lock config file"; writing `hooks/pre-commit`: read-only; `update-ref refs/heads/agent/other`: ok | The worker's own work runs. **Deleting any ref** (a rebase's, `git branch -d agent/x`) needs `packed-refs.lock` and fails with the common folder read-only: a worker can't delete its branches (the lead's tools do it outside). Another `agent/` ref stays writable (SB-D5's cost) |
+| `vs-heavy` with the slots' folder | the slots' folder (a scratch one: `VIBESWITCHER_TEST_LOCK_DIR`) bound `rw`; `vs-heavy --as inside-box` holds slot 1; outside, `vs-heavy --as outside true` with one slot | inside: `test-build.lock.holder` reads "pid 63, inside-box in …"; outside waited until killed by `timeout 5` (status 143) | A flock taken inside holds outside: the slots are shared. The holder note names the box's own pid (SB-D14's cost) |
+| `/sys` | `--sys` with the host's network; with `--net none` | "the box couldn't be built: /sys" (sysfs refused: the network namespace isn't the box's); with its own: `block bus class dev devices firmware fs kernel module`, `class/net` holds `lo` alone, `fs/cgroup` empty, writes `Read-only file system` | `/sys` only in a box with a network of its own. The plan's tables give none for slice 1's worker |
+| `RLIMIT_NPROC` before the user namespace | `--nproc` at the user's task count + 60 (378, with 318 tasks of uid 1000 outside); inside and outside, children forked until refused | inside: refused after 20 children; outside, the same limit: after 22 | The limit counts every task of the uid, outside the box included (kernel 5.14's counts are checked at every level up to the first namespace): **no per-box process limit** this way (SB-D13 stands) |
+
+### A real Claude Code turn in the prototype (gated, `RealClaudeSandboxTests.aRealClaudeTurnRunsInThePrototype`)
+
+Run twice with the user's go-ahead, on Sonnet, with the test login (`VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` naming
+`~/.vibeswitcher-test-claude`); the first run's wait ended early (the prompt's own text, echoed, matched), the second
+waited for the Stop hook. Claude Code 2.1.326, the versioned binary read-only. The box's config folder was a scratch
+`HOME/.claude` (`CLAUDE_CONFIG_DIR`), its `.claude.json` seeded from the test folder's (every key but `projects` and
+`mcpServers`, then the worktree's trust entry); the test folder's `settings.json`, `plugins/`, `skills/` and
+`.credentials.json` bound into it read-only (nothing read or copied them: the kernel bound them). Hooks given with
+`--settings`, each appending its event to a file of the box's home: a stand-in for the door. `HTTPS_PROXY` and the
+other three named a logging stand-in proxy (`Tests/Fixtures/sandbox/logging-proxy.py`). `DISABLE_AUTOUPDATER=1`,
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `--allowedTools "Bash(touch made-in-the-box)"`.
+
+- **The turn ran:** `made-in-the-box` in the worktree; the answer drawn; hook events `SessionStart UserPromptSubmit
+  PreToolUse PostToolUse Stop`, in that order.
+- **What it wrote in its config folder** (all in the box's own): `.claude.json` (by a temporary file and a rename
+  beside it: six times in one turn), `backups/`, `debug/` (`--debug`), `history.jsonl`, `mcp-needs-auth-cache.json`,
+  `projects/` (the transcript), `session-env/`, `sessions/`, `shell-snapshots/`; it watched `jobs/<id>` (absent). It
+  wrote nothing to a read-only entry and no write was refused (no `EROFS`, `EACCES` or `EPERM` in its debug log).
+- **In the home beside it:** `.cache/`, `.config/`, `.local/`; among them it registers a URL handler at
+  `~/.local/share/applications/claude-code-url-handler.desktop` at every start (in the box's own home: thrown away; for
+  an unconfined session it is a file the agent writes into the desktop's folder), and its install check says
+  "claude command at ~/.local/bin/claude missing or broken" (cosmetic).
+- **The given folder:** no entry changed or appeared (inode, change time and size of each, before and after; a second
+  listing by hand agreed). `.credentials.json` unchanged. **No login refresh** was asked in either turn (the token
+  was valid): whether a long session rewrites the login stays unmeasured; with the file bound read-only such a write
+  would fail with `EROFS` (SB-D8).
+- **Hosts asked of the proxy**, all as `CONNECT`: `api.anthropic.com:443` (twice) and `mcp-proxy.anthropic.com:443`
+  (eight times: the account's claude.ai connectors, which Claude Code loads from the account, not from `.claude.json`,
+  even with non-essential traffic off; those not authorized answered `mcp_unauthorized_no_token`). No telemetry,
+  update or other host. Claude Code honours `HTTPS_PROXY`: nothing went around it.
+- **A terminal with no name:** the TUI drew, took typed text into its prompt, and ended on Ctrl-C twice, on a pty made
+  outside whose name doesn't resolve inside (`ttyname`: `ENODEV`).
+- **Trust:** the seeded trust entry spared the trust question (none shown).
+- **Not shown inside:** `/mnt/c/Users` (its "WSL IDE lockfile path detection" fails `ENOENT`: harmless).
+
+What follows, for SB2 (`ClaudeFiles`) and SB-D7's list: the own entries are the ones above; the read-only list
+stands; the default hosts are `api.anthropic.com`, and `mcp-proxy.anthropic.com` only if the account's connectors are
+wanted in a box (the user's call with SB-D7 and SB-D9).

@@ -44,9 +44,11 @@ own headers (`<sched.h>`, `<sys/mount.h>`, `<linux/seccomp.h>`, `<linux/filter.h
 **Code references** are at `v2` `f62aef61`.
 
 **Status:** written 2026-11-17 beside the bootstrap, at the lead's request, so the sandbox can be built as early as
-possible instead of adding guard rails to plain mode. Nothing is built. The measurements below were made that day,
-read-only, on the node's machine. Decisions marked **needs the lead** or **needs the user** wait for an answer;
-everything else is written on the recommendation.
+possible instead of adding guard rails to plain mode. The measurements below were made that day, read-only, on the
+node's machine; SB0's are in the inventory (`docs/process/v2-linux-inventory.md`, "The session sandbox, measured"),
+which holds this table too. The lead accepted SB-D3, SB-D5, SB-D14 and SB-D17 on 2026-11-17; SB-D6 to SB-D9, SB-D15
+and SB-D16 wait for the user's answer, and what is built so far goes either way. Decisions marked **needs the lead**
+or **needs the user** wait for an answer; everything else is written on the recommendation.
 
 ## Words
 
@@ -222,7 +224,10 @@ inside, so transcripts, records and error messages name the same files on both s
 | Other terminals (`/dev/pts/N` of any other session, the user's) | absent | absent | absent | none at all (a POSIX session of its own, no `/dev/tty`) |
 
 Inside, git gets a generated `<home>/.gitconfig`: the user's `user.name` and `user.email`, `gc.auto=0`, and no
-credential helper.
+credential helper. With `<git>` read-only (SB0, measured): commit, status, log and a rebase work; deleting any ref
+(`git branch -d`, a rebase's own cleanup) can't take `packed-refs.lock` and fails, so a worker's branches are deleted
+by the lead's tools, outside. A read-only bind takes every mount below its source with it, each made read-only too:
+WSL mounts `/usr/lib/wsl/lib` and the kernel's modules folder read-write under `/usr` (measured).
 
 **Execute.** Anything it can read, as the user's own uid with no capability, `no_new_privs` set and every mount
 `nosuid` and `nodev`: a setuid program gains nothing, so `sudo`, `su`, `newgrp`, `crontab` and `at` do nothing there.
@@ -264,21 +269,25 @@ Claude Code is one native binary plus a config folder and a file beside it. What
 | `<home>/.claude/`, the folder | own | It makes temporary files and new entries there |
 | `settings.json`, `settings.local.json`, `CLAUDE.md`, `skills/`, `agents/`, `commands/`, `plugins/`, `keybindings.json`, the status line's script, `policy-limits.json*`, `remote-settings.json*`, each where it exists (`ClaudeFiles.readOnlyEntries`; an entry not on the list isn't shown) | ro, each bound into the session's folder | The user's settings, hooks and instructions still apply, and no session can change what the next one loads (S11 item 8) |
 | `projects/<this folder's name>/` (the transcript, its memory) | rw, the real folder | The lead's `read_session`, receipts and `tellLead` read transcripts from outside, and a resumed or rotated session finds its own |
-| Everything else there (on this machine: `shell-snapshots/`, `session-env/`, `history.jsonl`, `file-history/`, `paste-cache/`, `debug/`, `cache/`, `tasks/`, `teams/`, `jobs/`, `sessions/`, `state/`, `backups/`, the daemon's files, the caches) | own, empty at start | The Bash tool sources its snapshot before every command: a snapshot of the session's own can't carry another session's function (S11 item 8, measured route) |
+| Everything else there (on this machine: `shell-snapshots/`, `session-env/`, `history.jsonl`, `file-history/`, `paste-cache/`, `debug/`, `cache/`, `tasks/`, `teams/`, `jobs/`, `sessions/`, `state/`, `backups/`, the daemon's files, the caches; SB0 saw one turn write `backups/`, `history.jsonl`, `mcp-needs-auth-cache.json`, `projects/`, `session-env/`, `sessions/`, `shell-snapshots/`, and `debug/` with `--debug`) | own, empty at start | The Bash tool sources its snapshot before every command: a snapshot of the session's own can't carry another session's function (S11 item 8, measured route) |
 | `.credentials.json` (the login) | ro in slices 1 to 3; gone in slice 4 (SB-D8) | The agent can't call its API without it today |
-| `<home>/.cache/claude*`, `<home>/.local/state/claude`, `/tmp/claude-<uid>/` | own | Locks, staging and its tasks' output |
+| `<home>/.cache/claude*`, `<home>/.local/state/claude`, `/tmp/claude-<uid>/` | own | Locks, staging and its tasks' output. SB0: it also writes `<home>/.local/share/applications/claude-code-url-handler.desktop` (a URL handler) at every start, in the box's own home |
 | Its Bash tool's shell | `/bin/bash`, with no startup file in the session's home | `~/.bashrc` and the login files Claude Code sources (Task 12b) aren't there |
 | Its hooks | the user's `settings.json` names `<home>/.vibeswitcher/bin/vibeswitcher-hook`, which is there, read-only, and relays | No setting changes |
 | Its tool server | the role's `--mcp-config` names `<build>/bin/vibeswitcher-mcp`, which is there, read-only, and relays | No launch setting changes |
 | Its updates | off (`DISABLE_AUTOUPDATER=1`): the versions folder is read-only | An update inside would write what every agent runs |
-| Its API | slice 1: as today. From slice 2: `HTTPS_PROXY`, `HTTP_PROXY` and their lower-case forms name the box's listener | Measured for `curl`; Claude Code, git, npm and SwiftPM are SB0's to measure |
+| Its API | slice 1: as today. From slice 2: `HTTPS_PROXY`, `HTTP_PROXY` and their lower-case forms name the box's listener | Measured for `curl`, and by SB0 for Claude Code: every request a `CONNECT`, to `api.anthropic.com:443` and `mcp-proxy.anthropic.com:443` (the account's claude.ai connectors) only, with non-essential traffic off. git and npm through the proxy are SB10's; SwiftPM resolved its pinned dependencies with no network from private caches |
 | Environment | `HOME USER LOGNAME SHELL PATH LANG LC_* TERM COLORTERM TERM_PROGRAM VIBESWITCHER_SESSION VIBESWITCHER_ROLE VIBESWITCHER_DOOR TMPDIR` and the role's named ones (`GIT_OPTIONAL_LOCKS`, `VIBESWITCHER_HEAVY_*`, a verifier's three): an allow-list (S12 item 17) | A spawn's `env` can no longer carry a name nobody listed |
 
-**Not measured yet, and SB0's first job** (a gated run with M1's test login in a prototype box): whether Claude Code
-writes any top-level entry of its config folder besides the ones marked own (it would fail on a bound one); whether
-it refreshes its login during a session and how it writes it; which hosts it asks for; whether its TUI minds a
-terminal with no name; whether a seeded trust entry spares `answerTrust`'s typing. The table's "ro" and "own" lists
-are a platform answer (`ClaudeFiles`), so a new Claude Code version changes one list and its test.
+**Measured by SB0** (a gated run with the test login in the prototype box; the inventory has the detail): Claude Code
+writes no top-level entry of its config folder besides the ones marked own, and nothing on a bound one was refused; it
+rewrote `.claude.json` by a rename six times in one turn; it asked no login refresh in two short turns (whether a
+long session does stays open: on a read-only login it would fail with `EROFS`, SB-D8); it asks for
+`api.anthropic.com` and, for the account's claude.ai connectors, `mcp-proxy.anthropic.com` (SB-D7's list; those
+connectors come from the account, not from `.claude.json`, so SB-D9's seeded file doesn't drop them); its TUI draws,
+takes input and quits on a terminal with no name; a seeded trust entry spares the trust question; every hook event
+ran inside. The table's "ro" and "own" lists are a platform answer (`ClaudeFiles`), so a new Claude Code version
+changes one list and its test.
 
 Codex stays off (D15). Its own sandbox would run inside this one; that is measured before `VIBESWITCHER_CODEX_WORKERS`
 goes back on, in a task of its own after slice 3.
@@ -515,7 +524,7 @@ task starts.
    process of the box; the keeper's death ends the namespace (`PR_SET_PDEATHSIG`). *Changes S12 item 1's wording*
    ("only the session's slave passed in" stays true; the session leader is outside).
 3. **SB-D3: The tool server and the hook run outside, through a door and a porter.** **Needs the lead.**
-   *Recommended.* The other way, giving the box `host.sock`, `state/`, `steer/`, `lead/git-hooks/` and the main
+   *Recommended.* **Accepted by the lead, 2026-11-17.** The other way, giving the box `host.sock`, `state/`, `steer/`, `lead/git-hooks/` and the main
    checkout's `board.json` and records, keeps S11 items 5, 7 and 29 open and makes every later change to the tool
    server a sandbox change. *Costs:* two hook lines each in `vibeswitcher-mcp` and `vibeswitcher-hook`, which main
    shares; a process per confined session; a hook's event crosses two sockets. *Changes:* S4 (the connector is the
@@ -526,7 +535,7 @@ task starts.
    is dropped; `aConnectorConnectionIsItsSession`, `branchCodeHasNoConnector` and `theConnectorSurvivesAHandover`
    keep their names (SB5, SB6).
 5. **SB-D5: Worktrees stay in slice 1, with the base read-only; clones come later.** **Needs the lead.**
-   *Recommended.* A worker gets exactly the git folders a Codex worker's sandbox already gets
+   *Recommended.* **Accepted by the lead, 2026-11-17.** A worker gets exactly the git folders a Codex worker's sandbox already gets
    (`LeadLaunch.codexWritableRoots`), which closes S11 item 9 for the base, tags, config and hooks without changing
    how the lead reads a result. *Costs:* a worker can still move another `agent/` branch's ref or damage the object
    store (caught by the vault's heads and the audit; a denial of service). *Otherwise:* clones first (S12 item 3,
@@ -569,6 +578,7 @@ task starts.
     controllers, a later task puts each box in a cgroup of its own with `pids.max` and `memory.high`. S11 item 25
     keeps its exhaustion half.
 14. **SB-D14: The heavy-work slots get a folder of their own on Linux.** **Needs the lead** (a shared file).
+    **Accepted by the lead, 2026-11-17.**
     Today the slots' lock files and every session's TMPDIR share `/tmp/vibeswitcher-<uid>`, so sharing the slots
     would share the TMPDIRs. On Linux `TestLock.standard` and `vs-heavy`'s default move to
     `/tmp/vibeswitcher-<uid>/slots` (a platform answer and one line of the script), bound `rw` into every box.
@@ -585,7 +595,7 @@ task starts.
     card"). They join `LeadVault.guardedKeys`, so a worker's edit of `workflow.md` changes nothing until the user
     accepts it. A path under a hidden folder (`.ssh`, `.gnupg`, `.config`, `.vibeswitcher`, another project) is
     refused whatever the key.
-17. **SB-D17: When it is built.** **Needs the lead.** *Recommended:* SB0, SB1, SB2, SB4 and SB9 start now, beside
+17. **SB-D17: When it is built.** **Needs the lead.** **Accepted by the lead, 2026-11-17**, as recommended: SB0, SB1, SB2, SB4 and SB9 start now, beside
     the bootstrap's step 10: they are new files, and touch nothing step 8's or step 10's work touches. SB3, SB5 and
     SB6, which put hook lines into shared files, start once `v2-step8` is in `v2`. Slice 1 joins `v2` after the
     bootstrap's first merge, as the lead's first backlog item, or before it if the lead would rather have the first
@@ -702,22 +712,22 @@ Sources/VibeHost/V2/
 - Produces: for SB2, the final lists of `ClaudeFiles` and the default egress hosts; for SB3, how Claude Code takes a
   terminal with no name.
 
-- [ ] **Step 1: The prototype.** `prototype.sh HOME WORKTREE CONFIG -- COMMAND…` builds the worker's box of the
+- [x] **Step 1: The prototype.** `prototype.sh HOME WORKTREE CONFIG -- COMMAND…` builds the worker's box of the
   tables above by hand: scratch home, config folder as `ClaudeFiles` proposes, a devpts of its own, no network
   namespace. It refuses a `HOME` that is the account's. `SandboxPrototypeTests.thePrototypeRefusesTheAccountsHome`.
-- [ ] **Step 2: Ungated measurements**, each recorded in the inventory with its command and output: `swift build`
+- [x] **Step 2: Ungated measurements**, each recorded in the inventory with its command and output: `swift build`
   of a small package and one `scripts/test.sh --filter` suite inside (what SwiftPM writes under `~/.cache` and
   `~/.swiftpm`; whether `private` caches spare the network); git in a worktree with the read-only common folder
   (commit, `git status`, `git log`, a rebase; `gc.auto=0`); `vs-heavy` with the slots' folder; `/sys` mounted
   read-only in an own network namespace or not; `RLIMIT_NPROC` set before the user namespace is made, as a process
   limit for the box (kernel 5.14's per-namespace counts).
-- [ ] **Step 3: Gated, with the user's go-ahead.** `RealClaudeSandboxTests.aRealClaudeTurnRunsInThePrototype`: a
+- [x] **Step 3: Gated, with the user's go-ahead.** `RealClaudeSandboxTests.aRealClaudeTurnRunsInThePrototype`: a
   copy of M1's test config folder (never the folder itself), Claude Code started in the prototype on Sonnet, one
   turn that runs `touch made-in-the-box` with Bash. Recorded: every entry of the config folder whose inode or
   change time moved, and any write it was refused; whether `.credentials.json` was written; the hosts it asked a
   logging stand-in proxy for; whether the TUI drew and took input on a terminal with no name; whether the seeded
   trust entry spared the trust question; the hook's events through a stand-in door.
-- [ ] **Step 4:** The lists in this plan's tables are corrected to what was found, in the commit that records it.
+- [x] **Step 4:** The lists in this plan's tables are corrected to what was found, in the commit that records it.
 
 ### Task SB1: The shim, `Platform.Sandbox`
 
