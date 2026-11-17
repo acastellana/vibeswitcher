@@ -54,7 +54,7 @@ extension ConfigSealTests {
         #expect(try asLead.checkConfig(root: root).held.isEmpty)
     }
 
-    /// The round as the vault notes it and the lead's log says it: its paths, the bucket's folder never named.
+    /// The round as the vault notes it: its paths, the bucket's folder never named (the lead's log says only counts).
     static let roundSaid = ["synced/<account>/docx/SKILL.md changed", "synced/<account>/docx/scripts/new.py added"]
 
     /// The round accepted by itself is recorded as the sync's (not a change of the user's sealed), and the lead's
@@ -78,8 +78,10 @@ extension ConfigSealTests {
         #expect(ConfigSeal.syncRound(in: record) == Self.roundSaid)
         #expect(ConfigSeal.held(in: record).isEmpty)
         let progress = (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)) ?? ""
-        #expect(progress.contains("in ~/.claude/skills/synced, accepted by itself (nothing held): " + Self.roundSaid.joined(separator: ", ")), "\(progress)")
+        #expect(progress.contains("in ~/.claude/skills/synced, accepted by itself (nothing held): 1 changed, 1 added"), "\(progress)")
         #expect(!progress.contains("sealed as they are"), "\(progress)")
+        // Counts only: the log may be public, and a synced skill's name an organisation's own.
+        #expect(!progress.contains("docx"), "\(progress)")
         #expect(!progress.contains(Self.bucket), "\(progress)")
         // Noted once: the next look finds it noted.
         let third = try add(lead, "Third")
@@ -101,7 +103,7 @@ extension ConfigSealTests {
         let second = try add(lead, "Second")
         #expect(!lead.call("start_worker", ["task": second]).isError)
         let progress = (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)) ?? ""
-        #expect(progress.contains("accepted by itself (nothing held): " + Self.roundSaid.joined(separator: ", ")), "\(progress)")
+        #expect(progress.contains("accepted by itself (nothing held): 1 changed, 1 added"), "\(progress)")
     }
 
     /// The look that accepts it says so to whoever asked, and nothing as resealed.

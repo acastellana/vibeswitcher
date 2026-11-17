@@ -5765,13 +5765,17 @@ public final class LeadToolset: MCPToolset {
             try? store.appendProgress("Agents' config changed while no worker or verifier ran (the user's), sealed as they are: \(ConfigSeal.list(found.resealed))")
         }
         // A round of Claude Code's skill sync the vault accepted by itself, at this look or another (the app's, a
-        // branch run's end): noted once in this team's log, by its time.
+        // branch run's end): noted once in this team's log, by its time. Counts only: the log may be a public
+        // repository's, and a synced skill's name may be an organisation's own (the paths stay in the vault's record).
         if let round = found.lastSyncRound {
             let tag = "Claude Code's skill sync finished a round (\(String(round.at))) in ~/.claude/skills/synced, accepted by itself (nothing held): "
             let logged = (try? String(contentsOfFile: store.recordPath("progress.md"), encoding: .utf8)) ?? ""
             if !logged.contains(tag) {
-                let shown = round.files.prefix(8).joined(separator: ", ") + (round.files.count > 8 ? " and \(round.files.count - 8) more" : "")
-                try? store.appendProgress(tag + shown)
+                let counts = ["changed", "added", "removed"].compactMap { word -> String? in
+                    let count = round.files.filter { $0.hasSuffix(" " + word) }.count
+                    return count > 0 ? "\(count) \(word)" : nil
+                }
+                try? store.appendProgress(tag + (counts.isEmpty ? "no paths" : counts.joined(separator: ", ")))
             }
         }
         guard found.held.isEmpty else { throw Problem(text: ConfigSeal.refusal(found.held, outside: found.outside, not: not)) }
