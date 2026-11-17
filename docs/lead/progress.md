@@ -3484,3 +3484,5 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 01:55 Automatically (auto_advance): find-and-fix-the is audited, not merged: it has code that spawns processes (Sources/VibeSwitcher/MallocMode.swift: execv(path, CommandLine.unsafeArgv)) (the risk check raised it from review none). Its audit starts once the Mac has room.
 - 2026-11-17 01:55 Pipeline held: shell-cards-ending ready to merge with none landing; cause: a merge in progress
 - 2026-11-17 02:08 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: 3 tasks paused since 02:08 (1 planned, 2 in review).
+- 2026-11-17 02:25 Pipeline held: shell-cards-ending ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-17 02:26 Planned merges-are-held-names: "Merges are held" names the battery hold as its cause
