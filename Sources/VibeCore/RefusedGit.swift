@@ -14,7 +14,7 @@ import Foundation
 /// those, refused anyway).
 ///
 /// Not seen here, and so open: the same settings through git's environment (`GIT_DIR=x git …`, `GIT_CONFIG_*`),
-/// a line run by another shell (`sh -c '…'`, `eval`, `env -S '…'`), a refused command behind a harmless option
+/// a line run by another shell or program (`sh -c '…'`, `eval`, `env -S '…'`, `watch`; `find -exec` is read), a refused command behind a harmless option
 /// (`git -P push`), and a word the shell makes from an expansion (`git $opt x`, `git ${o:--C} x`).
 public enum RefusedGit {
     /// The refused options. `--config-env` is `-c` with its value read from an environment variable.
@@ -23,7 +23,7 @@ public enum RefusedGit {
     /// The global options that take the next word as their value when it isn't joined with `=` (`git --namespace n`),
     /// from `git -h` (2.54) and git.c; `--exec-path` alone prints the path and takes none.
     static let valued: Set<String> = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix",
-                                      "--attr-source"]
+                                      "--attr-source", "--shallow-file"]
 
     /// The rules as they were, by name: the spaced spelling (`Bash(git -C:*)`).
     static let rules: [String] = options.map { "Bash(git \($0):*)" }
@@ -32,10 +32,11 @@ public enum RefusedGit {
     /// (`Bash(git -C*)` takes `git -C/x` and `git -C x` alike). Only at the line's start: the hook finds the rest.
     static let spellingRules: [String] = options.map { $0.hasPrefix("--") ? "Bash(git \($0)=*)" : "Bash(git \($0)*)" }
 
-    /// Why a line is refused: a git it runs takes a refused option (as written), or it nests deeper than it's read.
+    /// Why a line is refused: a git it runs takes a refused option (as written), or it's past what's read (nested
+    /// deeper than `ShellWords.depthLimit`, or more work to read than its length warrants).
     public enum Refusal: Equatable {
         case option(String)
-        case tooDeep
+        case unreadable
 
         /// The hook's reason, as the session reads it.
         public var reason: String {
@@ -43,25 +44,25 @@ public enum RefusedGit {
             case .option(let option):
                 "VibeSwitcher refuses git's \(option) to every role, in every spelling: it points git at another repository, "
                     + "work tree, config or programs. Run git in your own worktree without it."
-            case .tooDeep:
-                "VibeSwitcher refuses a command nested more than \(ShellWords.depthLimit) levels deep (subshells, substitutions): "
-                    + "it can't check what git it runs. Write it flatter."
+            case .unreadable:
+                "VibeSwitcher refuses a command nested more than \(ShellWords.depthLimit) levels deep (subshells, substitutions) "
+                    + "or too tangled to read: it can't check what git it runs. Write it flatter."
             }
         }
     }
 
     /// The refusal a git in `line` would run with, or nil when none does.
     public static func refusal(in line: String) -> Refusal? {
-        guard let commands = ShellWords.commands(in: line) else { return .tooDeep }
+        guard let commands = ShellWords.commands(in: line) else { return .unreadable }
         for words in commands {
             if let option = refusal(command: words) { return .option(option) }
         }
         return nil
     }
 
-    /// Words that come before the program a command runs, with no effect on which it is.
+    /// Words that come before the program a command runs, with no effect on which it is (`time` is a wrapper, for its `-p`).
     static let keywords: Set<String> = ["!", "{", "}", "(", ")", "if", "then", "else", "elif", "fi", "do", "done", "while", "until",
-                                        "time", "coproc"]
+                                        "coproc"]
     /// Programs that run the command after them: their options that take a value (`env -u NAME git …`), and the
     /// operands before the command (`timeout 60 git …`).
     struct Wrapper {
@@ -87,6 +88,9 @@ public enum RefusedGit {
             let name = (word as NSString).lastPathComponent
             if keywords.contains(word) || isAssignment(word) {
                 index += 1
+            } else if word == "function" {
+                // `function f { git …; }`: the keyword, then the function's name.
+                index += 2
             } else if let wrapper = wrappers[name] {
                 index += 1
                 while index < words.count, words[index].hasPrefix("-") || (name == "env" && isAssignment(words[index])) {
@@ -97,7 +101,15 @@ public enum RefusedGit {
                 break
             }
         }
-        guard index < words.count, (words[index] as NSString).lastPathComponent == "git" else { return nil }
+        guard index < words.count else { return nil }
+        if (words[index] as NSString).lastPathComponent == "find" {
+            // `find … -exec git … \;`: each command find runs.
+            for (at, word) in words.enumerated().dropFirst(index + 1) where ["-exec", "-execdir", "-ok", "-okdir"].contains(word) {
+                if let option = refusal(command: Array(words[(at + 1)...])) { return option }
+            }
+            return nil
+        }
+        guard (words[index] as NSString).lastPathComponent == "git" else { return nil }
         index += 1
         // git's own options, up to its command: the first word that isn't one.
         while index < words.count {
@@ -130,11 +142,11 @@ enum ShellWords {
     /// build on a 512 KB thread (64 overflowed one: about 4 KB a frame, two or three frames a level).
     static let depthLimit = 16
 
-    /// The simple commands in `line`, or nil when it nests deeper than `depthLimit`.
+    /// The simple commands in `line`, or nil when it nests deeper than `depthLimit` or costs more than `lookahead` allows.
     static func commands(in line: String) -> [[String]]? {
         var scanner = Scanner(chars: line.unicodeScalars.map(Character.init))
         scanner.list(until: nil)
-        return scanner.tooDeep ? nil : scanner.commands
+        return scanner.unreadable ? nil : scanner.commands
     }
 
     struct Scanner {
@@ -145,9 +157,15 @@ enum ShellWords {
         /// whether the delimiter was quoted (the body is then text; unquoted, the shell runs its substitutions).
         var pending: [(delimiter: String, tabs: Bool, quoted: Bool)] = []
         var depth = 0
-        var tooDeep = false
+        var unreadable = false
+        /// What `isArithmetic`'s look-aheads may still read: each reads on to its `((`'s close, so lines built for it
+        /// (`(('((' ) ); ` over and over) cost the square of their length. Past it, the line is refused, not read.
+        var lookahead: Int
 
-        init(chars: [Character]) { self.chars = chars }
+        init(chars: [Character]) {
+            self.chars = chars
+            lookahead = 64 * chars.count + 100_000
+        }
 
         func peek(_ offset: Int = 0) -> Character? { i + offset < chars.count ? chars[i + offset] : nil }
 
@@ -157,9 +175,14 @@ enum ShellWords {
             depth += 1
             guard depth > ShellWords.depthLimit else { return true }
             depth -= 1
-            tooDeep = true
-            i = chars.count
+            giveUp()
             return false
+        }
+
+        /// The line isn't read further, and is refused.
+        mutating func giveUp() {
+            unreadable = true
+            i = chars.count
         }
 
         /// Reads commands until `terminator` (`)` of a subshell or `$(`, or a backtick) or the line's end; past it.
@@ -213,7 +236,7 @@ enum ShellWords {
                     i += 1
                     list(until: "`")
                     word = word ?? ""
-                case "$" where peek(1) == "(" || peek(1) == "{":
+                case "$" where peek(1) == "(" || peek(1) == "{" || peek(1) == "[":
                     word = (word ?? "") + expansion()
                 case "$" where peek(1) == "'":
                     // ANSI-C quoting: a backslash escapes the next character (`$'it\'s'`).
@@ -282,7 +305,7 @@ enum ShellWords {
                 case "`":
                     i += 1
                     list(until: "`")
-                case "$" where peek(1) == "(" || peek(1) == "{":
+                case "$" where peek(1) == "(" || peek(1) == "{" || peek(1) == "[":
                     text += expansion()
                 default:
                     text.append(c)
@@ -292,12 +315,12 @@ enum ShellWords {
             return text
         }
 
-        /// At `$(` or `${`: past the expansion, reading the commands it runs; its text, for the word it's in.
+        /// At `$(`, `${` or `$[`: past the expansion, reading the commands it runs; its text, for the word it's in.
         mutating func expansion() -> String {
             let start = i
             i += 1
             if peek() == "{" {
-                // `${x:-$(…)}`: its substitutions run.
+                // `${x:-$(…)}`: its substitutions run, and quotes in it are quotes (`${x:-'}'}`, in double quotes too).
                 guard enter() else { return "" }
                 defer { depth -= 1 }
                 i += 1
@@ -307,11 +330,22 @@ enum ShellWords {
                     case "`":
                         i += 1
                         list(until: "`")
-                    case "$" where peek(1) == "(" || peek(1) == "{": _ = expansion()
+                    case "'":
+                        i += 1
+                        while let d = peek(), d != "'" { i += 1 }
+                        i += 1
+                    case "\"":
+                        i += 1
+                        _ = expanded(until: "\"")
+                        i += 1
+                    case "$" where peek(1) == "(" || peek(1) == "{" || peek(1) == "[": _ = expansion()
                     default: i += 1
                     }
                 }
                 i += 1
+            } else if peek() == "[" {
+                // `$[1<<2]`, bash's old arithmetic: its `<<` is a shift.
+                _ = arithmetic(open: "[", close: "]")
             } else if isArithmetic() {
                 _ = arithmetic()
             } else {
@@ -322,11 +356,16 @@ enum ShellWords {
         }
 
         /// At `((`: whether `))` closes it, as bash reads an arithmetic expansion or command (`((cd x); y)` is two subshells).
-        func isArithmetic() -> Bool {
+        mutating func isArithmetic() -> Bool {
             guard peek() == "(", peek(1) == "(" else { return false }
             var level = 0
             var j = i
             while j < chars.count {
+                lookahead -= 1
+                if lookahead < 0 {
+                    giveUp()
+                    return false
+                }
                 if chars[j] == "(" {
                     level += 1
                 } else if chars[j] == ")" {
@@ -338,8 +377,9 @@ enum ShellWords {
             return false
         }
 
-        /// At `((`: past the matching `))`, reading the commands its substitutions run (`$((1 + $(…)))`); its text.
-        mutating func arithmetic() -> String {
+        /// At `((` (or `[` of `$[`): past the matching close, reading the commands its substitutions run
+        /// (`$((1 + $(…)))`); its text.
+        mutating func arithmetic(open: Character = "(", close: Character = ")") -> String {
             let start = i
             guard enter() else { return "" }
             defer { depth -= 1 }
@@ -349,12 +389,12 @@ enum ShellWords {
                 case "`":
                     i += 1
                     list(until: "`")
-                case "$" where peek(1) == "(" || peek(1) == "{":
+                case "$" where peek(1) == "(" || peek(1) == "{" || peek(1) == "[":
                     _ = expansion()
-                case "(":
+                case open:
                     level += 1
                     i += 1
-                case ")":
+                case close:
                     level -= 1
                     i += 1
                     if level == 0 { return String(chars[start..<i]) }

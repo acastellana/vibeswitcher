@@ -126,6 +126,11 @@ struct RefusedGitSpellingsTests {
         // Audit F7: the wrappers workers use.
         "timeout 60 git -C x status", "timeout -k 5 60 git --git-dir=x log", "arch -arm64 git -C x status", "stdbuf -oL git -C x status",
         "vs-heavy --timeout 2h git -C x status", "caffeinate -i git -C x status", "nohup git --git-dir=x log",
+        // The blind check's: `time -p`, a `function` keyword, `$[…]` arithmetic, a valued `--shallow-file`, quotes in
+        // `${…}`, and `find -exec`.
+        "time -p git -C x status", "function f { git --git-dir=x status; }; f", "echo $[1<<2]\ngit -C x status",
+        "git --shallow-file x -C y status", "echo ${x:-'}'}; git -C x status", "echo ${x:-\"}\"}; git -C x status",
+        "echo \"${x:-\"}\"}\"; git -C x status", "find . -name a -exec git -C x status \\;", "find . -execdir git --git-dir=x log {} +",
     ]
 
     /// The same lines' harmless neighbours: options after the subcommand, the words in a message or a pattern.
@@ -139,6 +144,8 @@ struct RefusedGitSpellingsTests {
         "cat <<\\EOF\n`git -C x status`\nEOF", "cat <<EOF\ngit -C x status is refused\nEOF\ngit log --oneline",
         "((x = 1<<2))\ngit status", "echo $((1<<2)) && git log --oneline", "echo $'it\\'s' && git status", "echo ${x:-$(git status)}",
         "timeout 60 git status", "vs-heavy --timeout 2h git log --oneline", "echo $(echo $(echo $(git status)))",
+        "time -p git status", "function f { git status; }; f", "echo $[1<<2]\ngit status", "echo ${x:-'}'}; git status",
+        "find . -name '*.swift' -exec git log --oneline -- {} \\;",
     ]
 
     /// A worker's own harmless writes (the lead and the verifier are refused `git switch` and `git commit` outright).
@@ -169,9 +176,13 @@ struct RefusedGitSpellingsTests {
         #expect(try worker.refuses(nested(10, "git -C x status")))
         #expect(try worker.refuses(nested(40, "git status")))
         for deep in [nested(100_000, "git status"), String(repeating: "(", count: 100_000), String(repeating: "${", count: 100_000),
-                     String(repeating: "$((", count: 50_000), String(repeating: "<(", count: 100_000)] {
+                     String(repeating: "$((", count: 50_000), String(repeating: "<(", count: 100_000),
+                     // Shallow, but each `((` looks ahead to the line's end: refused, not read in the square of its length.
+                     String(repeating: "(('((' ) ); ", count: 20_000) + "git status"] {
             #expect(try worker.refuses(deep))
         }
+        // A long line of honest arithmetic is still read.
+        #expect(try !worker.refuses(String(repeating: "((x = 1<<2)); ", count: 20_000) + "git status"))
     }
 
     /// The refused options, named here rather than read from the list they test.
