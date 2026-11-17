@@ -31,7 +31,8 @@ enum WebSocketHandshake {
         guard let key = headers["sec-websocket-key"], key.utf8.count == 24, Data(base64Encoded: key)?.count == 16 else {
             return .failure(WebRefusal(.plain(400)))
         }
-        guard headers.all("origin").count <= 1 else { return .failure(WebRefusal(.plain(400))) }
+        // Two Origins: no one origin asked, so not this page's (the live wire contract's §1): 403, as for another.
+        guard headers.all("origin").count <= 1 else { return .failure(WebRefusal(.plain(403))) }
         return .success(key)
     }
 

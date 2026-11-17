@@ -6,7 +6,7 @@ import VibeCore
 /// (`WebAssetSource`), who may connect (`WebGate`) and the hub (`WebSocketHandler`).
 ///
 /// - **One name.** Every request whose Host isn't exactly `127.0.0.1:<port>` is 421 with no body, an upgrade too:
-///   no other name is this listener's, not `localhost`. (A request with no Host, or two, never gets that far: 400.)
+///   no other name is this listener's, not `localhost`. (No Host, an empty one, or two, are 421 alike.)
 /// - **Files.** A GET is answered with the source's file for its path, with the file's own headers, or 404.
 /// - **One upgrade.** `/ws`, and only for a request whose Origin is exactly `http://127.0.0.1:<port>` and whose
 ///   `Sec-Fetch-Site`, when it sends one, is `same-origin`: else 403. Another path is 404. No subprotocol.

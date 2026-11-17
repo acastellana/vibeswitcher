@@ -173,9 +173,9 @@ extension WebListenerTests {
                 let upgrade = try world.connect()
                 #expect(upgrade.upgrade(path: "/ws", host: host, origin: world.origin)?.hasPrefix("HTTP/1.1 421 ") == true, "\(host)")
             }
-            // No Host, and two, are refused before that.
-            #expect(try world.exchange("GET / HTTP/1.1\r\n\r\n").head.hasPrefix("HTTP/1.1 400 "))
-            #expect(try world.exchange("GET / HTTP/1.1\r\nHost: \(world.host)\r\nHost: \(world.host)\r\n\r\n").head.hasPrefix("HTTP/1.1 400 "))
+            // No Host, and two, are refused alike (the live wire contract's §1).
+            #expect(try world.exchange("GET / HTTP/1.1\r\n\r\n").head.hasPrefix("HTTP/1.1 421 "))
+            #expect(try world.exchange("GET / HTTP/1.1\r\nHost: \(world.host)\r\nHost: \(world.host)\r\n\r\n").head.hasPrefix("HTTP/1.1 421 "))
             #expect(try world.exchange("GET / HTTP/1.1\r\nHost: \(world.host)\r\n\r\n").body == "page")
             world.settle()
             #expect(world.gate.admissions.isEmpty && world.hub.events.all.isEmpty)

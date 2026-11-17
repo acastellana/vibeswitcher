@@ -81,8 +81,8 @@ struct WebListenerTests {
             ("GET / HTTP/1.1\nHost: h\n\n", "400 Bad Request"),
             ("GET / HTTP/1.1\r\nHost: h\rX: y\r\n\r\n", "400 Bad Request"),
             ("\r\nGET / HTTP/1.1\r\nHost: h\r\n\r\n", "400 Bad Request"),
-            ("GET / HTTP/1.1\r\n\r\n", "400 Bad Request"),
-            ("GET / HTTP/1.1\r\nHost: h\r\nHost: other\r\n\r\n", "400 Bad Request"),
+            ("GET / HTTP/1.1\r\n\r\n", "421 Misdirected Request"),
+            ("GET / HTTP/1.1\r\nHost: h\r\nHost: other\r\n\r\n", "421 Misdirected Request"),
             ("GET / HTTP/1.1\r\nHost : h\r\n\r\n", "400 Bad Request"),
             ("GET / HTTP/1.1\r\nHost: h\r\nX-Folded: a\r\n b\r\n\r\n", "400 Bad Request"),
             ("GET / HTTP/1.1\r\nHost: h\r\nX-Nul: a\u{0}b\r\n\r\n", "400 Bad Request"),
@@ -244,7 +244,7 @@ struct WebListenerTests {
         _ = try refused("400 Bad Request") { $0.upgrade(host: host, origin: origin, key: "not base64 at all !!!!!!") }
         _ = try refused("400 Bad Request") { $0.upgrade(host: host, origin: origin, extra: ["Sec-WebSocket-Key: \(WebTestClient.sampleKey)"]) }
         _ = try refused("400 Bad Request") { $0.upgrade(host: host, origin: origin, connection: "keep-alive") }
-        _ = try refused("400 Bad Request") { $0.upgrade(host: host, origin: origin, extra: ["Origin: \(origin)"]) }
+        _ = try refused("403 Forbidden") { $0.upgrade(host: host, origin: origin, extra: ["Origin: \(origin)"]) }
         world.settle()
         #expect(world.events.all.isEmpty, "a refused handshake opened a WebSocket: \(world.events.all)")
     }

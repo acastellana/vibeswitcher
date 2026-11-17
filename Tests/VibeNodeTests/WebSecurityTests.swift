@@ -9,12 +9,9 @@ import VibeCore
 /// is sent before a valid `auth`, and a socket that never sends one is closed; a web connection changes nothing; no
 /// code or token reaches the log.
 ///
-/// **Which listener.** Lane A's `WebListener` (A2) is built in parallel and isn't on this branch, and the plan has F2
-/// test it once it is merged. Until then these cases drive `StandInListener` below, a minimal listener written to the
-/// contract's §1, through `WebSecurityRig.listener` alone; the gate (`WebAccess`), the screen in front of the handler
-/// (`WebRequestScreen`) and the rights are the real ones. At the join, `WebSecurityRig.listener` returns lane A's
-/// listener and the stand-in is deleted: every case then holds the real one. The cases need nothing of the listener
-/// but its port, its stop, `closeAll` (what I1 wires to `WebAccess.onRevoke`) and the clock its deadlines are on.
+/// **Which listener.** The node's own, `NodeWebListener` (lane A's, joined at I1), behind the real gate (`WebAccess`),
+/// the screen in front of the handler (`WebRequestScreen`) and the rights. The cases need nothing of it but its port,
+/// its stop, `closeAll` (what I1 wires to `WebAccess.onRevoke`) and the clock its deadlines are on.
 @Suite(.timeLimit(.minutes(5)))
 struct WebSecurityTests {
     private let scratch = Scratch()
@@ -134,8 +131,9 @@ struct WebSecurityTests {
         }
     }
 
-    /// A socket that never authenticates is closed when the 5 s are up, on the listener's clock (injected, advanced by
-    /// the test): `bye` and 4401, and nothing before them. One that authenticated in time is left open past them.
+    /// A socket that never authenticates is closed once the 5 s are up, on the listener's clock (injected, advanced by
+    /// the test; it counts the node clock's whole seconds, so the close comes in the second after them): `bye` and
+    /// 4401, and nothing before them. One that authenticated in time is left open past them.
     @Test func aSocketThatNeverAuthenticatesIsClosed() async throws {
         let rig = try WebSecurityRig(scratch)
         defer { rig.stop() }
@@ -145,7 +143,7 @@ struct WebSecurityTests {
         try authed.sendText(#"{"v":1,"id":"0","kind":"auth","args":{"token":"\#(issued.token)","client":"test"}}"#)
         #expect(try authed.nextFrame()?.json?["kind"]?.string == "hello")
         rig.clock.advance(4.9)
-        rig.clock.advance(0.2)
+        rig.clock.advance(1.2)
         let frames = try idle.framesUntilClosed()
         #expect(frames.count == 2, "\(frames)")
         #expect(frames.first?.json?["code"]?.string == "auth", "\(frames)")
@@ -247,11 +245,23 @@ final class WebSecurityRig: @unchecked Sendable {
         listener = try Self.listener(gate: access, handler: WebRequestScreen(handler, note: note), clock: clock, note: note)
     }
 
-    /// A listener on 127.0.0.1 and a port the kernel picks: lane A's `WebListener` once the lanes join (the live
-    /// plan's A2 merged into this branch for F2), `StandInListener` until then. The one line that changes at the join.
+    /// The node's listener on 127.0.0.1 and a port the kernel picks, serving no file, its `hello` the web's shape (the
+    /// rights, the voice), on `clock` (a `NodeClock` the test moves).
     static func listener(gate: WebGate, handler: WebSocketHandler, clock: ManualClock,
                          note: @escaping @Sendable (String) -> Void) throws -> WebListenerUnderTest {
-        try StandInListener(gate: gate, handler: handler, clock: clock, note: note)
+        let queue = DispatchQueue(label: "web-security-tests")
+        let ticks = NodeClock(queue: queue, now: { clock.now }) { seconds, fire in
+            clock.schedule(seconds, fire)
+            return {}
+        }
+        let web = NodeWebListener(port: 0, assets: NoAssets(), gate: gate, handler: handler, queue: queue, clock: ticks,
+                                  hello: { admission in
+                                      NodeWire.line(NodeWire.Value.object([
+                                          "v": .int(NodeWire.version), "kind": .string("hello"), "auth": admission.auth,
+                                          "peer": .object(["voice": .string("other"), "why": .string(WebAccess.peerWhy)]),
+                                      ])).dropLast()
+                                  }, note: note)
+        return NodeListenerUnderTest(web, port: try web.start())
     }
 
     var port: UInt16 { listener.port }
@@ -278,6 +288,30 @@ protocol WebListenerUnderTest: AnyObject, Sendable {
     func stop()
 }
 
+/// `NodeWebListener` as the cases see it.
+final class NodeListenerUnderTest: WebListenerUnderTest, @unchecked Sendable {
+    let web: NodeWebListener
+    let port: UInt16
+
+    init(_ web: NodeWebListener, port: UInt16) {
+        self.web = web
+        self.port = port
+    }
+
+    func closeAll(code: String, reason: String) { web.closeAll(code: code, reason: reason) }
+
+    func stop() {
+        let done = DispatchSemaphore(value: 0)
+        web.stop { done.signal() }
+        _ = done.wait(timeout: .now() + 10)
+    }
+}
+
+/// No file at all: these cases are about the socket.
+struct NoAssets: WebAssetSource {
+    func asset(path: String) -> WebAsset? { nil }
+}
+
 /// A handler that answers every request it is handed `ok`, and records what reached it.
 final class RecordingHandler: WebSocketHandler, @unchecked Sendable {
     private let lock = NSLock()
@@ -297,219 +331,6 @@ final class RecordingHandler: WebSocketHandler, @unchecked Sendable {
     }
     func binary(_ message: Data, on transport: LiveTransport) {}
     func closed(_ transport: LiveTransport) {}
-}
-
-// MARK: - The stand-in listener
-
-/// A minimal listener to the live wire contract's §1, standing in for lane A's until the lanes join (see the suite's
-/// note): 127.0.0.1 only; `GET` only; `Host` exactly `127.0.0.1:<port>`, once (else 421, no body); `/ws` upgraded
-/// only with `Origin` exactly `http://127.0.0.1:<port>`, once, and a `Sec-Fetch-Site` that is absent or `same-origin`
-/// (else 403); every other path 404 (it serves no file); then nothing sent until a first text frame that is an `auth`
-/// the gate admits, inside 5 s of its clock; `bye` and the close otherwise. Unfragmented masked frames only.
-final class StandInListener: WebListenerUnderTest, @unchecked Sendable {
-    let port: UInt16
-    private let fd: Int32
-    private let gate: WebGate
-    private let handler: WebSocketHandler
-    private let clock: ManualClock
-    private let note: @Sendable (String) -> Void
-    private let lock = NSLock()
-    private var connections: [StandInConnection] = []
-    private var stopped = false
-
-    init(gate: WebGate, handler: WebSocketHandler, clock: ManualClock, note: @escaping @Sendable (String) -> Void) throws {
-        (self.gate, self.handler, self.clock, self.note) = (gate, handler, clock, note)
-        let fd = socket(AF_INET, Platform.Sockets.stream, 0)
-        guard fd >= 0 else { throw RawClient.Failure("socket: \(errno)") }
-        var yes: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
-        var address = sockaddr_in()
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = 0
-        address.sin_addr.s_addr = inet_addr("127.0.0.1")
-        let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
-        guard bound == 0, listen(fd, 64) == 0 else {
-            close(fd)
-            throw RawClient.Failure("bind or listen: \(errno)")
-        }
-        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) } }
-        self.fd = fd
-        port = UInt16(bigEndian: address.sin_port)
-        Thread { [self] in acceptLoop() }.start()
-    }
-
-    private func acceptLoop() {
-        while !lock.withLock({ stopped }) {
-            var waiting = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-            guard poll(&waiting, 1, 50) > 0 else { continue }
-            let client = accept(fd, nil, nil)
-            guard client >= 0 else { continue }
-            let connection = StandInConnection(fd: client, port: port, gate: gate, handler: handler, clock: clock, note: note)
-            lock.withLock { connections.append(connection) }
-            Thread { connection.run() }.start()
-        }
-        close(fd)
-    }
-
-    func closeAll(code: String, reason: String) {
-        for connection in lock.withLock({ connections }) where connection.admitted { connection.close(code: code, reason: reason) }
-    }
-
-    func stop() {
-        let all = lock.withLock { () -> [StandInConnection] in
-            stopped = true
-            return connections
-        }
-        for connection in all { connection.end() }
-    }
-}
-
-final class StandInConnection: LiveTransport, @unchecked Sendable {
-    private let fd: Int32
-    private let port: UInt16
-    private let gate: WebGate
-    private let handler: WebSocketHandler
-    private let clock: ManualClock
-    private let note: @Sendable (String) -> Void
-    private let lock = NSLock()
-    private var _admitted = false
-    private var ended = false
-    var onWritable: (() -> Void)?
-    var writable: Bool { true }
-
-    init(fd: Int32, port: UInt16, gate: WebGate, handler: WebSocketHandler, clock: ManualClock, note: @escaping @Sendable (String) -> Void) {
-        (self.fd, self.port, self.gate, self.handler, self.clock, self.note) = (fd, port, gate, handler, clock, note)
-    }
-
-    var admitted: Bool { lock.withLock { _admitted } }
-
-    static func closeNumber(_ code: String) -> UInt16 {
-        switch code {
-        case "auth": return 4401
-        case "revoked": return 4403
-        case "stopping": return 1001
-        case "too-long": return 1009
-        case "version": return 4426
-        default: return 4400
-        }
-    }
-
-    func run() {
-        var buffer = Data()
-        guard let head = readHead(&buffer) else { return end() }
-        let lines = head.components(separatedBy: "\r\n")
-        let request = lines[0].split(separator: " ", omittingEmptySubsequences: false)
-        let headers: [(String, String)] = lines.dropFirst().compactMap { line in
-            guard let colon = line.firstIndex(of: ":") else { return nil }
-            return (line[..<colon].lowercased(), line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces))
-        }
-        func all(_ name: String) -> [String] { headers.filter { $0.0 == name }.map(\.1) }
-        guard request.count == 3, request[0] == "GET" else { return respond("405 Method Not Allowed") }
-        let hosts = all("host")
-        guard hosts.count == 1, hosts[0] == "127.0.0.1:\(port)" else { return respond("421 Misdirected Request") }
-        guard request[1] == "/ws" else { return respond("404 Not Found") }
-        let origins = all("origin")
-        guard origins.count == 1, origins[0] == "http://127.0.0.1:\(port)" else { return respond("403 Forbidden") }
-        guard all("sec-fetch-site").allSatisfy({ $0 == "same-origin" }) else { return respond("403 Forbidden") }
-        let keys = all("sec-websocket-key")
-        guard keys.count == 1, all("upgrade").contains(where: { $0.lowercased() == "websocket" }) else { return respond("400 Bad Request") }
-        let accept = Data(Insecure.SHA1.hash(data: Data((keys[0] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8))).base64EncodedString()
-        // Armed before the 101 is written, so a client that has read it finds the deadline on the clock.
-        clock.schedule(5) { [weak self] in
-            guard let self, !self.admitted else { return }
-            self.close(code: "auth", reason: WebAccess.refusedReason)
-        }
-        write(Data("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n".utf8))
-        while let frame = readFrame(&buffer) {
-            switch frame.opcode {
-            case 0x1:
-                if admitted {
-                    handler.text(frame.payload, on: self)
-                } else {
-                    guard let auth = NodeWire.decode(NodeWire.Request.self, frame.payload), auth.kind == "auth",
-                          let admission = gate.admit(auth.args ?? [:]) else { return close(code: "auth", reason: WebAccess.refusedReason) }
-                    lock.withLock { _admitted = true }
-                    let hello = NodeWire.Hello(node: NodeIds.node, epoch: "stand-in", server: .init(commit: "stand-in", startedAt: "", pid: 0),
-                                               host: .init(startedAt: nil, notes: nil), kinds: WebAccess.kinds(for: admission.rights),
-                                               peer: .init(voice: "other", why: WebAccess.peerWhy), rule: "stand-in", auth: admission.auth)
-                    send(Data(NodeWire.line(hello).dropLast()))
-                    handler.opened(self, rights: admission.rights)
-                }
-            case 0x8: return end()
-            case 0x9: write(Self.frame(0xA, frame.payload))
-            default: break
-            }
-        }
-        end()
-    }
-
-    func send(_ message: Data) { write(Self.frame(0x1, message)) }
-
-    func close(code: String, reason: String) {
-        send(Data(NodeWire.line(NodeWire.Bye(reason: reason, code: code)).dropLast()))
-        let number = Self.closeNumber(code)
-        write(Self.frame(0x8, Data([UInt8(number >> 8), UInt8(number & 0xff)])))
-        end()
-    }
-
-    func end() {
-        let first = lock.withLock { () -> Bool in
-            defer { ended = true }
-            return !ended
-        }
-        guard first else { return }
-        shutdown(fd, Int32(SHUT_RDWR))
-        if admitted { handler.closed(self) }
-    }
-
-    private func respond(_ status: String) {
-        write(Data("HTTP/1.1 \(status)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8))
-        end()
-    }
-
-    private func write(_ data: Data) {
-        guard !lock.withLock({ ended }) else { return }
-        _ = data.withUnsafeBytes { RawClient.writeAll(fd, $0) }
-    }
-
-    private func readHead(_ buffer: inout Data) -> String? {
-        let end = Data("\r\n\r\n".utf8)
-        while buffer.range(of: end) == nil {
-            guard buffer.count <= 8192, RawClient.readSome(fd, into: &buffer) else { return nil }
-        }
-        let range = buffer.range(of: end)!
-        let head = String(decoding: buffer[buffer.startIndex..<range.lowerBound], as: UTF8.self)
-        buffer.removeSubrange(buffer.startIndex..<range.upperBound)
-        return head
-    }
-
-    /// One whole masked frame; nil at the end, or on a frame this stand-in doesn't take (unmasked, fragmented, over
-    /// 64 KiB).
-    private func readFrame(_ buffer: inout Data) -> (opcode: UInt8, payload: Data)? {
-        while true {
-            if let parsed = RawClient.parseFrame(&buffer, masked: true) {
-                guard let frame = parsed, frame.fin else { return nil }
-                return (frame.opcode, frame.payload)
-            }
-            guard buffer.count <= 70_000, RawClient.readSome(fd, into: &buffer) else { return nil }
-        }
-    }
-
-    static func frame(_ opcode: UInt8, _ payload: Data) -> Data {
-        var data = Data([0x80 | opcode])
-        if payload.count < 126 {
-            data.append(UInt8(payload.count))
-        } else if payload.count <= 0xffff {
-            data.append(126)
-            data.append(contentsOf: [UInt8(payload.count >> 8), UInt8(payload.count & 0xff)])
-        } else {
-            data.append(127)
-            data.append(contentsOf: (0..<8).reversed().map { UInt8((payload.count >> ($0 * 8)) & 0xff) })
-        }
-        data.append(payload)
-        return data
-    }
 }
 
 // MARK: - The raw client

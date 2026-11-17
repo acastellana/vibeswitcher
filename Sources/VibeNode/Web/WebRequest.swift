@@ -62,7 +62,7 @@ public struct WebRequest: Sendable, Equatable {
         target.firstIndex(of: "?").map { String(target[target.index(after: $0)...]) }
     }
 
-    /// The Host field: exactly one came (a request without, or with two, is refused before it gets here).
+    /// The Host field: exactly one came (a request without, or with two, is refused 421 before it gets here).
     public var host: String { headers["host"] ?? "" }
 
     /// The Origin field; nil when none came (or several, which an upgrade is refused for).
@@ -232,6 +232,7 @@ struct HTTPHead {
     private struct Refusal: Error {
         var response: WebResponse
         init(_ status: Int, headers: [(String, String)] = []) { response = .plain(status, headers: headers) }
+        init(_ response: WebResponse) { self.response = response }
     }
 
     private func parse(_ limits: WebLimits) -> Result<WebRequest, Refusal> {
@@ -263,7 +264,9 @@ struct HTTPHead {
 
         guard parts[0].elementsEqual("GET".utf8) else { return .failure(Refusal(405, headers: [("Allow", "GET")])) }
         guard parts[1].first == UInt8(ascii: "/"), !parts[1].contains(UInt8(ascii: "#")) else { return .failure(Refusal(400)) }
-        guard let host = headers["host"], !host.isEmpty else { return .failure(Refusal(400)) }
+        // No Host, an empty one or two: not this listener's name, whatever it is (the live wire contract's §1): 421 with
+        // no body, as for another name.
+        guard let host = headers["host"], !host.isEmpty else { return .failure(Refusal(WebResponse(status: 421))) }
         // A GET carries no body: any length but 0, and any transfer coding, is one too large.
         guard headers.all("transfer-encoding").isEmpty else { return .failure(Refusal(413)) }
         let lengths = headers.all("content-length")
