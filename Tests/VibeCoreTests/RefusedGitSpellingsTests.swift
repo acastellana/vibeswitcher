@@ -105,6 +105,9 @@ struct RefusedGitSpellingsTests {
         "echo \"$(git --git-dir=x log)\"", "echo `git -c a.b=c log`", "{ git --git-dir=x log; }", "if true; then git -C x status; fi",
         "git status\ngit --git-dir=x status", "git status & git -C x status", "! git --git-dir=x status", "time git -C x status",
         "for f in a; do git --git-dir=x log; done", "x=$(git --exec-path=y version)",
+        // Arithmetic's `<<` is a shift: the next line is still read. Programs that run the command after them.
+        "echo $((1<<2))\ngit -C x status", "echo \"$((1<<2))\"\ngit -C x status", "/usr/bin/time git -C x status",
+        "git ls-files | xargs -n 1 git --git-dir=x log",
     ]
 
     /// The same lines' harmless neighbours: options after the subcommand, the words in a message or a pattern.

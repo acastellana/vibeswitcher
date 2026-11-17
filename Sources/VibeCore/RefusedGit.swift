@@ -45,7 +45,8 @@ public enum RefusedGit {
     /// Programs that run the command after them, and their options that take a value (`env -u NAME git …`).
     static let wrappers: [String: Set<String>] = ["env": ["-u", "-P", "-S", "-C"], "command": [], "builtin": [], "exec": ["-a"],
                                                   "nohup": [], "nice": ["-n"], "xcrun": ["--sdk", "--toolchain", "-sdk"], "sudo": ["-u", "-g"],
-                                                  "caffeinate": ["-t", "-w"]]
+                                                  "caffeinate": ["-t", "-w"], "time": ["-o"],
+                                                  "xargs": ["-I", "-J", "-L", "-n", "-P", "-E", "-s", "-R", "-S"]]
 
     /// The refused option in one simple command (its words, quotes taken off), when it runs git.
     static func refusal(command words: [String]) -> String? {
@@ -152,6 +153,9 @@ enum ShellWords {
                     i += 1
                     list(until: "`")
                     word = word ?? ""
+                case "$" where peek(1) == "(" && peek(2) == "(":
+                    // Arithmetic: its `<<` is a shift, not a here-document.
+                    word = (word ?? "") + skip(from: "(", to: ")")
                 case "$" where peek(1) == "(":
                     i += 2
                     list(until: ")")
@@ -208,6 +212,8 @@ enum ShellWords {
                 case "`":
                     i += 1
                     list(until: "`")
+                case "$" where peek(1) == "(" && peek(2) == "(":
+                    text += skip(from: "(", to: ")")
                 case "$" where peek(1) == "(":
                     i += 2
                     list(until: ")")
