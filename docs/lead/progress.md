@@ -3611,3 +3611,6 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 17:06 Audit of flaky-host-tests-make: complete, clean, round 2: 1 Important closed
 - 2026-11-17 17:21 Merged flaky-host-tests-make: Flaky host tests: make this week's five host/session flakes deterministic (in a batch: flaky-host-tests-make, flaky-lead-and-dictation landed on one test run) (build 9e4f85a8ba8c)
 - 2026-11-17 17:21 Merged flaky-lead-and-dictation: Flaky lead and dictation tests: make this week's six flakes deterministic (in a batch: flaky-host-tests-make, flaky-lead-and-dictation landed on one test run) (build 9e4f85a8ba8c)
+- 2026-11-17 17:21 Automatically (auto_advance): Merged flaky-host-tests-make at 612a3ead (its passing audit), flaky-lead-and-dictation at a8a3c77d (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-17 17:21 Automatically (auto_advance): Cleaned up flaky-host-tests-make (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-17 17:21 Automatically (auto_advance): Cleaned up flaky-lead-and-dictation (freed 2.5 GB of build output and temporary folders). It stays done.
