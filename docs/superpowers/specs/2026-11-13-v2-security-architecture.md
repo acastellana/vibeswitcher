@@ -1440,7 +1440,9 @@ what it needs.
   HEAD, its tree, no tracked file changed, no file untracked or ignored) and compares `build-info` with the hashes the
   link check took, which catches a change left in place, not one made and undone during the build (the security
   follow-ups' items 26 to 28, 2026-11-16). Its courtesy check of the user's clone reads nothing of the clone's git
-  configuration, so a filter a worker defines there doesn't run (item 25). The root-owned toolchain reduces the risk only when no worker runs
+  configuration, so a filter a worker defines there doesn't run (item 25); of the account's, it reads only the ignore
+  file (`core.excludesFile` or `~/.config/git/ignore`), copied in as data, since a pattern names no command and the
+  build doesn't rely on the check (the step 8 sweep, 2026-11-17). The root-owned toolchain reduces the risk only when no worker runs
   during the install (the start plan's S4b, 2026-11-16, with its review). The install also trusts the environment it
   is started with: bash runs exported functions, `SHELLOPTS` with `PS4`, `BASH_ENV` and `LD_PRELOAD` before the
   script's first line, so the user runs it as `/usr/bin/env -i HOME=<home> PATH=/usr/bin:/bin /bin/bash <its path>`.

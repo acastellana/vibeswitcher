@@ -139,7 +139,8 @@ install_node_main() {
 
     # Every git: nothing from the caller's environment, the system's or the user's config, replace refs, hooks or the
     # fsmonitor; https only (file:// too under --test-origin). HOME is a folder no process of the user's can make, so
-    # neither git's ~/.config/git (attributes, ignore) nor curl's ~/.netrc is read.
+    # neither git's ~/.config/git (attributes, ignore) nor curl's ~/.netrc is read (the courtesy check copies in the
+    # account's ignore file, below, as data).
     local -r git_home=/nonexistent
     local git_test=()
     [[ -z $test_origin ]] || git_test=(-c protocol.file.allow=always)
@@ -222,11 +223,32 @@ install_node_main() {
     if [[ -f $common/info/exclude ]]; then
         /bin/cp -- "$common/info/exclude" "$check/info/exclude" || fail 65 "can't tell whether $top is clean (can't copy its info/exclude)"
     fi
+    # The account's own ignore file, as the user's `git status` under this HOME reads it: core.excludesFile from
+    # ~/.config/git/config, then ~/.gitconfig (the later wins), else ~/.config/git/ignore. Read as data (no include
+    # followed) and copied in: an ignore pattern names no command, and at worst hides a file from this courtesy check,
+    # which the build doesn't rely on (it builds a fresh checkout of its own).
+    local user_home=${HOME:-$home} excludes="" config
+    [[ $user_home == /* ]] || user_home=$home
+    for config in "$user_home/.config/git/config" "$user_home/.gitconfig"; do
+        [[ -f $config ]] || continue
+        value=$(git_run -C / config --file "$config" --get core.excludesFile 2> /dev/null) && excludes=$value
+    done
+    case $excludes in
+        "") excludes=$user_home/.config/git/ignore ;;
+        "~/"*) excludes=$user_home/${excludes#"~/"} ;;
+        /*) ;;
+        *) excludes="" ;;
+    esac
+    local check_excludes=()
+    if [[ -n $excludes && -f $excludes ]]; then
+        /bin/cp -- "$excludes" "$check/excludes" || fail 65 "can't tell whether $top is clean (can't copy $excludes)"
+        check_excludes=(-c "core.excludesFile=$check/excludes")
+    fi
     check_git() {
         /usr/bin/env -i HOME="$git_home" PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
             GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_DIR="$check" GIT_WORK_TREE="$top" \
             GIT_OBJECT_DIRECTORY="$common/objects" /usr/bin/git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-            -c protocol.allow=never -C "$top" "$@"
+            -c protocol.allow=never ${check_excludes[@]+"${check_excludes[@]}"} -C "$top" "$@"
     }
     check_git rev-parse --verify -q "$head^{commit}" > /dev/null || fail 64 "$nocheckout"
     local changed untracked dirty

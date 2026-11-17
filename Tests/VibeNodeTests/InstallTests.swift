@@ -355,6 +355,37 @@ extension InstallTests {
         #expect(!FileManager.default.fileExists(atPath: world.prefix.path))
     }
 
+    /// The courtesy check ignores what the user's own `git status` ignores under the HOME it runs with: the
+    /// `core.excludesFile` of `~/.gitconfig`, else `~/.config/git/ignore`. A file neither lists is still refused.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func theAccountsOwnIgnoreFileIsHonouredByTheCleanCheck() async throws {
+        let world = try await world()
+        let idea = world.clone.appendingPathComponent(".idea")
+        try FileManager.default.createDirectory(at: idea, withIntermediateDirectories: true)
+        try "<project/>\n".write(to: idea.appendingPathComponent("workspace.xml"), atomically: true, encoding: .utf8)
+        let refused = try await world.install(try world.arguments(world.base, products: true))
+        #expect(refused.status == 65 && refused.errors.contains(".idea/workspace.xml"), "\(refused.status) \(refused.errors)")
+
+        // core.excludesFile in ~/.gitconfig, by a ~/ path.
+        try "[core]\n\texcludesFile = ~/global-ignore\n".write(to: world.home.appendingPathComponent(".gitconfig"), atomically: true, encoding: .utf8)
+        try ".idea/\n".write(to: world.home.appendingPathComponent("global-ignore"), atomically: true, encoding: .utf8)
+        let configured = try await world.install(try world.arguments(world.base, products: true))
+        // Past the courtesy check, the debug products stop at the link check.
+        #expect(configured.status == 69, "\(configured.status) \(configured.errors)")
+
+        // No core.excludesFile: ~/.config/git/ignore.
+        try FileManager.default.removeItem(at: world.home.appendingPathComponent(".gitconfig"))
+        let xdg = world.home.appendingPathComponent(".config/git")
+        try FileManager.default.createDirectory(at: xdg, withIntermediateDirectories: true)
+        try ".idea/\n".write(to: xdg.appendingPathComponent("ignore"), atomically: true, encoding: .utf8)
+        let defaulted = try await world.install(try world.arguments(world.base, products: true))
+        #expect(defaulted.status == 69, "\(defaulted.status) \(defaulted.errors)")
+
+        // A file it doesn't list is still dirt.
+        try "x\n".write(to: world.clone.appendingPathComponent("planted"), atomically: true, encoding: .utf8)
+        let planted = try await world.install(try world.arguments(world.base, products: true))
+        #expect(planted.status == 65 && planted.errors.contains("planted"), "\(planted.status) \(planted.errors)")
+    }
+
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aCommitNotOnOriginV2IsRefused() async throws {
         let world = try await world()
         // A commit on another branch of the origin, not reachable from its v2.

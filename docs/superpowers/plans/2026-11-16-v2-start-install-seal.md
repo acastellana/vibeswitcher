@@ -1432,6 +1432,13 @@ the courtesy check's git folder and products read once"):*
   wrote it) and `current`, with no fetch, gh call or build. It runs nothing in the folder. Any other folder for the
   commit is refused, saying to remove it. Held by `InstallTests.anInstallStoppedAfterItsRenameIsFinishedByARerun`
   (failed on the script before the change).
+- **The courtesy check honours the account's own ignore file.** Since item 25 its git ran with `HOME=/nonexistent`
+  and `GIT_CONFIG_GLOBAL=/dev/null`, so a file the user's `git status` ignores through `core.excludesFile` or
+  `~/.config/git/ignore` (an editor's folder) was refused as untracked (65). The script now reads `core.excludesFile`
+  from `~/.config/git/config` and `~/.gitconfig` under the HOME it runs with, as data (`git config --file`, no
+  include), else takes `~/.config/git/ignore`, copies that file into its own git folder and passes it as
+  `core.excludesFile`. No other setting of the account's is read. Held by
+  `InstallTests.theAccountsOwnIgnoreFileIsHonouredByTheCleanCheck` (failed on the script before the change).
 
 - [ ] **Step 4:** commit ("v2: the node's install script"). Push, both green.
 
