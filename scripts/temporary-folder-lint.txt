@@ -101,3 +101,5 @@ allow: Tests/VibeCoreTests/SessionTempTests.swift | #expect(root.path == "/priva
 # AgentExportLint: text it reads in scripts, never a folder it opens.
 allow: Tests/VibeCoreTests/AgentExportLintTests.swift | static let scratchRoots = | the folders a script's export may write into, matched against the script's text
 allow: Tests/VibeCoreTests/AgentExportLintTests.swift | unzip -q tree.zip -d /tmp/x | a line of an example script the lint reads; nothing runs it
+# RefusedGitSpellings: the reported command line, which the guard parses; nothing runs it or opens the path.
+allow: Tests/VibeCoreTests/RefusedGitSpellingsTests.swift | git --git-dir=/tmp/x status | the contract's symptom, a command line the guard reads; nothing runs it
