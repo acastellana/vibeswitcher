@@ -55,8 +55,10 @@ struct EgressRulesTests {
             ("::ffff:", ["::ffff:127.0.0.1", "::ffff:169.254.169.254", "::ffff:10.0.0.1"]),
             ("SIIT ::ffff:0:0:0/96", ["::ffff:0:127.0.0.1", "::ffff:0:169.254.169.254", "::ffff:0:10.0.0.1"]),
             ("64:ff9b::/96", ["64:ff9b::127.0.0.1", "64:ff9b::169.254.169.254", "64:ff9b::10.0.0.1"]),
-            // RFC 6052's /48: the IPv4 address in bytes 6-7 and 9-10, byte 8 zero.
-            ("64:ff9b:1::/48", ["64:ff9b:1:7f00:0:100::", "64:ff9b:1:a9fe:a9:fe00::", "64:ff9b:1:a00:0:100::"]),
+            // Local-use NAT64: refused whole, whatever the address decodes to under any one prefix length, a public
+            // one under the /48 layout (203.0.113.7) and under the /96 one (198.51.100.1) included.
+            ("64:ff9b:1::/48", ["64:ff9b:1:7f00:0:100::", "64:ff9b:1:a9fe:a9:fe00::", "64:ff9b:1:a00:0:100::",
+                                "64:ff9b:1:cb00:71:700::", "64:ff9b:1::c633:6401", "64:ff9b:1:ffff:ffff:ffff:ffff:ffff"]),
             ("2002::/16", ["2002:7f00:1::", "2002:a9fe:a9fe::", "2002:a00:1::"]),
         ]
         for (form, texts) in forms {
@@ -65,10 +67,12 @@ struct EgressRulesTests {
                 #expect(Self.refused(rules.decision(host: "listed.example", port: 443, resolved: [address])), "\(form): \(text)")
             }
         }
-        #expect(EgressRules.carried(Address("64:ff9b:1:a9fe:a9:fe00::")!) == Address("169.254.169.254"))
+        #expect(EgressRules.carried(Address("64:ff9b:1:a9fe:a9:fe00::")!) == nil, "local-use NAT64 is never decoded")
         #expect(EgressRules.carried(Address("::ffff:0:169.254.169.254")!) == Address("169.254.169.254"))
-        // A public IPv4 address in the new forms stays public.
-        #expect(rules.decision(host: "listed.example", port: 443, resolved: [Address("64:ff9b:1:cb00:71:700::")!]) == .allow([Address("64:ff9b:1:cb00:71:700::")!]))
+        // The well-known 64:ff9b::/96 maps one to one: a public IPv4 address in it stays public, and is that address.
+        #expect(EgressRules.carried(Address("64:ff9b::203.0.113.7")!) == Address("203.0.113.7"))
+        #expect(rules.decision(host: "listed.example", port: 443, resolved: [Address("64:ff9b::203.0.113.7")!]) == .allow([Address("64:ff9b::203.0.113.7")!]))
+        #expect(rules.decision(host: "listed.example", port: 443, resolved: [Address("::ffff:0:203.0.113.7")!]) == .allow([Address("::ffff:0:203.0.113.7")!]))
     }
 
     @Test func ipv6OutsideGlobalUnicastIsRefusedUnlessPrivateAndGiven() {

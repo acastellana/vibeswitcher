@@ -140,6 +140,7 @@ public struct EgressRules: Codable, Equatable, Sendable {
         Range("fd7a:115c:a1e0::/48", "the tailnet"),
         Range("fd00:ec2::254/128", "cloud metadata"),
         Range("2001::/32", "Teredo"),
+        Range("64:ff9b:1::/48", "local-use NAT64, whose IPv4 address can't be read without its prefix's length"),
     ]
 
     /// The ranges only the project's word opens (`privateHosts`).
@@ -241,8 +242,9 @@ public struct EgressRules: Codable, Equatable, Sendable {
     }
 
     /// The IPv4 address an IPv6 one carries, where it carries one a router would reach: IPv4-mapped (`::ffff:0:0/96`),
-    /// SIIT's IPv4-translated (`::ffff:0:0:0/96`), NAT64's well-known prefix (`64:ff9b::/96`), local-use NAT64
-    /// (`64:ff9b:1::/48`, the IPv4 address in bits 48-63 and 72-87, RFC 6052) and 6to4 (`2002::/16`).
+    /// SIIT's IPv4-translated (`::ffff:0:0:0/96`), NAT64's well-known prefix (`64:ff9b::/96`) and 6to4 (`2002::/16`).
+    /// Local-use NAT64 (`64:ff9b:1::/48`) isn't read: its operator picks the prefix's length (RFC 6052: /32 to /96), so
+    /// where the IPv4 address sits can't be known here, and the whole block is refused (`neverRanges`).
     static func carried(_ address: Address) -> Address? {
         let bytes = address.bytes
         guard bytes.count == 16 else { return nil }
@@ -251,7 +253,6 @@ public struct EgressRules: Codable, Equatable, Sendable {
             return Address(Array(bytes[12..<16]))
         }
         if bytes[0..<12] == [0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0] { return Address(Array(bytes[12..<16])) }
-        if bytes[0..<6] == [0, 0x64, 0xff, 0x9b, 0, 1] { return Address([bytes[6], bytes[7], bytes[9], bytes[10]]) }
         if bytes[0] == 0x20, bytes[1] == 0x02 { return Address(Array(bytes[2..<6])) }
         return nil
     }
