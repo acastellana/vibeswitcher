@@ -10,8 +10,9 @@ import Testing
 /// config and recorded the base. The lead is `FakeClaude` (the scratch node's `<root>/v2/test/claude`), and so are the
 /// workers and verifiers its tool server starts (`VIBESWITCHER_CLAUDE`, EN-D13); the fake runs no hooks, so the test
 /// writes what Claude Code's hooks would (`hook(_:_:pid:)`) and takes the lead's inbox as its prompt's hook does
-/// (`promptHookTakes`). `aRealLeadOnSonnetAsksAndIsAnswered` does the same with a real Claude Code on Sonnet, gated on
-/// the user's throwaway config folder (the security document's decision 16).
+/// (`promptHookTakes`). `anAnswerBeforeTheTurnEndsIsTakenByTheLeadsHookAsTheUsers` is the other way an answer reaches a
+/// lead: mid-turn, handed over by its own hook. `aRealLeadOnSonnetAsksAndIsAnswered` shows both with a real Claude Code
+/// on Sonnet, gated on the user's throwaway config folder (the security document's decision 16).
 @Suite(NodeTraits.linuxOnly, .serialized, .timeLimit(.minutes(15)))
 struct EngineEndToEndTests {
     private let scratch = Scratch()
@@ -220,19 +221,80 @@ struct EngineEndToEndTests {
         #expect(!held.output.components(separatedBy: "\n").contains { $0.hasPrefix("    ~/") }, "\(held.output)")
     }
 
+    /// The other way an answer reaches its lead (the real lead's first gated run, 2026-11-17: answered 0.1 s after it
+    /// asked, its turn still running): nothing is typed into a lead mid-turn; the answer waits in its inbox as the
+    /// user's, sealed by the host, and its own hook hands it over at the turn's end (Stop), under the user's sender
+    /// line, the message as it is, once. The fake runs no hooks, so the case takes the inbox as the lead's Stop hook does
+    /// (`leadsHookTakes`: its seals checked by the node's host's vault, as `vibeswitcher-hook` checks them).
+    @Test func anAnswerBeforeTheTurnEndsIsTakenByTheLeadsHookAsTheUsers() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        // A lead mid-turn (its hooks said PreToolUse) that asked through its tool server, answered at once.
+        let lead = try await node.askingLead("Which name for the parser?", options: ["Parser", "Reader"])
+        let tools = node.fake.files(terminal: lead.session.tty)
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Reader"])
+        #expect(answered.status == 0 && answered.output.contains("answered: the lead is told"), "\(answered.output)\n\(node.said)")
+        let message = try await Self.usersMessage(node, card: lead.card)
+        // It waits in the lead's inbox as the user's, with a seal the vault takes.
+        var found: SteerMessage?
+        _ = await eventually(timeout: 60) {
+            found = node.inbox(lead.session.tty).first { $0.from == .user && LeadVaultV2.digest($0.text) == message.digest }
+            return found != nil
+        }
+        let waiting = try #require(found, "no answer in the lead's inbox: \(node.inbox(lead.session.tty))\n\(node.said)")
+        #expect(waiting.text.hasSuffix(": Reader") && waiting.agentPid == lead.agentPid, "\(waiting)")
+        #expect(waiting.seal != nil && node.verifies(waiting) == true)
+        // A look or two on, its turn still running: nothing typed, and it waits still.
+        try await node.looks(2, at: lead.repo)
+        #expect(!Self.prompts(tools).contains { $0.contains("Reader") }, "\(Self.prompts(tools))")
+        #expect(node.inbox(lead.session.tty).contains { $0.id == waiting.id })
+
+        // Its turn ends: its Stop hook hands it over, as the user's, the message as it is.
+        let taken = leadsHookTakes(node, event: "Stop", tty: lead.session.tty, pid: lead.agentPid)
+        #expect(taken.messages.map(\.id) == [waiting.id] && taken.messages.first?.from == .user, "\(taken.messages)")
+        let said = SteerReply.messages(inContext: taken.context)
+        #expect(said.count == 1 && said.first?.fromLead == false && said.first?.text == waiting.text, "\(taken.context)")
+        #expect(taken.context.contains(SteerReply.userMarker) && !taken.context.contains(SteerReply.systemMarker), "\(taken.context)")
+        #expect(!waiting.text.hasPrefix(LeadDelivery.prefix), "handed as the user's, not as a system's: \(waiting.text)")
+        // The node's record of it: out of the inbox, in its delivered record.
+        #expect(SteerInbox.delivered(tty: lead.session.tty, root: node.root).contains(waiting.id))
+        #expect(!node.inbox(lead.session.tty).contains { $0.id == waiting.id })
+
+        // Between turns now: the server sees it taken (its seal retired), and types it in no more.
+        try hook(node, ["hook_event_name": "Stop"], tty: lead.session.tty, pid: lead.agentPid)
+        #expect(await eventually(timeout: 60) { node.verifies(waiting) == false }, "\(node.said)")
+        try await node.looks(2, at: lead.repo)
+        #expect(!Self.prompts(tools).contains { $0.contains("Reader") }, "\(Self.prompts(tools))")
+        #expect(leadsHookTakes(node, event: "Stop", tty: lead.session.tty, pid: lead.agentPid).messages.isEmpty)
+    }
+
     // MARK: A real lead
 
     /// The user's throwaway Claude Code config folder, named on the run's command line only.
     static let configFolder = ProcessInfo.processInfo.environment["VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR"]
 
-    /// What the real lead is asked: one question through its tool, two names, nothing else.
-    static let realGoal = "Use your ask_user tool now to ask the user exactly one question: which of two names to use for the project's parser, "
-        + "with exactly two options, Parser and Reader. Do nothing else: no other tool, no file. Once asked, end your turn and wait for the answer."
+    /// What the real lead is asked: one question through its tool, then, once answered, a second; nothing else.
+    static let realGoal = "A scripted run: do exactly this and nothing more, with no other tool and no file. "
+        + "1. Use your ask_user tool now to ask the user exactly one question: which of two names to use for the project's parser, "
+        + "with exactly two options, Parser and Reader. Then end your turn and wait: the answer comes as a message. "
+        + "2. Once that answer has come, use ask_user once more to ask which of two names to use for the project's lexer, with exactly "
+        + "two options, Lexer and Scanner, and end your turn. "
+        + "3. Once that answer has come, say the two names the user chose in one line, and stop."
 
     /// The same with a real Claude Code on Sonnet as the lead (the scratch node's `<root>/v2/test/claude` a script that
-    /// runs the account's `claude` with the config folder given and `--model sonnet`): it asks which of two names to
-    /// use, `questions` lists the card, the answer is recorded in the vault and typed in as its next prompt (its own
-    /// UserPromptSubmit hook records it). Each step's time is printed (`E9:` lines) for the inventory.
+    /// runs the account's `claude` with the config folder given and `--model sonnet`), both ways an answer reaches it:
+    ///
+    /// 1. It asks which of two names to use and ends its turn; `questions` lists the card. The user answers once the lead
+    ///    is idle (its Stop hook said so: waited for, the realistic order), and the answer, recorded in the vault, is
+    ///    typed in as its next prompt, the message as it is (its transcript's prompt has the digest the vault records).
+    /// 2. Told the answer, it asks a second question, answered at once, its turn still running: nothing is typed, and its
+    ///    own hook hands the answer over at its next step or its turn's end, under the user's sender line (which the
+    ///    hook gives only a message whose seal the node's vault took), the inbox's delivered record gaining it, and what
+    ///    it says next names the answer. A lead that asks no second question shows only the first (said, not failed:
+    ///    what the model does next isn't the node's).
+    ///
+    /// Either answer is checked by the way it went (`reached`): a real lead's turn can end, or go on, a moment before or
+    /// after the answer. Each step's time is printed (`E9:` lines) for the inventory.
     @Test(.enabled(if: configFolder != nil,
                    "starts a real Claude Code lead and spends a few prompts of the account's usage: set VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR to a Claude Code config folder you logged in once to run it"))
     func aRealLeadOnSonnetAsksAndIsAnswered() async throws {
@@ -302,22 +364,58 @@ struct EngineEndToEndTests {
         print("E9: the lead's terminal: \(lead.tty)")
         step("2, lead started")
         let stateFile = node.root.appendingPathComponent("state/\(lead.tty).json")
+        let hooks = { HookState.load(from: stateFile) }
+        let said = { node.said.replacingOccurrences(of: "\u{0}", with: " ") }
         // What the lead is at, for the record and for a run that fails: its screen (empty cells as spaces), its hooks'
         // last event, the board's questions.
         func look(_ when: String) {
             let screen = Platform.lines((node.screen(lead.id) ?? "no screen").replacingOccurrences(of: "\u{0}", with: " "))
                 .map { String($0.reversed().drop { $0 == " " }.reversed()) }.filter { !$0.isEmpty }.joined(separator: "\n")
-            let hook = HookState.load(from: stateFile).map { "\($0.lastEvent) \($0.toolName ?? "") \($0.request ?? $0.notice ?? "")" } ?? "none"
+            let hook = hooks().map { "\($0.lastEvent) \($0.toolName ?? "") \($0.request ?? $0.notice ?? "")" } ?? "none"
             let questions = BoardStore(root: repo.path).load().questions.map { "\($0.text) \($0.options)" }
             print("E9: \(when): hook \(hook); board questions \(questions); the lead's screen:\n\(screen)")
         }
-        var card: String?
-        for wait in 0..<10 where card == nil {
-            card = try await Self.listedCard(node, question: nil, timeout: 30)
-            if card == nil { look("\(30 * (wait + 1)) s after the start, no card yet") }
+        /// The card of a question the lead asked (one not in `answered`), once `questions` lists it within `minutes`.
+        func asked(besides answered: Set<String>, minutes: Int) async throws -> String? {
+            var card: String?
+            for wait in 0..<(2 * minutes) where card == nil {
+                card = try await Self.listedCard(node, question: nil, besides: answered, timeout: 30)
+                if card == nil { look("\(30 * (wait + 1)) s on, no card yet") }
+            }
+            return card
         }
-        guard let card else {
-            Issue.record("no card in 5 min: \(node.said.replacingOccurrences(of: "\u{0}", with: " "))")
+        /// `answer CARD OPTION`, its code typed: the vault's record of the message it sends the lead, and how that
+        /// message reached the lead (nil: not within 5 minutes).
+        func answer(_ card: String, _ option: String) async throws -> (message: LeadVaultV2.UserAction, taken: Int, went: Reached?) {
+            let taken = SteerInbox.delivered(tty: lead.tty, root: node.root).count
+            let answered = try await node.runOnTerminal(["answer", card, option])
+            #expect(answered.status == 0 && answered.output.contains("answered: the lead is told"), "\(answered.output)\n\(said())")
+            let message = try await Self.usersMessage(node, card: card)
+            let went = await Self.reached(digest: message.digest, transcript: { hooks()?.transcriptPath }, timeout: 300)
+            return (message, taken, went)
+        }
+        /// What `went` must be, either way: the message as it is (the digest the vault records is its text's), the user's.
+        func check(_ went: Reached?, _ answered: (message: LeadVaultV2.UserAction, taken: Int, went: Reached?), option: String) {
+            switch went {
+            case .typed(let prompt)?:
+                #expect(prompt.hasPrefix("Answer to your question") && prompt.hasSuffix(": \(option)"), "\(prompt)")
+                #expect(!prompt.hasPrefix(LeadDelivery.prefix), "typed as the user's, not as a system's: \(prompt)")
+            case .handed(let text, let fromLead)?:
+                // The user's sender line: the hook gives it only a message whose seal the node's vault took.
+                #expect(!fromLead, "handed over as the user's: \(text)")
+                #expect(text.hasPrefix("Answer to your question") && text.hasSuffix(": \(option)") && !text.hasPrefix(LeadDelivery.prefix), "\(text)")
+                // The node's record: its inbox's delivered record gained it, and it waits there no more.
+                #expect(SteerInbox.delivered(tty: lead.tty, root: node.root).count > answered.taken)
+                #expect(!node.inbox(lead.tty).contains { LeadVaultV2.digest($0.text) == answered.message.digest }, "\(node.inbox(lead.tty))")
+            case nil:
+                look("5 min after the answer, it reached the lead neither way")
+                Issue.record("the answer \(option) reached the lead neither as its prompt nor through its hook: \(String(describing: hooks()))\n\(said())")
+            }
+        }
+
+        // 1. It asks and ends its turn; the user answers the idle lead: typed in as its next prompt.
+        guard let first = try await asked(besides: [], minutes: 5) else {
+            Issue.record("no card in 5 min: \(said())")
             return
         }
         look("the card listed")
@@ -326,31 +424,147 @@ struct EngineEndToEndTests {
         let question = try #require(BoardStore(root: repo.path).load().questions.first, "the board has no question")
         #expect(question.options.contains { $0.contains("Parser") } && question.options.contains { $0.contains("Reader") }, "\(question)")
         step("3, the lead asked; questions lists the card")
-        let answered = try await node.runOnTerminal(["answer", card, "Reader"])
-        #expect(answered.status == 0 && answered.output.contains("answered: the lead is told"), "\(answered.output)\n\(node.said)")
-        step("4, answered, the code typed")
-        // Typed in once its turn is over: its UserPromptSubmit hook records the prompt, the answer as the user's.
-        let prompted = await eventually(timeout: 300) {
-            (HookState.load(from: stateFile)?.lastPrompt ?? "").contains("Reader")
+        let idle = await eventually(timeout: 180) { hooks()?.lastEvent == "Stop" }
+        if !idle { look("3 min after it asked, its turn hasn't ended") }
+        try #require(idle, "the lead's turn never ended after it asked: \(String(describing: hooks()))\n\(said())")
+        step("4, its turn ended (its Stop hook)")
+        let one = try await answer(first, "Reader")
+        step("5, answered, the code typed; the answer \(Self.word(one.went))")
+        check(one.went, one, option: "Reader")
+        if case .typed? = one.went {
+            // Its own UserPromptSubmit hook recorded the prompt.
+            #expect(await eventually(timeout: 30) { (hooks()?.lastPrompt ?? "").hasPrefix("Answer to your question") }, "\(String(describing: hooks()))")
         }
-        if !prompted { look("5 min after the answer, not typed in") }
-        #expect(prompted, "\(String(describing: HookState.load(from: stateFile)))\n\(node.said)")
-        let lastPrompt = HookState.load(from: stateFile)?.lastPrompt ?? ""
-        #expect(lastPrompt.hasPrefix("Answer to your question") && !lastPrompt.hasPrefix(LeadDelivery.prefix), "\(lastPrompt)")
-        step("5, the answer typed into the lead as its prompt")
-        let actions = try await offPool { () throws -> [LeadVaultV2.UserAction] in
-            guard case .vaultV2(.actions(let actions)) = try HostCall.request(.vaultV2(.userActions(since: 0)), socket: node.socket, appKey: nil, timeout: 10) else { return [] }
-            return actions
+        if case .typed? = one.went {} else { print("E9: the idle lead's answer wasn't typed in as its prompt") }
+
+        // 2. Told the answer, it asks again; answered at once, mid-turn: its own hook hands it over.
+        let second = try await asked(besides: [first], minutes: 3)
+        if let second {
+            look("the second card listed")
+            step("6, the lead asked again")
+            let two = try await answer(second, "Scanner")
+            step("7, answered at once, the code typed; the answer \(Self.word(two.went))")
+            check(two.went, two, option: "Scanner")
+            if two.went != nil {
+                // What it says next names the answer: its own words after the answer in its transcript (the message its
+                // Stop hook reported as it handed the answer over came before it, and names both options).
+                var next: [String] = []
+                let deadline = MacTime.real.awake() + 180
+                while !next.contains(where: { $0.localizedCaseInsensitiveContains("Scanner") }), MacTime.real.awake() < deadline {
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                    next = hooks()?.transcriptPath.map { Self.said(after: two.message.digest, transcript: $0) } ?? []
+                }
+                #expect(next.contains { $0.localizedCaseInsensitiveContains("Scanner") }, "what it said after the answer: \(next)")
+                print("E9: what it said after the second answer: \(next.joined(separator: " / "))")
+                let seen = Date().timeIntervalSince1970
+                _ = await eventually(timeout: 60) { hooks().map { $0.lastEvent == "Stop" && $0.lastEventAt >= seen - 1 } == true }
+                step("8, it named the answer, and its turn ended")
+            }
+            // Each answer once, one way or the other.
+            let transcript = hooks()?.transcriptPath.map(Self.reached(transcript:))
+            for answered in [one, two] {
+                let times = (transcript?.prompts.filter { LeadVaultV2.digest($0) == answered.message.digest }.count ?? 0)
+                    + (transcript?.handed.filter { LeadVaultV2.digest($0.text) == answered.message.digest }.count ?? 0)
+                #expect(times == 1 || answered.went == nil, "an answer reached the lead \(times) times")
+            }
+        } else {
+            print("E9: the lead asked no second question in 3 min: this run shows only the answer typed into the idle lead")
         }
-        #expect(actions.contains { $0.kind == "answer" && $0.subject == card }, "\(actions)")
-        // Observed, not asserted: what it said once its turn on the answer ended.
-        let ended = await eventually(timeout: 180) { HookState.load(from: stateFile).map { $0.lastEvent == "Stop" && $0.lastPrompt == lastPrompt } == true }
-        step("6, its turn on the answer \(ended ? "ended" : "still going after 3 min")")
-        print("E9: its last message: \(HookState.load(from: stateFile)?.lastMessage ?? "none")")
+        print("E9: its last message: \(hooks()?.lastMessage ?? "none")")
         look("at the end")
     }
 
     // MARK: Helpers
+
+    /// The vault's record of the message the user's answer to `card` sends its lead, once it's there: the `answer`
+    /// request's action first, then the message's digest under the same action (kind `message`).
+    static func usersMessage(_ node: ScratchNode, card: String, sourceLocation: SourceLocation = #_sourceLocation) async throws -> LeadVaultV2.UserAction {
+        var actions: [LeadVaultV2.UserAction] = []
+        var found: (answer: LeadVaultV2.UserAction, message: LeadVaultV2.UserAction)?
+        let deadline = MacTime.real.awake() + 60
+        while found == nil, MacTime.real.awake() < deadline {
+            actions = (try? await ScratchRunTests.userActions(node)) ?? []
+            if let answer = actions.first(where: { $0.kind == "answer" && $0.subject == card }),
+               let message = actions.first(where: { $0.kind == "message" && $0.action == answer.action }) {
+                found = (answer, message)
+            } else {
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+        let recorded = try #require(found, "the vault holds no answer to \(card) with its message: \(actions)", sourceLocation: sourceLocation)
+        #expect(recorded.answer.at <= recorded.message.at, sourceLocation: sourceLocation)
+        return recorded.message
+    }
+
+    /// How a message reached a lead, as its Claude Code transcript records it.
+    enum Reached: Equatable {
+        /// Typed in as its prompt: the prompt.
+        case typed(String)
+        /// Handed over by its hook (the hook's added context): the message's text, and whether its sender line is a
+        /// lead's or VibeSwitcher's (false: the user's).
+        case handed(String, fromLead: Bool)
+    }
+
+    static func word(_ went: Reached?) -> String {
+        switch went {
+        case .typed?: return "typed into the lead as its prompt"
+        case .handed?: return "handed over by the lead's own hook"
+        case nil: return "reached the lead neither way"
+        }
+    }
+
+    /// What reached the agent whose Claude Code transcript is at `path`: the prompts typed in (its user lines whose
+    /// content is text) and the messages its hooks handed over (`hook_additional_context`, each context as the hook
+    /// wrote it: `SteerReply.messages(inContext:)`). Claude Code's larger lines (its requests) are neither.
+    static func reached(transcript path: String) -> (prompts: [String], handed: [(text: String, fromLead: Bool)]) {
+        var prompts: [String] = [], handed: [(text: String, fromLead: Bool)] = []
+        let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        for line in text.split(separator: "\n") where line.utf8.count < 100_000 {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
+            if object["type"] as? String == "user", let prompt = (object["message"] as? [String: Any])?["content"] as? String { prompts.append(prompt) }
+            if let attachment = object["attachment"] as? [String: Any], attachment["type"] as? String == "hook_additional_context" {
+                for context in attachment["content"] as? [String] ?? [] { handed += SteerReply.messages(inContext: context) }
+            }
+        }
+        return (prompts, handed)
+    }
+
+    /// The agent's own words after the message whose text has `digest` reached it, typed in or handed over by its hook:
+    /// the text of its transcript's assistant lines after that line.
+    static func said(after digest: String, transcript path: String) -> [String] {
+        var reached = false, said: [String] = []
+        let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        for line in text.split(separator: "\n") where line.utf8.count < 100_000 {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
+            let message = object["message"] as? [String: Any]
+            if object["type"] as? String == "user", let prompt = message?["content"] as? String,
+               LeadVaultV2.digest(prompt.trimmingCharacters(in: .whitespacesAndNewlines)) == digest { reached = true }
+            if let attachment = object["attachment"] as? [String: Any], attachment["type"] as? String == "hook_additional_context",
+               (attachment["content"] as? [String] ?? []).contains(where: { SteerReply.messages(inContext: $0).contains { LeadVaultV2.digest($0.text) == digest } }) {
+                reached = true
+            }
+            guard reached, object["type"] as? String == "assistant" else { continue }
+            said += (message?["content"] as? [[String: Any]] ?? []).compactMap { $0["text"] as? String }.filter { !$0.isEmpty }
+        }
+        return said
+    }
+
+    /// How the message whose text has `digest` (the vault's record of it) reached the lead, once its transcript shows
+    /// it within `timeout`: typed in as a prompt, or handed over by its hook; nil when neither.
+    static func reached(digest: String, transcript: () -> String?, timeout: TimeInterval) async -> Reached? {
+        let deadline = MacTime.real.awake() + timeout
+        while MacTime.real.awake() < deadline {
+            if let path = transcript() {
+                let reached = reached(transcript: path)
+                // As Claude Code kept it: a paste's last line break may be gone.
+                let prompts = reached.prompts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let prompt = prompts.first(where: { LeadVaultV2.digest($0) == digest }) { return .typed(prompt) }
+                if let handed = reached.handed.first(where: { LeadVaultV2.digest($0.text) == digest }) { return .handed(handed.text, fromLead: handed.fromLead) }
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        return nil
+    }
 
     /// `repo`'s workflow.md: one finder (one verifier, no test run before it), a test command that passes.
     static func workflow(_ repo: URL) throws {
@@ -427,16 +641,18 @@ struct EngineEndToEndTests {
         return card
     }
 
-    /// The id of the card the server's `questions` lists for `question` (any question's when nil), once it does within
-    /// `timeout`; nil when none does.
-    static func listedCard(_ node: ScratchNode, question: String?, timeout: TimeInterval) async throws -> String? {
+    /// The id of the card the server's `questions` lists for `question` (any question's when nil; never one of
+    /// `besides`), once it does within `timeout`; nil when none does.
+    static func listedCard(_ node: ScratchNode, question: String?, besides: Set<String> = [], timeout: TimeInterval) async throws -> String? {
         var listed: String?
         let deadline = MacTime.real.awake() + timeout
         while listed == nil, MacTime.real.awake() < deadline {
             listed = await offPool { () -> String? in
                 guard let client = try? WireClient(node), let reply = WireClient.reply(client.request("questions", action: nil, timeout: 10)),
                       let cards = reply.result?["cards"]?.array else { return nil }
-                return cards.first { question == nil || $0["question"]?["text"]?.string == question }?["id"]?.string
+                return cards.first { card in
+                    (question == nil || card["question"]?["text"]?.string == question) && card["id"]?.string.map(besides.contains) == false
+                }?["id"]?.string
             }
             if listed == nil { try await Task.sleep(nanoseconds: 300_000_000) }
         }
@@ -466,6 +682,26 @@ func promptHookTakes(_ node: ScratchNode, tty: String, pid: Int32) -> String {
         return true
     }
     return handed
+}
+
+/// The lead's hook at `event` (Stop, PostToolUse: as `vibeswitcher-hook` answers it on the node, `SteerReply.answer`),
+/// its seals checked by the node's host's vault as the hook's are there: the messages it handed over, each as the vault
+/// lets it be delivered (one with no valid seal demoted to an unverified sender's), and the context it printed for
+/// Claude Code ("" when nothing).
+func leadsHookTakes(_ node: ScratchNode, event: String, tty: String, pid: Int32) -> (messages: [SteerMessage], context: String) {
+    let socket = node.socket
+    let sealer = SteerSeal(seal: { _ in throw LeadVault.Refused("the test seals nothing") }, verify: { messages in
+        guard case .verified(let valid)? = try? HostCall.vault(.verify(messages), socket: socket) else { return nil }
+        return valid
+    })
+    var handed: [SteerMessage] = []
+    SteerInbox.deliver(tty: tty, agentPid: pid, root: node.root, sealer: sealer, check: { SteerInbox.writeCheck($0, ids: $1) }, inParts: true,
+                       holding: Date().timeIntervalSince1970, wakingOnly: true) { messages in
+        guard SteerReply.output(event: event, messages: messages) != nil else { return 0 }
+        handed = messages
+        return messages.count
+    }
+    return (handed, handed.isEmpty ? "" : SteerReply.context(handed))
 }
 
 extension ScratchNode {

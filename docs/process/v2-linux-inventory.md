@@ -564,7 +564,8 @@ role, and `start_worker` ended each worker 45 s on ("its vibeswitcher tools didn
 affected (its root is `<home>/.vibeswitcher`, and its sessions' HOME is the user's); on a scratch node the link is the
 same layout.
 
-**`aRealLeadOnSonnetAsksAndIsAnswered` (gated on `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`) has not passed: an open item.**
+**`aRealLeadOnSonnetAsksAndIsAnswered` (gated on `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`) did not pass on 2026-11-16; it
+passed on 2026-11-17 (the next section).**
 Three gated runs, Claude Code **2.1.325** (`~/.local/bin/claude`, the native build), `--model sonnet` (Sonnet 5.5 on the
 screen), the scratch node's `<root>/v2/test/claude` a script running it with the config folder; the scratch
 repository's trust entry written into the folder's `.claude.json` and taken out at the end:
@@ -598,6 +599,51 @@ What run 3's screen showed besides:
 The next run, after the weekly limit resets (Nov 18) and with the user's go-ahead (the three runs this task allowed are
 spent): `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<config> bash scripts/test.sh --filter EngineEndToEndTests/aRealLead`,
 its `E9:` lines giving each step's time here.
+
+## A real lead asks and is answered, both ways (the engine's E9 Step 2, 2026-11-17, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+`EngineEndToEndTests.aRealLeadOnSonnetAsksAndIsAnswered`, run as `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=~/.vibeswitcher-test-claude
+bash scripts/test.sh --filter 'EngineEndToEndTests/aRealLead'`: a `ScratchNode` holding its first look, the lead a
+real Claude Code **2.1.326** (`~/.local/bin/claude`, the native build) with `--model sonnet` (Sonnet 5.5 on the
+screen), its status hooks and the repository's trust entry written into the throwaway config folder for the run and
+taken out at its end (checked after each run: no hook, no trust entry; `settings.json.vibeswitcher-backup` is the
+installer's one-time copy). Three runs, **the last two passed**:
+
+| Step (`E9:` lines) | Run 1, 18:11 | Run 2, 18:27 | Run 3, 18:30 |
+| --- | --- | --- | --- |
+| 1, config held and accepted, base shown and accepted | 0.4 s | 0.6 s | 0.6 s |
+| 2, the lead started | 0.2 s | 0.2 s | 0.3 s |
+| 3, the lead asked; `questions` lists the card | 3.8 s | 3.8 s | 4.6 s |
+| 4, its turn ended (its Stop hook) | not waited for | 1.2 s | 0.9 s |
+| 5, `answer CARD Reader`, the code typed, to the answer in the lead | 0.0 s to answer, then never typed | 0.3 s, typed in as its prompt | 0.3 s, typed in as its prompt |
+| 6, the lead asked its second question | | 2.1 s | 1.2 s |
+| 7, `answer CARD Scanner` at once, to the answer in the lead | | 1.4 s, handed over by its Stop hook | 1.6 s, handed over by its Stop hook |
+| 8, what it said next named the answer, its turn ended | | (checked on the wrong message) | 0.9 s |
+| In all | failed after 305 s | passed, 10.3 s | passed, 11.3 s |
+
+- **Run 1 failed on the case, not the node.** The answer was given 0.1 s after the lead asked, while its turn was still
+  running (its hooks' last event PostToolUse). The engine types only into a lead between turns, so the answer waited
+  in its inbox and the lead's own Stop hook handed it over about 1.5 s later: "Stop hook says: … The user sent this while you
+  were working (through VibeSwitcher) … > Answer to your question DB5A8357 “Which name should we use for the project's
+  parser?”: Reader", and the lead went on: "The user chose Reader as the parser's name…". The case waited 5 minutes for
+  the answer as a typed prompt (`lastPrompt`), which was never due. Both are the product's ways; the case asserted one.
+- **The case now shows both, each checked by the way it went** (the lead's transcript: a prompt whose digest is the
+  one the vault records for the user's message, or a hook's added context holding that message under the user's
+  sender line, which the hook gives only a message whose seal the vault took). The idle lead (its Stop hook waited
+  for) had its answer typed in 0.3 s after `answer`, the message as it is, not prefixed; the second answer, given at
+  once, was handed over by the Stop hook of the turn that asked, the inbox's delivered record gained it, nothing was
+  typed, and the lead's next words named it ("You chose Reader for the parser and Scanner for the lexer."). Each
+  answer reached the lead once.
+- **Run 2's check of the lead's next message was satisfied too early**: the message its Stop hook reported as it handed
+  the answer over ("…whether to call the lexer Lexer or Scanner, and I'm waiting for your answer") names both options.
+  The case now reads the lead's own words after the answer in its transcript; run 3 passed with it.
+- A real transcript (2.1.326) records a hook's added context as an `attachment` of type `hook_additional_context`
+  (`hookEvent: Stop`, `content` a list of strings), as `FakeClaude`'s does, and a typed prompt as a `user` line whose
+  content is the text.
+- The hook's way with `FakeClaude`, ungated: `anAnswerBeforeTheTurnEndsIsTakenByTheLeadsHookAsTheUsers` (the answer
+  waits sealed as the user's while the turn runs, nothing typed; the Stop hook, its seals checked by the scratch
+  host's vault, hands it over under the user's sender line; the delivered record holds it; its seal is retired and it
+  is typed no more).
 
 ## A full scratch team run (the bootstrap path's step 9, the start plan's S10, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
 
