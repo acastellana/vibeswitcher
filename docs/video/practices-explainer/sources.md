@@ -96,7 +96,7 @@ rules, its live status comes from Claude Code hooks, and its usage reading comes
 
 ## Added 2026-11-17 (the update after cc0e9da0)
 
-Read on 2026-11-17 from main (5045682f). Commit hashes are on main; `Sources/` paths are relative to the repository
+Read on 2026-11-17 from main (5045682f; the update check and the skill-sync rows from a9928275, after they merged). Commit hashes are on main; `Sources/` paths are relative to the repository
 root. The numbers above stay those of 2026-11-12, as the title card says.
 
 | Scene | Claim on screen or in the narration | Source |
@@ -122,6 +122,11 @@ root. The numbers above stay those of 2026-11-12, as the title card says.
 | s22 | The chat's model chip follows `/model` at once, and its menu offers Fable | 8906e144, 73bbffc6 |
 | s22 | A Run card's command reports back: the asking session hears its exit status and last output | 233acccc |
 | s22 | A card offers `/doctor prompt-audit` every 14 days, or when the model changed; Run now only on your click | ce72a400; `docs/lead/decisions.md` 2026-11-12 09:21:45 |
+| s22 | The app checks for a newer VibeSwitcher on GitHub's main (`origin/main`, fetched with the vault's pinned URL) and on this Mac's `main`: about 2 minutes after launch, then every 6 hours (also VibeSwitcher › Check for Updates…) | 279ed53b (the update check, merged as one commit); `Sources/VibeCore/AppUpdateWatch.swift` (`firstDelay` 120, `interval` 6 × 60 × 60); `docs/lead/decisions.md` 2026-11-17 11:44:39 |
+| s22 | Its card says what changed in plain words (a headless model's summary over the changes grouped by area; the commit subjects alone while AI summaries are off), with Later and Install & Restart | 279ed53b; `Sources/VibeCore/AppUpdate.swift` (`Offer.summary`, `summarySystem`); `Sources/VibeSwitcher/UpdateCard.swift` |
+| s22 | Install & Restart opens a shell card in the checkout that asks for the signing keychain's password each time (`security unlock-keychain … && scripts/build-app.sh --install`); the password is never stored | 279ed53b; `Sources/VibeCore/AppUpdate.swift` (`installCommand`: "password there, never stored"); `docs/lead/decisions.md` 2026-11-17 11:44:39 (the user chose click plus password over a stored password) |
+| s22 | When GitHub has commits this Mac's main lacks, the lead is asked (once per GitHub tip) to run `fetch_remote` then `merge_remote`, which merges in a scratch worktree, runs the test command on the result and moves main only when it passes; Install & Restart waits until then | 279ed53b; `Sources/VibeCore/AppUpdateWatch.swift` (the lead's message); `Sources/VibeCore/LeadToolset.swift` (`merge_remote`: "The test command runs on the result, and the base fast-forwards to it only when it passes"); `Sources/VibeSwitcher/UpdateCard.swift` ("Install & Restart turns on once it has") |
+| s17 | The config seal lets a finished round of Claude Code's own skill sync through by its shape (only under `~/.claude/skills/synced/<bucket>/`, a marked bucket, no links; its `.last-complete-round` and `manifest.json` rewritten together, shaped as Claude Code writes them); every other change to the sealed config is still held until you Accept | a2600cdd, 40c23d08 (an idle round takes nothing in; a held change stays held through a later round), 51072b49; `Sources/VibeCore/ConfigSeal.swift` (`finishedSyncRound`); `docs/lead/decisions.md` 2026-11-17 09:46:02 |
 
 Names on screen in s22 (`example-api`, `example-site`) are the sandbox's made-up projects, and `task-a`, `task-b` in
 s20 are placeholders: no real project or task is shown.

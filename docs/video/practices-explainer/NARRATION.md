@@ -17,14 +17,22 @@ walk-through. Whether the voice is as warm as wanted is for a human ear to judge
 voicing scenes (s04, s08, s15 and s16 were voiced twice, after a review tightened their wording to the sources) and 323
 on a probe, the opening sample and a speed test. The update of 2026-11-17 spent **1,854** more: s07 (354) and s15
 (445), re-voiced because their text changed, and the new s20 (362), s21 (403) and s22 (290). No other scene was
-re-voiced. That's 8,515 characters in all; the 22 scene files now hold 6,487. The account's quota couldn't be read
-(`GET /v1/user/subscription` needs `user_read`), and no call was refused. **Voice length:** 7:52 of speech in an 8:29
+re-voiced. A second update the same day spent **988** more: s17 (423) and s22 (565), re-voiced to add the config seal's
+skill-sync exception and the update check, once both had merged. That's 9,503 characters in all; the 22 scene files
+now hold 6,891. The account's quota couldn't be read
+(`GET /v1/user/subscription` needs `user_read`), and no call was refused. **Voice length:** 8:21 of speech in an 8:58
 film at its natural pace. The model ignores `voice_settings.speed` (1.0, 1.1 and 1.2 gave the same length), so the
 voice keeps its natural pace, about 130 words a minute, and the delivered MP4 is the whole film sped up 1.7× with the
 pitch kept (4:59.6; see `STORYBOARD.md`).
 
 The update's new and changed scenes were transcribed with whisper (`small.en`): "Fable", "Opus", "Codex", "UI
 journeys", "178 megabytes" and "/model" come through as written, and "macOS 27.2" as "Mac OS 27.2".
+
+The second update's s17 and s22 were transcribed the same way (whisper-cpp, `small.en`): "skill sync", "Claude Code's
+own", "by its shape", "every other change still waits for your click", "every six hours", "GitHub", "this Mac's main",
+"Install and restart", "signing password", "never stores it" and "merges it in and tests the result" come through as
+written, and "VibeSwitcher" as "vibe switcher". (A first pass without timestamps skipped the Install and Restart
+sentence; transcribed with timestamps, and on its own, it's all there.)
 
 The opening was sampled first and transcribed with whisper (`small.en` and `base.en`): "VibeSwitcher", "worktree" and
 "Codex" come through as written.

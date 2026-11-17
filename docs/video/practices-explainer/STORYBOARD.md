@@ -39,8 +39,8 @@ sandbox commands) are left out. Sources for each line are in `sources.md`, "Adde
 | Workers and verifiers can't read your prompt history, other sessions' transcripts or anything in ~/.claude but skills, plugins and projects | ba88848a, 614b59e4, db598c14, f579c69b, 2026-11-14 | No | s05: one line on screen |
 | The lead's records refuse another project's name or a credential's shape | 87ebb3e0, 2026-11-12 | No | s16: one line on screen |
 | Pushing to GitHub only on your click | 2c727025 (2026-11-05) | Yes: s17's Push card and its narration | No change |
-| Claude Code's own skill sync accepted by the config seal, every other change still held | not on main at the time of writing (branch accept-claude-code-s; decision 2026-11-17 09:46) | No | s17, if it merges before the render (see the done report) |
-| Update check with a changelog card and Install & Restart | not on main at the time of writing (branch update-check-a-card; decision 2026-11-17 11:44) | No | s22, if it merges before the render (see the done report) |
+| Claude Code's own skill sync accepted by the config seal, every other change still held | a2600cdd, 40c23d08, 51072b49 (2026-11-17; decision 09:46) | No | s17: a line on the config seal's key and in the narration (added in the second update, re-voiced) |
+| Update check: every 6 hours, GitHub's main and this Mac's; a plain-language changelog card; Install & Restart asks for the signing password, never stored; GitHub ahead → the lead merges first, tested | 279ed53b (2026-11-17; decision 11:44) | No | s22: a card under the restart card, and in the narration (added in the second update, re-voiced) |
 | Team mode (several workers on one task, a post wall) | 2026-11-13 … 11-15 | No | Left out: dropped as a default after its experiment (decision 2026-11-16 07:21) |
 | Floating dots panel removed | a27af4a0 | Never shown | Left out (a removal) |
 | Merge dry run; batch receipts | 9ee1c37d, 6dd2304b | No | Left out: the lead's bookkeeping, team experiment |
@@ -49,7 +49,8 @@ The numbers on screen (tasks, merges, audits, findings) stay those read on 2026-
 ("17 Oct – 12 Nov 2026"); refreshing them would re-voice six scenes for no new feature.
 
 New and changed scenes, in film order: s05 (screen only), s07 (re-voiced), s11, then **s20**, s12, s13, then
-**s21**, s14, s15 (re-voiced), s16 (screen only), s17, then **s22**, s18, s19. The chapter kickers after s13 are
+**s21**, s14, s15 (re-voiced), s16 (screen only), s17, then **s22**, s18, s19. The second update the same day (after
+the two features above merged) re-voiced s17 and s22 only, and changed s21's threshold line on screen. The chapter kickers after s13 are
 renumbered (screen only). The delivered MP4 is this film sped up 1.7×, pitch kept.
 
 **Render of 2026-11-17.** `npx hyperframes@0.9.37 render . --fps 30 --quality looks` under `vs-heavy` gave the 1× film
@@ -271,7 +272,8 @@ the lead's 52 rules enforced by a check or test.
 UI journeys: scripted sandbox runs, each shot diffed against its baseline (`scripts/ui-journeys.sh`). App health: the
 app's freezes, crashes and error lines by cause; 3 of 7 days or doubling → a proposed task (`watch_app_logs`). Memory:
 macOS 27.2's malloc kept freed pages (+74 MB an hour) → `MallocLargeCache=0`; chat images decoded at the size shown,
-two at a time. Counters: 4 journeys · 0.05 % · +178 MB (from +1,012) · 3 of 7.
+two at a time. Counters: 4 journeys · 0.05 % ("of a shot's pixels may change; any more flags it": `scripts/ui-journeys.sh` counts a shot
+as changed when more than the threshold differ) · +178 MB (from +1,012) · 3 of 7.
 
 ## Frame 14: A shared Mac, a finite account
 
@@ -329,19 +331,23 @@ rounds, reruns, tests, your waits".
 - motion: grid-card-assemble; spring-pop-entrance
 
 Review rules floor · sensitive and strict paths · merge policy (an approval covers one exact commit) · Push card ·
-Shell and wallet cards · Config seal · Phone over Tailscale (replies behind their own switch).
+Shell and wallet cards · Config seal ("One exception: a finished round of Claude Code's own skill sync, accepted by its
+shape", added 2026-11-17; the phone key now waits for its line) · Phone over Tailscale (replies behind their own switch).
 
 ## Frame 17b: Day to day (s22, added 2026-11-17)
 
-- scene: The restart card on the left; the model chip flipping on `/model fable`, Run cards and the prompt-audit
-  reminder on the right
-- duration: 18s (base; 21.9s narrated)
+- scene: The restart card on the left, the update card under it; the model chip flipping on `/model fable`, Run cards
+  and the prompt-audit reminder on the right
+- duration: 26s (base, 18s before the update card; 41.2s narrated)
 - status: animated
 - src: compositions/s22-day-to-day.html
 - motion: spring-pop-entrance; typewriter-reveal (`/model fable`)
 
 Card: "The Mac restarted" · Lead example-api · Lead example-site · Claude example-api · docs · "Leads reopen first, and
-each is told to restart its workers." · Dismiss / Choose… / Reopen all · "nothing reopens without your click".
+each is told to restart its workers." · Dismiss / Choose… / Reopen all · "nothing reopens without your click". Update card (added 2026-11-17): "every 6 hours ·
+GitHub's main and this Mac's main" · "A newer version" · Later / Install & Restart · "What changed, in plain words.
+Install & Restart opens a shell card that asks for the signing password: never stored." · "GitHub ahead? The lead
+merges it in first, tested.".
 
 ## Frame 18: What the system adds
 
