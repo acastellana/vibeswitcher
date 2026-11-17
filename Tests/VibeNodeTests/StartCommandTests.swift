@@ -962,6 +962,32 @@ extension StartCommandTests {
         #expect(unread.log.contains("showList") && unread.said.contains("can't be recorded"), "\(unread.log) \(unread.said)")
     }
 
+    /// The step 8 sweep: a start that finds the node running applies neither `--at-login` nor `--node-version` (only a
+    /// start of the node does), so it says so and exits 1 rather than 0, and changes nothing; on a machine without
+    /// systemd it says nothing starts the node at login.
+    @Test func aRunningNodeRefusesTheFlagsOnlyAStartApplies() throws {
+        for (arguments, kind, says) in [
+            (StartArguments(atLogin: true), StartSequence.Kind.node(.systemd), ["--at-login wasn't applied", "systemctl --user enable"]),
+            (StartArguments(nodeVersion: "v22.16.0"), .node(.systemd), ["--node-version v22.16.0 wasn't applied", "vibeswitcher stop"]),
+            (StartArguments(atLogin: true, nodeVersion: "v22.16.0"), .node(.systemd), ["--at-login and --node-version v22.16.0 weren't applied"]),
+            (StartArguments(atLogin: true), .node(.noSystemd), ["without systemd nothing starts the node when you log in", "--at-login wasn't applied"]),
+        ] {
+            let world = StartWorld()
+            world.kind = kind
+            world.server = .running
+            world.acknowledged = .success(true)
+            guard case .failure(let refused) = world.run(arguments) else { Issue.record("\(arguments) on a running node exited 0"); continue }
+            #expect(refused.exitCode == 1, "\(refused)")
+            for text in says { #expect(refused.text.contains(text), "\(arguments): \(refused.text)") }
+            #expect(world.touchedNothing && !world.log.contains { $0.hasPrefix("starter:") || $0 == "toolFolders" }, "\(world.log)")
+        }
+        // A plain start still says the node runs, exit 0.
+        let plain = StartWorld()
+        plain.server = .running
+        plain.acknowledged = .success(true)
+        #expect(try plain.run(StartArguments(interopIsOn: true)).get() == .running)
+    }
+
     @Test func aScratchNodeWithNoServerIsRefusedByTheSequence() {
         let world = StartWorld()
         world.kind = .scratch

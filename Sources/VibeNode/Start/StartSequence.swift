@@ -68,7 +68,8 @@ public struct StartArguments: Equatable, Sendable {
 /// 4. The facts and the interop refusal (`StartCheck`); their lines said. On a machine whose manager answers, the
 ///    manager-variable refusal (`NodeFolders.managerRefusal`) and the manager-configuration refusal.
 /// 5. A server that answers and passes `ServerCheck`: "the node runs" (the command line's `serverAnswers` says it),
-///    then S11's acknowledgment the first time, as before S2. A scratch node with no server is refused: its harness
+///    then S11's acknowledgment the first time, as before S2; then `--at-login` or `--node-version`, which only a start
+///    of the node applies, refused as not applied (`notApplied`; the step 8 sweep, 2026-11-17). A scratch node with no server is refused: its harness
 ///    starts it (69).
 /// 6. Otherwise, on the user's node: a machine without the manager's socket (refused), or without systemd (the
 ///    detached start, S3: `runDetached`), then S11's list and its acknowledgment the first time, before anything is
@@ -242,6 +243,7 @@ public struct StartSequence {
         switch steps.serverAnswers() {
         case .running:
             if let refused = acknowledgeAfterAnswer() { return .failure(refused) }
+            if let refused = Self.notApplied(arguments, kind: kind) { return .failure(refused) }
             return .success(.running)
         case .failed(let refused):
             return .failure(refused)
@@ -302,6 +304,25 @@ public struct StartSequence {
             steps.say("the node started from \(started.commit); its server answers" + (started.enabledAtLogin ? " (enabled: it starts at your login)" : ""))
             return .success(.started(commit: started.commit))
         }
+    }
+
+    /// Why a start that found the node running refuses the flags that only a start of the node applies (`--at-login`,
+    /// `--node-version`), or nil when none was given: the node runs as it was started, so neither took effect, and
+    /// exiting 0 would let the user believe start-at-login is set. Exit 1: nothing was changed.
+    static func notApplied(_ arguments: StartArguments, kind: Kind) -> StartRefusal? {
+        var flags: [String] = []
+        if arguments.atLogin { flags.append("--at-login") }
+        if let version = arguments.nodeVersion { flags.append("--node-version \(ConfigSeal.inert(version, limit: 64))") }
+        guard !flags.isEmpty else { return nil }
+        let them = flags.count > 1 ? "them" : "it"
+        var text = "the node runs already, so \(flags.joined(separator: " and ")) \(flags.count > 1 ? "weren't" : "wasn't") applied: "
+            + "only a start of the node applies \(them); `vibeswitcher stop`, then start again with \(them)"
+        if arguments.atLogin, kind == .node(.systemd) {
+            text += " (`systemctl --user enable \(VoiceRule.nodeUnit)` sets start-at-login alone)"
+        } else if arguments.atLogin, kind == .node(.noSystemd) {
+            text += "; without systemd nothing starts the node when you log in, so --at-login never applies here"
+        }
+        return StartRefusal(text, exitCode: 1)
     }
 
     /// The detached start (S3, ST-D6; the type's comment): `--at-login` refused; S11's list; the build (this command
