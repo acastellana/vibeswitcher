@@ -252,7 +252,9 @@ struct VoiceRuleTests {
         // Every user's-voice kind is one or the other: a kind added later changes state unless listed as not.
         #expect(NodeWire.kinds.filter { $0.value == .user }.keys.allSatisfy { NodeWire.changesState($0) != NodeWire.changesNothing.contains($0) })
         #expect(NodeWire.changesState("unlisted") && NodeWire.changesState("e9.later"))
-        #expect(NodeWire.kinds.filter { $0.value != .user }.keys.allSatisfy { !NodeWire.changesState($0) })
+        // The reads and the lead's tool server's kinds change nothing; a web client's (a draft, a terminal) change state.
+        #expect(NodeWire.kinds.filter { $0.value == .anyone || $0.value == .leadToolServer }.keys.allSatisfy { !NodeWire.changesState($0) })
+        #expect(NodeWire.kinds.filter { $0.value == .webDraft || $0.value == .webTerminal }.keys.allSatisfy { NodeWire.changesState($0) })
         // The cgroup rule doesn't ask it: there a peer with no terminal is the user's when its cgroup is a terminal's.
         #expect(Voice.handsRefusal(Self.peer(terminal: .none), kind: "stop", rule: Self.systemd) == nil)
     }

@@ -111,13 +111,16 @@ struct ServerTests {
         let node = try await ScratchNode(scratch)
         let client = try WireClient(node)
         // Kinds no list names (`lead` is taken from E4, the cards and the lead's questions from E6, the hooks from the
-        // start plan's S6, `build.switch` from its S8b: no kind the protocol names is left unanswered).
-        for kind in ["shell", "exec", ""] {
+        // start plan's S6, `build.switch` from its S8b). The live protocol's kinds are named and not yet taken: each is
+        // answered `unknown-kind` until the live plan's integration task that wires it (W0).
+        let live = Set(NodeWire.kinds.keys).subtracting(NodeWire.taken)
+        #expect(live == ["subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close"])
+        for kind in ["shell", "exec", ""] + live.sorted() {
             let reply = try #require(WireClient.reply(client.request(kind, args: ["folder": .string("/")])), "\(kind)")
             #expect(reply.ok == false && reply.error?.code == "unknown-kind", "\(kind): \(reply)")
         }
         #expect(client.hello.kinds == NodeWire.taken)
-        #expect(Set(NodeWire.taken) == Set(NodeWire.kinds.keys))
+        #expect(Set(NodeWire.taken).isSubset(of: Set(NodeWire.kinds.keys)))
         let status = try #require(WireClient.reply(client.request("status", action: nil))?.result)
         #expect(status["accepted"]?.array?.isEmpty == true, "\(status)")
         // `build.switch` on a scratch node given no install root: taken (recorded), and refused for that.
