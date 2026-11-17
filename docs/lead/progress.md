@@ -3647,3 +3647,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-17 20:16 Automatically (auto_advance): Started the audit of worker-git-guard-the at b21d0598 (Its review is audit).
 - 2026-11-17 20:17 Released worker-git-guard-the's worker (idle since its done report on b21d0598) while its audit runs
 - 2026-11-17 20:17 Automatically (auto_advance): Released worker-git-guard-the's worker, idle since its done report on b21d0598, while its audit runs (ended pid 19308 (Worker: Worker git guard: the '=' and attached spellings of refused git options slip the deny rules)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-17 20:17 Planned lead-chat-noise-fold: Lead chat noise: fold VibeSwitcher's report cards into one quiet line per burst
+- 2026-11-17 20:17 Started a worker on lead-chat-noise-fold
+- 2026-11-17 20:17 Automatically (auto_advance): Started a worker on lead-chat-noise-fold (Lead chat noise: fold VibeSwitcher's report cards into one quiet line per burst).
+- 2026-11-17 20:21 Audit of worker-git-guard-the: complete, clean, round 2: 2 Important closed, 5 Nit (1 open)
