@@ -48,6 +48,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     private var listenHook: Listen = { .failure(WebTokens.Refusal("this server has no web listener")) }
     private var changeHook: (@Sendable () -> Void)?
     private var revokeHook: (@Sendable () -> Void)?
+    private var takenHook: (@Sendable () -> Void)?
+    private var admittedHook: (@Sendable () -> Void)?
 
     /// `now` is the clock codes and tokens are judged on (a test's own); `note` the server's log, which never gets a
     /// code or a token.
@@ -73,6 +75,18 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     public var onRevoke: (@Sendable () -> Void)? {
         get { lock.withLock { revokeHook } }
         set { lock.withLock { revokeHook = newValue } }
+    }
+
+    /// Tests: called in `admit` once a code is taken and before its token is issued (where a revoke can land).
+    var betweenTakeAndIssue: (@Sendable () -> Void)? {
+        get { lock.withLock { takenHook } }
+        set { lock.withLock { takenHook = newValue } }
+    }
+
+    /// Tests: called in `admit` once it has admitted, before it returns (where a revoke can land before `hello`).
+    var afterAdmit: (@Sendable () -> Void)? {
+        get { lock.withLock { admittedHook } }
+        set { lock.withLock { admittedHook = newValue } }
     }
 
     /// `http://127.0.0.1:<port>/#pair=<code>`: the one origin (LW-D5), the code in the fragment.
@@ -148,12 +162,15 @@ public final class WebAccess: WebGate, @unchecked Sendable {
         switch (pair, token) {
         case (let pair?, nil):
             guard pair.utf8.count <= 64, take(pair, now: at) else { return refused() }
+            betweenTakeAndIssue?()
             guard let issued = try? tokens.issue(now: at) else { return refused() }
             note("a pairing code was taken: a web token issued")
             onChange?()
+            afterAdmit?()
             return WebAdmission(rights: Self.rights, auth: Self.auth(token: issued.token, expiresAt: issued.expiresAt), token: issued.token)
         case (nil, let token?):
             guard let expiresAt = tokens.expiry(of: token, now: at) else { return refused() }
+            afterAdmit?()
             return WebAdmission(rights: Self.rights, auth: Self.auth(token: nil, expiresAt: expiresAt), token: token)
         default:
             return refused()

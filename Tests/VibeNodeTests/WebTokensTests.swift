@@ -259,6 +259,37 @@ struct WebTokensTests {
         #expect(rig.access.admit(["pair": .string(pending)]) == nil, "a code made before the revoke is dropped too")
     }
 
+    /// A revoke that lands between an `auth`'s code being taken and its token being issued leaves no token alive and
+    /// admits nobody: the code was good when it was taken, but the user has since said "no page", and a token issued
+    /// after that would outlive the revoke (and keep the listener up) until it ran out in 24 h.
+    @Test func aRevokeBetweenTakeAndIssueLeavesNoLiveToken() throws {
+        let (access, clock, _) = access()
+        let code = access.openCode(now: clock.now)
+        access.betweenTakeAndIssue = { _ = try? access.revoke().get() }
+        #expect(access.admit(["pair": .string(code)]) == nil, "admitted after the revoke")
+        #expect(access.tokens.live(now: clock.now) == 0, "a token outlived the revoke")
+        #expect(access.wanted == false)
+        // Without a revoke in between, the same path admits (the control).
+        access.betweenTakeAndIssue = nil
+        #expect(access.admit(["pair": .string(access.openCode(now: clock.now))]) != nil)
+    }
+
+    /// A connection admitted under a token the revoke dropped, after `admit` and before `hello`, is closed `revoked`:
+    /// the listener asks `holds` once more before it says anything.
+    @Test func aTokenRevokedBeforeHelloGetsNoHello() async throws {
+        let rig = try WebSecurityRig(scratch)
+        defer { rig.stop() }
+        let issued = try rig.access.tokens.issue(now: rig.now)
+        rig.access.afterAdmit = { _ = try? rig.access.revoke().get() }
+        let page = try rig.upgraded()
+        try page.sendText(#"{"v":1,"id":"0","kind":"auth","args":{"token":"\#(issued.token)"}}"#)
+        let frames = try page.framesUntilClosed()
+        #expect(!frames.contains { $0.json?["kind"]?.string == "hello" }, "\(frames)")
+        #expect(frames.first?.json?["code"]?.string == "revoked", "\(frames)")
+        #expect(frames.last?.closeCode == 4403, "\(frames)")
+        #expect(rig.handler.opened == 0)
+    }
+
     // MARK: The user's voice
 
     /// `web.open` and `web.revoke` are the user's kinds, changing state; a WebSocket can send neither, whatever its
