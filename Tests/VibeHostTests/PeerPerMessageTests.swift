@@ -64,7 +64,7 @@ import Testing
         _ = (host, app)
 
         try lead.childWrite(Self.frame(2, .hello(protocolVersion: HostProtocol.version, app: "child")))
-        _ = try lead.reply(to: 2)
+        _ = try lead.reply(to: 2, readByChild: true)
         #expect(try lead.childEnd() == "ended 0")
         try lead.write(Self.frame(3, leadOnly("after")))
         let after = try lead.reply(to: 3)
@@ -82,7 +82,8 @@ import Testing
         let half = frame.count / 2
         try lead.write(frame.prefix(half))
         try lead.childWrite(frame.dropFirst(half))
-        let split = try lead.reply(to: 2)
+        // Read by the lead's children: the lead uses its socket again only once the host has read the child's half.
+        let split = try lead.reply(to: 2, readByChild: true)
         #expect(Self.refused(split), "a frame of two senders' bytes: \(split)")
         #expect(try lead.childEnd() == "ended 0")
         try lead.write(Self.frame(3, leadOnly("after")))
@@ -259,6 +260,9 @@ private func reap(_ pid: pid_t) {
 ///   reads a live sender: "given <child's pid>".
 /// - `child-end`: the child's stdin closed, which ends it, and the child reaped: "ended <wait status>".
 /// - `event`: the next control frame on its connection: "event <base64 payload>", or "ended".
+/// - `child-event`: the same, its bytes read off the connection by children of its own (`dd`, exactly the bytes the
+///   frame lacks), so that it doesn't use its socket itself until the host has sent the frame (see
+///   `Running.reply(to:readByChild:)`).
 enum LeadConnectionHelper {
     static let variable = "VIBE_PEER_PER_MESSAGE_TEST_HELPER"
 
@@ -294,7 +298,46 @@ enum LeadConnectionHelper {
         }
         var connection: Int32 = -1
         var child: (pid: pid_t, stdin: Int32)?
-        var decoder = HostFrameDecoder()
+        /// Bytes read from the connection not yet handed out as frames.
+        var held: [UInt8] = []
+        /// The bytes `held` lacks before it holds a whole frame (0 when it does); nil for a frame no host sends.
+        func missing() -> Int? {
+            guard held.count >= 4 else { return 4 - held.count }
+            let length = held[0..<4].reduce(0) { $0 << 8 | Int($1) }
+            guard length >= 1, length - 1 <= HostFrame.maxPayload else { return nil }
+            return max(0, 4 + length - held.count)
+        }
+        /// Exactly `count` bytes read from the connection by a child of its own, not by itself: `dd`, a byte a read,
+        /// so it takes no byte past them. Nil when they didn't come within the hang guard.
+        func childRead(_ count: Int) -> [UInt8]? {
+            var output: [Int32] = [-1, -1]
+            guard Sys.pipeClosedOnExec(&output) == 0 else { return nil }
+            var spawn = Platform.Spawn(executable: "/bin/dd", arguments: ["dd", "bs=1", "count=\(count)"])
+            spawn.stdin = .descriptor(connection)
+            spawn.stdout = .descriptor(output[1])
+            spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+            spawn.keep = []
+            let started = spawn.start()
+            Sys.close(output[1])
+            defer { Sys.close(output[0]) }
+            guard case .success(let pid) = started else { return nil }
+            var bytes: [UInt8] = []
+            var chunk = [UInt8](repeating: 0, count: 4_096)
+            while bytes.count < count, ready(output[0], for: POLLIN) {
+                let got = read(output[0], &chunk, chunk.count)
+                if got > 0 {
+                    bytes += chunk.prefix(got)
+                } else if got < 0, errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
+            if bytes.count < count { kill(pid, SIGKILL) }
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+            return bytes.count == count ? bytes : nil
+        }
         var pending: [UInt8] = []
         var byte: UInt8 = 0
         while true {
@@ -312,6 +355,9 @@ enum LeadConnectionHelper {
             case "connect":
                 do {
                     connection = try UnixSocket.connect(path: path)
+                    // Blocking, so a child's `dd` waits for its bytes (the flag is the connection's, shared with
+                    // every child given it). Set now: on the Mac setting it counts as using the socket.
+                    _ = fcntl(connection, F_SETFL, fcntl(connection, F_GETFL) & ~O_NONBLOCK)
                     say("connected")
                 } catch {
                     say("refused \(error)")
@@ -360,20 +406,29 @@ enum LeadConnectionHelper {
                 var status: Int32 = 0
                 while waitpid(running.pid, &status, 0) < 0, errno == EINTR {}
                 say("ended \(status)")
-            case "event":
+            case "event", "child-event":
+                let byChild = words.first == "child-event"
                 var said = false
                 var buffer = [UInt8](repeating: 0, count: 65_536)
-                while !said, connection >= 0 {
-                    if let frame = try? decoder.next() {
-                        guard frame.kind == .control else { continue }
-                        say("event " + frame.payload.base64EncodedString())
+                while !said, connection >= 0, let need = missing() {
+                    if need == 0 {
+                        let length = 4 + held[0..<4].reduce(0) { $0 << 8 | Int($1) }
+                        let kind = held[4], payload = Data(held[5..<length])
+                        held.removeFirst(length)
+                        guard kind == HostFrame.Kind.control.rawValue else { continue }
+                        say("event " + payload.base64EncodedString())
                         said = true
                         break
+                    }
+                    if byChild {
+                        guard let bytes = childRead(need) else { break }
+                        held += bytes
+                        continue
                     }
                     guard ready(connection, for: POLLIN) else { break }
                     let count = read(connection, &buffer, buffer.count)
                     if count > 0 {
-                        decoder.append(Data(buffer[0..<count]))
+                        held += buffer[0..<count]
                     } else if count < 0, errno == EINTR || errno == EAGAIN {
                         continue
                     } else {
@@ -488,9 +543,16 @@ enum LeadConnectionHelper {
         func childEnd() throws -> String { try ask("child-end") }
 
         /// The event that answers `seq`, the ones before it passed over.
-        func reply(to seq: Int) throws -> HostEvent {
+        ///
+        /// `readByChild`: every byte up to it read off the connection by the lead's children, not the lead, for a
+        /// request whose bytes a child wrote. On the Mac the host's sender is `LOCAL_PEERTOKEN` as it is after its
+        /// read, whoever last used the peer's socket, and the lead's own wait for the reply uses it (a `poll`
+        /// registers on it, a read begins on it): if that came after the child's write and before the host's read,
+        /// the child's bytes were the lead's (the Mac's CI, run 44131293771). The host's reply comes only after its
+        /// read, so the lead stays off its socket until then.
+        func reply(to seq: Int, readByChild: Bool = false) throws -> HostEvent {
             while true {
-                let answer = try ask("event")
+                let answer = try ask(readByChild ? "child-event" : "event")
                 guard answer.hasPrefix("event "), let payload = Data(base64Encoded: String(answer.dropFirst("event ".count))) else {
                     throw Failure(what: "no reply to \(seq): \(answer)")
                 }
