@@ -3496,3 +3496,4 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 08:41 Merged shell-cards-ending: Shell cards ending normally aren't counted as app errors (no audit: review none) (build ec89ed431487)
 - 2026-11-17 08:41 Automatically (auto_advance): Merged shell-cards-ending (Shell cards ending normally aren't counted as app errors) into main at 95d044ca, review none: on its worker's done report on 3595bf29 and the full test run.
 - 2026-11-17 08:41 Automatically (auto_advance): Cleaned up shell-cards-ending; ended pid 78147 (Worker: Shell cards ending normally aren't counted as app errors) (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-17 08:51 Audit of find-and-fix-the: complete, clean, round 1: 1 Important open, 3 Nit open
