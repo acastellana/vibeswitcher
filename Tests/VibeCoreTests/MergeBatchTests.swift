@@ -47,6 +47,8 @@ struct MergeBatchTests: LeadTeamFixture {
         try commit(["scripts/test.sh": """
             #!/bin/bash
             echo "run $* | $(ls *.txt | tr '\\n' ' ')" >> \(RecentProjects.shellQuote(runs))
+            # As vs-heavy says the width it gave the run (`MergeSample.cores`).
+            echo "vs-heavy: VS_HEAVY_CORES 9 of 12 cores: what was free as it started (load 2.6, 0 of the other 2 slots held), at least the slot's share, 4." >&2
             if \(fails); then
               printf '%s\\n' \(Self.failure.split(separator: "\n").map { RecentProjects.shellQuote(String($0)) }.joined(separator: " "))
               exit 1
@@ -188,10 +190,15 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(tasks.map { $0.merged?.onto } == [before, tasks[0].merged?.commit, tasks[1].merged?.commit])
         #expect(tasks[2].merged?.commit == Git.run(["rev-parse", "main"], in: root).output)
         #expect(tasks.allSatisfy { $0.merged?.batch == ["add-x", "add-y", "add-z"] && $0.receipt?.commits == 1 })
+        // The batch lands the tasks (done on the board), then appends their stats lines one by one, in the same pass:
+        // wait for all three, not just the board.
+        #expect(await advancing.until { ((try? mergeLines(stats)) ?? []).count >= 3 }, "\(String(describing: try? mergeLines(stats)))")
         let lines = try mergeLines(stats)
         #expect(lines.map(\.task) == ["add-x", "add-y", "add-z"])
         #expect(Set(lines.compactMap(\.batch)).count == 1 && lines.allSatisfy { $0.batchRuns == 1 && $0.batchTasks == 3 && $0.result == "passed" }, "\(lines)")
         #expect(lines.allSatisfy { $0.firstRun == "passed" && $0.taskFirstRun == "passed" }, "\(lines)")
+        // The width the batch's run got, on each task's line.
+        #expect(lines.allSatisfy { $0.cores == 9 }, "\(lines)")
         let progress = try String(contentsOfFile: lead.store.recordPath("progress.md"), encoding: .utf8)
         #expect(["add-x", "add-y", "add-z"].allSatisfy { progress.contains("Merged \($0): \($0) (in a batch: add-x, add-y, add-z landed on one test run)") }, "\(progress)")
         #expect(await advancing.until { reports(runtime).contains { $0.contains("as one batch, on 1 test run for 3 tasks") } }, "\(reports(runtime))")
@@ -276,10 +283,11 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(first[0].contains("break.txt") && !first[1].contains("break.txt") && first[2].contains("break.txt") && !first[3].contains("break.txt"), "\(first)")
         #expect(first[3].contains("w.txt x.txt z.txt"), "\(first)")
         // One rerun record, the whole stack's, paired with one base run (green: main has no break.txt, so the
-        // failure is the stack's); the bisect's failing prefix reran without a record or a base run of its own.
+        // failure is the stack's); the bisect's failing prefix reran without a record, and ran on the base too (a test
+        // red there mustn't send back the task a split puts it on).
         let reruns = FlakeLedgerStore(root: root).load().reruns
         #expect(reruns.count == 1 && reruns.first?.task == "add-z" && reruns.first?.passed == false && reruns.first?.base == .green, "\(reruns)")
-        #expect(ran().filter { $0.contains("--filter") && !$0.contains("break.txt") }.count == 1, "one base run: \(ran())")
+        #expect(ran().filter { $0.contains("--filter") && !$0.contains("--skip") && !$0.contains("break.txt") }.count == 2, "two base runs: \(ran())")
         #expect(landed(root) == ["add-w's work", "add-x's work", "add-z's work"])
         let breaker = try #require(board(root).task("add-break"))
         // Failed, then back at work once its worker has the output.
@@ -345,16 +353,81 @@ struct MergeBatchTests: LeadTeamFixture {
         }
         let merged = lead.call("merge", ["tasks": ["add-x", "add-y", "add-z"]])
         #expect(!merged.isError, "\(merged.text)")
-        // The rerun, then the failing tests once on the stack's base (main), record only: green there.
-        #expect(ran() == ["run  | a.txt c.txt x.txt y.txt z.txt ", #"run --filter /breaks\(\)(/|$) | a.txt c.txt x.txt y.txt z.txt "#,
-                          #"run --filter /breaks\(\)(/|$) | a.txt c.txt "#], "\(ran())")
+        // The rerun alone: it passed, so nothing runs on the stack's base.
+        #expect(ran() == ["run  | a.txt c.txt x.txt y.txt z.txt ", #"run --filter /breaks\(\)(/|$) | a.txt c.txt x.txt y.txt z.txt "#], "\(ran())")
         let rerun = FlakeLedgerStore(root: root).load().reruns
-        #expect(rerun.count == 1 && rerun.first?.task == "add-z" && rerun.first?.passed == true && rerun.first?.base == .green, "\(rerun)")
+        #expect(rerun.count == 1 && rerun.first?.task == "add-z" && rerun.first?.passed == true && rerun.first?.base == nil, "\(rerun)")
         #expect(merged.text.contains("recorded once in the flake ledger (under add-z)"), "\(merged.text)")
         #expect(landed(root) == ["add-x's work", "add-y's work", "add-z's work"])
         let flakes = FlakeLedgerStore(root: root).load().flakes
         #expect(flakes.count == 1 && flakes.first?.test == "breaks()" && flakes.first?.task == "add-z", "\(flakes)")
         #expect(board(root).task("add-x")?.receipt?.mergeReruns == 1)
+    }
+
+    /// A batch whose rerun fails on a test red on its base (main) too lands whole, isn't split, and plans one task to
+    /// fix the test, recorded once in the ledger under the stack's top.
+    @Test func aTestRedOnTheBaseTooLandsTheBatchWithoutSplitting() throws {
+        let root = try repo()
+        // breaks() fails wherever it runs; the rest of the checks (it filtered and skipped) pass.
+        try fakeSuite(root, fails: "[[ \"$*\" != *--skip* ]]")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        #expect(!lead.call("configure", ["test_command": "bash scripts/test.sh", "merge_policy": "auto", "auto_advance": false, "records_dir": ""]).isError)
+        for (slug, file) in [("add-x", "x.txt"), ("add-y", "y.txt")] {
+            try audited(lead, runtime, root: root, slug, [file: "\(slug)\n"])
+        }
+        let merged = lead.call("merge", ["tasks": ["add-x", "add-y"]])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(ran() == ["run  | a.txt c.txt x.txt y.txt ", #"run --filter /breaks\(\)(/|$) | a.txt c.txt x.txt y.txt "#,
+                          #"run --filter /breaks\(\)(/|$) --skip /breaks\(\)(/|$) | a.txt c.txt x.txt y.txt "#,
+                          #"run --filter /breaks\(\)(/|$) | a.txt c.txt "#], "\(ran())")
+        #expect(landed(root) == ["add-x's work", "add-y's work"])
+        let ledger = FlakeLedgerStore(root: root).load()
+        #expect(ledger.reruns.count == 1 && ledger.reruns.first?.task == "add-y" && ledger.reruns.first?.base == .red
+                && ledger.reruns.first?.redOnBase == ["breaks()"], "\(ledger.reruns)")
+        #expect(ledger.flakes.isEmpty, "\(ledger.flakes)")
+        let fixes = board(root).tasks.filter { $0.title == "Fix the test breaks(), red on main" }
+        #expect(fixes.count == 1 && fixes.first?.status == .planned, "\(board(root).tasks.map(\.title))")
+        #expect(merged.text.contains("Its rerun failed on breaks(), which failed on main"), "\(merged.text)")
+        #expect(board(root).task("add-x")?.receipt?.mergeReruns == 1)
+        // Landed without it, and main is red all the same: the board keeps it, and the lead is told with the base
+        // run's first failing lines.
+        let red = try #require(board(root).mainRed)
+        #expect(red.tests == ["breaks()"] && !red.all && red.fixes == fixes.map(\.slug), "\(red)")
+        let told = (board(root).reports ?? []).filter { $0.text.hasPrefix("main is red: breaks()") }
+        #expect(told.count == 1 && told.first?.text.contains("    ✘ Test breaks()") == true, "\((board(root).reports ?? []).map(\.text))")
+    }
+
+    /// A split doesn't send back the task a test red on main puts it on: each of the bisect's runs gets the base run
+    /// too. y breaks other(); breaks() is red on main. The whole stack fails (other() is green on main), the split
+    /// tries x alone, which fails only on breaks(), red on main too: x lands, y goes back.
+    @Test func aSplitDoesntSendBackATaskForATestRedOnTheBase() throws {
+        let root = try repo()
+        let lines = { (test: String) in
+            "echo '✘ Test \(test) recorded an issue at T.swift:3:5: no'; echo '✘ Test \(test) failed after 0.01 seconds with 1 issue.'"
+        }
+        try commit(["scripts/test.sh": """
+            #!/bin/bash
+            echo "run $* | $(ls *.txt | tr '\\n' ' ')" >> \(RecentProjects.shellQuote(runs))
+            [[ "$*" == *--skip* ]] && { echo "✔ Test run with 0 tests passed after 0.001 seconds."; exit 0; }
+            \(lines("breaks()"))
+            if [[ -e y.txt ]]; then \(lines("other()")); fi
+            echo "✘ Test run with 2 tests failed after 0.020 seconds with 1 issue."
+            exit 1
+            """], in: root, "the suite")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        #expect(!lead.call("configure", ["test_command": "bash scripts/test.sh", "merge_policy": "auto", "auto_advance": false, "records_dir": ""]).isError)
+        try audited(lead, runtime, root: root, "add-x", ["x.txt": "x\n"])
+        try audited(lead, runtime, root: root, "add-y", ["y.txt": "y\n"])
+
+        let merged = lead.call("merge", ["tasks": ["add-x", "add-y"]])
+        #expect(landed(root) == ["add-x's work"], "\(merged.text)\n\(ran())")
+        #expect(board(root).task("add-x")?.status == .done && board(root).task("add-y")?.status == .failed, "\(merged.text)")
+        #expect(board(root).tasks.filter { $0.title == "Fix the test breaks(), red on main" }.count == 1, "\(board(root).tasks.map(\.title))")
+        // The whole stack's rerun is recorded once, not excused (other() is green on main); the split's aren't recorded.
+        let reruns = FlakeLedgerStore(root: root).load().reruns
+        #expect(reruns.count == 1 && reruns.first?.redOnBase == nil && reruns.first?.base == .red, "\(reruns)")
     }
 
     // MARK: Conflicts
@@ -439,6 +512,83 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(ran().count == 3, "\(ran())")
         #expect(board(root).task("add-x")?.merged?.batch == nil && board(root).task("add-y")?.merged?.batch == nil)
         #expect(landed(root) == ["add-x's work", "add-y's work"])
+    }
+
+    // MARK: Merge-ready
+
+    /// The suite of `fakeSuite`, each run logged with its start and end (seconds since 1970, to the microsecond):
+    /// "start <t> <args> | <files>", then "end <t> <args> | <files>".
+    var stampedSuite: String {
+        """
+        #!/bin/bash
+        stamp() { perl -MTime::HiRes=time -e 'printf "%.6f", time'; }
+        files=$(ls *.txt | tr '\\n' ' ')
+        echo "start $(stamp) $* | $files" >> \(RecentProjects.shellQuote(runs))
+        if [[ -e break.txt ]]; then
+          printf '%s\\n' \(Self.failure.split(separator: "\n").map { RecentProjects.shellQuote(String($0)) }.joined(separator: " "))
+          echo "end $(stamp) $* | $files" >> \(RecentProjects.shellQuote(runs))
+          exit 1
+        fi
+        echo "✔ Test breaks() passed after 0.010 seconds."; echo "✔ Test run with 2 tests passed after 0.020 seconds."
+        echo "end $(stamp) $* | $files" >> \(RecentProjects.shellQuote(runs))
+        """
+    }
+
+    /// `stampedSuite`'s log, in order: each line's kind (start or end), time and files.
+    func stamped() -> [(kind: String, at: Double, files: String)] {
+        ran().compactMap { line in
+            let halves = line.components(separatedBy: " | ")
+            let words = halves[0].split(separator: " ")
+            guard halves.count == 2, words.count >= 2, let at = Double(words[1]) else { return nil }
+            return (String(words[0]), at, halves[1].trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    /// A batch of two tasks landing on one run: each one's receipt has merge-ready at that run's end (the team
+    /// experiment's endpoint, as a single merge records it), the same moment for both; a task not in the batch has none.
+    @Test func aBatchsReceiptsHaveMergeReadyAtTheEndOfItsPassingRun() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false], suite: stampedSuite)
+        try audited(lead, runtime, root: root, "add-x", ["x.txt": "x\n"])
+        try audited(lead, runtime, root: root, "add-y", ["y.txt": "y\n"])
+        try audited(lead, runtime, root: root, "add-z", ["z.txt": "z\n"])
+
+        let merged = lead.call("merge", ["tasks": ["add-x", "add-y"]])
+        let returned = Date().timeIntervalSince1970
+
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(landed(root) == ["add-x's work", "add-y's work"])
+        let log = stamped()
+        #expect(log.map(\.kind) == ["start", "end"], "one run: \(log)")
+        let ended = try #require(log.last?.at)
+        let x = try #require(board(root).task("add-x")?.receipt?.mergeReady, "add-x's receipt has no merge-ready")
+        let y = try #require(board(root).task("add-y")?.receipt?.mergeReady, "add-y's receipt has no merge-ready")
+        #expect(x == y)
+        #expect(x >= ended && x <= returned, "merge-ready \(x), the run ended at \(ended), the merge returned at \(returned)")
+        #expect(board(root).task("add-z")?.receipt?.mergeReady == nil)
+    }
+
+    /// A split: the task that lands on a prefix's passing run gets that run's end, not a later run's; the breaker,
+    /// sent back, gets no merge-ready; the task restacked after it, landing on a run of its own, gets that one's end.
+    @Test func aSplitBatchsMergeReadyIsEachLandingRunsEndAndTheBreakerHasNone() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false], suite: stampedSuite)
+        try audited(lead, runtime, root: root, "add-x", ["x.txt": "x\n"])
+        try audited(lead, runtime, root: root, "add-break", ["break.txt": "b\n"])
+        try audited(lead, runtime, root: root, "add-z", ["z.txt": "z\n"])
+
+        let merged = lead.call("merge", ["tasks": ["add-x", "add-break", "add-z"]])
+
+        #expect(landed(root) == ["add-x's work", "add-z's work"], "\(merged.text)")
+        let log = stamped()
+        // add-x alone (the split's passing prefix), the first run after it, and add-z's own run on main with add-x.
+        let alone = try #require(log.firstIndex { $0.kind == "end" && $0.files == "a.txt c.txt x.txt" }, "\(log)")
+        let next = try #require(log[(alone + 1)...].first { $0.kind == "start" }, "a run after add-x's: \(log)")
+        let zEnded = try #require(log.last { $0.kind == "end" && $0.files == "a.txt c.txt x.txt z.txt" }, "\(log)")
+        let x = try #require(board(root).task("add-x")?.receipt?.mergeReady, "add-x's receipt has no merge-ready")
+        let z = try #require(board(root).task("add-z")?.receipt?.mergeReady, "add-z's receipt has no merge-ready")
+        #expect(x >= log[alone].at && x <= next.at, "add-x merge-ready \(x), its run ended at \(log[alone].at), the next began at \(next.at): \(log)")
+        #expect(z >= zEnded.at, "add-z merge-ready \(z), its run ended at \(zEnded.at)")
+        let breaker = try #require(board(root).task("add-break"))
+        #expect(breaker.status == .failed && breaker.receipt?.mergeReady == nil, "\(breaker.status) \(String(describing: breaker.receipt))")
     }
 
     func reports(_ runtime: FakeRuntime) -> [String] {

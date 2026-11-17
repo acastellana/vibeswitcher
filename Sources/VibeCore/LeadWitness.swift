@@ -274,24 +274,30 @@ public enum LeadWitness {
                         + "It does nothing until then; its work so far is on agent/\(task.slug). Tell the user; after the reset, message(\(task.slug), …) tells it to go on where it was.")
                 } else if info.live, !info.agentQuit, let error = info.apiError, [.running, .failed].contains(task.status) {
                     add("\(worker)|api-error-\(Int(info.apiErrorAt ?? 0))", "The worker on \(task.slug) stopped mid-task: its turn ended on an API error (\(error)). Tell it to go on with message(\(task.slug), …); it picks up where it was.")
+                    // A turn ended on a question to a teammate, within its deadline, is what the wall asks (it
+                    // shows as "waiting on @x"); past it, the usual notice (T9).
                 } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
                                                          input: waitingText("The worker on \(task.slug)", info, now: now, advice: "Answer it with message, or ask the user if it's theirs to decide."),
-                                                         stopped: task.status == .running ? "The worker on \(task.slug) stopped without calling report\(info.diedJob.map { ": the background job it waited on (\($0.text)) has no process any more" } ?? ""). read_session to see where it is, then message it." : nil) {
+                                                         stopped: task.status == .running && task.peerWait(session: worker, now: now.timeIntervalSince1970) == nil ? "The worker on \(task.slug) stopped without calling report\(info.diedJob.map { ": \($0.goneText)" } ?? ""). read_session to see where it is, then message it." : nil) {
                     events.append(event)
                 }
                 if info.live {
-                    for stall in LeadStall.detect(info, task: task, now: now) where !stall.heldBack {
+                    for stall in LeadStall.detect(info, task: task, now: now, waitingOn: task.peerWait(session: worker, now: now.timeIntervalSince1970)) where !stall.heldBack {
                         // A job of its own that's alive is labelled so, not as a stall needing the lead.
                         add(stall.key(session: worker), "The worker on \(task.slug) is \(stall.report(now: now)). \(stall.waitsOnOwnJob ? "If that shell isn't what it's waiting for, read_session(\(task.slug)) or message it." : stall.advice(slug: task.slug))")
                     }
                 }
             }
+            events += memberNotices(task, seen: seen, now: now)
             // With several finders, each that hasn't submitted yet.
             for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
                 guard !noTools.contains(verifier), !advanced.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
                 if info.live, !info.agentQuit, let limit = info.usageLimit {
+                    // Fable's alone: the next audit goes on another model (`LeadToolset.auditModel`), no wait for the reset.
+                    let fable = LeadUsageFallback.fableOnly(limit, model: LeadUsageFallback.launchedModel(task, verifier))
                     add(usageLimitKey(verifier, limit), "The verifier on \(task.slug) stopped mid-audit at the account's usage limit: \(limitText(limit)). "
-                        + "It gives no verdict until then. Tell the user; audit(\(task.slug)) again after the reset.")
+                        + (fable ? "It gives no verdict. Fable is held back until then, so audit(\(task.slug)) again now: it starts on another model."
+                            : "It gives no verdict until then. Tell the user; audit(\(task.slug)) again after the reset."))
                 } else if info.live, !info.agentQuit, let error = info.apiError {
                     add("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again.")
                 } else if !info.live || info.agentQuit {
@@ -304,6 +310,51 @@ public enum LeadWitness {
                                               stopped: "The verifier on \(task.slug) stopped without calling submit_audit. read_session(\(task.slug), who: verifier) to see why, then audit again.") {
                     events.append(event)
                 }
+            }
+        }
+        return events
+    }
+
+    /// A team task's members other than its integrator, watched as its worker is (`notices`), each named, while they're
+    /// at work (`LeadTask.deadlinesRun`: running, or blocked on the lead with its members still going): one whose agent
+    /// quit and left its shell open, waiting for input, stopped between turns outside a wait on a teammate's answer
+    /// (`LeadTeamMember.waits`), stopped at the usage limit or on an API error, or stalled (`LeadStall.detect`). Not once
+    /// its part is done (`LeadTeam.partDone`): it waits on the integrator then. A member whose session is gone is told by
+    /// `endedMembers`. All of it goes to the lead; nothing here is typed into the member.
+    static func memberNotices(_ task: LeadTask, seen: [String: Seen], now: Date) -> [Notice] {
+        guard task.deadlinesRun else { return [] }
+        // Its stalls are read as a running task's: blocked on the lead is the integrator's state, not its members'.
+        var atWork = task
+        atWork.status = .running
+        var events: [Notice] = []
+        func add(_ key: String, _ text: @autoclosure @escaping @Sendable () -> String) { events.append((key, text)) }
+        for (member, session) in task.memberSessions where session != task.stopped && !LeadTeam.partDone(task, member: member.name) {
+            guard let info = seen[session], info.live else { continue }
+            let (slug, name, branch) = (task.slug, member.name, member.branch)
+            let who = "Member \(name) of \(slug)'s team"
+            let tell = "message(\(slug), …, member: \(name))"
+            // Its shell still open, its session counts as live, so `endedMembers` doesn't see it and start_worker
+            // doesn't start it again: told here. Its own key, not "|ended": `unbuiltMessages` gathers those into one
+            // message from `endings`, which has no line for a member, so two members quitting at once were told by no one.
+            if info.agentQuit {
+                add("\(session)|member-ended", "\(who) ended without saying its part is done: its agent quit and left the session's shell open. "
+                    + "Its commits are on \(branch). Ask the user to close that session, then start_worker(\(slug)) starts the member again where it was; "
+                    + "or stop_worker(\(slug)) ends the whole team and start_worker(\(slug)) starts it again.")
+                continue
+            }
+            let wait = task.peerWait(member: name, now: now.timeIntervalSince1970)
+            if let limit = info.usageLimit {
+                add(usageLimitKey(session, limit), "\(who) stopped at the account's usage limit: \(limitText(limit)). "
+                    + "It does nothing until then; its work so far is on \(branch). Tell the user; after the reset, \(tell) tells it to go on where it was.")
+            } else if let error = info.apiError {
+                add("\(session)|api-error-\(Int(info.apiErrorAt ?? 0))", "\(who) stopped mid-part: its turn ended on an API error (\(error)). Tell it to go on with \(tell); it picks up where it was.")
+            } else if let event = waiting(info, session: session, now: now,
+                                          input: waitingText(who, info, now: now, advice: "Answer it with \(tell), or ask the user if it's theirs to decide."),
+                                          stopped: wait == nil ? "\(who) stopped without saying its part is done\(info.diedJob.map { ": \($0.goneText)" } ?? ""). Ask it where it is with \(tell)." : nil) {
+                events.append(event)
+            }
+            for stall in LeadStall.detect(info, task: atWork, now: now, waitingOn: wait) where !stall.heldBack {
+                add(stall.key(session: session), "\(who) is \(stall.report(now: now)). \(stall.waitsOnOwnJob ? "If that shell isn't what it's waiting for, ask it with \(tell)." : stall.advice(slug: slug, member: name))")
             }
         }
         return events
@@ -496,7 +547,7 @@ public enum LeadWitness {
     }
 
     /// A usage-limit stop is told once: by its session and when the line was written.
-    private static func usageLimitKey(_ session: String, _ limit: UsageLimit) -> String {
+    static func usageLimitKey(_ session: String, _ limit: UsageLimit) -> String {
         "\(session)|usage-limit-\(Int(limit.at ?? limit.resetsAt ?? 0))"
     }
 
@@ -567,10 +618,34 @@ public enum LeadWitness {
         var found: [String: LeadStall] = [:]
         for task in board.tasks {
             guard let worker = task.worker, worker != task.stopped, let info = seen[worker], !info.neverGotTools(now: now),
-                  let stall = LeadStall.detect(info, task: task, now: now).first ?? LeadStall.awaitingPrompt(info, task: task, now: now) else { continue }
+                  let stall = LeadStall.detect(info, task: task, now: now, waitingOn: task.peerWait(session: worker, now: now.timeIntervalSince1970)).first
+                    ?? LeadStall.awaitingPrompt(info, task: task, now: now) else { continue }
             found[task.id] = stall
         }
         return found
+    }
+
+    /// The members of running team tasks, other than the integrator (whose end `notices` tells as the task's worker's),
+    /// whose worker's session is gone (not in `live`) before the member said its part is done (`LeadTeam.partDone`),
+    /// not told yet (`LeadTeamMember.endTold`). auto_advance doesn't start such a member again; start_worker(slug) does.
+    /// Only while its integrator runs: stop_worker ends the integrator first, then its members, and the integrator's
+    /// own end is told as the task's worker's (`notices`).
+    public static func endedMembers(board: LeadBoard, live: Set<String>) -> [(slug: String, member: String, worker: String)] {
+        var ended: [(slug: String, member: String, worker: String)] = []
+        for task in board.tasks where task.status == .running && task.isTeam {
+            guard let integrator = task.worker, integrator != task.stopped, live.contains(integrator) else { continue }
+            for member in (task.team ?? []).dropFirst() {
+                guard let worker = member.worker, !live.contains(worker), member.endTold != worker, !LeadTeam.partDone(task, member: member.name) else { continue }
+                ended.append((task.slug, member.name, worker))
+            }
+        }
+        return ended
+    }
+
+    /// What the lead is told of a member `endedMembers` found.
+    static func endedMemberText(slug: String, member: String) -> String {
+        "Member \(member) of \(slug)'s team ended (its session is gone) without saying its part is done. auto_advance doesn't start it again: "
+            + "start_worker(\(slug)) starts it again on agent/\(slug)\(LeadTeam.joiner)\(member), in its worktree, its commits kept."
     }
 
     /// How often the stranded sessions are told at most (see `strandedText`).

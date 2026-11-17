@@ -1,0 +1,58 @@
+# Run, from a reply's code block and from a shell request card (what `vs-shell run` files): each asks first, then runs
+# its command once. The commands append a line to a file in the fake session's folder (inside the sandbox's home), and
+# `lines` checks each ran exactly once: the journey fails on that line if one didn't run or ran twice.
+desc A reply's code block and a shell request card: each Run asks first, then runs its command exactly once.
+chat
+# The fake Claude really runs a `!` command (in zsh, in its folder), and replies with a two-line bash block: more than
+# one line, so its Run asks first.
+tell {"op": "realShell"}
+tell {"op": "done", "reply": "To try it, run this from the project folder:\n\n```bash\necho \"Run from the code block\" >> ran-block.txt\nwc -l < ran-block.txt\n```"}
+# The block with its Run, and the confirmation its Run shows (sheet-runblock).
+runblock
+shot block-confirm
+# Run confirmed: typed into the session as `! command`, recorded in the chat, and run once.
+runblock yes
+lines projects/example-api/ran-block.txt 1
+shot block-ran
+# A shell request card for the same session: its folder, its command, Decline and Run.
+shell-ask echo "Run from the shell card" >> ran-card.txt; wc -l < ran-card.txt
+shot card
+# Its Run starts a shell session that runs the command (selected, as Run does) and waits for the command to end.
+shell-click run
+lines projects/example-api/ran-card.txt 1
+shot card-ran
+# Still once each, after both: a code block's second run would have landed by now.
+lines projects/example-api/ran-block.txt 1
+lines projects/example-api/ran-card.txt 1
+
+# What changes from run to run on its own, in the 2560x1600 shots of the main window. The fake Claude's chat (block-*,
+# card): the session's age in its sidebar row and in the header's state pill, the clock time under the question, and
+# the inspector's values from the clock (State's age, Since, Started, Running for) or from the run (Session's id,
+# Process's pid and tty, Command's scratch paths), as in smoke.journey.
+mask block-*-main-* 430 250 75 45
+mask block-*-main-* 1115 118 140 44
+mask block-*-main-* 1940 325 95 35
+mask block-*-main-* 2220 256 340 130
+mask block-*-main-* 2245 770 315 55
+mask block-*-main-* 2440 825 120 75
+mask block-*-main-* 2100 1050 460 550
+mask card-main-* 430 250 75 45
+mask card-main-* 1115 118 140 44
+mask card-main-* 1940 325 95 35
+mask card-main-* 2220 256 340 130
+mask card-main-* 2245 770 315 55
+mask card-main-* 2440 825 120 75
+mask card-main-* 2100 1050 460 550
+# block-ran: the clock time under the `!` command it typed.
+mask block-ran-main-* 1940 1090 95 35
+# card: its Folder (the sandbox's scratch path) and when it expires.
+mask card-main-* 750 1088 1210 40
+mask card-main-* 1060 1290 130 36
+# card-ran (the shell session Run started): the two sidebar rows' ages, the header's state pill, and the inspector's
+# State age, Started and Running for.
+mask card-ran-main-* 430 250 75 45
+mask card-ran-main-* 430 405 75 45
+mask card-ran-main-* 850 118 140 44
+mask card-ran-main-* 2220 256 340 60
+mask card-ran-main-* 2245 650 315 50
+mask card-ran-main-* 2440 725 120 50

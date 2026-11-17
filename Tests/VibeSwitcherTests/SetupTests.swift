@@ -26,7 +26,7 @@ struct SetupTests {
             let old: [String: Any] = [
                 "notifyNeedsInput": false, "notifyDone": false, "playSound": false, "notifyReminders": false,
                 "minimizeOnPause": false, "sidebarMode": true, "sidebarAutoHide": false, "sessionOrder": "started",
-                "claudeCommand": "claude --model opus", "codexCommand": "codex --full-auto", "floatingPanel": "never",
+                "claudeCommand": "claude --model opus", "codexCommand": "codex --full-auto",
                 "openWindowAtLaunch": true, "terminalAppearance": try JSONEncoder().encode(appearance),
             ]
             for (key, value) in old { defaults.set(value, forKey: key) }
@@ -42,12 +42,24 @@ struct SetupTests {
             #expect(preferences.sessionOrder == .started)
             #expect(preferences.claudeCommand == "claude --model opus")
             #expect(preferences.codexCommand == "codex --full-auto")
-            #expect(preferences.floatingPanel == .never)
             #expect(preferences.openWindowAtLaunch == true)
             #expect(preferences.appearance == appearance)
             // With no presets file yet, the two old launch commands become the first presets.
             #expect(preferences.presets.global.contains { $0.kind == .claude && $0.command == "claude --model opus" })
             #expect(preferences.command(for: .codex) == "codex --full-auto")
+        }
+    }
+
+    /// A removed feature's saved setting (the panel of session dots, on "always", and its window frame) reads without
+    /// an error, is dropped at launch, and leaves the rest of the preferences as they were.
+    @Test func retiredKeysAreDroppedAtLaunch() throws {
+        try withSuite { defaults, presets in
+            #expect(!Preferences.retiredKeys.isEmpty)
+            for key in Preferences.retiredKeys { defaults.set("always", forKey: key) }
+            defaults.set("started", forKey: "sessionOrder")
+            let preferences = Preferences(defaults: defaults, presetsFile: presets)
+            for key in Preferences.retiredKeys { #expect(defaults.object(forKey: key) == nil, "\(key) kept") }
+            #expect(preferences.sessionOrder == .started && !preferences.sidebarMode)
         }
     }
 
@@ -58,14 +70,11 @@ struct SetupTests {
             preferences.notifyDone = false
             preferences.sidebarMode = true
             preferences.sessionOrder = .started
-            preferences.floatingPanel = .always
             preferences.openWindowAtLaunch = true
             #expect(defaults.object(forKey: "notifyDone") as? Bool == false)
             #expect(defaults.object(forKey: "sidebarMode") as? Bool == true)
             #expect(defaults.string(forKey: "sessionOrder") == "started")
-            #expect(defaults.string(forKey: "floatingPanel") == "always")
             #expect(defaults.object(forKey: "openWindowAtLaunch") as? Bool == true)
-            #expect(Preferences(defaults: defaults, presetsFile: presets).floatingPanel == .always)
         }
     }
 
@@ -114,7 +123,6 @@ struct SetupTests {
             #expect(preferences.minimizeOnPause && preferences.sidebarAutoHide)
             #expect(!preferences.sidebarMode && !preferences.openWindowAtLaunch)
             #expect(preferences.sessionOrder == .screen)
-            #expect(preferences.floatingPanel == .automatic)
         }
     }
 

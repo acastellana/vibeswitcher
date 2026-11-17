@@ -197,8 +197,8 @@ struct SettingsCatalogTests {
         // A word in the title only.
         #expect(ids("Scrollback").contains("scrollback"))
         // A word only in the description.
-        #expect(!(SettingsCatalog.option("floating-panel")!.title.lowercased().contains("crowded")))
-        #expect(ids("crowded") == ["floating-panel"])
+        #expect(!(SettingsCatalog.option("sidebar-auto-hide")!.title.lowercased().contains("pointer")))
+        #expect(ids("pointer") == ["sidebar-auto-hide"])
         // Not a keyword (the glossary's lint refuses that word alone), and still found through its description.
         #expect(ids("waiting").contains("notify-needs-input"))
         // Keywords, as the contract names them.
@@ -429,6 +429,9 @@ struct SettingsNoteTests {
         #expect(try help(.usageLimits).contains("\(Int(AccountUsage.threshold)) %"))
         #expect(SettingsNote.usageLimits.text.contains("still stops"))
         #expect(SettingsNote.power.text.contains("nothing new starts"))
+        // What keeps work running overnight, and what doesn't whatever Keep Awake says.
+        #expect(try help(.power).contains("on AC power with the lid open, or with an external display connected"))
+        #expect(try help(.power).contains("A closed lid sleeps whatever this setting says"))
         #expect(try description("battery-hold").contains("start no new work and merge nothing"))
         // What only you can do.
         #expect(SettingsNote.shells.text.contains("nothing runs until you press Run") && SettingsNote.shells.text.contains("any command as you"))
@@ -459,7 +462,6 @@ struct SettingsStoredKeysTests {
         ("sidebarAutoHide", { $0.sidebarAutoHide = false }),
         ("sidebarFlashOnSwitch", { $0.sidebarFlashOnSwitch = false }),
         ("sessionOrder", { $0.sessionOrder = SessionOrder.allCases.last! }),
-        ("floatingPanel", { $0.floatingPanel = .always }),
         ("terminalAppearance", { $0.appearance.fontSize = 18 }),
         ("openWindowAtLaunch", { $0.openWindowAtLaunch = true }),
         ("aiSummaries", { $0.aiSummaries = false }),
@@ -498,7 +500,7 @@ struct SettingsStoredKeysTests {
         #expect(preferences.notifyNeedsInput && preferences.notifyDone && preferences.playSound && preferences.notifyReminders)
         #expect(preferences.minimizeOnPause && preferences.sidebarAutoHide && preferences.sidebarFlashOnSwitch && preferences.aiSummaries && preferences.leadMail)
         #expect(!preferences.sidebarMode && !preferences.openWindowAtLaunch && !preferences.boostOnBattery && !preferences.letAgentsOpenShells)
-        #expect(preferences.sessionOrder == .screen && preferences.floatingPanel == .automatic)
+        #expect(preferences.sessionOrder == .screen)
         #expect(preferences.keepAwake == .onPower && preferences.leadRotation == .context && preferences.boostMode == .off)
         #expect(preferences.batteryHoldBelow == PowerWatch.defaultLimit && preferences.projectsFolder == ProjectCreation.defaultLocation)
         #expect(preferences.walletPeerID.isEmpty && preferences.walletPassagePath.isEmpty)
@@ -582,7 +584,6 @@ private extension Preferences {
         case "sidebarAutoHide": return sidebarAutoHide
         case "sidebarFlashOnSwitch": return sidebarFlashOnSwitch
         case "sessionOrder": return sessionOrder
-        case "floatingPanel": return floatingPanel
         case "terminalAppearance": return appearance.fontSize
         case "openWindowAtLaunch": return openWindowAtLaunch
         case "aiSummaries": return aiSummaries

@@ -108,7 +108,7 @@ struct VerifierPromptTests {
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "x", base: "claude", prompt: "p",
                                                 start: "Go.", server: "/opt/vibe switcher/vibeswitcher-mcp", name: "\(role)-x",
-                                                temporary: temp.url("session-tmp"))
+                                                temporary: temp.url("session-tmp"), home: temp.url("claude-home").path)
             let settings = try LaunchArguments.json("--settings", in: launch.command)
             let hooks = settings["hooks"] as? [String: Any]
             let groups = try #require(hooks?["PermissionRequest"] as? [[String: Any]])

@@ -51,12 +51,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             return WalletDesk.names(hosted: hostClient.sessions.filter(\.isLive), rows: windowModel.allRows)
         }
         desk.verifyStamps = { try LeadVault.standard.verifyWallet($0) }
+        desk.hostSessions = { [weak self] in self?.hostClient.sessions ?? [] }
         desk.deliver = { [weak self] session, text, then in
             guard let id = UUID(uuidString: session) else { return then(.ended) }
             guard let self else { return then(.notYet) }
             leadController.tell(text, from: .system("from New Shell"), session: id, then: then)
         }
         desk.atOnce = { [weak self] in self?.preferences.letAgentsOpenShells ?? false }
+        // Only a card you ran vouches for the commit it makes on the base; one started at once doesn't.
+        desk.userRan = { [weak self] request, at in self?.leadController.baseMoves.ranCard(request, at: at) }
         desk.launch = { [weak self] request, then in
             guard let self else { return then(.failure(ShellAsk.Refusal("VibeSwitcher is quitting"))) }
             // In the window's session host only, never a Terminal tab: the card said this window.
@@ -74,6 +77,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     }()
     /// Ends the shells Run cards opened once their command went well and nobody uses them, and the sidebar's Close
     /// Finished Shells… (`ShellTidier`).
+    /// The reminders to run /doctor prompt-audit, one per project a lead runs in, as a card in its lead's chat.
+    private lazy var promptAudit: PromptAuditDesk = {
+        let desk = PromptAuditDesk()
+        desk.roots = { [weak self] in self.map { Array($0.leadController.boards.keys) } ?? [] }
+        return desk
+    }()
     private lazy var shellTidier: ShellTidier = {
         let tidier = ShellTidier()
         tidier.sessions = { [weak self] in self?.hostClient.sessions ?? [] }
@@ -92,6 +101,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         return model
     }()
     private var welcomeWindow: OnboardingWindowController?
+    /// After a Mac restart, the card offering to reopen the sessions that were open (see `RestartReopen`).
+    private lazy var restartOffer: RestartOffer = {
+        let offer = RestartOffer()
+        offer.resumeSession = { [weak self] request in self?.resume(request) }
+        offer.reopenLead = { [weak self] root, conversation in self?.leadController.reopenLead(root: root, conversation: conversation) }
+        offer.show = { [weak self] in
+            guard let self else { return }
+            let card = restartCard ?? RestartCardWindowController(offer: restartOffer)
+            restartCard = card
+            card.show()
+        }
+        offer.close = { [weak self] in self?.restartCard?.close() }
+        return offer
+    }()
+    private var restartCard: RestartCardWindowController?
     let windowModel = WindowModel()
     private var mainWindow: MainWindowController?
     private lazy var windowActions = WindowActions(
@@ -184,10 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private var makePopoverContent: (() -> AnyView)!
     /// What the menu bar icon depends on; the image is only redrawn when this changes.
     private var iconSignature = ""
-    private var floatingPanel: FloatingPanelController!
     private var sidebar: SidebarController!
-    private var visibilityTimer: Heartbeat.Subscription?
-    private var hiddenReadings = 0
     private var notificationTimer: Heartbeat.Subscription?
     /// The Mac's load, memory, team sessions and heavy slots, once a minute, to ~/.vibeswitcher/stats (`LoadRecorder`).
     private let loadRecorder = LoadRecorder()
@@ -197,6 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// Gives malloc's free pages back as the footprint grows (see `FootprintRelief`).
     private let footprintRelief = FootprintRelief()
     private var terminationSignal: DispatchSourceSignal?
+    private var terminatedBySignal = false
     /// VibeSwitcher's own freezes, crashes and error lines, told to the lead of the project with watch_app_logs on.
     private var appHealth: AppHealthWatcher?
     private static let statusItemName = "VibeSwitcher"
@@ -220,7 +242,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // through a normal quit so hidden windows come back and today's stats are saved.
         signal(SIGTERM, SIG_IGN)
         terminationSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        terminationSignal?.setEventHandler { NSApp.terminate(nil) }
+        terminationSignal?.setEventHandler { [weak self] in
+            // A shutdown sends it too: the restart card's record keeps the sessions it ends (`RestartOffer.atQuit`).
+            self?.terminatedBySignal = true
+            NSApp.terminate(nil)
+        }
         terminationSignal?.resume()
         // Before the state folder is created below: its absence is part of what makes this a first run.
         let firstRun = FirstRun.shouldWelcome(
@@ -233,6 +259,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // Script blocks' files a crash left behind (see `RunnableCommand.Script`).
         RunnableCommand.Script.removeAll()
         HookBinary.atLaunch(connect: { hostClient.connectIfRunning() })
+        // The live window sessions' record, kept as they start and end; and, once the host is known (none running, or
+        // its welcome), the restart card if the sessions it names went with a restart.
+        restartOffer.watchRecord(hostClient, sessions: store.$sessions.eraseToAnyPublisher(),
+                                 replacedLeads: leadController.$replacedLeads.map { Set($0.keys) }.eraseToAnyPublisher())
+        restartOffer.watchLaunch(hostClient)
         // Leads' witness and questions work with the window closed too.
         _ = leadController
         // Requests filed or sent while the feature was called vault requests, carried over once.
@@ -240,6 +271,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         walletDesk.start()
         shellDesk.start()
         shellTidier.start()
+        // Settings › Project lead: the reminders on or off, and their interval.
+        preferences.$promptAuditReminders.combineLatest(preferences.$promptAuditDays)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] on, days in
+                self?.promptAudit.enabled = on
+                self?.promptAudit.intervalDays = days
+            }
+            .store(in: &cancellables)
+        promptAudit.start()
+        // A lead started in a project not looked at yet: looked at now (first seen, so no card for an interval).
+        leadController.$boards
+            .map { Set($0.keys) }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.promptAudit.refresh() }
+            .store(in: &cancellables)
         // A peer or Passage path chosen in Settings › Wallet: the cards redraw now (Send comes back on waiting ones),
         // not at the next look. After the change lands (@Published sends before it does). The path only once typing
         // paused (`WalletPeerList.typed`): a half-typed one is never run.
@@ -250,7 +298,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .store(in: &cancellables)
         // The host's sessions known, or changed: cards of the sessions it runs show, by the window's names.
         hostClient.$sessions
-            .map { $0.map { "\($0.id) \($0.label) \($0.title)" } }
+            // A Run-card shell's command ending, or its session: the asker hears how it ended.
+            .map { $0.map { "\($0.id) \($0.label) \($0.title) \($0.commandEnd != nil) \($0.isLive)" } }
             .removeDuplicates()
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -401,7 +450,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 guard let self else { return }
                 self.sidebar.setEnabled(enabled)
                 if !enabled { DispatchQueue.global(qos: .userInitiated).async { SidebarWorkspace.restoreHiddenWindows() } }
-                DispatchQueue.main.async { self.updateFloatingPanel() }
             }
             .store(in: &cancellables)
         hostingView = FirstMouseHostingView(rootView: AnyView(EmptyView()))
@@ -412,17 +460,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         popover.delegate = self
         popover.animates = false
 
-        floatingPanel = FloatingPanelController(store: store, onOpen: { [weak self] in self?.open($0, source: "panel") },
-                                                onShowList: { [weak self] anchor in self?.togglePopover(anchor: anchor) })
         preferences.$sessionOrder
             .receiveLatest(on: RunLoop.main)
             .sink { [weak self] order in self?.store.order = order }
             .store(in: &cancellables)
-        preferences.$floatingPanel
-            .receiveLatest(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateFloatingPanel() } }
-            .store(in: &cancellables)
-        visibilityTimer = Heartbeat.shared.every(2) { [weak self] in self?.updateFloatingPanel() }
         notificationTimer = Heartbeat.shared.every(15) { [weak self] in self?.notifier?.refreshAuthorization() }
         // The census on the main thread (the host's list is the main thread's: a few dozen string looks), the rest on
         // the recorder's queue.
@@ -453,10 +494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                     DispatchQueue.main.async { self.updateDotToolTips() }
                 }
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex, max(0, sessions.count - 1))
-                DispatchQueue.main.async {
-                    if self.floatingPanel.isShown { self.floatingPanel.fit() }
-                    if self.popover.isShown { self.fitPopover() }
-                }
+                DispatchQueue.main.async { if self.popover.isShown { self.fitPopover() } }
             }
             .store(in: &cancellables)
 
@@ -640,52 +678,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         return "\(number). \(session.displayName) · \(LeadTeams.label(of: session))\(paused)\(task)\nClick to switch · right-click for the list"
     }
 
-    /// Whether macOS is actually showing our menu bar icon. When the right side of the menu bar
-    /// overflows, the leftmost items are pushed under the notch (or off screen) and silently vanish.
-    private var statusItemVisible: Bool {
-        guard let window = statusItem.button?.window, window.isVisible,
-              let screen = window.screen ?? NSScreen.main else { return false }
-        let frame = window.frame
-        guard frame.width > 0, frame.minX >= screen.frame.minX, frame.maxX <= screen.frame.maxX else { return false }
-        // On a notched screen macOS only shows status items right of the notch; overflow is parked
-        // under the notch or behind the app menus on the left, invisible either way.
-        if let right = screen.auxiliaryTopRightArea, frame.minX < right.minX { return false }
-        return true
-    }
-
-    private func updateFloatingPanel() {
-        let visible = statusItemVisible
-        // The icon's frame is briefly bogus while macOS places it, so only trust two hidden readings in a row.
-        hiddenReadings = visible ? 0 : hiddenReadings + 1
-        var show: Bool
-        switch preferences.floatingPanel {
-        case .always: show = true
-        case .never: show = false
-        case .automatic: show = hiddenReadings >= 2
-        }
-        if preferences.sidebarMode { show = false } // the sidebar already shows every session
-        let changed = show != floatingPanel.isShown
-        floatingPanel.setShown(show)
-        AppStatus.extras["menuBarIconVisible"] = visible
-        AppStatus.extras["floatingPanelShown"] = show
-        if changed { AppStatus.write(sessions: store.sessions, terminalAccess: store.terminalAccess) }
-    }
-
+    /// Shows the list under the menu bar icon.
     private func togglePopover() {
-        togglePopover(anchor: nil)
-    }
-
-    /// Shows the list under the menu bar icon, or under the floating panel when the icon is hidden.
-    private func togglePopover(anchor: NSView?) {
         if popover.isShown {
             popover.performClose(nil)
             return
         }
-        let target: NSView?
-        if let anchor { target = anchor }
-        else if statusItemVisible || !floatingPanel.isShown { target = statusItem.button }
-        else { target = floatingPanel.anchorView }
-        guard let button = target else { return }
+        guard let button = statusItem.button else { return }
         store.refresh(forceTerminal: true)
         notifier?.refreshAuthorization()
         loadRecentProjects()
@@ -802,7 +801,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         if mainWindow == nil {
             let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions,
                                                   leads: leadController, briefing: briefing, dictation: dictation, wallet: walletDesk,
-                                                  boost: boostWatch, shells: shellDesk)
+                                                  boost: boostWatch, shells: shellDesk, promptAudit: promptAudit)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.onBoostMark = { [weak self] in self?.showSettings(tab: .performance, reveal: .boost) }
             controller.onStatistics = { [weak self] in self?.showStatistics() }
@@ -972,18 +971,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private func resumeSession(_ row: WindowRow) {
         guard let id = row.hostID, let info = hostClient.sessions.first(where: { $0.id == id }),
               let agentSession = windowModel.agentSessions[id] else { return }
-        let command = LaunchPlan.resumeCommand(base: info.command, agent: agentSession.agent, sessionID: agentSession.sessionID)
-        hostClient.spawn(SpawnRequest(cwd: info.cwd, command: command, env: [:], cols: info.cols, rows: info.rows,
-                                      keepShell: false, label: info.label, agent: agentSession.agent.rawValue)) { [weak self] result in
-            guard case .success(let session) = result else { return }
+        let request = LaunchPlan.resumeRequest(cwd: info.cwd, base: info.command, agent: agentSession.agent, sessionID: agentSession.sessionID,
+                                               cols: info.cols, rows: info.rows, label: info.label)
+        resume(request) { [weak self] _ in
             self?.mainWindow?.pane.forget(id)
             self?.hostClient.remove(id)
-            self?.showMainWindow(select: session.id)
+        }
+    }
+
+    /// Starts a Resume's window session (`LaunchPlan.resumeRequest`) and shows it: the sidebar's Resume and the restart
+    /// card's (`RestartOffer`). `started` hears the new session.
+    private func resume(_ request: SpawnRequest, started: @escaping (HostSession) -> Void = { _ in }) {
+        hostClient.spawn(request) { [weak self] result in
+            switch result {
+            case .success(let session):
+                started(session)
+                self?.showMainWindow(select: session.id)
+            case .failure(let error):
+                Breadcrumbs.shared.note("resume: \(request.label) in \((request.cwd as NSString).lastPathComponent) didn't start: \(error.message)")
+            }
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         Breadcrumbs.shared.note("app: quitting")
+        restartOffer.atQuit(yours: !terminatedBySignal)
         // Never leave the Mac silent behind a dictation that was recording (a device that doesn't answer in time: put
         // back at the next launch, from the marker).
         if !outputSilencer.unsilence(waitingAtMost: 1) {
@@ -998,6 +1010,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         phoneAccess.shutdown()
         walletDesk.close()
         shellDesk.close()
+        promptAudit.close()
         shellTidier.close()
         // Script blocks written for Run and not run yet.
         RunnableCommand.Script.removeAll()

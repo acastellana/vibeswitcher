@@ -356,3 +356,110 @@ Codex workers can't run scripts/sandbox-app.sh: the manifest compile writes ~/.c
 
 the-sandbox-app-builds showed that Codex's sandbox denies com.apple.hiservices-xpcservice, so the sandbox app can't start there even once it builds. The task was abandoned rather than merging Codex-only build paths that don't yield screenshots.
 
+## 2026-11-12 09:21:45 The periodic prompt audit is a reminder card for the user, not something leads run on their own (task remind-the-user-to). Each project's lead chat gets a card when 14 days have passed since that project's last `/doctor prompt-audit` or when its sessions' model has changed. The card offers Run now (on the user's click only), Remind me in a week, and Not for this project, with an on/off toggle and the interval in Settings › Project lead. The audit's 2026-11-12 findings for AGENTS.md (the stale lint list, and --load 24 being refused on 8 cores) go to task agents-md-run-every. The leftover worktree .claude/worktrees/fix-worker-tools, which holds an older AGENTS.md, stays until the user decides, because it may hold unmerged work.
+
+The user asked for the reminder (via wallet-manager's lead) and left the design to the lead ("do what you consider"). /doctor is a user command, and its proposed diff needs the user's eye, so the user starts each run. A model change is the second trigger because what counts as outdated depends on the model.
+## 2026-11-12 09:00:36 Build an automatic Fable→Opus fallback for workers and audits when Claude has refused a request at the Fable limit, with a return to Fable at the recorded reset (task when-fable-s-limit or as named). Once it merges, the lead clears its hand-set verifier_model=opus.
+
+The user's answer to EE3A5F57, 2026-11-12. Switching by hand cost a halted worker (boost-release-7-7) and repeated lead attention during Fable limits.
+
+## 2026-11-12 09:06:53 Model routing, 2026-11-12: Opus is the default everywhere. Fable goes to the lead as advisor, to hard tasks as advisor, to re-rolled tasks and to sensitive or security audits (task each-role-gets-the, after when-fable-s-limit). Whether routine audits move from Fable to Opus waits on audit-eval-on-opus. Keep verifier_model=opus until that eval has finished, so its run stays on Opus, and only then reconsider clearing it.
+
+The user: Opus works well for nearly everything, Fable should go to the hardest parts (strategy, decisions, organisation), and "we need to just do optimally" (credits aside, since part of Fable is included in the plan). Claude Code's advisor puts Fable at decision points without running it throughout.
+
+## 2026-11-12 09:23:09 Contracts for tasks that run on Fable state the outcome and its acceptance checks, give a larger scope than an Opus task would get, and leave the steps and routine test reminders out. Hard tasks get effort xhigh once per-task effort exists (each-role-gets-the). The user's global ~/.claude effort and advisor settings are left alone.
+
+Anthropic's Claude Code guidance for Fable: describe the outcome rather than the steps, skip routine test or check reminders, and give it larger tasks you'd normally split up. xhigh is the recommended effort for agentic coding on these models. A global advisorModel would change every Claude session on the Mac.
+
+## 2026-11-12 09:23:57 Tasks get bigger: one outcome with verification points (acceptance checks that pass or fail, with their output quoted) rather than several small tasks, wherever the parts share files or one would just wait on another. Split only for independent work that runs in parallel, or where review levels differ.
+
+The Claude Code team's talk (2026-11-12): today's models run for hours and verify their own work, so give them tasks bigger than you normally would, with verification points along the way. Each VibeSwitcher task also pays a fixed overhead (worktree init, a ~1.5 GB build, a 9–14 min merge suite, an audit), so fewer, larger tasks speed up delivery.
+
+## 2026-11-12 09:35:22 Briefs for tasks that use a third-party CLI scaffold (e.g. `npx hyperframes init`) say whether it writes outside the worktree. Where it does, as HyperFrames' init installs skills into ~/.claude/skills, ~/.agents, ~/.cursor, ~/.gemini and opencode, the brief forbids it and names the alternative, or the lead gets the user's OK first.
+
+2026-11-12: the an-animated-explainer worker ran `npx hyperframes init` as the skill said, and it installed two new skills into ~/.claude/skills plus symlinks into other agents' folders. The config seal caught it, but every new worker, audit and merge was held until the user ruled. My brief allowed "project-local npx" without checking what init writes.
+
+## 2026-11-12 10:33:35 Supersedes the earlier 2026-11-12 "tasks get bigger" decision: keep tasks under about 30 min of work where the change allows, and batch only parts that share files and would otherwise conflict or wait. Also: when gate or lead commits on main wait uninstalled and nothing is in flight, the lead files one install card saying how many commits and what they fix, instead of waiting for the user to ask.
+
+Fable's check of the speed review (2026-11-12) measured the opposite of the talk's advice for this project: tasks with over an hour of work needed a second audit round 59% of the time, against 18% for tasks under 30 min, and extra rounds are the largest in-flight cost (about 95 task-hours in 7 days, an upper bound). Merged work also waits a median of up to 4.5 h for an install, and most merges change the lead's own machinery, which runs from the installed app.
+
+## 2026-11-12 10:41:54 Small tasks merge without an audit: a task whose worker worked under 30 minutes, touching no sensitive or strict path, not flagged by the risk check, not Codex's work, and not marked security or irreversible, merges on its done report, the pre-done check and the merge's full suite, plus the existing 10% audit sample. The lead files such tasks review none, and VibeSwitcher applies the rule at done for tasks filed audit only for size or caution (task small-tasks-merge).
+
+The user's answer to A4977A3E (2026-11-12). Fable's check of the speed review: tasks under 30 minutes of work took 42% of the week's verifier spend ($220 of $526), and 5 of 49 had an Important finding. The pre-done check and the full suite now catch much of what audits caught on small changes.
+
+## 2026-11-12 10:56:35 Routine audits move to Opus, and security and sensitive-path audits stay on Fable. Sequence: verifier_model is fable now, only for audits-settle-their's six remaining eval cases. Once that run ends, the lead sets verifier_model=opus, and each-role-gets-the routes sensitive and security audits to Fable. The review floor already allows any verifier model (the user lowered it on 2026-11-11), so the user doesn't need to change anything.
+
+audit-eval-on-opus, 2026-11-12, on the same 14 cases, prompt and REVIEW.md as the Fable baseline. Opus found 7 of 14 by substance, 6 of them as Important, against Fable's 6 and 4, at $13.75 against $53 and in 93 min against 161. It missed only the symlink escape that needed a probe, which Fable had caught as a Nit. One run each, so the difference is within noise, but there's no sign Opus is worse for routine audits.
+
+## 2026-11-12 11:32:16 Nothing the lead records (dismiss reasons, decisions, contracts, updates, progress) names the user's other projects. Say "another project".
+
+2026-11-12 10:57: a dismiss reason named one, it went into docs/lead/progress.md, and PrivateNamesLint, which scans every tracked file including docs/lead/, then fails every merge's full suite until the line is fixed.
+
+## 2026-11-12 12:16:33 a-calm-mac-merge's timing check (median calm-Mac merge at or under 10 min, against 15) is the lead's to read from merges-*.jsonl after it merges, together with check 4's freezes per hour, in the next retrospective, instead of the worker holding the Mac quiet for 45 minutes.
+
+With 6–8 sessions running, no calm window was available, and holding all work for a measurement costs more than reading the merges' own recorded runs, which now carry their core width.
+
+## 2026-11-12 13:46:12 max_workers lowered from 5 to 4 (2026-11-12). Fewer tasks at once while merges are backed up; the lead raises it again once merges flow and the calm-Mac merge change is measured.
+
+With 7–10 sessions the Mac sat at load 50–100 for hours, all 3 test slots were held 45–55 min each, and full suites took twice as long. Running more at once made each task slower, not the batch faster.
+
+## 2026-11-12 13:47:49 The lead watches the merge pipeline itself on every wake, until merges-never-sit-blocked does it for them. If a task has been ready to merge for 20 minutes or more, find the cause at once (main red, a records check, slots, load, gate) and act: file the fix as the top task, correct a misblamed branch, tell the user what's needed from them in one line. Never just report that merges are waiting.
+
+The user, 2026-11-12: "you need to be more proactive in getting things through". Merges sat blocked for about 2 h 45 min while the lead kept describing the block instead of clearing it.
+
+## 2026-11-12 14:37:03 After the 2026-11-12 block cleared: tasks failed by the block (main's lint line, the flaky DevPreviewTests) get their workers to re-report done, so they rejoin the merge queue. prompts-and-agents-md's failure was real (AGENTS.md's new lint filter form broke ProjectMapTests) and went back to a worker.
+
+The batch split marked branches failed for problems on main. Only a fresh done report puts a review-none task back in the queue without redoing its work.
+
+## 2026-11-12 15:28:58 After a block clears with many tasks ready, the lead merges them itself in batches of up to 8 (merge with tasks), lowest-risk first, with the batch carrying test fixes (flaky-test fixes, test infrastructure) going first. auto_advance stays off for the few minutes that takes, so it doesn't fall back to one merge at a time.
+
+The user, 2026-11-12: "you need to be extremely proactive and try to make sure that everything gets to the finish line as quickly as possible." After the block, auto_advance went to merging the 14 ready tasks one at a time, about 15 min each, 3–4 h in all, where two batches take about 30–40 min.
+
+## 2026-11-12 16:27:53 Before batching, order tasks so that those touching the same hot files (LeadToolset.swift, LeadAdvance.swift, LeadWorkflow.swift, the merge path) go in separate batches or in a known order, and the rest go together. When planning, avoid running more than two tasks at once that change the same hot file.
+
+2026-11-12: a batch of 6 lost 2 tasks (a-calm-mac-merge, small-non-sensitive) to conflicts with others in the same stack, all touching LeadToolset and the merge path, which costs another round of catching up and testing.
+
+## 2026-11-13 19:24:12 No shared notes board between workers for now. Revisit when a second incident appears where several workers each track down the same shared trap, or when a rerun of scripts/worker-rediscovery.py puts tip-preventable repeats plus concurrent clashes over 5% of worker time.
+
+The user asked whether to adopt a board like Antigravity's /swarm and chose to measure first. Over 150 worker sessions in 7 days, repeats a tip would have prevented plus concurrent clashes cost 3.0% of worker time (docs/process/reviews/worker-rediscovery-2026-11.md, audited), and all of the tip-preventable part was one incident: main red on 2026-11-12. Cheaper fixes cover it: agents-md-and-the and every-worker-is-told.
+
+## 2026-11-13 22:00:08 ¿Construyo el modo equipo (2 a 4 workers en una tarea, con un muro de mensajes) y hago el experimento? Son 13 tareas pequeñas, unas 3 horas en serie por los archivos delicados más el resto en paralelo. Después se construye la misma función del backlog (B2, recorridos de interfaz en el sandbox) de las dos maneras, lo que cuesta más o menos un B2 extra de trabajo. Se adopta solo si el equipo llega a "listo para mezclar" al menos un 25 % antes, con como mucho 1,5 veces los tokens y sin más hallazgos importantes, en 2 de 2 pruebas. → Sí: construir y hacer el experimento con B2 dos veces
+
+The lead proposed it with a 30 min timer and the user didn't answer in time, so it went ahead (question 6080384A). Why it was asked: El diseño está listo y el tablero está vacío; dijiste que vamos hacia swarms.
+
+## 2026-11-13 22:00:45 Build the team mode from docs/process/reviews/team-on-one-task-design.md (13 tasks, T1 to T13) and run its experiment: backlog B2 built both ways from one commit, adopted only if the team arm reaches merge-ready at least 25% sooner, on at most 1.5 times the tokens, with no more Important findings, on 2 of 2 instances. For team tasks the verifier is denied Read of the members' transcripts (T10); backlog B7, if built, must exclude team posts.
+
+The user said the project is going toward swarms. The 2026-11-13 measurement only covered tips between independent tasks and can't see the gain from teams on one larger task, so the lead proposed building it with a pre-set bar; the proposal's 30-minute timer passed with no other answer (question 6080384A). The transcript rule keeps the audit independent of what members told each other; it is the lead's call as architecture.
+
+## 2026-11-13 22:49:20 A task's boundaries name the function or behaviour it must change wherever it lives, and always allow the minimal edits the compiler forces elsewhere (exhaustive switches), to be listed in the done report. When a worker's done report names an edit outside its boundaries that the lead accepts, and the audit has already started, settle a 'suspect' verdict with update_task(exception, accept_verdict) instead of a new audit round; findings from a suspect verdict are sent to the worker by the lead at once, since auto_advance doesn't send them.
+
+Twice on 2026-11-13 (teammate-sender-a-frame, member-worktrees-a-sub) the lead's boundaries were narrower than the goal, the worker rightly edited outside them, and the lead's exception was recorded after auto_advance had started the audit. The first cost a suspect verdict and 8 minutes with the task sitting failed, which the user noticed.
+
+## 2026-11-14 10:34:24 From observing another tool's multi-agent run on another project (2026-11-14, first 75 minutes, 22 agents): adopt (1) a structured handoff on part_done: what changed, caveats, how to verify (added to take-part-the-integrator's contract); (2) in the team experiment, one member of the team arm is a test track that writes the acceptance tests from the integrator's committed interface while the others implement. Not adopted: a shared workspace with ownership by instruction only, liveness judged from agents' self-written progress files, relay-only sub-orchestrators, and five verifiers per milestone (audit_finders already gives 2 or 3 focused finders when a task warrants it). Look again when that run ends and compare time, agents used and outcome before deciding anything further.
+
+In that run a stale progress file got a healthy worker declared hung and its finished work re-dispatched, the coordinator twice told the user work was verified before any verifier existed, and the test track drifted from the interface because it had no committed contract to import. Its heavier mode used no shared board at all: hierarchy, written contracts and independent verification carried the coordination. One run in progress is thin evidence, so only the two cheap changes are taken now.
+
+## 2026-11-15 20:23:01 Team experiment instance 1 (B2, sandbox UI journeys) is set up. Arm A: ui-journeys-a1-the (runner and diff), then a2/a3/a4 (journeys) after it, all audited, on Claude. Arm B: ui-journeys-b-team, 4 members (core integrator, diff as test track, select-run, dictate), audited, budget 300 min across members, auto_advance off so it's never auto-merged: audit, then merge(dry_run), then kept. Both arms start at the same moment from the same main commit (A1 held blocked until B can start). Endpoint and bar as in team-on-one-task-design.md §5. Instance 2 is backlog A3 (log watcher), set up the same way once instance 1 ends.
+
+The design's pre-registered experiment. Starting both together controls for Mac load and main's state. B's lead-side steps (member starts, audit, dry run) wait on my turns, a small bias against B, which the readout will note.
+
+## 2026-11-15 22:26:29 Experiment readout rule: when the normal arm merges first, the team arm's branch conflicts with main by construction (same files). The time the team arm spends merging main and dropping the other arm's duplicate files is excluded from its merge-ready time, and so is any wait for memory or load that only one arm hit. For instance 2: audit the team arm before the normal arm's first merge lands, or keep the normal arm's merges held until the team arm's dry run is done.
+
+Instance 1: arm A's runner merged at about 21:45 and arm B's audit was then refused for conflicts in scripts/ui-journeys.sh and smoke.journey. Neither arm did anything wrong; the design (§5) didn't say how the same feature lands twice.
+
+## 2026-11-15 23:10:59 Experiment instance 1: the team arm's audit passed at 23:09 (round 2). Its dry run conflicts with main because the normal arm keeps merging the same files. Its merge-ready time is therefore counted as that audit pass plus the duration of one passing dry run's test run, taken once the normal arm has fully merged and the team's integrator has merged main once more (that merge's minutes are excluded).
+
+Every normal-arm merge (A2 at about 23:05, A3 and A4 next) re-breaks the team branch's merge onto main. Repeating the catch-up after each one would charge the team arm for the experiment's setup, not for its way of working.
+
+## 2026-11-16 07:21:59 Team experiment instance 1 result, by the bar set beforehand: DROP. Team mode stays in the code, but I don't choose team tasks by default, instance 2 isn't run, and the team-only follow-ups (an integrator waiting on members counting as stalled, a fuller UI) aren't built. Numbers: normal arm 209 min to merge-ready (20:33 to 00:02), 100 worker-min, 41M worker tokens (est. $21.8), 0 Important findings, 3 merge conflicts. Team arm about 174 min raw (audit pass 23:09 plus a typical 18-min merge test), about 153 min with the excluded catch-up and the start wait only it hit (17–27% sooner), 128 worker-min, 82M worker tokens (2.0×, est. $32.7, 1.5×), 1 Important finding (masking applied to every sandbox shot, fixed in one round), 0 conflicts inside the team.
+
+The pre-registered rule (team-on-one-task-design.md §5) drops on more Important findings in either instance; the team arm also misses the ≤1.5× token bar (2.0×) and is only borderline on speed. Its real gains were quality ones the bar doesn't count: no hot-file conflicts, stable back-to-back journeys, and it found the inspector root cause that left the normal arm's select-copy flaky. It also cost about 8 extra lead turns (member starts, false stall alarms). Revisit if a task has 3+ parts that must share one hot file and conflicts cost more than the token overhead.
+
+## 2026-11-16 09:31:56 After a Mac restart, VibeSwitcher offers one card at launch that lists the sessions live at shutdown, with "Reopen all" and "Choose". Nothing reopens without the user's click. Leads reopen first and are told to restart their workers; workers and verifiers aren't listed.
+
+The user's answer to 9B2720A6 (2026-11-16). Reopening everything automatically would spend tokens and load the Mac without the user choosing to.
+
+## 2026-11-17 09:46:02 The config seal accepts a finished round of Claude Code's skill sync inside ~/.claude/skills/synced/ by itself (strict shape: manifest and round marker rewritten together, only under bucket folders with matching .bucket- markers, no symlinks). Every other change to the sealed config is still held for the user. Built as accept-claude-code-s, a security audit.
+
+The user chose it on 2026-11-17 (question 1EA6E8D7). The sync stalled every worker, audit and merge three times in a day, each time waiting on the user's click, and the changes were Claude Code's own bookkeeping.
+

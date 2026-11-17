@@ -60,9 +60,6 @@ final class Preferences: ObservableObject {
     @Published private(set) var launchAtLogin: Bool
     /// Mirrors the system permission, for the popover banner.
     @Published var notificationsAllowed = true
-    @Published var floatingPanel: FloatingPanelMode {
-        didSet { defaults.set(floatingPanel.rawValue, forKey: "floatingPanel") }
-    }
     /// Launch presets, in ~/.vibeswitcher/presets.json (the first load migrates the two launch commands).
     @Published var presets: LaunchPresets {
         didSet { if presetsCanSave { try? presets.save(to: presetsFile) } }
@@ -82,6 +79,15 @@ final class Preferences: ObservableObject {
     /// key in the app's defaults at each call (`LeadMail.isOn`): unset, it's on.
     @Published var leadRotation: LeadRotationMode { didSet { defaults.set(leadRotation.rawValue, forKey: "leadRotation") } }
     @Published var leadMail: Bool { didSet { defaults.set(leadMail, forKey: LeadMail.enabledKey) } }
+    /// Remind me to run /doctor prompt-audit in each project (`PromptAudit`), every `promptAuditDays` and after a model change.
+    @Published var promptAuditReminders: Bool { didSet { defaults.set(promptAuditReminders, forKey: PromptAudit.enabledKey) } }
+    @Published var promptAuditDays: Int {
+        didSet {
+            let kept = min(max(promptAuditDays, PromptAudit.intervalRange.lowerBound), PromptAudit.intervalRange.upperBound)
+            if kept != promptAuditDays { promptAuditDays = kept; return }
+            defaults.set(kept, forKey: PromptAudit.intervalKey)
+        }
+    }
     /// Keep the Mac from idle sleep while a lead's team works (see `KeepAwake`).
     @Published var keepAwake: KeepAwakeMode { didSet { defaults.set(keepAwake.rawValue, forKey: "keepAwake") } }
     /// On battery, the lead's witness tells it to hold new starts, audits and merges only below this charge, in %
@@ -143,6 +149,7 @@ final class Preferences: ObservableObject {
         self.defaults = defaults
         self.presetsFile = presetsFile
         Self.carryOverWalletKeys(defaults)
+        for key in Self.retiredKeys { defaults.removeObject(forKey: key) }
         // Decided once, at first launch, and kept: turning Reduce Motion on later doesn't flip it behind your back.
         if defaults.object(forKey: "sidebarFlashOnSwitch") == nil {
             defaults.set(Self.flashOnSwitchByDefault(reduceMotion: reduceMotion), forKey: "sidebarFlashOnSwitch")
@@ -162,7 +169,6 @@ final class Preferences: ObservableObject {
         sessionOrder = SessionOrder(rawValue: defaults.string(forKey: "sessionOrder") ?? "") ?? .screen
         codexCommand = defaults.string(forKey: "codexCommand") ?? "codex"
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
         // Locals, not the @Published properties: those can't be read before init finishes.
         let loaded = LaunchPresets.loadChecked(from: presetsFile,
                                                claudeCommand: defaults.string(forKey: "claudeCommand") ?? "claude",
@@ -176,6 +182,8 @@ final class Preferences: ObservableObject {
         aiSummaries = defaults.bool(forKey: "aiSummaries")
         leadRotation = LeadRotationMode(rawValue: defaults.string(forKey: "leadRotation") ?? "") ?? .context
         leadMail = LeadMail.isOn(defaults)
+        promptAuditReminders = PromptAudit.isOn(defaults)
+        promptAuditDays = PromptAudit.intervalDays(defaults)
         keepAwake = KeepAwakeMode(rawValue: defaults.string(forKey: "keepAwake") ?? "") ?? .onPower
         batteryHoldBelow = PowerWatch.clamp(defaults.integer(forKey: "batteryHoldBelow"))
         briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code
@@ -187,6 +195,10 @@ final class Preferences: ObservableObject {
         boostOnBattery = defaults.bool(forKey: "boostOnBattery")
         boostLimits = defaults.data(forKey: "boostLimits").flatMap { try? JSONDecoder().decode(BoostLimits.self, from: $0) } ?? BoostLimits()
     }
+
+    /// Keys of features that are gone, dropped at launch so nothing reads a stale value: the floating panel of session
+    /// dots (setting and saved frame; removed 2026-11-14, the main window's header switches sessions).
+    static let retiredKeys = ["floatingPanel", "NSWindow Frame VibeSwitcherFloatingPanel"]
 
     /// The keys `walletPeerID` and `walletPassagePath` had while the feature was called vault requests (until
     /// 2026-10-31): their values carried over once, unless the new key is already set, and the old keys removed.
@@ -229,21 +241,6 @@ final class Preferences: ObservableObject {
             NSLog("VibeSwitcher: login item change failed: \(error)")
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
-    }
-}
-
-enum FloatingPanelMode: String, CaseIterable {
-    /// Only when the menu bar icon is hidden (crowded menu bar / notch).
-    case automatic
-    case always
-    case never
-
-    var label: String {
-        switch self {
-        case .automatic: return "When the menu bar icon is hidden"
-        case .always: return "Always"
-        case .never: return "Never"
-        }
     }
 }
 

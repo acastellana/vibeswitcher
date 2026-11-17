@@ -12,7 +12,7 @@ extension NSAppearance {
     var isHighContrast: Bool { Contrast.isIncreased(self) }
 }
 
-/// System Settings › Accessibility › Display › Increase contrast. With it on, the popover, sidebar and pill are drawn
+/// System Settings › Accessibility › Display › Increase contrast. With it on, the popover and sidebar are drawn
 /// on a solid background instead of a material, in the 7:1 inks (`StatusPalette`'s `highContrast`). AppKit colours
 /// read it when they resolve, so they follow the setting without a relaunch; SwiftUI views read
 /// `\.colorSchemeContrast` through `@IncreasedContrast`.
@@ -55,7 +55,7 @@ extension ShapeStyle where Self == Color {
     /// Captions, durations and the footer (`StatusPalette.secondaryText`): AA, and 7:1 with Increase Contrast on.
     /// Instead of `.secondary` and `.tertiary`, which are neither on the popover's background.
     static var secondaryInk: Color { Contrast.secondaryInk }
-    /// What the popover, sidebar and pill are drawn on with Increase Contrast on.
+    /// What the popover and sidebar are drawn on with Increase Contrast on.
     static var solidBackground: Color { Contrast.solidBackground }
 }
 

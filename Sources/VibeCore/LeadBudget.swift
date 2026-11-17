@@ -29,7 +29,13 @@ public enum LeadBudget {
     /// in line for the Mac-wide test and build lock; nor does a session that ended, or quit, or stopped on an API
     /// error. Nor an audit: its task is in review, not running.
     public static func counts(_ seen: LeadWitness.Seen, task: LeadTask) -> Bool {
-        guard task.status == .running, seen.live, !seen.agentQuit, seen.apiError == nil, seen.usageLimit == nil, seen.lockWait == nil,
+        task.status == .running && works(seen)
+    }
+
+    /// Whether a session's time counts as work, whatever its task (the vault counts small_task_min's time from these,
+    /// mapped to tasks by its own records: `LeadVault.noteWorking`).
+    public static func works(_ seen: LeadWitness.Seen) -> Bool {
+        guard seen.live, !seen.agentQuit, seen.apiError == nil, seen.usageLimit == nil, seen.lockWait == nil,
               seen.status != .needsInput else { return false }
         switch seen.activity {
         case .needsInput?, .apiError?, .usageLimit?: return false
@@ -41,13 +47,22 @@ public enum LeadBudget {
         }
     }
 
-    /// The running tasks whose workers work now (see `counts`), by task id. Only the running tasks are copied.
+    /// The key a team task's member other than its integrator works under in `working`: `<task id>--<name>` (its
+    /// integrator's is the task's id, its worker being the task's).
+    public static func memberKey(_ id: String, member name: String) -> String { id + LeadTeam.joiner + name }
+
+    /// The running tasks whose workers work now (see `counts`), by task id; a team task's other members whose own
+    /// workers work, by `memberKey`. Only the running tasks are copied.
     public static func working(board: LeadBoard, seen: [String: LeadWitness.Seen]) -> Set<String> {
         var working: Set<String> = []
         for index in board.tasks.indices where board.tasks[index].status == .running {
             let task = board.tasks[index]
-            guard let worker = task.worker, worker != task.stopped, let info = seen[worker], counts(info, task: task) else { continue }
-            working.insert(task.id)
+            if let worker = task.worker, worker != task.stopped, let info = seen[worker], counts(info, task: task) { working.insert(task.id) }
+            guard task.isTeam, let team = task.team else { continue }
+            for member in team.dropFirst() {
+                guard let worker = member.worker, worker != task.stopped, worker != task.worker, let info = seen[worker], counts(info, task: task) else { continue }
+                working.insert(memberKey(task.id, member: member.name))
+            }
         }
         return working
     }
@@ -89,6 +104,8 @@ public struct LeadBudgetClock: Codable, Equatable, Sendable {
     public struct Entry: Codable, Equatable, Sendable {
         public var worked: Double?
         public var workedAt: Double?
+        /// A team task's members' counts, by name (`LeadTeamMember.worked`, `workedAt`); nil for a plain task.
+        public var members: [String: Entry]?
     }
 
     /// By task id, what `LeadTask.worked` and `workedAt` are now: each task the count looked at since board.json took it.
@@ -103,6 +120,20 @@ public struct LeadBudgetClock: Codable, Equatable, Sendable {
         guard let entry = entries[task.id] else { return }
         task.worked = entry.worked
         task.workedAt = entry.workedAt
+        guard let members = entry.members, let team = task.team else { return }
+        for at in team.indices {
+            guard let count = members[team[at].name] else { continue }
+            task.team?[at].worked = count.worked
+            task.team?[at].workedAt = count.workedAt
+        }
+    }
+
+    /// `task`'s count as an entry: its own, and its members' when it's a team task.
+    static func entry(_ task: LeadTask) -> Entry {
+        let members = task.isTeam ? task.team.map { team in
+            Dictionary(team.map { ($0.name, Entry(worked: $0.worked, workedAt: $0.workedAt)) }, uniquingKeysWith: { first, _ in first })
+        } : nil
+        return Entry(worked: task.worked, workedAt: task.workedAt, members: members)
     }
 
     /// `board`'s tasks with this clock's count on them.
@@ -149,7 +180,7 @@ extension BoardStore {
             } else if noted.changed {
                 if clock.flushedAt == nil { clock.flushedAt = now }
                 for index in board.budgeted {
-                    clock.entries[board.tasks[index].id] = LeadBudgetClock.Entry(worked: board.tasks[index].worked, workedAt: board.tasks[index].workedAt)
+                    clock.entries[board.tasks[index].id] = LeadBudgetClock.entry(board.tasks[index])
                 }
             } else {
                 return noted.reached
@@ -205,7 +236,7 @@ extension LeadBoard {
         var changed = false
         for index in budgeted {
             var task = tasks[index]
-            let noted = Self.noteWork(&task, working: working.contains(task.id), defaultMinutes: defaultMinutes, now: now, sleep: sleep)
+            let noted = Self.noteWork(&task, working: working, defaultMinutes: defaultMinutes, now: now, sleep: sleep)
             if noted.reached { reached.append(task) }
             if noted.changed {
                 tasks[index] = task
@@ -224,38 +255,59 @@ extension LeadBoard {
         if clock.due(on: board, now: now) { return true }
         return board.budgeted.contains { index in
             var task = board.tasks[index]
-            return Self.noteWork(&task, working: working.contains(task.id), defaultMinutes: defaultMinutes, now: now, sleep: sleep).changed
+            return Self.noteWork(&task, working: working, defaultMinutes: defaultMinutes, now: now, sleep: sleep).changed
         }
     }
 
     /// The tasks the budget looks at, by index: the running ones, and any other still holding the start of a count
-    /// (`workedAt`, from before it stopped running), which `noteWork` clears. Reads two fields of each task.
-    var budgeted: [Int] { tasks.indices.filter { tasks[$0].status == .running || tasks[$0].workedAt != nil } }
+    /// (`workedAt`, from before it stopped running; a team member's too), which `noteWork` clears.
+    var budgeted: [Int] {
+        tasks.indices.filter { tasks[$0].status == .running || tasks[$0].workedAt != nil || tasks[$0].team?.contains { $0.workedAt != nil } == true }
+    }
 
-    /// One task's count (see `noteWork`): whether it changed, and whether it reached its budget now.
-    private static func noteWork(_ task: inout LeadTask, working: Bool, defaultMinutes: Int, now: Double, sleep: MacSleepLog) -> (changed: Bool, reached: Bool) {
-        let before = (worked: task.worked, workedAt: task.workedAt)
-        if task.status == .running, working {
-            if let since = task.workedAt {
-                // Until it has had a step's time awake the count stays where it began, so the sleep is all in one window.
-                let step = LeadBudget.awake(from: since, to: now, sleep: sleep)
-                if step >= LeadBudget.step {
-                    task.worked = (task.worked ?? 0) + min(step, LeadBudget.longestStep)
-                    task.workedAt = now
-                }
-            } else {
-                task.workedAt = now
+    /// One task's count (see `noteWork`): whether it changed, and whether it reached its budget now. The task works
+    /// while its worker does (its id in `working`) or, for a team task, any member's (`LeadBudget.memberKey`); each
+    /// member counts its own, the integrator by the task's id.
+    private static func noteWork(_ task: inout LeadTask, working: Set<String>, defaultMinutes: Int, now: Double, sleep: MacSleepLog) -> (changed: Bool, reached: Bool) {
+        let before = (worked: task.worked, workedAt: task.workedAt, team: task.team)
+        let running = task.status == .running
+        var anyone = working.contains(task.id)
+        if task.isTeam, var team = task.team {
+            for at in team.indices {
+                let works = working.contains(at == 0 ? task.id : LeadBudget.memberKey(task.id, member: team[at].name))
+                anyone = anyone || works
+                var member = (worked: team[at].worked, workedAt: team[at].workedAt)
+                count(&member.worked, &member.workedAt, working: running && works, now: now, sleep: sleep)
+                (team[at].worked, team[at].workedAt) = member
             }
-        } else {
-            task.workedAt = nil
+            if team != before.team { task.team = team }
         }
+        count(&task.worked, &task.workedAt, working: running && anyone, now: now, sleep: sleep)
         var reached = false
         if task.status == .running, task.overBudget == nil, let minutes = LeadBudget.minutes(task, default: defaultMinutes),
            (task.worked ?? 0) >= Double(minutes) * 60 {
             task.overBudget = LeadOverBudget(minutes: minutes, at: now)
             reached = true
         }
-        return (reached || task.worked != before.worked || task.workedAt != before.workedAt, reached)
+        return (reached || task.worked != before.worked || task.workedAt != before.workedAt || task.team != before.team, reached)
+    }
+
+    /// One count's step (a task's or a member's): from `workedAt` to `now`, its time awake, while `working`.
+    private static func count(_ worked: inout Double?, _ workedAt: inout Double?, working: Bool, now: Double, sleep: MacSleepLog) {
+        guard working else {
+            workedAt = nil
+            return
+        }
+        guard let since = workedAt else {
+            workedAt = now
+            return
+        }
+        // Until it has had a step's time awake the count stays where it began, so the sleep is all in one window.
+        let step = LeadBudget.awake(from: since, to: now, sleep: sleep)
+        if step >= LeadBudget.step {
+            worked = (worked ?? 0) + min(step, LeadBudget.longestStep)
+            workedAt = now
+        }
     }
 
     /// The tasks over their budget that aren't finished, the earliest first.

@@ -107,7 +107,9 @@ struct LeadLaunchTests {
         let root = try root()
         let rules = ["Edit(~/.vibeswitcher/mac-limits.json)", "Write(~/.vibeswitcher/mac-limits.json)",
                      "Edit(~/.vibeswitcher/boost.json)", "Write(~/.vibeswitcher/boost.json)",
-                     "Edit(~/.vibeswitcher/policy.md)", "Write(~/.vibeswitcher/policy.md)"]
+                     "Edit(~/.vibeswitcher/policy.md)", "Write(~/.vibeswitcher/policy.md)",
+                     // The restart card's record: it runs each recorded session's command on the user's click.
+                     "Edit(~/.vibeswitcher/open-sessions.json)", "Write(~/.vibeswitcher/open-sessions.json)"]
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "fix", base: "claude",
                                                 prompt: "p", start: "s", server: "/App/vibeswitcher-mcp", name: "\(role.rawValue)-fix")

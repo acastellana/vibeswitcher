@@ -4,8 +4,8 @@ import Testing
 /// AGENTS.md at the repository's root holds the few rules and commands an agent can't find out from the repository;
 /// CLAUDE.md only imports it (`@AGENTS.md`), since Claude Code reads CLAUDE.md and Codex reads AGENTS.md. A file or
 /// script it names that was moved or renamed sends agents to run something that isn't there, so every path it names
-/// must exist, every lint its filter names must be a test, and it stays short: a map of the repository costs every
-/// session context and doesn't help agents find files.
+/// must exist, its lint filter must run every lint suite (and each name in it some test), and it stays short: a map of
+/// the repository costs every session context and doesn't help agents find files.
 struct ProjectMapTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     static let lineLimit = 40
@@ -58,6 +58,16 @@ struct ProjectMapTests {
         return types
     }
 
+    /// The test types a filter `name` selects: `swift test --filter` matches it as a regular expression against
+    /// `Module.Type/test`, so `LintTests/` selects every `…LintTests` and `KeychainLint` selects `KeychainLintTests`.
+    static func selected(by name: String, from types: [String]) -> [String] {
+        guard let pattern = try? NSRegularExpression(pattern: name) else { return [] }
+        return types.filter { type in
+            let id = "\(type)/"
+            return pattern.firstMatch(in: id, range: NSRange(id.startIndex..., in: id)) != nil
+        }
+    }
+
     static func agents() throws -> String {
         try String(contentsOf: repo.appendingPathComponent("AGENTS.md"), encoding: .utf8)
     }
@@ -75,10 +85,14 @@ struct ProjectMapTests {
 
     @Test func everyLintAgentsNamesIsATest() throws {
         let names = Self.filterNames(in: try Self.agents())
-        #expect(names.count >= 5, "AGENTS.md's lint filter names only \(names.count) tests: the check isn't reading it")
         let types = try Self.testTypes()
-        let unknown = names.filter { name in !types.contains { $0.contains(name) } }
+        let lints = types.filter { $0.hasSuffix("LintTests") }
+        #expect(lints.count >= 5, "only \(lints.count) lint suites found under Tests/: the check isn't reading them")
+        let run = Set(names.flatMap { Self.selected(by: $0, from: types) })
+        let unknown = names.filter { Self.selected(by: $0, from: types).isEmpty }
         #expect(unknown == [], "AGENTS.md's --filter names no test type (renamed?): \(unknown.joined(separator: ", "))")
+        let notRun = lints.filter { !run.contains($0) }
+        #expect(notRun == [], "AGENTS.md's lint filter doesn't run these lint suites: \(notRun.joined(separator: ", "))")
     }
 
     @Test func agentsStaysShort() throws {
@@ -109,9 +123,14 @@ struct ProjectMapTests {
         #expect(Self.missing(in: text, under: Self.repo) == ["Sources/VibeCore/NoSuchFile.swift", "docs/nowhere/", "Tests/Web/*.nothing"])
     }
 
-    /// The lint check itself: the names of a quoted filter are read, alternatives split.
+    /// The lint check itself: the names of a quoted filter are read, alternatives split, each matched as a regular
+    /// expression the way `swift test --filter` matches it.
     @Test func aFiltersNamesAreRead() {
         let text = "bash scripts/test.sh --filter 'KeychainLint|NoSuchLint'\nbash scripts/test.sh --filter LeadBoardTests"
         #expect(Self.filterNames(in: text) == ["KeychainLint", "NoSuchLint"])
+        let types = ["KeychainLintTests", "HomePathLintTests", "LeadBoardTests", "LintTestsHelperTests"]
+        #expect(Self.selected(by: "KeychainLint", from: types) == ["KeychainLintTests"])
+        #expect(Self.selected(by: "NoSuchLint", from: types) == [])
+        #expect(Self.selected(by: "LintTests/", from: types) == ["KeychainLintTests", "HomePathLintTests"])
     }
 }

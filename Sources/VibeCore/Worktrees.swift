@@ -488,11 +488,27 @@ extension Shell {
 /// Workers' worktrees (`<repo>/.vibeswitcher/worktrees/<slug>` on `agent/<slug>`) and the merge queue's git steps.
 public enum Worktrees {
     public enum Check: Equatable, Sendable {
+        /// The failing outputs of a run that ended (empty when its first run passed); nil when it didn't end with a
+        /// verdict (hung, cancelled, an error, a conflict).
+        public var failingOutputs: [String]? {
+            switch self {
+            case .passed: return []
+            case .passedOnRerun(_, let failed, _): return [failed]
+            case .passedRedOnBase(_, let failed, let rerun, _): return [failed, rerun]
+            case .failed(let output): return [output]
+            default: return nil
+            }
+        }
+
         /// The checks passed on this commit (the branch rebased onto main).
         case passed(String)
         /// The test command failed, and its rerun (`Rerun`) passed on this commit: the first run's output, then the
         /// rerun's. Whether that's a pass is the caller's to judge (`MergeRerun.unshown`).
         case passedOnRerun(commit: String, failed: String, rerun: String)
+        /// The test command failed, its filtered rerun failed too, and the tests it still failed failed on the base
+        /// (`Baseline`), while the rest of the checks passed on this commit without them: the first run's output, the
+        /// rerun's, and the base run's. Red before the branch, so not the branch's (`MergeRerun.redOnBranch`).
+        case passedRedOnBase(commit: String, failed: String, rerun: String, base: String)
         /// A command failed; all of its output (a rerun's starts with `Worktrees.rerunHeader`).
         case failed(String)
         /// Rebasing onto main conflicted; the rebase was undone.
@@ -938,7 +954,7 @@ public enum Worktrees {
     /// merge, its records the base's and the remote's by union (`landAsMerge`).
     /// With `trailers`, the commit that lands ends with them (`stamp`): the merge's provenance.
     /// With `rerun`, a failing test command may run once more (see `runChecks`): `passedOnRerun` when that passes;
-    /// then `baseline`, record only. `tested` hears the passing test command's output (the rerun's, when that's what passed), for its test count.
+    /// when it fails, `baseline` (`passedRedOnBase` when the base fails its tests too). `tested` hears the passing test command's output (the rerun's, when that's what passed), for its test count.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
                                      lock: TestLock?, records: String? = nil, remote: String? = nil, trailers: [Trailer] = [],
@@ -973,11 +989,23 @@ public enum Worktrees {
         let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
                                            as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun, baseline: baseline, begun: begun)
         if let stopped { return stopped }
+        return passing(outputs, commit: tested, tested: output)
+    }
+
+    /// How a run whose checks passed (`runChecks`' `outputs`) ended on `commit`: `passed`, `passedOnRerun`, or
+    /// `passedRedOnBase` when a base run is among them. `tested` hears the passing test command's output, for its test
+    /// count: the first run's when the base excused it, since that ran the whole suite.
+    static func passing(_ outputs: [(name: String, output: String)], commit: String, tested output: ((String) -> Void)?) -> Check {
+        let named = { (name: String) in outputs.last { $0.name == name }?.output }
+        if let base = named(baseStep), let first = named("test command"), let again = named("rerun") {
+            output?(first)
+            return .passedRedOnBase(commit: commit, failed: first, rerun: again, base: base)
+        }
         if let last = outputs.last, last.name != "init_command" { output?(last.output) }
         if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
-            return .passedOnRerun(commit: tested, failed: first.output, rerun: again.output)
+            return .passedOnRerun(commit: commit, failed: first.output, rerun: again.output)
         }
-        return .passed(tested)
+        return .passed(commit)
     }
 
     /// Puts the worktree at `path`'s detached HEAD, `commit`, on top of `base`: rebased, or squashed into one commit
@@ -1131,7 +1159,7 @@ public enum Worktrees {
         }
 
         /// Runs `setup` and `test` (as `rebaseAndTest` does, in a scratch home made empty first) on the stack's first
-        /// `count` commits: `passed` with the commit tested, `passedOnRerun`, `failed`, `hung`, `cancelled`, `error`.
+        /// `count` commits: `passed` with the commit tested, `passedOnRerun`, `passedRedOnBase`, `failed`, `hung`, `cancelled`, `error`.
         public func test(prefix count: Int, setup: String?, test: String?, timeout: TimeInterval, lock: TestLock?,
                          rerun: ((String) -> String?)?, baseline: Baseline? = nil, tested output: ((String) -> Void)? = nil,
                          begun: ((Date) -> Void)? = nil) -> Check {
@@ -1142,11 +1170,7 @@ public enum Worktrees {
             let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
                                                as: "VibeSwitcher's batch merge test of \(tip.prefix(8))", place: root, rerun: rerun, baseline: baseline, begun: begun)
             if let stopped { return stopped }
-            if let last = outputs.last, last.name != "init_command" { output?(last.output) }
-            if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
-                return .passedOnRerun(commit: tip, failed: first.output, rerun: again.output)
-            }
-            return .passed(tip)
+            return passing(outputs, commit: tip, tested: output)
         }
 
         /// The worktree at `commit`, whatever a run left changed or new in it (its ignored build output stays).
@@ -1259,15 +1283,21 @@ public enum Worktrees {
         case .hung(let command, let after, let output, let stall): return .hung(command: command, after: after, output: output, stall: stall)
         case .cancelled: return .cancelled
         case .error(let text): return .error(text)
-        case .passed, .passedOnRerun, .conflict: return .error("unexpected")
+        case .passed, .passedOnRerun, .passedRedOnBase, .conflict: return .error("unexpected")
         }
     }
 
-    /// A merge's paired base run (`runChecks`): after the rerun, the failing tests once on the base the branch was
-    /// rebased onto, so a branch's red test can be told from a flaky one (red on the base too). Record only.
+    /// A merge's base run (`runChecks`): after a rerun that failed, the failing tests once on the base the branch was
+    /// rebased onto, so a branch's red test can be told from one red before it (red on the base too). Red on both,
+    /// with the rest of the checks passing on the branch without them (`rest`), the merge goes ahead
+    /// (`Check.passedRedOnBase`); else the rerun's failure stands.
     public struct Baseline {
         /// The base's commit.
         public var commit: String
+        /// Given the first run's and the failed rerun's outputs: the tests it still failed, when they may be excused by the base
+        /// (`MergeRerun.redOnBranch`), and the command that runs the rest of the checks on the branch without them
+        /// (`MergeRerun.rest`); nil: nothing is excused.
+        public var rest: ((_ first: String, _ rerun: String) -> (tests: [String], command: String)?)?
         /// Given the first run's failing output, the command to run on `commit`; nil: none runs (the caller notes why).
         public var command: (String) -> String?
         /// Hears how it went, when a command was given.
@@ -1282,8 +1312,10 @@ public enum Worktrees {
             case unchecked(String)
         }
 
-        public init(commit: String, command: @escaping (String) -> String?, heard: @escaping (Run) -> Void) {
+        public init(commit: String, rest: ((_ first: String, _ rerun: String) -> (tests: [String], command: String)?)? = nil, command: @escaping (String) -> String?,
+                    heard: @escaping (Run) -> Void) {
             self.commit = commit
+            self.rest = rest
             self.command = command
             self.heard = heard
         }
@@ -1292,11 +1324,17 @@ public enum Worktrees {
     /// The run's header line on the cores its commands get (`TestLock.coresVariable`) holding one of `slots` slots: a
     /// hung merge's log showed no -j anywhere (2026-11-08), so whether its build was capped couldn't be read from it.
     static func coresLine(slots: Int, cores: Int = ProcessInfo.processInfo.processorCount) -> String {
-        "\(TestLock.coresVariable): \(TestLock.coreBudget(slots: slots, cores: cores)), the slot's share of \(cores) cores (\(slots) slot\(slots == 1 ? "" : "s")): builds and test runners take it as their parallelism\n"
+        "\(TestLock.coresVariable): \(TestLock.coreBudget(slots: slots, cores: cores)), the slot's share of \(cores) cores (\(slots) slot\(slots == 1 ? "" : "s")): builds and test runners take it as their parallelism, at least (a vs-heavy in the command widens it to the cores free when it starts, and says so)\n"
     }
 
     /// The first line of a rerun's output (`runChecks`' `rerun`).
     public static let rerunHeader = "Rerun once, after the first run failed (its failing tests when they can be picked out, else all of it):\n"
+    /// The name of the step that runs the rest of the checks on the branch without the tests its rerun still failed
+    /// (`Baseline.rest`), and the first line of its output.
+    static let restStep = "rest of the checks"
+    public static let restHeader = "The rest of the checks, without the tests the rerun still failed (they run on the base next):\n"
+    /// The name `runChecks` gives the base run's output when the base excused the rerun's failure.
+    static let baseStep = "base"
 
     /// Runs `setup` then `test` (each when given) in `path` with HOME, CFFIXED_USER_HOME and TMPDIR in `home` (made
     /// here, removed by the caller), as merge and an audit's shared run do. `stopped`: nil when every command passed,
@@ -1309,9 +1347,12 @@ public enum Worktrees {
     /// (`MergeRerun`: the failing tests again), in the same worktree and home, holding the same slot: its output,
     /// named "rerun", decides. It's never asked again, whatever the rerun does. `begun` hears when the commands start
     /// (the slot taken): the merge's stats line times the run from there (`MergeSample`).
-    /// After a rerun, `baseline` runs its command once on its commit, in the same worktree and home, holding the same
-    /// slot, with the same timeout: record only (`Baseline`). Its result changes nothing returned here; a cancel during
-    /// it is a cancel.
+    /// After a rerun that failed, `baseline` runs its command once on its commit, in the same worktree and home, holding
+    /// the same slot, with the same timeout (`Baseline`); a cancel during it is a cancel. When the rerun's failure is its
+    /// named tests' alone (`Baseline.rest`), the rest of the checks run first on the branch without them (named
+    /// `restStep`): when that passes and the base fails each of them too, the run passes with the base's output last
+    /// (named `baseStep`: `passedRedOnBase`); else the rerun's failure stands (with the rest's after it, when that
+    /// failed). After a rerun that passed, nothing runs on the base.
     static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
                           lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil,
                           rerun: ((String) -> String?)? = nil, baseline: Baseline? = nil, begun: ((Date) -> Void)? = nil,
@@ -1358,13 +1399,17 @@ public enum Worktrees {
         var steps = [("init_command", setup), ("test command", test)][...]
         // The first run's failure, once a rerun is planned: what the baseline pairs with.
         var firstFailure: String?
-        /// The baseline's run after the rerun; true when it was cancelled.
-        func pairOnBase() -> Bool {
-            guard let baseline, let failed = firstFailure, let command = baseline.command(failed) else { return false }
+        // The rerun's failure, and the tests it still failed while the rest of the checks run without them.
+        var rerunFailure: String?
+        var excusing: [String] = []
+        /// The base run after a rerun that failed: how it went (nil when none ran: the caller noted why), or cancelled.
+        func pairOnBase() -> (cancelled: Bool, run: Baseline.Run?) {
+            guard let baseline, let failed = firstFailure, let command = baseline.command(failed) else { return (false, nil) }
             let moved = Git.run(["checkout", "-q", "-f", "--detach", baseline.commit], in: path)
             guard moved.ok else {
-                baseline.heard(.unchecked("the base \(baseline.commit.prefix(8)) couldn't be checked out: \(said(moved))"))
-                return cancel?.isCancelled == true
+                let run = Baseline.Run.unchecked("the base \(baseline.commit.prefix(8)) couldn't be checked out: \(said(moved))")
+                baseline.heard(run)
+                return (cancel?.isCancelled == true, run)
             }
             Git.run(["clean", "-q", "-f", "-d"], in: path)
             var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
@@ -1377,9 +1422,10 @@ public enum Worktrees {
             let run = Shell.run(executable: Platform.Tools.loginShell, args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + command], in: path, env: env,
                                 timeout: timeout, interleaved: true, branchCode: true, watch: lock?.watch, time: time)
             stop?()
-            if run.cancelled || cancel?.isCancelled == true { return true }
-            baseline.heard(run.stall != nil || run.timedOut ? .hung : .ran(ok: run.ok, output: run.output))
-            return false
+            if run.cancelled || cancel?.isCancelled == true { return (true, nil) }
+            let result: Baseline.Run = run.stall != nil || run.timedOut ? .hung : .ran(ok: run.ok, output: run.output)
+            baseline.heard(result)
+            return (false, result)
         }
         while let (name, command) = steps.popFirst() {
             guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
@@ -1406,7 +1452,7 @@ public enum Worktrees {
             // A run stopped for making no progress says so first, then what it was stuck on, after its output.
             // Stopped at test_timeout_min, it says how long it had been silent: a crawl keeps writing, a stuck one doesn't.
             let silent = run.stall == nil ? run.quiet.map { "\n\n" + MergeRerun.quietNote($0) } : nil
-            var said = (name == "rerun" ? rerunHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
+            var said = (name == "rerun" ? rerunHeader : name == restStep ? restHeader : "") + header + run.output + (run.stall.map { "\n\n" + $0.report } ?? silent ?? "")
             if run.timedOut, !run.cancelled {
                 let stopped = time.wall(), window = stopped.timeIntervalSince(clocks.wall)
                 said += "\n\n" + MergeRerun.causeNote(stall: run.stall, quiet: run.quiet, slept: max(0, window - (time.awake() - clocks.awake)), window: window,
@@ -1426,10 +1472,33 @@ public enum Worktrees {
                     steps.append(("rerun", again))
                     continue
                 }
-                if name == "rerun", pairOnBase() { return (.cancelled, outputs) }
+                if name == "rerun" {
+                    // The tests it still failed may be red on the base too: the rest of the checks run first, without
+                    // them, so nothing else that failed goes through on the base's word.
+                    if let first = firstFailure, let (tests, command) = baseline?.rest?(first, failed) {
+                        rerunFailure = failed
+                        excusing = tests
+                        steps.append((restStep, command))
+                        continue
+                    }
+                    if pairOnBase().cancelled { return (.cancelled, outputs) }
+                    return (.failed(failed), outputs)
+                }
+                if name == restStep, let rerunFailure {
+                    if pairOnBase().cancelled { return (.cancelled, outputs) }
+                    return (.failed(rerunFailure + "\n\n" + failed), outputs)
+                }
                 return (.failed(failed), outputs)
             }
-            if name == "rerun", pairOnBase() { return (.cancelled, outputs) }
+            if name == restStep, let rerunFailure {
+                let paired = pairOnBase()
+                if paired.cancelled { return (.cancelled, outputs) }
+                // Red on the base too: not the branch's, and the merge goes ahead (`Check.passedRedOnBase`).
+                guard let run = paired.run, MergeRerun.excused(excusing, base: run), case .ran(_, let output) = run else {
+                    return (.failed(rerunFailure), outputs)
+                }
+                outputs.append((baseStep, output))
+            }
         }
         return (nil, outputs)
     }
@@ -1479,7 +1548,7 @@ public enum Worktrees {
             outcome = .hung(command, after: after, stall: said.isEmpty ? nil : said)
         case .cancelled: outcome = .cancelled
         case .error(let text): outcome = .error(text)
-        case .passed, .passedOnRerun, .conflict: outcome = .error("unexpected")
+        case .passed, .passedOnRerun, .passedRedOnBase, .conflict: outcome = .error("unexpected")
         }
         if case .cancelled = outcome { return AuditRun(outcome: outcome, logs: files) }
         try? VibePaths.writePrivate(Data((outcome.text + "\n").utf8), to: logs.appendingPathComponent("run.txt"))
@@ -1937,15 +2006,91 @@ public enum Worktrees {
     /// merged or committed; `force` is for leftovers of merged work, or work the lead chose to abandon.
     /// What still runs in the worktree is ended first (`SessionStrays.endInside`): a dev server or a suite left there
     /// would run on for days in a folder that's gone.
+    /// A folder at its path that isn't a worktree (`strayFolder`) goes only when it holds nothing but Finder's .DS_Store,
+    /// its branch then deleted if there is one; anything else there is refused, nothing touched.
     public static func remove(root: String, slug: String, force: Bool = false) throws {
         let path = path(root: root, slug: slug)
-        if FileManager.default.fileExists(atPath: path) {
+        if let stray = strayFolder(root: root, slug: slug) {
+            guard stray == .clutter else { throw Failure(description: strayText(path, stray)) }
+            try removeClutter(path)
+            guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch(slug))"], in: root).ok else { return }
+        } else if FileManager.default.fileExists(atPath: path) {
             SessionStrays.endInside(folder: path)
             let removed = Git.run(["worktree", "remove"] + (force ? ["--force"] : []) + [path], in: root)
             guard removed.ok else { throw Failure(description: removed.error) }
         }
         let deleted = Git.run(["branch", force ? "-D" : "-d", branch(slug)], in: root)
         guard deleted.ok else { throw Failure(description: deleted.error) }
+    }
+
+    /// What's at a task's worktree path when git doesn't list it as one of this repository's worktrees (a folder git
+    /// forgot, Finder's .DS_Store written into it after its removal): only Finder's file or nothing, which may go, or
+    /// anything else, which stays.
+    public enum StrayFolder: Equatable, Sendable {
+        case clutter
+        /// What's there, said: "holds notes.txt and 2 more", "is a symlink to /x".
+        case kept(String)
+    }
+
+    /// What `strayFolder` lets go: nothing else in a folder makes it clutter.
+    static let clutterNames: Set<String> = [".DS_Store"]
+
+    /// nil when nothing is at the task's worktree path, when git lists it as a worktree of this repository, or when git
+    /// can't say (left to `git worktree remove`, as before); else what's there (`StrayFolder`). Never follows a symlink:
+    /// one at the path is kept, whatever it leads to.
+    public static func strayFolder(root: String, slug: String) -> StrayFolder? {
+        let folder = path(root: root, slug: slug)
+        var info = stat()
+        guard lstat(folder, &info) == 0 else { return nil }
+        switch info.st_mode & S_IFMT {
+        case S_IFDIR: break
+        case S_IFLNK:
+            let target = (try? FileManager.default.destinationOfSymbolicLink(atPath: folder)).map { " to \($0)" } ?? ""
+            return .kept("is a symlink\(target)")
+        default: return .kept("is a file, not a folder")
+        }
+        let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+        // Its parent resolved, its own name as it is: it's no symlink (above).
+        let expected = (real((folder as NSString).deletingLastPathComponent) as NSString).appendingPathComponent((folder as NSString).lastPathComponent)
+        let listed = Git.run(["worktree", "list", "--porcelain"], in: root)
+        guard listed.ok else { return nil }
+        let worktrees = listed.output.components(separatedBy: "\n").filter { $0.hasPrefix("worktree ") }.map { String($0.dropFirst("worktree ".count)) }
+        guard !worktrees.contains(where: { real($0) == expected }) else { return nil }
+        let names: [String]
+        do { names = try FileManager.default.contentsOfDirectory(atPath: folder) } catch {
+            return .kept("can't be read (\(error.localizedDescription))")
+        }
+        // Finder's file counts only as a plain file: a folder or a symlink by that name is something else.
+        let other = names.filter { name in
+            guard clutterNames.contains(name) else { return true }
+            var entry = stat()
+            return lstat((folder as NSString).appendingPathComponent(name), &entry) != 0 || entry.st_mode & S_IFMT != S_IFREG
+        }.sorted()
+        guard !other.isEmpty else { return .clutter }
+        let shown = other.prefix(5).joined(separator: ", ")
+        return .kept("holds " + shown + (other.count > 5 ? " and \(other.count - 5) more" : ""))
+    }
+
+    /// "/x/.vibeswitcher/worktrees/a isn't a git worktree and holds notes.txt: it's left as it is".
+    public static func strayText(_ path: String, _ stray: StrayFolder) -> String {
+        guard case .kept(let what) = stray else { return "\(path) isn't a git worktree and holds nothing but .DS_Store" }
+        return "\(path) isn't a git worktree and \(what): it's left as it is"
+    }
+
+    /// Removes a clutter folder (`StrayFolder.clutter`): its .DS_Store, then the folder, which `rmdir` removes only
+    /// empty, so a file written there in between stays, refused.
+    static func removeClutter(_ folder: String) throws {
+        for name in clutterNames {
+            let file = (folder as NSString).appendingPathComponent(name)
+            var entry = stat()
+            guard lstat(file, &entry) == 0 else { continue }
+            guard entry.st_mode & S_IFMT == S_IFREG, unlink(file) == 0 || errno == ENOENT else {
+                throw Failure(description: "\(file) couldn't be removed: \(String(cString: strerror(errno)))")
+            }
+        }
+        guard rmdir(folder) == 0 else {
+            throw Failure(description: "\(folder) isn't a git worktree and couldn't be removed: \(String(cString: strerror(errno)))")
+        }
     }
 
     /// The commits on `agent/<slug>` a merge didn't take, newest first: on neither `base` nor behind `merged`, the
@@ -2463,5 +2608,174 @@ extension Worktrees {
             guard !result.ok, result.error.contains("index.lock"), Date() < deadline else { return result }
             if let pause { pause() } else { usleep(200_000) }
         }
+    }
+}
+
+// MARK: Team members' worktrees
+
+/// A team task's other members (`LeadTeam`, docs/process/reviews/team-on-one-task-design.md "The unit"): each works in
+/// `.vibeswitcher/worktrees/<slug>--<name>` on `agent/<slug>--<name>`, branched from a commit of the team branch
+/// `agent/<slug>`, and goes with the task's cleanup. The integrator is the task's own worktree and branch.
+extension Worktrees {
+    /// What names member `name`'s worktree and branch on the task `slug`: `<slug>--<name>`.
+    public static func memberSlug(_ slug: String, member name: String) -> String { slug + LeadTeam.joiner + name }
+
+    /// Makes member `name`'s worktree on `agent/<slug>--<name>`, branched from `commit`, which must be on the team
+    /// branch `agent/<slug>`. Idempotent: when the member's branch is already there and holds `commit`, its worktree
+    /// is the one returned (added again on that branch if it's gone), and the branch stays where it is, its member's
+    /// commits kept. Refused, nothing changed, when the name can't be a member's, `commit` isn't on the team branch, the
+    /// member's branch is there without `commit` (made from another commit: it's not reset), or something else is in
+    /// the way (a folder that isn't its worktree, the branch checked out elsewhere).
+    @discardableResult
+    public static func createMember(root: String, slug: String, member name: String, from commit: String) throws -> String {
+        if let problem = LeadTeam.nameProblem(name) { throw Failure(description: problem) }
+        let team = branch(slug), member = memberSlug(slug, member: name)
+        let path = path(root: root, slug: member), memberBranch = branch(member)
+        let resolved = Git.run(["rev-parse", "--verify", "--quiet", "\(commit)^{commit}"], in: root)
+        guard resolved.ok, !resolved.output.isEmpty else { throw Failure(description: "No commit \(commit) in this repository.") }
+        let sha = resolved.output
+        guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(team)"], in: root).ok else {
+            throw Failure(description: "There's no team branch \(team) to branch \(name) from.")
+        }
+        guard Git.run(["merge-base", "--is-ancestor", sha, "refs/heads/\(team)"], in: root).ok else {
+            throw Failure(description: "\(commit) isn't on \(team): a member branches from a commit of its team's branch.")
+        }
+        try BoardStore(root: root).ensureExcluded()
+        let exists = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(memberBranch)"], in: root).ok
+        if exists {
+            guard Git.run(["merge-base", "--is-ancestor", sha, "refs/heads/\(memberBranch)"], in: root).ok else {
+                let head = Git.run(["rev-parse", "--short=8", "refs/heads/\(memberBranch)"], in: root).output
+                throw Failure(description: "\(memberBranch) is already there, at \(head), without \(sha.prefix(8)): it isn't made again (that would drop what it holds).")
+            }
+            if isWorktree(root: root, slug: member) { return path }
+            if let elsewhere = checkout(of: memberBranch, root: root) {
+                throw Failure(description: "\(memberBranch) is checked out at \(elsewhere), not at \(path).")
+            }
+        }
+        guard !FileManager.default.fileExists(atPath: path) else {
+            throw Failure(description: "\(path) is there and isn't \(name)'s worktree on \(memberBranch): it's left as it is.")
+        }
+        let result = Git.run(["worktree", "add", "-q"] + (exists ? [path, memberBranch] : ["-b", memberBranch, path, sha]), in: root)
+        guard result.ok else { throw Failure(description: result.error.isEmpty ? "git worktree add failed" : result.error) }
+        return path
+    }
+
+    /// The members of the task `slug` the repository holds a worktree or a branch of (`agent/<slug>--<name>`), by
+    /// name, sorted. `team`, the board's stored members (the integrator left out), is taken over what the disk holds
+    /// when given: only those of them with a branch, or something at their folder. Without it, the branches named so,
+    /// and the folders that are a member's worktree (`memberCheckout`: never a symlink, or a folder git doesn't list
+    /// on that branch). `Slug.make` never makes a "--" and a member's name holds none, so these are the task's alone.
+    public static func members(root: String, slug: String, team: [String]? = nil) -> [String] {
+        let prefix = slug + LeadTeam.joiner
+        if let team {
+            return Set(team).filter { name in
+                LeadTeam.nameProblem(name) == nil
+                    && (Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch(prefix + name))"], in: root).ok
+                        || (try? FileManager.default.attributesOfItem(atPath: path(root: root, slug: prefix + name))) != nil)
+            }.sorted()
+        }
+        let refs = Git.run(["for-each-ref", "--format=%(refname)", "refs/heads/\(branch(prefix))*"], in: root).output
+            .split(separator: "\n").map { String($0.dropFirst("refs/heads/".count + branch(prefix).count)) }
+        let folders = ((try? FileManager.default.contentsOfDirectory(atPath: (path(root: root, slug: "") as NSString).standardizingPath)) ?? [])
+            .filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+            .filter { LeadTeam.nameProblem($0) == nil && memberCheckout(root: root, slug: slug, member: $0) != nil }
+        return Set(refs + folders).filter { LeadTeam.nameProblem($0) == nil }.sorted()
+    }
+
+    /// Member `name`'s worktree of the task `slug`, when its folder is one: a real directory (not a symlink, which could
+    /// lead to another task's worktree) that git lists as a worktree of this repository on `agent/<slug>--<name>`. Nil
+    /// otherwise, whatever is there.
+    public static func memberCheckout(root: String, slug: String, member name: String) -> String? {
+        let member = memberSlug(slug, member: name)
+        let folder = path(root: root, slug: member)
+        var info = stat()
+        guard lstat(folder, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { return nil }
+        let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+        // Its parent resolved, its own name as it is: it's no symlink (above).
+        let expected = (real((folder as NSString).deletingLastPathComponent) as NSString).appendingPathComponent((folder as NSString).lastPathComponent)
+        let listed = Git.run(["worktree", "list", "--porcelain"], in: root)
+        guard listed.ok else { return nil }
+        var current: String?
+        for line in listed.output.components(separatedBy: "\n") {
+            if line.hasPrefix("worktree ") { current = String(line.dropFirst("worktree ".count)) }
+            if line == "branch refs/heads/\(branch(member))", let current, real(current) == expected { return folder }
+        }
+        return nil
+    }
+
+    /// What a member's worktree and branch hold that removing them would lose: its uncommitted files (untracked ones
+    /// included, ignored ones not), and the commits on its branch that neither `base`, the team branch, nor `merged`
+    /// (the team branch's head its merge took) holds: its part's commits the integrator didn't take.
+    public struct MemberWork: Equatable, Sendable {
+        public var name: String
+        public var branch: String
+        public var uncommitted: [Uncommitted]
+        public var untaken: [String]
+
+        /// "lexer (agent/x--lexer): uncommitted a.swift (modified); 2 commits not taken: 1a2b3c4d, 5e6f7a8b".
+        public var text: String {
+            var parts: [String] = []
+            if !uncommitted.isEmpty { parts.append("uncommitted " + uncommitted.map { "\($0.path) (\($0.state))" }.joined(separator: ", ")) }
+            if !untaken.isEmpty {
+                parts.append("\(untaken.count) commit\(untaken.count == 1 ? "" : "s") not taken: "
+                             + untaken.prefix(3).map { String($0.prefix(8)) }.joined(separator: ", ") + (untaken.count > 3 ? ", …" : ""))
+            }
+            return "\(name) (\(branch)): " + parts.joined(separator: "; ")
+        }
+    }
+
+    /// Each member of the task `slug` (`members`) whose worktree or branch holds work (`MemberWork`); a failure when
+    /// git can't say, so nothing is taken for lost.
+    public static func memberWork(root: String, slug: String, base: String, merged: String?, team: [String]? = nil) -> Swift.Result<[MemberWork], Failure> {
+        let teamBranch = "refs/heads/\(branch(slug))"
+        let keep = ["refs/heads/\(base)", teamBranch].filter { Git.run(["rev-parse", "--verify", "--quiet", $0], in: root).ok } + (merged.map { [$0] } ?? [])
+        var found: [MemberWork] = []
+        for name in members(root: root, slug: slug, team: team) {
+            let member = memberSlug(slug, member: name), memberBranch = branch(member)
+            var work = MemberWork(name: name, branch: memberBranch, uncommitted: [], untaken: [])
+            let folder = path(root: root, slug: member)
+            // Only in its own worktree: git status in anything else at that name (a leftover folder, a symlink to
+            // another task's worktree) would read that one's files.
+            if memberCheckout(root: root, slug: slug, member: name) != nil {
+                let status = Git.run(["status", "--porcelain=v2", "-z", "--untracked-files=all"], in: folder)
+                guard status.ok else { return .failure(Failure(description: "Can't read \(folder)'s uncommitted files: \(status.error)")) }
+                work.uncommitted = uncommitted(porcelain: status.output)
+            }
+            let ref = "refs/heads/\(memberBranch)"
+            if Git.run(["rev-parse", "--verify", "--quiet", ref], in: root).ok {
+                let listed = Git.run(["rev-list", ref, "--not"] + keep, in: root)
+                guard listed.ok else { return .failure(Failure(description: "Can't tell which of \(memberBranch)'s commits were taken: \(listed.error)")) }
+                work.untaken = listed.output.split(separator: "\n").map(String.init)
+            }
+            if !work.uncommitted.isEmpty || !work.untaken.isEmpty { found.append(work) }
+        }
+        return .success(found)
+    }
+
+    /// Removes every member's worktree and branch of the task `slug` (`members`), whatever they hold: the caller has
+    /// checked `memberWork` first. What still runs in a worktree is ended first, as `remove` does. Each is tried; the
+    /// ones that couldn't go are named in the failure. The names removed.
+    @discardableResult
+    public static func removeMembers(root: String, slug: String, team: [String]? = nil) throws -> [String] {
+        var removed: [String] = [], failed: [String] = []
+        for name in members(root: root, slug: slug, team: team) {
+            let member = memberSlug(slug, member: name), folder = path(root: root, slug: member)
+            if memberCheckout(root: root, slug: slug, member: name) == nil, (try? FileManager.default.attributesOfItem(atPath: folder)) != nil {
+                // Something else at its folder (a symlink, a folder git doesn't list on its branch): left as it is, its
+                // branch still removed below.
+                failed.append("\(folder) (it isn't \(name)'s worktree on \(branch(member)): left as it is)")
+            } else if FileManager.default.fileExists(atPath: folder) {
+                SessionStrays.endInside(folder: folder)
+                let gone = Git.run(["worktree", "remove", "--force", folder], in: root)
+                guard gone.ok else { failed.append("\(folder) (\(gone.error))"); continue }
+            }
+            if Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch(member))"], in: root).ok {
+                let deleted = Git.run(["branch", "-D", branch(member)], in: root)
+                guard deleted.ok else { failed.append("\(branch(member)) (\(deleted.error))"); continue }
+            }
+            removed.append(name)
+        }
+        guard failed.isEmpty else { throw Failure(description: "These couldn't be removed: " + failed.joined(separator: "; ")) }
+        return removed
     }
 }

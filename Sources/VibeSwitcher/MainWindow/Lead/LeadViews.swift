@@ -758,6 +758,8 @@ struct LeadTeamView: View {
     /// Changes whenever a line `summary` or `decisionSummary` gives may have (`TeamSummaryModel.version`): the lines are
     /// looked up again only then, or when the rows or decisions do (`Lines`). nil: on every draw (pictures).
     var linesVersion: Int?
+    /// The team tasks' walls, by task slug (`TeamWallReads`): their members' lines and Wall sections.
+    var walls: [String: [LeadWall.Post]] = [:]
     @State var lines = Lines()
     /// The rows accessibility sees (`TeamExposure`).
     @StateObject private var exposure = TeamExposure()
@@ -841,7 +843,7 @@ struct LeadTeamView: View {
         let lines = self.lines.lines(rows: rows, decisions: decisions, version: linesVersion, summary: summary, decisionSummary: decisionSummary)
         return TeamGlance(board: board, rows: rows, openable: Set(seen.keys), notices: notices, decisions: decisions, lines: lines.rows,
                           decisionLines: lines.decisions, openRows: openRows, showFinished: showFinished, openDecisions: openDecisions,
-                          showEarlier: showEarlier, clock: clock, open: open, answer: answer)
+                          showEarlier: showEarlier, clock: clock, open: open, answer: answer, walls: walls)
     }
 }
 
@@ -864,6 +866,8 @@ struct TeamGlance: View, Equatable {
     let clock: Date?
     let open: (String) -> Void
     let answer: (LeadQuestion, String) -> Void
+    /// The team tasks' walls, by task slug.
+    var walls: [String: [LeadWall.Post]] = [:]
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -871,7 +875,7 @@ struct TeamGlance: View, Equatable {
         // The same board, not a walk through an equal one's 200-odd tasks (see `LeadBoard.isSame`).
         a.board.isSame(as: b.board) && a.rows == b.rows && a.openable == b.openable && a.notices == b.notices && a.decisions == b.decisions
             && a.lines == b.lines && a.decisionLines == b.decisionLines && a.openRows == b.openRows && a.showFinished == b.showFinished
-            && a.openDecisions == b.openDecisions && a.showEarlier == b.showEarlier && a.clock == b.clock
+            && a.openDecisions == b.openDecisions && a.showEarlier == b.showEarlier && a.clock == b.clock && a.walls == b.walls
     }
 
     var body: some View {
@@ -916,7 +920,7 @@ struct TeamGlance: View, Equatable {
                     Text("Nothing on the board yet. Tell the lead what to build.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 TeamTaskList(rows: rows, now: now, summary: { lines[$0.id] }, canOpen: { openable.contains($0) }, open: open,
-                             openRows: openRows, showFinished: showFinished)
+                             walls: walls, openRows: openRows, showFinished: showFinished)
                     .padding(.horizontal, -8)
             }
         }

@@ -53,6 +53,8 @@ public final class HostedSession {
     private var lastView = ParserView.empty
     /// Whether its program asked for focus events (see `FocusEvents`), read off its output as it's read. On `queue`.
     private var focus = FocusEvents()
+    /// A Run-card shell's command, watched for its start and end in the output (`CommandCapture`): set while it runs.
+    private var capture: CommandCapture?
     public var focusEvents: Bool { focus.on }
     /// The queries its program asked and what of its parser's replies goes in, on Linux (see V2/ParserReplies.swift).
     var parserReplies = ParserReplies()
@@ -117,6 +119,15 @@ public final class HostedSession {
         parserOptions = parser
         self.timers = timers
         ring = OutputRing(capacity: ringCapacity)
+        if ShellTidy.reportsOutcome(info), info.commandEnd == nil, info.isLive { capture = CommandCapture() }
+    }
+
+    /// Feeds the command's capture what the session printed; once the command ended, records how (`info.commandEnd`).
+    private func captureOutput(_ chunk: Data, quietly: Bool = false) {
+        guard let capture, let end = capture.feed(chunk, at: Date()) else { return }
+        self.capture = nil
+        info.commandEnd = end
+        if !quietly { onChange?(info) }
     }
 
     /// The Mac: `$SHELL -l -i [-c command]`, an interactive login shell; Linux: a plain bash (see
@@ -207,6 +218,9 @@ public final class HostedSession {
             session.ring = nil
         } else {
             session.ring?.append(saved.output)
+            // The command's start and the output since are in the replay (unless the ring let them go: then its
+            // output isn't known, and the end says so).
+            session.captureOutput(saved.output, quietly: true)
             if let on = saved.focusEvents { session.focus = FocusEvents(on: on) } else { session.focus.feed(saved.output) }
             session.startParser(replay: saved.output)
         }
@@ -382,6 +396,7 @@ public final class HostedSession {
                 ring?.append(chunk)
                 focus.feed(chunk)
                 parserReplies.noteQueries(in: chunk)
+                captureOutput(chunk)
                 parser?.feed(chunk)
                 onOutput?(chunk)
                 if pausing, !exiting, let parser, parser.unparsed > Self.maxUnparsed { return pauseReading() }

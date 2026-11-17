@@ -492,7 +492,6 @@ FEATURES = {
         ("A lead's Team tab: tasks, decisions, scorecard, messages between leads", "MainWindow/Lead/TeamViews.swift", r"struct LeadTeamPane\b"),
         ("Brief Me (⇧⌘B): a spoken briefing across led projects, or one project's", "Briefing/BriefingViews.swift", r"struct BriefMeButton\b"),
         ("Statistics window", "Statistics/StatisticsView.swift", r"class StatisticsWindowController\b"),
-        ("Floating dots panel", "FloatingPanel.swift", r"class FloatingPanelController\b"),
         ("Menu bar popover: every session, switch, pause, rename", "PopoverView.swift", r"\.contextMenu"),
         ("Global hot key", "HotKey.swift", r"class HotKey\b"),
         ("Phone access: a web app for the phone over Tailscale", "PhoneAccess.swift", r"\S"),

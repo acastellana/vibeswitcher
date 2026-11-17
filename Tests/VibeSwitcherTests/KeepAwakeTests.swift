@@ -321,17 +321,25 @@ struct KeepAwakeTests {
         #expect(power.names == [Self.name] && awake.held == [Self.root])
     }
 
+    /// Again and again: `settle`'s block on the assertions' queue once held `awake` past the test's resume, so on a
+    /// loaded Mac `awake = nil` let go of it only when that thread got to, and its release came after the test's wait
+    /// (3 merges' runs in November 2026; 0.5 to 6 rounds in 100 on a busy Mac). Each round waits on the queue, not a time.
     @MainActor @Test func releasedWhenItGoes() async {
-        let power = FakePower()
-        var awake: KeepAwake? = KeepAwake(power: power)
-        awake?.mode = { .always }
-        awake?.update(working: [Self.root])
-        await Self.settle(awake!)
-        #expect(power.held.count == 1)
-        let assertions = awake!.assertions
-        awake = nil
-        await withCheckedContinuation { done in assertions.settled { done.resume() } }
-        #expect(power.held.isEmpty)
+        for round in 1...1000 {
+            let power = FakePower()
+            var awake: KeepAwake? = KeepAwake(power: power)
+            awake?.mode = { .always }
+            awake?.update(working: [Self.root])
+            await Self.settle(awake!)
+            #expect(power.held.count == 1, "round \(round)")
+            let assertions = awake!.assertions
+            awake = nil
+            await withCheckedContinuation { done in assertions.settled { done.resume() } }
+            guard power.held.isEmpty else {
+                Issue.record("round \(round): still held after KeepAwake went: \(power.held)")
+                return
+            }
+        }
     }
 
     /// powerd stuck around a sleep or a charging change, as it kept the power source's read 6.4 s on 2026-10-28: each
