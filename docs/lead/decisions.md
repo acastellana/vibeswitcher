@@ -459,3 +459,7 @@ The pre-registered rule (team-on-one-task-design.md §5) drops on more Important
 
 The user's answer to 9B2720A6 (2026-11-16). Reopening everything automatically would spend tokens and load the Mac without the user choosing to.
 
+## 2026-11-17 09:46:02 The config seal accepts a finished round of Claude Code's skill sync inside ~/.claude/skills/synced/ by itself (strict shape: manifest and round marker rewritten together, only under bucket folders with matching .bucket- markers, no symlinks). Every other change to the sealed config is still held for the user. Built as accept-claude-code-s, a security audit.
+
+The user chose it on 2026-11-17 (question 1EA6E8D7). The sync stalled every worker, audit and merge three times in a day, each time waiting on the user's click, and the changes were Claude Code's own bookkeeping.
+
