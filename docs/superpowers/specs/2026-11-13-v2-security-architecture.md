@@ -747,7 +747,12 @@ look); from the security follow-ups' item 29, `HooksStagingTests.aStagedProgramS
 refused before anything is renamed and nothing is sealed; one rewritten in place is taken out again after its rename,
 2026-11-16). Step 8's `switch` and `rollback` from the command line behind the typed code (the start plan's S8c, 2026-11-16):
 `SwitchTests.aSwitchWithNoTerminalIsRefused`, `SwitchTests.aSwitchHandsOverToTheInstalledBuildAndEverythingNamesIt`,
-`SwitchTests.theSwitchsReplyReachesTheCommandLineBeforeTheServerIsReplaced`.
+`SwitchTests.theSwitchsReplyReachesTheCommandLineBeforeTheServerIsReplaced`. The step 8 sweep (2026-11-17):
+`StartCommandTests.aRecordedProcessThatFakesTheHostIsNeitherTrustedNorSignalled`,
+`ProcessesTests.theLocksListIsReadByDeviceAndInode` (a detached node's record is honoured only for the process holding
+the host's lock by an exclusive flock), `StartCommandTests.aNodeWithoutSystemdRunsInASessionOfItsOwnAndStopEndsIt`
+(stop ends only the record it showed), `ServerCheckTests.theUsersNodeRootIsTheAccountsWhateverHomeSays` (the user's
+node is reached under the account's root, whatever HOME says), `StartCommandTests.aRunningNodeRefusesTheFlagsOnlyAStartApplies`.
 
 **Tests to write:** none left: Step 8's are under Held by.
 
@@ -1586,7 +1591,11 @@ no change, except in the lead's accepted hooks, where only GitGuard's baseline o
 flag, read as GitGuard reads the record, is no change; a scratch home's seal reads nothing outside it; a worker's start
 doesn't hold its team; 2026-11-16, with the review of S7; and, the security follow-ups' items 23 and 24: in the
 roles' launch folders only a launch the vault recorded comes, and a folder unreadable mid-walk or a folder's mode
-changed holds the team);
+changed holds the team); `LinuxSealListTests.aScopeComingAndGoingInTheManagersRuntimeUnitsIsNoChange` (the step 8
+sweep, 2026-11-17: an app's scope file in the manager's `transient` folder comes and goes; anything else there holds);
+`HostHardeningTests.theNodesShellAndLocaleNeverComeFromTheManager` (the step 8 sweep: the `--node` host's `SHELL`,
+`USER` and `LOGNAME` from the user database, a locale naming a path dropped);
+`StartCommandTests.aDetachedStartRefusesAUmaskThatLetsOthersWrite` (the step 8 sweep);
 `SwitchTests.aRunningToolServerKeepsItsBuildAcrossASwitch`, `SwitchTests.aToolServerStartedAfterASwitchIsTheNewBuilds`,
 `SwitchTests.aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild` (the start plan's S8c: a running tool server keeps its
 build, one started after the switch is the new build's, and a worker a pre-switch lead starts keeps the old build's
@@ -1710,7 +1719,9 @@ snapshot's in a home shaped like the node's too), `RealClaudeTests.theStartupFil
 (bash's own rules in Claude Code's shapes, ungated); the engine's E4: `LeadStartTests.theLeadGetsNoCodexWorkers`,
 `LeadStartTests.aLeadIsLaunchedByClaudesResolvedPath`, `LeadStartTests.aClaudeFoundOnlyThroughALoginShellIsRefused`,
 `LeadStartTests.theLeadsLaunchSettingsAreInline`, `RoleProgramTests.aWorkersProgramIsTheLeadsResolvedClaudeNotTheSettings`,
-`LaunchPreflightTests.aProgramFoundOnlyThroughALoginShellIsMissingOnLinux` (the tool server's probe as sessions start).
+`LaunchPreflightTests.aProgramFoundOnlyThroughALoginShellIsMissingOnLinux` (the tool server's probe as sessions start);
+`SessionEnvironmentTests.theCommandFolderNeverComesBeforeRootsFolders` (the step 8 sweep, 2026-11-17: the build's
+command folder last on a session's PATH, after root's folders).
 
 **Tests to write:** After the bootstrap:
 `GitGuardTests.aChangedHooksCopyIsRefused`.
