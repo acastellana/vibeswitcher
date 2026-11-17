@@ -18,11 +18,11 @@ struct HeartbeatTests {
         let two = clock.every(2) { twos.append(seconds()) }
         let three = clock.every(3) { threes.append(seconds()) }
         var wakes = 0
-        runMainLoop(until: started.addingTimeInterval(6.6)) {
+        runMainLoop(at: [(started.addingTimeInterval(6.6), {
             wakes = clock.wakes
             two.cancel()
             three.cancel()
-        }
+        })])
         // On a loaded Mac a wake can come late (and a second be skipped), never early or extra.
         #expect(wakes <= 4, "woke \(wakes) times in 6 s")
         #expect(twos.allSatisfy { $0 % 2 == 0 } && threes.allSatisfy { $0 % 3 == 0 }, "every 2 s at \(twos), every 3 s at \(threes)")
@@ -35,31 +35,35 @@ struct HeartbeatTests {
         let started = Date()
         let five = clock.every(5) { fives += 1 }
         var one: Heartbeat.Subscription?
-        runMainLoop(until: started.addingTimeInterval(1.5)) { one = clock.every(1) { ones += 1 } }
-        var onesSeen = 0, fivesSeen = 0
-        runMainLoop(until: started.addingTimeInterval(4.1)) {
-            onesSeen = ones
-            fivesSeen = fives
-            one?.cancel()
-        }
+        var onesSeen = 0, fivesSeen = 0, fivesLater = 0
+        runMainLoop(at: [
+            (started.addingTimeInterval(1.5), { one = clock.every(1) { ones += 1 } }),
+            (started.addingTimeInterval(4.1), {
+                onesSeen = ones
+                fivesSeen = fives
+                one?.cancel()
+            }),
+            (started.addingTimeInterval(5.6), {
+                fivesLater = fives
+                five.cancel()
+            }),
+        ])
         #expect(onesSeen >= 1 && onesSeen <= 3, "every 1 s: \(onesSeen) times in 2.6 s")
         #expect(fivesSeen == 0)
-        runMainLoop(until: started.addingTimeInterval(5.6)) {
-            fivesSeen = fives
-            five.cancel()
-        }
-        #expect(fivesSeen == 1)
+        #expect(fivesLater == 1)
     }
 
-    /// Runs the main run loop until `deadline`, where `atDeadline` runs from a timer on that loop (in every mode the
-    /// clock's own timer runs in), then returns.
-    @MainActor private func runMainLoop(until deadline: Date, _ atDeadline: @escaping () -> Void) {
-        var done = false
-        let timer = Timer(fire: deadline, interval: 0, repeats: false) { _ in
-            MainActor.assumeIsolated { atDeadline() }
-            done = true
+    /// Runs the main run loop until each moment's action has run, from a timer on that loop (in every mode the clock's
+    /// own timer runs in), all of them set before it spins: a nested spin that holds one `run(until:)` call still fires
+    /// them on time, in order with the clock's wakes.
+    @MainActor private func runMainLoop(at moments: [(Date, () -> Void)]) {
+        var left = moments.count
+        for (date, action) in moments {
+            RunLoop.main.add(Timer(fire: date, interval: 0, repeats: false) { _ in
+                MainActor.assumeIsolated { action() }
+                left -= 1
+            }, forMode: .common)
         }
-        RunLoop.main.add(timer, forMode: .common)
-        while !done { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        while left > 0 { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
     }
 }
