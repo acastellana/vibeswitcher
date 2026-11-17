@@ -295,6 +295,37 @@ struct LinuxSealListTests {
         #expect(LinuxSealList.cameOrWent(key: binKey, recorded: was, now: ConfigSeal.hashes(of: [bin])) == nil)
     }
 
+    /// A folder under a folder of `.entries` that can't be listed carries the `unreadablePrefix` entry: what's under it
+    /// is unseen, so a read with it on either side is judged as ever, even where the rest only came or went (here a
+    /// new folder that is unlistable from the start, so no mode recorded before changes).
+    @Test(Self.linux) func anUnlistableFolderInAnEntriesFolderIsJudgedAsEver() throws {
+        let home = try home()
+        let snapshots = home + "/.claude/shell-snapshots"
+        try write("one\n", snapshots + "/snapshot-bash-1-a.sh")
+        let item = try #require(LinuxSealList.watched(home: home, uid: getuid()).first { $0.name == "~/.claude/shell-snapshots" })
+        let key = ConfigSeal.keyPrefix + item.name
+        let recorded = ConfigSeal.hashes(of: [item])
+        try FileManager.default.createDirectory(atPath: snapshots + "/sub", withIntermediateDirectories: false)
+        try write("hidden\n", snapshots + "/sub/planted.sh")
+        try #require(chmod(snapshots + "/sub", 0) == 0)
+        defer { chmod(snapshots + "/sub", 0o700) }
+        let unlistable = ConfigSeal.hashes(of: [item])
+        let entries = ConfigSeal.decode(unlistable[ConfigSeal.keysKey(of: key)] ?? "")
+        #expect(entries[LinuxSealList.unreadablePrefix + "sub"] != nil, "\(entries.keys.sorted())")
+        #expect(LinuxSealList.cameOrWent(key: key, recorded: recorded, now: unlistable) == nil, "unlistable now")
+        // Recorded so, and then gone: only an entry went, but what was under it was never seen.
+        try #require(chmod(snapshots + "/sub", 0o700) == 0)
+        try FileManager.default.removeItem(atPath: snapshots + "/sub")
+        let gone = ConfigSeal.hashes(of: [item])
+        #expect(LinuxSealList.cameOrWent(key: key, recorded: unlistable, now: gone) == nil, "unlistable when recorded")
+        // The same steps with the folder listable: no change.
+        try write("seen\n", snapshots + "/sub/planted.sh")
+        let listable = ConfigSeal.hashes(of: [item])
+        #expect(LinuxSealList.cameOrWent(key: key, recorded: recorded, now: listable) != nil)
+        try FileManager.default.removeItem(atPath: snapshots + "/sub")
+        #expect(LinuxSealList.cameOrWent(key: key, recorded: listable, now: ConfigSeal.hashes(of: [item])) != nil)
+    }
+
     /// The manager's runtime units folder (`/run/user/<uid>/systemd/transient`, read under a scratch root): a scope's
     /// unit file an app's start writes and its exit removes (a browser's, measured on the node 2026-11-17) comes and
     /// goes as no change; a service, a drop-in folder, a hidden or deeper file, or a scope changed in place is held.
@@ -600,7 +631,8 @@ struct LinuxSealVaultTests: LeadTeamFixture {
     }
 
     /// A watched folder made unreadable mid-walk (`chmod 000`) hides what's under it: held, as a cut read is, not
-    /// taken as its entries gone.
+    /// taken as its entries gone. (Here the mode in its folder's line changes too, which alone holds it: the
+    /// `unreadablePrefix` entry is checked on its own by `anUnlistableFolderInAnEntriesFolderIsJudgedAsEver`.)
     @Test(LinuxSealListTests.linux) func aWatchedSubfolderMadeUnreadableHoldsTheTeam() throws {
         let hooks = home + "/.vibeswitcher/lead/git-hooks"
         try LinuxSealListTests.baseline(in: hooks, store: "0123456789abcdef", hooks: ["pre-commit"])
