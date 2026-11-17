@@ -58,8 +58,8 @@ struct ClaudeStoresTests {
                                             start: "Go.", server: "/App/vibeswitcher-mcp", name: name, records: "docs/lead",
                                             folder: temp.url("run-\(name)"), cwd: role == .lead ? h.root : h.cwd,
                                             temporary: temp.url("session-tmp"), home: h.home)
-        let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
-        return try #require((settings?["permissions"] as? [String: Any])?["deny"] as? [String])
+        let settings = try LaunchArguments.json("--settings", in: launch.command)
+        return try #require((settings["permissions"] as? [String: Any])?["deny"] as? [String])
     }
 
     /// Whether a Read rule in `rules` matches `path` (`~/…`, or absolute: a rule's `//…`), as Claude Code's gitignore-style

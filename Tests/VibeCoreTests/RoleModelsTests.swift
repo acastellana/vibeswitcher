@@ -17,11 +17,21 @@ extension LeadAdvanceTests {
         return (launch.command, launch)
     }
 
-    /// The command line `prepare` writes, with its files' paths: what each role's launch is pinned to.
-    func expected(_ launch: LeadLaunch.Prepared, base: String = "claude", tail: String) -> String {
+    /// The command line `prepare` writes, with its files' paths: what each role's launch is pinned to. On v2 the
+    /// permission mode is named before `--name` on both systems (`LinuxLaunch.permissionMode`); and where a role's
+    /// settings go inline (Linux, `LinuxLaunch.inline`), no file is named: the three values, as the command carries
+    /// them (what they hold is LeadLaunchTests'), come last before the start, after everything `tail` pins.
+    func expected(_ launch: LeadLaunch.Prepared, base: String = "claude", tail: String) throws -> String {
         let quote = RecentProjects.shellQuote
-        return "\(base) --append-system-prompt-file \(quote(launch.promptFile)) --mcp-config \(quote(launch.mcpFile)) --settings \(quote(launch.settingsFile)) "
-            + "--name 'n' \(tail)-- 'go'"
+        let named = "--permission-mode auto --name 'n' \(tail)"
+        guard Platform.Tools.roleSettingsInline else {
+            return "\(base) --append-system-prompt-file \(quote(launch.promptFile)) --mcp-config \(quote(launch.mcpFile)) --settings \(quote(launch.settingsFile)) "
+                + named + "-- 'go'"
+        }
+        let inline = try ["--mcp-config", "--settings", "--append-system-prompt"].map { flag in
+            "\(flag) \(quote(try #require(LaunchArguments.value(flag, in: launch.command), "no \(flag) in \(launch.command.prefix(300))")))"
+        }
+        return "\(base) " + named + inline.joined(separator: " ") + " -- 'go'"
     }
 
     @Test func theLeadsAPlainTasksAndAHardTasksCommandLinesArePinned() throws {
@@ -31,12 +41,12 @@ extension LeadAdvanceTests {
         let leadRun = LeadLaunch.leadRun(workflow, defaultModel: "opus", fableHeldBack: false)
         #expect(leadRun == LeadLaunch.Run(model: "fable"))
         let lead = try prepared(.lead, task: nil, run: leadRun)
-        #expect(lead.command == expected(lead.files, tail: "--model 'fable' "), "\(lead.command)")
+        #expect(lead.command == (try expected(lead.files, tail: "--model 'fable' ")), "\(lead.command)")
         // A lead set to Opus: Fable as its advisor.
         let onOpus = LeadWorkflow.parse("---\nlead_model: opus\n---\n")
         let opusRun = LeadLaunch.leadRun(onOpus, defaultModel: "opus", fableHeldBack: false)
         let opusLead = try prepared(.lead, task: nil, run: opusRun)
-        #expect(opusLead.command == expected(opusLead.files, tail: "--model 'opus' --advisor 'fable' "), "\(opusLead.command)")
+        #expect(opusLead.command == (try expected(opusLead.files, tail: "--model 'opus' --advisor 'fable' ")), "\(opusLead.command)")
         // lead_advisor none: Opus alone.
         #expect(LeadLaunch.leadRun(LeadWorkflow.parse("---\nlead_model: opus\nlead_advisor: none\n---\n"), defaultModel: nil, fableHeldBack: false)
                 == LeadLaunch.Run(model: "opus"))
@@ -46,25 +56,25 @@ extension LeadAdvanceTests {
         let plainRun = LeadLaunch.workerRun(plain, workflow: workflow, codex: false, defaultModel: "opus", fableHeldBack: false)
         #expect(plainRun == LeadLaunch.Run())
         let worker = try prepared(.worker, run: plainRun)
-        #expect(worker.command == expected(worker.files, tail: ""), "\(worker.command)")
+        #expect(worker.command == (try expected(worker.files, tail: "")), "\(worker.command)")
         // A task marked hard (advisor fable): Fable advises its Opus worker, at effort high.
         plain.advisor = "fable"
         let hardRun = LeadLaunch.workerRun(plain, workflow: workflow, codex: false, defaultModel: "opus", fableHeldBack: false)
         #expect(hardRun == LeadLaunch.Run(advisor: "fable", effort: "high"))
         let hard = try prepared(.worker, run: hardRun)
-        #expect(hard.command == expected(hard.files, tail: "--advisor 'fable' --effort 'high' "), "\(hard.command)")
+        #expect(hard.command == (try expected(hard.files, tail: "--advisor 'fable' --effort 'high' ")), "\(hard.command)")
         // Its own effort wins over high.
         plain.effort = "xhigh"
         #expect(LeadLaunch.workerRun(plain, workflow: workflow, codex: false, defaultModel: "opus", fableHeldBack: false).effort == "xhigh")
         // The project's command's own --model, --advisor and --effort give way to the ones passed.
         let given = try prepared(.worker, base: "claude --advisor opus --effort=low --model sonnet", run: LeadLaunch.Run(model: "opus", advisor: "fable", effort: "high"))
-        #expect(given.command == expected(given.files, tail: "--model 'opus' --advisor 'fable' --effort 'high' "), "\(given.command)")
+        #expect(given.command == (try expected(given.files, tail: "--model 'opus' --advisor 'fable' --effort 'high' ")), "\(given.command)")
         // With no advisor passed, the command's own --advisor goes too: the workflow keys and the task decide advisors,
         // so a command's `--advisor fable` can't reach a session Fable is held back from or one whose task says none.
         let none = try prepared(.worker, base: "claude --advisor fable", run: LeadLaunch.Run())
-        #expect(none.command == expected(none.files, tail: ""), "\(none.command)")
+        #expect(none.command == (try expected(none.files, tail: "")), "\(none.command)")
         let lead2 = try prepared(.lead, base: "claude --advisor=fable --model fable", task: nil, run: LeadLaunch.Run(model: "opus"))
-        #expect(lead2.command == expected(lead2.files, tail: "--model 'opus' "), "\(lead2.command)")
+        #expect(lead2.command == (try expected(lead2.files, tail: "--model 'opus' ")), "\(lead2.command)")
     }
 
     @Test func anAdvisorBelowItsMainModelIsDroppedAndWorkerAdvisorAppliesToTasksThatSetNone() {

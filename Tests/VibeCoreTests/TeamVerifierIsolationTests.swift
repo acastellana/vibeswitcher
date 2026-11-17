@@ -6,12 +6,9 @@ import Testing
 /// verifier gets no post text in its prompt or tools, and its Read is denied the members' Claude Code transcript
 /// folders, where delivered posts sit; a plain task's verifier keeps today's rules.
 extension LeadFindingsToolTests {
-    /// The settings file the last session started as `name` was given.
+    /// The settings the last session started as `name` was given (a file's on the Mac, on its command line on Linux).
     func settings(of name: String, _ runtime: FakeRuntime) throws -> [String: Any] {
-        let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
-        let range = try #require(spawn.command.range(of: #"--settings '([^']+)'"#, options: .regularExpression))
-        let path = String(spawn.command[range].dropFirst("--settings '".count).dropLast())
-        return try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any])
+        try LaunchArguments.json("--settings", in: LaunchArguments.command(name, runtime))
     }
 
     static let posts = ["the picker hands back a closure named onPickZebra, not a delegate",
@@ -93,8 +90,8 @@ struct TeamVerifierLaunchTests {
     }
 
     func deny(_ launch: LeadLaunch.Prepared) throws -> [String] {
-        let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
-        return try #require((settings?["permissions"] as? [String: Any])?["deny"] as? [String])
+        let settings = try LaunchArguments.json("--settings", in: launch.command)
+        return try #require((settings["permissions"] as? [String: Any])?["deny"] as? [String])
     }
 
     func prepare(_ role: LeadLaunch.Role, root: String, task: String) throws -> LeadLaunch.Prepared {

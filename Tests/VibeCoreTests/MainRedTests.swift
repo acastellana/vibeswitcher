@@ -234,10 +234,8 @@ extension MergeBatchTests {
     /// A worker started while main is red has the line in its brief (but the fix's own worker); one started when it's
     /// green doesn't.
     @Test func aWorkerStartedWhileMainIsRedHasItInItsBrief() throws {
-        let (root, _, lead) = try team(["auto_advance": false])
-        let brief = { (slug: String) in
-            try String(contentsOf: vault.runFolder(root: root, name: "worker-\(slug)").appendingPathComponent("prompt.md"), encoding: .utf8)
-        }
+        let (root, runtime, lead) = try team(["auto_advance": false])
+        let brief = { (slug: String) in try LaunchArguments.prompt(of: "worker-\(slug)", runtime) }
         _ = try running(lead, root: root, ["while-green"])
         #expect(!(try brief("while-green")).contains("Main red:"))
 

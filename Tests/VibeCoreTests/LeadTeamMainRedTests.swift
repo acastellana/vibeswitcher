@@ -23,7 +23,7 @@ extension LeadTakePartTests {
     }
 
     func brief(_ team: Team, _ name: String) throws -> String {
-        try String(contentsOf: vault.runFolder(root: team.root, name: name).appendingPathComponent("prompt.md"), encoding: .utf8)
+        try LaunchArguments.prompt(of: name, team.runtime)
     }
 
     // MARK: Main red and green

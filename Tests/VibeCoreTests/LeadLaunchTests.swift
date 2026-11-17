@@ -287,15 +287,17 @@ struct LeadLaunchTests {
         return rules
     }
 
-    /// The Mac's rules are the ones at 47636aaf, the commit stage 2's plan starts from, for each role (each list's
-    /// SHA-256, its rules one a line): Linux's are added only where `Platform.Tools.roleDenyRules` has them, at the
-    /// end. The rules both systems give are checked on both.
+    /// The Mac's rules are main's, for each role (each list's SHA-256, its rules one a line): Linux's are added only
+    /// where `Platform.Tools.roleDenyRules` has them, at the end. The rules both systems give are checked on both.
+    /// Recorded at 47636aaf, the commit stage 2's plan starts from, and again at each merge of main that changes a list:
+    /// last at the merge of 2026-11-17 (main at d2277773: `claudeHome`, `claudeStores`, the restart record and the
+    /// rest), where `LeadLaunch.swift` differs from main's only by v2's hook lines.
     @Test func theMacsDenyRulesAreTodays() throws {
         let recorded: [String: String] = [
-            "lead": "f9a8bf505bc2a335acb239622cf0575f47bb40cfbf032c2f22585acd8dee016d",
-            "worker-project-lead-docs/lead": "03a8e95f7c38fb3af67648cfab7bad491c015e4394cb861d46a8b0aedcbe6de7",
-            "worker": "59c6eea671ff14ce0e2791c28cc9dd447fdddeb84ba7576572f6df80e8ba64e1",
-            "verifier-project-lead-docs/lead": "8f05b04170bc7cfbd8e435b7546bb18860ab1b0eccf337e5d76dc3fa2e2d51ee",
+            "lead": "8aa0892f62467afbb4b278588d28357e30655deb2ac458c93b8227dfbbe21b90",
+            "worker-project-lead-docs/lead": "b2ffd091342d22012c4c7e2381e78d71159b141bf183959b715efc41e5ea7b1a",
+            "worker": "332a225d45b98e9119ee677a7b4e83e9a5015a1e67fd4355beab05b8be906b08",
+            "verifier-project-lead-docs/lead": "64380195e9b87b14dc3d567c7d06a3c5d3288adc3449f6ab3c8254693fd7c88d",
         ]
         let shapes: [(LeadLaunch.Role, String?, String?)] = [(.lead, nil, nil), (.worker, "project-lead", "docs/lead"), (.worker, nil, nil),
                                                               (.verifier, "project-lead", "docs/lead")]

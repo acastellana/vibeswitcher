@@ -35,9 +35,7 @@ struct LeadSplitTests: LeadTeamFixture {
     }
 
     func task(_ root: String) -> LeadTask? { BoardStore(root: root).load().task("build-it") }
-    func prompt(_ root: String, _ name: String) throws -> String {
-        try String(contentsOf: vault.runFolder(root: root, name: name).appendingPathComponent("prompt.md"), encoding: .utf8)
-    }
+    func prompt(_ runtime: FakeRuntime, _ name: String) throws -> String { try LaunchArguments.prompt(of: name, runtime) }
 
     /// A lead with a team task `build-it` of `parts` (core the integrator), its integrator started; `settings` configured
     /// first.
@@ -71,7 +69,7 @@ struct LeadSplitTests: LeadTeamFixture {
         #expect(Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree).output == "agent/build-it")
         let integrator = try #require(task(root)?.worker)
         #expect(task(root)?.team?.first?.worker == integrator)
-        let brief = try prompt(root, "worker-build-it")
+        let brief = try prompt(runtime, "worker-build-it")
         #expect(brief.contains("branch agent/build-it, and nowhere else"))
         #expect(brief.contains("you are core, the integrator") && brief.contains("call `split`") && brief.contains("CORE-PART"))
         #expect(brief.contains("- ui: UI-PART") && brief.contains("- docs: DOCS-PART"))
@@ -103,7 +101,7 @@ struct LeadSplitTests: LeadTeamFixture {
         #expect(!seat.call("progress", ["text": "interface in"]).isError)
 
         // A member's brief: its own part, its own branch, the integrator's name; no other member's part.
-        let uiBrief = try prompt(root, "worker-build-it--ui")
+        let uiBrief = try prompt(runtime, "worker-build-it--ui")
         #expect(uiBrief.contains("branch agent/build-it--ui, and nowhere else"))
         #expect(uiBrief.contains("you are ui, a member") && uiBrief.contains("core is its integrator") && uiBrief.contains("UI-PART"))
         #expect(uiBrief.contains("It's built") && uiBrief.contains("swift test passes"))
@@ -136,7 +134,7 @@ struct LeadSplitTests: LeadTeamFixture {
         let plain = try seat("worker-plain", runtime)
         #expect(plain.tools.map(\.name) == ["report", "ask_lead", "progress", "answer_findings"])
         #expect(plain.call("split", [:]).isError)
-        #expect(!(try prompt(root, "worker-plain")).contains("Team task"))
+        #expect(!(try prompt(runtime, "worker-plain")).contains("Team task"))
 
         // Uncommitted changes in the integrator's worktree: refused, nothing branched.
         let worktree = Worktrees.path(root: root, slug: "build-it")
@@ -273,7 +271,7 @@ struct LeadSplitTests: LeadTeamFixture {
         #expect(runtime.spawned.count == 2 && runtime.spawned[1].cwd == Worktrees.path(root: root, slug: "build-it"))
         #expect(task(root)?.worker == runtime.spawned[1].id && task(root)?.team?.first?.worker == runtime.spawned[1].id)
         #expect(task(root)?.team?.dropFirst().allSatisfy { $0.worker == nil } == true)
-        #expect(try prompt(root, "worker-build-it").contains("The team is split already"))
+        #expect(try prompt(runtime, "worker-build-it").contains("The team is split already"))
     }
 
     /// Members run on Claude, whatever the task's agent: their brief has no Codex part.
@@ -286,7 +284,7 @@ struct LeadSplitTests: LeadTeamFixture {
         #expect(!members.isError, "\(members.text)")
         let ui = try #require(task(root)?.teamMember("ui")?.worker)
         #expect(runtime.agents[ui] == "claude")
-        #expect(!(try prompt(root, "worker-build-it--ui")).contains("You run in the Codex CLI"))
+        #expect(!(try prompt(runtime, "worker-build-it--ui")).contains("You run in the Codex CLI"))
     }
 
     /// add_task's and update_task's team: checked as LeadTeam.make checks it, and only before a split.
