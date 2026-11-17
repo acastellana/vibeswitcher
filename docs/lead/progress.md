@@ -3588,3 +3588,4 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 13:32 Released explainer-video-add-the-2's worker (idle since its done report on 06ff1751) while its audit runs
 - 2026-11-17 13:32 Automatically (auto_advance): Released explainer-video-add-the-2's worker, idle since its done report on 06ff1751, while its audit runs (ended pid 61296 (Worker: Explainer video: add the update check and the skill-sync auto-accept)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-17 13:36 Audit of explainer-video-add-the-2: complete, clean
+- 2026-11-17 13:50 Merged explainer-video-add-the-2: Explainer video: add the update check and the skill-sync auto-accept (build 9e4f85a8ba8c)
