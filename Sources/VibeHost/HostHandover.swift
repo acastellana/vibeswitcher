@@ -155,7 +155,7 @@ public enum HostHandover {
 
     /// Runs `executable --handover-probe path` and waits (up to `timeout`) for it to say it can take over. Blocks: not on
     /// the server's queue.
-    static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit) throws {
+    static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit, time: MacTime = .real) throws {
         var pipe: [Int32] = [-1, -1]
         guard Darwin.pipe(&pipe) == 0 else { throw Failure.probe("no pipe") }
         defer { Darwin.close(pipe[0]) }
@@ -184,9 +184,9 @@ public enum HostHandover {
         _ = fcntl(pipe[0], F_SETFL, fcntl(pipe[0], F_GETFL) | O_NONBLOCK)
         var output = Data()
         var status: Int32 = 0
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = time.wall().addingTimeInterval(timeout)
         while waitpid(pid, &status, WNOHANG) == 0 {
-            guard Date() < deadline else {
+            guard time.wall() < deadline else {
                 kill(pid, SIGKILL)
                 waitpid(pid, &status, 0)
                 throw Failure.probe("it didn't answer")

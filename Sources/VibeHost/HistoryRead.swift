@@ -35,7 +35,7 @@ final class HistoryRead {
             let interval = max(0.05, min(1, options.stallLimit / 4))
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.setEventHandler {
-                guard case (true, let since)? = self.link?.busy, Date().timeIntervalSince(since) > options.stallLimit else { return }
+                guard let waited = self.link?.stalledFor, waited > options.stallLimit else { return }
                 self.finish(nil)
             }
             timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(Int(interval * 250)))

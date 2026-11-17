@@ -233,7 +233,8 @@ public final class HostedSession {
 
     /// A parser for this session, rebuilt from `replay` (fed quietly), and the watchdog over it.
     private func startParser(replay: Data) {
-        guard let link = ParserLink.start(launcher: launcher, cols: info.cols, rows: info.rows, options: parserOptions, queue: queue) else {
+        guard let link = ParserLink.start(launcher: launcher, cols: info.cols, rows: info.rows, options: parserOptions, queue: queue,
+                                          time: timers.time) else {
             onParserTrouble?("couldn't start a parser: its screen is the last one shown")
             return
         }
@@ -302,12 +303,11 @@ public final class HostedSession {
     /// Output or a request waiting on the parser for longer than `ParserOptions.stallLimit`, with no progress: it's
     /// stalled. A parser with nothing to do: the watchdog stops until it has.
     private func checkParser() {
-        guard let parser, case (true, let since) = parser.busy else {
+        guard let parser, let waited = parser.stalledFor else {
             watchdog?.cancel()
             watchdog = nil
             return
         }
-        let waited = Date().timeIntervalSince(since)
         guard waited > parserOptions.stallLimit else { return }
         replaceParser(parser, because: "stalled for \(String(format: "%.1f", waited)) s")
     }
@@ -909,6 +909,8 @@ struct SessionTimers {
     enum Purpose { case exitPoll, parserWatchdog, exitingCheck }
     /// A timer for `purpose` firing its handler on the queue.
     var make: (Purpose, DispatchQueue, @escaping () -> Void) -> SessionTimer
+    /// The clock the parser's watchdog measures a stall with.
+    var time: MacTime = .real
 
     static let dispatch = SessionTimers { _, queue, fire in DispatchSessionTimer(queue: queue, fire: fire) }
 }
