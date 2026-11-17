@@ -142,8 +142,8 @@ struct WebSecurityTests {
         let authed = try rig.upgraded()
         try authed.sendText(#"{"v":1,"id":"0","kind":"auth","args":{"token":"\#(issued.token)","client":"test"}}"#)
         #expect(try authed.nextFrame()?.json?["kind"]?.string == "hello")
-        rig.clock.advance(4.9)
-        rig.clock.advance(1.2)
+        rig.clock.advance(4)
+        rig.clock.advance(2)
         let frames = try idle.framesUntilClosed()
         #expect(frames.count == 2, "\(frames)")
         #expect(frames.first?.json?["code"]?.string == "auth", "\(frames)")
@@ -231,13 +231,13 @@ struct WebSecurityTests {
 final class WebSecurityRig: @unchecked Sendable {
     let access: WebAccess
     let handler: RecordingHandler
-    let clock: ManualClock
+    let clock: WebTestTime
     let listener: WebListenerUnderTest
     private let notes: Locked<[String]>
     let now: Date
 
     init(_ scratch: Scratch) throws {
-        let notes = Locked<[String]>([]), handler = RecordingHandler(), clock = ManualClock()
+        let notes = Locked<[String]>([]), handler = RecordingHandler(), clock = WebTestTime()
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let note: @Sendable (String) -> Void = { line in notes.mutate { $0.append(line) } }
         let access = WebAccess(tokens: WebTokens(root: scratch.url("web-root")), now: { now }, note: note)
@@ -246,15 +246,11 @@ final class WebSecurityRig: @unchecked Sendable {
     }
 
     /// The node's listener on 127.0.0.1 and a port the kernel picks, serving no file, its `hello` the web's shape (the
-    /// rights, the voice), on `clock` (a `NodeClock` the test moves).
-    static func listener(gate: WebGate, handler: WebSocketHandler, clock: ManualClock,
+    /// rights, the voice), on `clock` (the test moves it a second at a time, as the node's clock beats).
+    static func listener(gate: WebGate, handler: WebSocketHandler, clock: WebTestTime,
                          note: @escaping @Sendable (String) -> Void) throws -> WebListenerUnderTest {
         let queue = DispatchQueue(label: "web-security-tests")
-        let ticks = NodeClock(queue: queue, now: { clock.now }) { seconds, fire in
-            clock.schedule(seconds, fire)
-            return {}
-        }
-        let web = NodeWebListener(port: 0, assets: NoAssets(), gate: gate, handler: handler, queue: queue, clock: ticks,
+        let web = NodeWebListener(port: 0, assets: NoAssets(), gate: gate, handler: handler, queue: queue, clock: clock.clock(),
                                   hello: { admission in
                                       NodeWire.line(NodeWire.Value.object([
                                           "v": .int(NodeWire.version), "kind": .string("hello"), "auth": admission.auth,

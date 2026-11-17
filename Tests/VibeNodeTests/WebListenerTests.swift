@@ -97,7 +97,8 @@ struct WebListenerTests {
             let answer = try world.exchange(entry.request)
             #expect(answer.head.hasPrefix("HTTP/1.1 \(entry.status)\r\n"), "\(entry.request.debugDescription) was answered \(answer.head.prefix(40))")
             #expect(answer.head.contains("\r\nX-Content-Type-Options: nosniff\r\n"))
-            #expect(answer.body == "\(entry.status)\n")
+            // A 421 says nothing (no name is this listener's but its own, the live wire contract's §1); the rest say their status.
+            #expect(answer.body == (entry.status.hasPrefix("421 ") ? "" : "\(entry.status)\n"))
         }
         #expect(try world.exchange("POST / HTTP/1.1\r\nHost: h\r\n\r\n").head.contains("\r\nAllow: GET\r\n"))
         // What is taken: a length of 0, a field's value with bytes over 127 (another site's cookie), a query.
