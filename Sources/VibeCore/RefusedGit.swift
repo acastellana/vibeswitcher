@@ -213,6 +213,12 @@ public enum RefusedGit {
     /// `home`: a `configHomes` variable the `find` running it was given, which a git it runs takes too.
     static func refusal(command words: [String], rules: Rules, budget: inout Int, depth: Int = 0, home: String? = nil) -> Refusal? {
         guard depth <= ShellWords.depthLimit else { return .unreadable }
+        // A short form's test the scanner split (`if [[ -n a && -n b ]] git …`, `=~ (a|b) ]] git …`): what follows its
+        // `]]` is read as a command too.
+        if let close = words.firstIndex(of: "]]"),
+           let refusal = refusal(command: Array(words[(close + 1)...]), rules: rules, budget: &budget, depth: depth + 1, home: home) {
+            return refusal
+        }
         var home = home
         var index = 0
         while index < words.count {
