@@ -10,6 +10,7 @@ enum HardenedHelper {
     static let variable = "VIBE_HARDENED_TEST_HELPER"
 
     static func serveIfAsked() {
+        NodeEnvironmentHelper.serveIfAsked()
         guard getenv(variable) != nil else { return }
         let line = "hardened \(Platform.ProcessSelf.harden())\n"
         _ = write(STDOUT_FILENO, line, line.utf8.count)
@@ -57,6 +58,69 @@ enum HardenedHelper {
         Sys.close(helper.stdin)
         var status: Int32 = 0
         while waitpid(helper.pid, &status, 0) < 0, errno == EINTR {}
+    }
+}
+
+/// A child of the test that runs `HostImages.startAsNode` as a `--node` host's first act does, with
+/// `NodeEnvironmentHelper.variable` naming a node root (whose `bin/vibeswitcher-server` is its own), then writes what
+/// it refused (or nothing) and its own environment after it, each a NUL-ended field, on its stdout, and ends. Never the
+/// test process itself, whose environment other tests read. Served from `HardenedHelper.serveIfAsked`'s hook.
+enum NodeEnvironmentHelper {
+    static let variable = "VIBE_NODE_ENVIRONMENT_TEST_HELPER"
+
+    static func serveIfAsked() {
+        guard let root = getenv(variable).map({ String(cString: $0) }) else { return }
+        unsetenv(variable)
+        let refused = HostImages.startAsNode(arguments: ["host", "--node", "--node-root", root, "--server", root + "/bin/vibeswitcher-server"])
+        var out = Array((refused ?? "").utf8) + [0]
+        var entry = environ
+        while let pointer = entry.pointee {
+            out += Array(String(cString: pointer).utf8) + [0]
+            entry += 1
+        }
+        var done = 0
+        while done < out.count {
+            let wrote = out.withUnsafeBytes { write(STDOUT_FILENO, $0.baseAddress! + done, out.count - done) }
+            if wrote < 0, errno == EINTR { continue }
+            if wrote <= 0 { break }
+            done += wrote
+        }
+        _exit(0)
+    }
+
+    /// Runs one with `environment` (and the variable naming `root`): what it refused, nil when nothing, and its
+    /// environment after `startAsNode`.
+    static func run(root: String, environment: [String: String]) throws -> (refused: String?, environment: [String: String]) {
+        let binary = try #require(Bundle.main.executablePath)
+        var output: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&output) == 0)
+        var spawn = Platform.Spawn(executable: binary, arguments: [binary])
+        spawn.environment = environment.map { "\($0.key)=\($0.value)" } + ["\(variable)=\(root)"]
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        spawn.stdout = .descriptor(output[1])
+        spawn.keep = []
+        let started = spawn.start()
+        Sys.close(output[1])
+        defer { Sys.close(output[0]) }
+        guard case .success(let pid) = started else { throw CancellationError() }
+        var said: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = read(output[0], &buffer, buffer.count)
+            if count < 0, errno == EINTR { continue }
+            if count <= 0 { break }
+            said += buffer[0..<count]
+        }
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+        let fields = said.split(separator: 0, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
+        let refused = fields.first.flatMap { $0.isEmpty ? nil : $0 }
+        var seen: [String: String] = [:]
+        for field in fields.dropFirst() where !field.isEmpty {
+            guard let equals = field.firstIndex(of: "=") else { continue }
+            seen[String(field[..<equals])] = String(field[field.index(after: equals)...])
+        }
+        return (refused, seen)
     }
 }
 
@@ -911,6 +975,27 @@ extension HostHardeningTests {
                 return (info.st_uid, info.st_mode, info.st_mode & S_IFMT == S_IFREG)
             }), "\(shell)")
         }
+    }
+
+    /// The step 8 sweep's review: `startAsNode` makes the `--node` host's own environment `nodeEnvironment`'s, so what
+    /// its sessions inherit (`SHELL`, `USER`, `LOGNAME`, the locale) is the user database's, not the manager's. Run in a
+    /// child (it changes the process's environment): a `SHELL` of the user's, `USER=root` and path-valued locale
+    /// variables are gone from that child's environment after it, a plain locale name kept.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's --node host; the Mac has none")) func aNodeHostsOwnEnvironmentIsTheUserDatabases() throws {
+        let dir = "\(shortScratchRoot)/vsne-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try FileManager.default.createDirectory(atPath: dir + "/node/bin", withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: dir + "/node/bin/vibeswitcher-server", contents: Data("server".utf8), attributes: [.posixPermissions: 0o755])
+        let given = ["HOME": dir + "/home", "PATH": "/usr/bin:/bin", "SHELL": dir + "/bash", "USER": "root", "LOGNAME": "root",
+                     "LANG": "C.UTF-8", "LC_ALL": "/x", "LANGUAGE": "../x", "LC_MESSAGES": dir + "/locale"]
+        let ran = try NodeEnvironmentHelper.run(root: dir + "/node", environment: given)
+        #expect(ran.refused == nil, "\(String(describing: ran.refused))")
+        let home = try #require(HostImages.accountHome)
+        #expect(ran.environment["HOME"] == home)
+        #expect(ran.environment["SHELL"] == HostImages.accountShell, "\(ran.environment)")
+        #expect(ran.environment["USER"] == HostImages.accountName && ran.environment["LOGNAME"] == HostImages.accountName, "\(ran.environment)")
+        #expect(ran.environment["LANG"] == "C.UTF-8")
+        for name in ["LC_ALL", "LANGUAGE", "LC_MESSAGES"] { #expect(ran.environment[name] == nil, "\(name): \(ran.environment)") }
     }
 
     /// With `--node-root` and `--image-path` naming different folders, the build's files are the node root's: its

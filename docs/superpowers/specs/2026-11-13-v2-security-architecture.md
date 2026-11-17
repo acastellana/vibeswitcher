@@ -1602,8 +1602,14 @@ roles' launch folders only a launch the vault recorded comes, and a folder unrea
 changed holds the team); `LinuxSealListTests.aScopeComingAndGoingInTheManagersRuntimeUnitsIsNoChange` (the step 8
 sweep, 2026-11-17: an app's scope file in the manager's `transient` folder comes and goes; anything else there holds);
 `HostHardeningTests.theNodesShellAndLocaleNeverComeFromTheManager` (the step 8 sweep: the `--node` host's `SHELL`,
-`USER` and `LOGNAME` from the user database, a locale naming a path dropped);
+`USER` and `LOGNAME` from the user database, a locale naming a path dropped), with
+`HostHardeningTests.aNodeHostsOwnEnvironmentIsTheUserDatabases` (its review: `startAsNode` run in a child, whose own
+environment is then read; failed with the host setting `HOME` alone);
 `StartCommandTests.aDetachedStartRefusesAUmaskThatLetsOthersWrite` (the step 8 sweep);
+`StartCommandTests.aStartWhileTheFirstWaitsForItsServerIsRefused` (its review: the start's lock held until the
+server answers, so a host that hasn't taken its own lock yet isn't replaced);
+`InstallTests.aFolderNoInstallRecordedIsRefusedNotAdopted` (its review: a folder at `<prefix>/<commit>` no install
+recorded is refused, not made current on its `build-info`'s word);
 `SwitchTests.aRunningToolServerKeepsItsBuildAcrossASwitch`, `SwitchTests.aToolServerStartedAfterASwitchIsTheNewBuilds`,
 `SwitchTests.aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild` (the start plan's S8c: a running tool server keeps its
 build, one started after the switch is the new build's, and a worker a pre-switch lead starts keeps the old build's
