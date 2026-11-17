@@ -312,7 +312,17 @@ extension InstallTests {
             case "$1" in
               auth) printf '%s\\n' '\(InstallScript.token)' ;;
               api) /bin/cat "$d/compare.json" ;;
-              run) /bin/cat "$d/runs.json" ;;
+              run)
+                # gh 2.45's own check (`gh run list --json` with no list prints these): an unknown field is exit 1.
+                fields=""; prev=""
+                for a in "$@"; do [ "$prev" = --json ] && fields=$a; prev=$a; done
+                for f in $(printf '%s' "$fields" | /usr/bin/tr ',' ' '); do
+                  case " conclusion createdAt databaseId displayTitle event headBranch headSha name number startedAt status updatedAt url workflowDatabaseId workflowName " in
+                    *" $f "*) ;;
+                    *) printf 'Unknown JSON field: "%s"\n' "$f" >&2; exit 1 ;;
+                  esac
+                done
+                /bin/cat "$d/runs.json" ;;
               *) exit 1 ;;
             esac
 
@@ -1294,7 +1304,7 @@ private enum InstallScript {
         static func ciRun(_ workflow: String, on commit: String, id: Int, status: String = "completed", conclusion: String = "success",
                           event: String = "push") -> [String: Any] {
             ["databaseId": id, "createdAt": "2026-11-16T10:00:\(String(format: "%02d", id % 60))Z", "workflowName": workflow, "headSha": commit,
-             "status": status, "conclusion": conclusion, "attempt": 1, "event": event]
+             "status": status, "conclusion": conclusion, "event": event]
         }
 
         /// Both runners passed `commit`.

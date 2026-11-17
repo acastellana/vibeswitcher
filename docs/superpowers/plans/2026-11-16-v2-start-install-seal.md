@@ -296,7 +296,7 @@ accepted every recommendation so far. Each can be overruled before its task star
     - `gh api repos/<R>/compare/<SHA>...v2` must say `identical` or `ahead`. `git merge-base --is-ancestor <SHA>
       FETCH_HEAD(v2)` in the fresh clone is checked too.
     - `gh run list -R <R> --commit <SHA> --json
-      databaseId,createdAt,workflowName,headSha,status,conclusion,attempt,event`, read by `/usr/bin/jq`. For each of
+      databaseId,createdAt,workflowName,headSha,status,conclusion,event`, read by `/usr/bin/jq`. For each of
       `v2 linux` and `v2 macos`, the run with the highest `databaseId` on that head (event `push` or
       `workflow_dispatch`) must be `completed`/`success`. A re-run updates its run in place, so its latest attempt is
       what counts. A `cancelled` run, a missing workflow, or an older success under a newer failure is refused.

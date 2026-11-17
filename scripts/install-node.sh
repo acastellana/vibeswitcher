@@ -390,7 +390,7 @@ install_node_main() {
         *) fail 67 "GitHub's compare of $commit with v2 says ${state:-nothing}, not identical or ahead: $commit isn't on v2" ;;
     esac
     answer=$(gh_run run list -R "$repository" --commit "$commit" -L 100 \
-        --json databaseId,createdAt,workflowName,headSha,status,conclusion,attempt,event) \
+        --json databaseId,createdAt,workflowName,headSha,status,conclusion,event) \
         || fail 1 "gh run list -R $repository failed"
     local workflow latest
     for workflow in "${workflows[@]}"; do
