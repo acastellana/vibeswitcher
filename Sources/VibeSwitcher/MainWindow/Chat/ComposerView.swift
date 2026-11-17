@@ -477,10 +477,12 @@ enum AttachedImages {
 private struct AttachedThumbnail: View {
     let path: String
     let remove: () -> Void
+    /// Decoded small, off the main thread, once (`ImageCache`), not from the file on every keystroke's redraw.
+    @State private var image: NSImage?
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            if let image = NSImage(contentsOfFile: path) {
+            if let image {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill).frame(width: 56, height: 56)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
@@ -493,6 +495,7 @@ private struct AttachedThumbnail: View {
         }
         .help(path)
         .padding(.leading, 30)
+        .task(id: path) { image = await ImageCache.thumbnail(file: path, pixels: 56 * 2, fill: true) }
     }
 }
 

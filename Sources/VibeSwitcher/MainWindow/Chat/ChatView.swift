@@ -1370,18 +1370,32 @@ private struct TodoPanel: View {
 }
 
 
-/// An image file referenced by a prompt (attached from the composer); click to open it.
+/// An image file referenced by a prompt (attached from the composer); click to open it. Decoded small, off the main
+/// thread, once (`ImageCache`): drawn from the file, each a screenshot's full size, a chat of them took a gigabyte.
 private struct FileThumbnail: View {
     let path: String
     let height: CGFloat
+    @State private var decoded: NSImage?
+    /// Not an image after all: nothing shows, as before it was decoded here.
+    @State private var failed = false
 
     var body: some View {
-        if let image = NSImage(contentsOfFile: path) {
-            Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(height: height)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
-                .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                .help(path)
+        if !failed {
+            Group {
+                if let decoded {
+                    Image(nsImage: decoded).resizable().aspectRatio(contentMode: .fit).frame(height: height)
+                } else {
+                    RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)).frame(width: height * 1.5, height: height)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
+            .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+            .help(path)
+            .task(id: path) {
+                decoded = await ImageCache.thumbnail(file: path, pixels: Int(height * 2))
+                failed = decoded == nil
+            }
         }
     }
 }
