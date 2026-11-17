@@ -101,13 +101,40 @@ extension ChatBench {
             + found.sorted { $0.pixels > $1.pixels }.prefix(top).map(\.text).joined(separator: "; ")
     }
 
+    /// VIBESWITCHER_BENCH_CENSUS=1 (with STREAM): the heap counted by class (`HeapCensus`) once the stream has started
+    /// and at the end; what grew per streamed line, for the classes `watched` names.
+    final class StreamCensus {
+        static let watched = ["NSKeyValue", "MallocBlock"]
+        private var first: (census: HeapCensus.Result, lines: Int)?
+
+        func note(lines: Int) {
+            if first == nil, lines > 0 { first = (HeapCensus.take(), lines) }
+        }
+
+        func results(lines: Int) -> String {
+            guard let first, lines > first.lines else { return "  census: the stream never started" }
+            let census = HeapCensus.take(), streamed = lines - first.lines
+            var text = "  census over \(streamed) streamed lines; grew:"
+            for row in HeapCensus.growth(from: first.census, to: census, top: .max)
+            where Self.watched.contains(where: row.name.contains) || row.after.bytes - row.before.bytes > 100_000 {
+                let blocks = row.after.blocks - row.before.blocks
+                guard blocks != 0 else { continue }
+                text += String(format: "\n    %@: %+d blocks (%+.1f a line), %+.1f KB", row.name as NSString, blocks,
+                               Double(blocks) / Double(streamed), Double(row.after.bytes - row.before.bytes) / 1024)
+            }
+            let watched = HeapCensus.growth(from: first.census, to: census, top: .max).filter { Self.watched.contains(where: $0.name.contains) }
+            let perLine = Double(watched.reduce(0) { $0 + $1.after.blocks - $1.before.blocks }) / Double(streamed)
+            return text + String(format: "\nRESULT chat-stream-watched-blocks-per-line %.1f", perLine)
+        }
+    }
+
     /// VIBESWITCHER_BENCH_STREAM=N: a reply streams into the conversation once it's shown: N lines a second appended to
     /// its transcript (a paragraph of the reply, a tool run and its result, in turn), read by the chat's poll as the
     /// window's does. Opened and left alone meanwhile (no resizes, no scrolls).
     final class Stream {
         private let url: URL
         private let perSecond: Int
-        private var count = 0
+        private(set) var count = 0
 
         init(path: String, perSecond: Int) {
             url = URL(fileURLWithPath: path)

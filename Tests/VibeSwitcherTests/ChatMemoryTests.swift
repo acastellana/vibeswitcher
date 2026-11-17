@@ -182,6 +182,22 @@ struct ChatMemoryTests {
         #expect(malloc < Self.longMallocLimit, "malloc rose \(malloc) MB")
     }
 
+    /// A reply streaming into a shown chat: what the heap grew by per streamed line, of the classes that grew about 85
+    /// blocks a streamed cycle in the app (NSKeyValueDependency, __NSMallocBlock__; counted by `HeapCensus`, in-process).
+    @Test
+    func streamedLinesLeaveNoObservationsBehind() async throws {
+        let run = try await bench(Self.longChat(entries: 120), ["VIBESWITCHER_BENCH_STREAM": "3", "VIBESWITCHER_BENCH_SECONDS": "20",
+                                                                 "VIBESWITCHER_BENCH_SIZE": "1020x748", "VIBESWITCHER_BENCH_CENSUS": "1"],
+                                  name: "stream-chat")
+        print("streamed chat: status \(run.status)\n\(run.output)")
+        let perLine = FootprintBenchTests.results(run.output)["chat-stream-watched-blocks-per-line"]?.first.flatMap(Double.init)
+        try #require(perLine != nil, "\(run.output)")
+        print("streamed chat: \(perLine!) watched blocks a streamed line")
+        // The chat's own streaming doesn't make them (2026-11-17: -73.5 a line, the open's own going): the app's growth
+        // is elsewhere. Kept so it stays so.
+        #expect(perLine! < 1, "\(perLine!) a streamed line")
+    }
+
     /// How far the footprint may rise at the peak (MB). About 110 MB of it is the system's drawing memory for a window
     /// redraw (the graphics ledger: there a moment after each redraw, gone a second later), the same for any content.
     /// Drawn from the files at full size, the image-heavy chat's attachments took a gigabyte (+1012 MB, 2026-11-17);

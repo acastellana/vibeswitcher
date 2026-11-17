@@ -89,6 +89,7 @@ enum ChatBench {
         // VIBESWITCHER_BENCH_STALL=1: also checks the hang watchdog (the main thread blocks for 4 s at t=3).
         let stall = env["VIBESWITCHER_BENCH_STALL"] == "1"
         let memory = env["VIBESWITCHER_BENCH_MEMORY"] == "1" ? MemoryProbe() : nil
+        let census = env["VIBESWITCHER_BENCH_CENSUS"] == "1" ? StreamCensus() : nil
         let stream = env["VIBESWITCHER_BENCH_STREAM"].flatMap(Int.init).flatMap { $0 > 0 ? Stream(path: path, perSecond: $0) : nil }
         let rule = StallRule.fromEnvironment(env)
         let startLoad = rule.load()
@@ -194,6 +195,7 @@ enum ChatBench {
                 failed = verdict.failed
             }
             if let memory { print(memory.results()) }
+            if let census, let stream { print(census.results(lines: stream.count)) }
             Self.clock("done")
             fflush(stdout)
             exit(status != 0 ? status : failed ? 4 : 0)
@@ -252,7 +254,11 @@ enum ChatBench {
                 if justReady, let at, let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: at, host: host) }
             } else if let stream {
                 // Left alone while a reply streams in, once it shows.
-                if chat.state == .ready, !chat.assembling { stream.next() }
+                if chat.state == .ready, !chat.assembling {
+                    // Counted once its first lines are shown (the open's own objects made by then).
+                    census?.note(lines: stream.count)
+                    stream.next()
+                }
             } else if earlier == 0, !sweeping {
                 // A width change (sidebar or inspector toggled, the window dragged): every row is measured again.
                 if second % 2 == 0 {
