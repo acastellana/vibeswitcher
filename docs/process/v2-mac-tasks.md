@@ -230,6 +230,22 @@ it. Each is done once the Mac work begins.
   too that a child that ignores SIGPIPE shows the bit in `p_sigignore`, and one that doesn't shows it clear.
 - **The two replaced oracles**: the raw Darwin reads `IndexLockTests` and `ProcessTableTests` checked against, now
   platform calls; restore them under `#if canImport(Darwin)`.
+- **The merge of main of 2026-11-17 (`4030c8af` and its four follow-ups), made and tested on Linux only**: nothing of
+  it has been built or run on a Mac. To check on the hosted Mac at the first push, and by hand where said:
+  - `83e7b934`: the Mac's code moved, not rewritten, but never compiled since. `Platform.Host.bootTime()`
+    (`Host+Darwin.swift`, `RestartReopen.bootTime()`'s old body: `RestartOfferTests`, `RestartReopenTests`);
+    `PromptAudit.isOn` and `intervalDays` on `any SettingsStore`, with `SettingsStore.integer(forKey:)` now a
+    requirement `UserDefaults` meets by its own method (`PromptAuditReminderTests`, `Preferences`);
+    `Sources/VibeCore/MacOnly/ImageDiff.swift` (`ImageDiffTests`), and by hand `scripts/ui-journeys.sh run smoke`:
+    the script compiles the file by its new path, alone, with its `#if canImport(Darwin)` around it.
+  - `329840cd`: `RoleModelsTests.theLeadsAPlainTasksAndAHardTasksCommandLinesArePinned` pins `--permission-mode auto`
+    before `--name` (main's pin had none, and `v2` names the mode on the Mac too); `LeadLaunchTests.
+    theMacsDenyRulesAreTodays`' four hashes were recorded from the Linux run with Linux's rules taken off the end.
+    Any test of the app's own (`Tests/VibeSwitcherTests`, new on main) that pins a role's whole command line without
+    the mode would fail the same way: none was found by reading (`LeadStartsHostTests`' reopen checks a suffix).
+  - `648d7bb1`: `vs-heavy`'s `give_width` reads the Mac's load in an `else` arm now; its words are the same.
+  - The ten conflicts' resolutions (the port map's [Merges](v2-port-map.md#the-merge-of-2026-11-17)): the Mac's side
+    is main's text in each, with `v2`'s hook lines beside it.
 
 ## The runner's skips
 
