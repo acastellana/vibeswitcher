@@ -13,6 +13,9 @@ public protocol SettingsStore: AnyObject {
     func string(forKey key: String) -> String?
     /// The value when it is a Bool (a number other than 0 and a String saying yes or true read true); else false.
     func bool(forKey key: String) -> Bool
+    /// The value when it is a number (a String that is a number reads as it, to its whole part; a Bool as 1 or 0);
+    /// else 0.
+    func integer(forKey key: String) -> Int
     /// The value when it is a dictionary; else nil.
     func dictionary(forKey key: String) -> [String: Any]?
     /// Keeps `value` under `key`; nil removes what is kept there.

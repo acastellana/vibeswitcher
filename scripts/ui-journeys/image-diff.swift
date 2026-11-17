@@ -1,4 +1,4 @@
-// scripts/ui-journeys.sh's screenshot comparer: compiled with Sources/VibeCore/ImageDiff.swift (which holds the
+// scripts/ui-journeys.sh's screenshot comparer: compiled with Sources/VibeCore/MacOnly/ImageDiff.swift (which holds the
 // comparison and its tests' subject) into .build/ui-journeys/image-diff, no package needed.
 //
 // image-diff BASELINE CURRENT DIFF [--tolerance N] [--threshold PERCENT] [--mask X,Y,W,H]...

@@ -1,3 +1,4 @@
+#if canImport(Darwin)
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -6,7 +7,7 @@ import UniformTypeIdentifiers
 /// Compares two screenshots pixel by pixel, for scripts/ui-journeys.sh (its command-line helper,
 /// scripts/ui-journeys/image-diff.swift, is compiled with this file). A pixel counts as changed when any of its four
 /// channels differs by more than `tolerance` (0–255); masked rectangles are never counted. Two images of different
-/// sizes differ everywhere.
+/// sizes differ everywhere. The Mac's alone: ImageIO reads and writes the PNGs, and the journeys are the Mac app's.
 public enum ImageDiff {
     /// An image as 8-bit RGBA, rows from the top.
     public struct Pixels: Equatable, Sendable {
@@ -158,3 +159,4 @@ public enum ImageDiff {
         return CGImageDestinationFinalize(destination)
     }
 }
+#endif

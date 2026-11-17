@@ -176,12 +176,7 @@ public enum RestartReopen {
     }
 
     /// When this Mac last started (nil: unknown).
-    public static func bootTime() -> Date? {
-        var time = timeval()
-        var size = MemoryLayout<timeval>.size
-        guard sysctlbyname("kern.boottime", &time, &size, nil, 0) == 0 else { return nil }
-        return Date(timeIntervalSince1970: TimeInterval(time.tv_sec) + TimeInterval(time.tv_usec) / 1_000_000)
-    }
+    public static func bootTime() -> Date? { Platform.Host.bootTime() }
 
     /// Writes the record (0600, atomically, flushed: it has to be there after a power cut).
     /// `at`: when it says it was written (a sample's, before the Mac started).

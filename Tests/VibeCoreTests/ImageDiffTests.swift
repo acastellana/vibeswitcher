@@ -1,9 +1,10 @@
+#if canImport(Darwin)
 import Foundation
 import Testing
 import VibeCore
 
 /// scripts/ui-journeys.sh's screenshot comparison (its helper, scripts/ui-journeys/image-diff.swift, is compiled with
-/// Sources/VibeCore/ImageDiff.swift).
+/// Sources/VibeCore/MacOnly/ImageDiff.swift).
 @Suite struct ImageDiffTests {
     let white: (UInt8, UInt8, UInt8, UInt8) = (255, 255, 255, 255)
 
@@ -86,3 +87,4 @@ import VibeCore
         #expect(ImageDiff.compare(image, read, tolerance: 0).changed == 0)
     }
 }
+#endif

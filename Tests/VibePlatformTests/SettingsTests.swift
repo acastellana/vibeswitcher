@@ -137,6 +137,12 @@ struct FileSettingsTests {
             // As `UserDefaults` reads a number: its digits, and true when it isn't 0.
             #expect(store.string(forKey: "count") == "7")
             #expect(store.bool(forKey: "count") == true)
+            // And as it reads an integer: the number, a String's when it is one, a Bool as 1 or 0, anything else 0.
+            #expect(store.integer(forKey: "count") == 7)
+            #expect(store.integer(forKey: "letAgentsOpenShells") == 1)
+            #expect(store.integer(forKey: "codexCommand") == 0)
+            #expect(store.integer(forKey: "bytes") == 0)
+            #expect(store.integer(forKey: "never-set") == 0)
             #expect((store.object(forKey: "bytes") as? Data) == Data([0, 1, 254, 255]))
             let list = try #require(store.object(forKey: "list") as? [Any])
             #expect(list.count == 3 && (list[0] as? String) == "a" && (list[1] as? Int) == 2 && (list[2] as? Bool) == false)

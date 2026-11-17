@@ -26,9 +26,9 @@ public enum PromptAudit {
     public static let enabledKey = "promptAuditReminders"
     public static let intervalKey = "promptAuditDays"
 
-    public static func isOn(_ defaults: UserDefaults) -> Bool { defaults.object(forKey: enabledKey) as? Bool ?? true }
+    public static func isOn(_ defaults: any SettingsStore) -> Bool { defaults.object(forKey: enabledKey) as? Bool ?? true }
 
-    public static func intervalDays(_ defaults: UserDefaults) -> Int {
+    public static func intervalDays(_ defaults: any SettingsStore) -> Int {
         let days = defaults.integer(forKey: intervalKey)
         return days == 0 ? defaultIntervalDays : min(max(days, intervalRange.lowerBound), intervalRange.upperBound)
     }

@@ -21,7 +21,7 @@
 # Files, all under .build/ui-journeys/: baseline/JOURNEY/*.png (the accepted shots), current/JOURNEY/*.png (the last
 # run's, with SHOT.diff.png beside each changed one: the shot faded, changed pixels red, masked areas grey), report.txt
 # (the last run's report, as printed), image-diff (the comparer, compiled from scripts/ui-journeys/image-diff.swift and
-# Sources/VibeCore/ImageDiff.swift when either is newer).
+# Sources/VibeCore/MacOnly/ImageDiff.swift when either is newer).
 #
 # A journey is a file scripts/ui-journeys/NAME.journey; adding one needs nothing here. One command a line:
 #   # …                   a comment (blank lines are skipped too)
@@ -105,7 +105,7 @@ accept() {
 # The comparer, compiled when it's missing or older than its sources.
 image_diff=$root/image-diff
 build_image_diff() {
-    local sources=("$journeys/image-diff.swift" "$repo/Sources/VibeCore/ImageDiff.swift") source
+    local sources=("$journeys/image-diff.swift" "$repo/Sources/VibeCore/MacOnly/ImageDiff.swift") source
     mkdir -p "$root"
     for source in "${sources[@]}"; do
         [[ -x $image_diff && ! $source -nt $image_diff ]] && continue
