@@ -265,15 +265,24 @@ extension Platform.Processes {
     /// names none, and a waiter, are passed over); nil when nothing holds one, the file isn't there, or the list can't
     /// be read. The Mac: nil (it has no such list). The engine plan's EN-D8: the command line's check of a scratch
     /// node, whose server must be the child of the host holding `<root>/scratch-host.lock`.
-    public static func lockHolder(path: String) -> pid_t? { System.lockHolder(path: path) }
+    public static func lockHolder(path: String) -> pid_t? { System.lockHolder(path: path, exclusiveFlock: false) }
+
+    /// The process holding an exclusive `flock` (`LOCK_EX`) on the file at `path`, as `lockHolder` finds it, any other
+    /// kind of lock passed over: a host's lock is that, and at most one process holds one on a file, while any process
+    /// that can open the file may add a POSIX or a shared lock beside it, which `/proc/locks` may list first. Linux
+    /// only; the Mac: nil. The start plan's S3 (the step 8 sweep): a detached node's record is honoured only for the
+    /// process that holds the account's host lock.
+    public static func exclusiveFlockHolder(path: String) -> pid_t? { System.lockHolder(path: path, exclusiveFlock: true) }
 
     /// `lockHolder`'s reading of a `/proc/locks` text: the pid of the first lock (not a waiter, `->`) on the file of
-    /// device `major:minor` and inode `inode`, whose pid is a number above 0. Each line is
-    /// `N: KIND ADVISORY|MANDATORY READ|WRITE PID MAJOR:MINOR:INODE START END`, the device's two numbers in hex.
-    public static func lockHolder(locks: String, major: UInt64, minor: UInt64, inode: UInt64) -> pid_t? {
+    /// device `major:minor` and inode `inode`, whose pid is a number above 0; with `exclusiveFlock`, of the first
+    /// `FLOCK` `WRITE` one only. Each line is `N: KIND ADVISORY|MANDATORY READ|WRITE PID MAJOR:MINOR:INODE START END`,
+    /// the device's two numbers in hex.
+    public static func lockHolder(locks: String, major: UInt64, minor: UInt64, inode: UInt64, exclusiveFlock: Bool = false) -> pid_t? {
         for line in locks.split(separator: "\n") {
             let words = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
             guard words.count >= 6, words[1] != "->" else { continue }
+            guard !exclusiveFlock || (words[1] == "FLOCK" && words[3] == "WRITE") else { continue }
             let file = words[5].split(separator: ":").map(String.init)
             guard file.count == 3, UInt64(file[0], radix: 16) == major, UInt64(file[1], radix: 16) == minor,
                   UInt64(file[2]) == inode, let pid = pid_t(words[4]), pid > 0 else { continue }

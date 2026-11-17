@@ -1013,7 +1013,18 @@ extension ProcessesTests {
         #expect(Platform.Processes.lockHolder(path: held) == nil)
         try #require(flock(fd, LOCK_EX | LOCK_NB) == 0)
         #expect(Platform.Processes.lockHolder(path: held) == getpid())
+        #expect(Platform.Processes.exclusiveFlockHolder(path: held) == getpid())
         #expect(Platform.Processes.lockHolder(path: free) == nil)
+        // A POSIX lock is a holder, but not of an exclusive flock.
+        let posix = open(free, O_RDWR | O_CLOEXEC)
+        try #require(posix >= 0)
+        var range = flock()
+        range.l_type = Int16(F_WRLCK)
+        range.l_whence = Int16(SEEK_SET)
+        try #require(fcntl(posix, F_SETLK, &range) == 0)
+        #expect(Platform.Processes.lockHolder(path: free) == getpid())
+        #expect(Platform.Processes.exclusiveFlockHolder(path: free) == nil)
+        close(posix)
         // Another file renamed over the path is another file: its holder (none) is what counts.
         let other = folder.appendingPathComponent("other").path
         FileManager.default.createFile(atPath: other, contents: nil)
@@ -1157,5 +1168,15 @@ extension ProcessesTests {
         #expect(Platform.Processes.lockHolder(locks: locks, major: 0xfd, minor: 1, inode: 9001) == 6000)
         #expect(Platform.Processes.lockHolder(locks: locks, major: 0, minor: 0x1a, inode: 77) == nil)
         #expect(Platform.Processes.lockHolder(locks: locks, major: 8, minor: 0x20, inode: 1) == nil)
+        // An exclusive flock only: a POSIX or shared lock any process added beside it, listed first, is passed over.
+        let beside = """
+            1: POSIX  ADVISORY  WRITE 777 08:20:9001 0 EOF
+            2: FLOCK  ADVISORY  READ  778 08:20:9001 0 EOF
+            3: FLOCK  ADVISORY  WRITE 4242 08:20:9001 0 EOF
+            4: POSIX  ADVISORY  WRITE 779 08:20:77 0 EOF
+            """
+        #expect(Platform.Processes.lockHolder(locks: beside, major: 8, minor: 0x20, inode: 9001) == 777)
+        #expect(Platform.Processes.lockHolder(locks: beside, major: 8, minor: 0x20, inode: 9001, exclusiveFlock: true) == 4242)
+        #expect(Platform.Processes.lockHolder(locks: beside, major: 8, minor: 0x20, inode: 77, exclusiveFlock: true) == nil)
     }
 }

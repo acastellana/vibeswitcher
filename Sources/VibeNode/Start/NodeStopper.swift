@@ -27,12 +27,12 @@ public enum NodeStopper {
     }
 
     /// The host `root`'s record names, checked (`NodeCheck.recordedHost`: its start, its command line by `isHost`,
-    /// non-dumpable), with its command line; or why nothing will be ended: no live host recorded (69, the node isn't
-    /// running), or the pid now names another process ("nothing ended", and that removing the record clears it: a
-    /// start replaces it too; the review of S3).
-    public static func detachedHost(root: String, isHost: ([String]) -> Bool) -> Result<(record: NodeRecord, arguments: [String]), StartRefusal> {
+    /// non-dumpable, holding `lock`), with its command line; or why nothing will be ended: no live host recorded (69,
+    /// the node isn't running), or the pid now names another process ("nothing ended", and that removing the record
+    /// clears it: a start replaces it too; the review of S3).
+    public static func detachedHost(root: String, lock: String, isHost: ([String]) -> Bool) -> Result<(record: NodeRecord, arguments: [String]), StartRefusal> {
         let record = NodeRecord.read(root: root)
-        switch NodeCheck.recordedHost(record, isHost: isHost) {
+        switch NodeCheck.recordedHost(record, isHost: isHost, lock: lock) {
         case .none(let why):
             return .failure(StartRefusal("the node isn't running: \(why) (\(ConfigSeal.inert(NodeRecord.path(root: root), limit: .max)))", exitCode: 69))
         case .other(let why):
@@ -54,11 +54,18 @@ public enum NodeStopper {
     /// each is killed (a child a session starts meanwhile). Not `KillMode=control-group`: a process that left the tree
     /// before it was read (a daemon a session's program double-forked, now init's) isn't found and outlives the stop
     /// (the security architecture document's S3 and S11 item 13, the weaker rule; the review of S3).
-    public static func stopDetached(root: String, isHost: ([String]) -> Bool, grace: TimeInterval = 30) -> Result<Void, StartRefusal> {
+    ///
+    /// `shown`: the record `detachedHost` gave when the stop was shown for its code; a record that names another
+    /// process by now ends nothing (the step 8 sweep: what is signalled is what the user was shown).
+    public static func stopDetached(root: String, lock: String, isHost: ([String]) -> Bool, shown: NodeRecord? = nil,
+                                    grace: TimeInterval = 30) -> Result<Void, StartRefusal> {
         let record: NodeRecord
-        switch detachedHost(root: root, isHost: isHost) {
+        switch detachedHost(root: root, lock: lock, isHost: isHost) {
         case .failure(let refused): return .failure(refused)
         case .success(let found): record = found.record
+        }
+        if let shown, shown != record {
+            return .failure(StartRefusal("the node's record changed since the stop was shown (pid \(shown.pid) then, \(record.pid) now): nothing ended; run stop again", exitCode: 1))
         }
         var under = gathered([], host: record.pid, while: record)
         Sys.kill(record.pid, SIGTERM)

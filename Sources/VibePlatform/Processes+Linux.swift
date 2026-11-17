@@ -511,14 +511,14 @@ extension Platform.Processes.System {
     /// link there names no lock): `stat`'s `st_dev` isn't the superblock's on btrfs (a subvolume's own device) or on an
     /// overlay over several file systems (a layer's), so a holder there was never found. The device is split as the
     /// kernel's `MAJOR`/`MINOR` do (12 bits and 20 bits, in glibc's encoding of `dev_t`).
-    static func lockHolder(path: String) -> pid_t? {
+    static func lockHolder(path: String, exclusiveFlock: Bool) -> pid_t? {
         guard let file = kernelFile(path: path) else { return nil }
         let major = ((file.device >> 8) & 0xfff) | ((file.device >> 32) & ~UInt64(0xfff))
         let minor = (file.device & 0xff) | ((file.device >> 12) & ~UInt64(0xff))
         for firstRead in lockListFirstReads {
             guard case .success(let read) = lockList(firstRead: firstRead) else { return nil }
             if let pid = Platform.Processes.lockHolder(locks: String(decoding: read.bytes, as: UTF8.self), major: major, minor: minor,
-                                                       inode: file.inode) {
+                                                       inode: file.inode, exclusiveFlock: exclusiveFlock) {
                 return pid
             }
             if read.whole { return nil }

@@ -307,7 +307,7 @@ extension Platform.Processes.System {
 #if canImport(Darwin)
 extension Platform.Processes.System {
     /// nil: the Mac has no `/proc/locks`.
-    static func lockHolder(path: String) -> pid_t? { nil }
+    static func lockHolder(path: String, exclusiveFlock: Bool) -> pid_t? { nil }
 
     /// nil: the Mac has no cgroups.
     static func cgroup(_ pid: pid_t) -> [String]? { nil }

@@ -245,14 +245,15 @@ public struct NodeStarter {
     /// Refused before anything when this process's umask (`mask`) lets other users write (`umaskRefusal`), as the
     /// unit's start refuses the manager's `UMask`.
     ///
-    /// Refused before anything is started while `root`'s record names a process that still runs (its start ticks) with
-    /// the host's command line (`isHost`: the installed command line passes `NodeCheck.isInstalledHost`): its server
+    /// Refused before anything is started while `root`'s record names the host (`NodeCheck.recordedHost`: a process
+    /// that still runs from its start ticks, with the host's command line by `isHost`, the installed command line
+    /// passing `NodeCheck.isInstalledHost`, non-dumpable, holding `hostLock`; the step 8 sweep): its server
     /// didn't answer, and a second host would only fail on the first one's lock. A record naming any other process
     /// (one given the number since, or any process a worker wrote in) is replaced, and that process left alone (the
     /// review of S3: stop refuses such a record, so it mustn't keep a start from running either). Then the record
     /// (`NodeRecord`: its pid and start) is written; a host that ends within `settle` is collected, its record removed,
     /// and refused: "the host ended at once (pid, status); see <log>".
-    public static func startDetached(host: [String], home: String, path: String, root: String, isHost: ([String]) -> Bool,
+    public static func startDetached(host: [String], home: String, path: String, root: String, lock hostLock: String, isHost: ([String]) -> Bool,
                                      settle: TimeInterval = detachedSettle, umask mask: mode_t? = processUmask()) -> Result<NodeRecord, StartRefusal> {
         guard let program = host.first, program.hasPrefix("/") else {
             return .failure(StartRefusal("the host's command isn't an absolute path: \(ConfigSeal.inert(host.joined(separator: " "), limit: .max))", exitCode: 1))
@@ -278,7 +279,7 @@ public struct NodeStarter {
             if errno == EINTR { continue }
             return .failure(StartRefusal("another start of the node is under way (it holds \(ConfigSeal.inert(lockPath, limit: .max))): nothing was started", exitCode: 1))
         }
-        if let old = NodeRecord.read(root: root), old.isLive(), isHost(Platform.Processes.arguments(old.pid)) {
+        if let old = NodeRecord.read(root: root), case .host = NodeCheck.recordedHost(old, isHost: isHost, lock: hostLock) {
             return .failure(StartRefusal("the recorded host (pid \(old.pid), \(ConfigSeal.inert(NodeRecord.path(root: root), limit: .max))) still runs, but its server didn't answer: `vibeswitcher stop` ends it, then run start again", exitCode: 1))
         }
         let fd = Sys.open(log, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_NOCTTY | O_CLOEXEC, 0o600)

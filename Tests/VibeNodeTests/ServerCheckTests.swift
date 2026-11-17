@@ -221,8 +221,9 @@ struct ServerCheckTests {
         let record = NodeRecord(pid: 40, startTicks: 777)
         let host = NodeUnit.execStart(prefix: "/home/u/.vibeswitcher/v2/builds", commit: "0123456789abcdef0123456789abcdef01234567")
         let isHost: ([String]) -> Bool = { NodeCheck.isInstalledHost($0, prefix: "/home/u/.vibeswitcher/v2/builds") }
-        func recorded(_ record: NodeRecord?, ticks: UInt64? = 777, words: [String] = host, dumpable: Bool? = false) -> NodeCheck.Recorded {
-            NodeCheck.recordedHost(record, isHost: isHost, startTicks: { _ in ticks }, arguments: { _ in words }, dumpable: { _ in dumpable })
+        func recorded(_ record: NodeRecord?, ticks: UInt64? = 777, words: [String] = host, dumpable: Bool? = false, holder: pid_t? = 40) -> NodeCheck.Recorded {
+            NodeCheck.recordedHost(record, isHost: isHost, lock: "/home/u/.vibeswitcher/host.lock", startTicks: { _ in ticks }, arguments: { _ in words },
+                                   dumpable: { _ in dumpable }, holder: { $0 == "/home/u/.vibeswitcher/host.lock" ? holder : nil })
         }
         #expect(recorded(record) == .host(40))
         guard case .other(let restarted) = recorded(record, ticks: 778) else { Issue.record("a pid whose start changed was taken"); return }
@@ -232,6 +233,11 @@ struct ServerCheckTests {
         guard case .other(let dumpable) = recorded(record, dumpable: true) else { Issue.record("a dumpable host was taken"); return }
         #expect(dumpable.contains("dumpable"), "\(dumpable)")
         if case .host = recorded(record, dumpable: nil) { Issue.record("a host whose dumpability can't be told was taken") }
+        // The step 8 sweep: the right tick, the installed host's command line and non-dumpable are each the process's
+        // own to set (`exec -a`, `PR_SET_DUMPABLE`); a process that doesn't hold the host's lock isn't the host.
+        guard case .other(let unlocked) = recorded(record, holder: 41) else { Issue.record("a process not holding the host's lock was taken"); return }
+        #expect(unlocked.contains("doesn't hold the host's lock") && unlocked.contains("/home/u/.vibeswitcher/host.lock"), "\(unlocked)")
+        if case .host = recorded(record, holder: nil) { Issue.record("a host with no lock held was taken") }
         if case .host = recorded(record, ticks: nil) { Issue.record("an ended host was taken") }
         if case .host = recorded(nil) { Issue.record("no record was taken") }
 
@@ -263,14 +269,15 @@ struct ServerCheckTests {
         }, "the detached host's server never came: \((try? String(contentsOf: detached.log, encoding: .utf8)) ?? "")")
         let server = try #require(DetachedScratch.server(of: written.pid))
         let read = try #require(NodeRecord.read(root: detached.root.path))
-        #expect(NodeCheck.recordedHost(read, isHost: { $0 == detached.command }) == .host(written.pid))
+        #expect(NodeCheck.recordedHost(read, isHost: { $0 == detached.command }, lock: detached.lock) == .host(written.pid))
         let listener = NodeCheck.listener(pid: server)
         #expect(listener.parent == written.pid && listener.session == written.pid && listener.dumpable == false, "\(listener)")
         #expect(NodeCheck.refusal(listener, mode: .detached(record: read), expectedParent: written.pid, parentSession: getsid(written.pid)) == nil)
         // The same host, but not of the installed host's form: not the node's.
-        guard case .other = NodeCheck.recordedHost(read, isHost: isHost) else { Issue.record("a scratch host was taken for the installed one"); return }
+        guard case .other = NodeCheck.recordedHost(read, isHost: isHost, lock: detached.lock) else { Issue.record("a scratch host was taken for the installed one"); return }
         // A recorded pid whose start changed: not the host.
-        guard case .other = NodeCheck.recordedHost(NodeRecord(pid: written.pid, startTicks: written.startTicks + 1), isHost: { $0 == detached.command }) else {
+        guard case .other = NodeCheck.recordedHost(NodeRecord(pid: written.pid, startTicks: written.startTicks + 1), isHost: { $0 == detached.command },
+                                                   lock: detached.lock) else {
             Issue.record("a record whose start changed was honoured"); return
         }
     }

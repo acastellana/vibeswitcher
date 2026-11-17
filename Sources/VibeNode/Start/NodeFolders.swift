@@ -24,6 +24,10 @@ public enum NodeFolders {
     /// `--node` takes): where a detached node's record and log are (S3), whatever the command line's HOME says.
     public static func nodeRoot(accountHome: String) -> String { join(accountHome, ".vibeswitcher") }
 
+    /// The host's lock in a root, `<root>/host.lock` (`VibePaths.hostLock`'s name): the user's node's host holds the
+    /// account's (`--node` takes no `--lock`), which a detached node's record is checked against (S3).
+    public static func hostLock(root: String) -> String { join(root, "host.lock") }
+
     /// How the node is started on this machine.
     public enum Mode: Equatable, Sendable {
         /// pid 1 is systemd and the user manager's socket is there: the unit.

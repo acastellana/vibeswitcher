@@ -53,7 +53,7 @@ enum StartCommand {
                 let record: NodeRecord
                 switch NodeStarter.startDetached(host: NodeUnit.execStart(prefix: unit.prefix, commit: unit.commit), home: unit.home,
                                                  path: NodeUnit.path(swiftBin: unit.swiftBin, nodeBin: unit.nodeBin), root: root,
-                                                 isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }) {
+                                                 lock: NodeFolders.hostLock(root: root), isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }) {
                 case .failure(let refused): return .failure(refused)
                 case .success(let written): record = written
                 }

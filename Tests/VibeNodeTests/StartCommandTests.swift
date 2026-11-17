@@ -1559,8 +1559,11 @@ struct DetachedScratch {
     }
 
     func start(settle: TimeInterval = NodeStarter.detachedSettle) -> Result<NodeRecord, StartRefusal> {
-        NodeStarter.startDetached(host: command, home: home.path, path: Self.path, root: root.path, isHost: { $0 == command }, settle: settle)
+        NodeStarter.startDetached(host: command, home: home.path, path: Self.path, root: root.path, lock: lock, isHost: { $0 == command }, settle: settle)
     }
+
+    /// The lock its host holds (`--lock`), which its record is checked against.
+    var lock: String { root.appendingPathComponent(NodeCheck.scratchLock).path }
 
     var log: URL { root.appendingPathComponent("v2/host.log") }
 
@@ -1670,7 +1673,14 @@ extension StartCommandTests {
         // stop without the server ends it, collects it (this process is its parent), and what was under it.
         let under = ScratchNode.descendants(of: pid)
         #expect(under.contains { $0.pid == server }, "\(under)")
-        let stopped = NodeStopper.stopDetached(root: host.root.path, isHost: { $0 == host.command })
+        // The record stop showed for its code is the one it ends: one that changed since ends nothing (the step 8 sweep).
+        guard case .failure(let moved) = NodeStopper.stopDetached(root: host.root.path, lock: host.lock, isHost: { $0 == host.command },
+                                                                  shown: NodeRecord(pid: record.pid, startTicks: record.startTicks + 1)) else {
+            Issue.record("a stop ended a record other than the one it showed"); return
+        }
+        #expect(moved.text.contains("changed since the stop was shown") && moved.text.contains("nothing ended"), "\(moved)")
+        #expect(record.isLive())
+        let stopped = NodeStopper.stopDetached(root: host.root.path, lock: host.lock, isHost: { $0 == host.command }, shown: record)
         #expect((try? stopped.get()) != nil, "\(stopped)")
         var status: Int32 = 0
         let reaped = waitpid(pid, &status, WNOHANG)
@@ -1693,7 +1703,7 @@ extension StartCommandTests {
         #expect(environment == NodeStarter.detachedEnvironment(home: host.home.path, path: DetachedScratch.path))
         #expect(ProcessInfo.processInfo.environment.count > 3)
         // A dumpable process isn't the node's host: stop refuses it, and it still runs.
-        guard case .failure(let refused) = NodeStopper.stopDetached(root: host.root.path, isHost: { $0 == host.command }) else {
+        guard case .failure(let refused) = NodeStopper.stopDetached(root: host.root.path, lock: host.lock, isHost: { $0 == host.command }) else {
             Issue.record("a dumpable recorded process was ended"); return
         }
         #expect(refused.text.contains("is dumpable") && refused.text.contains("nothing ended"), "\(refused)")
@@ -1710,7 +1720,8 @@ extension StartCommandTests {
         let marker = root.appendingPathComponent("started").path
         for mask: mode_t? in [0o000, 0o020, 0o055, nil] {
             guard case .failure(let refused) = NodeStarter.startDetached(host: ["/bin/sh", "-c", "touch \(marker)"], home: home.path,
-                                                                         path: DetachedScratch.path, root: root.path, isHost: { _ in false },
+                                                                         path: DetachedScratch.path, root: root.path,
+                                                                         lock: NodeFolders.hostLock(root: root.path), isHost: { _ in false },
                                                                          settle: hangGuard, umask: mask) else {
                 Issue.record("umask \(String(describing: mask)) was taken"); continue
             }
@@ -1730,6 +1741,92 @@ extension StartCommandTests {
     /// The app's `HostClientReapTests.endingAHostByAStalePidLeavesTheProcessNowUnderItAlone` (port-map row 98): a
     /// record whose pid now names another process, by its start or by its command line, ends nothing; that process
     /// stays its own parent's to signal and collect.
+    /// The step 8 sweep: a worker's process that gives itself the installed host's command line (`exec -a`) and makes
+    /// itself non-dumpable (`PR_SET_DUMPABLE 0`), named in a record the worker wrote with its own start ticks, passes
+    /// the tick, the command line and dumpability, but doesn't hold the host's lock: it isn't taken for the host. The
+    /// server check refuses it, stop ends nothing and leaves it running, and a start isn't refused for it. Here the
+    /// process is this test binary as `VibeHostTests`' hardened helper (`VIBE_HARDENED_TEST_HELPER`), and the host's
+    /// lock is held by this test, as the real host holds it.
+    @Test(NodeTraits.linuxOnly) func aRecordedProcessThatFakesTheHostIsNeitherTrustedNorSignalled() async throws {
+        let root = try scratch.shortFolder("vsfk")
+        let prefix = root.appendingPathComponent("builds").path
+        let folder = prefix + "/" + String(repeating: "ab", count: 20)
+        let forged = NodeUnit.execStart(prefix: prefix, commit: String(repeating: "ab", count: 20))
+        #expect(forged[2] == "--node-root" && forged[3] == folder)
+        let binary = try #require(Bundle.main.executablePath)
+        var output: [Int32] = [-1, -1], input: [Int32] = [-1, -1]
+        try #require(Sys.pipeClosedOnExec(&output) == 0 && Sys.pipeClosedOnExec(&input) == 0)
+        var spawn = Platform.Spawn(executable: binary, arguments: forged)
+        spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" } + ["VIBE_HARDENED_TEST_HELPER=1"]
+        spawn.stdin = .descriptor(input[0])
+        spawn.stdout = .descriptor(output[1])
+        spawn.keep = []
+        let started = spawn.start()
+        Sys.close(input[0])
+        Sys.close(output[1])
+        defer { Sys.close(output[0]) }
+        guard case .success(let pid) = started else { Sys.close(input[1]); throw CancellationError() }
+        var ended = false
+        defer {
+            Sys.close(input[1])
+            if !ended { kill(pid, SIGKILL); _ = collected(pid, by: MacTime.real.awake() + 10) }
+        }
+        var said: [UInt8] = []
+        var byte: UInt8 = 0
+        while said.last != UInt8(ascii: "\n") {
+            let count = read(output[0], &byte, 1)
+            if count < 0, errno == EINTR { continue }
+            guard count == 1 else { break }
+            said.append(byte)
+        }
+        try #require(String(decoding: said, as: UTF8.self) == "hardened true\n", "\(String(decoding: said, as: UTF8.self))")
+        // What a reader sees: the installed host's command line, non-dumpable, at its own start.
+        #expect(Platform.Processes.arguments(pid) == forged)
+        #expect(NodeCheck.isInstalledHost(Platform.Processes.arguments(pid), prefix: prefix))
+        #expect(Platform.Processes.isDumpable(pid) == false)
+        let ticks = try #require(Platform.Processes.link(pid)?.startTicks)
+        try NodeRecord(pid: pid, startTicks: ticks).write(root: root.path)
+        // The host's lock, held as the real host holds it (here by this process).
+        let lock = NodeFolders.hostLock(root: root.path)
+        let fd = open(lock, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        try #require(fd >= 0)
+        defer { close(fd) }
+        try #require(flock(fd, LOCK_EX | LOCK_NB) == 0)
+        let isHost: ([String]) -> Bool = { NodeCheck.isInstalledHost($0, prefix: prefix) }
+        func stillRuns() -> Bool {
+            var status: Int32 = 0
+            return waitpid(pid, &status, WNOHANG) == 0 && Platform.Processes.kernelRecord(pid)?.state != .zombie
+        }
+
+        guard case .other(let why) = NodeCheck.recordedHost(NodeRecord.read(root: root.path), isHost: isHost, lock: lock) else {
+            Issue.record("a process faking the host's command line and dumpability was taken for the host"); return
+        }
+        #expect(why.contains("doesn't hold the host's lock"), "\(why)")
+        guard case .failure(let shown) = NodeStopper.detachedHost(root: root.path, lock: lock, isHost: isHost) else {
+            Issue.record("stop showed the fake as the node's host"); return
+        }
+        #expect(shown.text.contains("nothing ended"), "\(shown)")
+        guard case .failure(let stopped) = NodeStopper.stopDetached(root: root.path, lock: lock, isHost: isHost) else {
+            Issue.record("stop ended the fake"); return
+        }
+        #expect(stopped.text.contains("doesn't hold the host's lock") && stopped.text.contains("nothing ended"), "\(stopped)")
+        #expect(stillRuns(), "the fake was signalled")
+        // A start isn't kept from running by it: it starts its own over the record (a host that ends at once here).
+        let home = root.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        guard case .failure(let replaced) = NodeStarter.startDetached(host: ["/bin/sh", "-c", "exit 3"], home: home.path, path: DetachedScratch.path,
+                                                                      root: root.path, lock: lock, isHost: isHost, settle: hangGuard) else {
+            Issue.record("a host that ended at once was taken"); return
+        }
+        #expect(replaced.text.contains("the host ended at once") && !replaced.text.contains("still runs"), "\(replaced)")
+        #expect(stillRuns())
+        // The helper ends at its stdin's end; collected here.
+        Sys.close(input[1])
+        input[1] = -1
+        #expect(collected(pid, by: MacTime.real.awake() + 30) != nil)
+        ended = true
+    }
+
     @Test(NodeTraits.linuxOnly) func stoppingByAStalePidLeavesTheProcessNowUnderItAlone() async throws {
         let root = try scratch.shortFolder("vsrp")
         var spawn = Platform.Spawn(executable: "/bin/sleep", arguments: ["/bin/sleep", "600"])
@@ -1746,7 +1843,7 @@ extension StartCommandTests {
 
         // The pid given to another process since the record was written: its start isn't the record's.
         try NodeRecord(pid: pid, startTicks: ticks + 1).write(root: root.path)
-        guard case .failure(let stale) = NodeStopper.stopDetached(root: root.path, isHost: { _ in true }) else {
+        guard case .failure(let stale) = NodeStopper.stopDetached(root: root.path, lock: NodeFolders.hostLock(root: root.path), isHost: { _ in true }) else {
             Issue.record("a stale record's pid was ended"); return
         }
         #expect(stale.text.contains("now names another process") && stale.text.contains("nothing ended"), "\(stale)")
@@ -1754,7 +1851,7 @@ extension StartCommandTests {
         // Its start matching, but the command line isn't the installed host's.
         try NodeRecord(pid: pid, startTicks: ticks).write(root: root.path)
         let prefix = StartWorld.prefix
-        guard case .failure(let other) = NodeStopper.stopDetached(root: root.path, isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }) else {
+        guard case .failure(let other) = NodeStopper.stopDetached(root: root.path, lock: NodeFolders.hostLock(root: root.path), isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }) else {
             Issue.record("a recorded process of another command line was ended"); return
         }
         #expect(other.text.contains("now names another process") && other.text.contains("/bin/sleep 600") && other.text.contains("nothing ended"), "\(other)")
@@ -1766,7 +1863,8 @@ extension StartCommandTests {
         let home = root.appendingPathComponent("home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         guard case .failure(let replaced) = NodeStarter.startDetached(host: ["/bin/sh", "-c", "exit 3"], home: home.path, path: DetachedScratch.path,
-                                                                      root: root.path, isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) },
+                                                                      root: root.path, lock: NodeFolders.hostLock(root: root.path),
+                                                                      isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) },
                                                                       settle: hangGuard) else {
             Issue.record("a host that ended at once was taken"); return
         }
@@ -1817,7 +1915,8 @@ extension StartCommandTests {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         // A settle as long as the hang guard: the host's exit, not a time, ends the wait.
         let started = NodeStarter.startDetached(host: ["/bin/sh", "-c", "echo said-out; echo said-err >&2; exit 3"], home: home.path,
-                                                path: DetachedScratch.path, root: root.path, isHost: { _ in false }, settle: hangGuard)
+                                                path: DetachedScratch.path, root: root.path, lock: NodeFolders.hostLock(root: root.path),
+                                                isHost: { _ in false }, settle: hangGuard)
         guard case .failure(let refused) = started else { Issue.record("a host that ended at once was taken: \(started)"); return }
         let log = root.appendingPathComponent("v2/host.log").path
         #expect(refused.text.contains("the host ended at once") && refused.text.contains("exit status 3") && refused.text.contains("see \(log)"), "\(refused)")
@@ -1830,7 +1929,7 @@ extension StartCommandTests {
         #expect(said.contains("said-out") && said.contains("said-err"), "\(said)")
         // A command that isn't absolute is refused before anything starts.
         guard case .failure(let relative) = NodeStarter.startDetached(host: ["sh"], home: home.path, path: DetachedScratch.path, root: root.path,
-                                                                      isHost: { _ in false }) else {
+                                                                      lock: NodeFolders.hostLock(root: root.path), isHost: { _ in false }) else {
             Issue.record("a relative host command was started"); return
         }
         #expect(relative.text.contains("absolute"), "\(relative)")
@@ -1885,7 +1984,7 @@ extension StartCommandTests {
         let marker = root.appendingPathComponent("started").path
         let host = ["/bin/sh", "-c", "touch '\(marker)'; exit 3"]
         guard case .failure(let refused) = NodeStarter.startDetached(host: host, home: home.path, path: DetachedScratch.path, root: root.path,
-                                                                     isHost: { _ in false }, settle: hangGuard) else {
+                                                                     lock: NodeFolders.hostLock(root: root.path), isHost: { _ in false }, settle: hangGuard) else {
             Issue.record("a second start went on while the first held the lock"); return
         }
         #expect(refused.text.contains("another start of the node") && refused.text.contains(lock), "\(refused)")
@@ -1893,7 +1992,7 @@ extension StartCommandTests {
         // Once the first is done, a start goes on (its host ends at once here, refused for that).
         flock(fd, LOCK_UN)
         guard case .failure(let ended) = NodeStarter.startDetached(host: host, home: home.path, path: DetachedScratch.path, root: root.path,
-                                                                   isHost: { _ in false }, settle: hangGuard) else {
+                                                                   lock: NodeFolders.hostLock(root: root.path), isHost: { _ in false }, settle: hangGuard) else {
             Issue.record("a host that ended at once was taken"); return
         }
         #expect(ended.text.contains("the host ended at once"), "\(ended)")

@@ -642,8 +642,15 @@ process that a process of the user can't change.
   stop's and each request's entries aren't written (the command line says "isn't recorded"), so `status` can't mark an
   accepted request with no entry or a start nobody typed. The node's record, `~/.vibeswitcher/v2/node.pid`, is any
   worker's to write: the command line's server check and `stop`'s signals take the process it names only while it is
-  the installed, non-dumpable host by its start ticks and command line, so a rewritten record makes them refuse (a
-  denial: removing the file, or a `start`, clears it), never signal or trust another process. A detached `stop` ends
+  the installed, non-dumpable host by its start ticks and command line and holds the account's host lock
+  (`~/.vibeswitcher/host.lock`, an exclusive `flock` found in `/proc/locks` by the file's inode), so a rewritten record
+  makes them refuse (a denial: removing the file, or a `start`, clears it), never signal or trust another process.
+  *(2026-11-17, the step 8 sweep)* The ticks, the command line and dumpability are each the process's own to set: a
+  worker's program run as `exec -a <prefix>/<commit>/bin/vibeswitcher-host … --node --node-root …` that makes itself
+  non-dumpable passed all three, so the server check trusted its child, `stop` ended it and said the node stopped while
+  the real host ran on, and every `start` was refused. The lock is what it can't take while the host holds it; a file
+  renamed over the lock's path is taken back by the host's path watch (S2), a race the worker must win against it. And
+  `stop` ends only the record it showed for the typed code. A detached `stop` ends
   the host and the processes found under it (the tree, read again while the host ends): a session's process that left
   the host's tree before it was read (a daemon double-forked to init) outlives the stop.
 - The text of the lead's questions: a turned lead asks what it likes. Only the card's facts are the engine's.
@@ -1844,7 +1851,8 @@ against it. Each line says what reduces it now, if anything.
     Each user's-voice request is in the journal and shown by `status`; without a user systemd there is no journal, so
     no acknowledgment, start, stop or request is journalled and `status` can't flag an unexplained start (2026-11-16,
     the review of the start plan's S3, pending the lead's call). There, too, the node's record
-    `~/.vibeswitcher/v2/node.pid` is any worker's to rewrite (its readers then refuse: S3), and a session's process
+    `~/.vibeswitcher/v2/node.pid` is any worker's to rewrite (its readers then refuse, the process it names taken only
+    while it holds the account's host lock: S3), and a session's process
     that left the host's tree outlives a detached `stop`.
 14. The user's own processes acting for a worker: a `vibeswitcher` or `systemctl` earlier on the user's PATH, an alias
     in a shell startup file, and the user's terminal (`/dev/pts/N` is the user's: a worker can draw text the user didn't

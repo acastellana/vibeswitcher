@@ -29,6 +29,9 @@ enum StopCommand {
         let runtime = NodeFolders.runtimeFolder(uid: getuid())
         let connection = Connection()
         let isHost: ([String]) -> Bool = { NodeCheck.isInstalledHost($0, prefix: prefix) }
+        let lock = NodeFolders.hostLock(root: root)
+        // The record the fallback showed for the code: the stopper ends only that one (the step 8 sweep).
+        let shown = Shown()
         let steps = StopSequence.Steps(
             kind: { StopSequence.kind(isScratch: context.isScratch, onTheMac: Platform.CodeIdentity.isAvailable,
                                       mode: { NodeFolders.mode(runtimeFolder: runtime) }) },
@@ -47,7 +50,10 @@ enum StopCommand {
                 guard !context.isScratch else { return .failure(StartRefusal(NodeContext.noStandIn, exitCode: 69)) }
                 switch mode {
                 case .noSystemd:
-                    return NodeStopper.detachedHost(root: root, isHost: isHost).map { NodeTexts.stopDetached(pid: $0.record.pid, arguments: $0.arguments) }
+                    return NodeStopper.detachedHost(root: root, lock: lock, isHost: isHost).map { found in
+                        shown.record = found.record
+                        return NodeTexts.stopDetached(pid: found.record.pid, arguments: found.arguments)
+                    }
                 case .systemd, .socketMissing:
                     return unitRuns(runtimeFolder: runtime).map { NodeTexts.stopUnit }
                 }
@@ -55,7 +61,7 @@ enum StopCommand {
             stopper: { mode in
                 guard !context.isScratch else { return .failure(StartRefusal(NodeContext.noStandIn, exitCode: 69)) }
                 switch mode {
-                case .noSystemd: return NodeStopper.stopDetached(root: root, isHost: isHost)
+                case .noSystemd: return NodeStopper.stopDetached(root: root, lock: lock, isHost: isHost, shown: shown.record)
                 case .systemd, .socketMissing: return NodeStopper.stopUnit(systemctl: "/usr/bin/systemctl", runtimeFolder: runtime)
                 }
             })
@@ -128,4 +134,9 @@ enum StopCommand {
         }
         return .success(())
     }
+}
+
+/// The record `stop`'s fallback showed (`NodeStopper.detachedHost`), for its stopper.
+private final class Shown {
+    var record: NodeRecord?
 }

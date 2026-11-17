@@ -18,7 +18,8 @@ import VibeCore
 /// - **A node started detached** (the start plan's S3, ST-D6: the user's node on a machine whose pid 1 isn't systemd):
 ///   non-dumpable, a child of the host its record (`NodeRecord`, `<root>/v2/node.pid`) names, in that process's
 ///   session, with no cgroup line read. The record is honoured only while what it names is that host
-///   (`recordedHost`): started at the recorded tick, with the installed host's command line, non-dumpable.
+///   (`recordedHost`): started at the recorded tick, with the installed host's command line, non-dumpable, and holding
+///   the account's host lock (the one fact a process can't give itself while the host runs).
 public enum NodeCheck {
     public enum Mode: Equatable, Sendable {
         case node
@@ -127,12 +128,20 @@ public enum NodeCheck {
 
     /// The host `record` names, or why it isn't one: the process must still run from the recorded tick (`startTicks`:
     /// nil when it has gone or is a zombie), its command line (`arguments`) must be the installed host's (`isHost`;
-    /// the command line passes `isInstalledHost`, a test its scratch host's), and it must be non-dumpable
-    /// (`dumpable`). Every reader is a parameter, the system's by default.
-    public static func recordedHost(_ record: NodeRecord?, isHost: ([String]) -> Bool,
+    /// the command line passes `isInstalledHost`, a test its scratch host's), it must be non-dumpable (`dumpable`), and
+    /// it must hold the host's lock (`lock`, the account's `~/.vibeswitcher/host.lock`, a test its scratch host's), by
+    /// an exclusive `flock` on the file the path names (`holder`, `/proc/locks` by inode). Every reader is a parameter,
+    /// the system's by default.
+    ///
+    /// The tick, the command line and the dumpable flag are each the process's own to set: a worker's program run as
+    /// `exec -a <prefix>/<commit>/bin/vibeswitcher-host … --node --node-root …` that makes itself non-dumpable, named
+    /// in a record the worker wrote, passes all three (the step 8 sweep). The lock it can't hold while the host does,
+    /// and the host takes back a lock path a file was renamed over (`HostPathWatch`). So they are hints; the lock decides.
+    public static func recordedHost(_ record: NodeRecord?, isHost: ([String]) -> Bool, lock: String,
                                     startTicks: (pid_t) -> UInt64? = NodeRecord.liveTicks,
                                     arguments: (pid_t) -> [String] = Platform.Processes.arguments,
-                                    dumpable: (pid_t) -> Bool? = Platform.Processes.isDumpable) -> Recorded {
+                                    dumpable: (pid_t) -> Bool? = Platform.Processes.isDumpable,
+                                    holder: (String) -> pid_t? = Platform.Processes.exclusiveFlockHolder) -> Recorded {
         guard let record else { return .none("no host is recorded") }
         let pid = record.pid
         guard let ticks = startTicks(pid) else { return .none("the recorded host (pid \(pid)) has ended") }
@@ -144,10 +153,14 @@ public enum NodeCheck {
             return .other("the recorded pid now names another process (pid \(pid) runs \(ConfigSeal.inert(words.joined(separator: " "), limit: 512)), not the installed host)")
         }
         switch dumpable(pid) {
-        case false?: return .host(pid)
+        case false?: break
         case true?: return .other("the recorded host (pid \(pid)) is dumpable: not the node's host")
         case nil: return .other("whether the recorded host (pid \(pid)) is dumpable can't be told")
         }
+        guard holder(lock) == pid else {
+            return .other("the recorded pid \(pid) doesn't hold the host's lock (\(ConfigSeal.inert(lock, limit: .max))): not the node's host")
+        }
+        return .host(pid)
     }
 
     /// Whether `arguments` (a process's command line) are the installed host's (ST-D7): argv[0]

@@ -6,7 +6,8 @@ import VibeNode
 /// S3): the facts read here, the rules in `NodeCheck`. The listener is the process at the other end (`SO_PEERCRED`,
 /// fixed when it accepted): non-dumpable, and the child of the node's host in its session, which for the user's node is the unit's
 /// `MainPID` (read with `/usr/bin/systemctl` by its absolute path, never from PATH; the cgroup from `/proc`), for a
-/// node started detached the host its record names, checked (`NodeCheck.recordedHost`, the start plan's S3), and for a
+/// node started detached the host its record names, checked (`NodeCheck.recordedHost`, the start plan's S3: holding
+/// the account's host lock among the rest), and for a
 /// scratch node the holder of `<root>/scratch-host.lock` (`/proc/locks`, by the file's inode).
 enum ServerCheck {
     /// Why the server at the other end of `fd` isn't the node's, or nil when it passes.
@@ -23,7 +24,8 @@ enum ServerCheck {
                 .flatMap { $0 > 0 ? $0 : nil }
         case .detached(let record):
             let prefix = NodeFolders.defaultPrefix(accountHome: VibePaths.accountHome)
-            switch NodeCheck.recordedHost(record, isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }) {
+            let lock = NodeFolders.hostLock(root: NodeFolders.nodeRoot(accountHome: VibePaths.accountHome))
+            switch NodeCheck.recordedHost(record, isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }, lock: lock) {
             case .host(let host): expected = host
             case .none(let why), .other(let why): return "the node's record doesn't name its host (\(why)), so the server can't be checked against it"
             }
