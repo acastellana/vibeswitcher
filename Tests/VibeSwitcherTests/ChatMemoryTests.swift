@@ -203,9 +203,10 @@ struct ChatMemoryTests {
     /// Drawn from the files at full size, the image-heavy chat's attachments took a gigabyte (+1012 MB, 2026-11-17);
     /// decoded at their size on screen, +178.
     static let imageFootprintLimit = 300.0
-    /// Malloc's bytes in use at the peak: the transcript's 4 MB tail read and parsed, its pasted screenshots decoded
-    /// from base64 (+81 MB before, +51 after).
-    static let imageMallocLimit = 100.0
+    /// Malloc's bytes in use at the peak: the transcript's 4 MB tail read and parsed, its screenshots decoded for their
+    /// thumbnails (each whole first: 20 MB a screenshot). +81 MB with the files drawn at full size, +51 with thumbnails
+    /// decoded a core each at once, +33 two at a time (`ImageCache`).
+    static let imageMallocLimit = 60.0
     /// The long chat: +184 MB (110 of it the redraw's), malloc +25.
     static let longFootprintLimit = 300.0
     static let longMallocLimit = 60.0

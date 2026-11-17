@@ -451,11 +451,23 @@ enum ImageCache {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
+    /// Two decodes at a time: making a thumbnail decodes the whole picture first (20 MB a retina screenshot), and a
+    /// chat's worth at once, one a core, raised malloc's peak by as many (+51 MB opening an image-heavy chat, +32 with two).
+    private static let decoding: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "vibeswitcher.thumbnails"
+        queue.qualityOfService = .utility
+        queue.maxConcurrentOperationCount = 2
+        return queue
+    }()
+
     /// The thumbnail cached under `key`, else what `decode` makes, off the main thread.
     private static func thumbnail(key: String, decode: @escaping @Sendable () -> CGImage?) async -> NSImage? {
         let key = key as NSString
         if let hit = thumbnails.object(forKey: key) { return hit }
-        guard let cgImage = await Task.detached(priority: .utility, operation: decode).value else { return nil }
+        guard let cgImage = await withCheckedContinuation({ (done: CheckedContinuation<CGImage?, Never>) in
+            decoding.addOperation { done.resume(returning: decode()) }
+        }) else { return nil }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         thumbnails.setObject(image, forKey: key, cost: cgImage.width * cgImage.height * 4)
         return image
