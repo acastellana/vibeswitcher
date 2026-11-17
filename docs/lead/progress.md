@@ -3506,3 +3506,6 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 09:04 Audit of find-and-fix-the: complete, clean, round 2: 1 Important closed, 3 Nit (2 open)
 - 2026-11-17 09:16 Pipeline held: merges-are-held-names ready to merge with none landing; cause: a merge in progress
 - 2026-11-17 09:19 Merged merges-are-held-names: "Merges are held" names the battery hold as its cause (no audit: review none) (build ec89ed431487)
+- 2026-11-17 09:19 Automatically (auto_advance): Merged merges-are-held-names ("Merges are held" names the battery hold as its cause) into main at 58f4cc64, review none: on its worker's done report on b415c0c8 and the full test run.
+- 2026-11-17 09:19 Automatically (auto_advance): Cleaned up merges-are-held-names; ended pid 81147 (Worker: "Merges are held" names the battery hold as its cause) (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-17 09:37 Merged find-and-fix-the: Find and fix the app's memory growth (+74 MB/h) (build ec89ed431487)
