@@ -3626,3 +3626,5 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 19:06 Released code-mode-trial-does's worker (idle since its done report on 3dd738c3) while its audit runs
 - 2026-11-17 19:06 Automatically (auto_advance): Released code-mode-trial-does's worker, idle since its done report on 3dd738c3, while its audit runs (ended pid 90713 (Worker: Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster?)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-17 19:09 Audit of code-mode-trial-does: complete, clean, round 1: 1 Nit open
+- 2026-11-17 19:29 Pipeline held: code-mode-trial-does ready to merge with none landing; cause: a merge in progress
+- 2026-11-17 19:31 Merged code-mode-trial-does: Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster? (build 9e4f85a8ba8c)
