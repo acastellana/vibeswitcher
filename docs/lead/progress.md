@@ -3680,3 +3680,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-17 22:38 Dismissed worker-git-guard-part:F3: Fixed on this branch (54645a7a, 662cf218): program names and git's command word are case-folded (RefusedGit.folded); `GIT -P push` refused, per the worker's answer and tests.
 - 2026-11-17 22:59 Pipeline held: worker-git-guard-part ready to merge with none landing; cause: a merge in progress
 - 2026-11-17 23:01 Merged worker-git-guard-part: Worker git guard, part 2: the parsed hook also checks refused subcommands and git's environment (build 0d8e30c31a28)
+- 2026-11-17 23:01 Automatically (auto_advance): Merged worker-git-guard-part (Worker git guard, part 2: the parsed hook also checks refused subcommands and git's environment) into main at 78c3208b, on its passing audit and the full test run.
+- 2026-11-17 23:01 Automatically (auto_advance): Cleaned up worker-git-guard-part (freed 3.3 GB of build output and temporary folders). It stays done.
