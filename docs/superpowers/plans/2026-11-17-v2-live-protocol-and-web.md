@@ -508,10 +508,24 @@ right reason before the code that passes it.
   - `vibeswitcher web [--revoke]`: the server check, what it will do said, the typed code, the request, the URL
     printed on its own line, the journal entry.
 
-- [ ] **Step 1: Failing tests**: the `WebTokensTests` names in [Security](#security) and [Seamless](#seamless), and
+- [x] **Step 1: Failing tests**: the `WebTokensTests` names in [Security](#security) and [Seamless](#seamless), and
   `aNewerTokensFormatIsRefused`, `aTokensFileThatCantBeReadIsNoTokens`, `theUrlCarriesTheCodeInItsFragment`,
   `webWithNoTerminalRefusesBeforeAnyRequest`.
-- [ ] **Step 2:** tokens, the gate, the requests, the command. **Step 3:** lints, under load.
+- [x] **Step 2:** tokens, the gate, the requests, the command. **Step 3:** lints, under load.
+
+**F1, 2026-11-17 (lane F), what I1 wires and where the names moved.** `WebTokens.issue(now:)` throws (a newer
+format's file) and returns the token with its `expiresAt` (for `hello`'s `auth`); `expiry(of:now:)` beside `check`.
+`Requests` has no stored property for the web (the integrator's file), so `webOpen(_:web:reply:)` and
+`webRevoke(_:web:reply:)` take the server's `WebAccess`: I1 adds one to `Requests`, hands `act`'s two cases to them, and
+lists `web.open` and `web.revoke` in `Requests.recorded`. `WebAccess` gives I1 `listen` (bind the listener, its port or
+why not: `web.open` makes no code without it), `onChange`, `onRevoke` (the listener's `closeAll(code: "revoked")`),
+`sweep()` (late codes dropped on the clock, then `wanted`) and `holds(_:)` (a connection whose token ran out is closed
+with 4403). What a web connection may send is lane F's too: `WebAccess.refusal(for:rights:)` and
+`WebAccess.kinds(for:)` (`hello.kinds`), applied by `WebRequestScreen`, which I1 puts between the listener and the hub
+(every user's-voice, lead's and terminal kind `voice`, before any handler). `vibeswitcher web` prints the address alone
+on stdout; `main.swift`'s usage text (the integrator's) doesn't list `web` yet. The cases that need `web.open` taken
+through `handle` (the user's voice reaching the handler, recorded) are I1's; F1's go through `handle` for the refusals
+and call the handlers directly.
 
 ### Task D1: The socket feed (lane D)
 
@@ -550,10 +564,21 @@ right reason before the code that passes it.
 **Needs:** F1; A2 and C1 merged into the lane's branch (it tests them together). **Files:** `WebSecurityTests.swift`,
 `WebAppLintTests.swift`.
 
-- [ ] **Step 1: Failing tests**: every `WebSecurityTests` and `WebAppLintTests` name in [Security](#security). Each
+- [x] **Step 1: Failing tests**: every `WebSecurityTests` and `WebAppLintTests` name in [Security](#security). Each
   is shown failing on a mutant where it can be (the `Host` check removed, the `Origin` check loosened to a prefix,
   `auth` skipped, an `innerHTML` added to a scratch copy of a file).
 - [ ] **Step 2:** whatever they find is fixed in its owner's lane, through the lead.
+
+**F2, 2026-11-17 (lane F): written before A2 and C1 are merged, against a stand-in.** `v2-ws` had no commit, so
+`WebSecurityTests` drive `StandInListener` (in the same file: a minimal listener to the contract's §1) through
+`WebSecurityRig.listener`, the one line that changes at the join; the gate, the screen and the rights are the real
+ones, and the client is a raw socket. Each case was seen failing on a mutant of the stand-in or of lane F's code.
+Step 1 is done for the cases; step 2 starts when A2 is merged: `WebSecurityRig.listener` returns lane A's listener,
+the stand-in is deleted, and what the cases find goes to lane A through the lead. Beside the plan's names:
+`theListenerHoldsTheLoopbackAddressOnly` (a bind probe on every other address, never a connect that could time out).
+`WebAppLintTests` reads `.js`, `.mjs`, `.cjs`, `.html`, `.htm`, `.svg`, `.xhtml`; the Node tests' folders (`WebApp/test/`,
+`WebApp/tests/`) are skipped and may hold `*.test.mjs` alone. C1's generator should leave those folders out of what is
+served.
 
 ### Task G1: The sandbox, the latency bench and the web bench's first three measures (lane G)
 
