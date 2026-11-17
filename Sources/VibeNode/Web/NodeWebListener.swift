@@ -39,6 +39,9 @@ public final class NodeWebListener: @unchecked Sendable {
         limits.headSeconds = 5
         limits.maxMessageBytes = 64 * 1_024
         limits.maxQueuedBytes = 4 << 20
+        // A file is at most 256 KiB on loopback: a client that takes longer than 5 s to read one holds a slot for
+        // nothing (the security review at I1).
+        limits.responseSeconds = 5
         limits.overflow = .close
         limits.pingSeconds = 15
         limits.maxMissedPings = 2
@@ -145,12 +148,15 @@ public final class NodeWebListener: @unchecked Sendable {
         let own = OwnName()
         let assets = assets
         let made = WebListener(queue: queue, clock: clock, limits: limits, policy: { host, origin, path, headers in
-            guard let name = own.name else { return false }
-            return path == "/ws" && host == name && origin == "http://" + name
+            guard let name = own.name, let origin else { return false }
+            // Compared byte for byte: String's == is canonical equivalence, and these are one exact string each.
+            return path == "/ws" && host.utf8.elementsEqual(name.utf8) && origin.utf8.elementsEqual(("http://" + name).utf8)
                 && headers.all("sec-fetch-site").allSatisfy { $0 == "same-origin" }
         }, port: requestedPort, note: note)
         made.refuse = { request in
-            guard let name = own.name, request.headers["host"] == name else { return WebResponse(status: 421) }
+            guard let name = own.name, let host = request.headers["host"], host.utf8.elementsEqual(name.utf8) else {
+                return WebResponse(status: 421)
+            }
             if WebSocketHandshake.isAsked(by: request), request.path != "/ws" { return .plain(404) }
             return nil
         }
