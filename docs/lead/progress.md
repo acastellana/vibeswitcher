@@ -3618,3 +3618,11 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 18:13 Started a worker on code-mode-trial-does (auto → Claude: Claude weekly 28%, 18 points ahead of pace (limits ignored), not tight; Codex 24%)
 - 2026-11-17 18:13 Automatically (auto_advance): Started a worker on code-mode-trial-does (Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster?); its agent is auto, so it went to Claude: Claude weekly 28%, 18 points ahead of pace (limits ignored), not tight; Codex 24%.
 - 2026-11-17 18:13 Automatically (auto_advance): Overlap for code-mode-trial-does's start (a warning only: nothing was refused or reordered). scripts/sandbox-app.sh: ui-journeys-b-team (kept: its branch changes it).
+- 2026-11-17 19:05 Sampled code-mode-trial-does for audit from review none (at 3dd738c3): draw 2.94 under audit_sample_percent 10 (seed 4141884572457957)
+- 2026-11-17 19:05 Automatically (auto_advance): Started the audit of code-mode-trial-does at 3dd738c3 (Sampled for audit: draw 2.94 under audit_sample_percent 10 (seed 4141884572457957)).
+- 2026-11-17 19:05 Planned worker-git-guard-the: Worker git guard: the '=' and attached spellings of refused git options slip the deny rules (review audit, for security)
+- 2026-11-17 19:05 Started a worker on worker-git-guard-the
+- 2026-11-17 19:05 Automatically (auto_advance): Started a worker on worker-git-guard-the (Worker git guard: the '=' and attached spellings of refused git options slip the deny rules).
+- 2026-11-17 19:06 Released code-mode-trial-does's worker (idle since its done report on 3dd738c3) while its audit runs
+- 2026-11-17 19:06 Automatically (auto_advance): Released code-mode-trial-does's worker, idle since its done report on 3dd738c3, while its audit runs (ended pid 90713 (Worker: Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster?)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-17 19:09 Audit of code-mode-trial-does: complete, clean, round 1: 1 Nit open
