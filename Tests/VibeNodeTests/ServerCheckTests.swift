@@ -154,7 +154,7 @@ struct ServerCheckTests {
     /// is the environment's.
     @Test func theUsersNodeRootIsTheAccountsWhateverHomeSays() {
         let account = "/home/someone"
-        let moved = "/tmp/elsewhere/.vibeswitcher"
+        let moved = "/scratch/elsewhere/.vibeswitcher"
         #expect(NodeCheck.root(of: .node, environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
         #expect(NodeCheck.root(of: .detached(record: nil), environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
         #expect(NodeCheck.root(of: .detached(record: NodeRecord(pid: 4, startTicks: 5)), environmentRoot: moved, accountHome: account)
