@@ -3577,3 +3577,4 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 13:02 Released update-check-a-card's worker (idle since its done report on 6118ce08) while its audit runs
 - 2026-11-17 13:02 Automatically (auto_advance): Released update-check-a-card's worker, idle since its done report on 6118ce08, while its audit runs (ended pid 96730 (Worker: Update check: a card with the changelog and Install & Restart when a newer VibeSwitcher is on GitHub)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-17 13:04 Audit of update-check-a-card: complete, clean, round 3: 1 Important closed, 3 Nit (2 open)
+- 2026-11-17 13:18 Merged update-check-a-card: Update check: a card with the changelog and Install & Restart when a newer VibeSwitcher is on GitHub (build 9e4f85a8ba8c)

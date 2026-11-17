@@ -8,6 +8,7 @@ The main window's menus (`MainMenu.build`); standard items go to the first respo
 
 ### VibeSwitcher
 - VibeSwitcher › About VibeSwitcher — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
+- VibeSwitcher › Check for Updates… — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - VibeSwitcher › Settings… ⌘, — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - VibeSwitcher › Restart Session Host — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - VibeSwitcher › Hide VibeSwitcher ⌘H — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
@@ -409,6 +410,8 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `sleep-notice` — SleepNoticeBanner — `Sources/VibeSwitcher/Sandbox.swift`
 - `toolchain-note` — ToolchainNoteView — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
 - `restart-card` — RestartCardView — `Sources/VibeSwitcher/RestartCard.swift`
+- `update-card` — UpdateCardView — `Sources/VibeSwitcher/UpdateCard.swift`
+- `update-card-waiting` — UpdateCardView — `Sources/VibeSwitcher/UpdateCard.swift`
 - `new-project` — NewProjectSheet — `Sources/VibeSwitcher/MainWindow/NewProject/NewProjectSheet.swift`
 - `menu-bar` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`
 - `menu-bar-dots` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`
