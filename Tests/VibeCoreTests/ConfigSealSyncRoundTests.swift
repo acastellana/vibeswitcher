@@ -23,7 +23,9 @@ extension ConfigSealTests {
 
     /// One of the sync's rounds: the skill rewritten (a file changed, one added), then the manifest and the round
     /// marker, the marker last. `marker`/`manifest` false leave that one as it was; `skill` false touches no skill.
-    func claudeSyncRound(marker: Bool = true, manifest: Bool = true, skill: Bool = true, token: String = "99999999-8888-4777-8666-555555555555") throws {
+    /// `idle`: a round with nothing new, as Claude Code runs one: the manifest only touched, the marker restamped.
+    func claudeSyncRound(marker: Bool = true, manifest: Bool = true, skill: Bool = true, idle: Bool = false,
+                         token: String = "99999999-8888-4777-8666-555555555555") throws {
         let bucket = home + "/" + Self.inBucket
         if skill {
             try write("docx v2\n", bucket + "docx/SKILL.md")
@@ -32,7 +34,7 @@ extension ConfigSealTests {
             try setTime(1_900_000_000, bucket + "docx/scripts/new.py")
         }
         if manifest {
-            try write(#"{"skills":[{"name":"docx","updatedAt":"2"}]}"#, bucket + "manifest.json")
+            if !idle { try write(#"{"skills":[{"name":"docx","updatedAt":"2"}]}"#, bucket + "manifest.json") }
             try setTime(1_900_000_001, bucket + "manifest.json")
         }
         if marker {
@@ -76,10 +78,30 @@ extension ConfigSealTests {
         #expect(ConfigSeal.syncRound(in: record) == Self.roundSaid)
         #expect(ConfigSeal.held(in: record).isEmpty)
         let progress = (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)) ?? ""
-        #expect(progress.contains("Claude Code's skill sync finished a round in ~/.claude/skills/synced, accepted by itself (nothing held): "
-            + Self.roundSaid.joined(separator: ", ")), "\(progress)")
+        #expect(progress.contains("in ~/.claude/skills/synced, accepted by itself (nothing held): " + Self.roundSaid.joined(separator: ", ")), "\(progress)")
         #expect(!progress.contains("sealed as they are"), "\(progress)")
         #expect(!progress.contains(Self.bucket), "\(progress)")
+        // Noted once: the next look finds it noted.
+        let third = try add(lead, "Third")
+        #expect(!lead.call("start_worker", ["task": third]).isError)
+        let again = (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)) ?? ""
+        #expect(again.components(separatedBy: "Claude Code's skill sync finished a round").count == 2, "\(again)")
+    }
+
+    /// A round another look accepted (the app's, here) is noted in the lead's log at its next look.
+    @Test func aRoundAnotherLookAcceptedIsLoggedAtTheLeadsNextLook() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        for (file, text) in syncedFiles { try write(text, home + "/" + file) }
+        let first = try add(lead, "First")
+        #expect(!lead.call("start_worker", ["task": first]).isError)
+        try claudeSyncRound()
+        #expect(try vault.checkConfig(root: root).syncAccepted == Self.roundSaid)
+        let second = try add(lead, "Second")
+        #expect(!lead.call("start_worker", ["task": second]).isError)
+        let progress = (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)) ?? ""
+        #expect(progress.contains("accepted by itself (nothing held): " + Self.roundSaid.joined(separator: ", ")), "\(progress)")
     }
 
     /// The look that accepts it says so to whoever asked, and nothing as resealed.
@@ -87,8 +109,12 @@ extension ConfigSealTests {
         let runtime = FakeRuntime()
         let (root, asLead) = try runningTeam(syncedFiles, runtime: runtime)
         try claudeSyncRound()
-        #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck(syncAccepted: Self.roundSaid))
-        #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck())
+        let found = try asLead.checkConfig(root: root)
+        #expect(found.syncAccepted == Self.roundSaid && found.held.isEmpty && found.resealed.isEmpty, "\(found)")
+        #expect(found.lastSyncRound?.files == Self.roundSaid)
+        let next = try asLead.checkConfig(root: root)
+        #expect(next.syncAccepted.isEmpty && next.held.isEmpty && next.resealed.isEmpty, "\(next)")
+        #expect(next.lastSyncRound == found.lastSyncRound)
     }
 
     /// Beside a finished round, anything else is held as ever: a file straight in the skills folder or in a skill of
@@ -170,15 +196,28 @@ extension ConfigSealTests {
         #expect(try asLead.checkConfig(root: root).held == ["~/.claude/skills"])
     }
 
-    /// A look that came mid-round held it; the round's finish lifts that hold by itself: the whole change since the
-    /// seal is a finished round.
-    @Test func aHoldMadeMidRoundLiftsWhenTheRoundFinishes() throws {
+    /// What a look held stays held for the user's click, whatever round follows: it may be no round's, and its card
+    /// may be up.
+    @Test func aHeldChangeStaysHeldThroughALaterRound() throws {
         let runtime = FakeRuntime()
         let (root, asLead) = try runningTeam(syncedFiles, runtime: runtime)
         try claudeSyncRound(marker: false)
         #expect(try asLead.checkConfig(root: root).held == ["~/.claude/skills"])
         try claudeSyncRound(manifest: false, skill: false)
-        #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck(syncAccepted: Self.roundSaid))
-        #expect(vault.heldConfig(root: root).isEmpty)
+        let found = try asLead.checkConfig(root: root)
+        #expect(found.held == ["~/.claude/skills"] && found.syncAccepted.isEmpty, "\(found)")
+        #expect(vault.heldConfig(root: root) == ["~/.claude/skills"])
+    }
+
+    /// A skill written into a synced skill, followed by one of the sync's idle rounds (nothing new: the manifest only
+    /// touched, the marker restamped), is held: an idle round takes nothing in.
+    @Test func aSkillFollowedByAnIdleRoundIsHeld() throws {
+        let runtime = FakeRuntime()
+        let (root, asLead) = try runningTeam(syncedFiles, runtime: runtime)
+        let bucket = home + "/" + Self.inBucket
+        try write("planted\n", bucket + "docx/scripts/x.py")
+        try setTime(1_900_000_000, bucket + "docx/scripts/x.py")
+        try claudeSyncRound(skill: false, idle: true)
+        #expect(try asLead.checkConfig(root: root).held == ["~/.claude/skills"])
     }
 }

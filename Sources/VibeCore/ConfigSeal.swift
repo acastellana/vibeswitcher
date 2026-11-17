@@ -338,11 +338,14 @@ public enum ConfigSeal {
     ///   straight in it: `.staging`, `.trash`), a bucket that was sealed, as a folder, with its `synced/.bucket-<bucket>`
     ///   marker a file sealed and unchanged: not a new bucket, nothing straight in `synced/`, nothing outside it;
     /// - what's added or changed is a file or a folder: no link, nothing else;
-    /// - in each bucket touched, the round marker and the manifest were both rewritten since the seal (contents or
-    ///   time), both shaped as Claude Code writes them (`syncShaped`), and the marker is no older than anything added
-    ///   or changed there: the round finished after them.
-    /// Shape and times, not proof: a shell that forges all of it is taken for the sync. What it can't do is slip a
-    /// skill in beside a round without forging one (a skill elsewhere, a link, a write after the marker).
+    /// - in each bucket touched, the manifest's contents changed since the seal (a round that lands or removes a skill
+    ///   rewrites its rows; a round with nothing new only touches its time, and that takes nothing in), the round marker
+    ///   was rewritten (contents or time: a reused round only touches it), both are shaped as Claude Code writes them
+    ///   (`syncShaped`), and the marker is no older than anything added or changed there: the round finished after them.
+    /// Shape and times, not proof: a shell that forges all of it is taken for the sync, and so is a skill written into a
+    /// bucket that a real round changing that bucket's manifest follows before any look sees it. A look that held it
+    /// first keeps it held (`LeadVault.judge`). What can't pass: a skill elsewhere, a link, a write after the marker, a
+    /// write only an idle round (manifest unchanged) follows.
     static func finishedSyncRound(key: String, recorded: [String: String], now: [String: String]) -> [String]? {
         guard name(ofKey: key) == copiedFolder,
               let sealedText = recorded[keysKey(of: key)], let nowText = now[keysKey(of: key)],
@@ -372,7 +375,8 @@ public enum ConfigSeal {
             for file in [round, manifest] {
                 guard let entry = nowBooks[file], entryKind(entry) == "f" else { return nil }
                 let was = sealedBooks[file]
-                guard was == nil || entryHash(was) != entryHash(entry) || entryTime(was) != entryTime(entry) else { return nil }
+                let timeCounts = file == round
+                guard was == nil || entryHash(was) != entryHash(entry) || (timeCounts && entryTime(was) != entryTime(entry)) else { return nil }
             }
             guard let finished = entryTime(nowBooks[round]), finished >= at else { return nil }
         }
@@ -391,6 +395,17 @@ public enum ConfigSeal {
     /// The paths of the last round accepted by itself, as `syncRoundValue` noted them; empty when none is.
     public static func syncRound(in record: [String: String]?) -> [String] {
         Array((record?[syncRoundKey] ?? "").split(separator: "\n").dropFirst().map(String.init))
+    }
+
+    /// The last round accepted by itself (`syncRoundKey`), whichever look accepted it: when, and what it changed.
+    public struct SyncRound: Equatable, Sendable {
+        public var at: Double
+        public var files: [String]
+    }
+
+    public static func lastSyncRound(in record: [String: String]?) -> SyncRound? {
+        guard let value = record?[syncRoundKey], let at = value.split(separator: "\n").first.flatMap({ Double($0) }) else { return nil }
+        return SyncRound(at: at, files: syncRound(in: record))
     }
 
     /// `path` with its bucket's folder (an account's ids) as "<account>".
@@ -1160,6 +1175,9 @@ extension LeadVault {
         /// What a finished round of Claude Code's skill sync changed, accepted by itself at this look
         /// (`ConfigSeal.finishedSyncRound`): "<path> <added, changed or removed>", the bucket's folder never named.
         public var syncAccepted: [String] = []
+        /// The last round accepted by itself, at this look or any before it (the app's, a branch run's end), for the
+        /// lead's log to note once (`LeadToolset.checkConfig`).
+        public var lastSyncRound: ConfigSeal.SyncRound?
     }
 
     /// VibeSwitcher's own write of watched things (`paths`: files, or what's in a watched folder, in your home): runs
@@ -1242,6 +1260,7 @@ extension LeadVault {
             check.syncAccepted = ConfigSeal.syncRound(in: after)
             check.resealed.removeAll { $0 == ConfigSeal.copiedFolder }
         }
+        check.lastSyncRound = ConfigSeal.lastSyncRound(in: after)
         return check
     }
 

@@ -1451,16 +1451,16 @@ extension LeadVault {
             })
             var differ = now.filter { firstSeen.contains($0.key) || (recorded[$0.key] != nil && recorded[$0.key] != $0.value) }
             // A round Claude Code's skill sync finished (`ConfigSeal.finishedSyncRound`), judged on the whole change since
-            // the seal: the sync's, accepted as it is at anyone's look, quiet or not, and a hold a look made mid-round
-            // lifts with it. Noted (`syncRoundKey`), never shown as a card. Anything else in the change, it's no round.
+            // the seal: the sync's, accepted as it is at anyone's look, quiet or not. Noted (`syncRoundKey`), never shown
+            // as a card. Anything else in the change, it's no round; and what's held already stays held for your click,
+            // a later round or not (what was held may be no round's, and you may be looking at its card).
             if home {
-                for key in Array(differ.keys) {
+                for key in Array(differ.keys) where before[key] == nil {
                     guard let changed = ConfigSeal.finishedSyncRound(key: key, recorded: recorded, now: hashes) else { continue }
                     seal([key], from: hashes, into: &recorded)
                     recorded[ConfigSeal.goneKey(of: key)] = nil
                     recorded[ConfigSeal.syncRoundKey] = ConfigSeal.syncRoundValue(changed, at: time)
                     differ[key] = nil
-                    if before.removeValue(forKey: key) != nil { held = Self.heldValue(before) }
                 }
             }
             // Your click seals only what its card showed you: each held thing as it was when held. One that moved
