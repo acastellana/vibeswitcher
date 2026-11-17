@@ -352,12 +352,19 @@ extension LeadEngine {
 
     /// The lead's environment: the launch's, the program it was started by (`VIBESWITCHER_CLAUDE`, for its tool
     /// server's workers and verifiers: EN-D13), no Codex workers (the security document's decision 15), and on a
-    /// scratch node its root (`VIBESWITCHER_HOME`, so its tool server and hook use it).
+    /// scratch node its root (`VIBESWITCHER_HOME`, so its tool server and hook use it) and its own test and build
+    /// slots (`TestLock.directoryVariable`: `temporaryRoot`, where the user's node's are too). A scratch node's merges
+    /// and audits never wait on the account's slots nor show in them: a suite that runs under `vs-heavy` holds one of
+    /// those itself, and on a machine with a single slot (under 12 cores) its scratch lead's merge waited for it until
+    /// the suite ended (the `v2 linux` run of 2026-11-17, a 4-core runner).
     func environment(_ launch: LeadLaunch.Prepared, program: String) -> [String: String] {
         var environment = launch.environment
         environment[RoleProgram.variable] = program
         environment["VIBESWITCHER_CODEX_WORKERS"] = "0"
-        if isScratch { environment["VIBESWITCHER_HOME"] = root.path }
+        if isScratch {
+            environment["VIBESWITCHER_HOME"] = root.path
+            environment[TestLock.directoryVariable] = temporaryRoot.path
+        }
         return environment
     }
 

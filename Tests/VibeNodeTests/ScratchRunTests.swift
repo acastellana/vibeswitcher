@@ -132,6 +132,11 @@ struct ScratchRunTests {
         #expect(try await scratchGit(repo.path, ["show", "main:src/parser.txt"]) == "Write the parser", "the worker's change on the base")
         #expect(Self.ranForMerge(marker, task: parser), "check.sh's marker: \((try? String(contentsOf: marker, encoding: .utf8)) ?? "none")")
         #expect(BoardStore(root: repo.path).load().task(parser)?.status == .done)
+        // Run under a test and build slot of the node's own (`<root>/tmp`), never one of the account's: this suite holds
+        // one of those itself (scripts/test.sh), the only one on a machine under 12 cores, where the merge waited for
+        // it until its call gave up (the `v2 linux` run of 2026-11-17, 4 cores: "no reply to request 2" after 300 s).
+        #expect(FileManager.default.fileExists(atPath: node.root.appendingPathComponent("tmp/test-build.lock").path),
+                "the merge's slot: \((try? FileManager.default.contentsOfDirectory(atPath: node.root.appendingPathComponent("tmp").path)) ?? [])")
         cli.assertEveryCallInScratchForm()
     }
 
