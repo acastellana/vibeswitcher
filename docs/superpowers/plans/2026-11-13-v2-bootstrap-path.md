@@ -80,8 +80,11 @@ asked for at the step that needs each.
 11. **Deferrals and small rules, accepted as a block.** *Recommended:* yes to all; any one can be answered apart.
     1. [D5] The handover goes through sealed memory and writes no file. *Costs:* none. *Otherwise:* the state file
        comes back with its hash check (stage 2's 9c).
-    2. [D6] No switch of builds while a worker or verifier runs, until stage 2's Task 3b measurement passes here.
-       *Costs:* you switch between tasks, not during them.
+    2. [D6] No switch of builds while a worker or verifier runs, until the server counts its requests in flight, after
+       the bootstrap. *Costs:* you switch between tasks, not during them. *2026-11-17, the step 8 sweep:* stage 2's
+       Task 3b measurement passed here (2026-11-13), and the rule stays all the same: stage 2's 9d review kept the
+       server's 30 s idle bound on the grounds that no switch happens while a worker or verifier runs (the start
+       plan's ST-D15).
     3. [D4] No subreaper before the bootstrap; an escaped process is refused by the cgroup rule instead. *Otherwise:*
        every `waitpid` in the host must first tolerate adopted children (stage 2's 4b1).
     4. [D7] Sessions identified by an inherited socket come with the sandbox. *Costs:* until then a session can be
@@ -177,20 +180,27 @@ place first (that defeats PATH only: the binary is still your file, S11 item 15)
   `"Bash(vibeswitcher answer:*)"` and `"Bash(/home/<you>/.vibeswitcher/v2/builds/current/bin/vibeswitcher answer:*)"`,
   and `"Edit(~/.vibeswitcher/v2/**)"` (which binds Write too: Claude Code 2.1.325 says a `Write(…)` rule "never matches
   · use Edit(…)").
-- **M7. Step 8, on the real node:** `vs start` (read S11's list, type the code: your acknowledgment); `vs hooks
-  install`; the WSL measurement (note `vs status`'s host start time, close every Windows Terminal and WSL window for
-  10 minutes, reopen one, `vs status` again: the same start time and the agent's test session still live mean WSL keeps
-  the node up; if not, keep a terminal open during the bootstrap or set up a Windows-side keep-alive yourself); then
-  `vs config held` / `vs config accept CARD` (the install's change), `vs switch COMMIT` (a commit the agent
-  installed), `vs status`, `vs config held` / `accept` again (the switch's change), `vs rollback`, and `config held` /
-  `accept` once more. *2026-11-16, the lead's call:* the server refuses a switch or rollback while the builds folder
-  or the unit's folder holds a change not accepted, so each comes after an accept (the start plan's S9 card).
+- **M7. Step 8, on the real node** (the start plan's S9 card, in its order; the agent reads `vs status` and the
+  journal after each step): `vs status` (none running); `vs start` (read S11's list, type the code: your
+  acknowledgment; the confirmation names the first installed commit); `vs status`; `vs config held` / `vs config
+  accept CARD` for the first look (the builds folder, `~/.config/systemd/user` with the units already there, and the
+  rest of the seal's list); `vs hooks install`; the WSL measurement (note `vs status`'s host and server start times,
+  close every Windows Terminal and WSL window for 10 minutes, reopen one, `vs status` again: the same two start times
+  and no stop in the journal mean WSL keeps the node up; if not, keep a terminal open during the bootstrap or set up a
+  Windows-side keep-alive yourself); then **the agent installs a second commit** (its step, not yours); `vs config
+  held` / `accept` (the install's change), `vs switch COMMIT` (that second commit), `vs status`; `vs config held` /
+  `accept` (the switch's change), `vs rollback`, `vs status`; and `config held` / `accept` once more (the rollback's
+  change). *2026-11-16, the lead's call:* the server refuses a switch or rollback while the builds folder or the
+  unit's folder holds a change not accepted, so each comes after an accept. *2026-11-17, the step 8 sweep:* no
+  session can be live here (D14: the agent can't run `vs lead`, and the host spawns nothing without a lead), so the
+  measurement's "a session still live" half is checked once, after M8's first lead (the start plan's ST-D22).
 - **M8. Step 10, before the lead's first start** [D9, D10, D13]: `systemctl --user disable --now
   gpg-agent-ssh.socket` (or `gpgconf --kill gpg-agent` before each team start); `printf '%s\n'
   "$HOME/projects/vibeswitcher-v2-lead" > ~/.vibeswitcher/v2/projects`; read the floor lines of the clone's
   `.vibeswitcher/workflow.md` [D13]; then `vs config held ~/projects/vibeswitcher-v2-lead`, `vs config accept
   CARD`, `vs base show ~/projects/vibeswitcher-v2-lead`, `vs base accept CARD`, `vs lead
-  ~/projects/vibeswitcher-v2-lead --goal "…"`.
+  ~/projects/vibeswitcher-v2-lead --goal "…"`. After this first lead, the agent reads `vs status` for the WSL
+  measurement's session half (M7; the start plan's ST-D22).
 - **M9. After every host restart** [D3]: `vs status` (how the host ended; `vs status --ack` once read), then M8's
   `config held`, `config accept`, `base show` (`--from COMMIT` when you know the last good head) and `base accept`,
   then `vs lead` again.
@@ -315,8 +325,9 @@ them off (decision 2), every lock the node has is a guard rail.
 
 **Whether WSL keeps it running with no terminal open is not known.** WSL may stop the distribution once the last
 Windows terminal into it closes, whatever runs inside. It is measured in step 8: start the node, close every WSL
-terminal for 10 minutes, reopen, and check that the host's start time is unchanged and a session is still live; the
-result goes into `docs/process/v2-linux-inventory.md`. Closing every Windows terminal is the user's step (an agent
+terminal for 10 minutes, reopen, and check that the host's and the server's start times are unchanged and the journal
+shows no stop; whether a session also stays live is checked once, after the first lead (M8: no session can run before
+it, the start plan's ST-D22); the result goes into `docs/process/v2-linux-inventory.md`. Closing every Windows terminal is the user's step (an agent
 runs inside one), so it is [M7](#things-only-you-can-do-on-the-machine): the agent prepares the check and reads the
 result, the user closes and reopens. If WSL stops it, the user decides how to keep it up (a terminal left open
 during the bootstrap needs nothing changed; a Windows-side keep-alive is the user's to set up, never an agent's).
@@ -432,17 +443,23 @@ Each ends in something that runs.
    - **A switch and a rollback**: `vibeswitcher switch COMMIT` (an installed commit) and `vibeswitcher rollback` (the
      commit installed before the current one). The command line asks the server with **`build.switch`** (`commit`;
      the user's voice, its own typed code, recorded in the vault like the engine's E6 requests, and a row of the
-     engine's request table). The server checks the rule below, then asks the host to hand over; once the handover
-     succeeded, the command line rewrites the unit's `ExecStart` to the new commit's folder and runs `daemon-reload`.
+     engine's request table). The server checks the rule below, and refuses while the seal holds a change nobody
+     accepted under the builds folder or the unit's folder `~/.config/systemd/user` (or one since the vault recorded
+     it), saying "accept the held config first" (`HeldChange`; the start plan's ST-D23 and its 2026-11-16 note: so a
+     build folder a worker changed is shown to the user before a switch runs it); then it asks the host to hand over.
+     Once the handover succeeded, the command line rewrites the unit's `ExecStart` to the new commit's folder, runs
+     `daemon-reload` and moves `<prefix>/current` to the new commit (`SwitchFollowUp`). Both are in folders the seal
+     watches, so the next look holds every team until `config accept` (ST-D23).
      The host hands over to the new build's host with the new build's `--node-root` and `--server` in its arguments,
      never the old one's (stage 2's S2-D7), its sealed copy checked against the new `build-info` as stage 2's Task 9d
      says; the new build's `vibeswitcher-server`, checked the same way, travels with the handover and the server is
      restarted from it once idle. Check that the host, the server and a tool server started after the switch all
      report the new commit, and that the journal shows `SWIFT_BACKTRACE=enable=no` at the new host's start; rollback
      restores all three.
-   - **The rule on switches** (S8, decision 6): until stage 2's Task 3b measurement has passed on this machine, the
-     server refuses `build.switch` while a worker or verifier session is live, saying so; the lead may stay:
-     `aSwitchWhileAWorkerRunsIsRefused`.
+   - **The rule on switches** (S8, decision 6): until the server counts its requests in flight, after the bootstrap,
+     the server refuses `build.switch` while a worker or verifier session is live, saying so; the lead may stay:
+     `aSwitchWhileAWorkerRunsIsRefused`. (Stage 2's Task 3b measurement passed here on 2026-11-13; the rule stays all
+     the same, the start plan's ST-D15.)
    - The WSL measurement above, with the user ([M7](#things-only-you-can-do-on-the-machine)).
    - **Proves:** the lead runs from an installed, statically linked build of a pushed commit, never the working copy.
 9. **A full scratch run on Sonnet** (a harness through `scripts/test.sh`, gated like the real-agent tests, on a
