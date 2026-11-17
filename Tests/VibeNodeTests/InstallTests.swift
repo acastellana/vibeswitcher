@@ -607,6 +607,36 @@ extension InstallTests {
         #expect(try world.calls().isEmpty, "gh was asked about a commit already installed")
     }
 
+    /// A build folder an earlier run renamed into place before it wrote `installs` and `current` (a failed append, a
+    /// signal): the rerun finishes it, with no fetch or gh call, and the one after that is refused as installed. A
+    /// folder whose build-info names another commit is refused, saying to remove it.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func anInstallStoppedAfterItsRenameIsFinishedByARerun() async throws {
+        let world = try await world()
+        let folder = world.prefix.appendingPathComponent(world.base)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data(#"{"commit":"\#(world.base)"}"#.utf8).write(to: folder.appendingPathComponent("build-info"))
+        let finished = try await world.install(try world.arguments(world.base, products: true))
+        #expect(finished.status == 0, "\(finished.status) \(finished.errors)")
+        let current = try? FileManager.default.destinationOfSymbolicLink(atPath: world.prefix.appendingPathComponent("current").path)
+        #expect(current == world.base)
+        let installs = (try? String(contentsOf: world.prefix.appendingPathComponent("installs"), encoding: .utf8)) ?? ""
+        #expect(installs.split(separator: "\n").map { $0.split(separator: " ").first.map(String.init) } == [world.base], "\(installs)")
+        #expect(try world.calls().isEmpty, "gh was asked while finishing a folder already checked")
+
+        let again = try await world.install(try world.arguments(world.base, products: true))
+        #expect(again.status == 1 && again.errors.contains("\(world.base) is installed"), "\(again.status) \(again.errors)")
+
+        let other = world.root.appendingPathComponent("other-prefix")
+        let otherFolder = other.appendingPathComponent(world.base)
+        try FileManager.default.createDirectory(at: otherFolder, withIntermediateDirectories: true)
+        try Data(#"{"commit":"\#(String(repeating: "0", count: 40))"}"#.utf8).write(to: otherFolder.appendingPathComponent("build-info"))
+        var arguments = try world.arguments(world.base, products: true)
+        arguments[2] = other.path
+        let refused = try await world.install(arguments)
+        #expect(refused.status == 1 && refused.errors.contains("remove it"), "\(refused.status) \(refused.errors)")
+        #expect(!FileManager.default.fileExists(atPath: other.appendingPathComponent("current").path))
+    }
+
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func theTestFlagsNeedAScratchPrefix() async throws {
         let world = try await world()
         // A dirty --repo: were a prefix let through, the run would stop at the courtesy check (65), writing nothing.

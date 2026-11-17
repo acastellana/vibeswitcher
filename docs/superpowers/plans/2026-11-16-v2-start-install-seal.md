@@ -261,7 +261,8 @@ accepted every recommendation so far. Each can be overruled before its task star
    - A worker can't make the user type a flag, and the user runs the script by its absolute path.
    - Order: arguments; dirty tree (a courtesy); the toolchain; the fresh fetch; provenance (ST-D9); ancestry and CI
      (ST-D10); the checkout; the build; the link check (ST-D12); the layout. Every local refusal comes before any
-     network call, and every refusal before any build.
+     network call, and every refusal that doesn't need the built products before the build. The link check and the
+     re-checks of the copies, the checkout and the record come after it, before anything is laid out.
 9. **ST-D9: What the install trusts, and which copy of the script runs.**
    - **Nothing in `--repo` is trusted.** The script makes a fresh `git init` in a scratch folder. It fetches `<SHA>`
      and `refs/heads/v2` from the constant `https://github.com/<R>.git`, never from `origin`. Objects fetched by hash
@@ -530,7 +531,8 @@ accepted every recommendation so far. Each can be overruled before its task star
    - Built from a root-owned toolchain with fresh caches; links nothing from a folder the user can write; no
      `RUNPATH`; the interpreter and `NEEDED` set exact (ST-D12).
    - The folder name equals `build-info`'s commit, and no `.git` lies under the prefix.
-   - Every refusal comes before any build.
+   - Every refusal that doesn't need the built products comes before the build; the link check and the re-checks
+     after it come before anything is laid out.
 4. **Every new state change takes the user's voice and the typed code.**
    - The new state changes: `start` of a stopped node, the `stop` fallback, `hooks.install`/`remove` and
      `build.switch`. Each has a no-terminal case where nothing is written or called.
@@ -1287,7 +1289,8 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
   7. `git worktree add --detach "$tool_scratch/src" <SHA>` in the fresh clone, then the "checked out" line;
   8. the build (ST-D11), skipped under `--test-products`;
   9. the link check (ST-D12);
-  10. copy into `<prefix>/<commit>.partial`, `install-record`, rename to `<prefix>/<commit>` (refused if it exists);
+  10. copy into `<prefix>/<commit>.partial`, `install-record`, rename to `<prefix>/<commit>` (refused if it exists; a rerun
+      finishes one an earlier run renamed but didn't record, see the 2026-11-17 note);
   11. `installs`, then `current` by a link renamed over, then the seal line.
 
   The script obeys `ScriptScratchLintTests`: it calls `scratch_tmpdir` before the build, never sets `TMPDIR` and
@@ -1415,6 +1418,20 @@ the courtesy check's git folder and products read once"):*
 - Residual: the `Resources/` files (`vs-*`, the script, its libraries) and `Package.resolved` are still read from the
   checkout by path after its re-check; a change made and undone between them isn't seen (as S9's `Doesn't promise`
   says of a worker live during an install). Copying them from the fetched commit's blobs instead would close it.
+
+**2026-11-17 (the step 8 sweep, scripts):**
+- **The CI check asks gh only for fields gh 2.45 has.** `attempt` isn't one of `gh run list --json`'s fields in 2.45,
+  and gh refused the whole call (`Unknown JSON field`, exit 1) before any network request, so every real install
+  stopped at step 6. The jq filter never read it. The tests' stand-in gh now refuses a field outside 2.45's list, as
+  the real one does: every case that gets past CI (`InstallTests.aFirstInstallRunsOnlyTheCommitsOwnScript` among
+  them) failed on the script before the change.
+- **A rerun finishes an install that stopped after its rename** (a failed `installs` append, a signal). Before, the
+  rerun refused ("is there already") and nothing but removing the folder by hand got out; a first install was left
+  with no `current`. Now, under the lock and after ST-D9's check of which copy runs, a folder for the commit whose
+  `build-info` names it, but which `current` and `installs` don't both name, gets its `installs` line (unless that run
+  wrote it) and `current`, with no fetch, gh call or build. It runs nothing in the folder. Any other folder for the
+  commit is refused, saying to remove it. Held by `InstallTests.anInstallStoppedAfterItsRenameIsFinishedByARerun`
+  (failed on the script before the change).
 
 - [ ] **Step 4:** commit ("v2: the node's install script"). Push, both green.
 
