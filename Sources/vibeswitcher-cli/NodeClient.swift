@@ -124,7 +124,8 @@ struct NodeContext {
     /// stamps each entry with the sender's credentials as the datagram comes, as journald does.
     ///
     /// False when there is no journal or the datagram didn't go; false too, with a line on stderr saying which
-    /// (`NodeJournal.notCounted`), when the entry never showed or journald recorded no cgroup for it.
+    /// (`NodeJournal.notCounted`), when the entry never showed or journald recorded no cgroup for it (it couldn't
+    /// read this process, which was there: not the writer that ended first that `status` speaks of).
     @discardableResult
     func writeJournal(_ fields: [(name: String, value: String)]) -> Bool {
         guard let socket = journalSocket else { return false }

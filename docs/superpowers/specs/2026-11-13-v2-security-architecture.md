@@ -618,11 +618,14 @@ when the journal holds it with a cgroup. One that never shows, or shows without,
 a request the server already accepted stays accepted, and `status` marks it.
 
 **An entry of the user's uid with no `_SYSTEMD_CGROUP` still never counts** (fail closed: any process of the user's, a
-session's among them, can write one and exit, as `logger` does). `status` says it for what it is, "journald recorded
-no cgroup (the writer ended first)", once: of the entry, or of the accepted request whose entry it is, in place of
-"came from no cgroup, not a terminal's" and "the journal has no entry for it". The words vouch for nothing: who wrote
-such an entry can't be told, and what it leaves marked (the start not acknowledged, the request accepted) is what no
-entry leaves marked. An entry of another uid with no cgroup is said as before.
+session's among them, can write one and exit, as `logger` does). `status` lists it on a line of its own for what it
+is, "journald recorded no cgroup (the writer ended first), so who wrote it can't be told", in place of "came from no
+cgroup, not a terminal's". **It changes no other mark** (the security review of the same day): an accepted request
+such an entry names keeps "the journal has no entry for it", word for word as with no entry at all, and both lines
+are shown, neither left out for the other. A first form of this fix said of the request "its journal entry isn't
+counted as yours" instead; a forged entry would then have softened the mark that says a request reached the server
+without the command line, so it was taken out. The start it doesn't explain and the acknowledgment it isn't stay
+marked too. An entry of another uid with no cgroup is said as before.
 
 **(call)** **The command line checks the server it reached**: on Linux, the listener (`SO_PEERCRED` on the client's
 end) must be non-dumpable (`/proc/<pid>/fd` is root's), in the node's unit's cgroup (read from `/proc/<pid>/cgroup`,
@@ -681,13 +684,12 @@ process that a process of the user can't change.
   detached node's record stays a hint a worker can forge, and the detached mode the weaker one. A detached `stop` ends
   the host and the processes found under it (the tree, read again while the host ends): a session's process that left
   the host's tree before it was read (a daemon double-forked to init) outlives the stop.
-- **(2026-11-17)** The words for an entry with no cgroup are any session's to cause: `logger -t vibeswitcher` with an
-  accepted request's action and kind, from a process that exits at once, turns that request's mark from "the journal
-  has no entry for it" into "its journal entry isn't counted as yours: journald recorded no cgroup (the writer ended
-  first)". The request is marked either way and the entry counts for nothing; only the words differ, and they never say
-  the entry was the user's. And the command line's wait on the user's node is run by no test: a scratch node never
-  runs the user's `journalctl` (it reads its stand-in's record), so the tests hold the arguments, the reading of the
-  output, the verdict and the wait itself, and the first `status --ack` on the node is that run's proof.
+- **(2026-11-17)** A line for an entry with no cgroup is any session's to cause: `logger -t vibeswitcher`, from a
+  process that exits at once, adds one to `status` each time (noise, and the words "the writer ended first" for an
+  entry the user never wrote). It counts for nothing and changes no other line: the line says who wrote it can't be
+  told. And the command line's wait on the user's node is run by no test: a scratch node never runs the user's
+  `journalctl` (it reads its stand-in's record), so the tests hold the arguments, the reading of the output, the
+  verdict and the wait itself, and the first `status --ack` on the node is that run's proof.
 - The text of the lead's questions: a turned lead asks what it likes. Only the card's facts are the engine's.
 - A lead (or a process inside its session) can record a `base_branch` hash of its own (`setGuarded` takes the lead's),
   and an approval card's diff is then taken against that base; the card names the base.
@@ -791,11 +793,13 @@ the host's lock by an exclusive flock), `StartCommandTests.aNodeWithoutSystemdRu
 (stop ends only the record it showed), `ServerCheckTests.theUsersNodeRootIsTheAccountsWhateverHomeSays` (the user's
 node is reached under the account's root, whatever HOME says), `StartCommandTests.aRunningNodeRefusesTheFlagsOnlyAStartApplies`.
 The bootstrap path's M4 (2026-11-17): `NodeJournalTests.anEntryJournaldRecordedNoCgroupForNeverCountsAndIsSaidSo` (an
-entry of the user's with no cgroup explains, acknowledges and records nothing, and is said for what it is, once),
+entry of the user's with no cgroup explains, acknowledges and records nothing, and is said for what it is on its own line),
+`NodeJournalTests.aForgedEntryWithNoCgroupLeavesAnAcceptedRequestsMarkAsItIs` (the security review: the request such an
+entry names is marked word for word as with no entry, and both lines are shown),
 `NodeJournalTests.theCommandLineWaitsUntilTheJournalHoldsItsEntry` (the wait: a poll on the entry's nonce, on an injected
 clock, and what each outcome says), `ServerTests.anEntryJournaldRecordedNoCgroupForIsSaidAtOnceAndNeverCounts` (the
 built command line on a scratch node whose journal stand-in records as journald does for a writer that ended: the
-acknowledgment fails saying why, and status says it of the entry and of the request),
+acknowledgment fails saying why, and status lists each such entry and keeps the request's mark),
 `NodeJournalTests.theJournalIsAskedForTheUsersEntriesOnly` (every journal read is matched on the user's uid).
 
 **Tests to write:** none left: Step 8's are under Held by.
