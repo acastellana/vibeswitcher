@@ -238,8 +238,9 @@ fi
 memory=$(free_memory)
 if [[ -n $on_linux ]] && [[ -z $memory || $memory -lt $memory_floor ]]; then
     echo "not starting: only ${memory:-?} % of memory is free (under the floor of $memory_floor %). Wait until" \
-        "/proc/meminfo's MemAvailable is at least $memory_floor % of its MemTotal (another session's build or test run finishing)."
-    exit 1
+        "/proc/meminfo's MemAvailable is at least $memory_floor % of its MemTotal (another session's build or test run finishing)" \
+        "(exit $busy_status)."
+    exit "$busy_status"
 fi
 if [[ -z $memory || $memory -lt $memory_floor ]]; then
     echo "not starting: only ${memory:-?} % of memory is free (under the floor of $memory_floor %). Wait until" \

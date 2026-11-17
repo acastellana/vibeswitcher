@@ -205,7 +205,10 @@ give_width() {
         my $load;
         if ($given =~ /^[0-9]+(\.[0-9]+)?$/) { $load = $given + 0; }
         else {
-            my $out = `/usr/sbin/sysctl -n vm.loadavg 2>/dev/null`;
+            my $out;
+            # Linux: the first number of /proc/loadavg (it has no vm.loadavg).
+            if ($^O eq "linux") { my $in; $out = open($in, "<", "/proc/loadavg") ? (scalar(<$in>) // "") : ""; }
+            else { $out = `/usr/sbin/sysctl -n vm.loadavg 2>/dev/null`; }
             if ($out =~ /([0-9]+(?:[.,][0-9]+)?)/) { (my $n = $1) =~ tr/,/./; $load = $n + 0; }
         }
         # The other slots held: a slot no one holds is flocked here for a moment (and let go); a missing file is free.

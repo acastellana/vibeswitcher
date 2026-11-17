@@ -155,7 +155,11 @@ struct TestScriptLinuxTests {
         let ran = try await Self.run(Self.vsHeavy, ["--as", "test", "true"], environment: Self.heavyEnvironment(folder))
         #expect(ran.inTime, "\(ran.output)")
         #expect(ran.status == 0, "\(ran.output)")
-        #expect(ran.output.isEmpty, "\(ran.output)")
+        // All it says is the width it gave the command (on stderr; a merge's stats line reads it back), worked out from
+        // the load it read: Linux's from /proc/loadavg.
+        let said = ran.output.split(separator: "\n")
+        #expect(said.count == 1 && said.first?.hasPrefix("vs-heavy: VS_HEAVY_CORES ") == true, "\(ran.output)")
+        #expect(!ran.output.contains("load unread"), "\(ran.output)")
         let left = try FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent("locks").path).sorted()
         #expect(left.filter { $0.hasPrefix("ticket-") || $0.hasSuffix(".holder") || $0.hasSuffix(".active") } == [], "\(left)")
         #expect(left.contains("test-build.lock") && left.contains("queue.lock"), "\(left)")
@@ -173,11 +177,13 @@ struct TestScriptLinuxTests {
         let machine = try #require(Int(counted.output.trimmingCharacters(in: .whitespacesAndNewlines)), "nproc: \(counted.output)")
         let ran = try await Self.run(Self.vsHeavy, ["bash", "-c", "echo $VS_HEAVY_CORES"], environment: Self.heavyEnvironment(folder))
         #expect(ran.inTime && ran.status == 0, "\(ran.output)")
-        let text = ran.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        // What the command printed is the last line: vs-heavy's own, saying the width, comes before it.
+        func printed(_ ran: Ran) -> String { ran.output.split(separator: "\n").last.map(String.init) ?? "" }
+        let text = printed(ran)
         let share = try #require(text.allSatisfy(\.isNumber) ? Int(text) : nil, "VS_HEAVY_CORES: \(ran.output)")
         #expect((1...max(2, machine)).contains(share), "\(share) of \(machine) cores")
         let alone = try await Self.run(Self.vsHeavy, ["bash", "-c", "echo $VS_HEAVY_CORES"],
                                        environment: Self.heavyEnvironment(folder, ["VIBESWITCHER_HEAVY_SLOTS": "1"]))
-        #expect(alone.output == "\(max(2, machine))\n", "\(alone.output)")
+        #expect(printed(alone) == "\(max(2, machine))", "\(alone.output)")
     }
 }
