@@ -140,7 +140,8 @@ extension StartCommand {
     /// check at another host; the review of S3) gives `.listening` (or `.refusedByCheck`); with nothing listening, that
     /// host ended (collected, being this process's child) gives `.hostEnded`; anything else is `.notYet`.
     static func detachedProbe(_ record: NodeRecord) -> NodeStarter.Probe {
-        switch NodeClient.connect(NodeContext(root: VibePaths.root, mode: .detached(record: record)), timeout: 5) {
+        let root = URL(fileURLWithPath: NodeFolders.nodeRoot(accountHome: VibePaths.accountHome), isDirectory: true)
+        switch NodeClient.connect(NodeContext(root: root, mode: .detached(record: record)), timeout: 5) {
         case .success: return .listening
         case .failure(.refused(let why)): return .refusedByCheck(why)
         case .failure(.broken): return .notYet

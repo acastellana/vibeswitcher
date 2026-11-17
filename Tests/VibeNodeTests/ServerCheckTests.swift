@@ -149,6 +149,22 @@ struct ServerCheckTests {
         }
     }
 
+    /// The step 8 sweep: the user's node's root (its socket, its record) is the account's, from the user database,
+    /// whatever `HOME` or `CFFIXED_USER_HOME` move `VibePaths.root` to: its host listens there. Only a scratch node's
+    /// is the environment's.
+    @Test func theUsersNodeRootIsTheAccountsWhateverHomeSays() {
+        let account = "/home/someone"
+        let moved = "/tmp/elsewhere/.vibeswitcher"
+        #expect(NodeCheck.root(of: .node, environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
+        #expect(NodeCheck.root(of: .detached(record: nil), environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
+        #expect(NodeCheck.root(of: .detached(record: NodeRecord(pid: 4, startTicks: 5)), environmentRoot: moved, accountHome: account)
+            == NodeFolders.nodeRoot(accountHome: account))
+        #expect(NodeCheck.root(of: .scratch(root: "/srv/vsn-1"), environmentRoot: "/srv/vsn-1", accountHome: account) == "/srv/vsn-1")
+        // The mode itself never looks at HOME: VIBESWITCHER_HOME unset is the user's node.
+        let mode = NodeCheck.mode(vibeswitcherHome: nil, accountHome: account)
+        #expect(NodeCheck.root(of: mode, environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
+    }
+
     @Test func aScratchHomeThatIsTheAccountsOwnGetsTheNodesCheck() {
         let account = "/home/someone"
         #expect(NodeCheck.mode(vibeswitcherHome: "/home/someone/.vibeswitcher", accountHome: account) == .node)

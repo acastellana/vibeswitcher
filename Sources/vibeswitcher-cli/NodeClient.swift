@@ -3,7 +3,7 @@ import VibeCore
 import VibeNode
 
 /// Where the command line's node is and how it reads it (the engine plan's E1, EN-D8, EN-D15 and the Global
-/// Constraints): the root (`VibePaths.root`), which check the server gets (`NodeCheck.mode`), and, for a scratch node,
+/// Constraints): the root (`NodeCheck.root`: a scratch node's `VibePaths.root`, the user's node's the account's), which check the server gets (`NodeCheck.mode`), and, for a scratch node,
 /// its test's stand-ins under `<root>/v2/test/` in place of the user's journal and manager. A scratch node never
 /// writes to `/run/systemd/journal/socket` and never runs `/usr/bin/journalctl` or `/usr/bin/systemctl`: without a
 /// stand-in it says "scratch node: no journal, no manager".
@@ -23,7 +23,8 @@ struct NodeContext {
         if mode == .node, !Platform.CodeIdentity.isAvailable, NodeFolders.mode(runtimeFolder: NodeFolders.runtimeFolder(uid: getuid())) == .noSystemd {
             mode = .detached(record: NodeRecord.read(root: NodeFolders.nodeRoot(accountHome: account)))
         }
-        return NodeContext(root: VibePaths.root, mode: mode)
+        return NodeContext(root: URL(fileURLWithPath: NodeCheck.root(of: mode, environmentRoot: VibePaths.root.path, accountHome: account), isDirectory: true),
+                           mode: mode)
     }
 
     var isScratch: Bool { if case .scratch = mode { return true } else { return false } }

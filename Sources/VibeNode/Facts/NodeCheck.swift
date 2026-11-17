@@ -38,6 +38,19 @@ public enum NodeCheck {
         return VibePaths.isAccountRoot(root, accountHome: accountHome) ? .node : .scratch(root: root.standardizedFileURL.path)
     }
 
+    /// The root the command line reads and connects under for `mode` (its socket, record, test folder): a scratch
+    /// node's is the environment's (`environmentRoot`, `VibePaths.root`, which `VIBESWITCHER_HOME` names); the user's
+    /// node's, started by the unit or detached, is always the account's (`NodeFolders.nodeRoot`, the home from the user
+    /// database), where its host (`--node`, HOME from `getpwuid`) listens and records, whatever this process's `HOME`
+    /// or `CFFIXED_USER_HOME` say (the start plan's Global Constraints: no environment variable moves these; the step 8
+    /// sweep, 2026-11-17).
+    public static func root(of mode: Mode, environmentRoot: String, accountHome: String) -> String {
+        switch mode {
+        case .scratch: return environmentRoot
+        case .node, .detached: return NodeFolders.nodeRoot(accountHome: accountHome)
+        }
+    }
+
     /// The listening process as the command line read it.
     public struct Listener: Equatable, Sendable {
         public var pid: pid_t
