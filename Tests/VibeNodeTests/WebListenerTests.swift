@@ -335,14 +335,11 @@ struct WebListenerTests {
         #expect(world.events.all.filter { $0.hasPrefix("text:") } == ["text:frag\u{E9}ment\u{1F600}ed", "text:slow"])
     }
 
-    /// What RFC 6455 forbids a client closes the connection with the code that fits, told to the client in a close
-    /// frame and to the handler; and nothing of the frame is delivered.
-    @Test func whatTheProtocolForbidsClosesWithItsCode() throws {
-        var limits = WebLimits()
-        limits.maxMessageBytes = 1_024
-        let world = try WebWorld(limits)
+    /// Frames RFC 6455 forbids a client, each with the code it closes the connection with, for a message limit of 1024
+    /// bytes: read by the decoder alone (`Parsing`) and sent to a listener.
+    static let forbidden: [(what: String, bytes: [UInt8], code: UInt16)] = {
         typealias Client = WebTestClient
-        let cases: [(what: String, bytes: [UInt8], code: UInt16)] = [
+        return [
             ("a frame not masked", Client.frame(Client.text, Array("hi".utf8), mask: nil), 1002),
             ("the first reserved bit", Client.frame(Client.text, Array("hi".utf8), rsv: 0b100), 1002),
             ("the second reserved bit", Client.frame(Client.binary, [1], rsv: 0b010), 1002),
@@ -371,6 +368,16 @@ struct WebListenerTests {
             ("fragments over the limit together", Client.frame(Client.binary, [UInt8](repeating: 0, count: 600), fin: false)
                 + Client.frame(Client.continuation, [UInt8](repeating: 0, count: 425)), 1009),
         ]
+    }()
+
+    /// What RFC 6455 forbids a client closes the connection with the code that fits, told to the client in a close
+    /// frame and to the handler; and nothing of the frame is delivered.
+    @Test func whatTheProtocolForbidsClosesWithItsCode() throws {
+        var limits = WebLimits()
+        limits.maxMessageBytes = 1_024
+        let world = try WebWorld(limits)
+        typealias Client = WebTestClient
+        let cases = Self.forbidden
         for (index, entry) in cases.enumerated() {
             let client = try world.socketClient(path: "/case/\(index)")
             #expect(world.events.wait(for: "open:/case/\(index)"))
@@ -881,6 +888,25 @@ extension WebListenerTests {
             var decoder = WebSocketDecoder(maxMessageBytes: 1_024)
             decoder.append(Client.frame(Client.binary, [], length: .claiming(70_000)).prefix(10))
             #expect(throws: WebSocketDecoder.Failure(code: 1009, reason: "a message too big")) { try decoder.next() }
+        }
+
+        /// Each frame the protocol forbids is refused by the decoder with its code, and nothing of it is delivered.
+        @Test func theDecoderRefusesWhatTheProtocolForbids() {
+            for entry in WebListenerTests.forbidden {
+                var decoder = WebSocketDecoder(maxMessageBytes: 1_024)
+                decoder.append(entry.bytes)
+                var events: [WebSocketDecoder.Event] = []
+                var refused: UInt16?
+                do {
+                    while let event = try decoder.next() { events.append(event) }
+                } catch let failure as WebSocketDecoder.Failure {
+                    refused = failure.code
+                } catch {
+                    Issue.record("\(entry.what): \(error)")
+                }
+                #expect(refused == entry.code, "\(entry.what): \(refused.map(String.init) ?? "taken"), events \(events)")
+                #expect(events.isEmpty, "\(entry.what): \(events)")
+            }
         }
 
         @Test func aServersFrameIsNeverMaskedAndItsLengthIsTheShortest() {
