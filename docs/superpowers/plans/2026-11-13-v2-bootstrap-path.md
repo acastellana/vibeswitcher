@@ -141,7 +141,7 @@ place first (that defeats PATH only: the binary is still your file, S11 item 15)
   /usr/bin/install -d -m 700 -o root -g root /root/swift-dl && cd /root/swift-dl || exit
   url=https://download.swift.org/swift-6.4.2-release/ubuntu2404/swift-6.4.2-RELEASE/swift-6.4.2-RELEASE-ubuntu24.04.tar.gz
   /usr/bin/curl -fLo swift.tar.gz "$url" && /usr/bin/curl -fLo swift.tar.gz.sig "$url.sig"
-  /usr/bin/curl -fsSLo keys.asc https://www.swift.org/keys/all-keys.asc
+  /usr/bin/curl -fsSL --compressed -o keys.asc https://www.swift.org/keys/all-keys.asc
   export GNUPGHOME=/root/swift-dl/gnupg && /usr/bin/install -d -m 700 "$GNUPGHOME"
   /usr/bin/gpg --batch --import keys.asc
   # Only a good signature whose key (or its primary) has exactly that fingerprint passes: not the name gpg prints.
