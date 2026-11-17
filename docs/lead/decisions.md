@@ -471,3 +471,7 @@ The user asked for it on 2026-11-17, to replace the lead's hand-filed install ca
 
 It passed 28 of 28 runs under load in the worker's runs and 10 of 10 in the verifier's. The one failing log (2026-11-12) cut off the field that would say which side lost the byte. So another round now would be guesswork, and it would hold back four real fixes, including the app's sleep bug (a parser busy at a sleep was replaced on waking and its bytes dropped).
 
+## 2026-11-17 19:55:55 The lead speaks to the user only when (1) the user must act (a card to run, a password, a question), (2) something the user asked for is finished (one message at the end, not one per step), (3) a real problem, risk or security finding needs their attention, or (4) the daily summary is due. Routine wakes get no message at all: a worker started, an audit started or passed, findings sent back automatically, a merge running long, a cleanup, an alert caused by our own test or probe.
+
+On 2026-11-17 the user said "we have too much noise... I don't even read 80%". On that afternoon's run (flaky tests, the Code Mode trial, the git guard), about 14 lead messages went out, and only about 4 needed the user: the install password, the trial's plugin finding, the security gap, and the final results.
+
