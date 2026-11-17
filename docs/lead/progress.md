@@ -3656,3 +3656,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-17 20:41 Released lead-chat-noise-fold's worker (idle since its done report on 73b2dd42) while its audit runs
 - 2026-11-17 20:41 Automatically (auto_advance): Released lead-chat-noise-fold's worker, idle since its done report on 73b2dd42, while its audit runs (ended pid 61733 (Worker: Lead chat noise: fold VibeSwitcher's report cards into one quiet line per burst)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-17 20:43 Merged worker-git-guard-the: Worker git guard: the '=' and attached spellings of refused git options slip the deny rules (build 0d8e30c31a28)
+- 2026-11-17 20:43 Automatically (auto_advance): Merged worker-git-guard-the (Worker git guard: the '=' and attached spellings of refused git options slip the deny rules) into main at 9982f7c6, on its passing audit and the full test run.
+- 2026-11-17 20:43 Started a worker on worker-git-guard-part
+- 2026-11-17 20:43 Automatically (auto_advance): Started a worker on worker-git-guard-part (Worker git guard, part 2: the parsed hook also checks refused subcommands and git's environment), its after tasks done (worker-git-guard-the).
+- 2026-11-17 20:43 Automatically (auto_advance): Cleaned up worker-git-guard-the (freed 4.9 GB of build output and temporary folders). It stays done.
+- 2026-11-17 20:46 Audit of lead-chat-noise-fold: complete, clean, round 1: 3 Nit open
