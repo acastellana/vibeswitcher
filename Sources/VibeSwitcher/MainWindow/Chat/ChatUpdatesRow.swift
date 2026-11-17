@@ -72,13 +72,13 @@ private struct UpdatesLine: View {
     var body: some View {
         Button(action: toggle) {
             HStack(spacing: 8) {
-                Image(systemName: "tray.full").font(.system(size: 10, weight: .semibold)).foregroundStyle(TeamMessageCard.tint.opacity(0.8))
+                Image(systemName: "tray.full").accessibilityHidden(true)
+                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(TeamMessageCard.tint.opacity(0.8))
                     .frame(width: 20, height: 20)
                     .background(Circle().fill(TeamMessageCard.tint.opacity(0.09)))
                     .overlay(alignment: .topTrailing) {
                         if updates.alarming { Circle().fill(Color.red).frame(width: 7, height: 7).offset(x: 1, y: -1) }
                     }
-                    .accessibilityHidden(true)
                 Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.tail)
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
