@@ -3533,3 +3533,9 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 11:25 Automatically (auto_advance): Merge of accept-claude-code-s failed: Tests fail rebased onto main (in a batch): itWakesOnlyWhenAClientIsDue(); the run stopped partway: 745 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running Sent its worker the output; it's back at work.
 - 2026-11-17 11:25 Automatically (auto_advance): Merged cut-the-app-s at c01ff549 (its passing audit) into main as one batch, on 2 test runs for 2 tasks.
 - 2026-11-17 11:25 Automatically (auto_advance): Cleaned up cut-the-app-s (freed 2.6 GB of build output and temporary folders). It stays done.
+- 2026-11-17 11:41 Asked the user to push main at d2277773 (37 commits) to origin/main
+- 2026-11-17 11:42 Pushed main at d2277773 (37 commits) to origin/main, on the user's click
+- 2026-11-17 11:44 Planned update-check-a-card: Update check: a card with the changelog and Install & Restart when a newer VibeSwitcher is on GitHub (review audit)
+- 2026-11-17 11:44 Started a worker on update-check-a-card
+- 2026-11-17 11:44 Automatically (auto_advance): Started a worker on update-check-a-card (Update check: a card with the changelog and Install & Restart when a newer VibeSwitcher is on GitHub).
+- 2026-11-17 11:44 Sent update-check-a-card's worker contract v2 (it had v1)

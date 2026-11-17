@@ -463,3 +463,7 @@ The user's answer to 9B2720A6 (2026-11-16). Reopening everything automatically w
 
 The user chose it on 2026-11-17 (question 1EA6E8D7). The sync stalled every worker, audit and merge three times in a day, each time waiting on the user's click, and the changes were Claude Code's own bookkeeping.
 
+## 2026-11-17 11:44:39 The app checks for a newer VibeSwitcher (GitHub's origin/main, or this Mac's main) about 2 minutes after launch and every 6 hours after that, and has a menu item. It shows a card with a plain-language changelog and Install & Restart. The button opens a shell card asking for the signing keychain's password each time; the password is never stored. Built as update-check-a-card (audit).
+
+The user asked for it on 2026-11-17, to replace the lead's hand-filed install cards, and chose click plus password over a stored password (question 6867BF0F).
+
