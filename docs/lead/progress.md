@@ -3568,3 +3568,8 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 12:38 Released update-check-a-card's worker (idle since its done report on 326085a0) while its audit runs
 - 2026-11-17 12:38 Automatically (auto_advance): Started the audit of update-check-a-card at 326085a0 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-17 12:39 Merged explainer-video-add-the: Explainer video: add the features since Nov 12, and render at 1.7× speed (build 9e4f85a8ba8c)
+- 2026-11-17 12:39 Automatically (auto_advance): Merged explainer-video-add-the (Explainer video: add the features since Nov 12, and render at 1.7× speed) into main at dc1aa8ab, on its passing audit and the full test run.
+- 2026-11-17 12:40 Automatically (auto_advance): Cleaned up explainer-video-add-the (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-17 12:41 Audit of update-check-a-card: complete, clean, round 2: 1 Important closed, 3 Nit (2 open)
+- 2026-11-17 12:44 Started a worker on update-check-a-card
+- 2026-11-17 12:44 Automatically (auto_advance): Merge of update-check-a-card failed: Tests fail rebased onto main: error: Git command 'git -C /tmp/vs-test.1v41Vp/home/Library/Caches/org.swift.swiftpm/repositories/SwiftTerm-74b92343 config --get remote.origin.url' failed: fatal: cannot change to '/tmp/vs-test.1v41… Sent its worker the output; it's back at work.
