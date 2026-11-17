@@ -638,34 +638,36 @@ extension InstallTests {
         #expect(try world.calls().isEmpty, "gh was asked about a commit already installed")
     }
 
-    /// A build folder an earlier run renamed into place before it wrote `installs` and `current` (a failed append, a
-    /// signal): the rerun finishes it, with no fetch or gh call, and the one after that is refused as installed. A
-    /// folder whose build-info names another commit is refused, saying to remove it.
-    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func anInstallStoppedAfterItsRenameIsFinishedByARerun() async throws {
+    /// A folder for the commit that no install recorded as current's (an install stopped after its rename, or a folder
+    /// a worker put there with a build-info naming the commit): refused, saying to remove it, before any gh call, and
+    /// neither `installs` nor `current` is written. One `installs` records while `current` names another commit is
+    /// refused as installed, and `current` stays where it was (only `vs switch` runs an older build).
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aFolderNoInstallRecordedIsRefusedNotAdopted() async throws {
         let world = try await world()
         let folder = world.prefix.appendingPathComponent(world.base)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try Data(#"{"commit":"\#(world.base)"}"#.utf8).write(to: folder.appendingPathComponent("build-info"))
-        let finished = try await world.install(try world.arguments(world.base, products: true))
-        #expect(finished.status == 0, "\(finished.status) \(finished.errors)")
-        let current = try? FileManager.default.destinationOfSymbolicLink(atPath: world.prefix.appendingPathComponent("current").path)
-        #expect(current == world.base)
-        let installs = (try? String(contentsOf: world.prefix.appendingPathComponent("installs"), encoding: .utf8)) ?? ""
-        #expect(installs.split(separator: "\n").map { $0.split(separator: " ").first.map(String.init) } == [world.base], "\(installs)")
-        #expect(try world.calls().isEmpty, "gh was asked while finishing a folder already checked")
+        let planted = try await world.install(try world.arguments(world.base, products: true))
+        #expect(planted.status == 1 && planted.errors.contains("remove it, then install"), "\(planted.status) \(planted.errors)")
+        #expect(Set(try FileManager.default.contentsOfDirectory(atPath: world.prefix.path)) == [world.base])
+        #expect(try world.calls().isEmpty, "gh was asked about a folder already there")
 
-        let again = try await world.install(try world.arguments(world.base, products: true))
-        #expect(again.status == 1 && again.errors.contains("\(world.base) is installed"), "\(again.status) \(again.errors)")
+        // Its installs line written, current not: still the user's to remove (a first install that stopped there).
+        let installs = world.prefix.appendingPathComponent("installs")
+        try Data("\(world.base) 2026-11-17T00:00:00Z\n".utf8).write(to: installs)
+        let unrecorded = try await world.install(try world.arguments(world.base, products: true))
+        #expect(unrecorded.status == 1 && unrecorded.errors.contains("remove it, then install"), "\(unrecorded.status) \(unrecorded.errors)")
+        #expect(!FileManager.default.fileExists(atPath: world.prefix.appendingPathComponent("current").path))
 
-        let other = world.root.appendingPathComponent("other-prefix")
-        let otherFolder = other.appendingPathComponent(world.base)
-        try FileManager.default.createDirectory(at: otherFolder, withIntermediateDirectories: true)
-        try Data(#"{"commit":"\#(String(repeating: "0", count: 40))"}"#.utf8).write(to: otherFolder.appendingPathComponent("build-info"))
-        var arguments = try world.arguments(world.base, products: true)
-        arguments[2] = other.path
-        let refused = try await world.install(arguments)
-        #expect(refused.status == 1 && refused.errors.contains("remove it"), "\(refused.status) \(refused.errors)")
-        #expect(!FileManager.default.fileExists(atPath: other.appendingPathComponent("current").path))
+        // An older install, current naming another: refused as installed, current not moved back to it.
+        let other = String(repeating: "0", count: 40)
+        try FileManager.default.createDirectory(at: world.prefix.appendingPathComponent(other), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: world.prefix.appendingPathComponent("current").path, withDestinationPath: other)
+        let older = try await world.install(try world.arguments(world.base, products: true))
+        #expect(older.status == 1 && older.errors.contains("\(world.base) is installed"), "\(older.status) \(older.errors)")
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: world.prefix.appendingPathComponent("current").path) == other)
+        #expect(try String(contentsOf: installs, encoding: .utf8) == "\(world.base) 2026-11-17T00:00:00Z\n")
+        #expect(try world.calls().isEmpty, "gh was asked about a folder already there")
     }
 
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func theTestFlagsNeedAScratchPrefix() async throws {

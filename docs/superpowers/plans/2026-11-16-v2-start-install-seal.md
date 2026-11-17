@@ -1290,8 +1290,8 @@ is half ported (its first case is S8a's), and the `HostClient.swift` row's lifec
   7. `git worktree add --detach "$tool_scratch/src" <SHA>` in the fresh clone, then the "checked out" line;
   8. the build (ST-D11), skipped under `--test-products`;
   9. the link check (ST-D12);
-  10. copy into `<prefix>/<commit>.partial`, `install-record`, rename to `<prefix>/<commit>` (refused if it exists; a rerun
-      finishes one an earlier run renamed but didn't record, see the 2026-11-17 note);
+  10. copy into `<prefix>/<commit>.partial`, `install-record`, rename to `<prefix>/<commit>` (refused if it exists: a
+      folder no install recorded, saying to remove it, see the 2026-11-17 note);
   11. `installs`, then `current` by a link renamed over, then the seal line.
 
   The script obeys `ScriptScratchLintTests`: it calls `scratch_tmpdir` before the build, never sets `TMPDIR` and
@@ -1426,20 +1426,15 @@ the courtesy check's git folder and products read once"):*
   stopped at step 6. The jq filter never read it. The tests' stand-in gh now refuses a field outside 2.45's list, as
   the real one does: every case that gets past CI (`InstallTests.aFirstInstallRunsOnlyTheCommitsOwnScript` among
   them) failed on the script before the change.
-- **A rerun finishes an install that stopped after its rename** (a failed `installs` append, a signal). Before, the
-  rerun refused ("is there already") and nothing but removing the folder by hand got out; a first install was left
-  with no `current`. Now, under the lock and after ST-D9's check of which copy runs, a folder for the commit whose
-  `build-info` names it, but which `current` and `installs` don't both name, gets its `installs` line (unless that run
-  wrote it) and `current`, with no fetch, gh call or build. It runs nothing in the folder. Any other folder for the
-  commit is refused, saying to remove it. Held by `InstallTests.anInstallStoppedAfterItsRenameIsFinishedByARerun`
-  (failed on the script before the change).
-- **The courtesy check honours the account's own ignore file.** Since item 25 its git ran with `HOME=/nonexistent`
-  and `GIT_CONFIG_GLOBAL=/dev/null`, so a file the user's `git status` ignores through `core.excludesFile` or
-  `~/.config/git/ignore` (an editor's folder) was refused as untracked (65). The script now reads `core.excludesFile`
-  from `~/.config/git/config` and `~/.gitconfig` under the HOME it runs with, as data (`git config --file`, no
-  include), else takes `~/.config/git/ignore`, copies that file into its own git folder and passes it as
-  `core.excludesFile`. No other setting of the account's is read. Held by
-  `InstallTests.theAccountsOwnIgnoreFileIsHonouredByTheCleanCheck` (failed on the script before the change).
+- **A folder for the commit no install recorded is refused, saying to remove it.** An install that stops between
+  its rename and step 11 (a failed `installs` append, a signal) leaves a folder the rerun refuses; the refusal now says
+  "remove it, then install", and the rerun fetches, checks and builds afresh. A resume that finished such a folder
+  (c91672b3) was taken back in the sweep's review: its only check was `build-info`'s commit, which a worker writes, so
+  a folder planted at `<prefix>/<commit>` became `current` with no fetch, v2/CI check, build or link check, and the
+  user's `vs config accept` of the held builds-folder change would have accepted it; it also moved `current` back to an
+  older installed commit. A folder `installs` records, with `current` there, is refused as installed and `current` isn't
+  moved (only `vs switch` runs an older build). Held by `InstallTests.aFolderNoInstallRecordedIsRefusedNotAdopted`
+  (failed on the resume's script).
 
 - [ ] **Step 4:** commit ("v2: the node's install script"). Push, both green.
 

@@ -24,9 +24,10 @@
 # build, install-record's refusal). Each refusal is one line on stderr naming what failed. Every local refusal comes
 # before any network call, and every refusal that doesn't need the built products before the build; the link check
 # and the re-checks of the copies, the checkout and the record come after it, before anything is laid out. One install
-# runs at a time on a prefix (a lock on it). A rerun finishes a build folder an earlier run of the same install renamed
-# into place but stopped before installs and current (its build-info naming COMMIT), with no fetch or build; any other
-# folder for COMMIT is refused.
+# runs at a time on a prefix (a lock on it). A folder for COMMIT already there is refused: installed when installs
+# records it and current is there; otherwise (an install that stopped after its rename, or a folder anyone else put
+# there) "remove it, then install". Nothing in such a folder is trusted, its build-info included: the rerun fetches,
+# checks and builds again.
 #
 # What it trusts (ST-D9): nothing in --repo, and nothing in your git and gh configuration: every git and gh runs under
 # `env -i`, gh with a configuration folder no process of yours can make, and the courtesy check's git with a git folder
@@ -305,34 +306,15 @@ install_node_main() {
     local lock
     exec {lock}< "$prefix" || fail 1 "can't open $prefix"
     /usr/bin/flock -n "$lock" || fail 1 "another install is running on $prefix: try again once it has ended"
-    # Step 11 (installs, then current by a link renamed over it), and how a rerun finishes a folder an earlier run of
-    # this install renamed into place (the resume below): that run may have written its installs line already.
-    install_node_finish() {
-        if (( ! resume )) || ! /usr/bin/grep -q -- "^$commit " "$prefix/installs" 2> /dev/null; then
-            printf '%s %s\n' "$commit" "$(/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$prefix/installs" \
-                || fail 1 "can't append to $prefix/installs"
-        fi
-        /bin/rm -f -- "$prefix/current.new"
-        /bin/ln -s -- "$commit" "$prefix/current.new" && /bin/mv -T -- "$prefix/current.new" "$prefix/current" \
-            || fail 1 "can't point $prefix/current at $commit"
-        printf 'installed %s in %s; current names it (`vs switch %s` runs it on a running node)\n' "$commit" "$final" "$commit"
-        printf 'the seal holds every team until `vs config accept` (the builds folder changed)\n'
-    }
-
-    # A folder for COMMIT already: installed, unless an earlier run of this install renamed it into place and stopped
-    # before step 11 (finished below, once the ST-D9 check has passed); anything else is refused.
-    local resume=0
+    # A folder for COMMIT already. Nothing in it is trusted (its build-info is anyone's to write): one installs records
+    # is installed, and current never moves back to it here (`vs switch` runs an older build); any other (an install
+    # that stopped between its rename and step 11, or a folder put there by someone else) is removed by the user and
+    # the commit installed afresh, fetched, checked and built again.
     if [[ -e $final || -L $final ]]; then
-        local named
-        [[ -d $final && ! -L $final ]] || fail 1 "$final is there already and isn't a build folder: remove it, then install"
-        named=$(jq_run -r '.commit // empty' "$final/build-info" 2> /dev/null) || named=""
-        [[ $named == "$commit" ]] \
-            || fail 1 "$final is there already, its build-info naming ${named:-no commit}: remove it, then install"
-        if [[ $(/usr/bin/readlink -- "$prefix/current" 2> /dev/null) == "$commit" ]] \
-            && /usr/bin/grep -q -- "^$commit " "$prefix/installs" 2> /dev/null; then
+        if [[ -e $prefix/current || -L $prefix/current ]] && /usr/bin/grep -q -- "^$commit " "$prefix/installs" 2> /dev/null; then
             fail 1 "$final is there already: $commit is installed"
         fi
-        resume=1
+        fail 1 "$final is there already, but no install recorded it as current's: remove it, then install"
     fi
 
     # Once a build is installed, only its copy of this script installs the next (ST-D9).
@@ -350,13 +332,6 @@ install_node_main() {
             || fail 66 "$prefix/current/Resources/install-node.sh isn't there: the next install runs the installed build's copy"
         [[ $self_real == "$expected_self" ]] \
             || fail 66 "a build is installed: the next install runs only as $prefix/current/Resources/install-node.sh, not $self_real"
-    fi
-    if (( resume )); then
-        printf 'install-node: %s was laid out by an install that stopped before current: finishing it\n' "$final" >&2
-        /bin/rm -rf -- "$early"
-        early_ours=0
-        install_node_finish
-        return 0
     fi
 
     # --- 4. A fresh repository, and the fetch ---------------------------------------------------------------------
@@ -640,7 +615,13 @@ install_node_main() {
     install_partial=""
 
     # --- 11. installs, then current by a link renamed over it ---------------------------------------------------------
-    install_node_finish
+    printf '%s %s\n' "$commit" "$(/usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$prefix/installs" \
+        || fail 1 "can't append to $prefix/installs"
+    /bin/rm -f -- "$prefix/current.new"
+    /bin/ln -s -- "$commit" "$prefix/current.new" && /bin/mv -T -- "$prefix/current.new" "$prefix/current" \
+        || fail 1 "can't point $prefix/current at $commit"
+    printf 'installed %s in %s; current names it (`vs switch %s` runs it on a running node)\n' "$commit" "$final" "$commit"
+    printf 'the seal holds every team until `vs config accept` (the builds folder changed)\n'
 }
 # On exit (on_exit): the build folder being made, unless it was renamed into place.
 install_node_drop_partial() {
