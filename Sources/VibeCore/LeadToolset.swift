@@ -568,9 +568,16 @@ public final class LeadToolset: MCPToolset {
     /// The workflow notes, with the lead's branch resolved and the review rules' floor the user set (`LeadReviewFloor`,
     /// from the vault: none when it can't be read, the rules as the file says, as before).
     var workflow: LeadWorkflow {
+        var workflow = workflowNotes
+        workflow.floor = floorRead()
+        return workflow
+    }
+
+    /// The workflow notes with the lead's branch resolved, and no floor: read without a round trip to the host, for
+    /// what never needs it (the remote poll's schedule, read at each tick).
+    var workflowNotes: LeadWorkflow {
         var workflow = LeadWorkflow.load(from: workflowPath)
         workflow.baseBranch = workflow.baseBranch ?? store.load().baseBranch ?? Worktrees.mainBranch(root: root)
-        workflow.floor = floorRead()
         return workflow
     }
 
