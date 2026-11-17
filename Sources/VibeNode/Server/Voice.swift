@@ -142,10 +142,12 @@ public struct VoiceRule: Equatable, Sendable {
     }
 
     /// The scopes a user's terminal runs in, as data (E1 Step 1, `docs/process/v2-linux-inventory.md`): the measured
-    /// rows and the documented fixtures. A row the user's measurement (the bootstrap path's M4) finds is added here by
-    /// one line, with a test in `VoiceRuleTests`. Anything else is refused.
+    /// rows and the documented fixtures. The user's measurement (the bootstrap path's M4, 2026-11-17) found no other
+    /// scope: a Windows Terminal tab's shell, a `claude` started there and its Bash tool's child are in `/init.scope`.
+    /// A scope a later measurement finds is added here by one line, with a test in `VoiceRuleTests`. Anything else is
+    /// refused.
     public static let terminalScopes: [Scope] = [
-        Scope("/init.scope", basis: "measured 2026-11-15 on Linux 5.15.167.4-microsoft-standard-WSL2: the agent's Bash tool's child and the scratch host's children (WSL starts terminals there)"),
+        Scope("/init.scope", basis: "measured on Linux 5.15.167.4-microsoft-standard-WSL2: 2026-11-15, the agent's Bash tool's child and the scratch host's children; confirmed by the user's M4, 2026-11-17: a Windows Terminal tab's shell, a `claude` started there and its Bash tool's child (WSL starts terminals there)"),
         Scope("/user.slice/user-{uid}.slice/session-*.scope", basis: "documented: a login over ssh (logind's session scope); not measured, no sshd here"),
     ]
 

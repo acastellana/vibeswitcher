@@ -716,8 +716,10 @@ started detached by its record): `StartCommandTests.aStopFallbackWithNoTerminalI
 `StartCommandTests.statusSaysTheWeakerRuleWithoutSystemd`, and from its review `ServerTests.aStopFromTheUserEndsEverySessionThenTheHost`
 (the confirmation counts the host's live sessions), `StartCommandTests.twoDetachedStartsAtOnceStartOneHost`,
 `StartCommandTests.aChildStartedWhileTheHostEndsIsFoundToo`, `StartCommandTests.theMacsStopWithNoServerSaysTheNodeIsntRunning`. The
-scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (a Windows
-Terminal tab, a `claude` there, `systemd-run --user`) wait on the bootstrap path's M4. The engine's E4:
+scopes are E1's measured and documented rows (docs/process/v2-linux-inventory.md); the user's own (the bootstrap
+path's M4, 2026-11-17) found no other: a Windows Terminal tab and a `claude` there are in the measured terminal scope,
+and the `systemd-run --user` unit is under the user's manager, refused (both fixtures are in the two `VoiceRuleTests`
+cases above). The engine's E4:
 `LeadStartTests.aSessionsProcessCannotStartALead`, `LeadStartTests.aLeadIsRefusedOnAFreshVaultUntilAccepted`,
 `ServerTests.aStopWhileALeadSpawnsStillEndsTheHost`. The engine's E6: `AnswerVoiceTests.anAnswerFromASessionsProcessIsRefused`,
 `AnswerVoiceTests.anAnswerFromAProcessCarryingASessionMarkerIsRefused`, `AnswerVoiceTests.anAnswerFromBranchCodeIsRefused`,

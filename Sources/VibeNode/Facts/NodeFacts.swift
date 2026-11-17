@@ -149,8 +149,9 @@ public struct NodeFacts: Equatable, Sendable {
 
     /// The names a user manager's environment holds on this machine without anyone setting them: systemd's own and
     /// what WSL's start gives it. Anything else came from `systemctl --user set-environment`, `environment.d` or an
-    /// edited unit (S9, T23), and `start` and `status` name it. A first set from the documentation of systemd and WSL;
-    /// the user's M4 output (the bootstrap path) checks it against this machine.
+    /// edited unit (S9, T23), and `start` and `status` name it. A first set from the documentation of systemd and WSL,
+    /// checked against this machine's manager on 2026-11-17 (names only; `docs/process/v2-linux-inventory.md`, "The
+    /// user manager's environment"): every name it holds is here but `SSH_AUTH_SOCK`.
     public static let expectedManagerEnvironment: Set<String> = [
         "HOME", "LANG", "LANGUAGE", "LOGNAME", "PATH", "SHELL", "USER", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
         "XDG_DATA_DIRS", "XDG_CONFIG_DIRS", "MANAGERPID", "MANAGERPIDFDID", "INVOCATION_ID", "SYSTEMD_EXEC_PID",

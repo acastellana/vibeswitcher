@@ -472,16 +472,21 @@ reads both, and each that is there must pass. Every process measured so far gave
 | --- | --- | --- |
 | the agent's own Bash tool's child (a `claude` started by WSL's `/init` relay, its Bash tool's `bash`) | `0::/init.scope`, `name=systemd:/init.scope` | measured by the agent, 2026-11-15 |
 | a scratch host started by a test (`ScratchNode`), its server child (from its sealed copy), and a session's program | `0::/init.scope`, `name=systemd:/init.scope` (the test process's own) | measured by the agent, 2026-11-15 |
-| a shell in a new Windows Terminal tab here (`cat /proc/self/cgroup`) | pending the user's M4 | the bootstrap path's M4 |
-| a `claude` started in that tab, its Bash tool's child | pending the user's M4 | the bootstrap path's M4 |
-| a `systemd-run --user --wait --pipe cat /proc/self/cgroup` | pending the user's M4 (expected under `/user.slice/user-1000.slice/user@1000.service/app.slice/run-u*.service`, which the rule refuses) | the bootstrap path's M4 |
-| whether `journalctl --user` lists the user's own entries (`logger -t vibeswitcher-probe hello; journalctl --user -t vibeswitcher-probe -n 1 --no-pager`), or the command line needs `_UID=` | pending the user's M4 | the bootstrap path's M4 |
+| a shell in a new Windows Terminal tab here (`cat /proc/self/cgroup`; its chain is `init-systemd(Ub` → `SessionLeader` → `Relay(pid)` → `bash`) | `0::/init.scope`, `15:name=systemd:/init.scope`, `12:pids:/init.scope`, `6:devices:/init.scope`, `5:memory:/init.scope`; every other controller `/` | measured by the user, 2026-11-17 (the bootstrap path's M4), after a `wsl --shutdown` |
+| a `claude` started in that tab, its Bash tool's child | the same lines, all `/init.scope` | measured by the user, 2026-11-17 (M4) |
+| a `systemd-run --user --wait --pipe cat /proc/self/cgroup` | the unit was `run-u0.service`, started by the user's manager (the user journal: `Started run-u0.service - /usr/bin/cat /proc/self/cgroup.`, from `systemd[282]`, whose own `_SYSTEMD_CGROUP` is `/user.slice/user-1000.slice/user@1000.service/init.scope`). The line the unit printed wasn't captured: `0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-u0.service` is derived from the unit's name and the manager's cgroup, not pasted. The rule refuses it | the unit's name and the manager's cgroup measured by the user, 2026-11-17 (M4); the line derived |
+| whether `journalctl --user` lists the user's own entries (`logger -t vibeswitcher-probe hello; journalctl --user -t vibeswitcher-probe -n 1 --no-pager`), or the command line needs `_UID=` | it lists them, without `_UID=`: the entry has `_UID=1000`, `_TRANSPORT=syslog` (`logger`'s; the command line's own go by the native socket) and `_RUNTIME_SCOPE=system` | measured by the user, 2026-11-17 (M4) |
+| a journal entry whose writer ended at once (`logger`) | no `_SYSTEMD_CGROUP`, no `_SYSTEMD_UNIT`, no `_COMM`: journald read `/proc/<pid>` after the process was gone | measured by the user, 2026-11-17 (M4) |
+| a journal entry whose writer stayed alive 2 s after its datagram | `_SYSTEMD_CGROUP=/init.scope`, `_SYSTEMD_UNIT=init.scope`, and `_COMM` | measured by the user, 2026-11-17 (M4) |
 | cron (`/system.slice/cron.service`), at (`/system.slice/atd.service`) | refused | documented fixtures, not measured: no crontab for this account, no `atd` |
 | ssh (`/user.slice/user-<uid>.slice/session-<n>.scope`) | taken | a documented fixture, not measured: no sshd here |
 
-So `VoiceRule.terminalScopes` holds `/init.scope` (measured) and `/user.slice/user-{uid}.slice/session-*.scope`
-(documented); anything else is refused, and so is anything under `user@<uid>.service` or in the node's unit.
-The agent started nothing in the user's systemd manager and read nothing from the user's journal for this.
+So `VoiceRule.terminalScopes` holds `/init.scope` (measured, by the agent on 2026-11-15 and by the user's M4 on
+2026-11-17) and `/user.slice/user-{uid}.slice/session-*.scope` (documented); anything else is refused, and so is
+anything under `user@<uid>.service` or in the node's unit. The agent started nothing in the user's systemd manager and
+read nothing from the user's journal for this: the M4 rows are what the user ran and gave. The v1 hierarchies' numbers
+are a boot's own (29, 26, 20 and 19 on 2026-11-15; 15, 12, 6 and 5 after the `wsl --shutdown` before M4): the rule
+reads the `name=systemd` line by its name and the unified one by `0::`, never by number.
 
 What this means, and what S3 already says it doesn't promise: **the agent's own Bash tool runs in `/init.scope`, as a
 user's terminal does**, so the cgroup line can't tell the user's own Claude Code from the user; the typed word (EN-D5)
@@ -490,12 +495,39 @@ process's scope too: a scratch node's tests give the server their own scope (`--
 process is refused by the other lines (its ancestry holds the host, its terminal is a session's, its environment
 carries `VIBESWITCHER_SESSION`).
 
-**The M4 follow-up**: each row marked pending gets its measured lines here; a scope the Windows Terminal tab or its
-`claude` shows that isn't `/init.scope` becomes one more `VoiceRule.Scope` row in `VoiceRule.terminalScopes` (one
-line) with a `VoiceRuleTests` case that it is taken; the `systemd-run` line becomes a `VoiceRuleTests` fixture that
-is refused (if it isn't under `user@1000.service`, the rule's first line needs another look before the bootstrap);
-and the journal answer decides whether `NodeContext.journalEntries` adds `_UID=<uid>` to its `journalctl --user`
-matches.
+**The M4 follow-up, done 2026-11-17** (Linux 5.15.167.4-microsoft-standard-WSL2):
+
+- **No new scope.** The Windows Terminal tab's shell, the `claude` started there and its Bash tool's child are all in
+  `/init.scope`, the row `VoiceRule.terminalScopes` already held; its basis now names the user's measurement too, and
+  `VoiceRuleTests.aTerminalScopeIsTheUser` reads the tab's lines as measured.
+- **The `systemd-run --user` unit is refused**, as expected: `run-u0.service` is under `user@1000.service`, so the
+  rule's first line refuses it (`VoiceRuleTests.anAnswerFromATransientUserUnitIsRefused`, on the derived line, in the
+  unified form alone and in the hybrid one; the manager's own `…/user@1000.service/init.scope` is refused there too).
+- **`journalctl --user` lists the user's own entries without `_UID=`.**
+- **journald stamps `_SYSTEMD_CGROUP` only for a writer it can still read.** It reads `/proc/<pid>` when it takes the
+  datagram, not when the datagram was sent: `logger`, which exits at once, left an entry with no `_SYSTEMD_CGROUP`,
+  `_SYSTEMD_UNIT` or `_COMM`, and a writer alive 2 s later got all three. The command line's entries count only by
+  `_SYSTEMD_CGROUP` (`NodeJournal.passes`), and on the user's node it sent its datagram and returned: a command that
+  ended right after writing (`status --ack`, `start`'s acknowledgment of S11, the stop fallback's entry, any entry
+  written last) could leave an entry that never counts, and `status` then showed the user's own action as "not a
+  terminal's" or as accepted with no entry.
+
+## The user manager's environment (2026-11-17, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+`systemctl --user show-environment | cut -d= -f1`, read by the agent after the `wsl --shutdown` before M4 (names only;
+nothing was set there and nothing started in the manager), gave twelve names:
+
+```
+DBUS_SESSION_BUS_ADDRESS GSM_SKIP_SSH_AGENT_WORKAROUND HOME LANG LOGNAME PATH QT_ACCESSIBILITY SHELL SSH_AUTH_SOCK
+USER XDG_DATA_DIRS XDG_RUNTIME_DIR
+```
+
+Against `NodeFacts.expectedManagerEnvironment`: eleven are in it, and `SSH_AUTH_SOCK` isn't. That is the lead's
+measurement of 2026-11-16 again (the start plan's ST-D2), so nothing changes: `start` doesn't refuse this manager
+(`NodeFolders.managerRefusal` leaves out `NodeUnit.unsetFromManager`, which is `SSH_AUTH_SOCK`: the unit unsets it), and
+`status` names `SSH_AUTH_SOCK` as beyond the expected, as ST-D2's note of 2026-11-16 says it does. No name the manager
+holds here would make `start` refuse. The expected set's other names (`MANAGERPID`, `INVOCATION_ID`, `JOURNAL_STREAM`,
+`WSL_DISTRO_NAME`, `DISPLAY` and the rest) aren't in this manager's environment: they are expected, not required.
 
 ## The engine's proof under a scratch host (the engine's E9, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
 

@@ -14,6 +14,17 @@ struct VoiceRuleTests {
         ["29:name=systemd:\(path)", "28:misc:/", "26:pids:\(path)", "19:memory:\(path)", "15:cpuset:/", "0::\(path)"]
     }
 
+    /// A Windows Terminal tab's shell here, as the user measured it (the bootstrap path's M4, 2026-11-17, after a `wsl
+    /// --shutdown`): every line of `/proc/self/cgroup`.
+    static let terminalTab = ["15:name=systemd:/init.scope", "14:misc:/", "13:rdma:/", "12:pids:/init.scope", "11:hugetlb:/", "10:net_prio:/",
+                              "9:perf_event:/", "8:net_cls:/", "7:freezer:/", "6:devices:/init.scope", "5:memory:/init.scope", "4:blkio:/",
+                              "3:cpuacct:/", "2:cpu:/", "1:cpuset:/", "0::/init.scope"]
+
+    /// The unit the user's `systemd-run --user --wait --pipe cat /proc/self/cgroup` ran in (M4, 2026-11-17): its name
+    /// is from the user's journal (`Started run-u0.service`, logged by the user's manager, whose own cgroup is
+    /// `…/user@1000.service/init.scope`). The line it printed wasn't captured: this path is derived, not pasted.
+    static let systemdRunUnit = "/user.slice/user-1000.slice/user@1000.service/app.slice/run-u0.service"
+
     static let nodeUnit = "/user.slice/user-1000.slice/user@1000.service/app.slice/vibeswitcher-node.service"
     /// The server's rule when it runs in the node's unit.
     static let systemd = VoiceRule.at(start: hybrid(nodeUnit), testScopes: nil, uid: uid)
@@ -36,6 +47,10 @@ struct VoiceRuleTests {
         #expect(Self.judged(Self.peer(cgroup: Self.hybrid("/user.slice/user-1000.slice/session-3.scope"))) == .user)
         // The unified hierarchy alone (no v1 lines) is read the same.
         #expect(Self.judged(Self.peer(cgroup: ["0::/init.scope"])) == .user)
+        // The user's M4 (2026-11-17): a shell in a new Windows Terminal tab, a `claude` started there and its Bash
+        // tool's child, each line as `cat /proc/self/cgroup` gave it (the v1 numbers are that boot's).
+        #expect(Self.judged(Self.peer(cgroup: Self.terminalTab)) == .user)
+        #expect(VoiceRule.terminalScopes.first?.basis.contains("the user's M4, 2026-11-17") == true)
         #expect(Self.judged(Self.peer(cgroup: ["0::/user.slice/user-1000.slice/session-12.scope"])) == .user)
         // Another user's session scope isn't this user's.
         #expect(Self.refused(Self.judged(Self.peer(cgroup: ["0::/user.slice/user-1001.slice/session-3.scope"]))))
@@ -58,6 +73,14 @@ struct VoiceRuleTests {
             let voice = Self.judged(Self.peer(cgroup: Self.hybrid(path)))
             #expect(voice == .notUser("its cgroup \(path) is in the user's systemd manager (a user unit, systemd-run, a service)"), "\(path): \(voice)")
         }
+        // The user's M4 (2026-11-17): `systemd-run --user` ran its command in `run-u0.service`. Refused on the unified
+        // line alone, on the hybrid layout's lines, and when only the v1 line names the unit.
+        let why = Voice.notUser("its cgroup \(Self.systemdRunUnit) is in the user's systemd manager (a user unit, systemd-run, a service)")
+        #expect(Self.judged(Self.peer(cgroup: ["0::" + Self.systemdRunUnit])) == why)
+        #expect(Self.judged(Self.peer(cgroup: Self.hybrid(Self.systemdRunUnit))) == why)
+        #expect(Self.judged(Self.peer(cgroup: ["15:name=systemd:" + Self.systemdRunUnit, "0::/init.scope"])) == why)
+        // A journal entry from it doesn't count either (`NodeJournal.passes` is the same rule on `_SYSTEMD_CGROUP`).
+        #expect(Self.systemd.cgroupRefusal(["0::" + Self.systemdRunUnit]) != nil)
     }
 
     @Test func atAndCronAreRefused() {

@@ -171,6 +171,9 @@ place first (that defeats PATH only: the binary is still your file, S11 item 15)
   /proc/self/cgroup` in a new Windows Terminal tab; the same run by the Bash tool of a `claude` started in that tab;
   `systemd-run --user --wait --pipe cat /proc/self/cgroup`; and `logger -t vibeswitcher-probe hello; journalctl --user
   -t vibeswitcher-probe -n 1 --no-pager` (whether your journal lists your own entries).
+  *Done 2026-11-17:* recorded in `docs/process/v2-linux-inventory.md` ("The voice rule's scopes"). The tab, its
+  `claude` and that one's Bash tool are all in `/init.scope` (no new scope); `systemd-run --user` ran in
+  `run-u0.service` under the user's manager, which the rule refuses; the journal lists your own entries.
 - **M5. Before step 8's `start`** [D2, D9]: `sudo nano /etc/wsl.conf` and add `[interop]` with `enabled=false` and
   `appendWindowsPath=false`, and `[automount]` with `enabled=false`; in `C:\Users\<you>\.wslconfig` (from Windows),
   `guiApplications=false` under `[wsl2]`; then `wsl --shutdown` in PowerShell and reopen. No `sudo` here while a team
