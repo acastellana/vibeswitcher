@@ -26,6 +26,8 @@ struct RestartTests {
         let goal = try await node.runOnTerminal(["lead", lead.repo.path, "--goal", "and then the second goal"])
         #expect(goal.status == 0 && goal.output.contains("the lead runs already"), "\(goal.output)\n\(node.said)")
         #expect(await node.eventuallyLead(lead.repo) { ($0["held"] as? Int) == 2 }, "\(node.said)")
+        // Both saved before the server is killed (`heldAtRest`).
+        try #require(await node.heldAtRest { $0.count == 2 }, "\(EngineState.load(root: node.root).state)\n\(node.said)")
 
         _ = try await node.restartServer()
         // Its role is bound to its session again, and both messages are still held for it.
@@ -862,7 +864,16 @@ extension ScratchNode {
         let answered = try await runOnTerminal(["answer", lead.card, "Parser"])
         try #require(answered.status == 0, "\(answered.output)\n\(said)")
         try #require(await eventuallyLead(lead.repo) { ($0["held"] as? Int) == 1 }, "\(said)")
+        // And saved: a case that stops or kills the server next reads it from `engine.json`.
+        try #require(await heldAtRest { $0.contains { $0.from == .user && $0.text.hasSuffix(": Parser") } }, "\(EngineState.load(root: root).state)\n\(said)")
         return lead
+    }
+
+    /// Whether what `engine.json` holds for the leads comes to satisfy `condition` within a minute. `status` counts what
+    /// the engine holds in memory; the file is written after it, on the engine's reads queue (`saveState`), so a case
+    /// that stops the server on `status`'s count alone can find the file without the message (under load, 2026-11-17).
+    func heldAtRest(_ condition: @escaping ([EngineState.Held]) -> Bool) async -> Bool {
+        await eventually(timeout: 60) { [root] in condition(EngineState.load(root: root).state.held) }
     }
 
     /// The board names the lead's agent again.

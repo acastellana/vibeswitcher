@@ -62,7 +62,8 @@ import VibeCore
 
     static func alive(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 }
 
-    /// The built tool server, and a copy of it at `path`: as a host's sibling it's that host's.
+    /// The built tool server. A case's copy of it (as a host's sibling it's that host's) is made by a child
+    /// (`installProgram`) and run at once: copied by this process, running it failed with "Text file busy" in a full run.
     static var built: String {
         URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
     }
@@ -89,7 +90,7 @@ import VibeCore
         // The tool server beside the scratch host's binary: the built one, waiting on its input as it does for its agent.
         let built = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         let toolServer = host.dir + "/old/vibeswitcher-mcp"
-        try FileManager.default.copyItem(atPath: built, toPath: toolServer)
+        try installProgram(built, atPath: toolServer)
         let input = Self.fifo(in: host.dir, "orphan-input")
         let (orphaned, writer) = try await Self.orphan(toolServer, input: input)
         defer { try? writer.close() }
@@ -135,7 +136,7 @@ import VibeCore
         defer { host.stop() }
         let built = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         let toolServer = host.dir + "/old/vibeswitcher-mcp"
-        try FileManager.default.copyItem(atPath: built, toPath: toolServer)
+        try installProgram(built, atPath: toolServer)
         let input = Self.fifo(in: host.dir, "orphan-input")
         let (orphaned, writer) = try await Self.orphan(toolServer, input: input)
         defer {
@@ -198,7 +199,7 @@ import VibeCore
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let toolServer = dir + "/vibeswitcher-mcp"
-        try FileManager.default.copyItem(atPath: Self.built, toPath: toolServer)
+        try installProgram(Self.built, atPath: toolServer)
         var ended: [pid_t] = []
         var writers: [FileHandle] = []
         defer {
@@ -271,5 +272,88 @@ import VibeCore
         await pause(2)
         #expect(Self.parsers(of: host.pid) == [restored], "\(notes())")
         #expect(!notes().contains("ended parser pid \(restored),") && !notes().contains("ended parser pid \(held),"), "\(notes())")
+    }
+
+    /// `installProgram`: a program it has just copied runs at once while the process starts children meanwhile, as a
+    /// full run's other tests do. Linux won't run a file that any process holds open for writing ("Text file busy",
+    /// ETXTBSY), and a child keeps every descriptor of this process that isn't close-on-exec: copied here with
+    /// `FileManager.copyItem`, the tool server's copies above couldn't be run in a full run (2026-11-17). Here each child
+    /// keeps what it inherits for 50 ms.
+    @Test func aProgramJustInstalledRunsWhileTheProcessStartsChildren() async throws {
+        let folder = scratchRoot.appendingPathComponent("vsos-\(UUID().uuidString.prefix(8))").path
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: folder) }
+        let program = URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path
+        let children = Children()
+        let spawning = Thread { children.spawnUntilStopped() }
+        spawning.start()
+        let refused = await offPool { () -> [String] in
+            defer { children.stopAndWait() }
+            var refused: [String] = []
+            for index in 0..<60 {
+                let copy = folder + "/sleep-\(index)"
+                do {
+                    try installProgram(program, atPath: copy)
+                    var run = Platform.Spawn(executable: copy, arguments: [copy, "0"])
+                    run.stdin = .path("/dev/null", flags: O_RDONLY)
+                    switch run.start() {
+                    case .failure(let failure): refused.append("\(index): \(failure)")
+                    case .success(let pid):
+                        var status: Int32 = 0
+                        while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+                        if status != 0 { refused.append("\(index): ended \(status)") }
+                    }
+                } catch {
+                    refused.append("\(index): \(error)")
+                }
+            }
+            return refused
+        }
+        #expect(refused.isEmpty, "\(refused.count) of 60 copies didn't run, the first: \(refused.first ?? "")")
+        #expect(children.started > 0)
+    }
+
+    /// Children started with `posix_spawn` and nothing closed: each keeps every descriptor of this process that isn't
+    /// close-on-exec, for its 50 ms. At most 64 at once. (As `InstallScriptTests`' in VibeCoreTests.)
+    private final class Children: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stopped = false
+        private var live: [pid_t] = []
+        private var count = 0
+        private let done = DispatchSemaphore(value: 0)
+        var started: Int { lock.withLock { count } }
+
+        func spawnUntilStopped() {
+            let arguments: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sleep"), strdup("0.05"), nil]
+            let environment: [UnsafeMutablePointer<CChar>?] = [nil]
+            defer { arguments.forEach { free($0) } }
+            while !lock.withLock({ stopped }) {
+                reap(blocking: false)
+                guard lock.withLock({ live.count }) < 64 else { sched_yield(); continue }
+                var pid = pid_t()
+                if posix_spawn(&pid, "/bin/sleep", nil, nil, arguments, environment) == 0 {
+                    lock.withLock {
+                        live.append(pid)
+                        count += 1
+                    }
+                }
+            }
+            reap(blocking: true)
+            done.signal()
+        }
+
+        /// Stops the spawning, and returns once every child has ended and been waited for (bounded by the hang guard).
+        func stopAndWait() {
+            lock.withLock { stopped = true }
+            _ = done.wait(timeout: .now() + hangGuard)
+        }
+
+        private func reap(blocking: Bool) {
+            for pid in lock.withLock({ live }) {
+                var status: Int32 = 0
+                let got = waitpid(pid, &status, blocking ? 0 : WNOHANG)
+                if got == pid || (got < 0 && errno == ECHILD) { lock.withLock { live.removeAll { $0 == pid } } }
+            }
+        }
     }
 }
