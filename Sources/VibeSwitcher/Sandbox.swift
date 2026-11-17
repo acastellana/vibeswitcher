@@ -1305,7 +1305,24 @@ private final class Driver: NSObject, NSApplicationDelegate {
         add("user", "[VibeSwitcher · worker ui-consistency-pass, not the user] The worker on ui-consistency-pass asks: "
             + "Should the unread badge show 99+ past 99, or the exact count?\nAnswer with message(ui-consistency-pass, …).")
         tool("mcp__vibeswitcher__message", ["task": "ui-consistency-pass", "text": "99+"], "Sent.")
-        add("assistant", [["type": "text", "text": "Told it 99+. Waiting on the two blocked tasks."]], usage: true)
+        say("Told it 99+. Waiting on the two blocked tasks.")
+        // A wake-up and a burst of six reports, with the lead's tool runs between them, as the user saw them fill the
+        // lead's chat (2026-11-17): the chat folds them into one line (`ChatUpdates`).
+        func card(_ about: String, _ text: String) { add("user", LeadDelivery.typed(text, from: .system(about))) }
+        card("reports", "6 new reports (auto_advance: Started the audit of git-guard; worker landing-copy done; verifier git-guard failed; 3 more). Call status.")
+        card(LeadAdvance.sender, "VibeSwitcher moved finished work on by itself (auto_advance):\n- Started the audit of git-guard\n"
+            + "The judgement calls stay yours: holds (update_task kept or blocked), re-plans, questions to the user, and post_update for a merge the user would notice.")
+        tool("mcp__vibeswitcher__status", [:], "6 reports.")
+        card("worker landing-copy", "The worker on landing-copy says it's done: the hero copy, the pricing table's footnotes and the FAQ are rewritten.\n"
+            + "Checks: LandingCopyTests 14/14, LintTests passed; sandbox shots in .build/sandbox-shots/landing-*.png.\nRoutine calls: kept the old anchors.")
+        card("verifier git-guard", "The audit of git-guard did not pass: F1 (Important) a commit with a staged secret goes through when the hook runs from a worktree.")
+        card(LeadAdvance.sender, "VibeSwitcher moved finished work on by itself (auto_advance):\n- Released the idle worker on stats-cache\n"
+            + "The judgement calls stay yours: holds (update_task kept or blocked), re-plans, questions to the user, and post_update for a merge the user would notice.")
+        tool("mcp__vibeswitcher__board", [:], "8 tasks.")
+        card(AppHealth.sender, "Crashes (reports in ~/Library/Logs/DiagnosticReports):\n- VibeSwitcher-2026-11-17-101500.ips: EXC_BAD_ACCESS in ChatSync.read\n"
+            + "Turn what's a real bug into a task.")
+        card("witness", "The worker on upload-test stopped mid-task: its turn ended on an API error (overloaded). Tell it to go on with message(upload-test, …); it picks up where it was.")
+        add("assistant", [["type": "text", "text": "Two need you: the git-guard audit failed on a staged secret, and the app crashed once in the chat's reader. I've sent the finding back and filed the crash."]], usage: true)
         return (lines.joined(separator: "\n") + "\n", withdrawnAt)
     }
 
