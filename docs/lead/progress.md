@@ -3662,3 +3662,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-17 20:43 Automatically (auto_advance): Cleaned up worker-git-guard-the (freed 4.9 GB of build output and temporary folders). It stays done.
 - 2026-11-17 20:46 Audit of lead-chat-noise-fold: complete, clean, round 1: 3 Nit open
 - 2026-11-17 21:05 Merged lead-chat-noise-fold: Lead chat noise: fold VibeSwitcher's report cards into one quiet line per burst (build 0d8e30c31a28)
+- 2026-11-17 21:05 Automatically (auto_advance): Merged lead-chat-noise-fold (Lead chat noise: fold VibeSwitcher's report cards into one quiet line per burst) into main at b8c5dcc8, on its passing audit and the full test run.
+- 2026-11-17 21:05 Automatically (auto_advance): Cleaned up lead-chat-noise-fold (freed 2.6 GB of build output and temporary folders). It stays done.
