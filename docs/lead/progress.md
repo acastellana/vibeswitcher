@@ -3486,3 +3486,4 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 02:08 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: 3 tasks paused since 02:08 (1 planned, 2 in review).
 - 2026-11-17 02:25 Pipeline held: shell-cards-ending ready to merge with none landing; cause: nothing VibeSwitcher sees
 - 2026-11-17 02:26 Planned merges-are-held-names: "Merges are held" names the battery hold as its cause
+- 2026-11-17 02:55 Pipeline held: shell-cards-ending ready to merge with none landing; cause: nothing VibeSwitcher sees
