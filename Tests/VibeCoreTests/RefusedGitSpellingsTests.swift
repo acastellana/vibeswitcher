@@ -132,6 +132,17 @@ struct RefusedGitSpellingsTests {
         }
     }
 
+    /// The refused options, named here rather than read from the list they test.
+    static let options = ["-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--config-env"]
+
+    /// The briefs list each refused option once, as before, not again in each spelling the rules add.
+    @Test func theBriefsListOfRefusedGitKeepsOneEntryPerOption() {
+        let listed = LeadLaunch.deniedGit(.worker, base: "main", records: "docs/lead")
+        for option in Self.options {
+            #expect(listed.filter { $0.hasPrefix("git \(option)") } == ["git \(option)"], "\(option): \(listed)")
+        }
+    }
+
     /// The everyday reads still run without a prompt in a worker's worktree.
     @Test func aWorkersEverydayGitReadsStillRunUnasked() throws {
         let worker = try Guard(.worker, temp: temp)

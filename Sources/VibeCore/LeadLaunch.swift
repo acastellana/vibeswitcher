@@ -26,8 +26,9 @@ public enum LeadLaunch {
     /// git with options before its command (`git -C . push`, `git -c alias.x=push x`), plumbing that moves refs, and
     /// git under another name: what prefix rules on `git <command>` don't see. Rules are a speed bump; `merge`
     /// checks the lead's branch itself.
-    static let gitAround = ["Bash(git -C:*)", "Bash(git -c:*)", "Bash(git --git-dir:*)", "Bash(git --work-tree:*)",
-                            "Bash(git --exec-path:*)", "Bash(git update-ref:*)", "Bash(git symbolic-ref:*)", "Bash(git config:*)",
+    /// The refused options (`RefusedGit`, whose parsed check each role's `PreToolUse` hook runs) are spelled out in
+    /// each form a rule can name: `git --git-dir=x` matches no `Bash(git --git-dir:*)` (2026-11-17).
+    static let gitAround = RefusedGit.rules + RefusedGit.spellingRules + ["Bash(git update-ref:*)", "Bash(git symbolic-ref:*)", "Bash(git config:*)",
                             "Bash(git fetch:*)", "Bash(git pull:*)", "Bash(git replace:*)", "Bash(git filter-branch:*)",
                             "Bash(env git:*)", "Bash(command git:*)", "Bash(/usr/bin/git:*)", "Bash(xcrun git:*)"]
     /// `git remote`'s subcommands that write (.git/config, which a worktree shares with the main checkout, or the
@@ -306,10 +307,10 @@ public enum LeadLaunch {
     /// The git commands `deny` refuses `role`, as its prompt lists them: each `Bash(...)` rule that runs git, without
     /// its `:*` ("git worktree", "git checkout * main", "env git"). Made from the rules, so the list never drifts from them.
     /// Not `outsideReads`: patterns of quotes, backticks and wildcards that read as noise in a brief (round 1's F8), for
-    /// reads no brief asks for.
+    /// reads no brief asks for. Nor `RefusedGit.spellingRules`: the same options as `git -C` and the rest, spelled again.
     public static func deniedGit(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         var seen = Set<String>()
-        let patterns = Set(outsideReads)
+        let patterns = Set(outsideReads + RefusedGit.spellingRules)
         return deny(role, base: base, records: records).compactMap { rule -> String? in
             guard rule.hasPrefix("Bash("), rule.hasSuffix(")"), !patterns.contains(rule) else { return nil }
             var command = String(rule.dropFirst("Bash(".count).dropLast())
@@ -363,11 +364,14 @@ public enum LeadLaunch {
     /// read-only git and grep (2026-10-31, 2026-11-01). Claude Code asks it only about what the deny rules let through
     /// (`outsideReads` stays a first layer); anything it doesn't allow prompts as an unlisted command does (and the
     /// witness declines a verifier's when no one answers it: `LeadWitness.stuckPrompts`). Loaded from `--settings`
-    /// whatever `--setting-sources` says.
+    /// whatever `--setting-sources` says. The same command is the role's `PreToolUse` hook, asked about every Bash call
+    /// in every permission mode (auto mode's included, where nothing reaches a prompt): it refuses git with a refused
+    /// option in a spelling no deny rule names (`RefusedGit`).
     public static func hooks(_ role: Role, server: String, root: String) -> [String: Any] {
         var words = [RecentProjects.shellQuote(server), ReadOnlyCommand.hookArgument, ReadOnlyCommand.rootArgument, RecentProjects.shellQuote(root)]
         if role == .worker { words.append(ReadOnlyCommand.workerArgument) }
-        return ["PermissionRequest": [["matcher": "Bash", "hooks": [["type": "command", "command": words.joined(separator: " "), "timeout": 10]]]]]
+        let hook: [[String: Any]] = [["matcher": "Bash", "hooks": [["type": "command", "command": words.joined(separator: " "), "timeout": 10]]]]
+        return ["PermissionRequest": hook, "PreToolUse": hook]
     }
 
     /// The environment a role's session (and every command it runs) starts with. A worker's git never opens an
