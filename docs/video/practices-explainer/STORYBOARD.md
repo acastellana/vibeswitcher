@@ -52,6 +52,13 @@ New and changed scenes, in film order: s05 (screen only), s07 (re-voiced), s11, 
 **s21**, s14, s15 (re-voiced), s16 (screen only), s17, then **s22**, s18, s19. The chapter kickers after s13 are
 renumbered (screen only). The delivered MP4 is this film sped up 1.7×, pitch kept.
 
+**Render of 2026-11-17.** `npx hyperframes@0.9.37 render . --fps 30 --quality looks` under `vs-heavy` gave the 1× film
+(1920×1080, 30 fps, 8:29.4, 50.2 MB, not committed). The delivered `practices-explainer.mp4` is that file through
+`ffmpeg -filter_complex "[0:v]setpts=PTS/1.7,fps=30[v];[0:a]atempo=1.7[a]" -c:v libx264 -preset slow -crf 18
+-pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart`: 1080p30, **4:59.6** (the cut before was 6:54 at 1×),
+31.6 MB. `atempo` keeps the voice's pitch. Stills in `stills/` are frames of the delivered file, named by their time
+in it (`at-1.7x-151s.png`: s20; 194 s: s21; 229 s: s15; 267 s: s22; 86 s: s07); the old cut's stills were removed.
+
 ## Frame 1: Title
 
 - scene: The yard draws itself, one car runs onto the main line, title lands
