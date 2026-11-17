@@ -1,6 +1,8 @@
 import AppKit
 import VibeCore
 
+// First of all: malloc that gives freed pages back (see `MallocMode`), which only a process started with it gets.
+MallocMode.relaunchIfNeeded()
 if CommandLine.arguments.contains("--malloc-check") { MallocMode.check() }
 
 // The app's breadcrumbs go to ~/.vibeswitcher/debug/app.log from its start (the debug aids' to their scratch home's).
