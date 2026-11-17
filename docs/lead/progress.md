@@ -3628,3 +3628,5 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 19:09 Audit of code-mode-trial-does: complete, clean, round 1: 1 Nit open
 - 2026-11-17 19:29 Pipeline held: code-mode-trial-does ready to merge with none landing; cause: a merge in progress
 - 2026-11-17 19:31 Merged code-mode-trial-does: Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster? (build 9e4f85a8ba8c)
+- 2026-11-17 19:31 Automatically (auto_advance): Merged code-mode-trial-does (Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster?) into main at 878ba3d7, on its passing audit and the full test run.
+- 2026-11-17 19:31 Automatically (auto_advance): Cleaned up code-mode-trial-does (freed 1.8 GB of build output and temporary folders). It stays done.
