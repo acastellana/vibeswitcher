@@ -13,7 +13,7 @@
 # e.g. run; url (open the address in a browser); flip; quit
 #
 # Options: --dir DIR (where its pid, state pointer and log are kept, .build/sandbox-server), --port N (run: the web's
-# port, 0 for the kernel's pick), --web-root (run: serve WebApp/ from the worktree, read at each request, instead of
+# port; by default a free one picked at the start and kept, so the page reconnects across a server restart), --web-root (run: serve WebApp/ from the worktree, read at each request, instead of
 # the files embedded in the server: a change shows at the next reload), --still (run: no status changes by
 # themselves; by default the second session's changes every 20 s), --wait S (how long a reply is waited for, 600 for
 # run, 60 otherwise).
@@ -109,6 +109,10 @@ run_sandbox() {
     local bundle
     bundle=$(swift build $(swiftpm_options) --show-bin-path | tail -n 1)/VibeSwitcherPackageTests.xctest
     [[ -x $bundle ]] || { echo "no test bundle at $bundle"; exit 1; }
+    # One port for the node's life: a server restarted by its host binds the same one, and the page comes back.
+    if ((port == 0)); then
+        port=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+    fi
     local state
     state=$(mktemp -d /tmp/vsss.XXXXXX)
     mkdir -m 700 "$state/home" "$state/tmp" "$state/control" "$state/xdg"
@@ -128,7 +132,7 @@ run_sandbox() {
         if ((SECONDS > deadline)); then echo "the sandbox node didn't say it was ready in ${wait_for:-600}s (see $dir/node.log)"; exit 1; fi
         sleep 0.2
     done
-    echo "sandbox node running: pid $launched, state $state${web_root:+, serving $web_root}"
+    echo "sandbox node running: pid $launched, state $state, its page on 127.0.0.1:$port${web_root:+, serving $web_root}"
     echo "its page: scripts/sandbox-server.sh url (open the address it prints); then flip, and quit"
 }
 

@@ -634,7 +634,7 @@ served.
 
 - [ ] **Step 1:** `LiveLatencyBench.aStatusChangeToItsFrame` and `aSubscribeToItsSnapshot`, failing over the
   contract's §7.
-- [ ] **Step 2:** the sandbox script. **Step 3:** the bench's driver and its five measures. **Step 4:** the numbers
+- [ ] **Step 2:** the sandbox script (`run`, `url`, `flip`, `quit`: done at I1, `SandboxServerDriver`; `shot` still to do). **Step 3:** the bench's driver and its five measures. **Step 4:** the numbers
   recorded in this plan's [Measured](#measured).
 
 ### Task I1: Slice 1 wired (the integrator)
@@ -646,11 +646,11 @@ served.
 document (S11: the port while the server is down; the principals: a web client), the design (the deviation, under
 "The node's processes"), `Tests/VibeNodeTests/ServerTests.swift`, `ScratchNodeTests.swift`.
 
-- [ ] **Step 1: Failing tests**: `ServerTests.subscribeOnTheUnixSocketGetsASnapshotThenDeltas`,
+- [x] **Step 1: Failing tests**: `ServerTests.subscribeOnTheUnixSocketGetsASnapshotThenDeltas`,
   `aLineClientGetsEventsBetweenReplies`; `ScratchNodeTests.aPageSessionFromPairToDelta` (a scratch node, `web.open`
   in the scratch form, a WebSocket client: `auth`, four subscriptions, a fake session's status change arriving as a
   delta), `theWebIsOffUntilAsked`, `aTestWebFlagIsRefusedOnTheUsersServer`, `statusSaysTheWebsState`.
-- [ ] **Step 2:** the hub made at the server's start with the three stores and the node's; `NodeServer`'s
+- [x] **Step 2:** the hub made at the server's start with the three stores and the node's; `NodeServer`'s
   connection as a `LiveTransport`; `Requests.act` handing `subscribe`, `unsubscribe`, `web.open` and `web.revoke`
   on; `Requests.value(_:)` calling `liveValue`; the listener started and stopped on the gate's `onChange`; the
   three test flags; `status`'s `web` line.
