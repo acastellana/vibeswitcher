@@ -3578,3 +3578,8 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 13:02 Automatically (auto_advance): Released update-check-a-card's worker, idle since its done report on 6118ce08, while its audit runs (ended pid 96730 (Worker: Update check: a card with the changelog and Install & Restart when a newer VibeSwitcher is on GitHub)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-17 13:04 Audit of update-check-a-card: complete, clean, round 3: 1 Important closed, 3 Nit (2 open)
 - 2026-11-17 13:18 Merged update-check-a-card: Update check: a card with the changelog and Install & Restart when a newer VibeSwitcher is on GitHub (build 9e4f85a8ba8c)
+- 2026-11-17 13:18 Automatically (auto_advance): Merged update-check-a-card (Update check: a card with the changelog and Install & Restart when a newer VibeSwitcher is on GitHub) into main at 279ed53b, on its passing audit and the full test run.
+- 2026-11-17 13:18 Started a worker on explainer-video-add-the-2
+- 2026-11-17 13:18 Automatically (auto_advance): Started a worker on explainer-video-add-the-2 (Explainer video: add the update check and the skill-sync auto-accept), its after tasks done (explainer-video-add-the, update-check-a-card, accept-claude-code-s).
+- 2026-11-17 13:18 Automatically (auto_advance): Cleaned up update-check-a-card (freed 3.3 GB of build output and temporary folders). It stays done.
+- 2026-11-17 13:18 Update: Update check and skill-sync auto-accept merged — **Update check (`update-check-a-card`, main 279ed53b):**
