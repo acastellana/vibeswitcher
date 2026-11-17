@@ -9,6 +9,7 @@ extension LeadToolset {
         var signals = LeadPipeline.Signals()
         let base = workflow.base
         signals.head = branchHead(base)
+        if let power = power(), power.onBattery, let limit = power.heldUnder { signals.batteryHold = (power.percent, limit) }
         signals.mainRedHolds = store.load().mainRed.map { $0.all && !mainRedLifted($0) } ?? false
         // The records as the base has them: what every merge's run tests.
         let lints = recordLints()
@@ -98,6 +99,13 @@ extension LeadToolset {
         let quick = LeadPipeline.look(board, signals: LeadPipeline.Signals(lastMerge: lastMerge()), base: workflow.base, now: now, sleep: sleep)
         guard !quick.stalled.isEmpty else { return quick }
         let look = LeadPipeline.look(board, signals: pipelineSignals(workflow, now: now, sleep: sleep), base: workflow.base, now: now, sleep: sleep)
+        if look.holdEnded, let since = look.since, let cause = look.cause {
+            // AC power is back: kept as the last report, so the next one comes 30 min on if merges still don't land.
+            try? store.update { board in
+                board.pipeline = LeadPipeline.Told(at: now.timeIntervalSince1970, since: since.timeIntervalSince1970, cause: cause.rawValue)
+            }
+            return look
+        }
         guard look.tell, let text = look.text, let since = look.since, let cause = look.cause else { return look }
         try? store.update { board in
             board.pipeline = LeadPipeline.Told(at: now.timeIntervalSince1970, since: since.timeIntervalSince1970, cause: cause.rawValue)

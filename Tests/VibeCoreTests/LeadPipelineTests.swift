@@ -86,6 +86,10 @@ struct LeadPipelineTests: LeadTeamFixture {
         held.mainRedHolds = true
         let red = look(held)
         #expect(red.cause == .mainRed && (red.text ?? "").contains("main is red: breaks() fail on main itself (h), so every merge fails on them. Get fix-breaks done first"), "\(String(describing: red.text))")
+        // The battery hold, over main red: it refuses the fix's merge too, and merging by hand.
+        held.batteryHold = (4, 10)
+        let battery = look(held)
+        #expect(battery.cause == .battery && (battery.text ?? "").contains("The Mac is on battery at 4 %, under the user's 10 % limit (Settings › Performance), so nothing merges, by hand or by auto_advance, until AC power returns"), "\(String(describing: battery.text))")
         // Once it no longer holds (a fix landed, the base moved), it's not the cause.
         #expect(look(.init(head: "moved")).cause == .unknown)
         board.mainRed = nil

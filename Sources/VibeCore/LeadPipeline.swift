@@ -83,6 +83,9 @@ public enum LeadPipeline {
     public struct Signals: Equatable, Sendable {
         /// The base's head now.
         public var head: String?
+        /// The battery hold (`LeadToolset.checkBattery`): on battery at `percent`, under the user's `limit`. Every
+        /// merge, by hand or by auto_advance, is refused while it lasts.
+        public var batteryHold: (percent: Int, limit: Int)?
         /// The board's `mainRed` still holds merges (`LeadToolset.mainRedLifted` says it isn't lifted).
         public var mainRedHolds = false
         /// What the lead's records fail on, by the lints that read them (`RecordLint`): "docs/lead/progress.md:12 (PrivateNamesLint)".
@@ -115,7 +118,8 @@ public enum LeadPipeline {
         }
 
         public static func == (lhs: Signals, rhs: Signals) -> Bool {
-            lhs.head == rhs.head && lhs.mainRedHolds == rhs.mainRedHolds && lhs.records == rhs.records && lhs.slotsHeld?.slots == rhs.slotsHeld?.slots
+            lhs.head == rhs.head && lhs.batteryHold?.percent == rhs.batteryHold?.percent && lhs.batteryHold?.limit == rhs.batteryHold?.limit
+                && lhs.mainRedHolds == rhs.mainRedHolds && lhs.records == rhs.records && lhs.slotsHeld?.slots == rhs.slotsHeld?.slots
                 && lhs.slotsHeld?.said == rhs.slotsHeld?.said && lhs.loadHold?.load == rhs.loadHold?.load
                 && lhs.loadHold?.threshold == rhs.loadHold?.threshold && lhs.gateLag == rhs.gateLag
                 && lhs.merging?.tasks == rhs.merging?.tasks && lhs.merging?.since == rhs.merging?.since
@@ -125,7 +129,7 @@ public enum LeadPipeline {
 
     /// What holds the merges, most decisive first.
     public enum Cause: String, Equatable, Sendable {
-        case mainRed = "main red", records = "the lead's records failing a check", slots = "every test slot held",
+        case battery = "the battery hold", mainRed = "main red", records = "the lead's records failing a check", slots = "every test slot held",
              load = "the load hold", gate = "the gate not installed", merging = "a merge in progress", unknown = "nothing VibeSwitcher sees"
     }
 
@@ -142,6 +146,9 @@ public enum LeadPipeline {
         public var tell: Bool
         /// When to look again: the next task's `stallAfter` mark, or the next report's due time; nil: nothing waits.
         public var next: Date?
+        /// The battery hold, told already, has ended: the board keeps this look as the last report's time, so the
+        /// stall's next report waits `repeatEvery` from AC power's return, as merges start again.
+        public var holdEnded = false
     }
 
     /// When `task` became ready to merge, by the board: in review with a passing verdict (its time), or review none with
@@ -189,6 +196,15 @@ public enum LeadPipeline {
         // since, doesn't tell it again. A merge landing after the last report ended that one.
         let told = board.pipeline.flatMap { told in (signals.lastMerge.map { $0.timeIntervalSince1970 > told.at } ?? false) ? nil : told }
         let toldAt = told.map { Date(timeIntervalSince1970: $0.at) }
+        // The battery hold, once told, isn't told again while it lasts: nothing merges until AC power returns, and the
+        // witness tells the lead when it does. Its end isn't told either: the next report waits its 30 min from then.
+        let toldHold = told?.cause == Cause.battery.rawValue
+        if toldHold, cause == .battery {
+            return Look(stalled: names, since: since, cause: cause, text: text, tell: false, next: now.addingTimeInterval(repeatEvery))
+        }
+        if toldHold {
+            return Look(stalled: names, since: since, cause: cause, text: text, tell: false, next: now.addingTimeInterval(repeatEvery), holdEnded: true)
+        }
         let tell = toldAt.map { awake($0) >= repeatEvery } ?? true
         let next = tell ? now.addingTimeInterval(repeatEvery) : toldAt!.addingTimeInterval(repeatEvery + slept(toldAt!))
         return Look(stalled: names, since: since, cause: cause, text: text, tell: tell, next: next)
@@ -210,6 +226,11 @@ public enum LeadPipeline {
 
     /// What holds the merges, and the one action needed, in words.
     static func cause(_ board: LeadBoard, signals: Signals, base: String, now: Date) -> (Cause, String) {
+        // First: it refuses every merge, a fix's for main red too, and merging by hand.
+        if let (percent, limit) = signals.batteryHold {
+            return (.battery, "The Mac is on battery at \(percent) %, under the user's \(limit) % limit (Settings › Performance), so nothing merges, "
+                    + "by hand or by auto_advance, until AC power returns or the limit is lowered. Nothing to do meanwhile; the witness tells you when to resume.")
+        }
         if let red = board.mainRed, red.all, signals.mainRedHolds {
             let fix = red.fixes.first.map { "Get \($0) done first (it's at the front of the plan); merges wait on it." } ?? "Plan a task to fix them first."
             return (.mainRed, "\(base) is red: \(red.tests.joined(separator: ", ")) fail on \(base) itself (\(red.onto.prefix(8))), so every merge fails on them. " + fix)
