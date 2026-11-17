@@ -407,13 +407,20 @@ right reason before the code that passes it.
   - per connection and `sub`: the `seq` last sent; on a stream's change, to each subscriber that is `writable`, one
     delta from its last-sent `seq` to the stream's; to one that isn't, nothing until `onWritable`.
 
-- [ ] **Step 1: Failing tests** (`LiveHubTests`, on a recording `LiveTransport`): `subscribeGetsAReplyThenASnapshot`,
+- [x] **Step 1: Failing tests** (`LiveHubTests`, on a recording `LiveTransport`): `subscribeGetsAReplyThenASnapshot`,
   `aChangeIsOneDeltaWithPrevAndSeq`, `everyDeltasPrevIsTheLastSeqSent`, `aRemovalIsAValueOfNull`,
   `anEqualValueSendsNothing`, `aChangeIsWrittenWithNoTimerBetween`, `aConnectionThatCantWriteGetsOneFoldedDelta`,
   `aFoldedDeltaCoversItsRange`, `nothingIsDroppedForASlowClient`, `twoClientsSeeTheSameSeq`,
   `subscribingAgainUnderALiveSubReplacesIt`, `unsubscribeStopsTheEvents`, `aClosedConnectionIsForgotten`,
-  `aConnectionWithoutReadIsRefused`, `anUnknownCollectionIsBadArgs`, `theSessionsSnapshotIsEverySessionOnce`.
-- [ ] **Step 2:** the stream and the hub. **Step 3:** lints, under load.
+  `aConnectionWithoutReadIsRefused`, `anUnknownCollectionIsBadArgs`, `theSessionsSnapshotIsEverySessionOnce`; and
+  `aWebConnectionsTextIsARequest`, `aTextThatIsntARequestCloses` (the hub's `WebSocketHandler` side).
+- [x] **Step 2:** the stream and the hub. **Step 3:** lints, under load.
+- **As built (B1):** `handle(_:on:rights:) -> Bool`, not `-> Reply?`: the hub writes the reply itself, so the
+  subscription's first event can't reach the transport before it; false means not the hub's kind, and the caller
+  answers. `follow(_ changes:into:value:)` feeds a stream from a store (`value` nil: gone); `others` takes a
+  WebSocket's requests of other kinds (I1 wires the rights and `Requests`; none: `unknown-kind`). A delta's `changes`
+  are in the order of each id's latest change in its range, not its first (the stream keeps one `seq` an entry); the
+  contract's "in the order the ids first changed" is the integrator's to reword.
 
 ### Task B2: The node's status as a stream, and a session's whole value (lane B)
 
