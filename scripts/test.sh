@@ -143,6 +143,7 @@ perf_tests=(
     HookBoundsTests/theBuiltHookLeavesInTime
     AppleScriptRunnerTests/aHungScriptEndsInTime
     ProcessTableTests/aSnapshotIsQuickOnABusyMac
+    ChatMemoryTests
 )
 
 source scripts/lib/processes.sh

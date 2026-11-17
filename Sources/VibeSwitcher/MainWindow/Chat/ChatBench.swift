@@ -88,6 +88,8 @@ enum ChatBench {
         let reopens = other == nil && scenario
         // VIBESWITCHER_BENCH_STALL=1: also checks the hang watchdog (the main thread blocks for 4 s at t=3).
         let stall = env["VIBESWITCHER_BENCH_STALL"] == "1"
+        let memory = env["VIBESWITCHER_BENCH_MEMORY"] == "1" ? MemoryProbe() : nil
+        let stream = env["VIBESWITCHER_BENCH_STREAM"].flatMap(Int.init).flatMap { $0 > 0 ? Stream(path: path, perSecond: $0) : nil }
         let rule = StallRule.fromEnvironment(env)
         let startLoad = rule.load()
         if !stall { print("  stall rule: \(rule.describe(load: startLoad))") }
@@ -116,6 +118,7 @@ enum ChatBench {
             if !opened {
                 opened = true
                 Self.clock("opening", at: now)
+                memory?.start()
                 chat.show(path: path)
             }
             if updates, chat.state == .ready { chat.objectWillChange.send() }
@@ -190,6 +193,7 @@ enum ChatBench {
                 print(verdict.text)
                 failed = verdict.failed
             }
+            if let memory { print(memory.results()) }
             Self.clock("done")
             fflush(stdout)
             exit(status != 0 ? status : failed ? 4 : 0)
@@ -246,6 +250,9 @@ enum ChatBench {
                     print("  reopened, anchor \(chat.restoreAnchor ?? "none")")
                 }
                 if justReady, let at, let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: at, host: host) }
+            } else if let stream {
+                // Left alone while a reply streams in, once it shows.
+                if chat.state == .ready, !chat.assembling { stream.next() }
             } else if earlier == 0, !sweeping {
                 // A width change (sidebar or inspector toggled, the window dragged): every row is measured again.
                 if second % 2 == 0 {
@@ -265,6 +272,10 @@ enum ChatBench {
             print("t=\(second)s cpu=\(String(format: "%.1f", cpu))s state=\(chat.state) entries=\(chat.log.entries.count) items=\(chat.items.count) "
                 + "shown=\(min(chat.items.count, chat.shownLimit)) atBottom=\(chat.atBottom) top=\(Int(chat.visibleTop)) rows=\(chat.rowTops.count) "
                 + "anchor=\(ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-") worst stall=\(String(format: "%.2f", worst))s\(worstCPU.map { " (cpu \(Self.seconds($0)))" } ?? "") \(probe.summary())")
+            if let memory {
+                print(memory.second())
+                if env["VIBESWITCHER_BENCH_LAYERS"] == "1" { print(Self.biggestLayers(in: window.contentView ?? host)) }
+            }
             fflush(stdout)
             probe.nextSecond()
             worst = 0
