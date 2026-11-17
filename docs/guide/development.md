@@ -90,7 +90,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|MCPLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|TemporaryFolderLint'
 ```
 
 | Lint | What it catches |
@@ -104,6 +104,7 @@ bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint
 | `HomePathLint` | A path under the home folder worked out once per process. |
 | `KeychainLint` | A test that can reach the real keychain. |
 | `MacOnlyTestsLint` | A file of `Tests/VibeCoreTests` or `Tests/VibeHostTests` wrapped whole in `#if canImport(Darwin)` that its target's `MacOnlyTests.txt` doesn't list with its reason; a file listed there that is gone or has no such wrap; or a tenth of a target's files listed, besides those its plan counts apart. |
+| `MCPLint` | A first statement of the tool server's or the hook's main, before the session sandbox's relay and porter hooks (`DoorRelay.runIfConfined`, `Porter.runIfAsked`), or a hook that finds its agent from its own pid rather than its caller's (`HookCaller`). |
 | `PlatformLint` | A libc or Apple-only import, or an `#if os(`/`canImport(`, in the portable targets outside `VibePlatform` and `VibeCore/MacOnly`; or a file on its pending list (`Tests/VibePlatformTests/PlatformLintPending.txt`) that no longer has one; or two tracked paths (a folder's too) that differ only in case, which are one on the Mac. |
 | `PreferencesLint` | A test that makes a defaults suite in the real `~/Library/Preferences`. |
 | `PrivateNamesLint` | A mention of the user's other projects (the list is in the test); write a stand-in, `project-b` or `project-c`. |

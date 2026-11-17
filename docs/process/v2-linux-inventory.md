@@ -722,3 +722,11 @@ the build's environment. glibc 2.39 (Ubuntu 24.04).
   `VIBESWITCHER_STATIC_PRODUCTS=<that folder> vs-heavy bash scripts/test.sh --filter InstallTests`.
 - **Not yet measured:** the gated build with the root toolchain (`InstallTests.anInstallBuildsWithTheRootToolchain`),
   waiting on M3. Its sizes, time and link-check output go here when it has run.
+
+## A hook through the session sandbox's door (the session sandbox plan's SB4, 2026-11-17, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+`DoorTests.aHookThroughTheDoorAnswersWithinItsThreeSeconds`: one `UserPromptSubmit` event, the built hook as the relay
+inside (a door stand-in for init, a scratch path for the door), the built tool server as the porter outside starting
+the built hook from a sealed copy, measured by the agent stand-in's shell around the hook's command. Through the door:
+0.021 s; the same hook run plain on the same folders: 0.015 s. The door adds about 5 ms (two socket crossings, one
+`posix_spawn` from a sealed copy), against the hook's 3 s.

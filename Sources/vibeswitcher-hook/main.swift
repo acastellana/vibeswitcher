@@ -8,6 +8,11 @@
 import Foundation
 import VibeCore
 
+// The session sandbox (its plan's SB4), first: inside a confined session's box the hook is a relay to the session's
+// porter outside (`DoorRelay`), and the hook the porter started takes its session's connector. Returns at once
+// otherwise.
+DoorRelay.runIfConfined(DoorRelay.hookMode, arguments: CommandLine.arguments, environment: ProcessInfo.processInfo.environment)
+
 // A reader gone (the session host mid-handover, the agent closing the pipe) makes a write fail, never ends the hook
 // unseen: settled before its first write (the host's round trip below), as every executable does (PlatformLintTests).
 // What it starts gets SIGPIPE at its default (`Platform.Spawn`'s defaults).
@@ -52,14 +57,17 @@ func codexOwner() -> (tty: String, pid: Int32)? {
 }
 let tty: String
 let agentPid: Int32?
-switch HookOwner.lineage(ProcessTable.ancestors(of: getpid()), arguments: arguments) {
+// Whose event this is: this process's ancestors, or, for a hook the porter started outside a box, its relay's
+// (`HookCaller`).
+let caller = HookCaller.pid(CommandLine.arguments)
+switch HookOwner.lineage(ProcessTable.ancestors(of: caller), arguments: arguments) {
 case .agent(let pid, let agentTTY): (tty, agentPid) = (agentTTY, pid)
 case .nested: exit(0)
 case .detached:
     guard let owner = codexOwner() else { exit(0) }
     (tty, agentPid) = (owner.tty, owner.pid)
 case .none:
-    if let own = ProcessTable.info(pid: getpid())?.tty { (tty, agentPid) = (own, nil) }
+    if let own = ProcessTable.info(pid: caller)?.tty { (tty, agentPid) = (own, nil) }
     else if let owner = codexOwner() { (tty, agentPid) = (owner.tty, owner.pid) }
     else { exit(0) }
 }

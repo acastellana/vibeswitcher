@@ -6,6 +6,12 @@
 import Foundation
 import VibeCore
 
+// The session sandbox (its plan's SB4), before anything reads a path: inside a confined session's box the tool server,
+// its status line and its permission hook are relays to the session's porter outside (`DoorRelay`), and a helper the
+// porter started takes its session's connector; `--porter` is the porter itself. Each returns at once otherwise.
+DoorRelay.runIfConfined(DoorRelay.toolServerMode, arguments: CommandLine.arguments, environment: ProcessInfo.processInfo.environment)
+Porter.runIfAsked(CommandLine.arguments)
+
 // A verifier session's shell prefix (`BranchCode.prefix`): each command its Claude Code runs, under the branch-code
 // wrapper, or its own tool server as itself. Before anything else: it runs none of the server's code.
 if BranchCode.isPrefix(CommandLine.arguments, environment: ProcessInfo.processInfo.environment) {

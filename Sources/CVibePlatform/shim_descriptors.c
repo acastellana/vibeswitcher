@@ -98,4 +98,61 @@ ssize_t vibe_send_claiming(int fd, const void *bytes, size_t count, pid_t pid, u
     memcpy(CMSG_DATA(part), &claimed, sizeof(claimed));
     return sendmsg(fd, &message, MSG_NOSIGNAL);
 }
+
+#define VIBE_DOOR_MOST 8
+
+ssize_t vibe_send_with_descriptors(int socket, const void *bytes, size_t count, const int *fds, size_t fdCount) {
+    if (fdCount > VIBE_DOOR_MOST || count == 0) { errno = EINVAL; return -1; }
+    union {
+        char bytes[CMSG_SPACE(VIBE_DOOR_MOST * sizeof(int))];
+        struct cmsghdr aligned;
+    } control;
+    memset(&control, 0, sizeof(control));
+    struct iovec piece = { .iov_base = (void *)bytes, .iov_len = count };
+    struct msghdr message = { .msg_iov = &piece, .msg_iovlen = 1 };
+    if (fdCount > 0) {
+        message.msg_control = control.bytes;
+        message.msg_controllen = CMSG_SPACE(fdCount * sizeof(int));
+        struct cmsghdr *part = CMSG_FIRSTHDR(&message);
+        part->cmsg_level = SOL_SOCKET;
+        part->cmsg_type = SCM_RIGHTS;
+        part->cmsg_len = CMSG_LEN(fdCount * sizeof(int));
+        memcpy(CMSG_DATA(part), fds, fdCount * sizeof(int));
+    }
+    ssize_t sent;
+    do sent = sendmsg(socket, &message, MSG_NOSIGNAL); while (sent < 0 && errno == EINTR);
+    return sent;
+}
+
+ssize_t vibe_receive_with_descriptors(int socket, void *bytes, size_t count, int *fds, size_t room, size_t *fdCount, int *cut) {
+    *fdCount = 0;
+    *cut = 0;
+    if (room > VIBE_DOOR_MOST) room = VIBE_DOOR_MOST;
+    union {
+        char bytes[CMSG_SPACE(sizeof(struct ucred)) + CMSG_SPACE(VIBE_DOOR_MOST * sizeof(int))];
+        struct cmsghdr aligned;
+    } control;
+    struct iovec piece = { .iov_base = bytes, .iov_len = count };
+    struct msghdr message = { .msg_iov = &piece, .msg_iovlen = 1, .msg_control = control.bytes,
+                              .msg_controllen = CMSG_SPACE(sizeof(struct ucred)) + CMSG_SPACE(room * sizeof(int)) };
+    ssize_t got;
+    do got = recvmsg(socket, &message, MSG_CMSG_CLOEXEC); while (got < 0 && errno == EINTR);
+    if (got < 0) return -1;
+    for (struct cmsghdr *part = CMSG_FIRSTHDR(&message); part != NULL; part = CMSG_NXTHDR(&message, part)) {
+        if (part->cmsg_level != SOL_SOCKET || part->cmsg_type != SCM_RIGHTS || part->cmsg_len <= CMSG_LEN(0)) continue;
+        size_t here = (part->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+        for (size_t index = 0; index < here; index++) {
+            int descriptor;
+            memcpy(&descriptor, CMSG_DATA(part) + index * sizeof(int), sizeof(descriptor));
+            if (*fdCount < room) {
+                fds[(*fdCount)++] = descriptor;
+            } else {
+                close(descriptor);
+                *cut = 1;
+            }
+        }
+    }
+    if (message.msg_flags & MSG_CTRUNC) *cut = 1;
+    return got;
+}
 #endif
