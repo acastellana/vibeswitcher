@@ -147,14 +147,17 @@ voice.
 ## s17 · You keep the keys
 
 > And you keep the keys. You set the review floor, the sensitive paths and the merge policy, and an approval covers
-> one exact commit. Pushes, installs and wallet requests come to you as cards. A seal guards the configuration. And
-> your phone can follow along, with replies behind their own switch.
+> one exact commit. Pushes, installs and wallet requests come to you as cards. A seal guards the configuration: a
+> finished round of Claude Code's own skill sync is let through by its shape, and every other change still waits for
+> your click. And your phone can follow along, with replies behind their own switch.
 
 ## s22 · Day to day
 
 > Day to day, it looks after you as well. After a Mac restart, one card offers to reopen the sessions you had open,
-> leads first, and nothing reopens until you click. The chat's model chip follows /model the moment you switch. And a
-> Run card tells the session that asked how its command ended.
+> leads first, and nothing reopens until you click. The chat's model chip follows /model the moment you switch. A Run
+> card tells the session that asked how its command ended. And every six hours, the app checks GitHub and this Mac's
+> main for a newer VibeSwitcher, and says what changed in plain words. Install and Restart asks for the signing
+> password each time, and never stores it. If GitHub is ahead, the lead first merges it in and tests the result.
 
 ## s18 · What the system adds
 

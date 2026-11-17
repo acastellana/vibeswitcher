@@ -19,10 +19,11 @@ import re
 import subprocess
 
 # Each scene's base length (seconds), in film order: its beats were authored against it (the silent cut's lengths;
-# s20-s22 were added on 2026-11-17 and sit where the film needs them, not at the end).
+# s20-s22 were added on 2026-11-17 and sit where the film needs them, not at the end; s22 grew from 18 to 26 when the
+# update check's card joined it).
 BASE = {
     "s01": 10, "s02": 22, "s03": 20, "s04": 18, "s05": 18, "s06": 16, "s07": 18, "s08": 20, "s09": 18, "s10": 16,
-    "s11": 18, "s20": 18, "s12": 16, "s13": 18, "s21": 18, "s14": 22, "s15": 18, "s16": 16, "s17": 20, "s22": 18,
+    "s11": 18, "s20": 18, "s12": 16, "s13": 18, "s21": 18, "s14": 22, "s15": 18, "s16": 16, "s17": 20, "s22": 26,
     "s18": 24, "s19": 14,
 }
 LEAD = 0.6  # the voice starts once the scene has faded in (0.4 s)
