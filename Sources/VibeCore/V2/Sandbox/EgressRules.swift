@@ -241,12 +241,17 @@ public struct EgressRules: Codable, Equatable, Sendable {
     }
 
     /// The IPv4 address an IPv6 one carries, where it carries one a router would reach: IPv4-mapped (`::ffff:0:0/96`),
-    /// NAT64's well-known prefix (`64:ff9b::/96`) and 6to4 (`2002::/16`).
+    /// SIIT's IPv4-translated (`::ffff:0:0:0/96`), NAT64's well-known prefix (`64:ff9b::/96`), local-use NAT64
+    /// (`64:ff9b:1::/48`, the IPv4 address in bits 48-63 and 72-87, RFC 6052) and 6to4 (`2002::/16`).
     static func carried(_ address: Address) -> Address? {
         let bytes = address.bytes
         guard bytes.count == 16 else { return nil }
         if bytes[0..<10].allSatisfy({ $0 == 0 }), bytes[10] == 0xff, bytes[11] == 0xff { return Address(Array(bytes[12..<16])) }
+        if bytes[0..<8].allSatisfy({ $0 == 0 }), bytes[8] == 0xff, bytes[9] == 0xff, bytes[10] == 0, bytes[11] == 0 {
+            return Address(Array(bytes[12..<16]))
+        }
         if bytes[0..<12] == [0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0] { return Address(Array(bytes[12..<16])) }
+        if bytes[0..<6] == [0, 0x64, 0xff, 0x9b, 0, 1] { return Address([bytes[6], bytes[7], bytes[9], bytes[10]]) }
         if bytes[0] == 0x20, bytes[1] == 0x02 { return Address(Array(bytes[2..<6])) }
         return nil
     }
@@ -254,8 +259,16 @@ public struct EgressRules: Codable, Equatable, Sendable {
     /// The never-opened range `address` is in (or the address it carries is in); nil when none.
     static func never(_ address: Address) -> Range? {
         if let inside = carried(address) { return never(inside) }
-        return neverRanges.first { $0.contains(address.bytes) }
+        if let range = neverRanges.first(where: { $0.contains(address.bytes) }) { return range }
+        // IPv6 is refused by default outside global unicast, so a special range no one listed never slips through;
+        // the private one (`fc00::/7`) stays the project's to open.
+        if address.bytes.count == 16, !globalUnicast.contains(address.bytes), privateRange(address) == nil { return outsideGlobal }
+        return nil
     }
+
+    /// IPv6's global unicast block, the only one a session reaches without the project's word.
+    static let globalUnicast = Range("2000::/3", "global unicast")
+    static let outsideGlobal = Range("::/0", "outside IPv6's global unicast (2000::/3)")
 
     /// The private range `address` is in (or the address it carries is in); nil when none.
     static func privateRange(_ address: Address) -> Range? {

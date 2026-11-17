@@ -48,6 +48,39 @@ struct EgressRulesTests {
         #expect(rules.decision(host: "listed.example", port: 443, resolved: [Self.public1, Self.public6]) == .allow([Self.public1, Self.public6]))
     }
 
+    @Test func everyEmbeddedIPv4FormIsJudgedByItsIPv4() {
+        let rules = EgressRules(hosts: ["listed.example"])
+        // loopback, metadata and a private address, in each form that carries an IPv4 address.
+        let forms: [(String, [String])] = [
+            ("::ffff:", ["::ffff:127.0.0.1", "::ffff:169.254.169.254", "::ffff:10.0.0.1"]),
+            ("SIIT ::ffff:0:0:0/96", ["::ffff:0:127.0.0.1", "::ffff:0:169.254.169.254", "::ffff:0:10.0.0.1"]),
+            ("64:ff9b::/96", ["64:ff9b::127.0.0.1", "64:ff9b::169.254.169.254", "64:ff9b::10.0.0.1"]),
+            // RFC 6052's /48: the IPv4 address in bytes 6-7 and 9-10, byte 8 zero.
+            ("64:ff9b:1::/48", ["64:ff9b:1:7f00:0:100::", "64:ff9b:1:a9fe:a9:fe00::", "64:ff9b:1:a00:0:100::"]),
+            ("2002::/16", ["2002:7f00:1::", "2002:a9fe:a9fe::", "2002:a00:1::"]),
+        ]
+        for (form, texts) in forms {
+            for text in texts {
+                let address = try! #require(Address(text), "\(text)")
+                #expect(Self.refused(rules.decision(host: "listed.example", port: 443, resolved: [address])), "\(form): \(text)")
+            }
+        }
+        #expect(EgressRules.carried(Address("64:ff9b:1:a9fe:a9:fe00::")!) == Address("169.254.169.254"))
+        #expect(EgressRules.carried(Address("::ffff:0:169.254.169.254")!) == Address("169.254.169.254"))
+        // A public IPv4 address in the new forms stays public.
+        #expect(rules.decision(host: "listed.example", port: 443, resolved: [Address("64:ff9b:1:cb00:71:700::")!]) == .allow([Address("64:ff9b:1:cb00:71:700::")!]))
+    }
+
+    @Test func ipv6OutsideGlobalUnicastIsRefusedUnlessPrivateAndGiven() {
+        let rules = EgressRules(hosts: ["listed.example"], privateHosts: ["listed.example"])
+        for text in ["100::1", "1::1", "4000::1", "8000::1", "e000::1", "fe00::1", "64:ff9b:2::1", "3fff::1".replacingOccurrences(of: "3fff", with: "1fff")] {
+            #expect(Self.refused(rules.decision(host: "listed.example", port: 443, resolved: [Address(text)!])), "\(text)")
+        }
+        #expect(rules.decision(host: "listed.example", port: 443, resolved: [Address("2606:4700::1111")!]) == .allow([Address("2606:4700::1111")!]))
+        #expect(rules.decision(host: "listed.example", port: 443, resolved: [Address("fd12::1")!]) == .allow([Address("fd12::1")!]))
+        #expect(Self.refused(EgressRules(hosts: ["listed.example"]).decision(host: "listed.example", port: 443, resolved: [Address("fd12::1")!])))
+    }
+
     @Test func aListedNameThatResolvesToARefusedAddressIsRefused() {
         let rules = EgressRules(hosts: ["api.anthropic.com"])
         #expect(Self.refused(rules.decision(host: "api.anthropic.com", port: 443, resolved: [Address("127.0.0.1")!])))
