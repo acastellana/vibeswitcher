@@ -1600,7 +1600,9 @@ flag, read as GitGuard reads the record, is no change; a scratch home's seal rea
 doesn't hold its team; 2026-11-16, with the review of S7; and, the security follow-ups' items 23 and 24: in the
 roles' launch folders only a launch the vault recorded comes, and a folder unreadable mid-walk or a folder's mode
 changed holds the team); `LinuxSealListTests.aScopeComingAndGoingInTheManagersRuntimeUnitsIsNoChange` (the step 8
-sweep, 2026-11-17: an app's scope file in the manager's `transient` folder comes and goes; anything else there holds);
+sweep, 2026-11-17: an app's scope file in the manager's `transient` folder comes and goes; anything else there holds,
+a scope's file changed in place included; not one removed and back changed at the next look, nor a new scope's
+`[Unit]` lines, which can name only units the manager has: ST-D20's note);
 `HostHardeningTests.theNodesShellAndLocaleNeverComeFromTheManager` (the step 8 sweep: the `--node` host's `SHELL`,
 `USER` and `LOGNAME` from the user database, a locale naming a path dropped), with
 `HostHardeningTests.aNodeHostsOwnEnvironmentIsTheUserDatabases` (its review: `startAsNode` run in a child, whose own

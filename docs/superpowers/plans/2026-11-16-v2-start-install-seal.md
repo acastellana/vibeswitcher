@@ -464,7 +464,11 @@ accepted every recommendation so far. Each can be overruled before its task star
     - *2026-11-17, the step 8 sweep:* `transient` is `.entries`, not `.folder`: the manager writes an app's scope file
       there at each start of an app that registers its own scope (a browser) and removes it at its exit, which held
       every team. A top-level `*.scope` file comes and goes as no change (`LinuxSealList.transientEntryMayCome`); the
-      rest holds as before. The measurement is in the Linux inventory.
+      rest holds as before. The measurement is in the Linux inventory. Not held (the sweep's review): a scope's file
+      changed in place holds, but one removed and back under its name at the next look comes as any new scope does,
+      whatever its content (the seal keeps hashes), so its `[Unit]` lines (`OnFailure=`, `OnSuccess=`, `Wants=`) reach
+      the manager at its next reload. Bounded: they name only units the manager has (in watched folders, where a new
+      one holds, or root's), the manager's API does the same with no file, and `/run` is emptied at reboot.
     - After M5 there is no `/mnt/c` mount, so those entries matter only if the user keeps automount on (D2's
       otherwise).
 21. **ST-D21: Step 9's run.**

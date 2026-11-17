@@ -630,6 +630,11 @@ that Chrome. The manager writes such a file each time an app registers a scope o
 scope goes, so on a `.folder` each browser start and exit held every team. The folder is now `.entries`: a top-level
 `*.scope` regular file comes and goes as no change, and a gone one isn't kept (`LinuxSealList.transientEntryMayCome`);
 a service, a timer, a drop-in folder, a link, a hidden or deeper file, or a scope's file changed in place still holds.
+What isn't held (the sweep's review): the seal keeps hashes, not content, so a scope removed at one look and back
+under its name at the next, changed or not, comes as a new scope does, and a new scope's file may hold `[Unit]` lines
+(`OnFailure=`, `OnSuccess=`, `Wants=`) the manager reads at its next reload. They can name only units the manager has
+already (a unit file in a folder the seal watches, where a new one holds, or root's); a worker gets the same through
+the manager's API (`systemd-run --user --scope -p OnFailure=…`) with no file the seal reads; `/run` is emptied at reboot.
 
 ## The install's static build (the start plan's S4c, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
 

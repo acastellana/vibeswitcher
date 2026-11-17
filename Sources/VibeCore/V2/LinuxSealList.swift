@@ -371,9 +371,14 @@ public enum LinuxSealList {
     /// Whether `path`, an entry of the manager's runtime units folder (`transient`) that wasn't there, comes as no
     /// change: a scope's unit file at its top, which the manager writes when an app registers a scope of its own (a
     /// browser's `app-<id>-<pid>.scope`, measured on the node 2026-11-17) and removes when the scope goes. A scope is
-    /// never started from its file (the manager makes scopes only through its API), and runs nothing. Anything else
-    /// (a service, a timer, a drop-in folder, a link, a file deeper down, a scope's file changed in place) holds, as
-    /// the folder's change did.
+    /// never started from its file (the manager makes scopes only through its API). Anything else (a service, a
+    /// timer, a drop-in folder, a link, a file deeper down, a scope's file changed in place) holds, as the folder's
+    /// change did. Not held, and what bounds it (the step 8 sweep's review): only hashes are sealed, so a new scope's
+    /// content isn't read, and a scope gone and back under its name across two looks is a new one: a worker can leave
+    /// a scope file whose `[Unit]` lines (`OnFailure=`, `OnSuccess=`, `Wants=`) the manager reads at its next reload.
+    /// Those can only name units the manager has already: a unit file in a folder the seal watches (a new one there
+    /// holds) or root's. The worker could make the same scope through the manager's API (`systemd-run --user --scope
+    /// -p OnFailure=…`), which writes nothing the seal reads, and `/run` is emptied at reboot.
     static func transientEntryMayCome(_ path: String, entry: String) -> Bool {
         isScopeFile(path) && ConfigSeal.entryKind(entry) == "f"
     }

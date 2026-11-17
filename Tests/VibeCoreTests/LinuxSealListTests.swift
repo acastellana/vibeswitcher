@@ -356,6 +356,8 @@ struct LinuxSealListTests {
         #expect(gone != nil, "a scope's file removed")
         #expect(ConfigSeal.decode(gone ?? "")["app-com.google.Chrome-3924612.scope"] == nil, "a scope gone isn't kept")
         try write(header, scope)
+        // Back under its name comes as a new scope does, changed or not (the seal keeps hashes, not content): ST-D20's
+        // note bounds what its `[Unit]` lines can name.
         #expect(look() != nil, "a scope back under its name")
         try write(header + "[Unit]\nOnFailure=planted.service\n", scope)
         #expect(look() == nil, "a scope's file changed in place")
