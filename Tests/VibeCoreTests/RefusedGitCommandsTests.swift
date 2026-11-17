@@ -187,12 +187,14 @@ struct RefusedGitCommandsTests {
         for line in ["arch -arm64 -e GIT_DIR=/x git status", "arch -arm64 -e HOME=/x git status", "arch -arm64 -eGIT_DIR=/x git status",
                      "arch -arm64 -e GIT_CONFIG_PARAMETERS=\"'alias.s=push'\" git s", "repeat 1 git -P push", "repeat 1 GIT_DIR=/x git status",
                      "repeat 1 git -C /x status", "if [[ 1 == 1 ]] git -P push", "if [[ 1 == 1 ]] GIT_DIR=/x git status",
-                     "if (( 1 )) git -P push", "while [[ -n x ]] git --no-pager tag v1", "git -P Filter-Branch -f -- --all",
+                     "if (( 1 )) git -P push", "while [[ -n x ]] git --no-pager tag v1", "if [[ -n a && -n b ]] git -P push", "if [[ -n a || -n b ]] GIT_DIR=/x git status",
+                     "if [[ a =~ (b|c) ]] git -P push", "git -P Filter-Branch -f -- --all",
                      "git Filter-Branch -f -- --all", "git --no-pager Tag v1"] {
             #expect(try worker.refuses(line), "lets through: \(line)")
         }
         for line in ["arch -arm64 -e FOO=1 git status", "arch -arm64 -e HOME=/x make", "repeat 3 git -P log", "if [[ -n x ]] git status",
-                     "if (( 1 )) git -P log", "[[ -d .git ]] && git status", "git -P Log", "git -P Switch -c topic"] {
+                     "if (( 1 )) git -P log", "[[ -d .git ]] && git status", "git -P Log", "git -P Switch -c topic",
+                     "if [[ -n a && -n b ]] git -P log"] {
             #expect(try !worker.refuses(line), "refuses: \(line)")
         }
     }
