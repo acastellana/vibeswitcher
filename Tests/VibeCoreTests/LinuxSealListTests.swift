@@ -295,6 +295,53 @@ struct LinuxSealListTests {
         #expect(LinuxSealList.cameOrWent(key: binKey, recorded: was, now: ConfigSeal.hashes(of: [bin])) == nil)
     }
 
+    /// The manager's runtime units folder (`/run/user/<uid>/systemd/transient`, read under a scratch root): a scope's
+    /// unit file an app's start writes and its exit removes (a browser's, measured on the node 2026-11-17) comes and
+    /// goes as no change; a service, a drop-in folder, a hidden or deeper file, or a scope changed in place is held.
+    @Test(Self.linux) func aScopeComingAndGoingInTheManagersRuntimeUnitsIsNoChange() throws {
+        let home = try home()
+        let outside = temp.url("seal-transient").path
+        let uid = getuid()
+        let folder = outside + "/run/user/\(uid)/systemd/transient"
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let header = "# This is a transient unit file, created programmatically via the systemd API. Do not edit.\n"
+        let item = try #require(LinuxSealList.watched(home: home, uid: uid, mounts: try mounts(windows: false), outside: outside)
+            .first { $0.name == "/run/user/\(uid)/systemd/transient" })
+        #expect(item.kind == .entries)
+        let key = ConfigSeal.keyPrefix + item.name
+        var recorded = ConfigSeal.hashes(of: [item])
+        func look() -> String? {
+            let now = ConfigSeal.hashes(of: [item])
+            guard let kept = LinuxSealList.cameOrWent(key: key, recorded: recorded, now: now) else { return nil }
+            recorded[key] = now[key]
+            recorded[ConfigSeal.keysKey(of: key)] = kept
+            return kept
+        }
+        let scope = folder + "/app-com.google.Chrome-3924612.scope"
+        try write(header, scope)
+        #expect(look() != nil, "a scope's file added")
+        try FileManager.default.removeItem(atPath: scope)
+        let gone = look()
+        #expect(gone != nil, "a scope's file removed")
+        #expect(ConfigSeal.decode(gone ?? "")["app-com.google.Chrome-3924612.scope"] == nil, "a scope gone isn't kept")
+        try write(header, scope)
+        #expect(look() != nil, "a scope back under its name")
+        try write(header + "[Unit]\nOnFailure=planted.service\n", scope)
+        #expect(look() == nil, "a scope's file changed in place")
+
+        let planted: [(String, () throws -> Void)] = [
+            ("a service", { try self.write("[Service]\nExecStart=/bin/sh -c planted\n", folder + "/planted.service") }),
+            ("a drop-in folder", { try self.write("[Service]\nExecStartPre=/bin/true\n", folder + "/vibeswitcher-node.service.d/50-x.conf") }),
+            ("a hidden file", { try self.write(header, folder + "/.#app-x.scope123") }),
+            ("a link", { try FileManager.default.createSymbolicLink(atPath: folder + "/app-link.scope", withDestinationPath: "/dev/null") }),
+        ]
+        for (what, plant) in planted {
+            recorded = ConfigSeal.hashes(of: [item])
+            try plant()
+            #expect(look() == nil, "\(what)")
+        }
+    }
+
     /// In the launch folders, only a launch the vault recorded comes: its repository's folder, its own, and the files a
     /// launcher writes there (or `writePrivate`'s temporary one); a name no launch has, another repository's key, a
     /// file the launcher doesn't write, a link, or anything deeper doesn't. The names are the launchers', from the

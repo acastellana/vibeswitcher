@@ -449,6 +449,10 @@ accepted every recommendation so far. Each can be overruled before its task star
     - *2026-11-16, S7's review:* `/run/user/<uid>/systemd/user` (runtime units, above `~/.local/share/systemd/user`
       on the manager's search path) is watched too. The generator folders aren't: the manager empties them at each
       reload.
+    - *2026-11-17, the step 8 sweep:* `transient` is `.entries`, not `.folder`: the manager writes an app's scope file
+      there at each start of an app that registers its own scope (a browser) and removes it at its exit, which held
+      every team. A top-level `*.scope` file comes and goes as no change (`LinuxSealList.transientEntryMayCome`); the
+      rest holds as before. The measurement is in the Linux inventory.
     - After M5 there is no `/mnt/c` mount, so those entries matter only if the user keeps automount on (D2's
       otherwise).
 21. **ST-D21: Step 9's run.**

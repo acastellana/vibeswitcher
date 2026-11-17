@@ -11,6 +11,8 @@ import Foundation
 ///   outside it): `/run/user/<uid>/systemd/transient`, `user.control` and `user` (the manager's runtime units and
 ///   drop-ins, on its search path ahead of `~/.local/share/systemd/user`, ST-D20), and while `/mnt/c` is a 9p or drvfs
 ///   mount, each Windows user's `.wslconfig` and Startup folder.
+///   The `transient` folder takes `.entries`: a scope's unit file comes and goes with an app's scope
+///   (`transientEntryMayCome`); anything else in it is a change.
 /// - Every entry executes: none is in `ConfigSeal.instructions`, so a change waits for the user's accept whoever made it.
 ///
 /// Large folders are read by their metadata (`Kind.listing`, ST-D18), never their contents; the folders every session's
@@ -115,9 +117,11 @@ public enum LinuxSealList {
     /// the Windows files while `/mnt/c` is mounted. Its generator folders aren't: the manager empties them at each reload.
     static func outsideEntries(uid: uid_t, mounts: String, root: String) -> [ConfigSeal.Watched] {
         let at = { (name: String) in root == "/" ? name : (root as NSString).appendingPathComponent(name) }
+        // `transient` takes `.entries`: the manager writes a scope's unit file there each time an app registers its
+        // own scope (a browser's start), and removes it as the app exits (`transientEntryMayCome`).
         var items = ["transient", "user.control", "user"].map { folder in
             let name = "/run/user/\(uid)/systemd/\(folder)"
-            return ConfigSeal.Watched(name: name, path: at(name), kind: .folder)
+            return ConfigSeal.Watched(name: name, path: at(name), kind: folder == "transient" ? .entries : .folder)
         }
         guard windowsMounted(mounts) else { return items }
         let users = "/mnt/c/Users"
@@ -198,8 +202,16 @@ public enum LinuxSealList {
 
     // MARK: Entries (ST-D19)
 
-    /// The names of the folders read as `.entries`.
+    /// The names of the folders read as `.entries` in the home (the manager's `transient` folder is one too:
+    /// `isTransient`).
     static var entriesNames: Set<String> { Set(homeEntries.filter { $0.1 == .entries }.map { "~/" + $0.0 }) }
+
+    /// Whether `name` is the manager's runtime units folder, `/run/user/<uid>/systemd/transient` (`outsideEntries`).
+    static func isTransient(_ name: String) -> Bool {
+        let parts = name.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 6 && parts[0].isEmpty && parts[1] == "run" && parts[2] == "user" && !parts[3].isEmpty
+            && parts[3].allSatisfy(\.isASCII) && parts[3].allSatisfy(\.isNumber) && parts[4] == "systemd" && parts[5] == "transient"
+    }
 
     /// The lead's accepted hooks (`GitGuard.store`): `<repository key>/accepted.json` and `<repository key>/copy/`.
     static var hooksName: String { "~/.vibeswitcher/lead/git-hooks" }
@@ -326,7 +338,7 @@ public enum LinuxSealList {
     /// judged as ever.
     static func cameOrWent(key: String, recorded: [String: String], now: [String: String]) -> String? {
         let name = ConfigSeal.name(ofKey: key)
-        guard entriesNames.contains(name), let was = recorded[key], let hash = now[key], was != hash,
+        guard entriesNames.contains(name) || isTransient(name), let was = recorded[key], let hash = now[key], was != hash,
               let before = recorded[ConfigSeal.keysKey(of: key)], let after = now[ConfigSeal.keysKey(of: key)] else { return nil }
         let old = ConfigSeal.decode(before), new = ConfigSeal.decode(after)
         guard !old.keys.contains(where: isUnseen), !new.keys.contains(where: isUnseen) else { return nil }
@@ -344,7 +356,31 @@ public enum LinuxSealList {
                 guard launchEntryMayCome(path, entry: entry, launches: launches) else { return nil }
             }
         }
-        return ConfigSeal.encode(old.merging(new) { $1 })
+        var kept = old.merging(new) { $1 }
+        if isTransient(name) {
+            for (path, entry) in new where old[path] == nil {
+                guard transientEntryMayCome(path, entry: entry) else { return nil }
+            }
+            // A scope gone isn't kept: one back under its name (changed or not) may come as any new scope may, and the
+            // folder would otherwise keep every app's start for good.
+            for path in old.keys where new[path] == nil && isScopeFile(path) { kept[path] = nil }
+        }
+        return ConfigSeal.encode(kept)
+    }
+
+    /// Whether `path`, an entry of the manager's runtime units folder (`transient`) that wasn't there, comes as no
+    /// change: a scope's unit file at its top, which the manager writes when an app registers a scope of its own (a
+    /// browser's `app-<id>-<pid>.scope`, measured on the node 2026-11-17) and removes when the scope goes. A scope is
+    /// never started from its file (the manager makes scopes only through its API), and runs nothing. Anything else
+    /// (a service, a timer, a drop-in folder, a link, a file deeper down, a scope's file changed in place) holds, as
+    /// the folder's change did.
+    static func transientEntryMayCome(_ path: String, entry: String) -> Bool {
+        isScopeFile(path) && ConfigSeal.entryKind(entry) == "f"
+    }
+
+    /// A top-level name `<unit>.scope`, not hidden.
+    static func isScopeFile(_ path: String) -> Bool {
+        !path.contains("/") && !path.hasPrefix(".") && path.hasSuffix(".scope") && path.count > ".scope".count
     }
 
     /// The vault's look: each `.entries` key of `now` not `held` whose change is entries added or removed only

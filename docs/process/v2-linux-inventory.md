@@ -623,6 +623,14 @@ once, at M8's first lead (S9's "Prepared for M8").
 second repository's first guarded git writes a new store with a shim: `config held` still holds nothing (the guard's
 baseline of a repository the seal hasn't seen comes as entries added; anything else added under `git-hooks` is held).
 
+**The manager's runtime units (ST-D20), 2026-11-17** (read only, `ls` and `stat` of the folder, from the step 8 sweep):
+`/run/user/1000/systemd/transient` held `app-com.google.Chrome-3924612.scope` (92 bytes: only the header "This is a
+transient unit file, created programmatically via the systemd API"), its mtime and the folder's 11:47:32, the start of
+that Chrome. The manager writes such a file each time an app registers a scope of its own, and removes it when the
+scope goes, so on a `.folder` each browser start and exit held every team. The folder is now `.entries`: a top-level
+`*.scope` regular file comes and goes as no change, and a gone one isn't kept (`LinuxSealList.transientEntryMayCome`);
+a service, a timer, a drop-in folder, a link, a hidden or deeper file, or a scope's file changed in place still holds.
+
 ## The install's static build (the start plan's S4c, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
 
 The spike ran the install's build command (ST-D11) by hand, under `vs-heavy` (6 cores), with swiftly's 6.4.2 (the same
