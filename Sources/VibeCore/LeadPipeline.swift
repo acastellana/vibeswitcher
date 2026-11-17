@@ -198,9 +198,11 @@ public enum LeadPipeline {
         let toldAt = told.map { Date(timeIntervalSince1970: $0.at) }
         // The battery hold, once told, isn't told again while it lasts: nothing merges until AC power returns, and the
         // witness tells the lead when it does. Its end isn't told either: the next report waits its 30 min from then.
+        // No look is armed meanwhile (a new time at each look would arm another wake each, on a Mac nearly out of
+        // charge): the witness nudges the tool server when it tells the hold's end (`LeadAdvance.nudge`).
         let toldHold = told?.cause == Cause.battery.rawValue
         if toldHold, cause == .battery {
-            return Look(stalled: names, since: since, cause: cause, text: text, tell: false, next: now.addingTimeInterval(repeatEvery))
+            return Look(stalled: names, since: since, cause: cause, text: text, tell: false, next: nil)
         }
         if toldHold {
             return Look(stalled: names, since: since, cause: cause, text: text, tell: false, next: now.addingTimeInterval(repeatEvery), holdEnded: true)
