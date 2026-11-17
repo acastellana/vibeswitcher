@@ -232,7 +232,11 @@ accepted every recommendation so far. Each can be overruled before its task star
    - *2026-11-17, the step 8 sweep:* the record's process is honoured only while it also holds the account's host
      lock (`NodeCheck.recordedHost`'s `lock`, an exclusive `flock` by `Platform.Processes.exclusiveFlockHolder`): its
      ticks, command line and dumpability are each its own to set (`exec -a`, `PR_SET_DUMPABLE`). `stop` ends only the
-     record it showed for the code (`NodeStopper.stopDetached`'s `shown`).
+     record it showed for the code (`NodeStopper.stopDetached`'s `shown`). The start's lock (`detachedLock`) is held
+     through the wait for the server too (`startDetached`'s `listening`), since a real host takes its lock only after
+     its startup checks, which can outlast the 1 s settle: a second start in between is refused by the start's lock,
+     not let past a record its check can't yet tell from a spoof. Held by
+     `StartCommandTests.aStartWhileTheFirstWaitsForItsServerIsRefused` (failed with the lock let go before the wait).
    - *2026-11-17, the step 8 sweep:* the host inherits the command line's umask (`posix_spawn` passes it on), so a
      detached start refuses a umask that doesn't mask other users' write (`NodeStarter.umaskRefusal`, read from
      `/proc/self/status`), as the unit's start refuses such a `UMask`, before anything is made or started.

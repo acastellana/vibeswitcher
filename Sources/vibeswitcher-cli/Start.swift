@@ -50,18 +50,18 @@ enum StartCommand {
                 guard let tools else { return .failure(StartRefusal(StartSequence.scratchNotStarted, exitCode: 69)) }
                 if let refused = beforeStart() { return .failure(refused) }
                 let root = NodeFolders.nodeRoot(accountHome: home)
-                let record: NodeRecord
+                let log = NodeStarter.hostLog(root: root)
+                // The wait for its server runs under the start's lock, so no second start replaces the record of a host
+                // that hasn't taken its own lock yet.
                 switch NodeStarter.startDetached(host: NodeUnit.execStart(prefix: unit.prefix, commit: unit.commit), home: unit.home,
                                                  path: NodeUnit.path(swiftBin: unit.swiftBin, nodeBin: unit.nodeBin), root: root,
-                                                 lock: NodeFolders.hostLock(root: root), isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }) {
+                                                 lock: NodeFolders.hostLock(root: root), isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) },
+                                                 listening: { record in
+                                                     NodeStarter(tools: tools, listen: { detachedProbe(record) }).awaitListening(detachedLog: log)
+                                                 }) {
                 case .failure(let refused): return .failure(refused)
-                case .success(let written): record = written
+                case .success: return .success(NodeStarter.Started(commit: unit.commit, enabledAtLogin: false))
                 }
-                let log = NodeStarter.hostLog(root: root)
-                if let refused = NodeStarter(tools: tools, listen: { detachedProbe(record) }).awaitListening(detachedLog: log) {
-                    return .failure(refused)
-                }
-                return .success(NodeStarter.Started(commit: unit.commit, enabledAtLogin: false))
             })
         switch StartSequence(steps: steps).run(parsed) {
         case .success: return 0

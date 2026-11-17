@@ -1690,6 +1690,30 @@ extension StartCommandTests {
         #expect(NodeRecord.read(root: host.root.path) == nil)
     }
 
+    /// The step 8 sweep's review: the record's check knows the host by the lock it holds, and a real host takes that
+    /// lock only after its startup checks, which can outlast the settle. A second start while the first waits for the
+    /// server (its `listening`) is refused by the start's lock, which the first holds until that wait ends, so the record
+    /// isn't replaced and no second host is spawned while the first hasn't taken its lock yet.
+    @Test(NodeTraits.linuxOnly) func aStartWhileTheFirstWaitsForItsServerIsRefused() async throws {
+        let host = try DetachedScratch(scratch)
+        var second: Result<NodeRecord, StartRefusal>?
+        var lockedAtSecond: pid_t?
+        let first = NodeStarter.startDetached(host: host.command, home: host.home.path, path: DetachedScratch.path, root: host.root.path,
+                                              lock: host.lock, isHost: { $0 == host.command }, settle: 0.01, listening: { _ in
+                                                  lockedAtSecond = Platform.Processes.exclusiveFlockHolder(path: host.lock)
+                                                  second = host.start(settle: 0.01)
+                                                  return nil
+                                              })
+        let record = try first.get()
+        defer { DetachedScratch.end(record.pid) }
+        if case .success(let other)? = second, other.pid != record.pid { DetachedScratch.end(other.pid) }
+        guard case .failure(let refused)? = second else {
+            Issue.record("a second start went on while the first waited for its server (the host's lock held by \(String(describing: lockedAtSecond)))"); return
+        }
+        #expect(refused.text.contains("another start of the node is under way"), "\(refused)")
+        #expect(NodeRecord.read(root: host.root.path) == record)
+    }
+
     @Test(NodeTraits.linuxOnly) func theDetachedHostGetsOnlyTheListedEnvironment() async throws {
         // Held dumpable (a scratch host's test flag), so its environment can be read from here. The test process's own
         // variables (the run's VIBESWITCHER_HOME, TMPDIR, CFFIXED_USER_HOME…) stand for what a shell would pass:

@@ -238,9 +238,12 @@ public struct NodeStarter {
     /// with `O_NOFOLLOW`). The host is this process's child until it exits, then init's.
     ///
     /// The whole start holds `detachedLock(root:)` (an exclusive `flock`), from the record's check through the record's
-    /// write and the settle: another start meanwhile is refused before anything ("another start of the node is under
-    /// way"), so two starts at once can't both pass the check and leave the record naming a host that failed on the
-    /// first one's lock while the first runs unrecorded (the review of S3).
+    /// write, the settle and `listening` (the caller's wait for the server, `awaitListening`): another start meanwhile is
+    /// refused before anything ("another start of the node is under way"), so two starts at once can't both pass the
+    /// check and leave the record naming a host that failed on the first one's lock while the first runs unrecorded (the
+    /// review of S3). Held through `listening` because the host takes its own lock only after its startup checks, which
+    /// can outlast the settle: until then the record's check (`NodeCheck.recordedHost`, which needs that lock) wouldn't
+    /// know it as the host (the step 8 sweep's review). `listening`'s refusal is the start's.
     ///
     /// Refused before anything when this process's umask (`mask`) lets other users write (`umaskRefusal`), as the
     /// unit's start refuses the manager's `UMask`.
@@ -254,7 +257,8 @@ public struct NodeStarter {
     /// (`NodeRecord`: its pid and start) is written; a host that ends within `settle` is collected, its record removed,
     /// and refused: "the host ended at once (pid, status); see <log>".
     public static func startDetached(host: [String], home: String, path: String, root: String, lock hostLock: String, isHost: ([String]) -> Bool,
-                                     settle: TimeInterval = detachedSettle, umask mask: mode_t? = processUmask()) -> Result<NodeRecord, StartRefusal> {
+                                     settle: TimeInterval = detachedSettle, umask mask: mode_t? = processUmask(),
+                                     listening: (NodeRecord) -> StartRefusal? = { _ in nil }) -> Result<NodeRecord, StartRefusal> {
         guard let program = host.first, program.hasPrefix("/") else {
             return .failure(StartRefusal("the host's command isn't an absolute path: \(ConfigSeal.inert(host.joined(separator: " "), limit: .max))", exitCode: 1))
         }
@@ -333,6 +337,8 @@ public struct NodeStarter {
             if reaped < 0, errno != EINTR { break }
             usleep(5_000)
         }
+        // Still under the start's lock (closed on return).
+        if let refused = listening(record) { return .failure(refused) }
         return .success(record)
     }
 
