@@ -241,7 +241,7 @@ send can be sent.
 | Who may mint a code | `web.open` and `web.revoke` need the user's voice and the typed code, are recorded in the vault, and are refused on a WebSocket | `WebTokensTests.openingTheWebNeedsTheUsersVoice`, `aSessionsProcessCantOpenTheWeb` |
 | The page running hostile text | CSP: `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self' ws://127.0.0.1:<port>; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'` on every response | `WebAssetsTests.everyResponseCarriesThePolicy`; the web bench's `hostile-text` page (a session, a card and a chat full of markup: no script runs, no element is made from it) |
 | Markup in the client | no `innerHTML` and its relatives, no `eval`, no inline script or handler, in any file of `WebApp/` | `WebAppLintTests.noFileBuildsMarkupFromText`, `theRuleFindsEachForm` |
-| Sniffing, framing, leaking | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-cache` with an `ETag` | `WebAssetsTests.everyResponseCarriesTheHeaders` |
+| Sniffing, framing, leaking | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`, an `ETag`, and `Cache-Control: no-cache` but on a build's files under `/_/<build>/` (`public, max-age=31536000, immutable`; the page names its files by them) | `WebAssetsTests.everyResponseCarriesTheHeaders`, `theIndexIsRevalidatedAndTheBuildsFilesAreKept` |
 | What is served | only files in the embedded list, by exact match; content types from a fixed table; no SVG, no HTML but `index.html` and `bench.html`; the generator refuses anything else | `WebAssetsTests.aPathOutsideTheListIs404` (`/../`, `%2e%2e`, a double slash, a NUL), `theGeneratorRefusesAnSVG` |
 | Files an agent produced | none served in these slices (LW-D11); later from a separate origin, never as SVG or HTML | `ChatStoreTests.anImageCarriesNoBytes` |
 | Resource exhaustion | 8 KiB of head, 64 KiB a client frame, 32 connections, the handshake's and `auth`'s 5 s, two missed pings | `WebListenerTests.aHeadOver8KIsRefused`, `aFrameOver64KClosesTheConnection`, `theThirtyThirdConnectionIsRefused`, `aStalledHandshakeIsClosed` |
@@ -259,7 +259,7 @@ files it owns.
 | --- | --- | --- |
 | **A** the listener | `v2-ws` (in flight) | `Sources/VibeNode/Web/WebSocketFrame.swift`, `WebSocketHandshake.swift`, `HTTPHead.swift`, `WebListener.swift`, `WebConnection.swift`; `Sources/VibePlatform/Sockets.swift`, `Sockets+Linux.swift`, `Sockets+Darwin.swift` (the TCP functions); `Tests/VibeNodeTests/WebSocketTests.swift`, `WebListenerTests.swift`; `Tests/VibePlatformTests/TCPSocketsTests.swift` |
 | **B** the hub and the stores | `v2-live` | `Sources/VibeNode/Live/LiveStream.swift`, `LiveHub.swift`, `LiveRequests.swift`, `SessionValue.swift`, `NodeStatusStore.swift`, `ChatStore.swift`, `ChatValue.swift`, `TerminalRelay.swift`; `Sources/VibeNode/Stores/CardStore.swift` and `Sources/VibeNode/Server/CardRequests.swift` (slice 3 only: the draft); `Sources/VibeNode/Host/HostLink.swift` (slice 4 only: `attach`); `Tests/VibeNodeTests/LiveHubTests.swift`, `LiveResumeTests.swift`, `NodeStatusStoreTests.swift`, `ChatStoreTests.swift`, `DraftTests.swift`, `TerminalRelayTests.swift` |
-| **C** the static files | `v2-static` | `Sources/VibeNode/Web/WebAssets.swift`, `WebHeaders.swift`; `scripts/webapp-embed.sh`; `Tests/VibeNodeTests/WebAssetsTests.swift`. (`WebAssets.generated.swift` is made by C1 once and by the integrator after) |
+| **C** the static files | `v2-static` | `Sources/VibeNode/Web/WebAssets.swift`, `WebSecurityHeaders.swift` (C1: renamed from `WebHeaders.swift`, lane A's request headers' type); `scripts/webapp-embed.sh`; `Tests/VibeNodeTests/WebAssetsTests.swift`. (`WebAssets.generated.swift` is made by C1 once and by the integrator after) |
 | **D** the web client | `v2-web-ui` (in flight) | everything under `WebApp/` except `WebApp/wire/` and `WebApp/bench/` |
 | **E** validators and vectors | `v2-wire` | `Sources/VibeNode/Live/Wire/WireSchema.swift`, `WireVectors.swift`; `Sources/vibeswitcher-cli/WireCommand.swift`; `WebApp/wire/validators.js`, `WebApp/wire/vectors.json`; `Tests/VibeNodeTests/WireVectorsTests.swift` |
 | **F** `vibeswitcher web` and the security tests | `v2-webcmd` | `Sources/VibeNode/Web/WebTokens.swift`, `WebAccess.swift`; `Sources/VibeNode/Server/WebRequests.swift`; `Sources/vibeswitcher-cli/Web.swift`, `Answer.swift` (slice 3 only: the draft); `Tests/VibeNodeTests/WebTokensTests.swift`, `WebSecurityTests.swift`, `WebAppLintTests.swift` |
@@ -448,24 +448,37 @@ right reason before the code that passes it.
 
 ### Task C1: The embedded files and their headers (lane C)
 
-**Needs:** W0. **Files:** `WebAssets.swift`, `WebHeaders.swift`, `scripts/webapp-embed.sh`,
+**Needs:** W0. **Files:** `WebAssets.swift`, `WebSecurityHeaders.swift`, `scripts/webapp-embed.sh`,
 `WebAssets.generated.swift` (first made here, from a three-file `WebApp/` placeholder if lane D hasn't merged),
 `WebAssetsTests.swift`.
+
+**C1, 2026-11-17, as built:** `WebHeaders` is `WebSecurityHeaders` (the lead's call: lane A's in-flight code defines
+a public `struct WebHeaders` for a request's headers). The lead asked for a browser cache that keeps the page's
+files and always asks again for the page, so a build's files are also served under `/_/<build>/<path>`,
+`immutable` for a year, and `index.html` is served with its own `src` and `href` naming them there; a module's
+relative imports follow. Everything else is `no-cache` with an `ETag`. The 304 is `WebAssets.response(to:ifNoneMatch:)`,
+for the listener to call (the seam's `asset(path:)` doesn't see the request's headers). Embedded: all of `WebApp/`
+but dotfiles, Markdown and shell scripts (the folder's notes and tools), `shots/`, `test/` and `tests/` (Node's tests of the page). The HTML allowed is `index.html` and
+`bench/bench.html` exactly (lane G: the bench page at that path, or ask). A query (`?mock`) is left off before the
+path is matched. Lane D's in-flight `icon.svg` is refused by the generator (the Security table's "no SVG"): lane D
+gives a PNG.
 
 **Interfaces:**
 - Consumes: `WebAssetSource`, `WebAsset`; `WebApp/` in the source tree (the stale test reads it, as the lints read
   sources).
-- Produces: `struct EmbeddedAssets: WebAssetSource` (the generated table; `/` is `index.html`; `/build.json` is
-  `{"assets": "<the first 8 hex of the SHA-256 of the sorted list of paths and hashes>"}`), `static var build:
-  String`; `struct FolderAssets: WebAssetSource` (`--test-web-root`: files read at each request, the same headers,
-  refusing a path that leaves the folder); `WebHeaders.all(port:contentType:etag:)` (the Security table's);
-  `scripts/webapp-embed.sh` (sorted, `LC_ALL=C`, base64 in 76-column chunks, reproducible).
+- Produces: `struct EmbeddedAssets: WebAssetSource` (`init(port:)`, the generated table; `/` is `index.html`;
+  `/build.json` is `{"assets": "<the first 8 hex of the SHA-256 of the sorted list of paths and hashes>"}`),
+  `static var build: String`; `struct FolderAssets: WebAssetSource` (`--test-web-root`: files read at each request,
+  the same headers, refusing a path that leaves the folder, following no link); `WebSecurityHeaders.all(port:
+  contentType:etag:caching:)` (the Security table's); `WebAssets.response(to:ifNoneMatch:)` (200 or 304);
+  `scripts/webapp-embed.sh` (sorted, `LC_ALL=C`, base64 in 76-column chunks, reproducible; `--root`, `--out`).
 
-- [ ] **Step 1: Failing tests**: the `WebAssetsTests` names in [Security](#security), and
-  `theEmbeddedFilesAreWebAppsToday` (stale: every file's hash against the tree), `theGeneratorIsReproducible`,
-  `rootServesIndex`, `anETagThatMatchesIs304`, `theBuildIsTheSameForTheSameFiles`,
-  `aTestRootNeverLeavesItsFolder`, `theContentTypeComesFromTheTable`.
-- [ ] **Step 2:** the generator, the table, the headers. **Step 3:** lints, under load.
+- [x] **Step 1: Failing tests**: the `WebAssetsTests` names in [Security](#security), and
+  `theEmbeddedFilesAreWebAppsToday` (stale: the generator's output over the tree equals the checked-in file, and
+  every file's hash against the tree), `theGeneratorIsReproducible`, `rootServesIndex`, `anETagThatMatchesIs304`,
+  `theBuildIsTheSameForTheSameFiles`, `aTestRootNeverLeavesItsFolder`, `theContentTypeComesFromTheTable`; added:
+  `theIndexIsRevalidatedAndTheBuildsFilesAreKept`, `theEmbeddedFilesStaySmall` (256 KiB a file, 1 MiB in all).
+- [x] **Step 2:** the generator, the table, the headers. **Step 3:** lints, under load.
 
 ### Task E1: The schema, the vectors and the validators (lane E)
 
