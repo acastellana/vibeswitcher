@@ -3529,3 +3529,7 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 11:13 Pipeline held: cut-the-app-s ready to merge with none landing; cause: a merge in progress
 - 2026-11-17 11:25 Merged cut-the-app-s: Cut the app's biggest memory peaks (chat loads, host selects) (in a batch, on a test run of its own) (build ec89ed431487)
 - 2026-11-17 11:25 Didn't merge accept-claude-code-s in the batch: tests fail with it on main (itWakesOnlyWhenAClientIsDue(); the run stopped partway: 745 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't sa…); back to its worker
+- 2026-11-17 11:25 Started a worker on accept-claude-code-s
+- 2026-11-17 11:25 Automatically (auto_advance): Merge of accept-claude-code-s failed: Tests fail rebased onto main (in a batch): itWakesOnlyWhenAClientIsDue(); the run stopped partway: 745 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running Sent its worker the output; it's back at work.
+- 2026-11-17 11:25 Automatically (auto_advance): Merged cut-the-app-s at c01ff549 (its passing audit) into main as one batch, on 2 test runs for 2 tasks.
+- 2026-11-17 11:25 Automatically (auto_advance): Cleaned up cut-the-app-s (freed 2.6 GB of build output and temporary folders). It stays done.
