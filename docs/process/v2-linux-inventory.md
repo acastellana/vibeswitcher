@@ -503,7 +503,10 @@ carries `VIBESWITCHER_SESSION`).
 - **The `systemd-run --user` unit is refused**, as expected: `run-u0.service` is under `user@1000.service`, so the
   rule's first line refuses it (`VoiceRuleTests.anAnswerFromATransientUserUnitIsRefused`, on the derived line, in the
   unified form alone and in the hybrid one; the manager's own `…/user@1000.service/init.scope` is refused there too).
-- **`journalctl --user` lists the user's own entries without `_UID=`.**
+- **`journalctl --user` lists the user's own entries without `_UID=`.** `NodeContext.journalEntries` adds
+  `_UID=<uid>` to its matches all the same (`NodeJournal.readArguments`): it changes nothing that is read here and
+  narrows the read to the user's entries wherever a journal holds more
+  (`NodeJournalTests.theJournalIsAskedForTheUsersEntriesOnly`).
 - **journald stamps `_SYSTEMD_CGROUP` only for a writer it can still read.** It reads `/proc/<pid>` when it takes the
   datagram, not when the datagram was sent: `logger`, which exits at once, left an entry with no `_SYSTEMD_CGROUP`,
   `_SYSTEMD_UNIT` or `_COMM`, and a writer alive 2 s later got all three. The command line's entries count only by

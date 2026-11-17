@@ -62,6 +62,18 @@ public enum NodeJournal {
 
     // MARK: Reading
 
+    /// The arguments of each `journalctl` run the command line reads the journal with (`NodeContext.journalEntries`):
+    /// the node unit's entries, then its own (`SYSLOG_IDENTIFIER`), each from the user's journal as JSON and each
+    /// matched on `_UID=<uid>` too. The user's journal lists the user's own entries without that match (measured, the
+    /// bootstrap path's M4, 2026-11-17), and `--user -u` matches the unit's entries by the user already: the match
+    /// narrows the read to the user's wherever a journal holds more, and changes nothing that counts (`passes` asks
+    /// for the user's `_UID`).
+    public static func readArguments(uid: uid_t) -> [[String]] {
+        [["-u", VoiceRule.nodeUnit], ["SYSLOG_IDENTIFIER=\(identifier)"]].map {
+            ["--user", "-o", "json", "--no-pager"] + $0 + ["_UID=\(uid)"]
+        }
+    }
+
     /// The entries of a `journalctl -o json` text, one JSON object a line; a line that isn't one is passed over.
     public static func entries(json text: String) -> [JournalEntry] {
         text.split(whereSeparator: \.isNewline).compactMap { line in

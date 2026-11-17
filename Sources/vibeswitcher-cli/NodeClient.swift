@@ -86,13 +86,13 @@ struct NodeContext {
                                        managerEnvironment: { read ?? managerEnvironment() }))
     }
 
-    /// The journal entries the command line reads: the node unit's and its own. nil, and why, when there is no
-    /// journal to read.
+    /// The journal entries the command line reads: the node unit's and its own, the user's only
+    /// (`NodeJournal.readArguments`). nil, and why, when there is no journal to read.
     func journalEntries() -> Result<[JournalEntry], NodeFacts.Failure> {
         guard let journalctl else { return .failure(.init(Self.noStandIn)) }
         var entries: [JournalEntry] = []
-        for match in [["-u", VoiceRule.nodeUnit], ["SYSLOG_IDENTIFIER=\(NodeJournal.identifier)"]] {
-            guard let ran = runTool(journalctl, ["--user", "-o", "json", "--no-pager"] + match), ran.status == 0 else {
+        for arguments in NodeJournal.readArguments(uid: getuid()) {
+            guard let ran = runTool(journalctl, arguments), ran.status == 0 else {
                 return .failure(.init("journalctl --user didn't answer"))
             }
             entries += NodeJournal.entries(json: ran.output)

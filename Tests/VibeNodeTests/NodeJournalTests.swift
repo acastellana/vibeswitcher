@@ -184,6 +184,18 @@ struct NodeJournalTests {
         #expect(NodeJournal.unitState(show: "ExecMainPID=0\n").execMainPID == nil)
     }
 
+    /// What `journalctl` is asked (`NodeContext.journalEntries` runs these as they are): the user's journal, as JSON,
+    /// the node unit's entries and the command line's own, each matched on the user's `_UID` too. The user's journal
+    /// lists the user's own entries without it (the bootstrap path's M4, 2026-11-17); with it nothing of another user
+    /// is read wherever a journal holds more.
+    @Test func theJournalIsAskedForTheUsersEntriesOnly() {
+        #expect(NodeJournal.readArguments(uid: 1000) == [
+            ["--user", "-o", "json", "--no-pager", "-u", "vibeswitcher-node.service", "_UID=1000"],
+            ["--user", "-o", "json", "--no-pager", "SYSLOG_IDENTIFIER=vibeswitcher", "_UID=1000"],
+        ])
+        #expect(NodeJournal.readArguments(uid: 1234).allSatisfy { $0.last == "_UID=1234" && $0.first == "--user" })
+    }
+
     @Test func anAckSurvivesAServerRestart() throws {
         // The ack is the journal's, read afresh by each command line: a server that restarted (a new epoch, nothing
         // in its memory) changes nothing.
