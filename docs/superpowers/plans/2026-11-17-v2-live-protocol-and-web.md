@@ -436,10 +436,16 @@ right reason before the code that passes it.
     `sessions` and `leads`, with `web`, sent under the node's id; `look()` on each of those streams' changes and at
     each refresh (an equal value sends nothing, `Changes`' own rule).
 
-- [ ] **Step 1: Failing tests**: `aSessionsLiveValueHasStatussEightFieldsUnchanged`, `shownStatusIsTheLeadsAsk`,
+- [x] **Step 1: Failing tests**: `aSessionsLiveValueHasStatussEightFieldsUnchanged`, `shownStatusIsTheLeadsAsk`,
   `aSessionWithNoTranscriptSaysSo`, `theNodesValueIsStatusWithoutSessionsAndLeads`, `aNewNoticeIsADelta`,
-  `aLookThatFindsNothingNewSendsNothing`, `anAcceptedRequestIsADelta`.
-- [ ] **Step 2:** both. **Step 3:** lints, under load.
+  `aLookThatFindsNothingNewSendsNothing`, `anAcceptedRequestIsADelta`; and `eachRefreshLooks`.
+- [x] **Step 2:** both. **Step 3:** lints, under load.
+- **As built (B2):** `NodeStatusStore(requests:web:)` (or `(queue:status:web:)`), `watch(_ changes:)` for each store
+  whose change can move the value (I1: `HostLink.changes`, `LeadStore.changes`, `CardStore.changes`),
+  `start(clock:)` (a look now and every `refreshEvery`, 3 s), `stop()`, `look()`. `Requests.accepted` has no change
+  stream, so I1 calls `look()` where a request is accepted (`Requests.acting` is the place). `webOff` is `web` until
+  the listener's state is wired. The hub follows it with
+  `hub.follow(status.changes, into: LiveStream(collection: "node")) { $0 }`, and sessions with `{ $0.liveValue }`.
 
 ### Task B3: Resume (lane B)
 
