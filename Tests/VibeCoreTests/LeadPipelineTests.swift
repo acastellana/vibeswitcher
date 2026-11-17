@@ -160,6 +160,58 @@ struct LeadPipelineTests: LeadTeamFixture {
         let progress = try String(contentsOfFile: root + "/docs/lead/progress.md", encoding: .utf8)
         #expect(progress.contains("Pipeline held: add-b ready to merge with none landing; cause: the lead's records failing a check"), "\(progress)")
     }
+
+    /// The battery hold as the cause: on 2026-11-17 at 02:25, on battery at 4 % under the user's 10 % limit (the
+    /// witness and auto_advance had told the hold at 02:08), the watch said "Cause: nothing VibeSwitcher sees … merge
+    /// one by hand", which the hold would only refuse. It names the hold, isn't told again while it lasts, and once AC
+    /// power returns the stall's next report waits its 30 min from then, as merges start again.
+    @Test func theBatteryHoldIsNamedAndNotRepeatedWhileItLasts() throws {
+        let url = temp.url("pipeline-battery")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let root = url.resolvingSymlinksInPath().path
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }
+        try "one\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt"], in: root)
+        Git.run(["commit", "-q", "-m", "first"], in: root)
+        let lead = try lead(root, FakeRuntime())
+        lead.testLock = nil
+        lead.mergeStats = { nil }
+        lead.recordLints = { .all }
+        var held = PowerState(onBattery: true, percent: 4)
+        held.heldUnder = 10
+        var power: PowerState? = held
+        lead.power = { power }
+        var clock = Self.t0
+        lead.pipelineClock = { clock }
+        try lead.store.update { board in board.tasks.append(Self.ready("shell-cards-ending", at: Self.t0)) }
+
+        clock = Self.t0.addingTimeInterval(125 * 60)
+        let look = lead.watchPipeline()
+        let text = look.text ?? ""
+        #expect(look.tell, "\(text)")
+        #expect(text.hasPrefix("Merges are held: shell-cards-ending has been ready to merge for 125 min with no merge landing. Cause: the battery hold."), "\(text)")
+        #expect(text.contains("on battery at 4 %, under the user's 10 % limit") && text.contains("until AC power returns"), "\(text)")
+        #expect(!text.contains("nothing VibeSwitcher sees") && !text.contains("merge one by hand"), "\(text)")
+        #expect(lead.store.load().reports?.count == 1)
+        // Not again while the hold lasts, however long.
+        for minute in [160.0, 200, 300] {
+            clock = Self.t0.addingTimeInterval(minute * 60)
+            let again = lead.watchPipeline()
+            #expect(!again.tell, "at \(minute) min: \(String(describing: again.text))")
+        }
+        #expect(lead.store.load().reports?.count == 1, "\(lead.store.load().reports ?? [])")
+        // AC power returns at 310 min: merges may start again, so the next report waits 30 min from then.
+        power = PowerState(onBattery: false, percent: 12, charging: true)
+        clock = Self.t0.addingTimeInterval(310 * 60)
+        #expect(!lead.watchPipeline().tell)
+        clock = Self.t0.addingTimeInterval(339 * 60)
+        #expect(!lead.watchPipeline().tell)
+        #expect(lead.store.load().reports?.count == 1, "\(lead.store.load().reports ?? [])")
+        clock = Self.t0.addingTimeInterval(341 * 60)
+        let after = lead.watchPipeline()
+        #expect(after.tell && (after.text ?? "").contains("Cause: nothing VibeSwitcher sees."), "\(String(describing: after.text))")
+        #expect(lead.store.load().reports?.count == 2)
+    }
 }
 
 /// The held-merges report by the Mac's awake clock (`MacTime`, noted as the witness's sleep log does): on 2026-11-16 a
