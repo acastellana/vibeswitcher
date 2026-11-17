@@ -482,12 +482,18 @@ right reason before the code that passes it.
   `validate(kind, value) -> string | null` (the first field that fails, or null) for every message and entity;
   `vectors.json`: `{name: frame}` for every vector of the contract.
 
-- [ ] **Step 1: Failing tests**: `theSchemaIsWhatTheEncodersWrite` (samples with every optional set and unset: the
+- [x] **Step 1: Failing tests**: `theSchemaIsWhatTheEncodersWrite` (samples with every optional set and unset: the
   keys and types the encoders write are the schema's, both ways), `theCheckedInFilesAreWhatTheGeneratorWrites`,
   `everyVectorPassesItsValidator` (run by Node 22 from the test, skipped with its reason where there is no `node`),
   `aVectorWithAWrongTypeFailsNamingTheField`, `anUnknownFieldPasses` (rule 3),
   `theContractsVectorsAreAllThere` (every name in the contract's §11 and §8).
-- [ ] **Step 2:** the schema, the generator, the files. **Step 3:** lints, under load.
+- [x] **Step 2:** the schema, the generator, the files. **Step 3:** lints, under load. (E1, 2026-11-17: also
+  `aStrictCheckFindsWhatTheSchemaLacks`, `everyVectorPassesTheSchema`, `theGeneratorIsReproducible`,
+  `theCommandWritesTheGeneratorsFiles`. `vectors.json` is `{name: frame}`, an exchange's frames as a list in order;
+  §8's vectors are named `draft.acked` (request, delta, ack), `draft.refused` and `answer.from-a-page`, names for the
+  contract to take. Where the encoders write other than the contract's examples, the vectors are the encoders': a
+  project id is `NodeIds.project(root:)`'s hash, a question at version 2 has its revision's note, a hello's absent
+  `host.notes` is left out, not null. For the integrator to write into the contract.)
 
 ### Task F1: Tokens, and `vibeswitcher web` (lane F)
 
