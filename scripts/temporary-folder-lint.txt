@@ -105,3 +105,6 @@ allow: Tests/VibePlatformTests/FilesExclusiveTests.swift | #expect(root == "/pri
 allow: Tests/VibePlatformTests/SettingsTests.swift | store.set(URL(fileURLWithPath: "/tmp"), forKey: "place") | a URL, a value no property list holds, that the store must refuse; nothing is opened
 allow: Tests/VibePlatformTests/SocketsTests.swift | Platform.Sockets.unixAddress("/tmp/s") | builds an address and reads its bytes; no socket is made
 allow: Tests/VibePlatformTests/SocketsTests.swift | Array("/tmp/s".utf8) | the bytes that address holds; no socket is made
+# The session sandbox's boxes (SB1): a box's own /tmp, an empty tmpfs inside its mount namespace, never the machine's.
+allow: Tests/VibePlatformTests/SandboxShimTests.swift | .init("/tmp", .empty(mode: 0o1777)) | the box's own /tmp: a tmpfs mounted inside the box, not the machine's folder
+allow: Tests/VibePlatformTests/SandboxShimTests.swift | "TMPDIR=/tmp" | the TMPDIR a program in the box is given: the box's own /tmp

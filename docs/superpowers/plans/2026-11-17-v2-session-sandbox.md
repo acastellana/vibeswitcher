@@ -780,8 +780,8 @@ Sources/VibeHost/V2/
   the C library falls back to `clone`, whose flags the filter can read. An architecture other than the build's is
   killed.
 
-- [ ] **Step 1: The types**, with `SandboxPlanCodingTests.aPlanSurvivesItsCoding` and `theMacHasNoSandbox`. Pushed.
-- [ ] **Step 2: Failing tests.** `SandboxShimTests`, each through the test binary's helper mode over scratch
+- [x] **Step 1: The types**, with `SandboxPlanCodingTests.aPlanSurvivesItsCoding` and `theMacHasNoSandbox`. Not pushed: the lead's.
+- [x] **Step 2: Failing tests.** `SandboxShimTests`, each through the test binary's helper mode over scratch
   folders, skipped with its reason where `probe()` says no:
   - `theProgramSeesOnlyWhatThePlanMounts`
   - `aReadOnlyMountRefusesWritesAndKeepsItsLockedFlags`
@@ -800,17 +800,35 @@ Sources/VibeHost/V2/
   - `theProgramIsItsTerminalsForegroundGroupAndTheKeeperItsLeader`
   - `aRunWithNoTerminalHasNone`
   - `anEmptyNetworkHasLoopbackAndNothingElse`
-- [ ] **Step 3:** `SandboxSeccompTests`: `hyperVPacketAndNetfilterSocketsAreRefused`,
+- [x] **Step 3:** `SandboxSeccompTests`: `hyperVPacketAndNetfilterSocketsAreRefused`,
   `bpfPerfUserfaultfdAndTheKeyringsAreRefused`, `typingIntoTheTerminalByIoctlIsRefused`,
   `aNestedUserNamespaceIsRefusedUnlessThePlanAllowsIt`, `aThreadedProgramAndAShellPipelineStillRun`,
   `tracingAProcessOfTheBoxIsAllowed`.
-- [ ] **Step 4:** `SandboxFactsTests`, which keep this plan's measurements true or say what changed:
+- [x] **Step 4:** `SandboxFactsTests`, which keep this plan's measurements true or say what changed:
   `landlocksAbiIsReadFromTheKernel`, `aLandlockedProcessCantRenameAcrossFoldersBeforeAbi2`,
   `hyperVSocketsIgnoreTheNetworkNamespace`, `aNonDumpableProcessCantWriteItsOwnUidMap`,
   `aTerminalMadeOutsideHasNoNameInsideButStaysATerminal`, `aWindowsStubDoesntStartWithoutInit`.
-- [ ] **Step 5:** The implementation, in the order above.
-- [ ] **Step 6:** `SandboxLintTests.onlyThePlatformCallsTheNamespaceAndMountCalls`,
+- [x] **Step 5:** The implementation, in the order above.
+- [x] **Step 6:** `SandboxLintTests.onlyThePlatformCallsTheNamespaceAndMountCalls`,
   `enterIsCalledOnlyFromALaunchersFirstStatements`. Lints, then the suite under load.
+
+*As built (2026-11-17):* the order above, with these choices the review should check. The root is built bubblewrap's
+way: a tmpfs over `/tmp` as a base, the machine's root pivoted under it at `/oldroot`, the plan's mounts made under
+`/newroot` with the new mount calls (`open_tree` and `move_mount` for a bind, `fsopen` and `fsmount` for a file
+system, `mount_setattr` with `AT_RECURSIVE` for the flags: a read-only bind makes every mount under it read-only,
+keeping the atime flags the kernel locks), then `/newroot` pivoted over the base and the base detached with the old
+root under it (bubblewrap's separate detach of `/oldroot` first changed nothing seen inside: dropped). A source is
+opened beneath `/oldroot` as if it were `/` with no link along it (`openat2` `RESOLVE_IN_ROOT | RESOLVE_NO_SYMLINKS`),
+a target's folders are made and opened one by one with no link followed, a mount point is a folder or a regular file
+and never a link, an overlay's three folders are named to overlayfs by the descriptors that were checked, and a device
+is a bare name under `/dev`: a plan that names a link refuses (`ELOOP`, `ENOTDIR`). The filter also refuses
+`TIOCLINUX` (a console's paste) and `socketpair` of a refused family; it loads only after `no_new_privs`
+(`vibe_sandbox_load_filter` no longer sets it itself, so the program's step is the one that does). The door is `0700`.
+`probe()` tries the namespaces with util-linux's `unshare(1)` in a child (no fork here, no namespace of this process).
+The tests' launcher is the test binary at load, before every other initializer (`.init_array.00200`): VibeCoreTests'
+zombie watch starts a thread as the bundle loads. Each step a test can miss is shown failing without it by
+`scripts/sandbox-mutation.sh` (a build of its own with `-DVIBE_SANDBOX_MUTATION`, which no product build sets:
+`SandboxLintTests.theShimsMutationSwitchIsNeverBuilt`).
 
 ### Task SB2: The planner: what each role sees
 
