@@ -19,12 +19,14 @@ import Testing
         return ["bpf": 321, "perf_event_open": 298, "userfaultfd": 323, "add_key": 248, "request_key": 249, "keyctl": 250,
                 "kexec_load": 246, "kexec_file_load": 320, "init_module": 175, "finit_module": 313, "delete_module": 176,
                 "swapon": 167, "swapoff": 168, "open_by_handle_at": 304, "mount": 165, "umount2": 166, "pivot_root": 155,
-                "unshare": 272, "setns": 308, "clone3": 435, "fsopen": 430, "open_tree": 428, "mount_setattr": 442]
+                "unshare": 272, "setns": 308, "clone3": 435, "fsopen": 430, "open_tree": 428, "mount_setattr": 442,
+                "io_uring_setup": 425, "io_uring_enter": 426, "io_uring_register": 427]
         #else
         return ["bpf": 280, "perf_event_open": 241, "userfaultfd": 282, "add_key": 217, "request_key": 218, "keyctl": 219,
                 "kexec_load": 104, "kexec_file_load": 294, "init_module": 105, "finit_module": 273, "delete_module": 106,
                 "swapon": 224, "swapoff": 225, "open_by_handle_at": 265, "mount": 40, "umount2": 39, "pivot_root": 41,
-                "unshare": 97, "setns": 268, "clone3": 435, "fsopen": 430, "open_tree": 428, "mount_setattr": 442]
+                "unshare": 97, "setns": 268, "clone3": 435, "fsopen": 430, "open_tree": 428, "mount_setattr": 442,
+                "io_uring_setup": 425, "io_uring_enter": 426, "io_uring_register": 427]
         #endif
     }()
 
@@ -116,6 +118,23 @@ import Testing
         #expect(plain["add_key"] == "ok", "\(plain)")
         #expect(plain["fd perf_event_open"] == "EFAULT", "\(plain)")
         #expect(plain["fd userfaultfd"] == "ok", "\(plain)")
+    }
+
+    /// io_uring runs its operations in the kernel past the filter's checks (sockets of any family, from 5.19): its three
+    /// calls are refused. In a plain child the kernel sets a ring up, and answers the other two by their arguments.
+    @Test(.enabled(if: can, "\(skip)"))
+    func ioUringIsRefused() throws {
+        let source = """
+            parameters = ctypes.create_string_buffer(120)
+            call("fd io_uring_setup", "io_uring_setup", 1, parameters)
+            call("io_uring_enter", "io_uring_enter", -1, 0, 0, 0, 0, 0)
+            call("io_uring_register", "io_uring_register", -1, 0, 0, 0)
+            """
+        let (box, plain) = try Self.both(source, "seccomp-io-uring")
+        for name in ["fd io_uring_setup", "io_uring_enter", "io_uring_register"] { #expect(box[name] == "EPERM", "\(name): \(box)") }
+        // The kernel alone answers otherwise: a ring, where io_uring is on; else its own refusal, never the filter's.
+        #expect(plain["fd io_uring_setup"] == "ok" || plain["fd io_uring_setup"] == "ENOSYS", "\(plain)")
+        #expect(plain["io_uring_enter"] == "EBADF" && plain["io_uring_register"] == "EBADF", "\(plain)")
     }
 
     @Test(.enabled(if: can, "\(skip)"))

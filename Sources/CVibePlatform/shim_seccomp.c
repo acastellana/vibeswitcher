@@ -5,6 +5,9 @@
 //   AF_VSOCK (a network namespace doesn't cover Hyper-V sockets: measured), AF_PACKET, AF_ALG, netfilter netlink;
 // - bpf, perf_event_open, userfaultfd, the keyring (add_key, request_key, keyctl), kexec_load, kexec_file_load, the
 //   modules (init_module, finit_module, delete_module), swapon, swapoff, open_by_handle_at;
+// - io_uring (io_uring_setup, io_uring_enter, io_uring_register): its operations run in the kernel without the system
+//   calls this filter reads (a socket of any family from 5.19, opens, reads, writes), and its bugs are many; Docker's
+//   and Chromium's filters refuse it too;
 // - ioctl's TIOCSTI (typing into a terminal) and TIOCLINUX (a virtual console's selection, which pastes);
 // - without nesting: unshare and clone with CLONE_NEWUSER, mount, umount2, pivot_root, the new mount calls (fsopen,
 //   fsconfig, fsmount, move_mount, open_tree, mount_setattr) and setns; and clone3 answers ENOSYS, so the C library
@@ -34,6 +37,16 @@
 #define VIBE_AUDIT_ARCH AUDIT_ARCH_AARCH64
 #endif
 
+// io_uring's three, 425 to 427 on every architecture (the unified table), for headers older than Linux 5.1.
+#ifndef SYS_io_uring_setup
+#define SYS_io_uring_setup 425
+#endif
+#ifndef SYS_io_uring_enter
+#define SYS_io_uring_enter 426
+#endif
+#ifndef SYS_io_uring_register
+#define SYS_io_uring_register 427
+#endif
 #ifndef SYS_clone3
 #define SYS_clone3 435
 #endif
@@ -116,6 +129,8 @@ static const long refused[] = {
 #ifdef SYS_open_by_handle_at
     SYS_open_by_handle_at,
 #endif
+    // io_uring does its work (sockets among it, from 5.19) inside the kernel, past every check here.
+    SYS_io_uring_setup, SYS_io_uring_enter, SYS_io_uring_register,
 };
 
 // Refused unless the plan allows nesting.
