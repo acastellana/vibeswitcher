@@ -859,7 +859,7 @@ zombie watch starts a thread as the bundle loads. Each step a test can miss is s
     projectFolder(cwd: String) -> String; static func seededConfig(from: Data, cwd: String) -> Data }`.
   - `public struct SandboxRefusal: Error, Equatable, CustomStringConvertible`.
 
-- [ ] **Step 1: Failing tests** (`SandboxPlannerTests`, on both systems):
+- [x] **Step 1: Failing tests** (`SandboxPlannerTests`, on both systems):
   - `aWorkerWritesItsWorktreeItsGitFolderTheObjectsAndTheAgentRefsOnly`
   - `theBasesRefTheConfigTheHooksAndTheTagsAreReadOnlyToAWorker`
   - `aWorktreesGitFileAndItsFoldersPointersAreReadOnly`
@@ -874,10 +874,19 @@ zombie watch starts a thread as the bundle loads. Each step a test can miss is s
   - `aVerifierIsNeverGivenTheWorkersWorktree`
   - `aWorktreeWhoseGitFileLeavesItsRepositoryIsRefused`
   - `theSameInputsGiveTheSamePlan`
-- [ ] **Step 2:** `SandboxPolicyTests`: `aPathUnderAHiddenFolderIsRefusedNamingIt`,
+- [x] **Step 2:** `SandboxPolicyTests`: `aPathUnderAHiddenFolderIsRefusedNamingIt`,
   `aLinkIsResolvedBeforeItIsJudged`, `aRelativeOrHomelessPathIsRefused`, `aHostWithASchemeAPathOrAnAddressIsRefused`,
   `theSandboxKeysAreGuarded` (a changed key is held until accepted, as `test_command` is).
-- [ ] **Step 3:** Implementation. `ClaudeFiles`' lists come from SB0 Step 4; until then, from this plan's table.
+- [x] **Step 3:** Implementation. `ClaudeFiles`' lists come from SB0 Step 4; until then, from this plan's table.
+
+*As built (2026-11-17):* `GitRoots.read` gives a `Roots` (common, own, slug) rather than a tuple. `SandboxInputs` has,
+beyond the list above, `accountHome` (a branch run's `home` is its scratch home), `environment` (the spawn's, filtered
+by `SandboxPlanner.allowed`), `agentConfig` (the account's `~/.claude.json`, seeded into the box's), `agentLogin` (SB-D8
+either way: `false` leaves the login out) and `gitIdentity` (the generated `~/.gitconfig`). `SandboxPlanner.plan`
+takes the file checks as closures, and `SandboxPlanner.folders(for:inputs:)` names what the host makes before entering
+(the session's home and each private layer's folders, under `<box>`). `SandboxPolicy.read` takes the home and the
+project's root, so `~/` and another repository can be judged. The `sandbox` key is read but never decides anything
+here: whether a project may turn its box off is SB-D16's question for the user.
 
 ### Task SB3: The launcher builds the box
 
