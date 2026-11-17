@@ -7,8 +7,10 @@ import Testing
 /// Each session's output is parsed in a process of its own (see `SessionParser`): a parser that stalls or traps (a test
 /// hook, on a scratch host only) holds up or ends only itself; the watchdog logs it and starts another.
 @Suite(.serialized, hostTestLimit) struct ParserIsolationTests {
-    /// Prints the time every 50 ms, so a client can tell how late each line reached it.
-    static let clock = "perl -MTime::HiRes=time -e '$|=1; while (1) { printf qq(t=%.4f\\n), time; select(undef, undef, undef, 0.05) }'"
+    /// Prints the time awake (`MacTime.awake`'s clock) every 50 ms, so a client can tell how late each line reached it:
+    /// by the wall clock, a line printed before a sleep and read after it would be late by the sleep (2026-11-16, a
+    /// merge's run slept 18 minutes in this test).
+    static let clock = "perl -MTime::HiRes=clock_gettime,CLOCK_UPTIME_RAW -e '$|=1; while (1) { printf qq(t=%.4f\\n), clock_gettime(CLOCK_UPTIME_RAW); select(undef, undef, undef, 0.05) }'"
     /// Prints a line, then the hook's sequence on its own, then counts.
     static func breaking(_ hook: String) -> String {
         "printf 'before\\n'; sleep 0.3; printf '\\033]7599;\(hook)\\007'; sleep 0.3; i=0; while :; do i=$((i+1)); echo after-$i; sleep 0.1; done"
@@ -57,7 +59,7 @@ import Testing
                 client.connection.onOutput = { [weak self] id, data in
                     earlier?(id, data)
                     guard id == session else { return }
-                    self?.received(data, at: Date().timeIntervalSince1970)
+                    self?.received(data, at: MacTime.real.awake())
                 }
             }
         }
