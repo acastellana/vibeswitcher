@@ -650,7 +650,14 @@ process that a process of the user can't change.
   non-dumpable passed all three, so the server check trusted its child, `stop` ended it and said the node stopped while
   the real host ran on, and every `start` was refused. The lock is what it can't take while the host holds it; a file
   renamed over the lock's path is taken back by the host's path watch (S2), a race the worker must win against it. And
-  `stop` ends only the record it showed for the typed code. A detached `stop` ends
+  `stop` ends only the record it showed for the typed code. *(2026-11-17, the security follow-ups' item 33, open)*
+  Still not held: while no host runs (or once a worker wins that race), a worker's own process holding an exclusive
+  `flock` on a file it put at the lock's path passes, since the lock check ties the path's device and inode only to a
+  lock the candidate holds (`/proc/locks`), and the candidate is the worker's. What would tie it to the installed build
+  (`/proc/<pid>/exe`, the descriptors in `/proc/<pid>/fd` and `fdinfo`) can't be read: the kernel refuses them to the
+  same uid for a non-dumpable process (measured on the node 2026-11-17: `exe`, `fd`, `fdinfo` and `maps` EACCES;
+  `stat`, `status`, `cmdline` and `/proc/locks` readable), and the check requires the candidate non-dumpable. So the
+  detached node's record stays a hint a worker can forge, and the detached mode the weaker one. A detached `stop` ends
   the host and the processes found under it (the tree, read again while the host ends): a session's process that left
   the host's tree before it was read (a daemon double-forked to init) outlives the stop.
 - The text of the lead's questions: a turned lead asks what it likes. Only the card's facts are the engine's.
@@ -1601,8 +1608,15 @@ doesn't hold its team; 2026-11-16, with the review of S7; and, the security foll
 roles' launch folders only a launch the vault recorded comes, and a folder unreadable mid-walk or a folder's mode
 changed holds the team); `LinuxSealListTests.aScopeComingAndGoingInTheManagersRuntimeUnitsIsNoChange` (the step 8
 sweep, 2026-11-17: an app's scope file in the manager's `transient` folder comes and goes; anything else there holds,
-a scope's file changed in place included; not one removed and back changed at the next look, nor a new scope's
-`[Unit]` lines, which can name only units the manager has: ST-D20's note);
+a scope's file changed in place included), with `LinuxSealListTests.aNewScopeComesOnlyInTheFormTheManagerWrites` (the
+security follow-ups' item 31, 2026-11-17: a new scope's file comes only in the form systemd writes for a scope made
+through its API, its transient header then `[Unit]` and `[Scope]` keys it writes for one; a dependency or trigger
+(`Wants=`, `Requires=`, `OnFailure=`…), another section or key, a comment or a continuation holds),
+`LinuxSealListTests.aScopesFormIsJudgedOnTheBytesTheWalkHashed` (its review: the form is judged on the very bytes the
+walk hashed, never on a second read tied to the entry by a truncated hash) and
+`LinuxSealListTests.aScopeBackChangedUnderItsNameIsHeld` (item 32: a scope gone leaves a tombstone of its last hash
+for 64 looks that record the folder, so one back changed under its name holds; at most 1024 tombstones, past which the
+look is judged as ever);
 `HostHardeningTests.theNodesShellAndLocaleNeverComeFromTheManager` (the step 8 sweep: the `--node` host's `SHELL`,
 `USER` and `LOGNAME` from the user database, a locale naming a path dropped), with
 `HostHardeningTests.aNodeHostsOwnEnvironmentIsTheUserDatabases` (its review: `startAsNode` run in a child, whose own

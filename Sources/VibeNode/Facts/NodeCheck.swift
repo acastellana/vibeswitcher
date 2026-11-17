@@ -137,6 +137,9 @@ public enum NodeCheck {
     /// `exec -a <prefix>/<commit>/bin/vibeswitcher-host … --node --node-root …` that makes itself non-dumpable, named
     /// in a record the worker wrote, passes all three (the step 8 sweep). The lock it can't hold while the host does,
     /// and the host takes back a lock path a file was renamed over (`HostPathWatch`). So they are hints; the lock decides.
+    /// Not held (the security follow-ups' item 33, open): while no host runs, a worker's process holding a file it put at
+    /// the lock's path passes. What would tie the candidate to the build (`/proc/<pid>/exe`, its `fd` and `fdinfo`) the
+    /// kernel refuses to the same uid for a non-dumpable process (measured 2026-11-17), and the candidate must be one.
     public static func recordedHost(_ record: NodeRecord?, isHost: ([String]) -> Bool, lock: String,
                                     startTicks: (pid_t) -> UInt64? = NodeRecord.liveTicks,
                                     arguments: (pid_t) -> [String] = Platform.Processes.arguments,

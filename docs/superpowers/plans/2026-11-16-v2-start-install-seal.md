@@ -237,6 +237,15 @@ accepted every recommendation so far. Each can be overruled before its task star
      its startup checks, which can outlast the 1 s settle: a second start in between is refused by the start's lock,
      not let past a record its check can't yet tell from a spoof. Held by
      `StartCommandTests.aStartWhileTheFirstWaitsForItsServerIsRefused` (failed with the lock let go before the wait).
+   - *2026-11-17, the security follow-ups' item 33, open:* the record check (`NodeCheck.recordedHost`) already ties the
+     lock's path to a lock the candidate holds by device and inode (`/proc/locks`, `exclusiveFlockHolder`), but a
+     worker's own process holding a file it put at the path passes while no host runs. The fix asked for, the
+     candidate's `/proc/<pid>/exe` being the build's `vibeswitcher-host` and the locked file found among its
+     `/proc/<pid>/fd` or `fdinfo`, can't be read: measured on the node, a non-dumpable process's `exe`, `fd`, `fdinfo`
+     and `maps` are EACCES to its own uid (only `stat`, `status`, `cmdline` and `/proc/locks` read), and the check
+     requires the candidate non-dumpable. No code changed; the security document's S3 note says so. Closing it needs
+     something the kernel ties to the binary and a non-dumpable process exposes (none found), or the unit's cgroup
+     (`systemctl --user`), which the detached mode is the absence of: the lead's call.
    - *2026-11-17, the step 8 sweep:* the host inherits the command line's umask (`posix_spawn` passes it on), so a
      detached start refuses a umask that doesn't mask other users' write (`NodeStarter.umaskRefusal`, read from
      `/proc/self/status`), as the unit's start refuses such a `UMask`, before anything is made or started.
@@ -469,6 +478,25 @@ accepted every recommendation so far. Each can be overruled before its task star
       whatever its content (the seal keeps hashes), so its `[Unit]` lines (`OnFailure=`, `OnSuccess=`, `Wants=`) reach
       the manager at its next reload. Bounded: they name only units the manager has (in watched folders, where a new
       one holds, or root's), the manager's API does the same with no file, and `/run` is emptied at reboot.
+    - *2026-11-17, the security follow-ups' item 31:* a new scope's file comes only in the form systemd writes for a
+      scope made through its API (`LinuxSealList.hasScopeForm`): the transient header (the node's
+      `/run/systemd/transient/session-2.scope` read for the form; the user manager's Chrome scope was the header alone),
+      then only empty lines, `[Unit]` and `[Scope]`, and the keys it writes for a scope (`scopeKeys`: Description,
+      Documentation, SourcePath, DefaultDependencies, CollectMode, SurviveFinalKillSignal, After and Before; Slice,
+      Delegate*, OOMPolicy, RuntimeMaxSec, the kill keys and the resource-control keys). A dependency or trigger, an
+      action, a condition, a key that loads a program or names a path, another section, a comment, a continuation, a
+      CR or a NUL holds. The walk reads a top-level scope file whole once (64 KiB at most, no link followed) and judges
+      the form on the bytes it hashed (kind `s` in the per-path entry); the review of the fix took back a second read
+      tied to the entry by its 8-byte hash prefix. Held by `LinuxSealListTests.aNewScopeComesOnlyInTheFormTheManagerWrites`
+      (29 planted forms came before it) and `LinuxSealListTests.aScopesFormIsJudgedOnTheBytesTheWalkHashed` (failed
+      on the re-read).
+    - *2026-11-17, the security follow-ups' item 32:* a scope gone leaves a tombstone of its last hash under its name
+      (kind `g`, its looks left in place of a time): back with that hash it comes, back changed it holds. The bound: a
+      tombstone lasts `LinuxSealList.tombstoneLooks` (64) looks that record the folder (a look only records it when it
+      changed), and a look that would keep more than `maxTombstones` (1024) is judged as ever. A worker who churns
+      scopes through the manager's API for 64 recorded looks outlasts a tombstone; the form check (item 31) still
+      holds whatever comes then. Held by `LinuxSealListTests.aScopeBackChangedUnderItsNameIsHeld` (back changed came
+      before it).
     - After M5 there is no `/mnt/c` mount, so those entries matter only if the user keeps automount on (D2's
       otherwise).
 21. **ST-D21: Step 9's run.**
@@ -1443,6 +1471,10 @@ the courtesy check's git folder and products read once"):*
   older installed commit. A folder `installs` records, with `current` there, is refused as installed and `current` isn't
   moved (only `vs switch` runs an older build). Held by `InstallTests.aFolderNoInstallRecordedIsRefusedNotAdopted`
   (failed on the resume's script).
+- *2026-11-17, the security follow-ups' item 34:* already fixed by the change above (fa80212b): no resume path is left,
+  an existing `<prefix>/<commit>` is refused with "remove it, then install". Checked again: with only fa80212b's script
+  change reversed, `InstallTests.aFolderNoInstallRecordedIsRefusedNotAdopted` fails (the planted folder with a matching
+  `build-info` became `current`); with it, it passes.
 
 - [ ] **Step 4:** commit ("v2: the node's install script"). Push, both green.
 

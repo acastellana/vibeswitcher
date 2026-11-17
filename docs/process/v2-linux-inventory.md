@@ -628,13 +628,17 @@ baseline of a repository the seal hasn't seen comes as entries added; anything e
 transient unit file, created programmatically via the systemd API"), its mtime and the folder's 11:47:32, the start of
 that Chrome. The manager writes such a file each time an app registers a scope of its own, and removes it when the
 scope goes, so on a `.folder` each browser start and exit held every team. The folder is now `.entries`: a top-level
-`*.scope` regular file comes and goes as no change, and a gone one isn't kept (`LinuxSealList.transientEntryMayCome`);
+`*.scope` regular file comes and goes as no change (`LinuxSealList.transientEntryMayCome`);
 a service, a timer, a drop-in folder, a link, a hidden or deeper file, or a scope's file changed in place still holds.
-What isn't held (the sweep's review): the seal keeps hashes, not content, so a scope removed at one look and back
-under its name at the next, changed or not, comes as a new scope does, and a new scope's file may hold `[Unit]` lines
-(`OnFailure=`, `OnSuccess=`, `Wants=`) the manager reads at its next reload. They can name only units the manager has
-already (a unit file in a folder the seal watches, where a new one holds, or root's); a worker gets the same through
-the manager's API (`systemd-run --user --scope -p OnFailure=…`) with no file the seal reads; `/run` is emptied at reboot.
+What the sweep's review found not held, and the security follow-ups closed (items 31 and 32, 2026-11-17): a new scope's
+file comes only in the form systemd writes for a scope made through its API (the header, then `[Unit]` and `[Scope]`
+keys it writes for one, no dependency or trigger: `LinuxSealList.hasScopeForm`, judged on the bytes the seal hashed),
+and a scope gone leaves a tombstone of its last hash for 64 recorded looks, so one back changed under its name holds.
+The form, read only on 2026-11-17: `/run/systemd/transient/session-2.scope` (the system manager's, logind's session
+scope) is the header, then `[Scope]` `Slice=`, `[Unit]` `Description=`, `Wants=`, `After=`, `RequiresMountsFor=`, then
+`[Scope]` `SendSIGHUP=`, `OOMPolicy=`, `TasksMax=` (logind's dependencies, which an app's scope in the user's folder
+doesn't carry and which hold there); the user manager's folder wasn't there at the follow-ups' read. `/run` is emptied
+at reboot.
 
 ## The install's static build (the start plan's S4c, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
 
