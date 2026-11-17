@@ -17,8 +17,9 @@ import Foundation
 /// matched as `git branch -D x` against the role's rules, `LeadLaunch.gitRules`); and a refused variable set for a
 /// command (`GIT_DIR=x git status`, `env GIT_DIR=x git …`), on its own (`GIT_DIR=x; git …`) or exported
 /// (`export GIT_DIR=x`, `declare -x`, `readonly`), whatever runs after it; and `HOME` or `XDG_CONFIG_HOME` (git's global
-/// config) set for a git. The program is found without its case (`GIT -P push`: this Mac's volume runs git), and behind
-/// zsh's precommand modifiers (`noglob`, `nocorrect`, `-`).
+/// config) set for a git (`arch -e` too). The program and git's command are found without their case (`GIT -P push`,
+/// `git Filter-Branch`: this Mac's volume finds them), behind zsh's precommand modifiers (`noglob`, `nocorrect`, `-`),
+/// its `repeat N` and its short forms' tests (`if [[ … ]] git …`, `while (( … )) git …`).
 ///
 /// Not seen here, and so open: a line run by another shell or program (`sh -c '…'`, `eval`, `env -S '…'`, `watch`,
 /// `source`; `find -exec` is read), a variable set another way (`read GIT_DIR` after `set -a`, a file sourced; `HOME`
@@ -121,7 +122,10 @@ public enum RefusedGit {
             for rule in rules where rule.hasPrefix("Bash(git ") && rule.hasSuffix(")") {
                 let text = String(rule.dropFirst("Bash(".count).dropLast())
                 let prefix = text.hasSuffix(":*")
-                let pattern = prefix ? String(text.dropLast(2)) : text
+                var pattern = prefix ? String(text.dropLast(2)) : text
+                // Its command's name without its case, as `refusal(command:)` reads a git's.
+                let name = RefusedGit.command(of: Array(pattern.utf8))
+                pattern = "git " + RefusedGit.folded(name) + pattern.dropFirst("git ".count + name.count)
                 let pieces = prefix ? [pattern] : pattern.components(separatedBy: "*")
                 let parsed = Rule(text: text, prefix: prefix, pieces: pieces.map { Array($0.utf8) })
                 let command = RefusedGit.command(of: Array(pattern.utf8))
@@ -196,8 +200,8 @@ public enum RefusedGit {
                 "timeout": timeout, "gtimeout": timeout, "arch": Wrapper(valued: ["-arch", "-d", "-e"]),
                 "stdbuf": Wrapper(valued: ["-i", "-o", "-e"]), "gstdbuf": Wrapper(valued: ["-i", "-o", "-e"]),
                 "vs-heavy": Wrapper(valued: ["--as", "--timeout", "--stall"]),
-                // zsh's precommand modifiers.
-                "noglob": Wrapper(), "nocorrect": Wrapper(), "-": Wrapper()]
+                // zsh's precommand modifiers, and its `repeat N git …`.
+                "noglob": Wrapper(), "nocorrect": Wrapper(), "-": Wrapper(), "repeat": Wrapper(operands: 1)]
     }()
 
     /// The builtins that export (or declare) the variables named after them, `NAME=value` or `NAME`.
@@ -225,17 +229,37 @@ public enum RefusedGit {
             } else if word == "function" {
                 // `function f { git …; }`: the keyword, then the function's name.
                 index += 2
+            } else if word == "[[" {
+                // zsh's short forms, `if [[ … ]] git …` (and `while`, `until`): the test, then the command it runs.
+                index += 1
+                while index < words.count, words[index] != "]]" {
+                    budget -= 1
+                    guard budget >= 0 else { return .unreadable }
+                    index += 1
+                }
+                index += 1
+            } else if starts(word, with: "(("), word.hasSuffix("))") {
+                // The same with an arithmetic test, `if (( 1 )) git …`: the scanner gives `((…))` as one word.
+                index += 1
             } else if let wrapper = wrappers[name] {
                 index += 1
-                // `env NAME=value git …` (and sudo's), each variable checked as one set before the command.
+                // `env NAME=value git …` (and sudo's), each variable checked as one set before the command, and an
+                // option's value that sets one (`arch -arm64 -e GIT_DIR=x git …`, or attached, `-eGIT_DIR=x`).
                 while index < words.count, starts(words[index], with: "-") || ((name == "env" || name == "sudo") && assigned(words[index]) != nil) {
                     budget -= 1
                     guard budget >= 0 else { return .unreadable }
-                    if let variable = assigned(words[index]) {
+                    let option = words[index]
+                    var values = [option]
+                    if wrapper.valued.contains(option), index + 1 < words.count { values.append(words[index + 1]) }
+                    for valued in wrapper.valued where option.utf8.count > valued.utf8.count && starts(option, with: valued) {
+                        values.append(String(decoding: option.utf8.dropFirst(valued.utf8.count), as: UTF8.self))
+                    }
+                    for value in values {
+                        guard let variable = assigned(value) else { continue }
                         if isRefused(variable: variable) { return .variable(variable) }
                         if configHomes.contains(variable) { home = home ?? variable }
                     }
-                    index += wrapper.valued.contains(words[index]) ? 2 : 1
+                    index += wrapper.valued.contains(option) ? 2 : 1
                 }
                 index += wrapper.operands
             } else {
@@ -301,8 +325,10 @@ public enum RefusedGit {
             index += valued.contains(word) ? 2 : 1
         }
         guard index < words.count else { return nil }
-        // Its command, without the options before it, as the rules name it: `git -P push x` is `git push x`.
-        let command = Array((["git"] + words[index...]).joined(separator: " ").utf8)
+        // Its command, without the options before it, as the rules name it: `git -P push x` is `git push x`. The
+        // command's name without its case, as the rules are read: this Mac's volume finds `git-Filter-Branch` (a script
+        // git runs), and a builtin in another case (`git PUSH`) fails anyway. Its options keep theirs (`-c` isn't `-C`).
+        let command = Array((["git", folded(words[index])] + words[(index + 1)...]).joined(separator: " ").utf8)
         let candidates = rules.candidates(Self.command(of: command))
         budget -= command.count + candidates.count
         guard budget >= 0 else { return .unreadable }
