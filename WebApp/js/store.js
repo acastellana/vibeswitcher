@@ -5,6 +5,9 @@
 //   store.apply(message)        a message from the feed: snapshot, delta, chat
 //   store.subscribe(topic, fn)  topic: sessions, leads, cards, boards, node, connection, chat:<session id>
 //   store.request(kind, args)   an action; resolves with the feed's reply ({ ok, result } or { ok: false, error })
+//   store.reconcile(name, list)  a live feed's snapshot of one collection, by id (socket.js)
+//   store.change(name, changes)  a live feed's delta of one collection: [{ id, value }], value null for gone
+//   store.can(kind)              whether this connection may send `kind` (`hello.kinds`; the mock may send anything)
 
 // The keyed collections, and the field each entry is keyed by (a lead and its board by their project's id).
 const KEYS = { sessions: 'id', cards: 'id', leads: 'project', boards: 'project' };
@@ -13,7 +16,16 @@ const COLLECTIONS = Object.keys(KEYS);
 export function createStore() {
   const state = {
     // connecting: no snapshot yet. live. reconnecting: the feed dropped; what's shown is the last known.
+    // unpaired: the node doesn't know this page (no code or token, or it refused them), revoked: its access was
+    // dropped. Neither retries: the user runs `vibeswitcher web` again.
     connection: 'connecting',
+    // What this connection may send (`hello.kinds`); null: anything (the mock).
+    kinds: null,
+    // The collections the feed follows; null: all of them (the mock). The node sends no lead's board yet.
+    follows: null,
+    // A card's place across a server restart: card ids are the server's memory and change, so a card that comes back
+    // under a new id with the same project and question keeps the key (and the row) it had. By card id.
+    cardKeys: new Map(),
     // The server start this state is from; a snapshot with another one replaces everything (rule 8).
     epoch: null,
     // The last message applied. A delta that isn't seq + 1 is a gap: the feed is asked for a snapshot.
@@ -108,8 +120,62 @@ export function createStore() {
     const map = state[change.in];
     if (change.value === null) map.delete(change.id);
     else map.set(change.id, change.value);
-    if (change.in === 'cards') state.acting.delete(change.id);
+    if (change.in === 'cards') {
+      state.acting.delete(change.id);
+      if (change.value === null) state.cardKeys.delete(change.id);
+    }
     touch(touched, change.in, change);
+  }
+
+  // The same question on the same project: a card the server made again after it restarted.
+  const sameQuestion = (a, b) => a.project === b.project && !!a.question && a.question.id === b.question?.id;
+
+  // A snapshot of one collection from a live feed: each row whose id is still there is updated in place, new ones are
+  // added and the rest removed, in one notification, so the list never shows empty in between. The order is the
+  // server's, except that a card back under a new id takes the place of the one it replaces.
+  function reconcile(name, list) {
+    const touched = new Map();
+    if (name === 'node') {
+      state.node = list[0] ?? null;
+      touch(touched, 'node', { type: 'reset' });
+    } else if (COLLECTIONS.includes(name)) {
+      const key = KEYS[name];
+      const before = state[name];
+      const next = new Map();
+      if (name === 'cards') {
+        const incoming = new Map(list.map((entry) => [entry[key], entry]));
+        const gone = [...before.values()].filter((card) => !incoming.has(card.id));
+        const placed = new Set();
+        // Where the old card was, its successor goes; then everything else in the server's order.
+        for (const old of before.values()) {
+          let card = incoming.get(old.id);
+          if (!card && gone.includes(old)) {
+            card = list.find((entry) => !before.has(entry.id) && !placed.has(entry.id) && sameQuestion(old, entry));
+            if (card) {
+              state.cardKeys.set(card.id, state.cardKeys.get(old.id) || old.id);
+              const acting = state.acting.get(old.id);
+              if (acting) state.acting.set(card.id, acting);
+            }
+          }
+          if (card && !placed.has(card.id)) { next.set(card.id, card); placed.add(card.id); }
+        }
+        for (const card of list) if (!placed.has(card.id)) next.set(card.id, card);
+        for (const id of state.cardKeys.keys()) if (!next.has(id)) state.cardKeys.delete(id);
+        for (const id of state.acting.keys()) if (!next.has(id)) state.acting.delete(id);
+      } else {
+        for (const entry of list) next.set(entry[key], entry);
+      }
+      state[name] = next;
+      touch(touched, name, { type: 'reset' });
+    }
+    emit(touched);
+  }
+
+  // A delta of one collection from a live feed (its order and gaps are socket.js's to judge).
+  function change(name, changes) {
+    const touched = new Map();
+    for (const entry of changes) applyChange({ in: name, id: entry.id, value: entry.value }, touched);
+    emit(touched);
   }
 
   // A message from the feed. Returns 'gap' when a delta doesn't follow the last one applied (the feed sends a new
@@ -206,6 +272,16 @@ export function createStore() {
     act,
     send,
     openChat,
+    reconcile,
+    change,
+    can: (kind) => state.kinds === null || state.kinds.includes(kind),
+    follows: (collection) => state.follows === null || state.follows.includes(collection),
+    // A card's stable key (its first id, across a server restart's new ones).
+    cardKey: (id) => state.cardKeys.get(id) || id,
+    setKinds(kinds) {
+      state.kinds = kinds;
+      emit(new Map([['connection', [{ connection: state.connection }]]]));
+    },
     setConnection: (connection) => setConnection(connection),
     connect(source) { feed = source; },
   };

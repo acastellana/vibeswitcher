@@ -1,20 +1,25 @@
 # WebApp: VibeSwitcher's web client
 
 The client for a VibeSwitcher 2 node (`docs/superpowers/specs/2026-11-12-vibeswitcher-2-design.md`, "The web client"
-and "Stage 5"). This is its first slice: the frame, the session list, a session's chat, a lead's team and questions,
-and the node's status, on invented data. It needs no server.
+and "Stage 5"). Served by the node itself (embedded in its server, `scripts/webapp-embed.sh`), it follows the node live
+over its WebSocket (`js/socket.js`, the wire contract `docs/superpowers/specs/2026-11-17-v2-live-wire-contract.md`):
+the node's status, the sessions as their status changes, the leads' questions. It reads only: an answer is given in a
+terminal, with the line the card shows. With `?mock` it runs on invented data instead and needs no server.
 
 ```sh
-WebApp/serve.sh                     # http://127.0.0.1:8765/
+bash scripts/sandbox-server.sh run && bash scripts/sandbox-server.sh url   # a scratch node, and the page's address
+WebApp/serve.sh                     # the mock, no node: http://127.0.0.1:8765/?mock
 bash scripts/test.sh --web WebApp/tests
 ```
 
 | Address | Shows |
 | --- | --- |
-| `/` | The mock node: a lead's team moves tasks across its board, a question arrives, sessions finish. |
-| `/?still` | The same snapshot with nothing happening after it (for screenshots). |
-| `/?empty` | A node with no sessions. |
-| `/?rows=10000` | One session ("Add dark mode…") with a 10,000-row chat. |
+| `/#pair=CODE` | The node, live: what `vibeswitcher web` prints. The code is taken off the address bar and exchanged for a token this tab keeps. |
+| `/` | The node again in this tab (its token), or "Not paired" with what to run. |
+| `/?mock` | The mock node: a lead's team moves tasks across its board, a question arrives, sessions finish. |
+| `/?still` | The mock's snapshot with nothing happening after it (for screenshots). |
+| `/?empty` | A mock node with no sessions. |
+| `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat. |
 | `/?theme=dark`, `/?theme=light` | The other look, whatever the system says. |
 
 Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
@@ -36,7 +41,10 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | --- | --- |
 | `index.html`, `style.css`, `app.js` | The page, its one stylesheet, and the entry: mounts the views, the keys, the clock. |
 | `js/store.js` | The state: a snapshot, then deltas. Knows nothing of the page or of where messages come from. |
-| `js/mock.js` | Stands in for the node. **The WebSocket feed replaces this file and nothing else.** |
+| `js/socket.js` | The node's live feed: pairing, the token, the four subscriptions, the contract's order rules, reconnecting. |
+| `js/wire.js` | The node's values in the shapes the views read, inventing nothing (a field the node doesn't send stays empty). |
+| `js/mock.js` | Stands in for the node with `?mock`. |
+| `wire/` | The validators and vectors, generated from the node's encoders (`vibeswitcher wire-vectors`): don't edit them. |
 | `js/ui.js` | What this window shows: the route (`#/s/<id>`, `#/node`), grouping, filter, panes; the list's arrangement. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |
 | `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes. |
@@ -57,7 +65,15 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 
 ## The feed
 
-`store.connect(feed)` takes anything with these four, which is all `mock.js` is:
+`store.connect(feed)` takes anything with these four: `socket.js` (the node) and `mock.js` (`?mock`).
+
+`socket.js` feeds the store per collection, as the wire carries it: `store.reconcile(name, values)` for a snapshot (by
+id, in one notification: a list is never emptied first) and `store.change(name, [{ id, value }])` for a delta, after
+it has run every frame through `wire/validators.js` and judged each subscription's order (`prev` and `seq`). Until
+`hello` says otherwise (`store.can(kind)`, from `hello.kinds`; `store.follows(collection)`), the views offer only what
+the connection may do: the node's page reads, so a card shows `vibeswitcher answer …` instead of its buttons, and the
+chat, the terminal and a lead's board say they come in a later build. `mock.js` keeps the older whole-state messages
+below, which the store still takes:
 
 ```js
 feed.start()                  // sends store.apply(snapshot), then deltas
@@ -93,6 +109,10 @@ Field names are the node's own where it has them. **In the node today** means `v
 `Stores/LeadStore.swift`). **Asked of the node** means the client needs it and the server doesn't send it yet.
 
 ### Session
+
+From the node, `js/wire.js` maps the contract's session (§5) to this: `status` is its `shownStatus`, `title` its
+`task`, `detail` its `activity` (else `detail`), and `lead` the project of the lead whose `session` it is. A worker's
+or verifier's `lead` isn't on the wire yet, so it is listed on its own; `paused` is always false.
 
 ```js
 {

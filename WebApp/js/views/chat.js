@@ -183,8 +183,11 @@ export function chatView(app) {
   const skeleton = h('div', { class: 'chat-skeleton', 'aria-hidden': 'true' },
     h('span', { class: 'bone right' }), h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }));
   const empty = h('p', { class: 'pane-empty', hidden: true }, 'No conversation for this session yet.');
+  // A node whose page can't follow a chat yet (`chat` isn't in what this connection may send): said once, calmly, in
+  // the conversation's place. A lead's questions still follow below it.
+  const later = h('p', { class: 'pane-empty', hidden: true }, 'This session’s conversation comes to this page in a later build.');
   const stackSlot = h('div');
-  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, rowsEl, live, stackSlot);
+  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, rowsEl, live, stackSlot);
   const scroller = h('div', { class: 'chat-scroll' }, column);
   const latestCount = h('span', { class: 'latest-count' });
   const latest = h('button', { class: 'latest', type: 'button', hidden: true, onclick: () => toEnd(true) }, icon('down', 12), 'Latest', latestCount);
@@ -209,6 +212,7 @@ export function chatView(app) {
   let start = 0;
   let unseen = 0;
   let stack = null;
+  let stackProject = null;
   let unsubscribe = null;
   let structural = true;
   let jump = true;
@@ -226,11 +230,14 @@ export function chatView(app) {
 
   function render() {
     const session = store.state.sessions.get(view.session);
+    placeStack(session);
     const chat = store.state.chats.get(view.session);
     const pinned = jump || atEnd();
+    const following = store.can('chat');
     const loaded = !!chat?.loaded;
-    skeleton.hidden = loaded;
-    empty.hidden = !loaded || chat.items.length > 0 || !!stack;
+    skeleton.hidden = loaded || !following;
+    later.hidden = following;
+    empty.hidden = !following || !loaded || chat.items.length > 0 || !!stack;
     if (loaded && structural) {
       const items = chat.items;
       if (jump || (pinned && items.length - start > WINDOW * 3)) start = Math.max(0, items.length - WINDOW);
@@ -268,11 +275,13 @@ export function chatView(app) {
   }
 
   function renderComposer(session) {
-    const typed = !!session?.hosted && !session.ended;
+    const typed = !!session?.hosted && !session.ended && store.can('send');
     form.hidden = !typed;
     hint.hidden = typed;
     if (!typed) {
-      setText(hint, !session ? '' : session.ended ? 'This session has ended.' : 'Runs in another terminal. It can be read here, not typed into.');
+      setText(hint, !session ? '' : session.ended ? 'This session has ended.'
+        : !store.can('send') ? 'This page follows the node; to type into a session, use its terminal.'
+        : 'Runs in another terminal. It can be read here, not typed into.');
       return;
     }
     const agent = AGENTS[session.agent] || AGENTS.claude;
@@ -281,6 +290,17 @@ export function chatView(app) {
   }
 
   const schedule = framed(render);
+
+  // A lead's questions, under its chat. Its project can arrive after the session does (the node sends the leads in
+  // their own collection), so the stack follows it.
+  function placeStack(session) {
+    const project = session?.role === 'lead' ? session.lead || null : null;
+    if (project === stackProject) return;
+    stackProject = project;
+    stack = project ? questionStack(app, project) : null;
+    stackSlot.replaceChildren(...(stack ? [stack.el] : []));
+    shownQuestions = 0;
+  }
 
   function onChat(changes) {
     for (const change of changes) {
@@ -337,7 +357,7 @@ export function chatView(app) {
     store.send(view.session, text);
   });
 
-  for (const topic of ['sessions', 'cards', 'leads']) store.subscribe(topic, () => { if (view.session && el.isConnected) schedule(); });
+  for (const topic of ['sessions', 'cards', 'leads', 'connection']) store.subscribe(topic, () => { if (view.session && el.isConnected) schedule(); });
 
   return {
     el,
@@ -354,9 +374,9 @@ export function chatView(app) {
       structural = true;
       jump = true;
       shownQuestions = 0;
-      const session = store.state.sessions.get(id);
-      stack = session?.role === 'lead' ? questionStack(app, session.lead) : null;
-      stackSlot.replaceChildren(...(stack ? [stack.el] : []));
+      stack = null;
+      stackProject = null;
+      placeStack(store.state.sessions.get(id));
       store.openChat(id);
       unsubscribe = store.subscribe('chat:' + id, onChat);
       render();

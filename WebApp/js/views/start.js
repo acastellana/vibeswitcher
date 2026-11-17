@@ -28,6 +28,11 @@ export function startView(app) {
       setText(sub, 'Connecting to the node…');
       return;
     }
+    if ((state.connection === 'unpaired' || state.connection === 'revoked') && state.sessions.size === 0) {
+      setText(title, 'Not paired with a node');
+      setText(sub, 'Run vibeswitcher web in a terminal, then open the address it prints in this browser.');
+      return;
+    }
     const said = summary(state);
     const needs = [...state.sessions.values()].some((session) => session.status === 'needs-you');
     setText(title, state.sessions.size === 0 ? 'No sessions' : said ? said.charAt(0).toUpperCase() + said.slice(1) : 'Nothing needs you');

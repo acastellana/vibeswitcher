@@ -129,7 +129,8 @@ export function sidebar(app) {
     arranged = loading ? { sections: [], order: [], total: 0 } : arrange(state, ui.state);
     keyed(groups, sections, arranged.sections, (group) => group.id, () => section(app), { move: true });
     empty.hidden = loading || arranged.sections.length > 0;
-    if (!empty.hidden) setText(empty, arranged.total === 0 ? 'No sessions' : 'No matches');
+    const signedOut = state.connection === 'unpaired' || state.connection === 'revoked';
+    if (!empty.hidden) setText(empty, arranged.total === 0 ? (signedOut ? '' : 'No sessions') : 'No matches');
     const said = summary(state);
     setText(line, loading || arranged.total === 0 ? '' : said || plural(arranged.total, 'session'));
     const notices = state.node?.notices?.length || 0;

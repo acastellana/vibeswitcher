@@ -26,7 +26,7 @@
 # `-j $VS_HEAVY_CORES` (scripts/lib/swift-jobs.sh).
 #
 # The phone's web tests run after swift test, in the same scratch home and TMPDIR: each Tests/Web/*.test.mjs with
-# node, a failing one named, then one line saying how many passed. Without node on PATH the run stops before the
+# node, a failing one named, then one line saying how many passed; then the node's web client's, WebApp/tests/*.test.mjs. Without node on PATH the run stops before the
 # build, naming it: PhoneWebTests (swift test) skips them without node, and Web/ changes had been checked only by hand.
 #
 # Inside Codex's sandbox (a Codex worker's commands: CODEX_SANDBOX is set) it runs the same, with no flag to give:
@@ -327,6 +327,8 @@ else
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.
     if [[ -z $perf ]]; then
         run_web_tests Tests/Web || status=1
+        # The node's web client (WebApp/: its store, its socket feed against the wire's vectors, its no-markup lint).
+        run_web_tests WebApp/tests || status=1
         # These use a private host, synthetic data and ad-hoc signed copies: no user sessions or Keychain.
         if [[ -e $VS_BUILD_FAILED_MARK ]]; then
             echo "security socket/signing tests: skipped, the build failed (above): they need its vibeswitcher-host"

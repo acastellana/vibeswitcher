@@ -44,6 +44,29 @@ function cardKeys(el, now) {
   });
 }
 
+// The card as the command line names it: the first 8 characters of its UUID (`vibeswitcher answer` takes any prefix
+// of 4 or more that only one card has; `vibeswitcher questions` lists them).
+export const cardShort = (id) => id.replace(/^.*:card:/, '').slice(0, 8);
+
+// An option as an example on the command line, only when it needs no shell quoting beyond the double quotes around
+// it: a lead's words never become a command that does something else when pasted.
+const sample = (option) => (option && /^[^"$`\\!\n]*$/.test(option) ? option : 'your answer');
+
+// A page that may only read (`answer` isn't in what this connection may send: no browser action is the user's voice
+// yet): the options as text, and the line that answers it in a terminal, where the user's own hands type its code.
+function readOnlyAnswer(card, counting) {
+  const short = cardShort(card.id);
+  const options = card.question.options;
+  return [
+    options.length ? h('ol', { class: 'options read-only' }, options.map((option) => h('li', { class: 'option' },
+      h('span', { class: 'option-text' }, option), option === card.question.proposal ? h('span', { class: 'option-note' }, 'Proposed') : null))) : null,
+    h('div', { class: 'card-command' },
+      h('span', { class: 'card-command-label' }, 'Answer in a terminal'),
+      h('code', null, `vibeswitcher answer ${short} "${sample(options[0])}"`),
+      counting ? h('code', null, `vibeswitcher hold ${short}`) : null),
+  ];
+}
+
 // What git and the vault say about a merge, apart from anything the lead wrote (the design's security rule 2: the
 // person approves facts, not prose). Nothing here is shortened: these fields are what an approval covers.
 function approvalFacts(approval) {
@@ -112,9 +135,19 @@ export function questionCard(app, first) {
     if (counting) {
       el.append(h('div', { class: 'timer' },
         h('span', { class: 'timer-text' }, 'Going with ', h('strong', null, question.proposal), ' ', h('span', { data: { until: question.decideBy } }, until(question.decideBy))),
-        h('button', { class: 'button quiet', type: 'button', title: 'Stop the timer: the lead waits for your answer', onclick: hold }, icon('pause', 12), 'Hold')));
+        app.store.can('hold') ? h('button', { class: 'button quiet', type: 'button', title: 'Stop the timer: the lead waits for your answer', onclick: hold }, icon('pause', 12), 'Hold') : null));
     } else if (held) {
       el.append(h('p', { class: 'timer held' }, 'Held: the timer is off. The lead proposed ', h('strong', null, question.proposal), '; it waits for your answer.'));
+    }
+
+    if (!app.store.can('answer')) {
+      el.append(...readOnlyAnswer(card, counting).filter(Boolean));
+      if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
+      el.append(h('p', { class: 'card-foot' }, counting
+        ? `If nobody answers, the lead goes ahead with ${question.proposal} at ${clock(question.decideBy)}.`
+        : 'It keeps working while you think; the answer reaches it at its next step.'));
+      keys = { buttons: [], hold: null };
+      return;
     }
 
     const list = optionList(question.options, { proposed: question.proposal, choose });
@@ -141,7 +174,7 @@ export function questionCard(app, first) {
   function update(next) {
     card = next;
     const acting = app.store.state.acting.get(card.id);
-    const now = JSON.stringify([card, acting || null]);
+    const now = JSON.stringify([card, acting || null, app.store.can('answer')]);
     if (now === shape) return;
     const focused = el.contains(document.activeElement);
     shape = now;
@@ -161,12 +194,17 @@ export function questionStack(app, project) {
   const list = h('div', { class: 'stack-cards' });
   const el = h('section', { class: 'stack', 'aria-label': 'Questions for you' }, h('header', { class: 'stack-head' }, count, order), list);
   const rows = new Map();
+  // Each card's place: keyed by its first id and ordered by when that card was first asked, so a question the node
+  // posts again after a restart (a new card id, the same question) keeps its row, its place and what was typed in it.
+  const keyOf = (card) => app.store.cardKey(card.id);
+  const firstAt = new Map();
 
   function update() {
     const cards = [...app.store.state.cards.values()].filter((card) => card.project === project && (card.kind === 'question' || card.kind === 'approval'));
+    for (const card of cards) if (!firstAt.has(keyOf(card))) firstAt.set(keyOf(card), Date.parse(card.at));
     const isOpen = (card) => card.open && app.store.state.acting.get(card.id)?.kind !== 'answer';
     const open = cards.filter(isOpen);
-    cards.sort((a, b) => (isOpen(b) - isOpen(a)) || (Date.parse(a.at) - Date.parse(b.at)));
+    cards.sort((a, b) => (isOpen(b) - isOpen(a)) || (firstAt.get(keyOf(a)) - firstAt.get(keyOf(b))));
     el.hidden = cards.length === 0;
     setText(count, open.length ? `${plural(open.length, 'question')} for you` : 'No questions waiting');
     setClass(count, 'blocking', open.some((card) => card.blocking));
@@ -176,10 +214,10 @@ export function questionStack(app, project) {
     const next = new Map();
     let cursor = list.firstChild;
     for (const card of cards) {
-      let row = rows.get(card.id);
+      let row = rows.get(keyOf(card));
       const fresh = !row;
       if (fresh) row = questionCard(app, card); else row.update(card);
-      next.set(card.id, row);
+      next.set(keyOf(card), row);
       if (row.el === cursor) cursor = cursor.nextSibling; else list.insertBefore(row.el, cursor);
       if (fresh && before > 0) row.el.classList.add('enter');
     }

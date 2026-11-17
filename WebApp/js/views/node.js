@@ -36,7 +36,8 @@ export function nodeView(app) {
     const notices = node.notices || [];
     const others = (builds?.installed || []).filter((commit) => commit !== notes?.build);
 
-    body.replaceChildren(
+    // replaceChildren would write an absent group as the word "null": the groups a node doesn't have are left out.
+    body.replaceChildren(...[
       notices.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, plural(notices.length, 'Notice')),
         h('ul', { class: 'notices' }, notices.map((notice) => h('li', null, icon('warning', 14), h('span', null, notice))))) : null,
       group('Session host',
@@ -54,6 +55,12 @@ export function nodeView(app) {
           row('Process', `pid ${server.pid}`),
           row('Node', node.node),
           row('State folder', tilde(node.root, home)))),
+      // The web listener this page came in by (the node's `web`; the mock has none).
+      node.web ? group('Web page',
+        h('dl', { class: 'facts-list' },
+          row('State', node.web.state === 'listening' ? `Listening on 127.0.0.1:${node.web.port}` : node.web.state === 'off' ? 'Off' : node.web.state),
+          row('Pages paired', String(node.web.tokens)),
+          row('Open now', String(node.web.connections)))) : null,
       group('Build',
         h('dl', { class: 'facts-list' },
           row('Running', h('code', null, notes?.build || server.commit)),
@@ -65,7 +72,8 @@ export function nodeView(app) {
         h('ul', { class: 'lines' }, (node.facts || []).map((line) => h('li', null, line)))),
       node.journal?.length ? group('Journal', h('ul', { class: 'lines' }, node.journal.map((line) => h('li', null, line.replace(/^journal: /, ''))))) : null,
       node.accepted?.length ? group('Requests it took as yours',
-        h('ul', { class: 'lines' }, node.accepted.map((entry) => h('li', null, h('code', null, entry.commandLine.join(' ')), ' · ', ago(entry.at), ' ago · ', entry.cgroup)))) : null);
+        h('ul', { class: 'lines' }, node.accepted.map((entry) => h('li', null, h('code', null, entry.commandLine.join(' ')), ' · ', ago(entry.at), ' ago · ', entry.cgroup)))) : null,
+    ].filter(Boolean));
   }
 
   const schedule = framed(render);

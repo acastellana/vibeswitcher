@@ -36,10 +36,10 @@ export function sessionView(app) {
   const strip = teamStrip(app);
   const chat = chatView(app);
   const team = teamPane(app);
+  const terminalSays = h('p', null, 'The live terminal comes to this page in a later build.');
+  const showChat = h('button', { class: 'button quiet', type: 'button', onclick: () => ui.setPane(ui.state.route.id, 'chat') }, 'Show Chat');
   const terminal = h('div', { class: 'pane terminal-pane' },
-    h('div', { class: 'placeholder' }, icon('terminal', 22), h('h2', null, 'Terminal'),
-      h('p', null, 'The live terminal arrives with the next slice of the web client. Until then, the session’s conversation is in Chat.'),
-      h('button', { class: 'button quiet', type: 'button', onclick: () => ui.setPane(ui.state.route.id, 'chat') }, 'Show Chat')));
+    h('div', { class: 'placeholder' }, icon('terminal', 22), h('h2', null, 'Terminal'), terminalSays, showChat));
   const gone = h('div', { class: 'pane', hidden: true },
     h('div', { class: 'placeholder' }, h('h2', null, 'This session isn’t here any more'), h('p', null, 'It ended, or its link is from another node.'), h('a', { class: 'button quiet', href: '#/' }, 'Start Page')));
   const loading = h('div', { class: 'pane head-skeleton', hidden: true, 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }));
@@ -74,17 +74,24 @@ export function sessionView(app) {
     setText(place, [role, tilde(session.cwd, store.state.node?.home) || 'No folder', AGENTS[session.agent], session.hosted ? null : `in another terminal (${session.terminal})`].filter(Boolean).join('  ·  '));
 
     const isLead = session.role === 'lead';
+    // A lead's board (its Team strip and pane) only where the feed follows boards: the node doesn't send them yet.
+    const hasTeam = isLead && store.follows('boards');
     let pane = ui.pane(id);
-    if (pane === 'team' && !isLead) pane = 'chat';
+    if (pane === 'team' && !hasTeam) pane = 'chat';
     tabs.forEach((tab, index) => {
-      tab.hidden = PANES[index].id === 'team' && !isLead;
+      tab.hidden = PANES[index].id === 'team' && !hasTeam;
       tab.setAttribute('aria-pressed', String(PANES[index].id === pane));
     });
-    strip.el.hidden = !isLead || pane === 'team';
-    if (isLead) {
+    strip.el.hidden = !hasTeam || pane === 'team';
+    if (hasTeam) {
       strip.update(session);
       team.update(session);
     }
+    // Until the page follows a chat, the terminal's placeholder doesn't send you to one.
+    const chatFollowed = store.can('chat');
+    showChat.hidden = !chatFollowed;
+    setText(terminalSays, chatFollowed ? 'The live terminal comes to this page in a later build. Until then, the session’s conversation is in Chat.'
+      : 'The live terminal comes to this page in a later build.');
     chat.el.hidden = pane !== 'chat';
     terminal.hidden = pane !== 'terminal';
     team.el.hidden = pane !== 'team';
@@ -97,7 +104,7 @@ export function sessionView(app) {
 
     // A finished turn you've now looked at is idle ("finished and already seen").
     clearTimeout(seenTimer);
-    if (word === 'done' && document.visibilityState === 'visible') {
+    if (word === 'done' && document.visibilityState === 'visible' && store.can('seen')) {
       seenTimer = setTimeout(() => { if (ui.state.route.id === id) store.request('seen', { session: id }); }, 1500);
     }
   }

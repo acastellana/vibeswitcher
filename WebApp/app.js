@@ -1,8 +1,11 @@
 // VibeSwitcher's web client. This file puts the pieces together: the store (what the node says), the feed that fills
-// it (a mock until the WebSocket exists), the window's own state, the views and the keyboard.
+// it (the node's WebSocket, or with ?mock an invented node that needs no server), the window's own state, the views
+// and the keyboard.
 
 import { createStore } from './js/store.js';
 import { createMock } from './js/mock.js';
+import { connectSocket } from './js/socket.js';
+import { validate } from './wire/validators.js';
 import { createUI, arrange } from './js/ui.js';
 import { h, setText } from './js/dom.js';
 import { since, until, stateOf, KEY, MAC } from './js/words.js';
@@ -15,7 +18,17 @@ import { palette } from './js/views/palette.js';
 const params = new URLSearchParams(location.search);
 const store = createStore();
 const ui = createUI();
-const feed = createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty') });
+const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows');
+const feed = mocked
+  ? createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty') })
+  : connectSocket(store, {
+    url: `ws://${location.host}/ws`,
+    WebSocket,
+    storage: sessionStorage,
+    validate,
+    // The page's own build, which `hello.assets` is weighed against: a newer one on the node reloads the page.
+    build: fetch('build.json', { cache: 'no-cache' }).then((reply) => (reply.ok ? reply.json() : null)).then((json) => json?.assets || null, () => null),
+  });
 store.connect(feed);
 
 // ?theme=dark or ?theme=light shows the other look without changing the system's; with neither it follows the system.
@@ -34,9 +47,12 @@ const session = sessionView(app);
 const node = nodeView(app);
 const start = startView(app);
 const offline = h('div', { class: 'offline', role: 'status', hidden: true }, 'Reconnecting to the node…');
+// The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
+// had stay readable underneath.
+const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
 const main = h('main', { class: 'main' }, start.el, session.el, node.el);
 const root = document.getElementById('app');
-root.replaceChildren(list.el, main, palette(app).el, offline);
+root.replaceChildren(list.el, main, palette(app).el, offline, unpaired);
 
 function route() {
   const name = ui.state.route.name;
@@ -52,7 +68,16 @@ store.subscribe('sessions', route);
 route();
 
 // Said only while it's true: nothing marks a working connection.
-store.subscribe('connection', () => { offline.hidden = store.state.connection !== 'reconnecting'; });
+store.subscribe('connection', () => {
+  const connection = store.state.connection;
+  offline.hidden = connection !== 'reconnecting';
+  // With no rows the start page says it already; the mark is for rows that stay readable but won't change.
+  unpaired.hidden = (connection !== 'unpaired' && connection !== 'revoked') || store.state.sessions.size === 0;
+  if (!unpaired.hidden) {
+    unpaired.replaceChildren(connection === 'revoked' ? 'This page’s access was revoked. ' : 'This page isn’t paired with the node. ',
+      'Run ', h('code', null, 'vibeswitcher web'), ' in a terminal and open the address it prints.');
+  }
+});
 
 // ---- Commands (the palette's, and the keys') ----
 
@@ -76,7 +101,7 @@ function commands() {
   return [
     { title: 'Next Session Needing You', keys: `${KEY.mod}J`, icon: 'question', run: nextNeedingYou },
     ...(selected ? [pane('chat', 'Chat', '2'), pane('terminal', 'Terminal', '1')] : []),
-    ...(selected?.role === 'lead' ? [pane('team', 'Team', '3')] : []),
+    ...(selected?.role === 'lead' && store.follows('boards') ? [pane('team', 'Team', '3')] : []),
     { title: 'Start Page', icon: 'home', run: () => ui.go('#/') },
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
     { title: 'Group by Attention', icon: 'filter', run: () => ui.setGrouping('attention') },
