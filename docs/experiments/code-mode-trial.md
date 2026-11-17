@@ -32,7 +32,7 @@ With that plugin off, the answers to the four questions:
 - **Fixtures.**
   - The guard-rail repository was a scratch clone whose `origin` is a bare repository beside it. A push that got through would have shown up in the bare repo's refs.
   - The timed job was a small Python package (`netkit/`, 10 modules, 2 test files) whose `tests/test_retry.py` passes only once `RETRY_LIMIT = 3` in `netkit/policy.py` becomes 5. Each run got a fresh git copy.
-- **Driver.** A throwaway pty driver in the scratch folder (not committed). It answered only the start-up dialogs ("Yes, I trust this folder", "Yes, turn on Code Mode") and would have declined any permission prompt. None came up. It pasted each prompt and waited on the `Stop` hook's file.
+- **Driver.** A throwaway pty driver in the scratch folder (not committed). It answered only the start-up dialogs ("Yes, I trust this folder", "Yes, turn on Code Mode") and declined any permission prompt with Esc (one came up, in the fourth check under point 3). It pasted each prompt and waited on the `Stop` hook's file.
 
 **Sessions.** 8 model sessions in total, the cap:
 
@@ -161,7 +161,7 @@ The prompt asked for ONE snippet that tries nine calls, each in try/catch. Claud
   - The commit ran on the hook's allow: "Exit code 1 / On branch task/probe / nothing to commit, working tree clean".
   - The `cd` form got no answer from `ReadOnlyCommand`, so Claude Code showed its prompt: "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it. Do you want to proceed?"
   - The driver declined it, which interrupted the turn. In a worker or verifier nobody answers that prompt.
-  - Code Mode writes `cd <dir> && …` itself whenever a snippet works in a subfolder (S1's snippets did twice). So it makes this prompt more likely than plain sessions do (fix 9).
+  - In this trial the `cd` came from my prompt. But the docs say a call from a snippet can reach hooks as `cd '<dir>' && …` on its own, so Code Mode makes this prompt more likely than plain sessions do (fix 9).
 
 **Verdict.** No refused git command and no deny-rule'd call got through from inside a snippet. Two behaviours are new:
 - The auto-mode classifier judges a snippet as a whole, so one call it dislikes stops every call in that snippet (fix 8).
