@@ -47,7 +47,7 @@ struct RefusedGitCommandsTests {
     /// git's refused variables, named here.
     static let variables = ["GIT_DIR", "GIT_WORK_TREE", "GIT_EXEC_PATH", "GIT_COMMON_DIR", "GIT_CONFIG", "GIT_CONFIG_GLOBAL",
                             "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
-                            "GIT_CONFIG_PARAMETERS"]
+                            "GIT_CONFIG_PARAMETERS", "GIT_INDEX_FILE"]
 
     /// Each variable set as an assignment before git, through `env`, and exported, then a few other ways.
     static let refusedEnvironment: [String] = variables.flatMap { name in
@@ -136,18 +136,64 @@ struct RefusedGitCommandsTests {
         let worker = try Guard(.worker, temp: temp)
         let chain = "find . " + String(repeating: "-exec find . ", count: 60) + "-exec git status \\;"
         let deep = "find . " + String(repeating: "-exec find . ", count: 5_000) + "-exec git status \\;"
+        // Audit F1's two readings of each command (BSD's end at `\;x`, GNU's at `\;`): read both at every level, 2^n again.
+        let ends = "find . " + String(repeating: "-exec find . ", count: 60) + String(repeating: "\\;x ", count: 60) + "-exec git status \\;"
         let done = DispatchSemaphore(value: 0)
         let answers = Answers()
         Thread {
-            answers.set([(try? worker.refuses(chain)) ?? false, (try? worker.refuses(deep)) ?? false])
+            answers.set([chain, deep, ends].map { (try? worker.refuses($0)) ?? false })
             done.signal()
         }.start()
         #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success)
-        #expect(answers.get() == [true, true])
+        #expect(answers.get() == [true, true, true])
         // An honest find with several commands is still read: the git in it is checked, and a harmless one runs.
         #expect(try !worker.refuses("find . -name a -exec git log -1 -- {} \\; -exec git status \\;"))
         #expect(try worker.refuses("find . -name a -exec git log -1 -- {} \\; -exec git -P push \\;"))
         #expect(try worker.refuses("find . -exec echo {} + -exec git --no-pager tag v1 \\;"))
+    }
+
+    /// Audit F1: macOS find (BSD) ends an `-exec` command at any word that starts with `;`, or with `+` after `{}`
+    /// (`\;x`, `+x`), and reads the words after it as its own: a git there runs. GNU find ends it only at `;` or
+    /// `{} +` exactly: both readings are checked.
+    @Test func findEndsAnExecCommandAtAWordStartingWithItsTerminator() throws {
+        let worker = try Guard(.worker, temp: temp)
+        for line in ["find . -maxdepth 0 -exec echo FIRST \\;x -exec git -P push \\;", "find . -exec echo FIRST {} +x -exec git -P push \\;",
+                     "find . -exec echo ';;' -exec git --no-pager tag v1 \\;", "find . -execdir true ';' -ok git -P push origin main \\;",
+                     "find . -exec git -P push ';x' \\;"] {
+            #expect(try worker.refuses(line), "lets through: \(line)")
+        }
+        #expect(try !worker.refuses("find . -exec echo FIRST \\;x -exec git -P log \\;"))
+        #expect(try !worker.refuses("find . -exec echo {} +x -exec git status {} +"))
+    }
+
+    /// Audit F2: zsh's precommand modifiers (`noglob`, `nocorrect`, `-`) run the command after them; F3: this Mac's
+    /// volume finds `GIT` (and `ENV`, `FIND`) as `git`, so the program's name is compared without its case.
+    @Test func zshsPrecommandModifiersAndAnUppercaseGitAreReadAsGit() throws {
+        let worker = try Guard(.worker, temp: temp)
+        for line in ["noglob git -P push", "nocorrect git --no-pager branch -D x", "- git -P tag v1", "noglob nocorrect git push origin main",
+                     "GIT -P push", "Git --no-pager branch -D x", "/usr/bin/GIT -P push", "ENV GIT_DIR=/x git status",
+                     "GIT_DIR=/x noglob git status", "FIND . -exec GIT -P push \\;", "noglob GIT -c alias.x=push x", "Nohup GIT push"] {
+            #expect(try worker.refuses(line), "lets through: \(line)")
+        }
+        for line in ["noglob git -P log", "nocorrect git status", "- git --no-pager diff", "GIT -P log", "Git status"] {
+            #expect(try !worker.refuses(line), "refuses: \(line)")
+        }
+    }
+
+    /// HOME and XDG_CONFIG_HOME pick git's global config, so they're refused when set for a git command (before it, or
+    /// through env); set for anything else, or exported, they stay allowed.
+    @Test(arguments: [LeadLaunch.Role.worker, .verifier, .lead])
+    func homeIsRefusedOnlyWhenSetForAGitCommand(_ role: LeadLaunch.Role) throws {
+        let guardRail = try Guard(role, temp: temp)
+        for line in ["HOME=/x git status", "env HOME=/x git status", "XDG_CONFIG_HOME=/x git log", "env XDG_CONFIG_HOME=/x git -P log",
+                     "HOME=/x GIT -P status", "HOME=/x env git status", "sudo HOME=/x git status", "cd a && HOME=/x git log",
+                     "HOME=/x find . -exec git status \\;", "HOME=/x xargs git status", "/usr/bin/env XDG_CONFIG_HOME=/x /usr/bin/git log"] {
+            #expect(try guardRail.refuses(line), "\(role) lets through: \(line)")
+        }
+        for line in ["export HOME=/x; git status", "HOME=/x make", "env HOME=/x swift test", "HOME=/x npm test; git status",
+                     "export XDG_CONFIG_HOME=/x", "XDG_CONFIG_HOME=/x nvim", "echo HOME=/x git status", "HOME=/x find . -name a"] {
+            #expect(try !guardRail.refuses(line), "\(role) refuses: \(line)")
+        }
     }
 
     /// The lead's and the verifier's git rules are one list, so the hook reads either for both (it isn't told which).
