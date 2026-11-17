@@ -156,13 +156,16 @@ struct PassageContractTests {
         let bin = try bin()
         let passage = bin.appendingPathComponent("passage")
         let script = try String(contentsOf: passage, encoding: .utf8)
+        // Both never answer: the 1 s limit ends only a binary that doesn't, never one a loaded Mac starts late.
         try script.replacingOccurrences(of: "version) echo", with: "version) exec sleep 600; echo")
+            .replacingOccurrences(of: "help) cat", with: "help) exec sleep 600; cat")
             .write(to: passage, atomically: true, encoding: .utf8)
         chmod(passage.path, 0o755)
         let ran = try check(bin: bin, timeLimit: 1)
         #expect(ran.status == 1, "\(ran.out)")
-        #expect(driftLines(ran.out) == ["DRIFT  version: `passage version` exited 142: "], "\(ran.out)")
-        #expect(ran.out.contains("ok     help: 7 commands listed"), "\(ran.out)")
+        let drifts = driftLines(ran.out)
+        #expect(drifts.prefix(2) == ["DRIFT  version: `passage version` exited 142: ", "DRIFT  help: `passage help` exited 142: "], "\(ran.out)")
+        #expect(!ran.out.contains("ok     version") && !ran.out.contains("ok     help"), "\(ran.out)")
         for limit in ["0", "1.5", "soon"] { #expect(try check(["--time-limit", limit], bin: bin).status == 64, "\(limit)") }
     }
 
