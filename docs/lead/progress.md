@@ -3630,3 +3630,7 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 19:31 Merged code-mode-trial-does: Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster? (build 9e4f85a8ba8c)
 - 2026-11-17 19:31 Automatically (auto_advance): Merged code-mode-trial-does (Code Mode trial: does VibeSwitcher work with Claude Code's Code Mode, and is it faster?) into main at 878ba3d7, on its passing audit and the full test run.
 - 2026-11-17 19:31 Automatically (auto_advance): Cleaned up code-mode-trial-does (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-17 19:38 Automatically (auto_advance): Started the audit of worker-git-guard-the at 4dacc241 (Its review is audit).
+- 2026-11-17 19:38 Released worker-git-guard-the's worker (idle since its done report on 4dacc241) while its audit runs
+- 2026-11-17 19:38 Automatically (auto_advance): Released worker-git-guard-the's worker, idle since its done report on 4dacc241, while its audit runs (ended pid 9741 (Worker: Worker git guard: the '=' and attached spellings of refused git options slip the deny rules)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-17 19:38 Planned worker-git-guard-part: Worker git guard, part 2: the parsed hook also checks refused subcommands and git's environment (review audit, for security)
