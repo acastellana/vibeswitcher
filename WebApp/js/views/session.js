@@ -68,8 +68,10 @@ export function sessionView(app) {
     setMark(stateMark, word);
     state.className = `head-state tone-text-${word}`;
     setText(stateWord, STATES[word].label);
-    stateTime.dataset.since = session.since;
+    // No duration where the node knows no moment the status began (the clock skips an element without one).
+    if (session.since) stateTime.dataset.since = session.since; else delete stateTime.dataset.since;
     setText(stateTime, since(session.since));
+    stateTime.hidden = !session.since;
     const role = session.role === 'lead' ? 'Lead' : session.role === 'worker' ? 'Worker' : session.role === 'verifier' ? 'Verifier' : null;
     setText(place, [role, tilde(session.cwd, store.state.node?.home) || 'No folder', AGENTS[session.agent], session.hosted ? null : `in another terminal (${session.terminal})`].filter(Boolean).join('  ·  '));
 

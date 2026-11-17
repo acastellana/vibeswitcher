@@ -352,3 +352,11 @@ test('a request this page may not send is answered here and never sent', async (
   assert.equal(reply.ok, false);
   assert.equal(r.socket().sent.length, before);
 });
+
+test('aStatusTheNodeCantDateShowsNoDuration', async () => {
+  const { session } = await import('../js/wire.js');
+  const value = { id: 'local:pts/9', terminal: 'pts/9', agent: 'claude', cwd: '/home/u/notes', status: 'unknown', shownStatus: 'unknown',
+    since: '0001-01-01T00:00:00.000Z', role: null, task: null, activity: null, detail: null };
+  assert.equal(session(value, new Map()).since, null, 'the start of time is no moment to count from');
+  assert.equal(session({ ...value, since: '2026-11-17T09:13:20.000Z' }, new Map()).since, '2026-11-17T09:13:20.000Z');
+});

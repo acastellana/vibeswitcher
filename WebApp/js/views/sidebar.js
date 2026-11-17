@@ -41,9 +41,10 @@ function sessionRow(app) {
       role.hidden = !nested;
       lead.hidden = session.role !== 'lead';
       setText(title, session.title || projectOf(session));
-      time.dataset.since = session.since;
+      if (session.since) time.dataset.since = session.since; else delete time.dataset.since;
       setText(time, since(session.since));
-      const showProject = app.ui.state.grouping === 'attention' && !nested;
+      // The folder under the title, unless the title is the folder already (a session the node knows no task for).
+      const showProject = app.ui.state.grouping === 'attention' && !nested && Boolean(session.title);
       project.hidden = !showProject;
       setText(project, projectOf(session));
       // What it's doing when it says, else the state's word.
