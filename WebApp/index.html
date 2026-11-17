@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- The page runs its own scripts and styles and nothing else: no inline code, no remote image, font or script, and
+     no string parsed as HTML (Trusted Types with no policy). The real server sends the same as a header. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f5f7">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1f1f21">
+<meta name="referrer" content="no-referrer">
+<title>VibeSwitcher</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div id="app" class="app" data-route="home">
+  <!-- What shows until the scripts run: the list's place and the page's, empty. app.js replaces it. -->
+  <nav class="sidebar" aria-hidden="true"></nav>
+  <main class="main"></main>
+</div>
+<noscript><p class="noscript">VibeSwitcher's web client needs JavaScript.</p></noscript>
+</body>
+</html>
