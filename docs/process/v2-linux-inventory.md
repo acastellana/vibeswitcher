@@ -664,10 +664,66 @@ code prompt. Three mutants of the product fail it, each on its own assertion: th
 vault recording the approval under another commit, and `approved` ignoring the task and commit.
 
 **`aScratchTeamPlansBuildsAuditsAndMerges` (gated on `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`, a real lead on Sonnet,
-the verifier on haiku) has not run: an open item.** The test account is at its weekly limit until Nov 18, and E9's
-Step 2 passes first. Each run needs the user's go-ahead, three at most:
-`VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=~/.vibeswitcher-test-claude vs-heavy bash scripts/test.sh --filter
-ScratchRunTests/aScratchTeamPlansBuildsAuditsAndMerges`, its `S10:` lines giving each step's time and the models here.
+the verifier on haiku) had not run on 2026-11-16** (the test account at its weekly limit, E9's Step 2 not passed).
+**It passed on 2026-11-17, on its first run** (one of the three allowed):
+`VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=~/.vibeswitcher-test-claude bash scripts/test.sh --filter
+ScratchRunTests/aScratchTeamPlansBuildsAuditsAndMerges`, 18:46, Claude Code **2.1.326** (`~/.local/bin/claude`), the
+test passing in 75.2 s. Its `S10:` lines, the time from the run's start:
+
+| At | What the run was at |
+| --- | --- |
+| 0.4 s, 0.6 s | 1, the config and the base accepted (each code typed); 2, the lead started |
+| 4.9 s | the lead's question listed ("Which greeting word should src/greeting.txt hold?") and answered with its first option, Hello |
+| 9.1 s, 11.2 s | `add-the-greeting` planned, then `add-the-farewell` (the slugs of the goal's titles, whose worktrees the case trusted beforehand) |
+| 13.2 s, 15.3 s | the greeting's worker live, then the farewell's: both at once beside the lead |
+| 21.6 s, 25.8 s | a worker's commit touching `src/` on `agent/add-the-greeting`, then on `agent/add-the-farewell` |
+| 36.3 s | both tasks in review (each worker reported done) |
+| 44.7 s | the greeting's verifier live |
+| 55.2 s | the vault holds a passing verdict at `cda96ecb` |
+| 67.9 s | the lead's approval card listed, and answered with exactly `Approve cda96ecb…` (the verdict's commit), the code typed |
+| 74.3 s | 3, `add-the-greeting` done: merged on `main`; 4, checked |
+
+- **Checked:** two `agent/*` branches each with a worker's commit; the verdict passing; the user's approval recorded
+  for the greeting at the verdict's commit, and the landed commit's `VS-Review` naming it; exactly one commit on
+  `main` with a `VS-Task` trailer (the greeting's); `check.sh` run in the merge's worktree (its marker); the question's
+  `answer` action and its message's digest in the vault; every command line call in scratch form.
+- **Models, from each role's own transcript in the config folder:** both workers on `claude-sonnet-5-5`, the verifier
+  on `claude-haiku-5-5`; the landed commit's `VS-Verifier-Model` says haiku and its `VS-Worker-Model` "unknown" (the
+  node's receipts read its scratch home, not the config folder, as the case's review noted).
+- **The cost seen** (each session's own `cost-state` in its transcript, what Claude Code counts at list prices; the
+  account is a subscription): the lead $0.20, the greeting's worker $0.20, the farewell's $0.15, the verifier $0.007:
+  $0.56 in all. The lead's status line read "weekly 29%" just before the run (E9's last).
+- **Nothing failed, in the product or in the harness.** No file of the config folder was left changed (no hook, no
+  trust entry), and no process of the run was left.
+- **What the harness gained before the run** (from E9's Step 2, and for a run that stops): each change of the board's
+  tasks, the live sessions, the branches with a worker's commit and the vault's verdict is printed with its time (the
+  table above); the run stops early, printing every session's screen, the board, the open cards and the node's log,
+  when a session's screen shows the account's usage limit or nothing at all has moved for 12 minutes (the board, git's
+  branches, the cards, each session's hooks' last event), instead of waiting out its 55 minutes; the greeting's task is
+  found by its slug or, failing that, its title; the workers' commits are noted as the run goes (a `cleanup` would take
+  a merged task's branch away), the second worker's waited for. The answers go as E9's Step 2 showed: one given while
+  the lead's turn runs reaches it through its own hook, one given to an idle lead is typed in; the case takes either.
+
+**The rehearsal on a machine with one test and build slot (2026-11-17).** The `v2 linux` run on `200e2c32` (its core
+job, a 4-core runner) failed `aScratchTeamOfFakesBuildsAuditsAndMerges` after 386 s: the fake lead's `merge` call
+answered "TimeoutError: no reply to request 2", so nothing had landed (no `VS-Task` trailer, no `src/parser.txt` on
+`main`). The timeout that fired is the test's own (the fake's MCP client, 300 s for that call); the merge wasn't slow,
+it was waiting. Its tests run under a slot of the account's test and build lock (`/tmp/vibeswitcher-<uid>`, `TestLock`);
+`scripts/test.sh` runs the whole suite under `vs-heavy`, holding one; a machine under 12 cores has one slot
+(`MacLimits.defaultHeavySlots`, the cores ÷ 6); and the scratch node's lead has none of the suite's environment
+(`VIBESWITCHER_TEST_LOCK`, by which `vs-heavy` knows it runs under its own holder). So the merge queued behind the
+suite that started it, until its call gave up. Here (24 cores, 4 slots) it took the next slot, and passed. Reproduced
+with one slot forced (`VIBESWITCHER_HEAVY_SLOTS=1` on the run and `heavy_slots: 1` in the scratch workflow): the same
+three issues, and while the merge waited the account's lock folder held its ticket ("VibeSwitcher's merge test of
+c92b15b8 in …/vsn-CC48ED34/repo … slots 1") behind slot 1's holder, "scripts/test.sh in …/step8".
+**Fixed in the engine:** a scratch node's lead gets `VIBESWITCHER_TEST_LOCK_DIR=<root>/tmp` (`LeadEngine.environment`),
+where its sessions' temporary folders are, as the user's node keeps both in `vibeswitcher-<uid>`, and as the bootstrap
+path's step 9 says of a scratch host ("its own `VIBESWITCHER_HOME` and lock"): its merges and audits neither wait on
+the account's slots nor show among them. With it the forced-single-slot run passes in 53 s.
+`LeadStartTests.theLeadsTestAndBuildSlotsAreUnderTheScratchRoot` and the rehearsal's check of the node's own slot file
+(`<root>/tmp/test-build.lock`) each fail without it. Left as it is: a scratch node's workers get the host's session
+variables only, so a `vs-heavy` a real worker runs there still takes the account's slots, and the server's witness
+reads the workers' waits from the account's lock.
 
 ## The config seal's Linux list (the start plan's S7, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
 
