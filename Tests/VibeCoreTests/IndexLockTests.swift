@@ -304,20 +304,26 @@ struct IndexLockHolderTests {
         let root = try repo()
         let path = root + "/.git/index.lock"
         let written = leaveStaleLock(path, age: 30 * 60)
+        // Still searching at the time limit, and after: it ends only when the test lets it (at the end), so a `find`
+        // that waited for it would come back only then, the search over. Not a time: on a merge's loaded Mac starting
+        // git alone took 23 s (2026-11-14, "< 2.5" on a search that slept 3 s).
+        let gate = SearchGate()
+        defer { gate.open() }
         let slow: IndexLock.Search = { _, _, _ in
-            Thread.sleep(forTimeInterval: 3)
+            gate.hold()
             return .none
         }
         let gaveUp: IndexLock.Search = { _, _, _ in .unknown }
+        // A search that finds nobody, waited for however long the Mac takes to run it.
+        let nobody: IndexLock.Search = { _, _, _ in .none }
         for search in [slow, gaveUp] {
-            let started = Date()
             let lock = try #require(IndexLock.find(in: root, timeLimit: 0.3, search: search))
-            #expect(Date().timeIntervalSince(started) < 2.5, "waited for the search past its time limit")
+            #expect(gate.ended == 0, "waited for the search past its time limit")
             #expect(!lock.checked && !lock.stale && lock.holder == nil)
             #expect(lock.description == "\(lock.path) is there, and VibeSwitcher couldn't check who holds it in time. It's 0 bytes, last written \(LeadToolset.age(lock.age())) ago \(written)")
             #expect(!lock.removeIfStale(minimumAge: 0, timeLimit: 0.3, search: search))
             // Not even when the first look found nobody, if the look before removing runs out of time.
-            var looked = try #require(IndexLock.find(in: root))
+            var looked = try #require(IndexLock.find(in: root, timeLimit: hangGuard, search: nobody))
             #expect(looked.stale)
             #expect(!looked.removeIfStale(minimumAge: 0, timeLimit: 0.3, search: search))
             #expect(FileManager.default.fileExists(atPath: path))
@@ -419,5 +425,34 @@ extension LeadToolsetTests {
         #expect(held.text.contains("held by pid \(holder.processIdentifier) (sleep 300)"), "\(held.text)")
         #expect(runtime.spawned.last?.command.contains("held by pid \(holder.processIdentifier)") == true)
         #expect(FileManager.default.fileExists(atPath: path))
+    }
+}
+
+/// Holds searches (`IndexLock.Search`) until it's opened, at most `hangGuard`, and counts those that ended.
+private final class SearchGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var isOpen = false
+    private var count = 0
+
+    func hold() {
+        condition.lock()
+        let deadline = Date().addingTimeInterval(hangGuard)
+        while !isOpen, condition.wait(until: deadline) {}
+        count += 1
+        condition.unlock()
+    }
+
+    func open() {
+        condition.lock()
+        isOpen = true
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    /// The searches held that ended.
+    var ended: Int {
+        condition.lock()
+        defer { condition.unlock() }
+        return count
     }
 }
