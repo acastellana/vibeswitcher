@@ -592,6 +592,7 @@ scripts/install-node.sh   S4b
 | `Sources/VibeCore/ConfigSeal.swift`, `Watched.Kind` and its read | `.listing` (ST-D18), and `.entries` if ST-D19's measurement needs it; one read branch each, into `LinuxSealList` | lead-approved | S7 |
 | `Sources/VibeCore/ConfigSeal.swift`, `isHome(key:)` | names starting `/mnt/` and `/run/user/` (ST-D20) | lead-approved | S7 |
 | `Sources/VibeCore/LeadVault.swift`, `judge` | only if ST-D19's measurement holds the team: `.entries` keys judged per entry | lead-approved | S7 |
+| `Sources/vibeswitcher-host/main.swift`, the sessions' `baseEnvironment` (*2026-11-17, the step 8 sweep*) | one hook: `HostImages.sessionEnvironment` in place of `TestLock.sessionEnvironment` (the Mac's same call; on Linux the command folder last, after root's folders) | 4 | sweep |
 
 The port map's rows 223 and 224 become `made`, and the new rows are added. `Package.swift` doesn't change.
 

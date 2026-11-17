@@ -1349,7 +1349,9 @@ differ replies before the server is replaced).
     commands: Claude Code's shell snapshot records the PATH Claude Code started with, not the one the user's startup
     files make, and every command sources it (S10, measured in Task 12b; the startup files reach the commands
     otherwise). The two last folders are the user's, so every worker can write them: they are named in the unit,
-    on the seal's list and in S11 item 10 (decisions 12 and 17). `claude` is not on it: every lead and role runs the absolute
+    on the seal's list and in S11 item 10 (decisions 12 and 17). The host adds one more after them, the build's
+    `Resources/bin` (`vs-heavy`, under the builds folder, which the seal lists by metadata), last: the user's too, and
+    not hashed by `build-info` (the step 8 sweep, 2026-11-17: it was first, ahead of root's folders). `claude` is not on it: every lead and role runs the absolute
     path `~/.local/bin/claude` resolves to at its start (the engine's EN-D13), since that folder holds files named by
     version only;
   - the user's host takes `VibePaths.root` from `getpwuid`, never from `VIBESWITCHER_HOME`, when started with `--node`
@@ -1805,7 +1807,8 @@ against it. Each line says what reduces it now, if anything.
    `<config>/shell-snapshots` that each command sources, whose functions and aliases run ahead of any PATH; and the
    folders on the commands' PATH, which is the unit's (the snapshot records the PATH Claude Code started with, and no
    startup file's PATH change reaches a command), the user's two, swiftly's `bin` and the node's, after `/usr/bin`,
-   S10). The seal detects it at its next look and holds
+   then the build's `Resources/bin` (`vs-heavy`'s, the user's to write too), last: S10). The seal detects it at its
+   next look and holds
    workers and merges; a change swapped in and restored between two looks is missed; a host restart resets the seal to
    "held until accepted". The Linux list (`~/.local/share/claude/versions` and the rest) arrives with the bootstrap
    path's step 8. S7, S9. Two known residuals in what the seal reads, recorded 2026-11-16 and left as they are (the
@@ -1836,8 +1839,10 @@ against it. Each line says what reduces it now, if anything.
 10. Branch code (merge's tests, an audit's run, `init_command`) runs as the user, unconfined, with the user's
     toolchain: a worker that replaces `swift-test` or patches a cached dependency makes every audit and merge pass.
     A verifier's or a worker's Bash command, branch code under `runPrefix` included, runs with the unit's PATH, which
-    the snapshot records (S10, measured): its two folders any worker can write, swiftly's `bin` and the node's, come
-    after `/usr/bin`, so a `git` put there doesn't shadow `/usr/bin/git`, but a `swift`, which only swiftly's `bin`
+    the snapshot records (S10, measured): its folders any worker can write, swiftly's `bin`, the node's and the
+    build's `Resources/bin` (`vs-heavy`'s, put last by the host: `HostImages.sessionEnvironment`; until the step 8
+    sweep, 2026-11-17, it came first, ahead of root's), come after `/usr/bin`, so a `git` put there doesn't shadow
+    `/usr/bin/git`, but a `swift`, which only swiftly's `bin`
     holds, is what every agent's commands run; and a function a worker adds to a startup file (item 8) runs ahead of
     any PATH. It
     is no session's to the host, and can do everything in this list. Reduced for installs by a root-owned toolchain

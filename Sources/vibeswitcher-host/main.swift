@@ -89,8 +89,8 @@ var config = HostServer.Config(
     shell: shell,
     // On Linux its own sealed copy (no launcher copy made); on the Mac a private copy, as always.
     launcher: images.own?.path ?? (startRefusal == nil ? ensureLauncher() : executable),
-    // With vs-heavy on PATH (Mac-wide one-at-a-time heavy work, for every project's sessions).
-    baseEnvironment: TestLock.sessionEnvironment(environment.filter { inherited.contains($0.key) }
+    // With vs-heavy on PATH (Mac-wide one-at-a-time heavy work, for every project's sessions); on Linux last (V2/HostImages.swift).
+    baseEnvironment: HostImages.sessionEnvironment(environment.filter { inherited.contains($0.key) }
                                                      .merging(Platform.Tools.sessionEnvironmentFixed) { $1 },
                                                  adding: folders.commandFolder),
     hostBuild: build)

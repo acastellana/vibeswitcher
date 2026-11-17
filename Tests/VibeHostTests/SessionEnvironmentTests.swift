@@ -56,6 +56,45 @@ struct SessionEnvironmentTests {
         #expect(environment["LANG"] == "C.UTF-8", "\(environment)")
     }
 
+    /// The step 8 sweep: the build's command folder (`<build>/Resources/bin`, `vs-heavy`'s, which the user's account
+    /// and so any worker can write) comes after root's folders on a Linux session's PATH, never before them: a `git`
+    /// or `sh` dropped there doesn't shadow root's. `vs-heavy` is still found by name. The Mac keeps it first.
+    @Test func theCommandFolderNeverComesBeforeRootsFolders() async throws {
+        let base = ["PATH": "/usr/local/bin:/usr/bin:/bin:/home/u/.local/share/swiftly/bin:/home/u/.nvm/versions/node/v22/bin", "HOME": "/h"]
+        let folder = "/home/u/.vibeswitcher/v2/builds/0123/Resources/bin"
+        let placed = HostImages.sessionEnvironment(base, adding: folder)
+        if Platform.CodeIdentity.isAvailable {
+            #expect(placed == TestLock.sessionEnvironment(base, adding: folder))
+            return
+        }
+        #expect(placed["PATH"] == base["PATH"]! + ":" + folder, "\(placed)")
+        #expect(placed["HOME"] == "/h")
+        // Once, wherever it was.
+        let twice = HostImages.sessionEnvironment(["PATH": "\(folder):/usr/bin:/bin"], adding: folder)
+        #expect(twice["PATH"] == "/usr/bin:/bin:\(folder)")
+        #expect(HostImages.sessionEnvironment(base, adding: nil) == base)
+
+        // A scratch host whose build has the folder (`--image-path`): its session's PATH ends with it, after root's,
+        // and `vs-heavy` is found there by name.
+        let build = "\(shortScratchRoot)/vsbp-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: build) }
+        for folder in ["/bin", "/Resources/bin"] { try FileManager.default.createDirectory(atPath: build + folder, withIntermediateDirectories: true) }
+        try FileManager.default.copyItem(atPath: hostLauncher, toPath: build + "/bin/vibeswitcher-host")
+        try installScript("#!/bin/sh\necho vs-heavy-here\n", atPath: build + "/Resources/bin/" + TestLock.command, mode: 0o755)
+        let imaged = try await ScratchHostProcess(arguments: ["--image-path", build + "/bin/vibeswitcher-host"],
+                                                  environment: ["PATH": "/usr/local/bin:/usr/bin:/bin"])
+        defer { imaged.stop() }
+        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(imaged.socket, appKey: imaged.appKey)
+        let out = imaged.dir + "/found"
+        let session = try await client.spawn("{ printf '%s\\n' \"$PATH\"; command -v \(TestLock.command); } > '\(out).partial' && mv '\(out).partial' '\(out)'; \(keepRunning)")
+        defer { kill(-session.childPID, SIGKILL) }
+        #expect(await eventually { FileManager.default.fileExists(atPath: out) }, "\(imaged.log)")
+        let lines = ((try? String(contentsOfFile: out, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        let commandFolder = build + "/Resources/bin"
+        #expect(lines.first == "/usr/local/bin:/usr/bin:/bin:\(commandFolder)", "\(lines) \(imaged.log)")
+        #expect(lines.dropFirst().first == commandFolder + "/" + TestLock.command, "\(lines)")
+    }
+
     /// The runtime folder (the gpg-agent's, the bus's and WSLg's sockets) isn't passed. A regression test: today's list
     /// never held it either; this keeps the new one from gaining it.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's list"))

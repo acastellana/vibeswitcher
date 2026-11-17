@@ -254,7 +254,8 @@ public enum HostImages {
         public var installFolder: String
         /// The tool server beside it (`HostServer.Config.toolServer`).
         public var toolServer: String
-        /// The command folder put first on the sessions' PATH (`TestLock.commandFolder`), when there is one.
+        /// The command folder put on the sessions' PATH (`TestLock.commandFolder`), when there is one: first on the
+        /// Mac, last on Linux (`sessionEnvironment`).
         public var commandFolder: String?
         /// The app's executable beside it, the default `HostServer.Config.appExecutable` (the Mac's).
         public var appExecutable: String
@@ -272,6 +273,22 @@ public enum HostImages {
                        toolServer: folder.appendingPathComponent("vibeswitcher-mcp").path,
                        commandFolder: TestLock.commandFolder(besideExecutable: image),
                        appExecutable: folder.appendingPathComponent("VibeSwitcher").path)
+    }
+
+    // MARK: The sessions' PATH
+
+    /// The sessions' environment `base` with the command folder (`folder`, `Folders.commandFolder`: `vs-heavy`'s) on
+    /// its PATH, once. The Mac: first, as always (`TestLock.sessionEnvironment`). Linux: last, after every folder of
+    /// the unit's PATH: the folder is the install's `<prefix>/<commit>/Resources/bin`, which the user's account (so any
+    /// worker) can write and `build-info` doesn't hash, and first it would put a `git`, `sh` or `node` dropped there
+    /// ahead of root's for every session, the lead's included; the unit's rule is root's folders first (S9, S11 item
+    /// 10; the step 8 sweep, 2026-11-17). `vs-heavy` is the only program there, and no root folder has one.
+    public static func sessionEnvironment(_ base: [String: String], adding folder: String?) -> [String: String] {
+        guard !Platform.CodeIdentity.isAvailable, let folder else { return TestLock.sessionEnvironment(base, adding: folder) }
+        var environment = base
+        let rest = (base["PATH"] ?? "/usr/local/bin:/usr/bin:/bin").split(separator: ":").map(String.init).filter { $0 != folder }
+        environment["PATH"] = (rest + [folder]).joined(separator: ":")
+        return environment
     }
 
     // MARK: The sealed copies
