@@ -239,8 +239,10 @@ public enum LinuxSealList {
     /// A folder of `.entries`, read as `ConfigSeal.readFolder` reads a folder, in one walk that also says when it was cut
     /// (`cutEntry`) or a folder in it couldn't be listed (`unreadablePrefix`); unlike that read, the folder's own mode
     /// (`ownEntry`) and each folder's are in its lines (`walkEntries`); the hooks record's per-path hash is taken as `GitGuard` reads
-    /// it, without its `told` flag (`acceptedRecord`), so that alone is no change in place.
-    static func readEntries(_ watched: ConfigSeal.Watched) -> ConfigSeal.FolderRead {
+    /// it, without its `told` flag (`acceptedRecord`), so that alone is no change in place. A scope's file in the
+    /// manager's runtime units folder takes `scopeKind` when the bytes the walk hashed have the manager's form, judged in
+    /// the walk itself (never on a second read). `afterWalk`: a test's, run between the walk and the entries' marking.
+    static func readEntries(_ watched: ConfigSeal.Watched, afterWalk: (() -> Void)? = nil) -> ConfigSeal.FolderRead {
         var hasher = SHA256()
         var info = stat()
         guard lstat(watched.path, &info) == 0 else {
@@ -257,14 +259,20 @@ public enum LinuxSealList {
             if let path { entries[path] = ConfigSeal.hex(SHA256.hash(data: line).prefix(8)) + " \(text.prefix(1)) \(mtime)" }
         }
         add("d \(ownEntry) \(info.st_mode & 0o7777)", ownEntry, Int(Platform.Files.modified(info).tv_sec))
-        let cut = walkEntries(watched.path, relative: "", count: &count, unreadable: &unreadable, add)
+        var scopes: Set<String>? = isTransient(watched.name) ? [] : nil
+        let cut = walkEntries(watched.path, relative: "", count: &count, unreadable: &unreadable, scopes: &scopes, add)
+        afterWalk?()
+        for path in scopes ?? [] where ConfigSeal.entryKind(entries[path]) == "f" {
+            var words = (entries[path] ?? "").split(separator: " ").map(String.init)
+            words[1] = scopeKind
+            entries[path] = words.joined(separator: " ")
+        }
         if cut { entries[cutEntry] = ConfigSeal.hex(SHA256.hash(data: Data("cut".utf8)).prefix(8)) + " o 0" }
         for relative in unreadable {
             entries[unreadablePrefix + relative] = ConfigSeal.hex(SHA256.hash(data: Data("unreadable \(relative)".utf8)).prefix(8)) + " o 0"
         }
         let hash = ConfigSeal.hex(hasher.finalize())
         var read = ConfigSeal.FolderRead(hash: hash, countingHash: hash, entries: entries)
-        if isTransient(watched.name) { markScopes(&read, folder: watched.path) }
         guard watched.name == hooksName else { return read }
         for (path, entry) in read.entries {
             let parts = path.split(separator: "/")
@@ -290,9 +298,11 @@ public enum LinuxSealList {
     /// `ConfigSeal.readFolder`'s walk: each entry under `folder` in name order (`.DS_Store` left out), one line each,
     /// links read and never followed, at most `ConfigSeal.maxEntries`; true when it was cut there. A folder's line also
     /// carries its mode (`st_mode & 0o7777`, as `listingHash`'s), and each folder that can't be listed is added to
-    /// `unreadable`.
+    /// `unreadable`. With `scopes` (the manager's runtime units folder), each top-level scope's regular file
+    /// (`isScopeFile`) of at most `scopeLimit` bytes is read whole once (no link followed): its line's digest is of
+    /// those bytes, and it's added to `scopes` when those same bytes have the manager's form (`hasScopeForm`).
     private static func walkEntries(_ folder: String, relative: String, count: inout Int, unreadable: inout [String],
-                                    _ line: (String, String?, Int) -> Void) -> Bool {
+                                    scopes: inout Set<String>?, _ line: (String, String?, Int) -> Void) -> Bool {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else {
             line("unreadable \(relative)", nil, 0)
             unreadable.append(relative)
@@ -312,11 +322,18 @@ public enum LinuxSealList {
             switch info.st_mode & S_IFMT {
             case S_IFDIR:
                 line("d \(shown) \(info.st_mode & 0o7777)", shown, mtime)
-                if walkEntries(path, relative: shown, count: &count, unreadable: &unreadable, line) { return true }
+                if walkEntries(path, relative: shown, count: &count, unreadable: &unreadable, scopes: &scopes, line) { return true }
             case S_IFLNK:
                 line("l \(shown) -> " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""), shown, mtime)
             case S_IFREG:
                 let digest: String
+                if scopes != nil, relative.isEmpty, isScopeFile(name),
+                   let data = ConfigSeal.regularContents(path, limit: scopeLimit, followLink: false) {
+                    digest = ConfigSeal.hex(SHA256.hash(data: data))
+                    if hasScopeForm(data) { scopes?.insert(shown) }
+                    line("f \(shown) \(info.st_mode & 0o777) \(digest)", shown, mtime)
+                    continue
+                }
                 switch ConfigSeal.contentsDigest(path, followLink: false) {
                 case .digest(let hex): digest = hex
                 case .other: digest = "other"
@@ -390,26 +407,9 @@ public enum LinuxSealList {
     }
 
     /// The per-path entry's kind (in place of `f`) of a top-level scope's file in the manager's runtime units folder
-    /// whose contents, as hashed, have the form the manager writes for a scope (`hasScopeForm`): `markScopes`.
+    /// whose contents, the very bytes the walk hashed, have the form the manager writes for a scope (`hasScopeForm`,
+    /// judged in `walkEntries`).
     static let scopeKind = "s"
-
-    /// In `read` of the manager's runtime units folder at `folder`: each top-level scope's regular file, read again
-    /// (no link followed, at most `scopeLimit` bytes), whose contents hash as the walk hashed them (its line, mode and
-    /// digest, the same per-path hash) and have the manager's form (`hasScopeForm`) takes `scopeKind`. Any other, or
-    /// one changed between the two reads, stays `f`, which never comes (`transientEntryMayCome`).
-    static func markScopes(_ read: inout ConfigSeal.FolderRead, folder: String) {
-        for (path, entry) in read.entries where isScopeFile(path) && ConfigSeal.entryKind(entry) == "f" {
-            let file = (folder as NSString).appendingPathComponent(path)
-            var info = stat()
-            guard lstat(file, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
-                  let data = ConfigSeal.regularContents(file, limit: scopeLimit, followLink: false), hasScopeForm(data) else { continue }
-            let line = "f \(path) \(info.st_mode & 0o777) " + ConfigSeal.hex(SHA256.hash(data: data))
-            guard ConfigSeal.hex(SHA256.hash(data: Data((line + "\n").utf8)).prefix(8)) == ConfigSeal.entryHash(entry) else { continue }
-            var words = entry.split(separator: " ").map(String.init)
-            words[1] = scopeKind
-            read.entries[path] = words.joined(separator: " ")
-        }
-    }
 
     /// A scope's file read whole at most (the manager's are a few hundred bytes).
     static let scopeLimit = 64 << 10

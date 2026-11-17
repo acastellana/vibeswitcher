@@ -488,6 +488,34 @@ struct LinuxSealListTests {
         }
     }
 
+    /// A scope's form is judged on the bytes the walk hashed, never on a second read: a file of the manager's form
+    /// swapped for a planted one right after the walk hashed it is recorded as the form it was hashed in (so the
+    /// planted one is a change in place at the next look), and a planted one swapped for the form after its hash
+    /// never comes. (The automated review of item 31: a re-read tied to the walk's entry by its 8-byte hash prefix.)
+    @Test(Self.linux) func aScopesFormIsJudgedOnTheBytesTheWalkHashed() throws {
+        let home = try home()
+        let outside = temp.url("seal-transient-bytes").path
+        let uid = getuid()
+        let folder = outside + "/run/user/\(uid)/systemd/transient"
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let header = "# This is a transient unit file, created programmatically via the systemd API. Do not edit.\n"
+        let item = try #require(LinuxSealList.watched(home: home, uid: uid, mounts: try mounts(windows: false), outside: outside)
+            .first { $0.name == "/run/user/\(uid)/systemd/transient" })
+        let scope = folder + "/app-x-1.scope", generated = header + "[Unit]\nDescription=x\n", planted = header + "[Unit]\nWants=planted.service\n"
+        let swap = { (text: String) in { try? self.write(text, scope + ".new"); _ = rename(scope + ".new", scope) } }
+
+        try write(generated, scope)
+        let alone = try #require(LinuxSealList.readEntries(item).entries["app-x-1.scope"])
+        let swappedAway = LinuxSealList.readEntries(item, afterWalk: swap(planted)).entries["app-x-1.scope"]
+        #expect(ConfigSeal.entryHash(swappedAway) == ConfigSeal.entryHash(alone), "the hash is the generated file's")
+        #expect(ConfigSeal.entryKind(swappedAway) == LinuxSealList.scopeKind, "judged on the bytes hashed")
+        #expect(ConfigSeal.entryKind(LinuxSealList.readEntries(item).entries["app-x-1.scope"]) == "f", "the planted file now")
+
+        try write(planted, scope)
+        let swappedIn = LinuxSealList.readEntries(item, afterWalk: swap(generated)).entries["app-x-1.scope"]
+        #expect(ConfigSeal.entryKind(swappedIn) == "f", "planted when hashed")
+    }
+
     /// In the launch folders, only a launch the vault recorded comes: its repository's folder, its own, and the files a
     /// launcher writes there (or `writePrivate`'s temporary one); a name no launch has, another repository's key, a
     /// file the launcher doesn't write, a link, or anything deeper doesn't. The names are the launchers', from the
