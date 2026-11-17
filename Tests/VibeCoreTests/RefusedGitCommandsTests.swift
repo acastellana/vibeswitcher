@@ -180,6 +180,23 @@ struct RefusedGitCommandsTests {
         }
     }
 
+    /// The blind check's: a wrapper's option that sets a variable (`arch -e`), zsh's `repeat` and short `if`/`while`
+    /// forms, and a git command in another case (APFS finds `git-Filter-Branch`, the script).
+    @Test func armsEnvironmentZshsShortFormsAndACommandInAnotherCaseAreRead() throws {
+        let worker = try Guard(.worker, temp: temp)
+        for line in ["arch -arm64 -e GIT_DIR=/x git status", "arch -arm64 -e HOME=/x git status", "arch -arm64 -eGIT_DIR=/x git status",
+                     "arch -arm64 -e GIT_CONFIG_PARAMETERS=\"'alias.s=push'\" git s", "repeat 1 git -P push", "repeat 1 GIT_DIR=/x git status",
+                     "repeat 1 git -C /x status", "if [[ 1 == 1 ]] git -P push", "if [[ 1 == 1 ]] GIT_DIR=/x git status",
+                     "if (( 1 )) git -P push", "while [[ -n x ]] git --no-pager tag v1", "git -P Filter-Branch -f -- --all",
+                     "git Filter-Branch -f -- --all", "git --no-pager Tag v1"] {
+            #expect(try worker.refuses(line), "lets through: \(line)")
+        }
+        for line in ["arch -arm64 -e FOO=1 git status", "arch -arm64 -e HOME=/x make", "repeat 3 git -P log", "if [[ -n x ]] git status",
+                     "if (( 1 )) git -P log", "[[ -d .git ]] && git status", "git -P Log", "git -P Switch -c topic"] {
+            #expect(try !worker.refuses(line), "refuses: \(line)")
+        }
+    }
+
     /// HOME and XDG_CONFIG_HOME pick git's global config, so they're refused when set for a git command (before it, or
     /// through env); set for anything else, or exported, they stay allowed.
     @Test(arguments: [LeadLaunch.Role.worker, .verifier, .lead])
