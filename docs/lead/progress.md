@@ -3539,3 +3539,6 @@ Proposed task 1: Fix the repeated app.log error: shell: <id> ended: …
 - 2026-11-17 11:44 Started a worker on update-check-a-card
 - 2026-11-17 11:44 Automatically (auto_advance): Started a worker on update-check-a-card (Update check: a card with the changelog and Install & Restart when a newer VibeSwitcher is on GitHub).
 - 2026-11-17 11:44 Sent update-check-a-card's worker contract v2 (it had v1)
+- 2026-11-17 11:52 Planned explainer-video-add-the: Explainer video: add the features since Nov 12, and render at 1.7× speed
+- 2026-11-17 11:52 Started a worker on explainer-video-add-the
+- 2026-11-17 11:52 Automatically (auto_advance): Started a worker on explainer-video-add-the (Explainer video: add the features since Nov 12, and render at 1.7× speed).
