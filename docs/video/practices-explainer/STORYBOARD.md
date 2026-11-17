@@ -1,6 +1,6 @@
 ---
 format: 1920x1080
-duration: 509.4s at 1x (the delivered MP4 is 1.7x: 299.6s)
+duration: 537.7s at 1x (the delivered MP4 is 1.7x: 316.3s)
 message: "VibeSwitcher wraps Claude Code sessions in an engineering process, so one conversation can run a team you can trust."
 arc: Hook → Starting point → Structure → The task's journey (contract → worktree → report → audit → findings → gate) → What keeps it running (auto_advance, incidents, limits, models, memory) → Your controls → Comparison → Proof
 audience: developers who drive Claude Code (or Codex) sessions by hand
@@ -8,7 +8,7 @@ mode: autonomous
 ---
 
 Narrated cut: each scene's length below is the silent cut's. `tools/captions.py` now stretches each scene to fit its
-voice (`NARRATION.md`), never shorter, so the film runs 8:29 (6:54 before the update of 2026-11-17). Every number is from `sources.md`. Scenes are sub-compositions in `compositions/`, mounted back to back in
+voice (`NARRATION.md`), never shorter, so the film runs 8:57.7 (8:29 after the first update of 2026-11-17, 6:54 before it). Every number is from `sources.md`. Scenes are sub-compositions in `compositions/`, mounted back to back in
 `index.html`. Each fades in over 0.4 s and out over 0.4 s, with hard cuts between scenes. The kicker in the top-left
 (`NN / NAME`) numbers the chapters.
 
@@ -59,6 +59,14 @@ renumbered (screen only). The delivered MP4 is this film sped up 1.7×, pitch ke
 -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart`: 1080p30, **4:59.6** (the cut before was 6:54 at 1×),
 31.6 MB. `atempo` keeps the voice's pitch. Stills in `stills/` are frames of the delivered file, named by their time
 in it (`at-1.7x-151s.png`: s20; 194 s: s21; 229 s: s15; 267 s: s22; 86 s: s07); the old cut's stills were removed.
+
+**Second render of 2026-11-17** (after the update check and the skill-sync exception merged). s17 and s22 re-voiced
+(the same voice, model and seed), captions and lengths refitted by `tools/captions.py`: s17 22.2 → 31.2 s, s22 21.9 →
+41.2 s (its base 18 → 26 s for the update card), film 8:29.4 → 8:57.7 at 1×. Rendered the same way under `vs-heavy`
+(1920×1080, 30 fps, 55.5 MB, not committed), and through the same `ffmpeg` line: the delivered `practices-explainer.mp4`
+is 1080p30, **5:16.3** (316.3 s), 33.3 MB. New stills: `at-1.7x-260s.png` (s17, the seal's exception),
+`at-1.7x-284s.png` (s22 with the update card, replacing 267 s) and `at-1.7x-194s.png` again (s21's reworded threshold);
+151 s, 229 s and 86 s fall in unchanged scenes at unchanged times.
 
 ## Frame 1: Title
 

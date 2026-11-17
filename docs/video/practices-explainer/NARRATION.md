@@ -23,7 +23,7 @@ now hold 6,891. The account's quota couldn't be read
 (`GET /v1/user/subscription` needs `user_read`), and no call was refused. **Voice length:** 8:21 of speech in an 8:58
 film at its natural pace. The model ignores `voice_settings.speed` (1.0, 1.1 and 1.2 gave the same length), so the
 voice keeps its natural pace, about 130 words a minute, and the delivered MP4 is the whole film sped up 1.7× with the
-pitch kept (4:59.6; see `STORYBOARD.md`).
+pitch kept (5:16.3; see `STORYBOARD.md`).
 
 The update's new and changed scenes were transcribed with whisper (`small.en`): "Fable", "Opus", "Codex", "UI
 journeys", "178 megabytes" and "/model" come through as written, and "macOS 27.2" as "Mac OS 27.2".
