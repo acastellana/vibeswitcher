@@ -81,6 +81,16 @@
           color: var(--muted);
           font-family: var(--mono);
         }
+        .s07 .small {
+          position: absolute;
+          left: 1120px;
+          top: 372px;
+          width: 680px;
+          font-family: var(--mono);
+          font-size: 21px;
+          line-height: 1.4;
+          color: var(--muted);
+        }
       </style>
       <div id="root" data-composition-id="s07-review" data-width="1920" data-height="1080">
         <div class="stage s07">
@@ -98,6 +108,7 @@
           </svg>
           <div class="tl t-none" style="left: 700px; top: 268px"><b>none</b> <span class="muted">· the merge's full test run is the check</span></div>
           <div class="tl t-audit" style="left: 700px; top: 528px"><b class="amber">audit</b> <span class="muted">· a verifier must pass it first</span></div>
+          <div class="small"><span class="amber">small task</span> · an audit task done in its first round, under 30 min of work, nothing sensitive or risky, not Codex's: <span class="go">merges on its tests</span></div>
           <div class="car ca"></div>
           <div class="cols">
             <div class="col card k1">
@@ -112,7 +123,7 @@
             <div class="col card k3">
               <div class="h3">A random sample</div>
               <div class="li">10 % of the rest, drawn once per task</div>
-              <div class="li" style="margin-top: 14px; color: var(--fg)">These can only raise a review. Nothing lowers one.</div>
+              <div class="li" style="margin-top: 14px; color: var(--fg)">These can only raise a review. Nothing lowers a raised one.</div>
             </div>
           </div>
           <div class="foot">35 tasks were raised to audit by the risk check</div>
@@ -136,6 +147,7 @@
           K.draw(tl, ".s07 .divert", 4.4, 0.4);
           tl.to(".s07 .ca", { x: 960, y: 492, duration: 0.6, ease: "none" }, 5.1);
           tl.to(".s07 .ca", { x: 1600, duration: 1.4, ease: "power2.out" }, 5.7);
+          K.rise(tl, ".s07 .small", 2.8, { y: 12 });
           K.rise(tl, ".s07 .k1", 6.2, { y: 40 });
           K.rise(tl, ".s07 .k2", 7.6, { y: 40 });
           K.rise(tl, ".s07 .k3", 9.4, { y: 40 });
@@ -143,7 +155,7 @@
           K.count(tl, S.querySelector(".n1"), 271, 11.2, 1.6);
           K.count(tl, S.querySelector(".n2"), 495, 11.2, 1.6);
           K.rise(tl, ".s07 .foot", 13.0);
-          window.__timelines["s07-review"] = K.fit(tl, 18, 22);
+          window.__timelines["s07-review"] = K.fit(tl, 18, 29);
         })();
       </script>
     </template>

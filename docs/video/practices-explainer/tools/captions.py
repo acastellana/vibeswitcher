@@ -18,10 +18,12 @@ import os
 import re
 import subprocess
 
-# The silent cut's scene lengths (seconds): each scene's beats were authored against these.
+# Each scene's base length (seconds), in film order: its beats were authored against it (the silent cut's lengths;
+# s20-s22 were added on 2026-11-17 and sit where the film needs them, not at the end).
 BASE = {
     "s01": 10, "s02": 22, "s03": 20, "s04": 18, "s05": 18, "s06": 16, "s07": 18, "s08": 20, "s09": 18, "s10": 16,
-    "s11": 18, "s12": 16, "s13": 18, "s14": 22, "s15": 18, "s16": 16, "s17": 20, "s18": 24, "s19": 14,
+    "s11": 18, "s20": 18, "s12": 16, "s13": 18, "s21": 18, "s14": 22, "s15": 18, "s16": 16, "s17": 20, "s22": 18,
+    "s18": 24, "s19": 14,
 }
 LEAD = 0.6  # the voice starts once the scene has faded in (0.4 s)
 TAIL = 1.0  # and ends before the scene starts fading out (the last 0.45 s, stretched by at most ~1.4)
@@ -120,7 +122,7 @@ def caption_html(text):
 
 
 def main():
-    ids = sorted(BASE)
+    ids = list(BASE)  # film order
     scene_files = {}
     for f in sorted(os.listdir("compositions")):
         m = re.fullmatch(r"(s\d\d)-[a-z0-9-]+\.html", f)

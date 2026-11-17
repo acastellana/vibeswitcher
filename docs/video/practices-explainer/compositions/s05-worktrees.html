@@ -57,17 +57,28 @@
         .s05 .facts {
           position: absolute;
           left: 120px;
-          top: 860px;
+          top: 846px;
           width: 1680px;
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 18px 60px;
+          gap: 12px 60px;
         }
         .s05 .fact {
-          font-size: 26px;
+          font-size: 24px;
           line-height: 1.32;
           padding-left: 18px;
           border-left: 4px solid var(--accent);
+        }
+        .s05 .fact .mono {
+          font-size: 22px;
+          color: var(--accent);
+        }
+        .s05 .fact.deny {
+          grid-column: 1 / span 2;
+          border-left-color: var(--line);
+          color: var(--muted);
+          font-family: var(--mono);
+          font-size: 21px;
         }
       </style>
       <div id="root" data-composition-id="s05-worktrees" data-width="1920" data-height="1080">
@@ -90,8 +101,11 @@
           <div class="facts">
             <div class="fact">Up to 3 workers per project, 7 with Boost</div>
             <div class="fact">Its own worktree and branch: no two agents in one checkout</div>
-            <div class="fact">Can't push, move refs or check out the lead's branch: Claude Code permission rules deny it</div>
+            <div class="fact">Can't push, move refs or check out the lead's branch</div>
             <div class="fact">To catch up, a worker merges the base in</div>
+            <div class="fact">Can't read your prompt history or other sessions' transcripts</div>
+            <div class="fact">Nothing in <span class="mono">~/.claude</span> but skills, plugins and projects</div>
+            <div class="fact deny">All of it denied by Claude Code's own permission rules</div>
           </div>
         </div>
       </div>
@@ -115,7 +129,7 @@
             tl.fromTo(sel, { opacity: 0, x: 460, y: y }, { opacity: 1, x: 470, y: y, duration: 0.4 }, at);
             tl.to(sel, { x: end - 120, duration: 9.5, ease: "sine.inOut" }, at + 0.4);
           });
-          K.slide(tl, ".s05 .fact", 5.0, { stagger: 1.4, x: -24 });
+          K.slide(tl, ".s05 .fact", 5.0, { stagger: 1.1, x: -24 });
           window.__timelines["s05-worktrees"] = K.fit(tl, 18, 21.1);
         })();
       </script>

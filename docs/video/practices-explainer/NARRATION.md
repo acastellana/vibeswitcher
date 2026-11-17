@@ -62,9 +62,10 @@ voice.
 
 ## s07 · Who gets audited
 
-> Not every change needs an audit. By default, the merge's full test run is the check. But sensitive paths, risky
-> changes and a random ten percent sample are raised to an audit, and nothing can lower one. So far, 271 of 495 merges
-> were audited.
+> Not every change needs an audit. By default, the merge's full test run is the check, and a small task, done in under
+> thirty minutes and touching nothing sensitive, merges on its tests too. But sensitive paths, risky changes and a
+> random ten percent sample are always raised to an audit, and nothing can lower that. So far, 271 of 495 merges were
+> audited.
 
 ## s08 · An independent verifier
 
@@ -90,6 +91,13 @@ voice.
 > flake. A run that goes silent is stopped, and the last test it started is named. 495 merges, every one tested at the
 > gate. Zero reverts.
 
+## s20 · Merges keep flowing
+
+> Merges got faster, too. A merge's test run takes whatever cores are free, and only the failing tests run again. A
+> test that's red on main as well doesn't send the branch back: it merges, and a task to fix that test is filed. And
+> when finished work stops landing, the lead is told why: main is red, the slots are full, or the Mac is loaded,
+> asleep, or on battery.
+
 ## s12 · It moves on its own
 
 > Between steps, the board moves on its own. A done report starts the audit or the merge, findings go back to the
@@ -102,6 +110,13 @@ voice.
 > hour, five times in two days. That became a rule: a run with no output, and next to no CPU, for ten minutes, is
 > stopped. All 21 incidents on record became check tasks.
 
+## s21 · The app checks itself
+
+> The app is held to the same standard. UI journeys drive the real app in a sandbox, and compare each screenshot with
+> its baseline. A health watcher groups the app's own freezes and errors by cause, and proposes a task when one keeps
+> coming back. And memory is measured: on macOS 27.2, freed memory now goes back at once, and an image-heavy chat adds
+> 178 megabytes at its peak, down from about a gigabyte.
+
 ## s14 · A shared Mac, a finite account
 
 > The Mac is shared, and the account is finite, so both are budgeted. Each task has a budget of working time. When it
@@ -111,9 +126,10 @@ voice.
 
 ## s15 · The right model for each role
 
-> Each role gets a model that suits it. By default, the verifier runs on a different model from the workers. In this
-> project, for now, both run on Opus. Codex takes bounded, mechanical tasks, and with agent set to auto, it's picked
-> when Claude's limits run tight. A Claude verifier always audits its work. The dashed roles are still being built.
+> Each role gets a model that suits it. Fable leads, advises on hard tasks, takes re-rolls, and audits anything
+> sensitive. In this project, Opus does the work and the routine audits. Codex takes bounded, mechanical tasks: with
+> agent set to auto, it's picked when Claude's limits run tight, and a Claude verifier always audits its work. And when
+> Fable reaches its usage limit, workers and audits move to Opus on their own, and go back at the reset.
 
 ## s16 · Memory that lives in the repo
 
@@ -126,6 +142,12 @@ voice.
 > And you keep the keys. You set the review floor, the sensitive paths and the merge policy, and an approval covers
 > one exact commit. Pushes, installs and wallet requests come to you as cards. A seal guards the configuration. And
 > your phone can follow along, with replies behind their own switch.
+
+## s22 · Day to day
+
+> Day to day, it looks after you as well. After a Mac restart, one card offers to reopen the sessions you had open,
+> leads first, and nothing reopens until you click. The chat's model chip follows /model the moment you switch. And a
+> Run card tells the session that asked how its command ended.
 
 ## s18 · What the system adds
 

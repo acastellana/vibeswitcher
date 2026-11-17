@@ -1,0 +1,174 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s21 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s21 .cards {
+          position: absolute;
+          left: 120px;
+          top: 260px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 28px;
+        }
+        .s21 .card {
+          padding: 24px 30px;
+          min-height: 360px;
+        }
+        .s21 .card .k {
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 26px;
+          margin-bottom: 14px;
+        }
+        .s21 .card .d {
+          font-size: 25px;
+          line-height: 1.36;
+          margin-bottom: 10px;
+        }
+        .s21 .card .d .mono {
+          font-size: 21px;
+          color: var(--accent);
+        }
+        .s21 .arrow {
+          color: var(--muted);
+          font-family: var(--mono);
+        }
+        .s21 .shots {
+          display: flex;
+          gap: 10px;
+          margin: 4px 0 14px;
+        }
+        .s21 .shot {
+          width: 104px;
+          height: 64px;
+          border: 2px solid var(--line);
+          border-radius: 8px;
+          background: var(--panel2);
+          position: relative;
+          overflow: hidden;
+        }
+        .s21 .shot i {
+          position: absolute;
+          left: 10px;
+          right: 10px;
+          height: 6px;
+          border-radius: 3px;
+          background: var(--line);
+        }
+        .s21 .shot.diff {
+          border-color: var(--stop);
+        }
+        .s21 .shot.diff b {
+          position: absolute;
+          right: 8px;
+          top: 30px;
+          width: 34px;
+          height: 22px;
+          border-radius: 4px;
+          background: rgba(239, 122, 104, 0.55);
+        }
+        .s21 .rec {
+          position: absolute;
+          left: 120px;
+          top: 700px;
+          width: 1680px;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 28px;
+          border-top: 2px solid var(--line);
+          padding-top: 30px;
+        }
+        .s21 .rec .num {
+          font-size: 76px;
+          line-height: 1;
+          white-space: nowrap;
+        }
+        .s21 .rec .num small {
+          font-size: 36px;
+        }
+        .s21 .rec .t {
+          font-size: 23px;
+          line-height: 1.3;
+          color: var(--muted);
+          margin-top: 12px;
+          width: 380px;
+        }
+      </style>
+      <div id="root" data-composition-id="s21-self-check" data-width="1920" data-height="1080">
+        <div class="stage s21">
+          <div class="kicker">12 / The app checks itself</div>
+          <div class="head h2">The app is held to the same standard.</div>
+          <div class="cards">
+            <div class="card c1">
+              <div class="k go">UI journeys</div>
+              <div class="d">Scripted runs of the real app in the sandbox: select and copy, Run cards, dictation.</div>
+              <div class="shots">
+                <div class="shot"><i style="top: 12px"></i><i style="top: 26px; right: 40px"></i><i style="top: 40px"></i></div>
+                <div class="shot"><i style="top: 12px"></i><i style="top: 26px; right: 40px"></i><i style="top: 40px"></i></div>
+                <div class="shot diff"><i style="top: 12px"></i><i style="top: 26px; right: 40px"></i><b></b></div>
+              </div>
+              <div class="d"><span class="arrow">→</span> each screenshot diffed against its baseline</div>
+              <div class="d"><span class="mono">scripts/ui-journeys.sh</span></div>
+            </div>
+            <div class="card c2">
+              <div class="k amber">App health</div>
+              <div class="d">The app's own freezes, crashes and error lines, grouped by cause.</div>
+              <div class="d"><span class="arrow">→</span> a cause on 3 of 7 days, or doubling day over day: proposed to the lead as a task, once</div>
+              <div class="d"><span class="mono">watch_app_logs</span></div>
+            </div>
+            <div class="card c3">
+              <div class="k info">Memory</div>
+              <div class="d">On macOS 27.2, malloc kept every freed page: +74 MB an hour.</div>
+              <div class="d"><span class="arrow">→</span> the app restarts itself with <span class="mono">MallocLargeCache=0</span>, and freed memory goes back</div>
+              <div class="d"><span class="arrow">→</span> chat images decoded at the size they show, two at a time</div>
+            </div>
+          </div>
+          <div class="rec">
+            <div><div class="num go n1">0</div><div class="t">UI journeys: smoke, select-copy, run-card, dictate</div></div>
+            <div><div class="num amber"><span class="n2">0</span><small> %</small></div><div class="t">of a shot's pixels changed is enough to flag it</div></div>
+            <div><div class="num info"><span class="n3">0</span><small> MB</small></div><div class="t">at the peak opening an image-heavy chat, down from +1,012 MB</div></div>
+            <div><div class="num"><span class="n4">0</span><small> of 7</small></div><div class="t">days with the same cause, and it becomes a proposed task</div></div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s21");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 18);
+          K.rise(tl, ".s21 .head", 0.3);
+          [".c1", ".c2", ".c3"].forEach((c, i) => {
+            const at = 0.9 + i * 3.4;
+            K.rise(tl, ".s21 " + c, at, { y: 36 });
+            K.rise(tl, ".s21 " + c + " .d", at + 0.4, { stagger: 0.55, y: 12 });
+          });
+          K.pop(tl, ".s21 .shot", 1.8, { stagger: 0.25, from: 0.8 });
+          tl.fromTo(".s21 .shot.diff b", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power1.out" }, 2.6);
+          K.rise(tl, ".s21 .rec > div", 11.6, { stagger: 0.3 });
+          K.count(tl, S.querySelector(".n1"), 4, 11.8, 0.8);
+          const p = { v: 0 };
+          const n2 = S.querySelector(".n2");
+          n2.textContent = "0.00";
+          tl.to(p, { v: 0.05, duration: 1.0, ease: "power2.out", onUpdate() { n2.textContent = p.v.toFixed(2); } }, 12.1);
+          K.count(tl, S.querySelector(".n3"), 178, 12.4, 1.4, { pre: "+" });
+          K.count(tl, S.querySelector(".n4"), 3, 12.7, 0.8);
+          window.__timelines["s21-self-check"] = K.fit(tl, 18, 31.7);
+        })();
+      </script>
+    </template>
+  </body>
+</html>
