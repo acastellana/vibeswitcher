@@ -229,6 +229,9 @@ accepted every recommendation so far. Each can be overruled before its task star
      `startTicks` match, its `/proc/<pid>/cmdline` has the installed host's form (ST-D7), and it is non-dumpable. The
      same session (the sweep's rule).
    - `status` says "no systemd: the weaker voice rule; the node's pid file is yours, and any worker's, to write".
+   - *2026-11-17, the step 8 sweep:* the host inherits the command line's umask (`posix_spawn` passes it on), so a
+     detached start refuses a umask that doesn't mask other users' write (`NodeStarter.umaskRefusal`, read from
+     `/proc/self/status`), as the unit's start refuses such a `UMask`, before anything is made or started.
 7. **ST-D7: `stop` with no server** (`StopSequence.run`).
    - It falls back when no server answers (`.notRunning`), when a listener sends no hello within `NodeClient`'s
      timeout, and when a listener fails `ServerCheck`. Each is safe: `systemctl stop` acts on the unit, not on the

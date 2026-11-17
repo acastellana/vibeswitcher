@@ -207,6 +207,30 @@ public struct NodeStarter {
     /// How long `startDetached` watches the host it started for an exit at once.
     public static let detachedSettle: TimeInterval = 1
 
+    /// Why a detached start refuses this process's umask (`mask`, which the host inherits through `posix_spawn`), or
+    /// nil: as the unit's `UMask` (`NodeUnit.defaultsMismatch`), it must mask other users' write, or every file the host
+    /// makes without a mode of its own (its sessions', worktrees') would be writable by other users. nil `mask`: it
+    /// couldn't be read, which refuses too (the step 8 sweep, 2026-11-17).
+    public static func umaskRefusal(_ mask: mode_t?) -> StartRefusal? {
+        guard let mask else {
+            return StartRefusal("this shell's umask can't be read: start won't start the host without knowing the mode of the files it makes", exitCode: 1)
+        }
+        guard mask & 0o002 == 0 else { return nil }
+        return StartRefusal("this shell's umask is \(String(format: "%04o", mask)): the host would inherit it, and files it makes would be writable by other users; run `umask 022` (or `umask 077`), then start again", exitCode: 1)
+    }
+
+    /// This process's umask: Linux's `/proc/self/status` (`Umask:`), which reads it without changing it; else (no such
+    /// line) `umask` set and set back, nil when that fails.
+    public static func processUmask(status: String = "/proc/self/status") -> mode_t? {
+        if let text = try? String(contentsOfFile: status, encoding: .utf8),
+           let line = text.split(separator: "\n").first(where: { $0.hasPrefix("Umask:") }) {
+            return mode_t(line.dropFirst("Umask:".count).trimmingCharacters(in: .whitespaces), radix: 8)
+        }
+        let old = umask(0o077)
+        umask(old)
+        return old
+    }
+
     /// Starts `host` (its argv, by its absolute path; the installed command line passes `NodeUnit.execStart`) detached,
     /// on a machine without systemd (ST-D6): with `Platform.Spawn` in a session of its own (`posix_spawn`'s `SETSID`,
     /// not a double fork: the command line is multithreaded), keeping no descriptor of the command line's, in `home`,
@@ -218,6 +242,9 @@ public struct NodeStarter {
     /// way"), so two starts at once can't both pass the check and leave the record naming a host that failed on the
     /// first one's lock while the first runs unrecorded (the review of S3).
     ///
+    /// Refused before anything when this process's umask (`mask`) lets other users write (`umaskRefusal`), as the
+    /// unit's start refuses the manager's `UMask`.
+    ///
     /// Refused before anything is started while `root`'s record names a process that still runs (its start ticks) with
     /// the host's command line (`isHost`: the installed command line passes `NodeCheck.isInstalledHost`): its server
     /// didn't answer, and a second host would only fail on the first one's lock. A record naming any other process
@@ -226,10 +253,11 @@ public struct NodeStarter {
     /// (`NodeRecord`: its pid and start) is written; a host that ends within `settle` is collected, its record removed,
     /// and refused: "the host ended at once (pid, status); see <log>".
     public static func startDetached(host: [String], home: String, path: String, root: String, isHost: ([String]) -> Bool,
-                                     settle: TimeInterval = detachedSettle) -> Result<NodeRecord, StartRefusal> {
+                                     settle: TimeInterval = detachedSettle, umask mask: mode_t? = processUmask()) -> Result<NodeRecord, StartRefusal> {
         guard let program = host.first, program.hasPrefix("/") else {
             return .failure(StartRefusal("the host's command isn't an absolute path: \(ConfigSeal.inert(host.joined(separator: " "), limit: .max))", exitCode: 1))
         }
+        if let refused = umaskRefusal(mask) { return .failure(refused) }
         let log = hostLog(root: root)
         do {
             try VibePaths.ensurePrivate(URL(fileURLWithPath: NodeFolders.join(root, "v2"), isDirectory: true))

@@ -1700,6 +1700,33 @@ extension StartCommandTests {
         #expect(record.isLive())
     }
 
+    /// The step 8 sweep: a detached host inherits the command line's umask, so one that lets other users write
+    /// (`umask 000`, seen on WSL) is refused before anything, as the unit's start refuses such a `UMask`: no folder,
+    /// log, lock or record made, nothing started. The umask is read from `/proc/self/status` without changing it.
+    @Test(NodeTraits.linuxOnly) func aDetachedStartRefusesAUmaskThatLetsOthersWrite() throws {
+        let root = try scratch.shortFolder("vsum")
+        let home = root.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let marker = root.appendingPathComponent("started").path
+        for mask: mode_t? in [0o000, 0o020, 0o055, nil] {
+            guard case .failure(let refused) = NodeStarter.startDetached(host: ["/bin/sh", "-c", "touch \(marker)"], home: home.path,
+                                                                         path: DetachedScratch.path, root: root.path, isHost: { _ in false },
+                                                                         settle: hangGuard, umask: mask) else {
+                Issue.record("umask \(String(describing: mask)) was taken"); continue
+            }
+            #expect(refused.exitCode == 1 && refused.text.contains("umask"), "\(refused)")
+            if mask != nil { #expect(refused.text.contains("writable by other users") && refused.text.contains("umask 022"), "\(refused)") }
+        }
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("v2").path), "nothing made")
+        #expect(!FileManager.default.fileExists(atPath: marker), "nothing started")
+        #expect(NodeStarter.umaskRefusal(0o022) == nil && NodeStarter.umaskRefusal(0o077) == nil && NodeStarter.umaskRefusal(0o002) == nil)
+        // Read as the kernel says it, never set.
+        let status = root.appendingPathComponent("status").path
+        try "Name:\tx\nUmask:\t0027\nState:\tR (running)\n".write(toFile: status, atomically: true, encoding: .utf8)
+        #expect(NodeStarter.processUmask(status: status) == 0o027)
+        #expect(NodeStarter.processUmask() != nil)
+    }
+
     /// The app's `HostClientReapTests.endingAHostByAStalePidLeavesTheProcessNowUnderItAlone` (port-map row 98): a
     /// record whose pid now names another process, by its start or by its command line, ends nothing; that process
     /// stays its own parent's to signal and collect.
