@@ -16,10 +16,13 @@ import Foundation
 /// those, refused anyway); a refused command after git's options, whichever come first (`git --no-pager branch -D x`,
 /// matched as `git branch -D x` against the role's rules, `LeadLaunch.gitRules`); and a refused variable set for a
 /// command (`GIT_DIR=x git status`, `env GIT_DIR=x git …`), on its own (`GIT_DIR=x; git …`) or exported
-/// (`export GIT_DIR=x`, `declare -x`, `readonly`), whatever runs after it.
+/// (`export GIT_DIR=x`, `declare -x`, `readonly`), whatever runs after it; and `HOME` or `XDG_CONFIG_HOME` (git's global
+/// config) set for a git. The program is found without its case (`GIT -P push`: this Mac's volume runs git), and behind
+/// zsh's precommand modifiers (`noglob`, `nocorrect`, `-`).
 ///
 /// Not seen here, and so open: a line run by another shell or program (`sh -c '…'`, `eval`, `env -S '…'`, `watch`,
-/// `source`; `find -exec` is read), a variable set another way (`read GIT_DIR` after `set -a`, a file sourced), a git
+/// `source`; `find -exec` is read), a variable set another way (`read GIT_DIR` after `set -a`, a file sourced; `HOME`
+/// or `XDG_CONFIG_HOME` set on its own or exported, which every program reads, before a git), a git
 /// alias the user's config already has, and a word the shell makes from an expansion (`git $opt x`, `git ${o:--C} x`).
 public enum RefusedGit {
     /// The refused options. `--config-env` is `-c` with its value read from an environment variable.
@@ -41,8 +44,13 @@ public enum RefusedGit {
     /// `GIT_COMMON_DIR`, where a worktree's refs and config are), the work tree, git's programs, or its config
     /// (`GIT_CONFIG_PARAMETERS` is how `-c` reaches the programs git runs; `GIT_CONFIG_COUNT`/`_KEY_<n>`/`_VALUE_<n>`
     /// are `-c` again; `GIT_CONFIG`, `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` name another file): every `GIT_CONFIG_*`.
+    /// `GIT_INDEX_FILE` names another index, so a commit there writes a tree no rule on the worktree's saw.
     public static let variables: Set<String> = ["GIT_DIR", "GIT_WORK_TREE", "GIT_EXEC_PATH", "GIT_COMMON_DIR", "GIT_CONFIG",
-                                                "GIT_CONFIG_PARAMETERS"]
+                                                "GIT_CONFIG_PARAMETERS", "GIT_INDEX_FILE"]
+
+    /// Variables that pick git's global config file (`$HOME/.gitconfig`, `$XDG_CONFIG_HOME/git/config`), and with it
+    /// any alias: refused only when set for a git (before it, or through `env`), since everything else reads them too.
+    static let configHomes: Set<String> = ["HOME", "XDG_CONFIG_HOME"]
 
     static func isRefused(variable name: String) -> Bool { variables.contains(name) || starts(name, with: "GIT_CONFIG_") }
 
@@ -69,7 +77,7 @@ public enum RefusedGit {
                 "VibeSwitcher refuses \(rule) to this role, with git's global options before the command too (`git -P …`, "
                     + "`git --no-pager …`): its deny rules do. It isn't this role's to run."
             case .variable(let name):
-                "VibeSwitcher refuses setting \(name) to every role: it points git at another repository, work tree, config "
+                "VibeSwitcher refuses setting \(name)\(configHomes.contains(name) ? " for git" : "") to every role: it points git at another repository, work tree, config "
                     + "or programs, as git's -C, -c and --git-dir do. Run git in your own worktree without it."
             case .unreadable:
                 "VibeSwitcher refuses a command nested more than \(ShellWords.depthLimit) levels deep (subshells, substitutions) "
@@ -167,6 +175,10 @@ public enum RefusedGit {
     }
 
     /// Words that come before the program a command runs, with no effect on which it is (`time` is a wrapper, for its `-p`).
+    /// A program's name as this Mac's volume finds it: without its case (`GIT`, `/usr/bin/Find`, `xargſ` all run the
+    /// lowercase program), as APFS folds names.
+    static func folded(_ name: String) -> String { name.folding(options: [.caseInsensitive], locale: nil) }
+
     static let keywords: Set<String> = ["!", "{", "}", "(", ")", "if", "then", "else", "elif", "fi", "do", "done", "while", "until",
                                         "coproc"]
     /// Programs that run the command after them: their options that take a value (`env -u NAME git …`), and the
@@ -183,7 +195,9 @@ public enum RefusedGit {
                 "xargs": Wrapper(valued: ["-I", "-J", "-L", "-n", "-P", "-E", "-s", "-R", "-S"]),
                 "timeout": timeout, "gtimeout": timeout, "arch": Wrapper(valued: ["-arch", "-d", "-e"]),
                 "stdbuf": Wrapper(valued: ["-i", "-o", "-e"]), "gstdbuf": Wrapper(valued: ["-i", "-o", "-e"]),
-                "vs-heavy": Wrapper(valued: ["--as", "--timeout", "--stall"])]
+                "vs-heavy": Wrapper(valued: ["--as", "--timeout", "--stall"]),
+                // zsh's precommand modifiers.
+                "noglob": Wrapper(), "nocorrect": Wrapper(), "-": Wrapper()]
     }()
 
     /// The builtins that export (or declare) the variables named after them, `NAME=value` or `NAME`.
@@ -191,17 +205,20 @@ public enum RefusedGit {
 
     /// Why one simple command (its words, quotes taken off) is refused, if it is: a refused variable set for it or
     /// exported, or a git it runs with a refused option or command. `budget`: what reading it may still cost; `depth`:
-    /// how many `find -exec` it's in (past `ShellWords.depthLimit`, refused as the scanner refuses a line nested deeper).
-    static func refusal(command words: [String], rules: Rules, budget: inout Int, depth: Int = 0) -> Refusal? {
+    /// how many `find -exec` it's in (past `ShellWords.depthLimit`, refused as the scanner refuses a line nested deeper);
+    /// `home`: a `configHomes` variable the `find` running it was given, which a git it runs takes too.
+    static func refusal(command words: [String], rules: Rules, budget: inout Int, depth: Int = 0, home: String? = nil) -> Refusal? {
         guard depth <= ShellWords.depthLimit else { return .unreadable }
+        var home = home
         var index = 0
         while index < words.count {
             budget -= 1
             guard budget >= 0 else { return .unreadable }
             let word = words[index]
-            let name = (word as NSString).lastPathComponent
+            let name = folded((word as NSString).lastPathComponent)
             if let variable = assigned(word) {
                 if isRefused(variable: variable) { return .variable(variable) }
+                if configHomes.contains(variable) { home = home ?? variable }
                 index += 1
             } else if keywords.contains(word) {
                 index += 1
@@ -214,7 +231,10 @@ public enum RefusedGit {
                 while index < words.count, starts(words[index], with: "-") || ((name == "env" || name == "sudo") && assigned(words[index]) != nil) {
                     budget -= 1
                     guard budget >= 0 else { return .unreadable }
-                    if let variable = assigned(words[index]), isRefused(variable: variable) { return .variable(variable) }
+                    if let variable = assigned(words[index]) {
+                        if isRefused(variable: variable) { return .variable(variable) }
+                        if configHomes.contains(variable) { home = home ?? variable }
+                    }
                     index += wrapper.valued.contains(words[index]) ? 2 : 1
                 }
                 index += wrapper.operands
@@ -223,7 +243,7 @@ public enum RefusedGit {
             }
         }
         guard index < words.count else { return nil }
-        let program = (words[index] as NSString).lastPathComponent
+        let program = folded((words[index] as NSString).lastPathComponent)
         if exporters.contains(program) {
             // `export GIT_DIR=x`, `declare -x GIT_DIR`: refused whatever runs after it on the line.
             for word in words.dropFirst(index + 1) {
@@ -234,8 +254,11 @@ public enum RefusedGit {
             }
             return nil
         }
-        if program == "find" {
+        if program == "find" || program == "gfind" {
             // `find … -exec git … \;`: each command find runs, up to its `;` (or `{} +`), and find's words after it.
+            // This Mac's find (BSD) ends the command at any word that starts with `;`, or with `+` after `{}` (`\;x`,
+            // `{} +x`), and reads on from there; GNU find only at `;` or `+` exactly, so its command runs on past BSD's
+            // end: both are read, and find's words from BSD's end on.
             var at = index + 1
             while at < words.count {
                 budget -= 1
@@ -244,18 +267,29 @@ public enum RefusedGit {
                     at += 1
                     continue
                 }
+                func ends(_ end: Int, exactly: Bool) -> Bool {
+                    let word = words[end]
+                    let plus = words[end - 1] == "{}"
+                    return exactly ? word == ";" || (plus && word == "+") : starts(word, with: ";") || (plus && starts(word, with: "+"))
+                }
                 var end = at + 1
-                while end < words.count, words[end] != ";", !(words[end] == "+" && words[end - 1] == "{}") { end += 1 }
-                budget -= end - at
+                while end < words.count, !ends(end, exactly: false) { end += 1 }
+                var gnuEnd = end
+                while gnuEnd < words.count, !ends(gnuEnd, exactly: true) { gnuEnd += 1 }
+                budget -= gnuEnd - at
                 guard budget >= 0 else { return .unreadable }
-                if let refusal = refusal(command: Array(words[(at + 1)..<end]), rules: rules, budget: &budget, depth: depth + 1) {
-                    return refusal
+                for last in gnuEnd == end ? [end] : [end, gnuEnd] {
+                    if let refusal = refusal(command: Array(words[(at + 1)..<last]), rules: rules, budget: &budget, depth: depth + 1,
+                                             home: home) {
+                        return refusal
+                    }
                 }
                 at = end + 1
             }
             return nil
         }
         guard program == "git" else { return nil }
+        if let home { return .variable(home) }
         index += 1
         // git's own options, up to its command: the first word that isn't one.
         while index < words.count {
