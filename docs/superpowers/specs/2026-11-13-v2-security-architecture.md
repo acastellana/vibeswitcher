@@ -269,6 +269,16 @@ with interop off and automount off (decision 2). Before stage 3's later work the
 loopback port comes, it trusts no header and asks for a device key in the first frame (design, requirement 4), and with
 mirrored networking it is reachable from every Windows process of every Windows user.
 
+#### A web client (the live protocol's page, stage 3)
+
+A page on `http://127.0.0.1:<port>` holding a token (the live wire contract's §2; the live plan's LW-D3 to LW-D6): it
+**reads** what a process of the uid reads already (the node, the sessions, the leads, the cards) and, from slice 3,
+**drafts** an answer the user confirms on the command line. It is never the user's voice: on a WebSocket every kind but
+the read and draft ones is refused `voice` before any handler (`WebSecurityTests.aWebConnectionChangesNothing`), and
+`web.open` and `web.revoke` are the user's voice behind the typed code. The token's SHA-256 is kept at rest in a file
+the user's processes can write, so a worker can mint itself one (S11, item 33): a token gains nothing a process of
+the uid lacks. The listener is the server's until H1 moves it to the host (S11, item 32).
+
 #### Root
 
 Everything. Not defended. On this machine root is one step from the user while interop is on (S1).
@@ -2029,6 +2039,18 @@ against it. Each line says what reduces it now, if anything.
     profile's IndexedDB files on disk, which on WSL are under `/mnt/c` for any process of the user. Approvals that
     need the person's presence (a security key or the platform authenticator, WebAuthn) don't have this hole. Stage 4's
     design checks it before approvals rest on browser keys.
+32. **The web's port while the server is down** (the live plan's LW-D1). Until the host binds the loopback port and
+    hands it to each server it starts (Task H1), nothing holds `127.0.0.1:47830` between two servers: any local process
+    can bind it, and a page reconnecting sends its token there, and a bookmark opens that process's page. A squatter
+    gains a token that reads what its uid reads already and a display it can lie on; a draft it plants is shown whole
+    on the command line before the user's code confirms it. A server that finds the port taken refuses the web and
+    says so in `status`.
+33. **The web tokens' hashes are in a file the user's processes can write** (`<root>/v2/web-tokens.json`, 0600): a
+    worker can add a hash of its own and gain a token. That is why a token reads and drafts and never changes anything
+    (the live plan's LW-D6).
+34. **Under WSL's mirrored networking the web's port is reachable from every Windows process of every Windows user**
+    (S1, item 22's reach). The token is the only lock against them; the page's files are public and hold no secret.
+    The listener is off until `vibeswitcher web`, and closes with the last token (`vibeswitcher web --revoke`).
 
 **The project allow-list (S2-D11)** is what makes this list acceptable before stage 6: in the user's host on Linux a
 `spawn` whose working folder isn't inside an allowed repository is refused, saying why. The list is

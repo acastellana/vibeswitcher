@@ -156,8 +156,10 @@ public final class NodeWebListener: @unchecked Sendable {
         }
         made.onRequest = { request in
             guard let asset = assets.asset(path: request.path) else { return .plain(404) }
-            var response = WebResponse(status: 200, body: asset.body)
-            response.headers = asset.headers.map { WebHeaders.Field(name: $0.0, value: $0.1) }
+            // A file the browser holds already (its ETag in If-None-Match) is 304 with no body (`WebAssets.response`).
+            let answer = WebAssets.response(to: asset, ifNoneMatch: request.headers["if-none-match"])
+            var response = WebResponse(status: answer.status, body: answer.body)
+            response.headers = answer.headers.map { WebHeaders.Field(name: $0.0, value: $0.1) }
             return response
         }
         made.onSocket = { [weak self] socket in self?.opened(socket) }
@@ -206,6 +208,17 @@ public final class NodeWebListener: @unchecked Sendable {
     public func close(token: String, code: String, reason: String) {
         queue.async { [self] in
             for transport in Array(transports.values) where transport.admission?.token == token { transport.close(code: code, reason: reason) }
+        }
+    }
+
+    /// Every connection whose token the gate no longer holds (it ran out, or was revoked) told `revoked` and closed: the
+    /// sweep the integration runs on its clock.
+    public func closeUnheld() {
+        queue.async { [self] in
+            for transport in Array(transports.values) {
+                guard let token = transport.admission?.token, !gate.holds(token) else { continue }
+                transport.close(code: "revoked", reason: "this page's access ran out: run `vibeswitcher web` again")
+            }
         }
     }
 

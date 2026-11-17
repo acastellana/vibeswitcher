@@ -42,6 +42,66 @@ struct ServerTests {
         #expect(client.closed())
     }
 
+    // MARK: The live protocol on the Unix socket (the live plan's I1, LW-D8)
+
+    /// `subscribe` is a request kind on the server's socket as on a WebSocket, for anyone of the uid: its reply, then a
+    /// snapshot of the collection, then a delta when a session's status changes, `prev` the snapshot's `seq`.
+    @Test func subscribeOnTheUnixSocketGetsASnapshotThenDeltas() async throws {
+        let node = try await ScratchNode(scratch)
+        let agent = try await HookedAgent.start(node)
+        try agent.hook(node, "UserPromptSubmit")
+        let client = try WireClient(node)
+        #expect(client.hello.kinds.contains("subscribe") && client.hello.auth == nil && client.hello.assets == nil)
+        let replied = client.request("subscribe", args: ["sub": .string("s1"), "collection": .string("sessions")], action: nil)
+        let reply = try #require(WireClient.reply(replied), "\(replied.map { String(decoding: $0, as: UTF8.self) })")
+        #expect(reply.ok && reply.result?["mode"]?.string == "snapshot" && reply.result?["sub"]?.string == "s1", "\(reply)")
+        let snapshot = try #require(client.next(until: { _ in true }).first.flatMap { NodeWire.decode(NodeWire.Value.self, $0) })
+        #expect(snapshot["kind"]?.string == "snapshot" && snapshot["collection"]?.string == "sessions", "\(snapshot)")
+        #expect(WireSchema.check(snapshot, as: "frame") == nil, "\(snapshot)")
+        var mine = try #require(snapshot["seq"]?.int)
+        // The server scans every 2 s and the hook's write is coalesced: the agent shows up working, then needs you.
+        var seen: NodeWire.Value?
+        try agent.hook(node, "PermissionRequest")
+        let deadline = Date().addingTimeInterval(60)
+        while seen == nil, Date() < deadline {
+            for line in client.next(until: { _ in true }, timeout: 5) {
+                let event = try #require(NodeWire.decode(NodeWire.Value.self, line))
+                #expect(event["kind"]?.string == "delta" && event["sub"]?.string == "s1", "\(event)")
+                #expect(event["prev"]?.int == mine, "a delta's prev is the seq sent before: \(event)")
+                #expect(WireSchema.check(event, as: "frame") == nil, "\(event)")
+                mine = event["seq"]?.int ?? mine
+                let change = event["changes"]?.array?.first { $0["id"]?.string == agent.id }
+                if change?["value"]?["shownStatus"]?.string == "needs-you" { seen = change }
+            }
+        }
+        #expect(seen?["value"]?["terminal"]?.string == agent.session.tty, "\(node.said)")
+        // `unsubscribe` ends it: its reply is `{}`.
+        let ended = try #require(WireClient.reply(client.request("unsubscribe", args: ["sub": .string("s1")], action: nil)))
+        #expect(ended.ok && ended.result == .object([:]), "\(ended)")
+    }
+
+    /// A line client asking between events gets them on the same lines, in order, between its replies: an event never
+    /// splits a reply, and every request still gets its one reply.
+    @Test func aLineClientGetsEventsBetweenReplies() async throws {
+        let node = try await ScratchNode(scratch)
+        let agent = try await HookedAgent.start(node)
+        let client = try WireClient(node)
+        _ = client.request("subscribe", args: ["sub": .string("n"), "collection": .string("sessions")], action: nil)
+        var betweenReplies = false
+        var event = "Stop"
+        let deadline = Date().addingTimeInterval(60)
+        while !betweenReplies, Date() < deadline {
+            try agent.hook(node, event)
+            event = event == "Stop" ? "UserPromptSubmit" : "Stop"
+            let messages = client.request("questions", action: nil, timeout: 10)
+            let kinds = messages.map { NodeWire.decode(NodeWire.Envelope.self, $0) }
+            #expect(kinds.last??.re != nil, "the request's reply comes last: \(messages.map { String(decoding: $0, as: UTF8.self) })")
+            #expect(kinds.filter { $0?.re != nil }.count == 1)
+            betweenReplies = kinds.dropLast().contains { $0?.kind == "delta" || $0?.kind == "snapshot" }
+        }
+        #expect(betweenReplies, "no event came between two replies: \(node.said)")
+    }
+
     @Test func aNewerVersionIsAnsweredAndClosed() async throws {
         let node = try await ScratchNode(scratch)
         let client = try WireClient(node)
@@ -111,10 +171,10 @@ struct ServerTests {
         let node = try await ScratchNode(scratch)
         let client = try WireClient(node)
         // Kinds no list names (`lead` is taken from E4, the cards and the lead's questions from E6, the hooks from the
-        // start plan's S6, `build.switch` from its S8b). The live protocol's kinds are named and not yet taken: each is
-        // answered `unknown-kind` until the live plan's integration task that wires it (W0).
+        // start plan's S6, `build.switch` from its S8b). The live protocol's later kinds are named and not yet taken: each
+        // is answered `unknown-kind` until the live plan's integration task that wires it (slice 1's are taken from I1).
         let live = Set(NodeWire.kinds.keys).subtracting(NodeWire.taken)
-        #expect(live == ["subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close"])
+        #expect(live == ["chat.page", "draft", "draft.clear", "term.open", "term.close"])
         for kind in ["shell", "exec", ""] + live.sorted() {
             let reply = try #require(WireClient.reply(client.request(kind, args: ["folder": .string("/")])), "\(kind)")
             #expect(reply.ok == false && reply.error?.code == "unknown-kind", "\(kind): \(reply)")

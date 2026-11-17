@@ -1,0 +1,189 @@
+import Foundation
+import VibeCore
+
+/// The live protocol and the web page joined to a server (the live plan's I1): the hub (lane B) fed by the stores, the
+/// gate and its tokens (lane F), the page's files (lane C) and the listener (lane A), each behind its seam. The
+/// integrator's file; `ServerStart` makes one, `NodeServer` hands it the Unix socket's `subscribe`, and `Requests` its
+/// `web.open` and `web.revoke`.
+///
+/// - **Streams.** `node` (`NodeStatusStore`: `status` less its lists, with `web`), `sessions` (`Session.liveValue`, by
+///   terminal), `leads` (`status`'s lead values, by root) and `cards` (`CardStore.Card.value`, by `at`). A lead's value
+///   says its open cards and the witness's looks, which `LeadStore` doesn't send, so the leads are looked at again on
+///   each change of the leads or the cards and at each of the engine's refreshes; an equal value sends nothing.
+/// - **The web.** Off until a code or a token is alive (LW-D3): `follow()` at the start binds it only when
+///   `web-tokens.json` holds a live token. `web.open` binds it (`WebAccess.listen`); a revoke closes every page
+///   (`revoked`, 4403) and, with nothing alive, the listener. A sweep at each housekeeping drops late codes, closes a
+///   page whose token ran out, and lets the listener go once nothing wants it.
+/// - **A web connection** is screened first (`WebRequestScreen`: a token reads and drafts, never the user's voice),
+///   then the hub takes `subscribe` and `unsubscribe`, and what is left (`status`, `questions`) goes to `Requests` as a
+///   peer that is nobody's voice.
+///
+/// On the engine's queue (`queue`): the listener's sockets are served there too, so a store's change, the hub's delta
+/// and its frame are written in one turn, with no hop between (the plan's LW-D14).
+public final class NodeLive: @unchecked Sendable {
+    public let queue: DispatchQueue
+    public let hub: LiveHub
+    public let status: NodeStatusStore
+    public let access: WebAccess
+    public let web: NodeWebListener
+    /// The page's files: the embedded ones, or a scratch server's folder.
+    public let assets: LiveAssets
+
+    private let requests: Requests
+    private let sessions: NodeSessions?
+    private let engine: LeadEngine?
+    private let clock: NodeClock
+    private let note: @Sendable (String) -> Void
+    /// The leads' values as the `leads` stream follows them (a lead's open cards and looks are `status`'s additions).
+    private let leads = Changes<NodeWire.Value>()
+    private var leadIDs: Set<String> = []
+    private var follows: [Subscription] = []
+    private var ticks: [Subscription] = []
+
+    /// How often late codes are dropped and pages whose token ran out are closed, in seconds.
+    public static let sweepEvery = 30
+
+    /// `port`: the web's (`NodeWeb.port` on the user's node; a scratch server's `--test-web-port=`, 0 for the kernel's
+    /// pick). `webRoot`: a scratch server's `--test-web-root=`. `clock`: the engine's.
+    public init(requests: Requests, sessions: NodeSessions?, engine: LeadEngine?, clock: NodeClock, port: UInt16 = NodeWeb.port,
+                webRoot: URL? = nil, note: @escaping @Sendable (String) -> Void = { _ in }) {
+        queue = requests.queue
+        self.requests = requests
+        self.sessions = sessions
+        self.engine = engine
+        self.clock = clock
+        self.note = note
+        hub = LiveHub(queue: queue, epoch: requests.epoch)
+        access = WebAccess(tokens: WebTokens(root: requests.root), note: note)
+        let bound = BoundPort()
+        let assets = LiveAssets(folder: webRoot, port: { bound.port })
+        self.assets = assets
+        web = NodeWebListener(port: port, assets: assets, gate: access, handler: WebRequestScreen(hub, note: note), queue: queue,
+                              clock: clock, hello: { [weak requests] admission in
+                                  guard let requests else { return nil }
+                                  return NodeWire.message(requests.webHello(admission, assets: assets.build))
+                              }, note: { note($0) })
+        bound.web = web
+        let said = SaidWeb()
+        status = NodeStatusStore(requests: requests, web: { said.live?.webValue() ?? NodeStatusStore.webOff })
+        let web = web
+        access.listen = {
+            if let port = web.port { return .success(port) }
+            do {
+                return .success(try web.start())
+            } catch {
+                if case .refused(let why) = web.state { return .failure(WebTokens.Refusal(why)) }
+                return .failure(WebTokens.Refusal("\(error)"))
+            }
+        }
+        access.onChange = { [weak self] in
+            self?.queue.async {
+                guard let self else { return }
+                self.web.follow()
+                self.status.look()
+            }
+        }
+        access.onRevoke = { web.closeAll(code: "revoked", reason: "this page's access was revoked: run `vibeswitcher web` again") }
+        hub.others = { [weak requests] request, transport, _ in
+            requests?.handle(request, from: NodeLive.webPeer) { reply in transport.send(NodeWire.message(reply)) }
+        }
+        requests.web = access
+        requests.webValue = { said.live?.webValue() ?? NodeStatusStore.webOff }
+        said.live = self
+    }
+
+    /// A web connection as `Requests` sees it: no process, no terminal, no cgroup. It is never the user's voice (the
+    /// screen refuses those kinds before; this is the second lock), and nobody's tool server.
+    static let webPeer = PeerFacts(pid: 0, uid: nil, cgroup: nil, ancestry: nil, terminal: .none, sessionMarker: nil, underRunner: nil)
+
+    /// The streams fed, the leads looked at, the web brought to what the tokens want, and the sweeps on the clock. On
+    /// `queue`, once.
+    public func start() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        let sessionsStream = LiveStream(collection: "sessions", order: .field("terminal"))
+        let leadsStream = LiveStream(collection: "leads", order: .field("root"))
+        let cardsStream = LiveStream(collection: "cards", order: .fields(["at"]))
+        let nodeStream = LiveStream(collection: "node")
+        for stream in [sessionsStream, leadsStream, cardsStream, nodeStream] { hub.add(collection: stream.collection, stream) }
+        if let sessions {
+            hub.follow(sessions.changes, into: sessionsStream) { $0.liveValue }
+            status.watch(sessions.changes)
+        }
+        status.watch(requests.link.changes)
+        if let engine {
+            hub.follow(engine.cards.changes, into: cardsStream) { $0.value }
+            status.watch(engine.leads.changes)
+            status.watch(engine.cards.changes)
+            follows.append(engine.leads.changes.subscribe(on: queue) { [weak self] _ in self?.lookLeads() })
+            follows.append(engine.cards.changes.subscribe(on: queue) { [weak self] _ in self?.lookLeads() })
+        }
+        lookLeads()
+        hub.follow(leads, into: leadsStream) { $0 }
+        status.start(clock: clock)
+        hub.follow(status.changes, into: nodeStream) { $0 }
+        ticks.append(clock.every(NodeStatusStore.refreshEvery) { [weak self] in self?.lookLeads() })
+        ticks.append(clock.every(Self.sweepEvery) { [weak self] in self?.sweep() })
+        // After a restart, the web is bound again only when a token is alive (LW-D3).
+        web.follow()
+        if case .refused(let why) = web.state { note("the web isn't up: \(why)") }
+    }
+
+    /// Late codes dropped, pages whose token ran out closed, and the listener let go once nothing wants it.
+    func sweep() {
+        access.sweep()
+        web.closeUnheld()
+        web.follow()
+        status.look()
+    }
+
+    /// Each lead's value now, sent when it changed; a lead gone is removed. On `queue`.
+    private func lookLeads() {
+        guard let engine else { return }
+        var now: [String: NodeWire.Value] = [:]
+        for lead in engine.leads.leads.values { now[lead.project] = requests.leadValue(lead) }
+        for gone in leadIDs.subtracting(now.keys).sorted() { leads.send(gone, nil) }
+        for id in now.keys.sorted() { leads.send(id, now[id]) }
+        leadIDs = Set(now.keys)
+    }
+
+    /// `status`'s and the `node` stream's `web`: the listener's state (`off`, `listening`, `refused: <why>`), its port,
+    /// the tokens alive and the connections open.
+    public func webValue() -> NodeWire.Value {
+        let state: String, port: NodeWire.Value
+        switch web.state {
+        case .off: (state, port) = ("off", .null)
+        case .on(let bound): (state, port) = ("listening", .int(Int(bound)))
+        case .refused(let why): (state, port) = ("refused: " + why, .null)
+        }
+        return .object(["state": .string(state), "port": port, "tokens": .int(access.tokens.live(now: Date())),
+                        "connections": .int(web.connectionCount)])
+    }
+
+    /// This, once made: what `status` and the `node` stream ask for `web`.
+    private final class SaidWeb: @unchecked Sendable {
+        weak var live: NodeLive?
+    }
+
+    /// The listener, once made: its port is the page's origin, which the files' policy names.
+    private final class BoundPort: @unchecked Sendable {
+        weak var web: NodeWebListener?
+        var port: UInt16 { web?.port ?? 0 }
+    }
+}
+
+/// The page's files as the listener serves them: the embedded ones (the user's node, rule 10), or a scratch server's
+/// folder read at each request; their policy names the port the listener is bound to.
+public struct LiveAssets: WebAssetSource {
+    public let folder: URL?
+    let port: @Sendable () -> UInt16
+
+    public func asset(path: String) -> WebAsset? {
+        if let folder { return FolderAssets(root: folder, port: port()).asset(path: path) }
+        return EmbeddedAssets(port: port()).asset(path: path)
+    }
+
+    /// `hello.assets`: the build of the files served now.
+    public var build: String {
+        folder.flatMap { FolderAssets(root: $0, port: 0).build } ?? EmbeddedAssets.build
+    }
+}

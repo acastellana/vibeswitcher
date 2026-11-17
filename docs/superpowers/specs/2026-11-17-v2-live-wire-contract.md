@@ -108,7 +108,7 @@ Server, on success: `hello`, `NodeWire.Hello`'s fields as today plus `auth` and 
 ```json
 {"v":1,"kind":"hello","node":"local","epoch":"0b6c1a52-3f0e-4c58-9a57-2d1c8e4f7a10",
  "server":{"commit":"f62aef61","startedAt":"2026-11-17T09:12:44.031Z","pid":41822},
- "host":{"startedAt":"2026-11-17T08:01:10.555Z","notes":null,"pid":41790},
+ "host":{"startedAt":"2026-11-17T08:01:10.555Z","pid":41790},
  "kinds":["status","questions","subscribe","unsubscribe","chat.page","draft","draft.clear"],
  "peer":{"voice":"other","why":"a web client: it reads and drafts, and is never the user's voice"},
  "rule":"systemd",
@@ -118,6 +118,7 @@ Server, on success: `hello`, `NodeWire.Hello`'s fields as today plus `auth` and 
 
 | Field | Type | Meaning |
 | --- | --- | --- |
+| `host.notes` | object, optional | the host's notes as last asked; left out (not `null`) when the server has none yet |
 | `epoch` | string (UUID) | made at each server start (`Requests.epoch`). A different one than last time: the server restarted |
 | `kinds` | [string] | the request kinds this connection may send. A web connection's list is the read and draft kinds only |
 | `peer.voice` | `"user"` \| `"other"` | always `"other"` on a WebSocket |
@@ -333,7 +334,7 @@ shows them as text nodes only, never as markup, and the command line prints them
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `project` | string | the id: `local:project:` and 12 characters; no path in it |
+| `project` | string | the id: `local:project:` and 12 characters of base64url, a hash of the root (`NodeIds.project(root:)`); no path in it |
 | `root` | string † | the repository's top |
 | `session` | string? | the live lead session's id (a `sessions` id), if one runs |
 | `named` | string? | the session the board names as the lead |
@@ -561,7 +562,7 @@ shows a state the server didn't confirm for long:
 The stream stays the truth: the effect reaches every other client, and this one, as a delta. Chat keys in `applied`
 are `chat:<session id>`.
 
-### Vectors: a draft, acked
+### Vectors: a draft, acked (`draft.acked`)
 
 ```json
 {"v":1,"id":"12","kind":"draft","action":"6f1d2a34-9b8c-4e7d-a1f0-3c5b7d9e2f46",
@@ -570,10 +571,10 @@ are `chat:<session id>`.
 ```json
 {"v":1,"kind":"delta","sub":"s3","prev":57,"seq":58,"at":"2026-11-17T09:15:11.900Z",
  "changes":[{"id":"local:card:5b2e9c0a-7d41-4f6e-b3a8-1c9d0e2f4a67","value":{"id":"local:card:5b2e9c0a-7d41-4f6e-b3a8-1c9d0e2f4a67",
-   "kind":"question","project":"local:project:Qm3xT9aLk2Pz","root":"/home/u/acme-site","open":true,"closed":null,"notice":null,
+   "kind":"question","project":"local:project:NNIR0a8Cgphg","root":"/home/u/acme-site","open":true,"closed":null,"notice":null,
    "at":"2026-11-17T09:02:41.700Z","blocking":true,
    "question":{"id":"q-7","short":"q-7","text":"Merge the login fix now, or wait for the audit?","options":["Yes, merge it","Wait for the audit"],
-     "priority":"blocking","whyNow":"Two tasks wait on it","version":2,"revisionNote":null,"proposal":null,"decideBy":null,
+     "priority":"blocking","whyNow":"Two tasks wait on it","version":2,"revisionNote":"Named the audit as the other choice","proposal":null,"decideBy":null,
      "state":"open","answer":null,"answeredVersion":null,"withdrawReason":null,"task":"login-fix"},
    "draft":{"text":"Yes, merge it","version":2,"at":"2026-11-17T09:15:11.898Z","action":"6f1d2a34-9b8c-4e7d-a1f0-3c5b7d9e2f46"}}}]}
 ```
@@ -581,15 +582,15 @@ are `chat:<session id>`.
 {"v":1,"re":"12","ok":true,"result":{"applied":{"cards":58},"card":"local:card:5b2e9c0a-7d41-4f6e-b3a8-1c9d0e2f4a67"}}
 ```
 
-### Vectors: refused
+### Vectors: refused (`draft.refused`, `answer.from-a-page`)
 
-A draft for a wording the lead has since revised:
+A draft for a wording the lead has since revised (`draft.refused`):
 
 ```json
 {"v":1,"re":"13","ok":false,"error":{"code":"refused","message":"the lead revised question q-7 (version 3): read it again"}}
 ```
 
-An `answer` sent from a page:
+An `answer` sent from a page (`answer.from-a-page`):
 
 ```json
 {"v":1,"re":"14","ok":false,"error":{"code":"voice","message":"not the user's voice: a web client drafts, and `vibeswitcher answer` confirms"}}
@@ -680,7 +681,7 @@ The frames of a page's first connection, in order. Each is in `WebApp/wire/vecto
 
 ```json
 {"v":1,"kind":"snapshot","sub":"s2","collection":"leads","epoch":"0b6c1a52-3f0e-4c58-9a57-2d1c8e4f7a10","seq":12,
- "entries":[{"id":"local:project:Qm3xT9aLk2Pz","value":{"project":"local:project:Qm3xT9aLk2Pz","root":"/home/u/acme-site",
+ "entries":[{"id":"local:project:NNIR0a8Cgphg","value":{"project":"local:project:NNIR0a8Cgphg","root":"/home/u/acme-site",
    "session":"local:3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f","named":"3F6C2C1E-8A5B-4C1D-9E0F-2B7A6D5C4E3F",
    "bound":"3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f","replaced":[],"held":0,"reportsWaiting":0,"notice":null,
    "starting":false,"lastStart":"started","lastStartAt":"2026-11-17T08:40:02.410Z","looks":211,

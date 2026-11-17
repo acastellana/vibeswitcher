@@ -21,6 +21,7 @@ let usage = """
            vibeswitcher config held [FOLDER] [--diff NAME] | config accept CARD
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher hooks install|remove [--agent claude|codex]
+           vibeswitcher web [--revoke]
     """
 
 let words = Array(CommandLine.arguments.dropFirst())

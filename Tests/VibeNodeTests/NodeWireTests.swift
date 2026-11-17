@@ -53,16 +53,18 @@ struct NodeWireTests {
 
     /// The live protocol's kinds (the live wire contract, W0): named with the voice each needs, and taken by no server
     /// until the integration task that wires each (I1 to I4), so a server answers them `unknown-kind` as before.
-    @Test func theLiveKindsAreNamedAndNotYetTaken() {
+    /// The live protocol's kinds, each with its voice; slice 1's (I1) taken, the later slices' not yet.
+    @Test func theLiveKindsAreNamedAndSliceOnesTaken() {
         let live: [String: NodeWire.Voice] = [
             "subscribe": .anyone, "unsubscribe": .anyone, "chat.page": .anyone,
             "draft": .webDraft, "draft.clear": .webDraft,
             "web.open": .user, "web.revoke": .user,
             "term.open": .webTerminal, "term.close": .webTerminal,
         ]
+        let sliceOne: Set = ["subscribe", "unsubscribe", "web.open", "web.revoke"]
         for (kind, voice) in live {
             #expect(NodeWire.kinds[kind] == voice, "\(kind)")
-            #expect(!NodeWire.taken.contains(kind), "\(kind)")
+            #expect(NodeWire.taken.contains(kind) == sliceOne.contains(kind), "\(kind)")
         }
         // What a server takes is a part of what the protocol names.
         #expect(Set(NodeWire.taken).isSubset(of: Set(NodeWire.kinds.keys)))
