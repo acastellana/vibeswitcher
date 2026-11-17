@@ -51,8 +51,9 @@ public enum RefusedGit {
         }
     }
 
-    /// The refusal a git in `line` would run with, or nil when none does.
-    public static func refusal(in line: String) -> Refusal? {
+    /// The refusal a git in `line` would run with, or nil when none does. `rules`: the role's deny rules that run git
+    /// (`LeadLaunch.gitRules`).
+    public static func refusal(in line: String, rules: [String] = []) -> Refusal? {
         guard let commands = ShellWords.commands(in: line) else { return .unreadable }
         for words in commands {
             if let option = refusal(command: words) { return .option(option) }

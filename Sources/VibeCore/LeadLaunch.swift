@@ -310,13 +310,22 @@ public enum LeadLaunch {
     /// reads no brief asks for. Nor `RefusedGit.spellingRules`: the same options as `git -C` and the rest, spelled again.
     public static func deniedGit(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         var seen = Set<String>()
-        let patterns = Set(outsideReads + RefusedGit.spellingRules)
-        return deny(role, base: base, records: records).compactMap { rule -> String? in
-            guard rule.hasPrefix("Bash("), rule.hasSuffix(")"), !patterns.contains(rule) else { return nil }
+        return gitRules(role, base: base, records: records).compactMap { rule -> String? in
             var command = String(rule.dropFirst("Bash(".count).dropLast())
             if command.hasSuffix(":*") { command.removeLast(2) }
-            guard command.hasPrefix("git ") || command.hasSuffix(" git") || command.hasSuffix("/git") else { return nil }
             return seen.insert(command).inserted ? command : nil
+        }
+    }
+
+    /// The `Bash(...)` rules of `deny` that run git, as `deniedGit` lists them: the one list both the briefs and the
+    /// `PreToolUse` hook read (`RefusedGit.refusal(in:rules:)`, which refuses each also behind a global option).
+    public static func gitRules(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
+        let patterns = Set(outsideReads + RefusedGit.spellingRules)
+        return deny(role, base: base, records: records).filter { rule in
+            guard rule.hasPrefix("Bash("), rule.hasSuffix(")"), !patterns.contains(rule) else { return false }
+            var command = String(rule.dropFirst("Bash(".count).dropLast())
+            if command.hasSuffix(":*") { command.removeLast(2) }
+            return command.hasPrefix("git ") || command.hasSuffix(" git") || command.hasSuffix("/git")
         }
     }
 
@@ -366,10 +375,15 @@ public enum LeadLaunch {
     /// witness declines a verifier's when no one answers it: `LeadWitness.stuckPrompts`). Loaded from `--settings`
     /// whatever `--setting-sources` says. The same command is the role's `PreToolUse` hook, asked about every Bash call
     /// in every permission mode (auto mode's included, where nothing reaches a prompt): it refuses git with a refused
-    /// option in a spelling no deny rule names (`RefusedGit`).
-    public static func hooks(_ role: Role, server: String, root: String) -> [String: Any] {
+    /// option in a spelling no deny rule names, a refused git command behind a global option, and git's settings through
+    /// its environment (`RefusedGit`). A worker's names its `base` and `records`, which its git rules name (`gitRules`).
+    public static func hooks(_ role: Role, server: String, root: String, base: String? = nil, records: String? = nil) -> [String: Any] {
         var words = [RecentProjects.shellQuote(server), ReadOnlyCommand.hookArgument, ReadOnlyCommand.rootArgument, RecentProjects.shellQuote(root)]
-        if role == .worker { words.append(ReadOnlyCommand.workerArgument) }
+        if role == .worker {
+            words.append(ReadOnlyCommand.workerArgument)
+            if let base { words += [ReadOnlyCommand.baseArgument, RecentProjects.shellQuote(base)] }
+            if let records { words += [ReadOnlyCommand.recordsArgument, RecentProjects.shellQuote(records)] }
+        }
         let hook: [[String: Any]] = [["matcher": "Bash", "hooks": [["type": "command", "command": words.joined(separator: " "), "timeout": 10]]]]
         return ["PermissionRequest": hook, "PreToolUse": hook]
     }
@@ -597,7 +611,7 @@ public enum LeadLaunch {
             setAsideMemory(cwd: cwd)
         }
         if !env.isEmpty { settings["env"] = env }
-        settings["hooks"] = hooks(role, server: server, root: cwd)
+        settings["hooks"] = hooks(role, server: server, root: cwd, base: branch, records: records)
         // The account's usage windows reach VibeSwitcher only through a status line's input: its own records them and
         // shows yours (see `UsageStatusLine`): for a verifier, only your user settings' (its project settings don't run).
         settings["statusLine"] = UsageStatusLine.settings(server: server, userOnly: role == .verifier)

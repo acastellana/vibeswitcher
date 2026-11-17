@@ -35,7 +35,7 @@ struct RefusedGitSpellingsTests {
 
         /// The tool server's hook options for `event`'s hook, as its command line in the settings sets them up; nil
         /// without one.
-        func hook(_ event: String) -> (root: String?, writes: Bool)? {
+        func hook(_ event: String) -> ReadOnlyCommand.HookOptions? {
             let groups = (settings["hooks"] as? [String: Any])?[event] as? [[String: Any]]
             guard let group = groups?.first(where: { $0["matcher"] as? String == "Bash" }),
                   let command = (group["hooks"] as? [[String: Any]])?.first?["command"] as? String,
@@ -47,7 +47,8 @@ struct RefusedGitSpellingsTests {
         func hookDenies(_ line: String, cwd: String) throws -> Bool {
             guard let options = hook("PreToolUse") else { return false }
             let event: [String: Any] = ["hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": ["command": line], "cwd": cwd]
-            guard let answer = ReadOnlyCommand.hookAnswer(try JSONSerialization.data(withJSONObject: event), root: options.root, writes: options.writes),
+            guard let answer = ReadOnlyCommand.hookAnswer(try JSONSerialization.data(withJSONObject: event), root: options.root, writes: options.writes,
+                                                          base: options.base, records: options.records),
                   let object = try JSONSerialization.jsonObject(with: answer) as? [String: Any],
                   let output = object["hookSpecificOutput"] as? [String: Any] else { return false }
             return output["hookEventName"] as? String == "PreToolUse" && output["permissionDecision"] as? String == "deny"

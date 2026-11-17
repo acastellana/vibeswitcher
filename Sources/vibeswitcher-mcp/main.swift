@@ -32,13 +32,14 @@ if let at = CommandLine.arguments.dropFirst().firstIndex(of: MCPKeeper.flag) {
     exit(MCPKeeper.run(executable: executable, arguments: arguments))
 }
 
-// `vibeswitcher-mcp --read-only-permission --root WORKTREE [--worker]`, as a role's `PermissionRequest` hook (see
+// `vibeswitcher-mcp --read-only-permission --root WORKTREE [--worker [--base BRANCH] [--records FOLDER]]`, as a role's `PermissionRequest` hook (see
 // `LeadLaunch.hooks`): the event's JSON on stdin; prints the allow for a command line that only reads inside WORKTREE
 // (and for a worker, its own commits: `ReadOnlyCommand`), nothing otherwise (the prompt shows). First, so a hook runs
 // none of the server's code.
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == ReadOnlyCommand.hookArgument {
     if let options = ReadOnlyCommand.hookOptions(Array(CommandLine.arguments.dropFirst(2))),
-       let answer = ReadOnlyCommand.hookAnswer(FileHandle.standardInput.readDataToEndOfFile(), root: options.root, writes: options.writes) {
+       let answer = ReadOnlyCommand.hookAnswer(FileHandle.standardInput.readDataToEndOfFile(), root: options.root, writes: options.writes,
+                                               base: options.base, records: options.records) {
         FileHandle.standardOutput.write(answer)
     }
     exit(0)

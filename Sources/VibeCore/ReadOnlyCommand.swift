@@ -13,10 +13,13 @@ import Foundation
 /// Claude Code asks its `PermissionRequest` hook (`hookArgument`) only about what they let through.
 public enum ReadOnlyCommand {
     /// The tool server's argument that makes it a role's `PermissionRequest` hook (see `hookAnswer`), followed by
-    /// `--root <worktree>` and, for a worker, `--worker`.
+    /// `--root <worktree>` and, for a worker, `--worker`, then its base branch and records folder (`--base <branch>`,
+    /// `--records <folder>`: what its deny rules name, `LeadLaunch.deny`).
     public static let hookArgument = "--read-only-permission"
     public static let rootArgument = "--root"
     public static let workerArgument = "--worker"
+    public static let baseArgument = "--base"
+    public static let recordsArgument = "--records"
 
     /// Where a line runs, and for whom. `root`: the worktree (or the lead's checkout) every path must stay in, symlinks
     /// resolved (`resolvesInside`); without one, a path is judged by its text alone (absolute, "~" and climbing out of
@@ -165,12 +168,16 @@ public enum ReadOnlyCommand {
     /// permission mode: it refuses a line that runs git with a refused option in any spelling (`RefusedGit`), or one
     /// nested too deep to read (`ShellWords.depthLimit`), and says
     /// nothing about any other (the call then goes on to the rules, and to the prompt or the `PermissionRequest` event).
-    public static func hookAnswer(_ input: Data, root: String? = nil, writes: Bool = false) -> Data? {
+    /// `base` and `records` are the worker's (`writes`), for the git commands its deny rules refuse (`LeadLaunch.gitRules`):
+    /// the hook refuses them behind any global option too.
+    public static func hookAnswer(_ input: Data, root: String? = nil, writes: Bool = false, base: String? = nil, records: String? = nil) -> Data? {
         guard let object = try? JSONSerialization.jsonObject(with: input) as? [String: Any],
               object["tool_name"] as? String == "Bash",
               let command = (object["tool_input"] as? [String: Any])?["command"] as? String else { return nil }
         if object["hook_event_name"] as? String == "PreToolUse" {
-            guard let refusal = RefusedGit.refusal(in: command) else { return nil }
+            // The lead's and the verifier's git rules are the same (`RefusedGitCommandsTests`); a worker's name its base.
+            let rules = LeadLaunch.gitRules(writes ? .worker : .lead, base: base, records: records)
+            guard let refusal = RefusedGit.refusal(in: command, rules: rules) else { return nil }
             let answer: [String: Any] = ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "deny",
                                                                 "permissionDecisionReason": refusal.reason]]
             return try? JSONSerialization.data(withJSONObject: answer, options: [.sortedKeys])
@@ -180,15 +187,40 @@ public enum ReadOnlyCommand {
         return try? JSONSerialization.data(withJSONObject: answer, options: [.sortedKeys])
     }
 
-    /// The hook's command-line arguments after `hookArgument` (`--root <worktree>`, then `--worker` for a worker):
-    /// nil for anything else, and the hook then allows nothing.
-    public static func hookOptions(_ arguments: [String]) -> (root: String?, writes: Bool)? {
-        switch arguments.count {
-        case 0: return (nil, false)
-        case 2 where arguments[0] == rootArgument: return (arguments[1], false)
-        case 3 where arguments[0] == rootArgument && arguments[2] == workerArgument: return (arguments[1], true)
-        default: return nil
+    /// What the hook's command line says: the worktree, whether it's a worker's, and the worker's base branch and
+    /// records folder.
+    public struct HookOptions: Equatable, Sendable {
+        public var root: String?
+        public var writes = false
+        public var base: String?
+        public var records: String?
+    }
+
+    /// The hook's command-line arguments after `hookArgument` (`--root <worktree>`, then `--worker` for a worker, then
+    /// `--base <branch>` and `--records <folder>` if it has them): nil for anything else, and the hook then allows nothing.
+    /// A worker's hook written before `--base` still reads: its rules then guard main and master.
+    public static func hookOptions(_ arguments: [String]) -> HookOptions? {
+        var options = HookOptions()
+        guard !arguments.isEmpty else { return options }
+        guard arguments.count >= 2, arguments[0] == rootArgument else { return nil }
+        options.root = arguments[1]
+        var rest = arguments.dropFirst(2)
+        if rest.first == workerArgument {
+            options.writes = true
+            rest = rest.dropFirst()
         }
+        while rest.count >= 2, let flag = rest.first {
+            let value = rest[rest.startIndex + 1]
+            if flag == baseArgument, options.base == nil {
+                options.base = value
+            } else if flag == recordsArgument, options.records == nil {
+                options.records = value
+            } else {
+                return nil
+            }
+            rest = rest.dropFirst(2)
+        }
+        return rest.isEmpty ? options : nil
     }
 
     // MARK: Parsing
