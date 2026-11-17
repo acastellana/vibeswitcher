@@ -1,6 +1,6 @@
 ---
 format: 1920x1080
-duration: 342s
+duration: 509.4s at 1x (the delivered MP4 is 1.7x: 299.6s)
 message: "VibeSwitcher wraps Claude Code sessions in an engineering process, so one conversation can run a team you can trust."
 arc: Hook → Starting point → Structure → The task's journey (contract → worktree → report → audit → findings → gate) → What keeps it running (auto_advance, incidents, limits, models, memory) → Your controls → Comparison → Proof
 audience: developers who drive Claude Code (or Codex) sessions by hand
@@ -8,7 +8,7 @@ mode: autonomous
 ---
 
 Narrated cut: each scene's length below is the silent cut's. `tools/captions.py` now stretches each scene to fit its
-voice (`NARRATION.md`), never shorter, so the film runs 6:54. Every number is from `sources.md`. Scenes are sub-compositions in `compositions/`, mounted back to back in
+voice (`NARRATION.md`), never shorter, so the film runs 8:29 (6:54 before the update of 2026-11-17). Every number is from `sources.md`. Scenes are sub-compositions in `compositions/`, mounted back to back in
 `index.html`. Each fades in over 0.4 s and out over 0.4 s, with hard cuts between scenes. The kicker in the top-left
 (`NN / NAME`) numbers the chapters.
 
@@ -149,7 +149,8 @@ fresh agent · the routine calls it made". "A done without evidence for every ch
 - src: compositions/s07-review.html
 - motion: comparison-split; spring-pop-entrance, counting-dynamic-scale
 
-none: "the merge's full test run is the check". audit: "a verifier must pass it first". Raised anyway: sensitive
+none: "the merge's full test run is the check"; since 2026-11-17 also "small task · an audit task done in its first
+round, under 30 min of work, nothing sensitive or risky, not Codex's: merges on its tests". audit: "a verifier must pass it first". Raised anyway: sensitive
 paths (`.claude/` `AGENTS.md` `.github/` `.env` `*.entitlements` …) · the risk check (over 400 lines outside tests ·
 deletes or rewrites files · changes permissions · spawns processes · adds locks or threads · touches test or build
 setup · removes tests · plus a small model's look) · a random 10 % sample. "Nothing can lower a review." Count: 35
@@ -211,6 +212,19 @@ Hung: "no output, under 1 % of a core for 10 min → stopped, naming the last te
 installed build · status says when the base holds gate code that build lacks". Record: 495 merges, each tested at the
 gate · 72 passed only on the rerun · up to 3,986 tests a run · 0 reverts.
 
+## Frame 11b: Merges keep flowing (s20, added 2026-11-17)
+
+- scene: Faster runs on the left; a "Merges are held" report types itself on the right, its causes lighting up
+- duration: 18s (base; 28s narrated)
+- status: animated
+- src: compositions/s20-flow.html
+- motion: waterfall-entry (list), typewriter-reveal (report), spring-pop-entrance (cause chips)
+
+Left, "faster runs": the run takes the free cores (`VS_HEAVY_CORES`) · only failing tests run again · red on main too →
+merges and a fix task is filed · main red: each worker told once, and again when green. Right: the report ("Merges are
+held: task-a, task-b have been ready to merge for 24 min with no merge landing. Cause: the battery hold.") · causes ·
+"after 20 min · at most every 30 min · minutes counted awake, 'paused by sleep'".
+
 ## Frame 12: It moves on its own
 
 - scene: An auto_advance loop: events on the left trigger steps on the right
@@ -239,6 +253,19 @@ task `turn-this-incident-into-10` → check: "`stall_min`: a run with no output 
 stopped, and the last test it started is named." Counts: 21 incidents recorded · 21 turned into check tasks · 33 of
 the lead's 52 rules enforced by a check or test.
 
+## Frame 13b: The app checks itself (s21, added 2026-11-17)
+
+- scene: Three cards (UI journeys, App health, Memory), then four counters
+- duration: 18s (base; 31.7s narrated)
+- status: animated
+- src: compositions/s21-self-check.html
+- motion: grid-card-assemble; counting-dynamic-scale
+
+UI journeys: scripted sandbox runs, each shot diffed against its baseline (`scripts/ui-journeys.sh`). App health: the
+app's freezes, crashes and error lines by cause; 3 of 7 days or doubling → a proposed task (`watch_app_logs`). Memory:
+macOS 27.2's malloc kept freed pages (+74 MB an hour) → `MallocLargeCache=0`; chat images decoded at the size shown,
+two at a time. Counters: 4 journeys · 0.05 % · +178 MB (from +1,012) · 3 of 7.
+
 ## Frame 14: A shared Mac, a finite account
 
 - scene: Three gauges (time, attention, capacity) with their thresholds
@@ -264,13 +291,12 @@ AC power: 18 sessions, load 36, 3 slots.
 - src: compositions/s15-models.html
 - motion: comparison-split; counting-dynamic-scale
 
-Fable, judgment: "audits, by default: a model other than the workers'" (today), and, dashed as the lead's decision of
-2026-11-12 that is still being built: "the lead's advisor · hard tasks and re-rolls · sensitive and security audits".
-Opus, doing: "the workers' model in this project · routine audits, for now" (today), "the default everywhere else"
-(decided, being built). Codex, bounded: "mechanical tasks with a tight contract · `agent: auto` picks
-it when Claude is tight (a limit at 70 %, or 10 points ahead of pace) and Codex has room · always audited by a Claude
-verifier". "Verifier and worker on different models, by default." Sessions launched: Opus 175 · Fable 70 · Codex 17 ·
-Sonnet 8. Note: "dashed: the lead's routing decision of 2026-11-12, being built".
+Updated 2026-11-17, the routing now built (a3e2a30e) and the Fable fallback shown. Fable, judgment: "the lead · advisor
+on hard tasks · re-rolls · sensitive and security audits". Opus, doing: "the workers' model in this project · routine
+audits · the lead, while Fable is held back". Codex, bounded: "mechanical tasks, tight contracts · agent: auto, when
+Claude is tight · always audited by Claude". Bottom: "At Fable's usage limit, workers and audits start on Opus, a halted
+worker restarts on Opus, and the lead is told. Back to Fable at the reset." Sessions launched (2026-11-12): Opus 175 ·
+Fable 70 · Codex 17 · Sonnet 8.
 
 ## Frame 16: Memory that lives in the repo
 
@@ -297,6 +323,18 @@ rounds, reruns, tests, your waits".
 
 Review rules floor · sensitive and strict paths · merge policy (an approval covers one exact commit) · Push card ·
 Shell and wallet cards · Config seal · Phone over Tailscale (replies behind their own switch).
+
+## Frame 17b: Day to day (s22, added 2026-11-17)
+
+- scene: The restart card on the left; the model chip flipping on `/model fable`, Run cards and the prompt-audit
+  reminder on the right
+- duration: 18s (base; 21.9s narrated)
+- status: animated
+- src: compositions/s22-day-to-day.html
+- motion: spring-pop-entrance; typewriter-reveal (`/model fable`)
+
+Card: "The Mac restarted" · Lead example-api · Lead example-site · Claude example-api · docs · "Leads reopen first, and
+each is told to restart its workers." · Dismiss / Choose… / Reopen all · "nothing reopens without your click".
 
 ## Frame 18: What the system adds
 
