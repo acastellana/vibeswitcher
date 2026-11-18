@@ -156,6 +156,36 @@ struct RecordsFirstTests: LeadTeamFixture {
         #expect(lead.records.mergeFailedOn.isEmpty)
     }
 
+    /// A batch, the same: the records commit lands first, then each task's commit on it.
+    @Test func uncommittedRecordLinesAtABatchsStartDontFailIt() throws {
+        let root = try repo()
+        try lintSuite(root)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.power = { nil }
+        lead.macLimits = { MacLimits(maxSessions: 12) }
+        let set = lead.call("configure", ["test_command": "bash scripts/run.sh", "merge_batching": "always"])
+        #expect(!set.isError, "\(set.text)")
+        try lead.store.appendProgress("Started")
+        guard case .committed = lead.records.flush(base: "main") else { Issue.record("records not committed"); return }
+
+        try audited(lead, runtime, root: root, slug: "add-b", files: ["b.txt": "bee\n"])
+        try audited(lead, runtime, root: root, slug: "add-c", files: ["c.txt": "sea\n"])
+        try lead.store.appendProgress("FIXED the line the lint fails on")
+        #expect(lead.records.mergeFailedOn.isEmpty)
+        let before = Git.run(["rev-parse", "main"], in: root).output
+
+        let batch = try lead.mergeBatch(["add-b", "add-c"])
+        for slug in ["add-b", "add-c"] {
+            let task = try #require(BoardStore(root: root).load().task(slug))
+            #expect(task.status == .done, "\(slug) \(task.status): \(batch.text)")
+        }
+        let landed = Git.run(["log", "--reverse", "--format=%s", "\(before)..main"], in: root).output.split(separator: "\n").map(String.init)
+        #expect(Array(landed.prefix(3)) == [LeadRecords.subject, "add-b's work", "add-c's work"], "\(landed)")
+        let onto = Git.run(["rev-list", "--reverse", "\(before)..main"], in: root).output.split(separator: "\n").first.map(String.init) ?? ""
+        #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("FIXED"))
+    }
+
     /// The commit before a merge takes only the records: the user's other changes in the main checkout (staged,
     /// unstaged, untracked) stay as they were.
     @Test func theCommitBeforeAMergeLeavesEveryOtherFileAlone() throws {
