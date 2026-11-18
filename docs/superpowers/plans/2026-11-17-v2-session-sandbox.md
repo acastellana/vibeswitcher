@@ -48,7 +48,10 @@ possible instead of adding guard rails to plain mode. The measurements below wer
 node's machine; SB0's are in the inventory (`docs/process/v2-linux-inventory.md`, "The session sandbox, measured"),
 which holds this table too. The lead accepted SB-D3, SB-D5, SB-D14 and SB-D17 on 2026-11-17; SB-D6 to SB-D9, SB-D15
 and SB-D16 wait for the user's answer, and what is built so far goes either way. Decisions marked **needs the lead**
-or **needs the user** wait for an answer; everything else is written on the recommendation.
+or **needs the user** wait for an answer; everything else is written on the recommendation. The lead's decisions of
+2026-11-18, after SB2's security review, are SB-D20 to SB-D24. That day SB0, SB1 and SB2 (with their review fixes)
+and SB4 and SB9 (with theirs) were joined on `v2-sandbox` over `v2` at `0bfae9b4`, and the joined code reviewed as an
+attacker would read it: what that found is under each task it touches, as *From the join's review*.
 
 ## Words
 
@@ -233,8 +236,9 @@ WSL mounts `/usr/lib/wsl/lib` and the kernel's modules folder read-write under `
 `nosuid` and `nodev`: a setuid program gains nothing, so `sudo`, `su`, `newgrp`, `crontab` and `at` do nothing there.
 A Windows program doesn't start (measured). The seccomp filter refuses what no session needs: sockets other than Unix,
 IPv4, IPv6 and route netlink (so `AF_VSOCK`, `AF_PACKET`, `AF_ALG`, netfilter netlink); `bpf`, `perf_event_open`,
-`userfaultfd`, the keyring calls, `kexec`, modules, `swapon`, `open_by_handle_at`; `TIOCSTI`; and, unless the
-project's `sandbox_nesting` allows it, new user namespaces and the mount calls. `ptrace` is left: inside, it reaches
+`userfaultfd`, the keyring calls, `kexec`, modules, `swapon`, `open_by_handle_at`, `io_uring`, `fanotify_init`
+(SB-D23); `TIOCSTI`; and, unless the project's `sandbox_nesting` allows it, new user namespaces and the mount calls.
+The list refuses by name until SB3b turns it round (SB-D22). `ptrace` is left: inside, it reaches
 only the box's own processes.
 
 ### Network
@@ -492,7 +496,7 @@ them most is SB0 finding that Claude Code needs something the tables don't give.
 
 | Slice | Tasks | What is confined after it | S11 items closed | Cost |
 | --- | --- | --- | --- | --- |
-| **1. Files and processes** | SB0 to SB8, with SB6b | workers, and every branch run (a merge's tests, an audit's run, `init_command`, a verifier's commands) | 1 to 11, 13 (all but `ssh localhost`), 14, 15, 16, 18 (reading), 19, 20, 23 to 26, 28, 29 for workers, and the two new ones | about 40 agent-hours: 5 days of one agent's work. Its longest chain (SB1, SB3, SB5, SB7, SB8) is 22 agent-hours, so about 3 days in four worktrees, less if agents work through the night as the engine's did; then the sweep |
+| **1. Files and processes** | SB0 to SB8, with SB3b and SB6b | workers, and every branch run (a merge's tests, an audit's run, `init_command`, a verifier's commands) | 1 to 11, 13 (all but `ssh localhost`), 14, 15, 16, 18 (reading), 19, 20, 23 to 26, 28, 29 for workers, and the two new ones | about 40 agent-hours: 5 days of one agent's work. Its longest chain (SB1, SB3, SB5, SB7, SB8) is 22 agent-hours, so about 3 days in four worktrees, less if agents work through the night as the engine's did; then the sweep |
 | **2. Network** | SB9, SB10 | the same, with a network namespace and the proxy | 18 (sending), 22, the rest of 13 and 16 | about 9 agent-hours |
 | **3. The lead and the verifiers' agents** | SB11, SB12 | every team session | 3, 6, 7, 29 for a turned lead or verifier with a shell; the allow-list no longer carries anything | about 9 agent-hours |
 | **4. The login leaves the box** | SB13 | — | the rest of 18: the agents' logins | about 4 agent-hours, after a gated measurement |
@@ -543,14 +547,19 @@ task starts.
 6. **SB-D6: In slice 1 a worker keeps the host's network; branch runs get none.** **Needs the user.**
    *Recommended*, to have the file and process locks days earlier. *Costs:* until slice 2 a worker that tries can
    still send out what it can read (its worktree, the agent's login) and reach loopback services, the Windows side's
-   included. *Otherwise:* SB9 and SB10 join slice 1 (about 9 agent-hours more), and no worker runs confined before
+   included, and the machine's abstract Unix sockets, which go with the network namespace and no mount hides (an X
+   server's `@/tmp/.X11-unix/X0` where one runs: the join's review, 2026-11-18). *Otherwise:* SB9 and SB10 join slice 1 (about 9 agent-hours more), and no worker runs confined before
    the proxy's list is right for Claude Code.
 7. **SB-D7: Egress is a proxy mode of the host's image, serving listeners the boxes make.** Each box binds
    `127.0.0.1:3128` inside its own network namespace and hands the listener out; the proxy, outside, accepts on it
    (measured). No tap device, no relay, no root, nothing installed, and each listener is one session, so each has
    its own list. One proxy per node, started by the host from a sealed copy as parsers are, non-dumpable, restarted
    when it ends. **Needs the user:** the default list per agent (recommended: the agent's API host and what SB0's
-   log shows it needs to stay logged in; telemetry and updates off).
+   log shows it needs to stay logged in; telemetry and updates off). *Recommended for Claude Code since 2026-11-18
+   (SB-D24):* `api.anthropic.com`, `platform.claude.com` (where it takes a new token: SB0's third gated run),
+   `mcp-proxy.anthropic.com` (the account's claude.ai connectors: SB0's second), and `console.anthropic.com`, which
+   SB9 listed for the login and no run has asked for. `EgressRules.defaultHosts` holds it. Still the user's to
+   confirm.
 8. **SB-D8: The agent's login is read-only inside until slice 4.** **Needs the user.** *Recommended.* *Costs:* a
    worker can read the user's Claude login until then (S11 item 18's "agents' logins"), and if Claude Code must
    rewrite the file during a long session, SB0 says so and the file becomes the one `rw` entry of the config folder.
@@ -608,6 +617,27 @@ task starts.
     node's facts. The vault binds the worker role only to a session the host confined, where the node confines
     workers (one hook in the host's `.vault` case). The app (the engine starting a lead, the user's own sessions)
     may still start a plain session.
+
+20. **SB-D20: A worker's branch is named `agent/<slug>/<name>`.** **Decided by the lead, 2026-11-18.** Git locks
+    and renames a ref beside it, so a ref is writable alone only in a folder of its own: with the branch at
+    `agent/<slug>` a worker's box would need the shared `refs/heads/agent/` and could move every other worker's
+    branch. The planner already refuses a worker whose HEAD isn't under `refs/heads/agent/<slug>/` (SB2's review).
+    SB6, the only task that edits `Worktrees.swift`, changes the engine's naming, and whatever reads a worker's branch
+    by name with it.
+21. **SB-D21: A worker's new objects are checked before they join the shared store.** **Decided by the lead,
+    2026-11-18.** A worker writes its objects to `<box>/objects`, the shared store read-only behind it. Until a merge
+    the lead's tools read the worker's commits with `<box>/objects` as an alternate (SB5). The merge runs `git fsck`
+    on the worker's new objects, the shared store as their alternate, and copies them into the shared store only when
+    it passes; a failed check fails the merge, naming it (SB6, with the merge).
+22. **SB-D22: The filter becomes an allow-list.** **Decided by the lead, 2026-11-18.** A list of refusals lets
+    through every call nobody thought of, and every call a later kernel adds. It is turned round in a task of its
+    own, SB3b, after SB3: by then real sessions run in a box, so the calls an agent, a build and a test run make can
+    be measured there instead of guessed.
+23. **SB-D23: `fanotify_init` is refused now.** **Decided by the lead, 2026-11-18.** The kernel gives an
+    unprivileged process a fanotify group since 5.13. It joins the filter's refusals with a probe that fails without
+    it (`SandboxSeccompTests.fanotifyIsRefused`); inotify stays.
+24. **SB-D24: `platform.claude.com` and `mcp-proxy.anthropic.com` join the recommended egress list.** **Decided by
+    the lead, 2026-11-18**, for SB-D7's recommendation, which stays the user's to confirm.
 
 ## Review Focus
 
@@ -687,7 +717,8 @@ Sources/VibeHost/V2/
 | `Sources/VibeHost/HostServer.swift`, the `.vault` case | one hook before the vault answers a `bind`: `SessionConfinement.bindRefusal` (SB-D19). If the book has no reader for a grant's role, the executor stops and asks | 4 | SB5 |
 | `Sources/vibeswitcher-host/main.swift` | one hook: `config.confinement = SessionConfinement.forNode(…)`; one first-statement hook: `EgressProxy.runIfAsked(arguments)` | 4 | SB5, SB9 |
 | `Sources/vibeswitcher-mcp/main.swift` | three first-statement hooks, before anything reads a path: `BranchRun.execIfLaunched`, `DoorRelay.runIfConfined`, `Porter.runIfAsked` | 4 | SB4, SB6 |
-| `Sources/vibeswitcher-hook/main.swift` | one first-statement hook, `DoorRelay.runIfConfined`; `HookCaller.pid(arguments)` in place of `getpid()` in the lineage | 4 | SB4 |
+| `Sources/vibeswitcher-hook/main.swift` | one first-statement hook, `DoorRelay.runIfConfined`; the lineage read by `HookCaller.read(arguments)` (the caller, its ancestors and its terminal, read while the caller is held) in place of `getpid()`'s | 4 | SB4 |
+| `Sources/vibeswitcher-mcp/main.swift`, the status line's mode; `Sources/VibeCore/AccountUsage.swift`, `UsageStatusLine.run` | `ownCommand: Bool = true`, false for a box's status line (`Porter.boxArgument`): no status line command runs outside on a box's input | 5, 4 | SB4 (the join's review) |
 | `Sources/VibeCore/Worktrees.swift`, where `BranchCode.wrapper` is run (`Shell.run(branchCode:)`, `runPrefix`) | one hook each: `BranchRun.command(…)` wraps the wrapper | 4 | SB6 |
 | `Sources/VibeCore/LeadToolset.swift`, where a worktree's file is opened (`report`'s evidence and load script; the list is SB6b Step 1's) | one hook each: `BoxPath.open(_:beneath:)` | 4 | SB6b |
 | `Sources/vibeswitcher-hook/main.swift`, where `GitMoves.steps(for:)` is asked | one hook: `HookCaller.steps(arguments) ?? GitMoves.steps(for: payload)`, so a helper given the relay's reading runs no git | 4 | SB6b |
@@ -774,7 +805,8 @@ Sources/VibeHost/V2/
 - The filter (`shim_seccomp.c`): allow by default; `EPERM` for `socket` with a family other than `AF_UNIX`,
   `AF_INET`, `AF_INET6` or `AF_NETLINK` with a protocol other than `NETLINK_ROUTE`; for `bpf`, `perf_event_open`,
   `userfaultfd`, `add_key`, `request_key`, `keyctl`, `kexec_load`, `kexec_file_load`, `init_module`,
-  `finit_module`, `delete_module`, `swapon`, `swapoff`, `open_by_handle_at`, `ioctl` with `TIOCSTI`; and, without
+  `finit_module`, `delete_module`, `swapon`, `swapoff`, `open_by_handle_at`, `ioctl` with `TIOCSTI`; since
+  2026-11-18 `io_uring`'s three calls (SB2's review) and `fanotify_init` (SB-D23); and, without
   `nesting`, for `unshare` and `clone` with `CLONE_NEWUSER`, `mount`, `umount2`, `pivot_root`, `fsopen`, `fsconfig`,
   `fsmount`, `move_mount`, `open_tree`, `mount_setattr`, `setns`. `clone3` answers `ENOSYS` without `nesting`, so
   the C library falls back to `clone`, whose flags the filter can read. An architecture other than the build's is
@@ -829,6 +861,12 @@ The tests' launcher is the test binary at load, before every other initializer (
 zombie watch starts a thread as the bundle loads. Each step a test can miss is shown failing without it by
 `scripts/sandbox-mutation.sh` (a build of its own with `-DVIBE_SANDBOX_MUTATION`, which no product build sets:
 `SandboxLintTests.theShimsMutationSwitchIsNeverBuilt`).
+
+*From the join's review (2026-11-18):* init now closes every descriptor it doesn't work with before it forks the
+program (its line to the keeper, its signals, the door and the door line stay): whatever its launcher was started
+with, the plan's sealed memory and the launcher's own image among it, stayed open in the box's pid 1 for the session's
+life, against Review Focus 2 (`SandboxShimTests.initHoldsNoDescriptorTheLauncherWasGiven`, and the mutation run's
+`init descriptors` step). `fanotify_init` is refused (SB-D23).
 
 ### Task SB2: The planner: what each role sees
 
@@ -894,13 +932,19 @@ folder: its own ref folder and log (`refs/heads/agent/<slug>/`, so a worker's br
 `agent/<slug>/<name>`; one named `agent/<slug>` refuses its box) and its own objects (`<box>/objects`, the shared store
 read-only behind it through git's alternates). Measured in the prototype: commit and rebase work; another agent's ref,
 a new ref beside it and the shared objects are refused; the lead outside reads the worker's commits only with
-`<box>/objects` as an alternate. **For the lead:** the engine names a worker's branch `agent/<slug>` today
-(`Worktrees.swift`, SB6's file), which this needs to become `agent/<slug>/<name>`; and the merge must take a worker's
-objects into the shared store only after checking them (`git fsck` of the new objects, with the shared store as their
-alternate): SB5's and the merge's. A policy path is refused whether it is under a hidden place or holds one, and when it
+`<box>/objects` as an alternate. **Decided by the lead, 2026-11-18 (SB-D20, SB-D21):** the engine names a worker's
+branch `agent/<slug>` today (`Worktrees.swift`, SB6's file), which becomes `agent/<slug>/<name>`; and the merge takes a
+worker's objects into the shared store only after checking them (`git fsck` of the new objects, with the shared store
+as their alternate): SB5's and the merge's. A policy path is refused whether it is under a hidden place or holds one, and when it
 holds another repository (a look through at most 20,000 folders; past that, refused). A `sandbox*` key a vault has no
 record of, where it has a record of the other rails, is recorded at its default, so a value written since is held for
 the user's accept (`SandboxPolicy.baseline`, a hook in `LeadVault.changedSettings`).
+
+*From the join's review (2026-11-18):* the planner's door and its variable are `DoorProtocol`'s own (`path`,
+`variable`), no longer a second spelling, and `SandboxPlannerTests.everyRoleWithADoorHasHelpersAndABranchRunHasNone`
+holds the roles of the two lanes together. For SB5: `pathFolders` are given with their links followed (the planner
+spells a PATH folder as it came, and the shim refuses a source with a link along it, so a linked PATH folder would
+fail the whole box, closed).
 
 ### Task SB3: The launcher builds the box
 
@@ -937,6 +981,42 @@ the user's accept (`SandboxPolicy.baseline`, a hook in `LeadVault.changedSetting
 - [ ] **Step 2:** Implementation. The two hooks and the argument go into the port map's Non-seam edits.
 - [ ] **Step 3:** `HostHardeningTests.aSessionsProgramHoldsNoImageDescriptor` and
   `HostedSessionTerminalTests` pass unchanged for a confined session (run again with a plan, as parameterised cases).
+
+### Task SB3b: The filter becomes an allow-list
+
+**Needs:** SB3 (real sessions in a box, to measure on). It runs beside SB4 to SB6 and SB9. **Worktree:** `sb-filter`.
+The lead's decision of 2026-11-18 (SB-D22).
+
+**Files:**
+- Modify: `Sources/CVibePlatform/shim_seccomp.c` (the list turned round), `Tests/VibePlatformTests/SandboxSeccompTests.swift`,
+  `scripts/sandbox-mutation.sh` (its `filter` step's tests), `docs/process/v2-linux-inventory.md` (the calls measured)
+
+**Interfaces:**
+- `vibe_sandbox_load_filter(nesting)` keeps its signature. Inside it: a call on the list is allowed, with the
+  argument rules of today kept for the ones that have them (`socket` and `socketpair` by family, `ioctl` without
+  `TIOCSTI` and `TIOCLINUX`, `clone` and `unshare` without `CLONE_NEWUSER` unless `nesting`, `clone3` answering
+  `ENOSYS` unless `nesting`); a call the filter knows and refuses answers `EPERM`; any other number answers `ENOSYS`,
+  as a kernel without it would, so a C library's fallback still runs. The list is a table per architecture (x86_64,
+  aarch64), generated from one source list of names so the two can't drift. Another architecture, and x32, is killed
+  as today.
+- The list starts from what was measured, not from what is refused today: every call Claude Code, `git`, `swift build`
+  and `swift test`, `node`, `python3` and a shell make in a box, taken with the filter in a logging build
+  (`SECCOMP_RET_LOG`, which this kernel has) or by tracing the box's own program from inside the box, never by
+  tracing a process outside one. A published baseline (Docker's default profile) is read beside it, and a call on
+  neither is left off.
+
+- [ ] **Step 1: The measurement**, recorded in the inventory: the calls each workload made, by name, and the ones the
+  baseline has that none of them made.
+- [ ] **Step 2: Failing tests.** `SandboxSeccompTests`: `aCallOffTheListIsRefusedWhateverItIs` (calls today's list
+  never named: `kcmp`, `syslog`, `quotactl_fd`, `process_madvise`, a number past the table's end),
+  `aCallNoKernelHasAnswersAsAnOlderKernelWould` (`ENOSYS`), `theArgumentRulesStillHold` (today's socket, ioctl and
+  clone probes), `theMeasuredWorkloadsStillRun` (a threaded program, a shell pipeline, `git`, a `swift build` of a
+  small package, `node -e`), `bothArchitecturesListTheSameCalls`.
+- [ ] **Step 3:** Implementation; today's probes (`hyperVPacketAndNetfilterSocketsAreRefused`,
+  `bpfPerfUserfaultfdAndTheKeyringsAreRefused`, `ioUringIsRefused`, `fanotifyIsRefused`,
+  `typingIntoTheTerminalByIoctlIsRefused`, `aNestedUserNamespaceIsRefusedUnlessThePlanAllowsIt`) pass unchanged.
+- [ ] **Step 4:** The mutation run, the suites under load, and a gated real-agent turn in a box with the user's
+  go-ahead (a call Claude Code makes only in a long session is the risk this step looks for).
 
 ### Task SB4: The door: relays inside, the porter outside
 
@@ -1003,7 +1083,46 @@ permission hook through the door until `SessionHelper` carries its audit checkou
 `Porter.maxConnections` connections at once, each line within `Porter.helloPatience`. Added tests:
 `PorterTests.aBoxCantHoldMoreThanItsShareOfRequests`, `aHookTakesItsRelaysPidOnlyFromItsConnection`,
 `DoorTests.theHelpersReachTheHostOnlyThroughTheSessionsConnector`. Multi-descriptor messages are
-`Platform.Sockets.send(_:with:over:)` and `receive(over:count:room:)` (`shim_descriptors.c`).
+`Platform.Sockets.send(_:with:over:)` and `receive(over:count:room:)` (`shim_descriptors.c`). Its tests stand a
+listener in for the box's init (`DoorStandIn`) and a small server in for the host on the session's connector
+(`ConnectorHost`, until SB5's `SessionConnector`).
+
+*From the join's review (2026-11-18):*
+- **A relay's pid named whoever held it next.** The hook outside read the ancestors of the pid the door's connection
+  recorded, up to 5 s after the connect. A relay that left meanwhile, its connection kept open by another process of
+  its box, lent its pid to the next process given it: one of another session, whose state file the hook would then
+  write and whose steered messages it would hand to the box. The porter now holds the relay's process from the moment
+  the connection reaches it (`Platform.ProcessExit.hold`, a pidfd) and tells the hook the box's init, which the kernel
+  names to it on the door line (`SCM_CREDENTIALS`: `Platform.Sockets.receiveDescriptorAndSender`); the hook takes the
+  pid only while that process still runs after its ancestors were read, and only when the box's init is among them
+  (`HookCaller.read`; `PorterTests.aHookActsForNoRelayThatLeftNorForAProcessOutsideItsBox`). **For SB5:** the host
+  sets `Platform.Sockets.enableCredentials` on the porter's end of the door line as it makes the pair, so a
+  connection handed over before the porter's first statement names its sender too (the porter sets it again, and
+  gives a hook no helper when the line didn't say).
+- **A terminal made inside a box named another session.** The hook outside took its session's terminal from the
+  nearest process named for an agent above the relay. Both are the box's to make: a pty of the box's own devpts
+  carries the number of one of the machine's, and any process can be named `claude`. A worker that opened ptys up to
+  another session's number and ran the hook under a process so named had that session's state file written and its
+  steered messages handed over, with no race at all. The session's terminal is now its box's init's (the one its
+  keeper leads, which nothing inside changes), the ancestors the hook reads end below init, and the nearest agent
+  among them must be on that terminal, or the event is nobody's
+  (`DoorTests.aHookForAnAgentOnATerminalOfTheBoxsOwnMakingIsNobodys`, and in a real box
+  `RealBoxTests.aHookInARealBoxWritesTheStateOfItsSessionsTerminal`). A hook through a door names Claude Code only:
+  Codex's hooks find their session among every Codex terminal of the machine by what the event says, which a box's
+  event would choose (`Porter.agents`; Codex workers are off, D15).
+- **The stand-ins met the real box.** `RealBoxTests` (VibeNodeTests) runs the built relays in a box the shim builds:
+  the door init binds, the door line to a real porter, a hook under an agent on the session's terminal, and a
+  proxied box's listener served by the real proxy under `EgressRules.session`. The door's own tests keep their
+  stand-ins, with the hook's init stand-in now a process on the agent's terminal, above the agent, as init is.
+- **The user's own status line ran outside on a box's input.** The status line's helper ran the command of the
+  user's settings as the user, outside, with the JSON the box wrote on its input; a status line that asks git about
+  the folder its input names runs git there, with that folder's config and hooks. For a box the helper now runs no
+  status line command at all: it keeps the usage and shows it (`Porter.boxArgument`, `UsageStatusLine.run`'s
+  `ownCommand`; `DoorTests.theStatusLineAndThePermissionHookWorkThroughTheDoor`). A confined session's status line
+  is therefore VibeSwitcher's few words, not the user's. Running the user's command inside the box, by the relay, would
+  give it back: SB6b's to weigh.
+- Left as it is, and said: the numbers a status line's helper keeps (the account's usage, a session's context) are
+  the box's word, as a plain session's are.
 
 ### Task SB5: The host confines what a lead starts
 
@@ -1060,6 +1179,17 @@ permission hook through the door until `SessionHelper` carries its audit checkou
   `StartCommandTests.theNotPromisedListSaysWhatIsClosedForWhom`, `TestLockTests.theSlotsHaveAFolderOfTheirOwnOnLinux`.
 - [ ] **Step 4:** Implementation; the port map's rows.
 
+*Decided since (2026-11-18), and from the join's review:*
+- **SB-D21.** Until a merge, what the lead's tools read of a worker's branch they read with `<box>/objects` as an
+  alternate (`GIT_ALTERNATE_OBJECT_DIRECTORIES`), never by copying first. `ConfinedTeamTests` holds it:
+  `theLeadReadsAWorkersCommitsThroughItsOwnObjects`.
+- **The door line names its sender.** `SessionConfinement.launch` makes the door line's pair with
+  `Platform.Sockets.enableCredentials` on the porter's end (SB4's review note).
+- **The slots' folder is written by boxes** (SB-D14). `vs-heavy` and `TestLock` outside open its lock and note files
+  with no link followed, and write a note by a temporary file and a rename: a link a box planted there as
+  `test-build.lock.holder` would otherwise be written through, as the user. `TestLockTests.aLinkPlantedInTheSlotsFolderIsNeverWrittenThrough`.
+- **PATH folders with their links followed** (SB2's review note).
+
 ### Task SB6: Branch code runs in a box of its own
 
 **Needs:** SB1, SB2; `v2-step8` merged into `v2`. It runs beside SB3 to SB5. **Worktree:** `sb-runs`. The only task
@@ -1093,6 +1223,22 @@ that edits `Worktrees.swift`.
   - `anInterruptEndsEveryProcessOfARun` (Task 12b's measurement, with the box)
   - `aScriptInsideARunSeesTheSlotItsRunHolds`
 - [ ] **Step 2:** Implementation; the port map's rows.
+- [ ] **Step 3 (SB-D20, the lead's, 2026-11-18): a worker's branch is `agent/<slug>/<name>`.** `Worktrees`' naming,
+  and whatever reads a worker's branch by name (the board, the merge, the audit's checkout, a branch's deletion by the
+  lead's tools). `WorktreesTests.aWorkersBranchIsNamedInARefFolderOfItsOwn`,
+  `SandboxPlannerTests.aWorkerWritesItsWorktreeItsGitFolderTheObjectsAndTheAgentRefsOnly` against a worktree the
+  engine made.
+- [ ] **Step 4 (SB-D21, the lead's, 2026-11-18): the merge checks a worker's objects.** `git fsck` of the worker's
+  new objects (`<box>/objects`, the shared store as their alternate) before they are copied into the shared store; a
+  failed check fails the merge, naming the object. `BranchRunHostTests.aMergeChecksAWorkersObjectsBeforeTheyJoinTheSharedStore`,
+  `aWorkersCorruptObjectFailsItsMergeAndNeverReachesTheSharedStore`.
+
+*From the join's review (2026-11-18), for Steps 3 and 4:* a worker writes its own ref folder, so a ref there may be
+a symbolic one (a file that says `ref: refs/heads/<base>`, or a link). The node's git, outside, reads a worker's
+branch as a commit id and never updates through it: an `update-ref` or a rebase that followed such a ref would move
+the base (S11 item 9, by another road). `BranchRunHostTests.aWorkersRefThatNamesAnotherRefMovesNothing`. And a
+worker's object folder is its own to fill: an `info/alternates` there would send the node's git reading wherever it
+points, so it is never honoured (the check and the copy take loose objects and packs, and nothing else of the folder).
 
 ### Task SB6b: The outside trusts nothing a box wrote
 
@@ -1116,7 +1262,12 @@ that edits `Worktrees.swift`.
 - [ ] **Step 1: The list.** Every place a tool server's or a hook's helper opens a path under a worktree, or runs
   a program in one, read from the code and written into the review record: at least `GitMoves.checkout(at:)`,
   `report`'s `KeptImages` and `checkLoadProof`, `Worktrees.remove`, and the records a branch carries. Each gets
-  one of: done by the relay inside; opened through `BoxPath`; run in `<root>` instead.
+  one of: done by the relay inside; opened through `BoxPath`; run in `<root>` instead. *From the join's review
+  (2026-11-18), also on the list:* the transcripts' folder (`~/.claude/projects/<name>/`, read-write to the box, and
+  read outside by `read_session`, receipts, `tellLead` and the status line's `transcript_path`: a link planted there
+  is followed as one in a worktree would be); every path a hook's payload or a status line's input names
+  (`transcript_path`, `cwd`), which is the box's word; and the status line's own command (SB4's review note: run by
+  the relay inside, or not at all, never outside).
 - [ ] **Step 2: Failing tests.** `BoxPathTests`: `aLinkOutOfTheFolderIsRefused`, `aLinkInsideTheFolderIsFollowed`,
   `aPathThroughDotDotIsRefused`, `aFolderSwappedForALinkDuringTheOpenIsRefused`. `DeputyTests`:
   `aHooksGitReadingIsDoneInsideItsBox`, `noHelperRunsAProgramInAFolderItsBoxCanWrite` (a decoy `git` wrapper
@@ -1204,6 +1355,19 @@ close`. `Dialer` is a struct of two closures. TCP is `Platform.TCP` (Linux only;
 `EgressRulesTests.theDefaultListIsDataAndNamesOnlyTheAgentsHosts`, `addressesReadAsTheyAreWritten`. Not stopped
 by any list: TLS fronting through a listed host's address (the proxy doesn't read inside a tunnel).
 
+*From the join's review (2026-11-18):*
+- `Platform.TCP` is one type since the join, the web listener's (v2's), with the proxy's `resolve` and
+  `connect(to:port:timeout:)` added to it in each system's file.
+- **A plain request could name a second Host.** The proxy writes a plain request's `Host` from the URL the rules
+  judged and drops the request's own, read line by line at CRLF. A bare LF or CR inside a line, a line carried on
+  from the one before, or `Host :` with a space reached a host that reads its lines more loosely as a second `Host`:
+  another site at the same address. A header with a control character in a line, or a line that isn't `name: value`,
+  is refused with 400 (`EgressProxyTests.aPlainRequestCantNameASecondHostPastTheProxys`).
+- `EgressRules.session(role:policy:agent:)` makes a session's rules from the project's guarded keys, so SB10 has one
+  place where `sandbox_hosts` and `sandbox_run_hosts` meet the default list
+  (`EgressRulesTests.aSessionsRulesComeFromItsRoleAndTheProjectsKeys`).
+- `EgressRules.defaultHosts` is SB-D24's list.
+
 ### Task SB10: Boxes on their own network
 
 **Needs:** SB5, SB9; SB-D7's list. **Worktree:** `sb-net`.
@@ -1288,6 +1452,7 @@ Four lanes, each a worktree at a time, so four agents can work at once. A task's
 | SB2 | SB1 Step 1 | SB0, SB1, SB4, SB9 | `LeadVaultGuarded.swift` | 3 | SB-D5, SB-D16 |
 | SB4 | SB1 Step 1 | SB0 to SB3, SB6, SB9 | `vibeswitcher-mcp/main.swift` (two of its three hooks), `vibeswitcher-hook/main.swift` | 5 | SB-D3 before it starts |
 | SB3 | SB1, SB2; step 8 in `v2` | SB4, SB6, SB9 | `PTYSpawn.swift`, `HostedSession.swift` | 4 | — |
+| SB3b | SB3 | SB4, SB5, SB6, SB6b, SB9 | `shim_seccomp.c` | 4 | a go-ahead for Step 4's gated turn |
 | SB6 | SB1, SB2; step 8 in `v2` | SB3, SB4, SB5, SB9 | `Worktrees.swift`, `BranchCodeSession.swift`; its hook in `vibeswitcher-mcp/main.swift` after SB4's are in | 4 | — |
 | SB5 | SB3, SB4 | SB6, SB9; SB7's fixtures | `HostServer.swift`, `HostProtocol.swift`, `HostHandover.swift`, `vibeswitcher-host/main.swift`, `LeadToolset.swift`, `TestLock.swift`, `vs-heavy` | 5 | SB-D14 |
 | SB6b | SB4 | SB5, SB6, SB9 | its hook in `vibeswitcher-hook/main.swift` after SB4's are in; its hooks in `LeadToolset.swift` after SB5's is in | 3 | — |
@@ -1299,7 +1464,7 @@ Four lanes, each a worktree at a time, so four agents can work at once. A task's
 | SB12 | SB11 | SB13 | the security document | 3 | — |
 | SB13 | SB10 | SB11, SB12 | — | 4 | SB-D8; a go-ahead for the gated measurement |
 
-- **Lanes for slice 1:** the kernel lane (SB1, SB3, SB5), the tool server lane (SB2, SB4, SB6, SB6b), the measuring lane
+- **Lanes for slice 1:** the kernel lane (SB1, SB3, SB3b, SB5), the tool server lane (SB2, SB4, SB6, SB6b), the measuring lane
   (SB0, SB7's fixtures, SB7, SB8), and the network lane (SB9), which is slice 2's and starts at once.
 - Every job is green before the next task's first push, whatever runs beside.
 - The port map's Non-seam rows are added by each task in a commit of its own at its end, so two lanes never rewrite
@@ -1334,7 +1499,7 @@ them in.
 
 ## Done when
 
-- Slice 1: `SandboxPlannerTests`, `SandboxPolicyTests`, `SandboxShimTests`, `SandboxSeccompTests`,
+- Slice 1: `SandboxPlannerTests`, `SandboxPolicyTests`, `SandboxShimTests`, `SandboxSeccompTests` (with SB3b's),
   `SandboxFactsTests`, `SessionSandboxTests`, `DoorTests`, `PorterTests`, `ConfinedSpawnTests`,
   `SessionConnectorTests`, `ConfinedTeamTests`, `BranchRunTests`, `BranchRunHostTests`, `BoxPathTests`, `DeputyTests`
   and `SandboxAttackTests` pass
