@@ -355,3 +355,7 @@ It passed 28 of 28 runs under load in the worker's runs and 10 of 10 in the veri
 
 On 2026-11-17 the user said "we have too much noise... I don't even read 80%". On that afternoon's run (flaky tests, the Code Mode trial, the git guard), about 14 lead messages went out, and only about 4 needed the user: the install password, the trial's plugin finding, the security gap, and the final results.
 
+## 2026-11-18 09:57:28 Swift Testing's parallel width in the merge's suite may go above the heavy slot's core count: 2× VS_HEAVY_CORES, done in faster-test-suite with an override variable. This revises the 2026-11-08 05:42:44 cap of width = VS_HEAVY_CORES. CPU-bound suites (benches, load tests) keep their own limits, and the change merges only if 3 full runs at the new width show no new flake.
+
+The 2026-11-08 decision said to measure the cap's cost on later merges, and the measurement is in. On main the test phase took 680 s at 6 cores and 1009 s at 4: the same slot-seconds either way, while the test process ran at only 1–35% CPU. So tests hold width while they wait on subprocesses, sockets and timers, and the cap costs time without protecting the CPU.
+
