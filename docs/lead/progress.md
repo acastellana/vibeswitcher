@@ -3759,3 +3759,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 11:53 Released lead-brief-merge-error's worker (idle since its done report on 1900961c) while its audit runs
 - 2026-11-18 11:53 Automatically (auto_advance): Started the audit of lead-brief-merge-error at 1900961c (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-18 11:53 Started a worker on git-guard-fails-closed
+- 2026-11-18 12:00 Raised cache-aware-vibeswitcher to audit (the risk check, at 3f01a0d6): it changes 1201 lines outside tests, over risk_lines (400)
+- 2026-11-18 12:00 Automatically (auto_advance): cache-aware-vibeswitcher is audited, not merged: it changes 1201 lines outside tests, over risk_lines (400) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-11-18 12:00 Planned config-seal-cover-the: Config seal: cover the hook modules a plugin's hooks.json lists (review audit, for security)
