@@ -525,7 +525,23 @@ public enum UsageStatusLine {
         }
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
+        if !exited { killAll(group: pid) }
         return output
+    }
+
+    /// How long `killAll` goes on killing a stopped command's group: well inside the ~2 s Claude Code gives this
+    /// process after its TERM, and the usage is kept only after it.
+    static let groupSweep: TimeInterval = 0.5
+
+    /// Kills `group` again and again until none of it is left (ESRCH), for at most `groupSweep`. One kill isn't enough:
+    /// XNU's kill of a group passes over a child its shell is still making (a pipeline's or a `&`'s fork under way), and
+    /// that child then runs on in the group with launchd as its parent (StatusLineBinaryTests, 2026-11-18: a `sleep` left
+    /// so in about 1 full test run in 10 under load). EPERM isn't "none left": it's said while such a child is being made.
+    static func killAll(group: pid_t) {
+        let deadline = MacTime.real.awake() + groupSweep
+        while kill(-group, SIGKILL) == 0 || errno != ESRCH, MacTime.real.awake() < deadline {
+            usleep(2_000)
+        }
     }
 }
 
