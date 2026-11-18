@@ -494,16 +494,24 @@ struct LeadGuardRailsTests: LeadTeamFixture {
             kill(-scratch.processIdentifier, SIGTERM)
             #expect(await exited(scratch), "pid \(scratch.processIdentifier) still running")
         }
-        let pgrep = Process()
-        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        // A pattern that matches nothing, then "-n": what that worker typed.
-        pgrep.arguments = ["-P", "\(getpid())", "-f", "zz-\(UUID().uuidString)", "-n"]
-        let out = Pipe()
-        pgrep.standardOutput = out
-        try pgrep.run()
-        let listed = out.fileHandleForReading.readDataToEndOfFile()
-        #expect(await exited(pgrep), "pid \(pgrep.processIdentifier) still running")
-        let matched = String(decoding: listed, as: UTF8.self).split(separator: "\n")
+        // A pattern that matches nothing, then "-n": what that worker typed. Asked again until the scratch process is
+        // listed (a hang guard bounds it): on a loaded Mac the first look can come before its arguments are readable.
+        func listed() async throws -> [Substring] {
+            let pgrep = Process()
+            pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+            pgrep.arguments = ["-P", "\(getpid())", "-f", "zz-\(UUID().uuidString)", "-n"]
+            let out = Pipe()
+            pgrep.standardOutput = out
+            try pgrep.run()
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            #expect(await exited(pgrep), "pid \(pgrep.processIdentifier) still running")
+            return String(decoding: data, as: UTF8.self).split(separator: "\n")
+        }
+        let deadline = MacTime.real.awake() + hangGuard
+        var matched = try await listed()
+        while !matched.contains("\(scratch.processIdentifier)"), MacTime.real.awake() < deadline, !Task.isCancelled {
+            matched = try await listed()
+        }
         #expect(matched.contains("\(scratch.processIdentifier)"), "-n read as a pattern matches a role's --name")
 
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
