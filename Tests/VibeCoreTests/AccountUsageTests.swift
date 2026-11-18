@@ -60,6 +60,31 @@ struct AccountUsageTests: LeadTeamFixture {
         }
     }
 
+    @Test func correctingAScopedRefusalKeepsItsResetAndOtherEveryModelHolds() throws {
+        let old = AccountUsage.Limit(name: "seven_day_overage_included", usedPercent: 100,
+                                     resetsAt: Self.tomorrow, at: Self.now.timeIntervalSince1970, reached: true)
+        var other = old
+        other.at -= 1
+        other.resetsAt = Self.tomorrow + 60
+        usageStore.record([old, other], now: Self.now)
+        // The newer reading wins its key; a separate account's identical refusal must stay untouched too.
+        var account = old
+        account.account = "other-account"
+        usageStore.record([account], now: Self.now)
+        var scoped = old
+        scoped.model = "fable"
+        usageStore.record([scoped], now: Self.now)
+        #expect(usageStore.load().limits.contains(scoped))
+        #expect(!usageStore.load().limits.contains(old))
+        #expect(usageStore.load().limits.contains(account))
+        // A different, unnamed refusal remains every-model even after re-reading the scoped refusal.
+        other.at += 2
+        usageStore.record([other], now: Self.now)
+        usageStore.record([scoped], now: Self.now)
+        #expect(usageStore.load().limits.contains(other))
+        #expect(usageStore.load().hold(model: "opus", now: Self.now) != nil)
+    }
+
     /// A live refusal for startup tests; the historical transcript above keeps its original parsing expectations.
     /// Live at the test clock (`now`, the time every test here reads the usage at): it resets a day after it.
     func activeFableRefusal(now: Date = AccountUsageTests.now) throws -> UsageLimit {

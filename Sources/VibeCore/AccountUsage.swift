@@ -195,7 +195,7 @@ public struct AccountUsage: Equatable, Sendable {
     }
 
     /// A refusal at the account's usage limit (`UsageLimit`, from a transcript) in a session running `model`: that
-    /// limit at 100 % until its reset; for that model's family only when its type names a model, or the model needs
+    /// limit at 100 % until its reset; for that model's family only when its type or limit sentence names a model, or it needs
     /// usage credits (its weekly allowance is spent: `model_requires_usage_credits`), else for every model. Nil for a
     /// model-only refusal whose model isn't known (Claude's default, a session no task names): unknown usage holds
     /// nothing back, and kept for every model it would stop every start.
@@ -203,7 +203,13 @@ public struct AccountUsage: Equatable, Sendable {
         let kind = limit.kind ?? "usage"
         let named = ["fable", "opus", "sonnet", "haiku"].first { kind.lowercased().contains($0) }
         let modelOnly = limit.apiError == "model_requires_usage_credits"
-        let scoped = named ?? (modelOnly ? family(model) : nil)
+        // Newer Claude refusals use usage_limit_reached and a generic overage kind even for Fable alone.
+        // Only an explicit model-limit sentence scopes that generic refusal; mentioning a model elsewhere doesn't.
+        let words = limit.said.trimmingCharacters(in: .whitespacesAndNewlines)
+        let saidModel = ["fable", "opus", "sonnet", "haiku"].first {
+            words.range(of: "^you['’]ve (?:hit|reached) your \($0) limit\\b", options: [.regularExpression, .caseInsensitive]) != nil
+        }
+        let scoped = named ?? (modelOnly ? family(model) : saidModel)
         if modelOnly, scoped == nil { return nil }
         return Limit(name: kind, model: scoped, usedPercent: 100, resetsAt: limit.resetsAt, at: limit.at ?? now.timeIntervalSince1970, reached: true,
                      account: limit.account)
@@ -296,6 +302,14 @@ public struct AccountUsageStore: Sendable {
         if let active = activeAccount() { names[active.id] = active.name }
         var kept = Dictionary(before.map { ($0.key, $0) }, uniquingKeysWith: { $0.at >= $1.at ? $0 : $1 })
         for limit in limits {
+            // Re-reading an explicit model refusal corrects an older version's every-model classification.
+            // Replace only the identical refusal, retaining its model-scoped hold and original reset.
+            if limit.reached, limit.model != nil {
+                kept = kept.filter { _, old in
+                    !(old.reached && old.model == nil && old.name == limit.name && old.account == limit.account
+                      && old.at == limit.at && old.resetsAt == limit.resetsAt)
+                }
+            }
             guard let old = kept[limit.key] else { kept[limit.key] = limit; continue }
             // Newer only; the same reading again (a status line runs at every change of the session's screen) is
             // rewritten only once it's `refresh` old, so the file isn't written each time.

@@ -103,8 +103,8 @@ extension LeadAdvanceTests {
         #expect(lead.auditModel(lead.workflow, task: one) == "sonnet")
     }
 
-    @Test func sensitiveAuditUsesConfiguredVerifierWhileFableIsRefused() throws {
-        let (root, runtime, lead) = try fableTeam(["verifier_model": "opus"])
+    @Test(arguments: ["opus", "sonnet"]) func sensitiveAuditUsesConfiguredVerifierWhileFableIsRefused(model: String) throws {
+        let (root, runtime, lead) = try fableTeam(["verifier_model": model])
         runtime.claude = "claude --model opus"
         _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
         #expect(!lead.call("start_worker", ["task": "touchy"]).isError)
@@ -125,12 +125,14 @@ extension LeadAdvanceTests {
         let status = lead.call("status", [:]).text
         #expect(status.contains("the fable limit") && !status.contains("seven day overage included (every model)"), "\(status)")
         try runtime.kill(first)
+        #expect(lead.auditModel(lead.workflow, task: task("touchy", root), security: true) == model)
         let audited = lead.call("audit", ["task": "touchy"])
         #expect(!audited.isError, "\(audited.text)")
         let verifier = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-touchy'") })
-        #expect(verifier.command.contains("--model 'opus'"), "\(verifier.command)")
-        #expect(audited.text.contains("on opus in Fable's place"), "\(audited.text)")
-        #expect(task("touchy", root)?.launchedModels?[verifier.id] == "opus")
+        #expect(verifier.id != first)
+        #expect(verifier.command.contains("--model '\(model)'"), "\(verifier.command)")
+        #expect(audited.text.contains("on \(model) in Fable's place"), "\(audited.text)")
+        #expect(task("touchy", root)?.launchedModels?[verifier.id] == model)
         try runtime.kill(verifier.id)
         lead.usageClock = { Date(timeIntervalSince1970: Self.fableReset) }
         let reset = lead.call("audit", ["task": "touchy"])
