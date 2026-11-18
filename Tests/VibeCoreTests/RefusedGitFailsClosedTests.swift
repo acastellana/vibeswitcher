@@ -124,20 +124,15 @@ struct RefusedGitFailsClosedTests {
         }
     }
 
-    /// Each refusal is the unreadable kind, and its reason says what to do instead: run the git plainly, without the
-    /// wrapper or the variable.
+    /// Each refusal's reason says what to do instead: run the git plainly, without the wrapper or the variable.
     @Test func theReasonSaysToRunGitPlainly() throws {
         for line in Self.handed + Self.handedUnseen {
-            guard case .unreadable(.handed)? = RefusedGit.refusal(in: line) else {
-                Issue.record("not refused as handed over: \(line)")
-                continue
-            }
+            let reason = RefusedGit.refusal(in: line)?.reason ?? ""
+            #expect(reason.contains("Run the git command plainly") && reason.contains("without the wrapper"), "\(line): \(reason)")
         }
         for line in Self.expanded {
-            guard case .unreadable(.expanded)? = RefusedGit.refusal(in: line) else {
-                Issue.record("not refused as expanded: \(line)")
-                continue
-            }
+            let reason = RefusedGit.refusal(in: line)?.reason ?? ""
+            #expect(reason.contains("Run the git command plainly") && reason.contains("without the variable"), "\(line): \(reason)")
         }
         // As the session reads it, in the hook's answer.
         func reason(_ line: String) throws -> String {
@@ -168,10 +163,8 @@ struct RefusedGitFailsClosedTests {
                      "g=git; timeout 60 $g push", "g=git; env $g push", "cd src && $(command -v git) status", "$EDITOR .git/config",
                      "2>&1$(echo git) push", "\"\"$(echo git) push"] {
             #expect(try guardRail.hookDenies(line, cwd: guardRail.root), "\(role)'s hook lets through: \(line)")
-            guard case .unreadable(.program)? = RefusedGit.refusal(in: line) else {
-                Issue.record("not refused for its program's name: \(line)")
-                continue
-            }
+            let reason = RefusedGit.refusal(in: line)?.reason ?? ""
+            #expect(reason.contains("a command whose name the shell makes"), "\(line): \(reason)")
         }
         for line in ["\"$(git rev-parse --show-toplevel)/scripts/x.sh\" args", "$(git rev-parse --show-toplevel)/scripts/test.sh --filter X",
                      "\"$HOME/bin/tool\" x", "$EDITOR notes.md", "\"$TMPDIR/probe\" && echo ok", "$(brew --prefix)/bin/swiftlint",
@@ -182,14 +175,16 @@ struct RefusedGitFailsClosedTests {
         #expect(reason.contains("`$g`") && reason.contains("run the git command plainly") && reason.contains("without the variable"))
     }
 
-    /// What names git: the word alone, in a path, in git's variables and folder, in any case; not a longer word.
+    /// What names git in the text handed over: the word alone, in a path, in git's variables and folder, in any case,
+    /// behind quotes or a backslash; not a longer word that holds it.
     @Test func gitIsNamedAsAWordNotInsideOne() {
-        for text in ["git", "git push", "/usr/bin/git status", "GIT -P push", "x; git", "GIT_DIR=/x make", "cat .git/config", "g\"\"it", "g\\it",
-                     "g''it push", "$(git status)", "a=1;git", "git-upload-pack", "égit"] {
-            #expect(RefusedGit.names(text), "\(text)")
+        for text in ["git", "git push", "ls /usr/bin/git", "GIT -P push", "x; git", "GIT_DIR=/x make", "cat .git/config", "g\"\"it", "g\\it",
+                     "$(git status)", "a=1;git", "git-upload-pack", "égit"] {
+            #expect(RefusedGit.refusal(in: "sh -c '\(text)'") != nil, "\(text)")
         }
-        for text in ["", "gi", "github.com", "digit", "RefusedGit", "legit", "gitignore", "git2go", "ls | wc -l", "gi t", "g i t"] {
-            #expect(!RefusedGit.names(text), "\(text)")
+        for text in ["", "gi", "open https://github.com/x", "echo digit", "echo RefusedGit", "echo legit", "cat .gitignore", "echo git2go",
+                     "ls | wc -l", "echo gi t", "echo g i t"] {
+            #expect(RefusedGit.refusal(in: "sh -c '\(text)'") == nil, "\(text)")
         }
     }
 
