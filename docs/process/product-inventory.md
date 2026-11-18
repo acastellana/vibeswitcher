@@ -359,7 +359,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `team named` — starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>… — `Sources/VibeSwitcher/Sandbox.swift`
 - `ask [TEXT]` — puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unfold` — shows the selected lead's team under its row in the sidebar — `Sources/VibeSwitcher/Sandbox.swift`
-- `rotation` — shows the scheduled rotation chat line in the selected fake session — `Sources/VibeSwitcher/Sandbox.swift`
+- `rotation` — shows the scheduled rotation chat line in the selected fake session (`rotation idle`: the handover at a long… — `Sources/VibeSwitcher/Sandbox.swift`
 - `replaced [N]` — shows the selected window session as a lead another session replaced, with N characters (default 200000)… — `Sources/VibeSwitcher/Sandbox.swift`
 - `answer` — answers the fake lead's open questions: its row reads as its terminal does again — `Sources/VibeSwitcher/Sandbox.swift`
 - `leadmail` — writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private… — `Sources/VibeSwitcher/Sandbox.swift`

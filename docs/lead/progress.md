@@ -3864,3 +3864,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 16:33 Pipeline held: lead-context-cost-hand, git-guard-fails-closed ready to merge with none landing; cause: a merge in progress
 - 2026-11-18 17:03 Pipeline held: lead-context-cost-hand, git-guard-fails-closed ready to merge with none landing; cause: a merge in progress
 - 2026-11-18 17:12 Merged git-guard-fails-closed: Git guard fails closed: refuse git handed to another interpreter or built from an expansion (build 5978f0ab2ede)
+- 2026-11-18 17:12 Automatically (auto_advance): Merged git-guard-fails-closed (Git guard fails closed: refuse git handed to another interpreter or built from an expansion) into main at 8121329f, on its passing audit and the full test run.
+- 2026-11-18 17:13 Automatically (auto_advance): Cleaned up git-guard-fails-closed (freed 4.2 GB of build output and temporary folders). It stays done.
+- 2026-11-18 17:27 Merged lead-context-cost-hand: Lead context cost: hand over after a long idle, keep the cache warm through a short one (build 5978f0ab2ede)
