@@ -7,7 +7,7 @@ installed. The numbers come from `scripts/cache-cold-cost.py`.
 ## In short
 
 **Cold caches are a small cost here: 0.3% of the week's tokens and about 3 to 6% of its estimated bill.** In the 7
-days to 2026-11-18 11:45, this project's sessions spent 1.85 billion tokens. 5.0 million of them were cache writes after
+days to 2026-11-18 11:45, this project's sessions spent 1.86 billion tokens. 5.0 million of them were cache writes after
 a gap longer than the cache's lifetime, in 40 cold re-sends: 27 by the lead, 6 by workers, 7 by workers' subagents, none
 by a verifier. Writing that context again instead of reading it cost an estimated $20 at the Receipts prices, or $63 if
 Fable 5.2 (which has no price in that table) is priced as Fable 5.1.
@@ -20,10 +20,10 @@ lead.
 for a person at a terminal. Left on, it submits a prompt by itself and writes a file into the session's root.
 
 **The tokens are in carrying large contexts, not in re-sending them.** 97% of all tokens are cache reads. The lead read
-311 million tokens in 1,212 requests, a mean prompt of 261k. The proposals that save real tokens shrink what is carried:
+311 million tokens in 1,214 requests, a mean prompt of 261k. The proposals that save real tokens shrink what is carried:
 
 1. Hand the lead over to a fresh one when it has been idle 50 minutes with a large context, while its cache is warm:
-   about 150M tokens a week by simulation.
+   about 80M tokens a week by simulation.
 2. Wake the lead less often for reports that need no action: about 0.6M tokens per wake avoided.
 3. Keep releasing workers during audits: by tokens that is already the cheaper choice.
 
@@ -44,7 +44,7 @@ more tokens than it saves.
 - **What is read from a transcript.** A response's usage numbers and model, the time its request was sent, the session's
   name, which kind of sender started a turn (`turnOrigin`), an error's kind, and a compaction's token counts. No message
   text is read, kept or printed. The script's header lists the exact keys.
-- **What is read from elsewhere.** The Mac's sleeps from `pmset -g log` (48.9 hours asleep in the window). From the
+- **What is read from elsewhere.** The Mac's sleeps from `pmset -g log` (48.8 hours asleep in the window). From the
   board and its archive: each task's start, done report, merge and end times, and each question's asked and answered
   times.
 - **A cache line** is one transcript's responses in order. A subagent has its own, and so does a session's advisor.
@@ -54,8 +54,17 @@ more tokens than it saves.
   tokens are "written cold". The part that had been in the cache before the gap is "re-sent".
 - **Codex workers** keep no Claude Code transcript and are not in these numbers.
 
-Reproduce: `python3 -I scripts/cache-cold-cost.py --until "2026-11-18 11:45" --events`. Claude Code prunes old
-transcripts, so a later run of the same window may find fewer.
+Reproduce, from the repository's root:
+
+```sh
+python3 -I scripts/cache-cold-cost.py --until "2026-11-18 11:45" --events
+python3 -I scripts/cache-cold-cost.py --until "2026-11-18 11:45" --price-as claude-fable-5-2=claude-fable-5-1
+```
+
+The first gives every token count and the dollars at the Receipts prices. The second gives the dollars with Fable 5.2
+priced as Fable 5.1 (section 2); its token counts are the same. Two runs of the same window a few minutes apart differed
+by under 0.5% in the token totals, since responses in flight at the window's end are written late. Claude Code also
+prunes old transcripts, so a much later run may find fewer.
 
 ### Which TTL each role gets
 
@@ -64,7 +73,7 @@ Measured from the buckets, not assumed:
 | Role | Cache write | In the 1 h bucket | In the 5 min bucket | TTL it gets |
 | --- | ---: | ---: | ---: | --- |
 | Lead | 6.2M | 100.0% | 0.0% | 1 hour |
-| Worker | 19.2M | 99.2% | 0.6% | 1 hour |
+| Worker | 19.3M | 99.2% | 0.6% | 1 hour |
 | Verifier | 8.3M | 100.0% | 0.0% | 1 hour |
 | Lead's subagents | 813k | 0.0% | 100.0% | 5 minutes |
 | Workers' subagents | 12.3M | 0.0% | 97.1% | 5 minutes |
@@ -73,13 +82,13 @@ Measured from the buckets, not assumed:
 The transcripts hold the same answer as a field: each response records `promptCacheRequested` as `1h` (main sessions)
 or `5m` (subagents).
 
-The TTL holds in the data. Of 9,896 requests sent within the hour of the last one on a 1-hour line, 32 missed the
+The TTL holds in the data. Of 9,919 requests sent within the hour of the last one on a 1-hour line, 32 missed the
 cache. Past 2 hours, 17 of 18 missed:
 
 | TTL in force | Gap since the last request | Responses | Missed the cache | Cache read / last prompt |
 | --- | --- | ---: | ---: | ---: |
-| 1 h | up to 5 min | 9,471 | 28 | 99.9% |
-| 1 h | 5–30 min | 396 | 3 | 99.4% |
+| 1 h | up to 5 min | 9,491 | 28 | 99.9% |
+| 1 h | 5–30 min | 399 | 3 | 99.4% |
 | 1 h | 30–55 min | 27 | 1 | 98.7% |
 | 1 h | 55–60 min | 2 | 0 | 100.1% |
 | 1 h | 60–70 min | 4 | 2 | 50.5% |
@@ -96,12 +105,12 @@ countdown built from the transcript can say "cold" when the cache is still warm,
 
 | Role | Tokens | Cache write | Written cold | Share of its writes | Cold re-sends | Median context at one | A session's first write | Other miss inside the TTL |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Lead | 317.3M | 6.2M | 3.8M | 60.8% | 27 | 218k | 30k | 668k |
-| Worker | 1.15B | 19.2M | 589k | 3.1% | 6 | 163k | 3.3M | 830k |
+| Lead | 318.0M | 6.2M | 3.8M | 60.8% | 27 | 218k | 30k | 668k |
+| Worker | 1.16B | 19.3M | 589k | 3.1% | 6 | 163k | 3.3M | 830k |
 | Verifier | 142.5M | 8.3M | 0 | 0.0% | 0 | – | 4.0M | 0 |
 | Lead's subagents | 23.1M | 813k | 0 | 0.0% | 0 | – | 112k | 0 |
 | Workers' subagents | 210.1M | 12.3M | 617k | 5.0% | 7 | 130k | 3.8M | 0 |
-| **All** | **1.85B** | **46.9M** | **5.0M** | **10.7%** | **40** | 202k | 11.3M | 1.5M |
+| **All** | **1.86B** | **47.0M** | **5.0M** | **10.6%** | **40** | 202k | 11.3M | 1.5M |
 
 Nearly all of the cold writes are re-sent context (5.0M of 5.0M): the gap added little that was new.
 
@@ -139,8 +148,9 @@ How each cause is decided:
   in the 90 seconds before the wake. VibeSwitcher wakes an idle lead within 8 seconds of a report
   (`LeadWake`, `Sources/VibeCore/LeadDelivery.swift:503`). With none, the wake was typed in.
 
-Does that last test work? Of the lead's 531 typed-in turns, 352 began within 90 seconds of a team event. None of the 27
-cold ones did. So the lead is not being woken cold by reports. While the team works, reports arrive more often than
+Does that last test work? Of the lead's 532 typed-in turns, 353 began within 90 seconds of a team event. Of the 27 cold
+ones, 1 did: the user's answer to a question. None began with a report, a verdict or a merge. So the lead is not being
+woken cold by reports. While the team works, reports arrive more often than
 hourly and the lead stays warm. The long idles end when the user comes back.
 
 What the method can't tell apart: a prompt the user typed from a notice the app typed (a question's timer, a stall
@@ -171,19 +181,19 @@ one. Reads cost a tenth of input or less.
 
 | | At the Receipts prices | With Fable 5.2 priced as Fable 5.1 |
 | --- | ---: | ---: |
-| The week's tokens | 1.85B | 1.85B |
-| Estimated bill | $744, plus 170.9M tokens with no price | $1,096 |
-| Written cold | 5.0M tokens = 0.3% of tokens, 10.7% of cache writes | the same |
+| The week's tokens | 1.86B | 1.86B |
+| Estimated bill | $744, plus 175.1M tokens with no price | $1,100 |
+| Written cold | 5.0M tokens = 0.3% of tokens, 10.6% of cache writes | the same |
 | Extra cost of re-sending instead of reading | $20 = 2.7% | $63 = 5.7% |
 | Of it the lead's | $14 | $54 |
 | Of it workers' | $4 | $6 |
 | Of it workers' subagents' | $3 | $3 |
 
-**The Receipts table has no price for `claude-fable-5-2`**, the model of 170.9M of the week's tokens (most of the lead's
-and many verifiers'). A receipt with those tokens shows "cost unknown", and 9 of the 15 verifier receipts on the board
+**The Receipts table has no price for `claude-fable-5-2`**, the model of 175.1M of the week's tokens (part of the lead's
+week and many verifiers'). A receipt with those tokens shows "cost unknown", and 9 of the 15 verifier receipts on the board
 do. The right-hand column is an assumption of mine, not a published price.
 
-By role, with that assumption: lead $164, workers $500, workers' subagents $137, verifiers $218, workers' advisor $67,
+By role, with that assumption: lead $164, workers $503, workers' subagents $137, verifiers $218, workers' advisor $67,
 lead's subagents $10.
 
 One cold re-send of the lead's median context (218k) costs about $1.70 on Opus 5.5 and $4.30 on Fable at 5.1 rates.
@@ -195,11 +205,13 @@ Reading it warm costs 4 to 5 cents.
 
 ### 1. Hand the lead over at a long idle when its context is large
 
-- **Saves**: about 150M cache-read tokens a week (48% of the lead's tokens) and 0.4M cold-written tokens, est. $39.
-  From the script's simulation with a 150k threshold: 8 handovers in the week, 6 of them with the Mac awake at minute
-  50. With a 100k threshold: 12 handovers, 160M tokens. With 200k: 6 handovers, 122M.
+- **Saves**: about 81M cache-read tokens a week (a quarter of the lead's tokens) and 0.5M cold-written tokens, est.
+  $27. From the script's simulation with a 150k threshold: 8 handovers in the week, 5 of them with the Mac awake at
+  minute 50. With a 100k threshold: 11 handovers, 88M tokens. With 200k: 5 handovers, 48M. The simulation hands over
+  only where the lead's context was still whole at its next request. Where Claude Code had compacted it in the gap (4
+  times), it counts nothing.
 - **Why it's large**: the saving is not the re-send. It is every later request. A fresh lead starts near 58k and the
-  simulation gives it 80k after it has read its handover. Each of the 1,212 requests a week then carries that much less.
+  simulation gives it 80k after it has read its handover. Each later request then carries that much less, until the context has grown back.
 - **What changes**:
   - `LeadRotation.reason` (`Sources/VibeCore/LeadRotation.swift:18`) gains a rule: idle 50 minutes and context over a
     token count. Today's context rule is a percent of the window (over 60%), checked only when the lead is quiet. The
@@ -207,7 +219,7 @@ Reading it warm costs 4 to 5 cents.
   - `LeadController.rotateIfDue` (`Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift:2178`) already runs every
     3 seconds and already has the whole flow: ask for a note, write it, start the fresh lead. It needs the time of the
     lead's last request, which the transcript's tail has.
-  - When the Mac was asleep at minute 50 (2 of the 8), the cache is cold at the wake. Then either hand over from the
+  - When the Mac was asleep at minute 50 (3 of the 8), the cache is cold at the wake. Then either hand over from the
     records without a note, or pay the re-send. Decide by size.
 - **Risk: medium.** A fresh lead knows only what the note, the board and the records say. A user who comes back after
   an hour finds a lead that has lost the thread of the conversation. That already happens to a lead over 200k through
@@ -217,8 +229,8 @@ Reading it warm costs 4 to 5 cents.
 
 ### 2. Wake the lead less often for reports that need no action
 
-- **Saves**: about 0.6M tokens per wake avoided (the lead's 317M tokens over 531 typed-in turns). 352 of those turns
-  began with a team event, about 206M tokens a week. What share of them needed the lead at once I can't measure without
+- **Saves**: about 0.6M tokens per wake avoided (the lead's 318M tokens over 532 typed-in turns). 353 of those turns
+  began with a team event, about 210M tokens a week. What share of them needed the lead at once I can't measure without
   reading the reports.
 - **What exists**: `LeadWake` batches the reports that arrive within 5 to 8 seconds into one prompt, and
   `LeadAdvance.wakes` (`Sources/VibeCore/LeadAdvance.swift:311`) already delivers housekeeping lines without waking.
@@ -329,8 +341,10 @@ From `LeadLaunch.prepare` (`Sources/VibeCore/LeadLaunch.swift:574`):
 | Verifier | The same, plus `--setting-sources user --strict-mcp-config` | The user's settings only: still every enabled plugin and its hooks. No project settings, no MCP servers but VibeSwitcher's |
 | Team summaries (headless) | `-p --setting-sources "" --strict-mcp-config` (`Sources/VibeCore/TeamSummaries.swift:210`) | Nothing of the user's |
 
-Checked in the transcripts of the last 3 days (names of tools, skills and hooks only; 55 workers, 44 verifiers, 1
-lead):
+Checked in the transcripts of the last 3 days (55 workers, 44 verifiers, 1 lead). This is the one place I read more
+from a transcript than usage numbers and times: the names of the tools, skill namespaces and hook events each session
+was started with, from its listing lines, with a one-off probe that isn't committed. No message text. The lead may
+prefer to strike this list; the table above stands on the code alone.
 
 - **Every worker, verifier and lead** lists the skills of superpowers, vercel, claude-hud, codex, brag and
   frontend-design, runs a `SessionStart` hook, and has the savvy-progress tools, which that plugin's hooks module

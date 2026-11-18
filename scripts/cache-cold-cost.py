@@ -280,8 +280,13 @@ def board(root):
         with open(os.path.join(folder, "board-archive.jsonl")) as fh:
             for line in fh:
                 try:
-                    task(json.loads(line))
-                except ValueError:
+                    entry = json.loads(line)
+                    if isinstance(entry, dict) and "slug" not in entry and isinstance(entry.get("question"), dict):
+                        if entry["question"].get("askedAt"):
+                            question(entry["question"])     # a closed question, archived by itself
+                    elif isinstance(entry, dict):
+                        task(entry)
+                except (ValueError, TypeError):
                     pass
     except OSError:
         pass
@@ -468,16 +473,18 @@ def main():
                 if counted and g == "lead" and r["origin"] == "human":
                     tot[g]["turns"] += 1
                     tot[g]["turns_team"] += 1 if team_event(r["t"], events, ends) else 0
-                if counted and g == "lead" and prev is not None and price:
+                if counted and g == "lead" and prev is not None:
                     # Had the lead handed over to a fresh one at an idle of ROTATE_IDLE_S with its context over n.
+                    # Tokens are counted whatever the model; dollars only for a priced one.
                     before_, gap_ = prev["in"] + prev["read"] + prev["cw"], r["t"] - prev["t"]
-                    _i, out_, read_, _w5, w1_ = rates(r, price)
+                    _i, out_, read_, _w5, w1_ = rates(r, price) if price else (0.0,) * 5
+                    shrank = prompt < before_ * 0.7     # a compaction or a new start already dropped the old context
                     for n in rotate_at:
                         ro = rotate[n]
-                        if prompt < before_ * 0.7:
-                            offsets[n] = 0.0        # its context shrank anyway (a compaction, a new start)
+                        if shrank:
+                            offsets[n] = 0.0            # nothing left for a handover to save here
                         carried = before_ - offsets[n]
-                        if gap_ > ROTATE_IDLE_S and carried >= n:
+                        if not shrank and gap_ > ROTATE_IDLE_S and carried >= n:
                             ro["rotations"] += 1
                             awake = spans is None or overlap(prev["t"], prev["t"] + ROTATE_IDLE_S, spans) < 60
                             if awake:
@@ -491,7 +498,8 @@ def main():
                             if not was:
                                 ro["saved"] += carried * read_                   # ...and doesn't read the old context
                             offsets[n] = before_ - FRESH_LEAD
-                        kept = min(offsets[n], r["read"])
+                        # Never less than a fresh lead carries.
+                        kept = min(offsets[n], r["read"], max(0, prompt - FRESH_LEAD))
                         ro["read_saved"] += kept
                         ro["saved"] += kept * read_
                 if counted:
@@ -546,8 +554,9 @@ def main():
                                             "ttl": ttl, "model": r["model"], "at": r["t"], "task": s["slug"] or "",
                                             "slept": overlap(prev["t"], r["t"], spans) if spans else 0})
                         # Keep-warm: a request every PING_EVERY_S while idle, at most `cap` of them.
-                        if ttl >= 3600 and why not in ("Mac sleep", "usage-limit stop") and price:
-                            _i, out, read, _w5, _w1 = rates(prev, price)
+                        if ttl >= 3600 and why not in ("Mac sleep", "usage-limit stop"):
+                            # Tokens whatever the model; dollars only for a priced one.
+                            _i, out, read, _w5, _w1 = rates(prev, price) if price else (0.0,) * 5
                             need = int(gap // PING_EVERY_S)
                             for cap in caps:
                                 w = warm[(g, cap)]
