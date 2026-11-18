@@ -159,13 +159,15 @@ suite_width() {
         export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=$(cpu_count) VIBESWITCHER_TEST_WIDTH_DEFAULT=1
     fi
 }
-# Tests a core on a slot: VIBESWITCHER_TESTS_PER_CORE, a whole number from 1; 2 without one. The tests mostly wait (on
-# their git, scripts, hosts and sockets), each holding its place in the width while it does: on 2026-11-18 a full
-# run's tests took 680 s at a width of 6 and 1009 s at 4 (about 4,050 test-seconds either way) with the test process
-# at 1–35 % CPU, so a test a core left the slot's cores mostly idle. 1 is a test a core, as before.
+# Tests a core on a slot: VIBESWITCHER_TESTS_PER_CORE, a whole number from 1; 1 without one, a test a core. The tests
+# mostly wait (on their git, scripts, hosts and sockets), each holding its place in the width while it does: on
+# 2026-11-18 a full run's tests took 1009 s at a width of 4 with the test process at 1–35 % CPU, and 388–420 s at 2 a
+# core (8). Not the default yet: at 2 a core, 3 of 10 full runs got a SIGPIPE from a write to a pipe or socket whose
+# reader had gone (the run fails, naming it: `brokenPipesFailTheRun` in Tests/VibeCoreTests/TestSupport.swift), its
+# writer not yet found; at 1, none in 4. Once it is, 2 is the default to give.
 tests_per_core() {
-    local per=${VIBESWITCHER_TESTS_PER_CORE:-2}
-    [[ $per =~ ^[0-9]+$ ]] && (( 10#$per >= 1 )) || per=2
+    local per=${VIBESWITCHER_TESTS_PER_CORE:-1}
+    [[ $per =~ ^[0-9]+$ ]] && (( 10#$per >= 1 )) || per=1
     echo $(( 10#$per ))
 }
 export -f tests_per_core
