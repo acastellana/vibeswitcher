@@ -554,11 +554,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func openShell(_ runnable: RunnableCommand.Runnable, in folder: String, from session: UUID?,
                            _ done: @escaping (RunOutcome) -> Void) {
         guard let shells else { return done(.refused(RunRefusal.noFolder)) }
+        // When Run was taken, before its shell started (as a card's `userRan`): a quick git command's move comes after.
+        let at = Date()
         shells.runBlock(command: runnable.command, cwd: folder, from: session) { [weak self] outcome in
             if outcome == .ran {
                 Breadcrumbs.shared.note("chat: ran a code block in a new shell (\(runnable.command.count) chars)")
                 // A git command run: what lets the lead's base move it makes be taken as yours, as Run's.
-                if let session { self?.leads.baseMoves.typed(runnable.prompt, session: session.uuidString, cwd: folder) }
+                if let session { self?.leads.baseMoves.typed(runnable.prompt, session: session.uuidString, cwd: folder, at: at) }
             }
             done(outcome)
         }
