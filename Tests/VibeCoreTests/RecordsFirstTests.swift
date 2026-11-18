@@ -186,6 +186,23 @@ struct RecordsFirstTests: LeadTeamFixture {
         #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("FIXED"))
     }
 
+    /// A merge refused at its gate (here: no audit yet) commits nothing: the records go in only once a merge is past
+    /// its gate and its waits, about to rebase, so a refused merge that auto_advance tries again doesn't move the base.
+    @Test func aMergeRefusedAtItsGateLeavesTheRecordsUncommitted() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try lead.store.appendProgress("Started")
+        guard case .committed = lead.records.flush(base: "main") else { Issue.record("records not committed"); return }
+        #expect(!lead.call("add_task", ["title": "add-b", "goal": "g", "acceptance": ["a"]]).isError)
+        let before = Git.run(["rev-parse", "main"], in: root).output
+
+        let refused = lead.call("merge", ["task": "add-b"])
+        #expect(refused.isError, "\(refused.text)")
+        #expect(Git.run(["rev-parse", "main"], in: root).output == before)
+        #expect(!Git.run(["diff", "--quiet", "main", "--", "docs/lead/progress.md"], in: root).ok)
+    }
+
     /// The commit before a merge takes only the records: the user's other changes in the main checkout (staged,
     /// unstaged, untracked) stay as they were.
     @Test func theCommitBeforeAMergeLeavesEveryOtherFileAlone() throws {

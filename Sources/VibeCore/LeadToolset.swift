@@ -3802,7 +3802,6 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func merge(_ slug: String, acceptStale: String? = nil, locked: (() -> Void)? = nil) throws -> MCPToolResult {
-        commitRecordsFirst(not: slug)
         // The remote's tip, read once: what the gate checks the branch against, what it lands as and whose records are
         // taken after are the same answer, and no answer stops it here, before anything is tested.
         let fetched = try fetchedTip(self.workflow, not: "Not merged (nothing was tested)")
@@ -3823,8 +3822,8 @@ public final class LeadToolset: MCPToolset {
         }
         defer { held.release() }
         noteMergeStarted([slug])
-        guard let current = branchHead(base) else { throw Problem(text: "There's no branch \(base) to merge into.") }
-        try checkBaseMoves(base: base, current: current)
+        guard let found = branchHead(base) else { throw Problem(text: "There's no branch \(base) to merge into.") }
+        try checkBaseMoves(base: base, current: found)
         // A lock in the main checkout stops the fast-forward at the end: said now, before the tests run.
         if let lock = Worktrees.indexLock(blocking: base, root: root) {
             throw Problem(text: "Not merged (nothing was tested): \(Worktrees.refusal(lock))")
@@ -3833,6 +3832,9 @@ public final class LeadToolset: MCPToolset {
         // Timing-sensitive tests fail on a Mac every project's team is loading: the tests wait (a bounded time) for
         // the load to drop.
         let waited = try waitForLoad(workflow, slug: slug)
+        // The lead's records not committed yet go in first, under this merge's lock, and it rebases onto them: it
+        // never fails on the records' own lines. Past the gate and the waits, so a merge refused there moves nothing.
+        let current = commitRecordsFirst(not: slug, holdingBaseLock: true) ?? found
         // Exactly the audited commit, rebased and tested where no agent works. A failing test command runs once more
         // (`MergeRerun`): what failed, then the rerun that passed, when that's how it passed.
         let tested: String
@@ -4396,14 +4398,19 @@ public final class LeadToolset: MCPToolset {
         MergeRerun.baseline(commit: base, plan: plan, workflow: workflow, pairing: pairing)
     }
 
-    /// Before a merge of `merging` starts: the records committed first when they have changes not committed
-    /// (`LeadRecords.commitBeforeMerge`). Noted in the progress log only when the last merge failed on one of them or a
-    /// redaction waited: the routine commit before each merge adds no line of its own (it would leave the records
-    /// changed again after every one), and a routine commit that waits or fails shows in status (`statusLine`).
-    func commitRecordsFirst(not merging: String) {
+    /// Before a merge of `merging` rebases: the records committed first when they have changes not committed
+    /// (`LeadRecords.commitBeforeMerge`); the merge calls it holding its lock on the base (`holdingBaseLock`), past
+    /// its gate and its waits, and rebases onto the commit it returns (nil: none was made). Noted in the progress log
+    /// only when the last merge failed on one of them or a redaction waited: the routine commit before each merge adds
+    /// no line of its own (it would leave the records changed again after every one), and a routine commit that waits
+    /// or fails shows in status (`statusLine`).
+    @discardableResult
+    func commitRecordsFirst(not merging: String, holdingBaseLock: Bool = false) -> String? {
         let failedOn = records.mergeFailedOn
         let noted = !failedOn.isEmpty || !LeadRedaction.pending(store).isEmpty
-        guard let outcome = records.commitBeforeMerge(base: base), noted else { return }
+        guard let outcome = records.commitBeforeMerge(base: base, holdingBaseLock: holdingBaseLock) else { return nil }
+        let made: String? = if case .committed(let commit) = outcome { commit } else { nil }
+        guard noted else { return made }
         let why = failedOn.isEmpty ? "a redaction (redact_record) waited" : "the last merge failed on \(failedOn.joined(separator: ", "))"
         switch outcome {
         case .committed(let commit):
@@ -4418,6 +4425,7 @@ public final class LeadToolset: MCPToolset {
             if !clean { _ = try? tellLead("The records couldn't be committed before merging \(merging) (\(why)): \(text) Clear the line with redact_record.", about: LeadAdvance.sender) }
         case .unchanged, .local: break
         }
+        return made
     }
 
     /// The base moves only through merges and reverts: anything else that moved it from where the vault last saw it

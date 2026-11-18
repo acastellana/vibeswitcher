@@ -140,7 +140,7 @@ struct LeadReviewTests: LeadTeamFixture {
         let main = head("main", root)
         let refused = lead.call("merge", ["task": "add-b"])
         #expect(refused.isError && refused.text.contains("The test command fails"), "\(refused.text)")
-        #expect(head("main", root) == main)
+        #expect(onlyRecords(on: "main", since: main, in: root))
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
     }
 

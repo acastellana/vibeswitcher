@@ -478,8 +478,6 @@ extension LeadToolsetTests {
         lead.loadPoll = 0.02
         runtime.load = 150
         runtime.others = Self.neighbours
-        // The records go in before the merge starts (`LeadRecords.commitBeforeMerge`): committed now, the base stays put.
-        lead.records.flush(base: "main")
         let before = Git.run(["rev-parse", "main"], in: root).output
         let started = Date()
         let refused = call(lead, "merge", ["task": "add-b"])

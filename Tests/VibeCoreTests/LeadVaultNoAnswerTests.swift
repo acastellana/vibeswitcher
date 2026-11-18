@@ -246,6 +246,8 @@ struct LeadVaultNoAnswerTests: LeadTeamFixture {
         let flaky = FlakyHost()
         let lead = try lead(root, runtime, through: flaky)
         try audited("b", lead, runtime, root: root)
+        // The records committed now: the head the merge records next is its fast-forward's (`commitBeforeMerge` has none).
+        lead.records.flush(base: "main")
         let store = BoardStore(root: root)
         let (board, before) = (store.file, head("main", root))
         // The moment the merge records the head: the fast-forward is done, the board's write is next.

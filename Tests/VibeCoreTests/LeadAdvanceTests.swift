@@ -566,7 +566,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         try work("add-b", file: "b.txt", root: root, runtime)
         #expect(await advancing.until { toWorker("add-b", root, runtime).contains { $0.contains("BROKEN-ON-PURPOSE") } && task("add-b", root)?.status == .running
             && reports(runtime).contains { $0.contains("Merge of add-b failed") } })
-        #expect(head("main", root) == main)
+        #expect(onlyRecords(on: "main", since: main, in: root))
         let after = try #require(task("add-b", root))
         #expect(after.status == .running && after.setback?.stage == .merge, "\(after.status)")
         #expect(reports(runtime).contains { $0.contains("Merge of add-b failed") && $0.contains("Sent its worker the output") })
@@ -1194,7 +1194,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         let after = try #require(task("add-b", root))
         #expect(after.status == .kept && after.keptBecause == "main's suite fails 2 pre-existing tests" && after.merged == nil, "\(after.status) \(after.keptBecause ?? "")")
         #expect(after.setback == nil, "\(String(describing: after.setback))")
-        #expect(head("main", root) == main)
+        #expect(onlyRecords(on: "main", since: main, in: root))
         #expect(!Git.run(["show", "main:b.txt"], in: root).ok)
         #expect(toWorker("add-b", root, runtime).isEmpty, "\(toWorker("add-b", root, runtime))")
         let told = reports(runtime).filter(aboutMerge)

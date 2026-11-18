@@ -259,10 +259,11 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let worktree = try reported(lead, runtime, root: root)
         try passingAudit(lead, runtime)
         let audited = head("agent/add-b", root)
-        let base = head("main", root)
         // While the tests run, the worker commits and edits in its worktree; the tests read b.txt.
         let set = lead.call("configure", ["test_command": "grep -q bee b.txt && echo late > \(worktree)/late.txt && git -C \(worktree) add late.txt && git -C \(worktree) commit -qm late && echo evil > \(worktree)/b.txt"])
         #expect(!set.isError, "\(set.text)")
+        lead.records.flush(base: "main")
+        let base = head("main", root)
         let merged = lead.call("merge", ["task": "add-b"])
         // The run tested the audited commit and the branch is past it now: neither the late commit nor the older one
         // lands, and the late commit stays on the branch (cleanup would have deleted it behind a landed merge).
@@ -282,6 +283,9 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
+        // The records kept local: none committed before the merge's rebase (`commitBeforeMerge`), so the audited
+        // commit lands on the main it was made on.
+        #expect(!lead.call("configure", ["records_dir": ""]).isError)
         let worktree = try reported(lead, runtime, root: root)
         try passingAudit(lead, runtime)
         let audited = head("agent/add-b", root)
@@ -290,8 +294,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(!set.isError, "\(set.text)")
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
-        // The lead's records go in a commit of their own on top (LeadRecords). Under them, the audited commit with the
-        // merge's provenance trailers and nothing else changed (MergeProvenanceTests).
+        // The audited commit with the merge's provenance trailers and nothing else changed (MergeProvenanceTests).
         #expect(MergeProvenanceTests.isStamped(underRecords("main", in: root), from: audited, in: root))
         #expect(try String(contentsOfFile: root + "/b.txt", encoding: .utf8) == "bee\n")
         #expect(!FileManager.default.fileExists(atPath: root + "/late.txt"))
@@ -770,8 +773,9 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let landed = lead.call("merge", ["task": "add-b"])
         #expect(!landed.isError, "\(landed.text)")
         #expect(Git.run(["rev-list", "--merges", "main"], in: root).output.isEmpty)
+        // On top of the records the round wrote, committed before its rebase, on top of what main was.
         let work = underRecords("main", in: root)
-        #expect(head("\(work)~1", root) == mainBefore)
+        #expect(onlyRecords(on: "\(work)~1", since: mainBefore, in: root))
         #expect(Git.run(["show", "main:b.txt"], in: root).output == "bee and main's own")
         #expect(Git.run(["log", "-1", "--format=%s", work], in: root).output == "change b.txt")
     }

@@ -91,7 +91,6 @@ extension LeadToolset {
         var slugs: [String] = []
         for slug in given where !slugs.contains(slug) { slugs.append(slug) }
         guard slugs.count <= Self.batchLimit else { throw Problem(text: "Not merged: a batch takes at most \(Self.batchLimit) tasks; this was \(slugs.count).") }
-        commitRecordsFirst(not: slugs.joined(separator: ", "))
         try checkBattery(not: "Not merged")
         let workflow = self.workflow
         try checkSettings(workflow, not: "Not merged (nothing was tested)")
@@ -130,14 +129,17 @@ extension LeadToolset {
         }
         defer { held.release() }
         noteMergeStarted(gates.map(\.task.slug))
-        guard let current = branchHead(base) else { throw Problem(text: "There's no branch \(base) to merge into.") }
-        try checkBaseMoves(base: base, current: current)
+        guard let found = branchHead(base) else { throw Problem(text: "There's no branch \(base) to merge into.") }
+        try checkBaseMoves(base: base, current: found)
         if let lock = Worktrees.indexLock(blocking: base, root: root) {
             throw Problem(text: "Not merged (nothing was tested): \(Worktrees.refusal(lock))")
         }
         locked?()
         let names = gates.map(\.task.slug).joined(separator: ", ")
         let waited = try waitForLoad(workflow, slug: names)
+        // The lead's records not committed yet go in first, under this batch's lock, and the stack builds on them (as
+        // `merge` does).
+        let current = commitRecordsFirst(not: names, holdingBaseLock: true) ?? found
 
         let place = vault.scratch(root: root, "merge-batch")
         try vault.ensurePrivate(place.deletingLastPathComponent())
