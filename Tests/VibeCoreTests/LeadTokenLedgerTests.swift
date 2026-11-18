@@ -128,4 +128,29 @@ struct LeadTokenLedgerTests {
         let day = try #require(ledger.days[LoadStats.day(Date(timeIntervalSince1970: begun + 5))])
         #expect(day.total == 10 && day.unpriced == ["claude-new-9"] && day.tokens.cost == nil)
     }
+
+    @Test func theLeadsAdvisorCallsAreCountedOnceAtTheAdvisorsPrices() throws {
+        let (root, home, claude) = try project()
+        let begun = Date().timeIntervalSince1970 - 600
+        try LeadTokenLedger.tally(root: root, home: home, now: Date(timeIntervalSince1970: begun))
+        let consulted = LeadReceiptTests.advisedResponse("a1", "claude-opus-5-5", input: 10, output: 100, at: begun + 5,
+                                                         advisor: [LeadReceiptTests.advisor("claude-fable-5-2", input: 40_000, output: 1000)])
+        let lead = claude.appendingPathComponent("l.jsonl")
+        try write(LeadReceiptTests.named(LeadTokenLedger.leadName(root: root), session: "l") + [consulted], to: lead)
+        try backdate(lead, to: begun + 1)
+        var ledger = try #require(try LeadTokenLedger.tally(root: root, home: home))
+        let key = LoadStats.day(Date(timeIntervalSince1970: begun + 5))
+        var day = try #require(ledger.days[key])
+        #expect(day.input == 40_010 && day.output == 1100 && day.models == ["claude-opus-5-5": 110], "\(day)")
+        #expect(day.advisor?.calls == 1 && day.advisor?.models == ["claude-fable-5-2"] && day.tokens.advisor == day.advisor)
+        // Opus 5.5: 10 × $4 + 100 × $20; its Fable 5.2 advisor: 40k × $8 + 1000 × $40 (per million).
+        #expect(abs(day.cost - (2040 + 360_000) / 1_000_000) < 1e-12 && abs((day.advisor?.cost ?? -1) - 0.36) < 1e-12, "\(day)")
+        // The same line again (another content block) and a later tally: the call still counts once, and the
+        // response's own id is what's kept to tell its repeats.
+        try append(consulted.replacingOccurrences(of: "\"apiBlockIndex\":0", with: "\"apiBlockIndex\":1") + "\n", to: lead)
+        ledger = try #require(try LeadTokenLedger.tally(root: root, home: home))
+        day = try #require(ledger.days[key])
+        #expect(day.input == 40_010 && day.advisor?.calls == 1)
+        #expect(ledger.files.values.compactMap(\.recent).flatMap { $0 } == ["a1"])
+    }
 }

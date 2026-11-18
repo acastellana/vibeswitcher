@@ -52,6 +52,9 @@ public enum LeadTokenLedger {
         public var models: [String: Int] = [:]
         /// The transcripts (sessions, subagents' included) its responses came from.
         public var sessions: [String] = []
+        /// Of its tokens and cost, the lead's advisor calls' (`LeadAdvisorTokens`), their models not in `models`; nil
+        /// when it made none (and in days tallied before they were read).
+        public var advisor: LeadAdvisorTokens?
 
         public init() {}
 
@@ -61,7 +64,7 @@ public enum LeadTokenLedger {
         public var tokens: LeadTokens {
             LeadTokens(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite, cacheWrite1h: cacheWrite1h,
                        sessions: sessions.count, models: models.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map(\.key),
-                       cost: unpriced == nil ? cost : nil, unpriced: unpriced)
+                       cost: unpriced == nil ? cost : nil, unpriced: unpriced, advisor: advisor)
         }
 
         mutating func add(_ response: LeadReceipts.Response, session: String) {
@@ -70,7 +73,13 @@ public enum LeadTokenLedger {
             cacheRead += response.cacheRead
             cacheWrite += response.cacheWrite
             cacheWrite1h += response.cacheWrite1h
-            models[response.model, default: 0] += response.input + response.output + response.cacheRead + response.cacheWrite
+            if response.advisor {
+                var calls = advisor ?? LeadAdvisorTokens()
+                calls.add(response)
+                advisor = calls
+            } else {
+                models[response.model, default: 0] += response.input + response.output + response.cacheRead + response.cacheWrite
+            }
             if let price = LeadPrices.price(response.model) {
                 cost += LeadPrices.cost(response, price: price)
             } else {
@@ -189,7 +198,8 @@ public enum LeadTokenLedger {
             guard let at = response.at else { continue }
             ledger.days[LoadStats.day(Date(timeIntervalSince1970: at)), default: Day()].add(response, session: session)
         }
-        let recent = (mark.recent ?? []) + responses.map(\.id)
+        // A response's own ids: its advisor calls count with it.
+        let recent = (mark.recent ?? []) + responses.filter { !$0.advisor }.map(\.id)
         mark.recent = recent.isEmpty ? nil : Array(recent.suffix(recentIDs))
     }
 
