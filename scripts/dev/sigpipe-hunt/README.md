@@ -17,7 +17,9 @@ Runs, each with the probe, one at a time under vs-heavy:
 - 5 full runs at 2 a core: no SIGPIPE (tests 431–479 s; run 2 also failed 2 HookBoundsTests after its driver shell was killed mid-run, an artifact of that).
 - 42 runs of the 52 early suites at 2 a core (about 65 s each): one caught SIGPIPE, in the second (before the write hook and the in-handler snapshot below existed); none in the 40 after.
 - 5 runs of the early suites at 3 a core: no SIGPIPE. The hunt stopped with every vs-heavy slot held by other sessions.
-- `scripts/test-under-load.sh` on the early suites refused to start: the disk had 11 GB free (it wants 15).
+- Then, with the new probe, 60 minutes of `scripts/test-under-load.sh --load 24 -r 3` on the early suites (once the disk had 22 GB free): 17 load runs, 51 completed early-suite runs (the probe installed in each), no SIGPIPE, and not one unguarded EPIPE from the bundle's writes. Each load run also exited 1 on a `vswt-*` entry some test leaves in its TMPDIR.
+
+So the probe now in the patch has caught nothing yet in about 60 early-suite runs; the early catch came before it existed. At this rate (1 in about 100 early-suite runs overall, none in 5 full runs) the writer is rare at 2 a core.
 
 What the one catch showed (`dump-early2.txt` here):
 
@@ -37,7 +39,7 @@ Newly ruled out:
 
 Not the early catch's writer, since none of them ran in it (the filter is `(suite|…)/`): `LeadAdvance.stop`'s 1-byte write (no early suite starts a LeadAdvance, LeadToolset or MCPServer in the test process; its reader exits only on that byte, its EOF or a kevent error), the raw TCP write in `PhoneRepliesTests.exchange` (no SO_NOSIGPIPE), and `TooLargeReplyTests` (its socketpair's `fds[0]` isn't configured, though its peer stays open while the connection lives). Each could still be a full run's writer. The early catch's writer is in one of the 52 early suites or the code they run.
 
-Flakes seen meanwhile, none a SIGPIPE: `StatusLineBinaryTests.claudeCodeStoppingTheStatusLineStopsYourCommandToo` (3 early runs, after about 300 s), `HostServerTests.inputBeyondTheBufferIsRefusedOutLoudNeverLost` (1 early run), `HostedSessionTests.aShellThatIsntThereIsNamedOnTheSessionsScreen` (1 run at 3 a core).
+Flakes seen meanwhile, none a SIGPIPE: `StatusLineBinaryTests.claudeCodeStoppingTheStatusLineStopsYourCommandToo` (3 early runs and 6 of 51 under load, after about 300 s each), `HostServerTests.inputBeyondTheBufferIsRefusedOutLoudNeverLost` (1 early run), `HostedSessionTests.aShellThatIsntThereIsNamedOnTheSessionsScreen` (1 run at 3 a core), `endedSessionsCloseTheirPTYs` and `refusedInputIsAnError` (1 each under load).
 
 The probe in `epipe-probe.patch` now does three things, all in the test process on its own task. They read raw stack memory, so they're for hunting only:
 
