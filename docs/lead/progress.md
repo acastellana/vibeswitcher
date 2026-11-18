@@ -3988,3 +3988,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 23:17 Automatically (auto_advance): Started a worker on merge-reruns-only-what (Merge reruns only what failed: a failing first run reruns its named tests, not the whole suite).
 - 2026-11-18 23:17 Automatically (auto_advance): Overlap for merge-reruns-only-what's start (a warning only: nothing was refused or reordered). scripts/test.sh: sigpipe-probe-always-on (running: its boundaries name it).
 - 2026-11-18 23:20 Audit of flaky-host-tests-turn: complete, clean
+- 2026-11-18 23:40 Pipeline held: flaky-host-tests-turn ready to merge with none landing; cause: every test slot held
+- 2026-11-18 23:41 Merged flaky-host-tests-turn: Flaky host tests: turn job control off in every scratch program that runs stty or dd (build 31d37278312c)
