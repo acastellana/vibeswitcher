@@ -3969,3 +3969,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 22:19 Planned sensitive-audits-fall: Sensitive audits fall back to the verifier_model when Fable is refused at its limit (review audit)
 - 2026-11-18 22:30 Planned architecture-diagram: Architecture diagram: VibeSwitcher's parts, its caged agents and the outside, one page
 - 2026-11-18 22:33 Started a worker on architecture-diagram
+- 2026-11-18 22:47 Planned merge-reruns-only-what: Merge reruns only what failed: a failing first run reruns its named tests, not the whole suite (review audit)
+- 2026-11-18 22:47 Planned the-config-seal-is: The config seal is checked before a merge's test run, and a passing run survives a seal hold (review audit, for security)
+- 2026-11-18 22:47 Planned the-lead-s-records: The lead's records never fail a merge: they're committed before every merge starts
+- 2026-11-18 22:50 Exception on new-work-waits-when by lead of vibeswitcher: edits to docs/guide/project-lead.md, scripts/test-under-load.sh, Tests/**/MacLoadTests.swift, Tests/**/MacMemoryTests.swift, Tests/**/LoadRunDiskTests.swift accepted. Reason: The lead accepts the routine edits the worker listed: the new disk_headroom_gb row in the settings table, one comment line in the load script naming its reader (the floor value unchanged), and the two…

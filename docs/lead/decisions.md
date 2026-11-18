@@ -387,3 +387,7 @@ Today five finished workers waited 1–3 h on the 15 GB load-run floor while new
 
 Fable's weekly limit was spent while Opus still worked. The user allowed reviews on the workers' model for those days only.
 
+## 2026-11-18 22:48:03 From the 2026-11-18 speed review (start to merge, 94 tasks, 294 task-hours): three merge-path fixes, chained because they share the merge code: merge-reruns-only-what (a failure reruns only what failed, not the whole suite), then the-config-seal-is (seal checked before a merge's tests; a passing run survives a seal hold), then the-lead-s-records (records committed before every merge). Not changed now: merge width stays at 4 cores until sigpipe-probe-always-on names the pipe writer; Mac sleep (54 h) and rework rounds (~15 h) get no task.
+
+Whole-suite reruns cost about 35 h in the week (24 of 91 first runs failed; every rerun re-ran everything, a median 39 min against 16 for a clean pass). Seal checks after the tests threw away three passing runs, and the lead's records failed 9 merges. Sleep is mostly the lid closed overnight; rework is spread thin with no single cause.
+
