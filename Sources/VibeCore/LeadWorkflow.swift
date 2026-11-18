@@ -30,6 +30,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     public var leadAdvisor: String? = LeadWorkflow.defaultLeadAdvisor
     /// Every worker's advisor when its task sets none (`worker_advisor:`; empty or none: no advisor, the default).
     public var workerAdvisor: String?
+    /// The Claude Code plugins of yours that workers and verifiers load (`team_plugins:`, comma-separated ids,
+    /// "<plugin>@<marketplace>" or a plugin's name alone; empty, the default: none). Every other plugin is off in their
+    /// sessions alone (`LeadLaunch.pluginsOff`); the lead and your own sessions keep yours.
+    public var teamPlugins: [String] = []
     /// The branch the lead builds on and merges into (`base_branch:`; otherwise the one checked out when the lead
     /// first started there, kept on its board).
     public var baseBranch: String?
@@ -162,6 +166,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "lead_model": workflow.leadModel = present ?? defaultLeadModel
                 case "lead_advisor": workflow.leadAdvisor = advisorValue(present ?? defaultLeadAdvisor)
                 case "worker_advisor": workflow.workerAdvisor = present.flatMap(advisorValue)
+                case "team_plugins": workflow.teamPlugins = globs(value) ?? []
                 case "base_branch": workflow.baseBranch = present
                 case "remote": workflow.remote = present
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
@@ -519,7 +524,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         return model
     }
 
-    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "lead_model", "lead_advisor", "worker_advisor", "max_workers",
+    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "lead_model", "lead_advisor", "worker_advisor", "team_plugins", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                       "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "watch_app_logs", "agent_default",
@@ -660,6 +665,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     # Every worker's advisor when its task sets none (none, fable or opus). Workers run on Opus; mark a hard task
     # with add_task's advisor: fable instead.
     worker_advisor: none
+    # The Claude Code plugins of yours that workers and verifiers load, comma-separated (plugin@marketplace, or a
+    # plugin's name alone), e.g. swift-lsp. Every other plugin is off in their sessions only; the lead and your own
+    # sessions keep yours, and nothing in ~/.claude changes. Empty: none.
+    team_plugins:
     # The branch workers start from and verified work is merged into. Empty: the one checked out when the lead first
     # started here.
     base_branch:

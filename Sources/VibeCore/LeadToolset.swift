@@ -114,6 +114,10 @@ public protocol LeadRuntime: AnyObject {
     /// What this Mac lacks to start a session with `command` (the agent's CLI, git, the Command Line Tools, the tool
     /// server): see `LaunchPreflight`. Blocks while the login shell answers.
     func preflight(command: String) -> LaunchPreflight.Problem?
+    /// The ids of the user's Claude Code plugins as `command`'s own `claude plugin list --json` lists them, run in a
+    /// folder of VibeSwitcher's own, never a worktree (by name only; see `LeadLaunch.listedPlugins`); nil when not
+    /// listed. Blocks while it runs.
+    func pluginIDs(command: String) -> [String]?
 }
 
 public extension LeadRuntime {
@@ -132,6 +136,9 @@ public extension LeadRuntime {
 
     /// Nothing looked at: a runtime that starts no real agent (the tests') lacks nothing.
     func preflight(command: String) -> LaunchPreflight.Problem? { nil }
+
+    /// Nothing listed: a runtime that starts no real agent (the tests') runs no Claude Code (see `HostRuntime`).
+    func pluginIDs(command: String) -> [String]? { nil }
 
     /// From the Claude command's own --model only; the app's runtime also reads Claude's settings (see `HostRuntime`).
     func workerModel(root: String) -> String? { LeadWorkflow.claudeModel(command: claudeCommand(root: root)) }
@@ -241,6 +248,10 @@ public final class LeadToolset: MCPToolset {
     /// look, or a pass after another, doesn't ask again.
     private var riskAnswers: [String: String?] = [:]
     private let riskLock = NSLock()
+    /// What Claude Code's plugin list gave at the last worker's or verifier's start (`listPlugins`): its ids, or nil
+    /// when it failed; nil before any start. Status and configure say it (`teamPluginsText`) without listing again.
+    private var pluginListing: [String]??
+    private let pluginListingLock = NSLock()
     /// Status said once that workflow.md's Mac-wide keys are ignored.
     private var toldIgnoredKeys = false
     private let tellingIgnoredKeys = NSLock()
@@ -827,6 +838,7 @@ public final class LeadToolset: MCPToolset {
                                          "lead_model": P(type: "string", description: "The lead's own model, from its next start (empty: fable, the model best at deciding what to do and judging what comes back; Opus in its place while Fable is held back)"),
                                          "lead_advisor": P(type: "string", description: "The lead's advisor while it runs on Opus: fable (the default), opus, or none"),
                                          "worker_advisor": P(type: "string", description: "Every worker's advisor when its task sets none: none (the default), fable or opus. Mark hard tasks with add_task's advisor: fable instead of setting it for all"),
+                                         "team_plugins": P(type: "string", description: "The user's Claude Code plugins that workers and verifiers load, comma-separated: plugin@marketplace, or a plugin's name alone (empty, the default: none). Every other plugin is off in their sessions only, from each one's next start; the lead and the user's own sessions keep theirs, and nothing in ~/.claude changes"),
                                          "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)"),
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
                                          "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
@@ -2829,7 +2841,8 @@ public final class LeadToolset: MCPToolset {
                 : try LeadLaunch.prepare(role: role, root: root, task: slug, base: command, prompt: prompt,
                                          start: start, server: runtime.server, name: name, model: model, advisor: advisor, effort: effort, branch: branch,
                                          records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
-                                         cwd: folder, temporary: sessionTempRoot, home: claudeHome)
+                                         cwd: folder, temporary: sessionTempRoot, home: claudeHome, teamPlugins: workflow.teamPlugins,
+                                         listedPlugins: listPlugins(command: command, role: role))
             // The project's heavy_slots for its sessions' vs-heavy too.
             var environment = launch.environment
             if let slots = workflow.heavySlots { environment[TestLock.slotsVariable] = String(slots) }
@@ -5651,6 +5664,12 @@ public final class LeadToolset: MCPToolset {
                 value = policy.rawValue
             case "sensitive_paths", "strict_paths":
                 value = LeadWorkflow.globs(value)?.joined(separator: ", ") ?? ""
+            case "team_plugins":
+                let ids = LeadWorkflow.globs(value) ?? []
+                if let bad = ids.first(where: { !LeadLaunch.isPluginName($0) }) {
+                    throw Problem(text: "team_plugins is a comma-separated list of plugin ids as `claude plugin list` shows them (plugin@marketplace, or a plugin's name alone); \"\(bad)\" isn't one.")
+                }
+                value = ids.joined(separator: ", ")
             case "records_dir" where !value.isEmpty:
                 guard let folder = LeadWorkflow.recordsFolder(value) else {
                     throw Problem(text: "records_dir is a folder inside the repository (e.g. docs/lead), not in .git or .vibeswitcher; empty keeps the logs in .vibeswitcher.")
@@ -5690,7 +5709,7 @@ public final class LeadToolset: MCPToolset {
                                           "done_check_command": after.doneCheckCommand ?? "", "done_check_min": Self.gb(after.doneCheckMinutes),
                                           "base_branch": after.baseBranch ?? "", "remote": after.remote ?? "", "verifier_model": after.verifierModel ?? "",
                                           "lead_model": after.leadModel, "lead_advisor": after.leadAdvisor ?? "none",
-                                          "worker_advisor": after.workerAdvisor ?? "none",
+                                          "worker_advisor": after.workerAdvisor ?? "none", "team_plugins": after.teamPlugins.joined(separator: ", "),
                                           "max_workers": String(after.maxWorkers),
                                           "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
                                           "test_timeout_min": Self.gb(after.testTimeoutMinutes), "stall_min": Self.gb(after.stallMinutes),
@@ -6702,6 +6721,7 @@ public final class LeadToolset: MCPToolset {
         // One line, only where the floor holds a rule above workflow.md: status stays bounded on a big board;
         // configure() shows every rule.
         if let line = workflow.floor?.statusLine(workflow, workerModel: runtime.workerModel(root: root)) { lines.append(Self.clip(line, 600)) }
+        if let line = teamPluginsStatusLine(workflow) { lines.append(Self.clip(line, 600)) }
         if let line = heavyLockLine(board) { lines.append(line) }
         lines += usageLines(sessions: listing)
         lines += sessionRunLines(board, sessions, workflow: workflow)
@@ -7162,6 +7182,50 @@ public final class LeadToolset: MCPToolset {
             + floor.lines(workflow, auditModel: auditModel(workflow))
     }
 
+    /// Claude Code's own list of the user's plugins for a worker's or verifier's start (`LeadRuntime.pluginIDs`, run in
+    /// a folder of VibeSwitcher's own, never the worktree), kept for status and configure (`pluginListing`).
+    func listPlugins(command: String, role: LeadLaunch.Role) -> [String]? {
+        guard role != .lead else { return nil }
+        let ids = runtime.pluginIDs(command: command)
+        pluginListingLock.lock()
+        pluginListing = .some(ids)
+        pluginListingLock.unlock()
+        return ids
+    }
+
+    /// Which of the user's plugins team sessions load (team_plugins), as configure and status say it: one line. With
+    /// what the last team session's start listed (`pluginListing`): how many of the user's plugins that leaves off, or
+    /// that the listing failed and some may still load. Nothing is listed here: before a start, no count.
+    func teamPluginsText(_ workflow: LeadWorkflow) -> String {
+        let wanted = workflow.teamPlugins.isEmpty ? "none of the user's plugins (team_plugins empty)"
+            : workflow.teamPlugins.joined(separator: ", ") + " only"
+        let keep = "; the lead and the user's own sessions keep theirs"
+        pluginListingLock.lock()
+        let listing = pluginListing
+        pluginListingLock.unlock()
+        switch listing {
+        case .none:
+            return wanted + keep
+        case .some(.none):
+            return wanted + " wanted, but Claude Code's plugin list failed at the last team session's start: some of the "
+                + "user's plugins (those only it lists, such as ones synced from the account) may still load there" + keep
+        case .some(.some(let ids)):
+            let known = LeadLaunch.knownPlugins(home: claudeHome, cwd: root, listed: ids)
+            let off = LeadLaunch.pluginsOff(role: .worker, allowed: workflow.teamPlugins, known: known).count
+            return wanted + "; \(off) of the user's \(known.count) off in their sessions" + keep
+        }
+    }
+
+    /// Status's line on team sessions' plugins, only when it carries news: team_plugins names some, or the last
+    /// listing failed so some may still load. The default (none wanted, listing fine) says nothing: configure shows it.
+    func teamPluginsStatusLine(_ workflow: LeadWorkflow) -> String? {
+        pluginListingLock.lock()
+        let failed = pluginListing == .some(.none)
+        pluginListingLock.unlock()
+        guard !workflow.teamPlugins.isEmpty || failed else { return nil }
+        return "Team sessions' plugins (workers, verifiers): " + teamPluginsText(workflow)
+    }
+
     private func workflowText() -> String {
         let workflow = self.workflow
         let raw = LeadWorkflow.load(from: workflowPath)
@@ -7181,6 +7245,7 @@ public final class LeadToolset: MCPToolset {
                      "- lead_model: \(workflow.leadModel) (the lead's own, from its next start; Opus while Fable is held back)",
                      "- lead_advisor: \(workflow.leadAdvisor ?? "none") (while the lead runs on Opus)",
                      "- worker_advisor: \(workflow.workerAdvisor ?? "none") (for tasks that set no advisor; advisor: fable marks a task hard)",
+                     "- team_plugins: " + teamPluginsText(workflow),
                      "- max_workers: \(workflow.maxWorkers)",
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
                      "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)",

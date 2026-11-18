@@ -59,6 +59,15 @@ final class FakeRuntime: LeadRuntime {
     /// The project's Codex command, flags included.
     var codex = "codex"
     func codexCommand(root: String) -> String { codex }
+    /// What Claude Code's `plugin list` gives (nil: not listed), and each command it was asked for.
+    var plugins: [String]?
+    var pluginLists: [String] = []
+    func pluginIDs(command: String) -> [String]? {
+        calls.lock()
+        defer { calls.unlock() }
+        pluginLists.append(command)
+        return plugins
+    }
     /// The agent each session was started as ("claude", "codex"), by session.
     var agents: [String: String] = [:]
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {

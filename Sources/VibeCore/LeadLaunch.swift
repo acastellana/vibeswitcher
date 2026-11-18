@@ -574,7 +574,8 @@ public enum LeadLaunch {
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
                                server: String, name: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
                                branch: String? = nil, records: String? = nil, folder: URL? = nil, cwd: String? = nil,
-                               temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil) throws -> Prepared {
+                               temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil,
+                               teamPlugins: [String] = [], listedPlugins: [String]? = nil) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -611,6 +612,9 @@ public enum LeadLaunch {
             setAsideMemory(cwd: cwd)
         }
         if !env.isEmpty { settings["env"] = env }
+        // Your plugins stay off in a worker's or verifier's session but those team_plugins names (`pluginsOff`).
+        let off = pluginsOff(role: role, allowed: teamPlugins, known: knownPlugins(home: home, cwd: cwd, listed: listedPlugins))
+        if !off.isEmpty { settings["enabledPlugins"] = off }
         settings["hooks"] = hooks(role, server: server, root: cwd, base: branch, records: records)
         // The account's usage windows reach VibeSwitcher only through a status line's input: its own records them and
         // shows yours (see `UsageStatusLine`): for a verifier, only your user settings' (its project settings don't run).
@@ -655,6 +659,110 @@ public enum LeadLaunch {
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
         return prepared
+    }
+
+    // MARK: Plugins
+
+    /// What a worker's or verifier's own settings (`--settings`) say of your Claude Code plugins: each one known
+    /// (`knownPlugins`) that `allowed` (workflow.md's team_plugins) doesn't name, off (`false`). Claude Code takes
+    /// `enabledPlugins` from the `--settings` file over your user and project settings, for that process alone
+    /// (2.1.326: the Code Mode trial, docs/experiments/code-mode-trial.md), so the session loads none of their skills,
+    /// hooks, agents or MCP servers, and your own sessions keep them. Empty for the lead: it keeps yours, as you do.
+    /// Why: every plugin costs tokens in every team session, and some plugins' instructions contradict the working
+    /// policy the lead gives workers (mandatory extra reviewers, brainstorming gates, full-suite runs).
+    public static func pluginsOff(role: Role, allowed: [String], known: [String]) -> [String: Bool] {
+        guard role != .lead else { return [:] }
+        var off: [String: Bool] = [:]
+        for id in known where !pluginAllowed(id, by: allowed) { off[id] = false }
+        return off
+    }
+
+    /// Whether team_plugins names the plugin `id` ("<plugin>@<marketplace>"): by that whole id, or by its plugin name
+    /// alone (any marketplace's), as `claude plugin list` shows it.
+    public static func pluginAllowed(_ id: String, by allowed: [String]) -> Bool {
+        let name = id.split(separator: "@", maxSplits: 1).first.map(String.init) ?? id
+        return allowed.contains { $0 == id || (!$0.contains("@") && $0 == name) }
+    }
+
+    /// Whether `text` reads as a plugin's id or name for team_plugins: "<plugin>@<marketplace>" or "<plugin>", each part
+    /// letters, digits, `.`, `_` and `-` (no spaces, commas, quotes or path characters).
+    public static func isPluginName(_ text: String) -> Bool {
+        let parts = text.split(separator: "@", omittingEmptySubsequences: false)
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        return (1...2).contains(parts.count)
+            && parts.allSatisfy { !$0.isEmpty && $0.unicodeScalars.allSatisfy(allowed.contains) }
+    }
+
+    /// The ids of the plugins a session started in `cwd` could load, by name only ("<plugin>@<marketplace>"): those
+    /// `listed` (Claude Code's own `claude plugin list --json`, `listedPlugins`: the only source of the ones synced from
+    /// the account, "<plugin>@synced", and of "<name>@skills-dir"), every one Claude Code's record of installed plugins
+    /// lists (`~/.claude/plugins/installed_plugins.json`, its keys alone: no install's path or contents is read), and
+    /// every one `cwd`'s own project settings enable (`.claude/settings.json`, `.claude/settings.local.json` in the
+    /// worktree). Nothing here is written. A record that can't be read adds none.
+    public static func knownPlugins(home: String, cwd: String, listed: [String]? = nil) -> [String] {
+        var ids = Set(listed ?? [])
+        let record = (home as NSString).appendingPathComponent(".claude/plugins/installed_plugins.json")
+        if let data = ConfigSeal.regularContents(record, limit: ConfigSeal.jsonLimit),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            ids.formUnion((object["plugins"] as? [String: Any] ?? [:]).keys)
+        }
+        for file in [".claude/settings.json", ".claude/settings.local.json"] {
+            let path = (cwd as NSString).appendingPathComponent(file)
+            guard let data = ConfigSeal.regularContents(path, limit: ConfigSeal.jsonLimit),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            ids.formUnion((object["enabledPlugins"] as? [String: Any] ?? [:]).keys)
+        }
+        return ids.filter { !$0.isEmpty }.sorted()
+    }
+
+    /// The ids `claude plugin list --json` gives (each entry's "id"), run as `command`'s program (`LaunchPreflight.program`,
+    /// else claude) by your login shell in `folder` (`pluginListFolder`: VibeSwitcher's own, empty; never a task's
+    /// worktree or the repository, whose project settings a worker may have written and a verifier never loads); nil
+    /// when the folder isn't private and empty, or the listing fails, prints no list or takes longer than `timeout`.
+    /// `plugin list` takes no `--setting-sources` (2.1.327), so the neutral folder is what keeps a project's settings out.
+    /// Only the ids are kept: never a plugin's path or contents.
+    public static func listedPlugins(command: String, folder: URL = pluginListFolder, timeout: TimeInterval = 20) -> [String]? {
+        guard neutral(folder) else { return nil }
+        let program = LaunchPreflight.program(in: command) ?? "claude"
+        let result = Shell.run(executable: "/bin/zsh", args: ["-lc", "exec \"$1\" plugin list --json", "zsh", program],
+                               in: folder.path, timeout: timeout, grace: 1)
+        guard result.ok else { return nil }
+        return pluginIDs(json: Data(result.output.utf8))
+    }
+
+    /// Where `listedPlugins` runs Claude Code's `plugin list`: a folder of VibeSwitcher's own under the sessions' temporary
+    /// root (`SessionTemp.root`: /private/tmp/vibeswitcher-<uid> for your own app, in no repository), named so the app's
+    /// sweep of ended sessions' folders leaves it.
+    public static var pluginListFolder: URL { SessionTemp.root.appendingPathComponent("plugins", isDirectory: true) }
+
+    /// Makes `folder` (0700) and says whether it and the root above it are real folders of yours, private, with nothing
+    /// in `folder`: no project settings (`.claude/`) for the listing to load.
+    static func neutral(_ folder: URL) -> Bool {
+        let top = folder.deletingLastPathComponent()
+        var info = stat()
+        if lstat(top.path, &info) == 0, info.st_uid != getuid() || (info.st_mode & S_IFMT) != S_IFDIR { return false }
+        guard (try? VibePaths.ensurePrivate(folder, within: top)) != nil, SessionTemp.isPrivate(top), SessionTemp.isPrivate(folder),
+              let entries = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return false }
+        return entries.isEmpty
+    }
+
+    /// The ids in `claude plugin list --json`'s output (an array of objects, each with its "id"): the first array that
+    /// parses from a line opening with `[` to a later line closing with `]` (a login shell's own lines before or after
+    /// it are skipped, even ones that start with `[`); nil when there's none.
+    static func pluginIDs(json: Data) -> [String]? {
+        let lines = String(decoding: json, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
+        let opens = lines.indices.filter { lines[$0].hasPrefix("[") }
+        // The array's own last line isn't indented ("]" or the whole array on one line); the lines inside it are.
+        let closes = lines.indices.filter { lines[$0].first.map { !$0.isWhitespace } == true
+            && lines[$0].trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("]") }
+        for open in opens.prefix(32) {
+            for close in closes.reversed().prefix(32) where close >= open {
+                let text = lines[open...close].joined(separator: "\n")
+                guard let list = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]] else { continue }
+                return list.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
+            }
+        }
+        return nil
     }
 
     /// A verifier isn't started when its tool server's path can't be its shell prefix (`BranchCode.prefixable`).

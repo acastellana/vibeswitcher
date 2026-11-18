@@ -231,6 +231,9 @@ final class HostRuntime: LeadRuntime {
 
     func claudeCommand(root: String) -> String { command(.claude, root: root) ?? "claude" }
 
+    /// Claude Code's own `plugin list --json`, run as the session would start (see `LeadLaunch.listedPlugins`).
+    func pluginIDs(command: String) -> [String]? { LeadLaunch.listedPlugins(command: command) }
+
     func codexCommand(root: String) -> String { command(.codex, root: root) ?? "codex" }
 
     /// The same command the app starts `agent` with (its preferences and launch presets), so workers run like your own
