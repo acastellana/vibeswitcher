@@ -1,7 +1,8 @@
 import Foundation
 import ObjectiveC
 
-/// The debug aids' defaults (`--chat-bench`, `--idle-bench`, `--ui-bench`, `--board-bench`, `--ui-bench-write`): a
+/// The debug aids' defaults (`--chat-bench`, `--idle-bench`, `--ui-bench`, `--board-bench`, `--ui-bench-write`,
+/// `--memory-bench-run`): a
 /// suite of their own in scratch, in place of the build's domain. cfprefsd keeps an unbundled binary's defaults (domain:
 /// its file name, `VibeSwitcher`) in the real ~/Library/Preferences whatever HOME and CFFIXED_USER_HOME say, and until
 /// 2026-10-25 every bench wrote its window frames, split views, chat font and inspector tab there. The same move as the
@@ -9,7 +10,7 @@ import ObjectiveC
 /// in that path's .plist; AppKit's own reads and writes (window frames, split views) go there too.
 enum BenchDefaults {
     /// The flags whose runs get scratch defaults (main.swift calls `redirect` before running any of them).
-    static let flags = ["--chat-bench", "--idle-bench", "--ui-bench", "--board-bench", "--ui-bench-write"]
+    static let flags = ["--chat-bench", "--idle-bench", "--ui-bench", "--board-bench", "--ui-bench-write", "--memory-bench-run"]
 
     /// Where the suite goes: in the scratch home a bench runs on (`<home>/bench-defaults.plist`), or, on the account's
     /// own home (a chat bench run by hand), in a new folder in the temporary folder. Never in ~/Library/Preferences.
