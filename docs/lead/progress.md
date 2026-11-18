@@ -3990,3 +3990,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 23:20 Audit of flaky-host-tests-turn: complete, clean
 - 2026-11-18 23:40 Pipeline held: flaky-host-tests-turn ready to merge with none landing; cause: every test slot held
 - 2026-11-18 23:41 Merged flaky-host-tests-turn: Flaky host tests: turn job control off in every scratch program that runs stty or dd (build 31d37278312c)
+- 2026-11-18 23:41 Automatically (auto_advance): Merged flaky-host-tests-turn (Flaky host tests: turn job control off in every scratch program that runs stty or dd) into main at 8d310226, on its passing audit and the full test run.
+- 2026-11-18 23:41 Automatically (auto_advance): Cleaned up flaky-host-tests-turn (freed 1.7 GB of build output and temporary folders). It stays done.
