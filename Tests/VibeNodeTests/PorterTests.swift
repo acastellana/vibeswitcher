@@ -454,8 +454,10 @@ struct PorterTests {
             }
         }
 
+        /// Ends `script`, the one process here this test started itself: its terminal hangs up, which ends the shell
+        /// and the relay on it. Neither is signalled by the pid it wrote down: a pid read from a file names whatever
+        /// holds it by then (a relay whose shell had gone would have written the user's systemd as its parent).
         func end() {
-            for pid in [relay, box] where pid > 1 { kill(pid, SIGKILL) }
             kill(runner, SIGKILL)
             _ = collected(runner, by: MacTime.real.awake() + 10)
             if accepted >= 0 { Sys.close(accepted) }
@@ -506,6 +508,8 @@ struct PorterTests {
         #expect(HookCaller.pid(terminal.arguments(held: wrong)) == getpid())
         // The relay leaves. Its connection still names its pid (the kernel recorded it at the connect), and the pid is
         // free for any process once its shell has collected it: the hook acts for nobody.
+        // (Signalled only as the process this test holds, and that connected to its listener.)
+        try #require(Platform.ProcessExit.stillRuns(held: held, pid: terminal.relay) && Platform.Sockets.peerPID(terminal.accepted) == terminal.relay)
         kill(terminal.relay, SIGKILL)
         var gone = pollfd(fd: held, events: Int16(POLLIN), revents: 0)
         var ready: Int32
