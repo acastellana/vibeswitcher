@@ -564,6 +564,36 @@ enum ShimBox {
         #expect(ended.descriptors == [0, 1, 2], "\(ended.output)")
     }
 
+    /// The box's init keeps its lines and nothing else the launcher was started with: a pipe's writing end given to the
+    /// launcher is closed in the keeper, in the program (at its exec) and in init, so its reading end, here, comes to
+    /// its end while the program still runs. An init that kept it would hold it open for the session's life.
+    @Test(.enabled(if: can, "\(skip)"))
+    func initHoldsNoDescriptorTheLauncherWasGiven() throws {
+        let (root, box) = try ShimBox.scratch("shim-init-descriptors")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let given = try SpawnTests.newPipe()
+        defer { close(given.reading) }
+        var line: [Int32] = [-1, -1]
+        try #require(socketpair(AF_UNIX, Platform.Sockets.stream, 0, &line) == 0)
+        defer { line.forEach { close($0) } }
+        // With a door, so the lines init does keep are all there.
+        let plan = ShimBox.plan(box.path, door: "/run/vibeswitcher/door")
+        let launched = try ShimBox.launch(plan, ["/bin/sh", "-c", "echo ready; exec sleep 600"], in: box, doorLine: line[1], keep: [given.writing])
+        close(given.writing)
+        defer {
+            kill(launched.pid, SIGKILL)
+            _ = launched.ended()
+        }
+        try #require(ShimBox.eventually { launched.output.contains("ready") }, "\(launched.errors)")
+        // The end of the pipe: nobody holds its writing end any more.
+        var waiting = pollfd(fd: given.reading, events: Int16(POLLIN), revents: 0)
+        var ready: Int32
+        repeat { ready = poll(&waiting, 1, 20_000) } while ready < 0 && errno == EINTR
+        #expect(ready == 1 && waiting.revents & Int16(POLLHUP) != 0, "the box's init still holds a descriptor its launcher was given")
+        // The program still runs: the end came from init letting go, not from the box ending.
+        #expect(launched.running)
+    }
+
     @Test(.enabled(if: can && ShimBox.python, "\(skip), and python3"))
     func initIsNotDumpableAndCantBeTracedOrReadFromInside() throws {
         let (root, box) = try ShimBox.scratch("shim-init")

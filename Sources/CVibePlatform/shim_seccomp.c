@@ -8,6 +8,8 @@
 // - io_uring (io_uring_setup, io_uring_enter, io_uring_register): its operations run in the kernel without the system
 //   calls this filter reads (a socket of any family from 5.19, opens, reads, writes), and its bugs are many; Docker's
 //   and Chromium's filters refuse it too;
+// - fanotify_init: a watch on every file a process can reach, which the kernel has given an unprivileged process since
+//   5.13 (the lead's decision of 2026-11-18); inotify stays;
 // - ioctl's TIOCSTI (typing into a terminal) and TIOCLINUX (a virtual console's selection, which pastes);
 // - without nesting: unshare and clone with CLONE_NEWUSER, mount, umount2, pivot_root, the new mount calls (fsopen,
 //   fsconfig, fsmount, move_mount, open_tree, mount_setattr) and setns; and clone3 answers ENOSYS, so the C library
@@ -128,6 +130,9 @@ static const long refused[] = {
 #endif
 #ifdef SYS_open_by_handle_at
     SYS_open_by_handle_at,
+#endif
+#ifdef SYS_fanotify_init
+    SYS_fanotify_init,
 #endif
     // io_uring does its work (sockets among it, from 5.19) inside the kernel, past every check here.
     SYS_io_uring_setup, SYS_io_uring_enter, SYS_io_uring_register,

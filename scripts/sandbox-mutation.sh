@@ -21,6 +21,7 @@
 #   capabilities   every capability dropped         SandboxShimTests.theProgramIsTheUsersUidWithNoCapabilityAndNoNewPrivileges
 #   no_new_privs   no_new_privs                     every box test (the filter can't load without it)
 #   descriptors    descriptors past 2 closed        SandboxShimTests.theProgramHoldsNoDescriptorButItsThree
+#   init descriptors  init's own closed but its lines  SandboxShimTests.initHoldsNoDescriptorTheLauncherWasGiven
 #   filter         the seccomp filter               SandboxSeccompTests
 # Logs: .build/logs/sandbox-mutation-<step>.log.
 set -uo pipefail
@@ -29,7 +30,7 @@ cd "$(dirname "$0")/.."
 steps=("$@")
 if [[ ${#steps[@]} -eq 0 ]]; then
     steps=(private attributes read-only "root read-only" network pid "death signal" "not dumpable" foreground session
-           capabilities no_new_privs descriptors filter)
+           capabilities no_new_privs descriptors "init descriptors" filter)
 fi
 suites='SandboxShimTests|SandboxSeccompTests|SandboxFactsTests'
 build=(--scratch-path .build/sandbox-mutation -Xcc -DVIBE_SANDBOX_MUTATION)

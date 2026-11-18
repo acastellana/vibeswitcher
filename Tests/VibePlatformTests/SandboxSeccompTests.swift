@@ -20,13 +20,13 @@ import Testing
                 "kexec_load": 246, "kexec_file_load": 320, "init_module": 175, "finit_module": 313, "delete_module": 176,
                 "swapon": 167, "swapoff": 168, "open_by_handle_at": 304, "mount": 165, "umount2": 166, "pivot_root": 155,
                 "unshare": 272, "setns": 308, "clone3": 435, "fsopen": 430, "open_tree": 428, "mount_setattr": 442,
-                "io_uring_setup": 425, "io_uring_enter": 426, "io_uring_register": 427]
+                "io_uring_setup": 425, "io_uring_enter": 426, "io_uring_register": 427, "fanotify_init": 300]
         #else
         return ["bpf": 280, "perf_event_open": 241, "userfaultfd": 282, "add_key": 217, "request_key": 218, "keyctl": 219,
                 "kexec_load": 104, "kexec_file_load": 294, "init_module": 105, "finit_module": 273, "delete_module": 106,
                 "swapon": 224, "swapoff": 225, "open_by_handle_at": 265, "mount": 40, "umount2": 39, "pivot_root": 41,
                 "unshare": 97, "setns": 268, "clone3": 435, "fsopen": 430, "open_tree": 428, "mount_setattr": 442,
-                "io_uring_setup": 425, "io_uring_enter": 426, "io_uring_register": 427]
+                "io_uring_setup": 425, "io_uring_enter": 426, "io_uring_register": 427, "fanotify_init": 262]
         #endif
     }()
 
@@ -135,6 +135,18 @@ import Testing
         // The kernel alone answers otherwise: a ring, where io_uring is on; else its own refusal, never the filter's.
         #expect(plain["fd io_uring_setup"] == "ok" || plain["fd io_uring_setup"] == "ENOSYS", "\(plain)")
         #expect(plain["io_uring_enter"] == "EBADF" && plain["io_uring_register"] == "EBADF", "\(plain)")
+    }
+
+    /// fanotify_init is refused (the lead's decision of 2026-11-18). The probe asks for what the kernel gives a process
+    /// with no capability since 5.13: a group that reports file ids (`FAN_CLASS_NOTIF | FAN_REPORT_FID`). In a plain
+    /// child the kernel makes one; in a box without the filter's entry it would too, the program being as
+    /// unprivileged there.
+    @Test(.enabled(if: can, "\(skip)"))
+    func fanotifyIsRefused() throws {
+        let (box, plain) = try Self.both(#"call("fd fanotify_init", "fanotify_init", 0x200, 0)"# + "\n", "seccomp-fanotify")
+        #expect(box["fd fanotify_init"] == "EPERM", "\(box)")
+        // The kernel alone gives a group (5.13 and later), or has no fanotify at all: never the filter's refusal.
+        #expect(plain["fd fanotify_init"] == "ok" || plain["fd fanotify_init"] == "ENOSYS", "\(plain)")
     }
 
     @Test(.enabled(if: can, "\(skip)"))

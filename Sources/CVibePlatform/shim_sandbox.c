@@ -663,6 +663,32 @@ static void become_program(const struct vibe_sandbox_plan *plan, int report) {
 
 static void init_forwards(int signal_number) { (void)signal_number; }
 
+// Init holds what it works with and nothing else the launcher was started with: every descriptor from 3 up is closed
+// but `kept` (each -1 or a descriptor). Whatever the launcher held (the plan's sealed memory, its own image, a folder
+// of the machine's) would otherwise stay open in the box's pid 1 for the session's life.
+static void init_keeps_only(const int *kept, size_t count) {
+    int sorted[8];
+    size_t held = 0;
+    for (size_t index = 0; index < count && held < sizeof(sorted) / sizeof(sorted[0]); index++) {
+        if (kept[index] < 3) continue;
+        size_t at = held++;
+        while (at > 0 && sorted[at - 1] > kept[index]) {
+            sorted[at] = sorted[at - 1];
+            at--;
+        }
+        sorted[at] = kept[index];
+    }
+    unsigned int from = 3;
+    for (size_t index = 0; index <= held; index++) {
+        unsigned int to = index < held ? (unsigned int)sorted[index] : ~0u;
+        if (index < held && to < from) continue;
+        if (index == held || to > from) {
+            if (syscall(SYS_close_range, from, index < held ? to - 1 : ~0u, 0u) != 0) init_fails(errno, "init's descriptors");
+        }
+        if (index < held) from = to + 1;
+    }
+}
+
 static void be_init(const struct vibe_sandbox_plan *plan, int line) {
     init_line = line;
     // Killed with its keeper. The keeper may have died before this was set: its end of the line tells.
@@ -694,6 +720,12 @@ static void be_init(const struct vibe_sandbox_plan *plan, int line) {
     if (sigprocmask(SIG_BLOCK, &waited, NULL) != 0) init_fails(errno, "signals");
     int signals = signalfd(-1, &waited, SFD_CLOEXEC | SFD_NONBLOCK);
     if (signals < 0) init_fails(errno, "signals");
+
+    // Its line to the keeper, its signals, the door and the door line: nothing else, before the program is forked.
+    if (!skipped("init descriptors")) {
+        const int kept[] = { line, signals, door, door >= 0 ? plan->door_line : -1 };
+        init_keeps_only(kept, sizeof(kept) / sizeof(kept[0]));
+    }
 
     int report[2];
     if (pipe2(report, O_CLOEXEC) != 0) init_fails(errno, "start the program");
