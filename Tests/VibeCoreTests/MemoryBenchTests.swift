@@ -291,7 +291,11 @@ struct MemoryBenchTests {
         #expect(!Git.run(["worktree", "list"], in: root).output.contains(MemoryBench.folderName))
         let written = try String(contentsOf: stats.appendingPathComponent(MemoryBench.statsName), encoding: .utf8)
         #expect(written.split(separator: "\n").count == 1)
-        #expect(written.contains("\"commit\":\"\(head)\"") && written.contains("\"duration_s\":") && written.contains("\"limit\":150"))
+        #expect(written.contains("\"commit\":\"\(head)\"") && written.contains("\"duration_s\":") && written.contains("\"limit\":150")
+                && written.contains("\"pass\":true"))
+        // A budget not judged says so: pass is null, not left out.
+        let unjudged = try LoadStats.line(MemoryBench.Budget(name: "a", value: nil, limit: 2, unit: "MB", pass: nil))
+        #expect(unjudged.contains("\"pass\":null") && unjudged.contains("\"value\":null"))
         #expect(MemoryBench.Record.all(in: stats.appendingPathComponent(MemoryBench.statsName)) == [record])
         // The output is kept for a look.
         #expect(try String(contentsOf: bench.log, encoding: .utf8).contains("BUDGET footprint-window-closed-mb"))

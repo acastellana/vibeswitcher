@@ -39,6 +39,7 @@ struct SandboxSoakBenchTests {
         // The script bounds its own run (the soak's minutes); this only guards a script that never ends.
         if await offPool({ ended.wait(timeout: .now() + 3 * hangGuard) }) == .timedOut {
             process.terminate()
+            print(MemoryBench.Budget(name: "soak-hour-growth-mb", value: nil, limit: Self.limit, unit: "MB/h", pass: nil).line)
             Issue.record("the soak bench hung")
             return
         }

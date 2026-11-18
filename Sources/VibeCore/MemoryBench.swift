@@ -63,6 +63,18 @@ public enum MemoryBench {
             self.init(name: name, value: value, limit: limit, unit: unit, pass: judged ? value.map(within) ?? false : nil)
         }
 
+        enum CodingKeys: String, CodingKey { case name, value, limit, unit, pass }
+
+        /// `pass` is always written: null for a budget not judged, so every budget says pass, fail or neither.
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(name, forKey: .name)
+            try container.encode(value, forKey: .value)
+            try container.encode(limit, forKey: .limit)
+            try container.encode(unit, forKey: .unit)
+            try container.encode(pass, forKey: .pass)
+        }
+
         static let prefix = "BUDGET "
 
         /// "BUDGET footprint-window-closed-mb 72.4 150 MB pass" (or "n/a" for no value, "unjudged" for no verdict).
