@@ -118,12 +118,12 @@ public enum RestartReopen {
         ordered(offered).filter { entry in (chosen?.contains(entry.id) ?? true) && blocker(entry, folderExists: folderExists) == nil }
     }
 
-    /// What a user session's resume runs: the sidebar's Resume (`LaunchPlan.resumeCommand`), the same conversation in
-    /// the same folder.
-    public static func spawnRequest(_ entry: Entry) -> SpawnRequest? {
+    /// What a user session's resume runs: the sidebar's Resume (`LaunchPlan.resumeRequest`), the same conversation in
+    /// the same folder, with its preset's environment (`presets`: those for its folder).
+    public static func spawnRequest(_ entry: Entry, presets: [LaunchPreset]) -> SpawnRequest? {
         guard let id = entry.agentSessionID, !id.isEmpty else { return nil }
         return LaunchPlan.resumeRequest(cwd: entry.folder, base: entry.command, agent: entry.agent, sessionID: id,
-                                        cols: entry.cols, rows: entry.rows, label: entry.label)
+                                        cols: entry.cols, rows: entry.rows, label: entry.label, presets: presets)
     }
 
     /// The one message a reopened lead starts with: the Mac restarted, its workers and verifiers ended, and which of

@@ -291,12 +291,19 @@ public enum LaunchPlan {
     }
 
     /// The window session a Resume starts: the agent's conversation `sessionID` picked up in `cwd`, run as `base` (the
-    /// ended session's command) ran it, in a window session labelled as that one was. The sidebar's Resume and the
-    /// restart card's both start this (`RestartReopen.spawnRequest`).
+    /// ended session's command) ran it, in a window session labelled as that one was, with the environment of the preset
+    /// it was started from (`launchedFrom`; `presets`: those for `cwd`). The sidebar's Resume (`resumeRequest(resuming:)`)
+    /// and the restart card's (`RestartReopen.spawnRequest`) both start this.
     public static func resumeRequest(cwd: String, base: String?, agent: Agent, sessionID: String, cols: Int, rows: Int,
-                                     label: String) -> SpawnRequest {
+                                     label: String, presets: [LaunchPreset]) -> SpawnRequest {
         SpawnRequest(cwd: cwd, command: resumeCommand(base: base, agent: agent, sessionID: sessionID), env: [:], cols: cols,
                      rows: rows, keepShell: false, label: label, agent: agent.rawValue)
+    }
+
+    /// The sidebar's Resume of a window session the host still lists (ended, or still running).
+    public static func resumeRequest(resuming host: HostSession, agent: Agent, sessionID: String, presets: [LaunchPreset]) -> SpawnRequest {
+        resumeRequest(cwd: host.cwd, base: host.command, agent: agent, sessionID: sessionID, cols: host.cols, rows: host.rows,
+                      label: host.label, presets: presets)
     }
 
     /// Shell variable names: an ASCII letter or underscore, then ASCII letters, digits, underscores.

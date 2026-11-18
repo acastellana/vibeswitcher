@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private lazy var restartOffer: RestartOffer = {
         let offer = RestartOffer()
         offer.resumeSession = { [weak self] request in self?.resume(request) }
+        offer.presets = { [weak self] folder in self?.presets(for: folder) ?? [] }
         offer.reopenLead = { [weak self] root, conversation in self?.leadController.reopenLead(root: root, conversation: conversation) }
         offer.show = { [weak self] in
             guard let self else { return }
@@ -999,8 +1000,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private func resumeSession(_ row: WindowRow) {
         guard let id = row.hostID, let info = hostClient.sessions.first(where: { $0.id == id }),
               let agentSession = windowModel.agentSessions[id] else { return }
-        let request = LaunchPlan.resumeRequest(cwd: info.cwd, base: info.command, agent: agentSession.agent, sessionID: agentSession.sessionID,
-                                               cols: info.cols, rows: info.rows, label: info.label)
+        let request = LaunchPlan.resumeRequest(resuming: info, agent: agentSession.agent, sessionID: agentSession.sessionID,
+                                               presets: presets(for: info.cwd))
         resume(request) { [weak self] _ in
             self?.mainWindow?.pane.forget(id)
             self?.hostClient.remove(id)
