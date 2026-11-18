@@ -379,3 +379,7 @@ About 160 probed runs caught the signal once, before the sharper probe existed (
 
 2026-11-18: flaky-host-tests-turn went to Codex by agent auto while Claude's weekly overage limit was reached; its baseline load run failed 36 issues a run on `bind: Operation not permitted` before reaching the code under test. Same shape as the 2026-11-11 rule for sandbox-screenshot UI tasks.
 
+## 2026-11-18 21:51:10 From the 2026-11-18 retrospective: (1) Disk stalls get a product fix (task new-work-waits-when): new workers wait while free disk is under the load floor plus headroom, so work in flight can finish its load run. Until it lands, the lead starts no new worker by hand while free disk is under 20 GB. (2) A worker's done gate run inside Codex's sandbox can fail on sandbox-only limits (sockets, /dev/stdout); the lead then runs the same check outside the sandbox and, on a pass, sets that task's done_check off with the result in its context. (3) Silent workers are handled by the merged auto-nudge (a-worker-that-stops); the merge reruns by sigpipe-probe-always-on and the flake tasks. No change for the status size bound (once) or the /model switch (the per-task opus pin held).
+
+Today five finished workers waited 1–3 h on the 15 GB load-run floor while new ones kept starting, and six of the lead's turns answered the same disk question; two Codex rounds failed their checks only because of the sandbox. The silent-worker and rerun setbacks already have merged or planned fixes.
+
