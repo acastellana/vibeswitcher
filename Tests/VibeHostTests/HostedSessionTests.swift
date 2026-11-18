@@ -287,7 +287,7 @@ extension HostedSessionTests {
     /// its session leader exits, so a launcher that exited right after writing left an empty screen (2026-11-18).
     @Test func aShellThatIsntThereIsNamedEvenWhenTheHostReadsLate() async throws {
         let probe = SessionProbe()
-        let request = SpawnRequest(cwd: "/tmp", command: "true", env: ["PROBE": "yes"], cols: 80, rows: 24, keepShell: false,
+        let request = SpawnRequest(cwd: NSHomeDirectory(), command: "true", env: ["PROBE": "yes"], cols: 80, rows: 24, keepShell: false,
                                    label: "Test", agent: nil)
         let session = try probe.queue.sync {
             let session = try HostedSession.spawn(request, shell: "/no/such/bin/fakesh", launcher: hostLauncher,
