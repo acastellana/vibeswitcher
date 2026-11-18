@@ -713,7 +713,9 @@ enum ShimBox {
         defer { close(porterEnd) }
         // Outside: each connection taken off the line, answered, closed.
         let answered = SpawnTests.Box(0)
+        let left = DispatchSemaphore(value: 0)
         let porter = Thread {
+            defer { left.signal() }
             while true {
                 let connection = vibe_receive_descriptor(porterEnd)
                 guard connection >= 0 else { return }
@@ -739,6 +741,9 @@ enum ShimBox {
         let plan = ShimBox.plan(box.path, door: "/run/vibeswitcher/door")
         let (ended, errors) = try ShimBox.run(plan, ["/usr/bin/python3", "-I", "-c", probe], in: box, doorLine: line[1])
         close(line[1])
+        // The line has no other end now: the thread reads its end and leaves, before its number is closed here (a
+        // number closed under a thread still about to read it would be another test's by then).
+        #expect(left.wait(timeout: .now() + 60) == .success)
         #expect(ended.exit == 0, "\(errors)")
         #expect(ShimBox.lines(ended.output) == ["door 0o700", "outside got one", "outside got two"], "\(ended.output)")
         #expect(answered.value == 2)

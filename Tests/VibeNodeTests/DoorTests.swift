@@ -33,30 +33,44 @@ final class DoorStandIn: @unchecked Sendable {
 /// What stands for the host on a session's connector (SB5's `SessionConnector`): each byte asked on it is answered with
 /// one end of a new stream pair, and the other end served as a host serves a connection: a welcome to the hello, every
 /// steered message's seal valid to the vault, `.ok` to the rest. It counts what it was asked.
+///
+/// Every descriptor it watches is its own, closed only once its source has been cancelled: the connector is watched
+/// through a copy (`dup`), not by the rig's number. A source left on a number its owner had closed went on answering
+/// for whatever this process opened under that number next: it took a byte off another test's socket and sent a
+/// descriptor down it, and a host's connection in another suite then failed at random.
 final class ConnectorHost: @unchecked Sendable {
     private let queue = DispatchQueue(label: "connector-host")
-    private var sources: [DispatchSourceRead] = []
+    private var sources: [Int32: DispatchSourceRead] = [:]
     private var decoders: [Int32: HostFrameDecoder] = [:]
     private(set) var asked: [HostRequest] = []
     private(set) var connections = 0
 
-    init(connector: Int32) {
+    init(connector given: Int32) {
+        let connector = dup(given)
+        precondition(connector >= 0, "no copy of the connector: errno \(errno)")
+        _ = fcntl(connector, F_SETFD, FD_CLOEXEC)
         let source = DispatchSource.makeReadSource(fileDescriptor: connector, queue: queue)
         source.setEventHandler { [weak self] in
             var byte: UInt8 = 0
-            guard recv(connector, &byte, 1, 0) == 1, let self, let pair = Platform.Sockets.pair(type: Platform.Sockets.stream) else { return }
+            guard let self else { return }
+            let got = recv(connector, &byte, 1, Int32(MSG_DONTWAIT))
+            // The porter has gone: watched no more.
+            if got == 0 { self.drop(connector) }
+            guard got == 1, let pair = Platform.Sockets.pair(type: Platform.Sockets.stream) else { return }
             _ = Platform.Sockets.sendDescriptor(pair.1, over: connector)
             Sys.close(pair.1)
             self.connections += 1
             self.serve(pair.0)
         }
+        source.setCancelHandler { Sys.close(connector) }
         source.resume()
-        sources.append(source)
+        queue.sync { sources[connector] = source }
     }
 
     var count: Int { queue.sync { connections } }
     var requests: [HostRequest] { queue.sync { asked } }
 
+    /// On `queue`.
     private func serve(_ fd: Int32) {
         UnixSocket.configure(fd)
         decoders[fd] = HostFrameDecoder()
@@ -84,7 +98,7 @@ final class ConnectorHost: @unchecked Sendable {
         }
         source.setCancelHandler { Sys.close(fd) }
         source.resume()
-        sources.append(source)
+        sources[fd] = source
     }
 
     private func send(_ event: HostEvent, replyTo: Int?, on fd: Int32) {
@@ -93,11 +107,14 @@ final class ConnectorHost: @unchecked Sendable {
         _ = frame.withUnsafeBytes { Platform.Sockets.send(fd, $0.baseAddress, $0.count) }
     }
 
+    /// On `queue`: a connection at its end is watched no more (a source left on it would be told of the end again and
+    /// again), and closed once its source is cancelled.
     private func drop(_ fd: Int32) {
         decoders[fd] = nil
+        sources.removeValue(forKey: fd)?.cancel()
     }
 
-    deinit { sources.forEach { $0.cancel() } }
+    deinit { sources.values.forEach { $0.cancel() } }
 }
 
 /// The door end to end (the session sandbox plan's SB4): the built tool server and hook as relays inside (only the door
