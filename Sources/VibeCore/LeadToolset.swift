@@ -4409,7 +4409,13 @@ public final class LeadToolset: MCPToolset {
         let failedOn = records.mergeFailedOn
         let noted = !failedOn.isEmpty || !LeadRedaction.pending(store).isEmpty
         guard let outcome = records.commitBeforeMerge(base: base, holdingBaseLock: holdingBaseLock) else { return nil }
-        let made: String? = if case .committed(let commit) = outcome { commit } else { nil }
+        // A commit the vault couldn't record (`LandedMoves`) landed all the same: the merge goes on from it, or its
+        // fast-forward would find the base moved under it.
+        let made: String? = switch outcome {
+        case .committed(let commit): commit
+        case .failed: records.landed.noted(base: base).flatMap { $0 == branchHead(base) ? $0 : nil }
+        default: nil
+        }
         guard noted else { return made }
         let why = failedOn.isEmpty ? "a redaction (redact_record) waited" : "the last merge failed on \(failedOn.joined(separator: ", "))"
         switch outcome {

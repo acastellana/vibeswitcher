@@ -219,6 +219,30 @@ struct LeadVaultNoAnswerTests: LeadTeamFixture {
         #expect(read(BoardStore(root: root).recordPath("progress.md")).contains("Recorded main at \(landed.prefix(8))"))
     }
 
+    /// The records commit before a merge lands but the vault can't record it: the merge goes on from that commit
+    /// (`LandedMoves`) rather than testing on the head before it and finding the base moved at its fast-forward.
+    @Test func aRecordsCommitTheVaultCouldntRecordIsWhatTheMergeBuildsOn() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let flaky = FlakyHost()
+        let lead = try lead(root, runtime, through: flaky)
+        try audited("b", lead, runtime, root: root)
+        lead.records.flush(base: "main")
+        try lead.store.appendProgress("Not committed yet")
+        let before = head("main", root)
+
+        // The records commit's first word to the vault is answered; the one recording its commit, and the rest, aren't.
+        flaky.drop(firstAnswered: FlakyHost.setsHead(of: "main"))
+        let merged = lead.call("merge", ["task": "add-b"])
+
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.status == .done, "\(task.status): \(merged.text)")
+        let onto = try #require(task.merged?.onto)
+        #expect(onto != before && head("\(onto)~1", root) == before)
+        #expect(Git.run(["log", "-1", "--format=%s", onto], in: root).output == LeadRecords.subject)
+        #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("Not committed yet"))
+    }
+
     /// What's remembered is that one move: a commit on top of it is still nobody's.
     @Test func aMoveOnTopOfTheUnrecordedMergeIsStillRefused() throws {
         let root = try repo()

@@ -618,6 +618,13 @@ final class LandedMoves: @unchecked Sendable {
         moves[base] = (from, to)
     }
 
+    /// Where the move noted on `base` went, if one is noted.
+    func noted(base: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return moves[base]?.to
+    }
+
     /// True when the vault's head (`known`) and the branch (`current`) are exactly the two ends of a move noted here,
     /// once the vault has recorded it. Throws when it couldn't, and the move stays noted.
     func settle(base: String, known: String, current: String, root: String, vault: LeadVault) throws -> Bool {

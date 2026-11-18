@@ -391,7 +391,9 @@ struct LeadRecordsTests: LeadTeamFixture {
     @Test func noRecordsCommitLandsWhileAMergeTests() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
-        try workflow(root, "---\ntest_command: sleep 2 && test -f b.txt\n---")
+        // The tests say they've started and run until the test lets them end: the checks below happen while they run.
+        let started = temp.url("started").path, release = temp.url("release").path
+        try workflow(root, "---\ntest_command: touch '\(started)'; while [ ! -e '\(release)' ]; do sleep 0.05; done; test -f b.txt\n---")
         let lead = try lead(root, runtime)
         try audited(lead, runtime, root: root, slug: "add-b", file: "b.txt")
         #expect(!lead.call("record_decision", ["decision": "Merge add-b", "why": "audited"]).isError)
@@ -408,13 +410,14 @@ struct LeadRecordsTests: LeadTeamFixture {
             done.signal()
         }
         // While its tests run, a batch is due: it waits for the merge.
-        await pause(1)
+        #expect(await eventually { FileManager.default.fileExists(atPath: started) })
         let committedFirst = head("main", root)
         #expect(Git.run(["log", "-1", "--format=%s", committedFirst], in: root).output == LeadRecords.subject)
         #expect(head("\(committedFirst)~1", root) == before)
         try lead.store.appendDecision("During the merge's tests", why: "a batch is due")
         #expect(lead.records.flush(base: "main") == .waiting("a merge into main is running."))
         #expect(head("main", root) == committedFirst)
+        FileManager.default.createFile(atPath: release, contents: nil)
         #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success)
         #expect(box.result?.isError == false, "\(box.result?.text ?? "")")
         // Then right after it: the tested commit is what landed, the records on top.
