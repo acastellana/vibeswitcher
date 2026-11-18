@@ -70,8 +70,8 @@ extension LeadVault {
     public func changedSettings(_ workflow: LeadWorkflow, root: String) throws -> [(key: String, value: String)] {
         let now = Self.guardedHashes(workflow)
         let recorded = try guardedSettings(root: root) ?? [:]
-        let unrecorded = now.filter { recorded[$0.key] == nil }
+        let unrecorded = SandboxPolicy.baseline(now.filter { recorded[$0.key] == nil }, recorded: recorded)
         if !unrecorded.isEmpty { try setGuardedSettings(unrecorded, root: root) }
-        return Self.guardedKeys.filter { recorded[$0] != nil && recorded[$0] != now[$0] }.map { ($0, workflow.settings[$0] ?? Self.guardedValue($0, in: workflow)) }
+        return Self.guardedKeys.filter { (recorded[$0] ?? unrecorded[$0]) != nil && (recorded[$0] ?? unrecorded[$0]) != now[$0] }.map { ($0, workflow.settings[$0] ?? Self.guardedValue($0, in: workflow)) }
     }
 }

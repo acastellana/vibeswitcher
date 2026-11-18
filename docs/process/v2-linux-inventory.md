@@ -821,3 +821,23 @@ other three named a logging stand-in proxy (`Tests/Fixtures/sandbox/logging-prox
 What follows, for SB2 (`ClaudeFiles`) and SB-D7's list: the own entries are the ones above; the read-only list
 stands; the default hosts are `api.anthropic.com`, and `mcp-proxy.anthropic.com` only if the account's connectors are
 wanted in a box (the user's call with SB-D7 and SB-D9).
+
+### A worker's git with only its own ref and objects writable (the security review, 2026-11-18)
+
+In the prototype, a worktree on branch `agent/w1/head`; `.git` read-only, with `worktrees/w1/`, `refs/heads/agent/w1/`
+and `logs/refs/heads/agent/w1/` read-write; `GIT_OBJECT_DIRECTORY` a session folder of its own and
+`GIT_ALTERNATE_OBJECT_DIRECTORIES` the shared `objects`. `commit`: ok; `rebase main`: ok (after the same
+`packed-refs.lock` error as above); `update-ref refs/heads/agent/w2/head`: "cannot lock ref … Read-only file system";
+`branch agent/x`: the same; `update-ref refs/heads/agent/w1/other`: ok. Outside, the session folder held 5 objects;
+`git log agent/w1/head` in the main checkout: "fatal: bad object", and with the session folder as an alternate, the
+three commits. A single ref file can't be the writable part: git takes `<ref>.lock` beside it and renames it over.
+
+### The third gated run (2026-11-18): the allow-listed `.claude.json`, and a revoked login
+
+The same test, its box's `.claude.json` now `ClaudeFiles.seededConfig`'s allow-list (with the login). No trust
+question, no onboarding screen; the TUI drew and took typed text. The turn didn't run: "API error · retrying … OAuth
+token revoked · Please run /login". Hosts asked: `platform.claude.com:443` (twice: where Claude Code takes a new
+token, which it now asks for) and `api.anthropic.com:443`. `.credentials.json` unchanged (bound read-only; with the
+login revoked there was nothing to write). The test login needs logging in again (the user's; an agent never logs
+in), and until then the allow-list is unproven against a real turn. `platform.claude.com` joins SB-D7's list of what
+Claude Code asks for.

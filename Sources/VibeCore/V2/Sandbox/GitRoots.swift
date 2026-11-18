@@ -64,4 +64,25 @@ public enum GitRoots {
         guard FileManager.default.fileExists(atPath: spelled) else { return nil }
         return SandboxPolicy.resolved(spelled)
     }
+
+    /// The ref a worktree's HEAD names (`ref: refs/heads/…`), from its own git folder's `HEAD`; nil when HEAD is
+    /// detached, a link, or not a ref.
+    public static func branch(_ roots: Roots) -> String? {
+        let path = roots.own + "/HEAD"
+        let fd = open(path, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC | O_NOFOLLOW)
+        guard fd >= 0 else { return nil }
+        defer { Sys.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size <= off_t(pointerLimit) else { return nil }
+        var bytes = [UInt8](repeating: 0, count: pointerLimit)
+        let count = Sys.read(fd, &bytes, bytes.count)
+        guard count > 0, let line = String(decoding: bytes[0..<count], as: UTF8.self).split(whereSeparator: \.isNewline).first,
+              line.hasPrefix("ref: ") else { return nil }
+        let ref = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        // A ref's name: no `..`, no empty part, nothing a path could escape by.
+        guard ref.hasPrefix("refs/heads/"), !ref.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else {
+            return nil
+        }
+        return ref
+    }
 }

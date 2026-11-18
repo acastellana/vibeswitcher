@@ -204,7 +204,7 @@ inside, so transcripts, records and error messages name the same files on both s
 | Its TMPDIR (the folder `SessionTemp.make` made for it) | rw | rw | rw | the run's scratch home's `tmp/` |
 | `<home>` itself | own (in `<box>`) | own | own | the run's scratch home, as today |
 | Its worktree | `<wt>` rw | its audit checkout rw | absent | the run's scratch worktree rw |
-| `<git>` | ro, with rw: `objects/`, `worktrees/<slug>/`, `refs/heads/agent/`, `logs/refs/heads/agent/` (the list `LeadLaunch.codexWritableRoots` already gives a Codex worker) | ro, with its own `worktrees/<name>/` rw | ro | ro, with the scratch worktree's own git folder rw |
+| `<git>` | ro, with rw: `worktrees/<slug>/`, its own ref folder `refs/heads/agent/<slug>/` and its log's (so its branch is `agent/<slug>/<name>`); its new objects go to `<box>/objects` (`GIT_OBJECT_DIRECTORY`), the shared store read-only behind it (`GIT_ALTERNATE_OBJECT_DIRECTORIES`): measured, the security review of 2026-11-18 | ro, with its own `worktrees/<name>/` rw | ro | ro, with the scratch worktree's own git folder rw |
 | The base branch's ref, `packed-refs`, `HEAD`, `config`, `hooks/`, `info/`, tags | ro | ro | ro | ro |
 | The worktree's pointers: its `.git` file, and `commondir` and `gitdir` in its git folder | ro | ro | — | ro |
 | `<root>`'s working files | absent | absent | private (it may build; nothing reaches the real checkout) | absent |
@@ -887,6 +887,20 @@ takes the file checks as closures, and `SandboxPlanner.folders(for:inputs:)` nam
 (the session's home and each private layer's folders, under `<box>`). `SandboxPolicy.read` takes the home and the
 project's root, so `~/` and another repository can be judged. The `sandbox` key is read but never decides anything
 here: whether a project may turn its box off is SB-D16's question for the user.
+
+*After the security review (2026-11-18):* the seeded `.claude.json` is an allow-list (`ClaudeFiles.configKeys`, and the
+account's named fields only with the login), never the account's file less two keys. A worker writes no shared git
+folder: its own ref folder and log (`refs/heads/agent/<slug>/`, so a worker's branch must be named
+`agent/<slug>/<name>`; one named `agent/<slug>` refuses its box) and its own objects (`<box>/objects`, the shared store
+read-only behind it through git's alternates). Measured in the prototype: commit and rebase work; another agent's ref,
+a new ref beside it and the shared objects are refused; the lead outside reads the worker's commits only with
+`<box>/objects` as an alternate. **For the lead:** the engine names a worker's branch `agent/<slug>` today
+(`Worktrees.swift`, SB6's file), which this needs to become `agent/<slug>/<name>`; and the merge must take a worker's
+objects into the shared store only after checking them (`git fsck` of the new objects, with the shared store as their
+alternate): SB5's and the merge's. A policy path is refused whether it is under a hidden place or holds one, and when it
+holds another repository (a look through at most 20,000 folders; past that, refused). A `sandbox*` key a vault has no
+record of, where it has a record of the other rails, is recorded at its default, so a value written since is held for
+the user's accept (`SandboxPolicy.baseline`, a hook in `LeadVault.changedSettings`).
 
 ### Task SB3: The launcher builds the box
 

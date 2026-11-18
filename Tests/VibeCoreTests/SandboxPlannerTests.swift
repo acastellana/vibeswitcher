@@ -76,7 +76,8 @@ struct SandboxPlannerTests {
         try make(root)
         for arguments in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"],
                           ["commit", "-q", "--allow-empty", "-m", "first"],
-                          ["worktree", "add", "-q", "-b", "agent/w1", ".vibeswitcher/worktrees/w1"]] {
+                          ["worktree", "add", "-q", "-b", "agent/w1/head", ".vibeswitcher/worktrees/w1"],
+                          ["branch", "agent/w2/head"]] {
             #expect(Git.run(arguments, in: root).ok, "git \(arguments)")
         }
         try write("---\nmax_workers: 3\n---\n", root + "/.vibeswitcher/workflow.md")
@@ -149,17 +150,17 @@ struct SandboxPlannerTests {
     /// Whether `path` is `folder` or below it.
     static func within(_ path: String, _ folder: String) -> Bool { path == folder || path.hasPrefix(folder + "/") }
 
-    @Test func aWorkerWritesItsWorktreeItsGitFolderTheObjectsAndTheAgentRefsOnly() throws {
+    @Test func aWorkerWritesItsWorktreeItsGitFolderItsOwnObjectsAndItsOwnRefOnly() throws {
         let world = try world()
         let plan = try plan(world.inputs(.worker))
         let git = world.root + "/.git"
-        // Of the repository, it writes exactly these.
+        // Of the repository, it writes exactly these: its own ref folder and its log, never the shared ones.
         let repository = Self.writable(plan).filter { Self.within($0, world.root) }
-        #expect(repository == [world.worktree, git + "/worktrees/w1", git + "/objects", git + "/refs/heads/agent",
-                               git + "/logs/refs/heads/agent"], "\(repository)")
-        // Elsewhere: its own home (the session's folder), its TMPDIR, the slots, the transcripts' folder.
+        #expect(repository == [world.worktree, git + "/worktrees/w1", git + "/refs/heads/agent/w1", git + "/logs/refs/heads/agent/w1"],
+                "\(repository)")
+        // Elsewhere: its own home (the session's folder), its own objects, its TMPDIR, the slots, the transcripts' folder.
         let elsewhere = Self.writable(plan).subtracting(repository)
-        #expect(elsewhere == [world.home, world.temporary, world.slots,
+        #expect(elsewhere == [world.home, world.box + "/objects", world.temporary, world.slots,
                               world.home + "/.claude/projects/" + ClaudeFiles.projectFolder(cwd: world.worktree)], "\(elsewhere)")
         // Its home is the session's own folder, not the account's.
         #expect(plan.mounts.contains { $0.target == world.home && $0.kind == .readWrite(source: world.box + "/home") })
@@ -226,6 +227,22 @@ struct SandboxPlannerTests {
                 #expect(!Self.sources(plan).contains(world.home), "\(role): the whole home")
             }
         }
+    }
+
+    /// A source that holds a hidden place is refused as one under it is: the home, `~/.local` (which holds the
+    /// keyrings), `/var` (which holds `/var/run`), the node's folder's parent.
+    @Test func aSourceThatHoldsAHiddenFolderIsRefused() throws {
+        let world = try world()
+        for held in [world.home, world.home + "/.local", "/var", world.home + "/.config/..", world.home + "/projects/.."] {
+            var inputs = world.inputs(.worker)
+            inputs.policy = SandboxPolicy(read: [URL(fileURLWithPath: held).standardizedFileURL.path])
+            #expect(throws: SandboxRefusal.self, "\(held)") { try SandboxPlanner.plan(inputs).get() }
+        }
+        // A PATH folder that holds one is left out rather than shown.
+        var inputs = world.inputs(.worker)
+        inputs.pathFolders.append(world.home + "/.local")
+        let plan = try SandboxPlanner.plan(inputs).get()
+        #expect(!Self.sources(plan).contains(world.home + "/.local"))
     }
 
     @Test func theNodesFolderIsNeverASourceButForItsBuildAndTheHook() throws {
@@ -319,14 +336,84 @@ struct SandboxPlannerTests {
         let object = try #require(try JSONSerialization.jsonObject(with: contents) as? [String: Any])
         #expect(object["userID"] as? String == "u")
         #expect(object["mcpServers"] == nil)
+        #expect(Set(object.keys) == ["userID", "projects"], "\(object.keys)")
         let projects = try #require(object["projects"] as? [String: Any])
         #expect(Array(projects.keys) == [world.worktree])
         let entry = try #require(projects[world.worktree] as? [String: Any])
         #expect(entry["hasTrustDialogAccepted"] as? Bool == true)
         // Not JSON: this folder's entry alone.
-        let fallback = try #require(try JSONSerialization.jsonObject(with: ClaudeFiles.seededConfig(from: Data("not json".utf8), cwd: "/w")) as? [String: Any])
+        let fallback = try #require(try JSONSerialization.jsonObject(with: ClaudeFiles.seededConfig(from: Data("not json".utf8), cwd: "/w", login: true)) as? [String: Any])
         #expect(Array(fallback.keys) == ["projects"])
         #expect(ClaudeFiles.projectFolder(cwd: "/scratch/vs-test.IJGOvE/sb0-D91C5045/work_tree") == "-scratch-vs-test-IJGOvE-sb0-D91C5045-work-tree")
+    }
+
+    /// The box's `.claude.json` is an allow-list of the account's: a key nobody named, a key or token, a value of
+    /// another kind, never reach it; the account's description only with the login, and only its named fields.
+    @Test func theSeededConfigTakesOnlyWhatItsAllowListNames() throws {
+        let given = Data("""
+            {"userID": "u1", "hasCompletedOnboarding": true, "lastOnboardingVersion": "2.1.326", "migrationVersion": 11,
+             "installMethod": ["not", "text"], "hasSeenAutoDefaultNotice": "yes", "numStartups": 1,
+             "primaryApiKey": "decoy-primary-api-key", "customApiKeyResponses": {"approved": ["decoy-key-tail"]},
+             "aFutureKey": {"anything": "decoy-future"}, "projects": {"/other": {"hasTrustDialogAccepted": true}},
+             "mcpServers": {"s": {"command": "x", "env": {"TOKEN": "decoy-server-token"}}},
+             "oauthAccount": {"accountUuid": "a1", "emailAddress": "t@t", "accessToken": "decoy-access-token",
+                              "refreshToken": "decoy-refresh-token", "organizationUuid": "o1"}}
+            """.utf8)
+        let decoys = ["decoy-primary-api-key", "decoy-key-tail", "decoy-future", "decoy-server-token", "decoy-access-token",
+                      "decoy-refresh-token", "aFutureKey", "primaryApiKey", "customApiKeyResponses", "numStartups", "/other"]
+        for login in [true, false] {
+            let seeded = ClaudeFiles.seededConfig(from: given, cwd: "/w", login: login)
+            let text = String(decoding: seeded, as: UTF8.self)
+            for decoy in decoys { #expect(!text.contains(decoy), "login \(login): \(decoy) in \(text)") }
+            let object = try #require(try JSONSerialization.jsonObject(with: seeded) as? [String: Any])
+            let expected: Set<String> = ["userID", "hasCompletedOnboarding", "lastOnboardingVersion", "migrationVersion", "projects"]
+            #expect(Set(object.keys) == (login ? expected.union(["oauthAccount"]) : expected), "login \(login): \(object.keys)")
+            #expect(object["hasCompletedOnboarding"] as? Bool == true && object["migrationVersion"] as? Int == 11)
+            if login {
+                let account = try #require(object["oauthAccount"] as? [String: Any])
+                #expect(Set(account.keys) == ["accountUuid", "emailAddress", "organizationUuid"], "\(account.keys)")
+            } else {
+                #expect(!text.contains("t@t") && !text.contains("a1"), "\(text)")
+            }
+        }
+        // The planner passes the login's answer on: with no login, no account in the box's copy.
+        let world = try world()
+        var inputs = world.inputs(.worker)
+        inputs.agentConfig = given
+        inputs.agentLogin = false
+        let seeded = try #require(try plan(inputs).mounts.first { $0.target == world.home + "/.claude.json" })
+        guard case .file(let contents, _) = seeded.kind else { return }
+        #expect(!String(decoding: contents, as: UTF8.self).contains("oauthAccount"))
+    }
+
+    /// A worker's git writes its own ref folder and its own objects: another agent's ref, a new ref beside them, the
+    /// shared objects and their packs are read-only to it. Its git is told where its objects go and where the shared
+    /// ones are (alternates). A branch that isn't in a ref folder of its own refuses the box.
+    @Test func aWorkerCantCreateOrMoveAnotherAgentsRef() throws {
+        let world = try world()
+        let plan = try plan(world.inputs(.worker))
+        let git = world.root + "/.git"
+        for path in ["refs/heads/agent/w2/head", "refs/heads/agent/w3", "refs/heads/agent/w2", "refs/heads/main", "logs/refs/heads/agent/w2/head",
+                     "objects/ab/cdef", "objects/pack", "objects/info/alternates", "packed-refs"].map({ git + "/" + $0 }) {
+            #expect(Self.over(path, plan)?.kind == .readOnly(source: git), "\(path): \(String(describing: Self.over(path, plan)))")
+        }
+        #expect(Self.over(git + "/refs/heads/agent/w1/head", plan)?.kind == .readWrite(source: git + "/refs/heads/agent/w1"))
+        #expect(plan.environment.contains("GIT_OBJECT_DIRECTORY=\(world.box)/objects"))
+        #expect(plan.environment.contains("GIT_ALTERNATE_OBJECT_DIRECTORIES=\(git)/objects"))
+        #expect(SandboxPlanner.folders(for: plan, inputs: world.inputs(.worker)).contains(world.box + "/objects"))
+        // Today's names (`agent/<slug>`, a ref beside every other worker's) refuse a worker's box.
+        #expect(Git.run(["checkout", "-q", "-b", "agent/w1-flat"], in: world.worktree).ok)
+        let refused = SandboxPlanner.plan(world.inputs(.worker))
+        guard case .failure(let refusal) = refused else {
+            Issue.record("planned: \(refused)")
+            return
+        }
+        #expect(refusal.reason.contains("agent/w1/<name>"), "\(refusal)")
+        // A verifier and a branch run write no ref and no object at all.
+        for role in [SandboxRole.verifier, .branchRun] {
+            let other = try SandboxPlanner.plan(world.inputs(role)).get()
+            #expect(!Self.writable(other).contains { Self.within($0, git + "/refs") || Self.within($0, git + "/objects") }, "\(role)")
+        }
     }
 
     @Test func aBranchRunHasNoDoorNoTerminalNoAgentAndNoNetwork() throws {

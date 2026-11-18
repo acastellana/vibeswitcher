@@ -170,7 +170,8 @@ public enum SandboxPlanner {
             let transcripts = "/projects/" + ClaudeFiles.projectFolder(cwd: directory)
             mounts.append(.init(inputs.home + "/.claude" + transcripts, .readWrite(source: config + transcripts)))
             mounts.append(.init(inputs.home + "/.claude.json",
-                                .file(contents: ClaudeFiles.seededConfig(from: inputs.agentConfig ?? Data("{}".utf8), cwd: directory), mode: 0o600)))
+                                .file(contents: ClaudeFiles.seededConfig(from: inputs.agentConfig ?? Data("{}".utf8), cwd: directory,
+                                                                          login: inputs.agentLogin), mode: 0o600)))
             if let identity = inputs.gitIdentity {
                 mounts.append(.init(inputs.home + "/.gitconfig", .file(contents: gitConfig(identity), mode: 0o644)))
             }
@@ -198,9 +199,21 @@ public enum SandboxPlanner {
             readOnly(roots.common)
             readWrite(roots.own)
             if role == .worker {
-                for folder in ["objects", "refs/heads/agent", "logs/refs/heads/agent"] where exists(roots.common + "/" + folder) {
+                // Its own ref folder and its log, never the shared `refs/heads/agent` (git locks and renames a ref
+                // beside it, so a branch is writable alone only in a folder of its own: `agent/<slug>/<name>`), and a
+                // folder of objects of the session's own, the shared store read-only behind it (git's alternates):
+                // no other worker's branch, and no object anyone else reads, is the worker's to write.
+                guard let branch = GitRoots.branch(roots), branch.hasPrefix("refs/heads/agent/\(roots.slug)/") else {
+                    return .failure(SandboxRefusal(value: worktree, reason: "a worker's branch must be agent/\(roots.slug)/<name>, "
+                                                   + "so its ref folder is its own (its HEAD names \(GitRoots.branch(roots) ?? "no branch"))"))
+                }
+                for folder in ["refs/heads/agent/\(roots.slug)", "logs/refs/heads/agent/\(roots.slug)"] {
+                    guard exists(roots.common + "/" + folder) else {
+                        return .failure(SandboxRefusal(value: roots.common + "/" + folder, reason: "a worker's ref folder must be there before its box"))
+                    }
                     readWrite(roots.common + "/" + folder)
                 }
+                readWrite(objectsFolder(inputs))
             }
             // The worktree's pointers, read-only over the folders that hold them.
             readOnly(worktree + "/.git")
@@ -235,19 +248,27 @@ public enum SandboxPlanner {
         if agent {
             environment += ["VIBESWITCHER_DOOR=\(door)", "DISABLE_AUTOUPDATER=1"]
         }
+        if role == .worker, let common = try? gitRoots(inputs.worktree ?? "").get().common {
+            environment += ["GIT_OBJECT_DIRECTORY=\(objectsFolder(inputs))", "GIT_ALTERNATE_OBJECT_DIRECTORIES=\(common)/objects"]
+        }
         return .success(Platform.Sandbox.Plan(mounts: mounts, network: role == .branchRun && inputs.network == .shared ? .none : inputs.network,
                                               hostname: hostname, directory: directory, environment: environment,
                                               door: agent ? door : nil, terminal: agent ? .foreground : .none,
                                               nesting: inputs.policy.nesting))
     }
 
-    /// The folders the host makes before `inputs`' box is entered, each 0700: the session's own home and each private
-    /// layer's two (`SandboxPlanner.plan` names them as sources).
+    /// A worker's own objects (`<box>/objects`): what its git writes. The lead and the merge read them only through an
+    /// alternate, after checking them (`git fsck` of the worker's new objects before they are copied into the shared
+    /// store: SB5's and the merge's to do).
+    public static func objectsFolder(_ inputs: SandboxInputs) -> String { inputs.box + "/objects" }
+
+    /// The folders the host makes before `inputs`' box is entered, each 0700: the session's own home, a worker's own
+    /// objects, and each private layer's two (`SandboxPlanner.plan` names them as sources).
     public static func folders(for plan: Platform.Sandbox.Plan, inputs: SandboxInputs) -> [String] {
         var folders: [String] = []
         for mount in plan.mounts {
             switch mount.kind {
-            case .readWrite(let source) where source == inputs.box + "/home": folders.append(source)
+            case .readWrite(let source) where source == inputs.box + "/home" || source == objectsFolder(inputs): folders.append(source)
             case .overlay(_, let upper, let work): folders += [upper, work]
             default: break
             }
@@ -259,10 +280,15 @@ public enum SandboxPlanner {
     static func sourceRefusal(_ source: String, _ inputs: SandboxInputs) -> SandboxRefusal? {
         func refuse(_ reason: String) -> SandboxRefusal { SandboxRefusal(value: source, reason: reason) }
         let home = inputs.accountHome
-        for hidden in SandboxPolicy.hiddenRoots where source == hidden || SandboxPolicy.isBelow(source, hidden) {
-            return refuse("is under \(hidden), which no box shows")
+        // Whichever way round: a source under a hidden place, or one that holds one (the home holds them all).
+        func touches(_ hidden: String) -> Bool {
+            source == hidden || SandboxPolicy.isBelow(source, hidden) || SandboxPolicy.isBelow(hidden, source)
+        }
+        for hidden in SandboxPolicy.hiddenRoots where touches(hidden) {
+            return refuse("is, holds or is under \(hidden), which no box shows")
         }
         let node = home + "/.vibeswitcher"
+        if SandboxPolicy.isBelow(node, source) { return refuse("holds the node's folder, which no box shows") }
         if source == node || SandboxPolicy.isBelow(source, node) {
             let allowed = [inputs.build, node + "/bin", inputs.box]
             guard allowed.contains(where: { source == $0 || SandboxPolicy.isBelow(source, $0) }) else {
@@ -273,8 +299,8 @@ public enum SandboxPlanner {
         let config = home + "/.claude"
         let agentEntries = (ClaudeFiles.readOnlyEntries + [ClaudeFiles.login]).map { config + "/" + $0 } + [config + "/projects"]
         if agentEntries.contains(where: { source == $0 || SandboxPolicy.isBelow(source, $0) }) { return nil }
-        for name in SandboxPolicy.hidden where source == home + "/" + name || SandboxPolicy.isBelow(source, home + "/" + name) {
-            return refuse("is under ~/\(name), which no box shows")
+        for name in SandboxPolicy.hidden where touches(home + "/" + name) {
+            return refuse("is, holds or is under ~/\(name), which no box shows")
         }
         if source == home || source == "/" { return refuse("is the whole home, or more") }
         return nil

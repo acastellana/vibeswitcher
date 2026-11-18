@@ -5,7 +5,8 @@ import Foundation
 /// session's own; the user's entries that say how the agent behaves are bound into it read-only, so a session can't
 /// change what the next one loads; the transcript's folder is the real one; the login is read-only (SB-D8); everything
 /// else Claude Code writes there starts empty and goes with the box. `~/.claude.json` is a seeded copy in the session's
-/// own home, since Claude Code rewrites it by a rename beside it (six times in one turn, measured).
+/// own home, since Claude Code rewrites it by a rename beside it (six times in one turn, measured), made from an
+/// allow-list of the account's file (`configKeys`).
 ///
 /// A new Claude Code version changes these lists and their test (`SandboxPlannerTests`), nothing else.
 public enum ClaudeFiles {
@@ -30,13 +31,103 @@ public enum ClaudeFiles {
         })
     }
 
-    /// The seeded `~/.claude.json` for a session in `cwd`: the account's file with every key but `projects` and
-    /// `mcpServers` (the user's other projects and their tool servers, whose keys may be in it: SB-D9), and one project,
-    /// `cwd`, trusted and onboarded, which spares the trust question (measured). A file that isn't a JSON object gives
-    /// that project alone.
-    public static func seededConfig(from data: Data, cwd: String) -> Data {
-        var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        object["mcpServers"] = nil
+    /// The keys of `~/.claude.json` the box's copy takes, each only with a value of the kind named: who the user is
+    /// (an anonymous id) and what Claude Code has already shown them, so it starts with no onboarding, release notes or
+    /// migration (the keys of the test login's file, SB0). Nothing else is copied: not the user's other projects, not
+    /// tool servers, not caches, not a key or token, nor whatever a later version adds.
+    public static let configKeys: [String: ConfigValue] = [
+        "userID": .text, "hasCompletedOnboarding": .flag, "lastOnboardingVersion": .text, "lastReleaseNotesSeen": .text,
+        "installMethod": .text, "migrationVersion": .number, "opusProMigrationComplete": .flag,
+        "sonnet1m45MigrationComplete": .flag, "hasSeenAutoDefaultNotice": .flag, "hasSeenAutoModeEntryWarning": .flag,
+        "hasResetAutoModeOptInForDefaultOffer": .flag,
+    ]
+
+    /// The account's description (`oauthAccount`), taken only with the login (`agentLogin`) and only these fields of it:
+    /// which account and organization it is, never a token (the file holds none there; the login is
+    /// `.credentials.json`).
+    public static let accountKey = "oauthAccount"
+    public static let accountFields: [String: ConfigValue] = [
+        "accountUuid": .text, "emailAddress": .text, "displayName": .text, "organizationUuid": .text, "organizationName": .text,
+        "organizationRole": .text, "organizationType": .text, "workspaceRole": .text, "billingType": .text,
+    ]
+
+    /// The kind of value a copied key may hold; any other is dropped.
+    public enum ConfigValue: Sendable {
+        case text, flag, number
+    }
+
+    /// One value of the account's file, as JSON wrote it: a JSON `true` is a flag and never a number, `1` a number and
+    /// never a flag (JSONDecoder's own rule).
+    enum Scalar: Decodable {
+        case text(String), flag(Bool), number(Double), other
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let flag = try? container.decode(Bool.self) {
+                self = .flag(flag)
+            } else if let number = try? container.decode(Double.self) {
+                self = .number(number)
+            } else if let text = try? container.decode(String.self) {
+                self = .text(text)
+            } else {
+                self = .other
+            }
+        }
+
+        /// The value for JSONSerialization when it is of `kind`; nil otherwise.
+        func value(as kind: ConfigValue) -> Any? {
+            switch (self, kind) {
+            case (.text(let text), .text): return text
+            case (.flag(let flag), .flag): return flag
+            case (.number(let number), .number): return number.rounded() == number && abs(number) < 1e15 ? Int(number) : number
+            default: return nil
+            }
+        }
+    }
+
+    /// An object of the account's file: its keys, each a scalar or not.
+    struct Object: Decodable {
+        var values: [String: Scalar] = [:]
+        var objects: [String: [String: Scalar]] = [:]
+
+        init() {}
+
+        struct Key: CodingKey {
+            var stringValue: String
+            var intValue: Int? { nil }
+            init(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { nil }
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: Key.self)
+            for key in container.allKeys {
+                if let nested = try? container.decode([String: Scalar].self, forKey: key) {
+                    objects[key.stringValue] = nested
+                } else if let scalar = try? container.decode(Scalar.self, forKey: key) {
+                    values[key.stringValue] = scalar
+                }
+            }
+        }
+    }
+
+    /// The seeded `~/.claude.json` for a session in `cwd`: from the account's file, the keys `configKeys` allows (and,
+    /// with the login, `accountFields` of `oauthAccount`), each with a value of its kind; then one project, `cwd`,
+    /// trusted and onboarded, which spares the trust question (measured). A file that isn't a JSON object gives that
+    /// project alone.
+    public static func seededConfig(from data: Data, cwd: String, login: Bool) -> Data {
+        let given = (try? JSONDecoder().decode(Object.self, from: data)) ?? Object()
+        var object: [String: Any] = [:]
+        for (key, kind) in configKeys {
+            if let value = given.values[key]?.value(as: kind) { object[key] = value }
+        }
+        if login, let account = given.objects[accountKey] {
+            var kept: [String: Any] = [:]
+            for (field, kind) in accountFields {
+                if let value = account[field]?.value(as: kind) { kept[field] = value }
+            }
+            if !kept.isEmpty { object[accountKey] = kept }
+        }
         object["projects"] = [cwd: ["hasTrustDialogAccepted": true, "hasCompletedProjectOnboarding": true,
                                     "allowedTools": [String]()] as [String: Any]]
         return (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)

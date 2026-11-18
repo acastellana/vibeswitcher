@@ -11,8 +11,8 @@ import Foundation
 /// - `sandbox_nesting`: whether a box may make user namespaces and mounts of its own (SB-D10).
 ///
 /// Lists are comma-separated. A path is absolute or under the home (`~/…`) and is judged after its links are followed;
-/// one under a hidden folder (`hidden`), the node's own folder, `/run`, `/mnt`, `/init`, `/proc`, `/sys` or `/dev`, or in
-/// another project, is refused, naming it, whatever the key. A host is a name (`api.example.com`, `*.example.com`,
+/// one under a hidden folder (`hidden`), the node's own folder, `/run`, `/mnt`, `/init`, `/proc`, `/sys` or `/dev`, or one
+/// holding any of them, or one in or holding another project, is refused, naming it, whatever the key. A host is a name (`api.example.com`, `*.example.com`,
 /// optionally `:port`): never a scheme, a path, a user or an address.
 public struct SandboxPolicy: Codable, Equatable, Sendable {
     public var enabled: Bool
@@ -104,12 +104,14 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
             if candidate == "/" || candidate == realHome || candidate == home || isBelow(realHome, candidate) || isBelow(home, candidate) {
                 return refuse("names the home, or a folder that holds it")
             }
-            for hiddenRoot in hiddenRoots where candidate == hiddenRoot || isBelow(candidate, hiddenRoot) {
-                return refuse("is under \(hiddenRoot), which no box shows")
+            // Whichever way round: under a hidden place, or holding one.
+            func touches(_ hidden: String) -> Bool { candidate == hidden || isBelow(candidate, hidden) || isBelow(hidden, candidate) }
+            for hiddenRoot in hiddenRoots where touches(hiddenRoot) {
+                return refuse("is, holds or is under \(hiddenRoot), which no box shows")
             }
             for name in hidden {
-                for base in Set([home, realHome]) where candidate == base + "/" + name || isBelow(candidate, base + "/" + name) {
-                    return refuse("is under ~/\(name), which no box shows")
+                for base in Set([home, realHome]) where touches(base + "/" + name) {
+                    return refuse("is, holds or is under ~/\(name), which no box shows")
                 }
             }
         }
@@ -121,6 +123,12 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
                 return refuse("is in another repository (\(folder))")
             }
             folder = (folder as NSString).deletingLastPathComponent
+        }
+        // Nor one below it: a bounded look for `.git` under the path, links not followed.
+        switch repositories(resolvedPath, root.map(resolve)) {
+        case .none: break
+        case .found(let repository): return refuse("holds another repository (\(repository))")
+        case .tooBig: return refuse("holds more than \(scanLimit) folders, too many to look through for another repository")
         }
         return .success(resolvedPath)
     }
@@ -159,6 +167,45 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
         guard let real = realpath(path, nil) else { return path }
         defer { free(real) }
         return String(cString: real)
+    }
+
+    /// What a vault records for guard rails it has nothing for (`LeadVault.changedSettings`' hook): `unrecorded` as it
+    /// is, but where the vault already has a record (rails it set before these keys were guarded), each `sandbox*` key at
+    /// its default (unset), so a value written since (a worker's `sandbox: off`) is a change held for the user's accept,
+    /// never trusted on first sight.
+    public static func baseline(_ unrecorded: [String: String], recorded: [String: String]) -> [String: String] {
+        guard !recorded.isEmpty else { return unrecorded }
+        return Dictionary(uniqueKeysWithValues: unrecorded.map { key, hash in (key, keys.contains(key) ? LeadVault.hash("") : hash) })
+    }
+
+    /// The most folders the look for a repository under a path goes through before it refuses the path.
+    public static let scanLimit = 20_000
+
+    public enum RepositoryScan: Equatable {
+        case none
+        case found(String)
+        case tooBig
+    }
+
+    /// The first repository (a folder holding `.git`, file or folder) at or under `path` that isn't `root`, looked for
+    /// through at most `limit` folders, links not followed and no `.git` entered.
+    public static func repositories(_ path: String, _ root: String?, limit: Int = scanLimit) -> RepositoryScan {
+        var isFolder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isFolder), isFolder.boolValue else { return .none }
+        var pending = [path], seen = 0
+        while let folder = pending.popLast() {
+            seen += 1
+            if seen > limit { return .tooBig }
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else { continue }
+            if names.contains(".git"), folder != root { return .found(folder) }
+            for name in names where name != ".git" {
+                let child = folder + "/" + name
+                var info = stat()
+                guard lstat(child, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { continue }
+                pending.append(child)
+            }
+        }
+        return .none
     }
 
     /// Whether `folder` is a repository's working tree: it holds `.git`.

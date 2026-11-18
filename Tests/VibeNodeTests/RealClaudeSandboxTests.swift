@@ -13,8 +13,8 @@ import VibeCore
 /// line: `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<that folder> bash scripts/test.sh --filter RealClaudeSandboxTests`.
 ///
 /// That folder is never the box's config folder. The box's is a scratch one (`HOME/.claude`), seeded with a
-/// `.claude.json` made from the given one's (every key but `projects` and `mcpServers`, then this worktree's trust
-/// entry: what `ClaudeFiles.seededConfig` will make), with the given folder's read-only entries bound into it
+/// `.claude.json` made from the given one's by `ClaudeFiles.seededConfig` (its allow-list, then this worktree's trust
+/// entry), with the given folder's read-only entries bound into it
 /// read-only, the login among them: the kernel binds the file, nothing here reads it. So the run adds nothing to the
 /// given folder; the test lists its entries (`lstat` only) before and after, and removes any entry that appeared.
 struct RealClaudeSandboxTests {
@@ -46,7 +46,7 @@ struct RealClaudeSandboxTests {
 
         // The seeded config, and the given folder as it was.
         let given = try Data(contentsOf: config.appendingPathComponent(".claude.json"))
-        try Self.seeded(from: given, trusting: worktreePath).write(to: home.appendingPathComponent(".claude/.claude.json"))
+        try ClaudeFiles.seededConfig(from: given, cwd: worktreePath, login: true).write(to: home.appendingPathComponent(".claude/.claude.json"))
         let before = Self.entries(of: config)
         defer { Self.removeWhatAppeared(in: config, since: before) }
 
@@ -141,15 +141,6 @@ struct RealClaudeSandboxTests {
                 "ttyname", "not a tty"].contains { lower.contains($0) }
             && !lower.contains("bearer ") && !lower.contains("sk-ant")
             && line.range(of: "[A-Za-z0-9_\\-]{40,}", options: .regularExpression) == nil
-    }
-
-    /// The given `.claude.json` with every key but `projects` and `mcpServers`, and one project: `worktree`, trusted.
-    static func seeded(from given: Data, trusting worktree: String) throws -> Data {
-        var object = try #require(try JSONSerialization.jsonObject(with: given) as? [String: Any])
-        object["mcpServers"] = nil
-        object["projects"] = [worktree: ["hasTrustDialogAccepted": true, "hasCompletedProjectOnboarding": true,
-                                         "allowedTools": [String]()] as [String: Any]]
-        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
     /// Each entry of `folder`, by name: its inode, change time and size, from `lstat` (nothing is opened).

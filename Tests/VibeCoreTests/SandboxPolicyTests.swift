@@ -38,6 +38,43 @@ struct SandboxPolicyTests {
         #expect(taken.read == [home + "/sdk", SandboxPolicy.resolved("/usr/share/doc")] && taken.privateFolders == [home + "/.cache/sdk"])
     }
 
+    /// Whichever way round: a path that holds a hidden folder is refused as one under it is.
+    @Test func aPathThatHoldsAHiddenFolderIsRefused() throws {
+        let home = try home()
+        try FileManager.default.createDirectory(atPath: home + "/.local/share/keyrings", withIntermediateDirectories: true)
+        for (value, named) in [("~", "home"), ("~/.config/..", "home"), ("~/.local", ".local/share/keyrings"), ("~/.local/share", ".local/share/keyrings"),
+                               ("/var", "/var/run"), ("/", "home")] {
+            let result = SandboxPolicy.read(Self.workflow("sandbox_read: \(value)"), home: home, root: home + "/projects/app")
+            guard case .failure(let refusal) = result else {
+                Issue.record("\(value) was taken: \(result)")
+                continue
+            }
+            #expect(refusal.description.contains(named), "\(value): \(refusal)")
+        }
+    }
+
+    /// A path that holds another repository is refused, naming it; one too big to look through is refused too.
+    @Test func aFolderHoldingAnotherRepositoryIsRefused() throws {
+        let home = try home()
+        try FileManager.default.createDirectory(atPath: home + "/projects/app/.git", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: home + "/work/deep/down/second", withIntermediateDirectories: true)
+        try "gitdir: /elsewhere\n".write(toFile: home + "/work/deep/down/second/.git", atomically: true, encoding: .utf8)
+        for value in ["~/projects", "~/work"] {
+            let result = SandboxPolicy.read(Self.workflow("sandbox_read: \(value)"), home: home, root: home + "/projects/app")
+            guard case .failure(let refusal) = result else {
+                Issue.record("\(value) was taken: \(result)")
+                continue
+            }
+            #expect(refusal.description.contains("another repository"), "\(refusal)")
+        }
+        // The project's own repository under it is no other's.
+        #expect(SandboxPolicy.repositories(home + "/projects/app", home + "/projects/app") == .none)
+        #expect(SandboxPolicy.repositories(home + "/projects", home + "/projects/app") == .found(home + "/projects/other"))
+        // Past the limit, refused rather than passed.
+        #expect(SandboxPolicy.repositories(home + "/work", nil, limit: 2) == .tooBig)
+        #expect(SandboxPolicy.repositories(home + "/sdk", nil) == .none)
+    }
+
     @Test func aLinkIsResolvedBeforeItIsJudged() throws {
         let home = try home()
         // A harmless-looking name whose link leads into a hidden folder.
@@ -111,5 +148,34 @@ struct SandboxPolicyTests {
         #expect(try lead.changedSettings(before, root: root).isEmpty)
         let held = try lead.changedSettings(after, root: root)
         #expect(held.map(\.key) == ["sandbox_read"] && held.first?.value == "~/.ssh", "\(held)")
+    }
+
+    /// A vault whose rails were recorded before the `sandbox*` keys were guarded takes each at its default, not as the
+    /// file says now: a `sandbox: off` written since is held for the user's accept, never recorded on first sight. A
+    /// vault with nothing recorded yet records them as it does every rail.
+    @Test func aSandboxKeyAddedAfterTheVaultsBaselineIsHeld() throws {
+        let book = LeadVault.Book(restoring: nil)
+        book.configHome = scratch.url("baseline-config-home").path
+        let folder = scratch.url("baseline-vault")
+        let app = book.vault(folder: folder, as: { .app })
+        let lead = book.vault(folder: folder, as: { .session("lead-session") })
+        let root = scratch.url("baseline-repo").resolvingSymlinksInPath().path
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        for arguments in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"],
+                          ["commit", "-q", "--allow-empty", "-m", "first"]] { #expect(Git.run(arguments, in: root).ok) }
+        let grant = try app.startLead(root: root, branch: "main", floor: nil)
+        try app.bind(grant, root: root, session: "lead-session")
+        // The baseline of a build before the keys: every other rail, recorded as the lead set it.
+        let old = Self.workflow("test_command: make test")
+        try app.setGuardedSettings(LeadVault.guardedHashes(old).filter { !SandboxPolicy.keys.contains($0.key) }, root: root)
+        // Then a worker writes `sandbox: off` and widens what its box reads.
+        let widened = Self.workflow("test_command: make test\nsandbox: off\nsandbox_nesting: on")
+        let held = try lead.changedSettings(widened, root: root)
+        #expect(Set(held.map(\.key)) == ["sandbox", "sandbox_nesting"], "\(held)")
+        #expect(held.first { $0.key == "sandbox" }?.value == "off")
+        // Held again on the next call: nothing recorded it.
+        #expect(Set(try lead.changedSettings(widened, root: root).map(\.key)) == ["sandbox", "sandbox_nesting"])
+        // A file that leaves them unset is what was recorded: nothing held.
+        #expect(try lead.changedSettings(old, root: root).isEmpty)
     }
 }
