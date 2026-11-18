@@ -3721,3 +3721,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 10:15 Automatically (auto_advance): Started the audit of folded-update-line-its at e7d26d62 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-18 10:17 Merged app-memory-grows-again: App memory grows again: 262 → 713 MB overnight (Nov 17–18), relief frees nothing (in a batch: app-memory-grows-again, resume-and-reopen-all landed on one test run) (build 5978f0ab2ede)
 - 2026-11-18 10:17 Merged resume-and-reopen-all: Resume and Reopen all drop a launch preset's environment variables (in a batch: app-memory-grows-again, resume-and-reopen-all landed on one test run) (build 5978f0ab2ede)
+- 2026-11-18 10:17 Automatically (auto_advance): Merged app-memory-grows-again at 66bdadc0 (its passing audit), resume-and-reopen-all at 84d977e0 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-18 10:17 Automatically (auto_advance): Cleaned up app-memory-grows-again (freed 3.4 GB of build output and temporary folders). It stays done.
+- 2026-11-18 10:17 Automatically (auto_advance): Cleaned up resume-and-reopen-all (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-18 10:19 Audit of patterns-from-the-top: complete, clean, round 1: 2 Nit open
+- 2026-11-18 10:21 Audit of folded-update-line-its: incomplete, clean, round 1: 1 Important open, 3 Nit open
+- 2026-11-18 10:21 Started a worker on folded-update-line-its
+- 2026-11-18 10:21 Automatically (auto_advance): Sent folded-update-line-its's worker the open Important findings folded-update-line-its:F1 from its audit at e7d26d62 (in a new worker: its last one was released during the audit).
