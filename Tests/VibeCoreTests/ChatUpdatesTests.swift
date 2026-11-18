@@ -164,16 +164,19 @@ struct ChatUpdatesTests {
         }
         #expect(!burst.alarming(tasks: ["x": ChatTaskStanding(status: .done, since: 990)]))
         #expect(!burst.alarming(tasks: [:]))
-        // Blocked again after the card (a new card says so): this one's dealt with; so is one the lead answered.
+        // Blocked again after the card (a new card says so): this one's dealt with.
         #expect(!burst.alarming(tasks: ["x": ChatTaskStanding(status: .blocked, since: 1_010)]))
-        #expect(!burst.alarming(tasks: ["x": ChatTaskStanding(status: .blocked, since: 990, touched: 1_020)]))
+        // Still blocked, whatever else happened on it since: the lead's message, a milestone, an audit.
+        #expect(burst.alarming(tasks: ["x": ChatTaskStanding(status: .blocked, since: 990, messaged: 1_020, worked: 1_030, audited: 1_040)]))
 
         // An audit that didn't pass, until a new audit starts, a later verdict passes or anything moves the task on.
         let failed = Self.card("audit", "verifier b", "The audit of b did not pass: F1 the sheet never closes.", at: 2_000)
         let audit = try updates(fold([failed]).first)
-        #expect(audit.alarming(tasks: ["b": ChatTaskStanding(status: .failed, since: 1_990, touched: 1_990)]))
+        #expect(audit.alarming(tasks: ["b": ChatTaskStanding(status: .failed, since: 1_990, audited: 1_990)]))
+        // Still failed, its worker going on with the fixes: marked until an audit starts or gives its verdict.
+        #expect(audit.alarming(tasks: ["b": ChatTaskStanding(status: .failed, since: 1_990, messaged: 2_050, worked: 2_060, audited: 1_990)]))
         #expect(!audit.alarming(tasks: ["b": ChatTaskStanding(status: .review, since: 2_100)]), "a new audit started")
-        #expect(!audit.alarming(tasks: ["b": ChatTaskStanding(status: .failed, since: 1_990, touched: 2_100)]), "a new audit, or a later failing verdict")
+        #expect(!audit.alarming(tasks: ["b": ChatTaskStanding(status: .failed, since: 1_990, audited: 2_100)]), "a new audit, or a later failing verdict")
         var passing = LeadTask(slug: "b", title: "b", contract: LeadContract(goal: "b", acceptance: [], boundaries: [], context: ""), status: .review)
         passing.since = 1_990
         passing.evidence = LeadEvidence(completion: .complete, integrity: .clean, summary: "ok", at: 2_200)
@@ -186,7 +189,7 @@ struct ChatUpdatesTests {
         let stopped = Self.card("stop", "witness", Self.stopped.team!.body, at: 3_000)
         let halt = try updates(fold([stopped]).first)
         #expect(stopped.team?.alarmTask == "d")
-        #expect(halt.alarming(tasks: ["d": ChatTaskStanding(status: .running, since: 100, touched: 2_900)]))
+        #expect(halt.alarming(tasks: ["d": ChatTaskStanding(status: .running, since: 100, messaged: 2_900, worked: 2_900, audited: 2_900)]))
         var going = LeadTask(slug: "d", title: "d", contract: LeadContract(goal: "d", acceptance: [], boundaries: [], context: ""), status: .running)
         going.since = 100
         going.checkpoints = [LeadCheckpoint(text: "going on", at: 3_050)]
@@ -198,6 +201,48 @@ struct ChatUpdatesTests {
         #expect(Self.card("v", "witness", "The verifier on y stopped mid-audit: its turn ended on an API error (overloaded).").team?.alarmTask == "y")
         #expect(Self.card("m", "witness", "Member api of team-wall's team stopped mid-part: its turn ended on an API error (x).").team?.alarmTask == "team-wall")
         #expect(Self.card("q", "witness", "The worker on f stopped without calling report. read_session to see where it is.").team?.alarmTask == "f")
+    }
+
+    /// On a team task the members note progress all the time: a teammate's milestone doesn't settle a blocked card, a
+    /// failed audit's or the worker's stop; a stopped member's own milestone settles its stop (the verifier's F1 at
+    /// e7d26d62).
+    @Test func aTeammatesMilestoneDoesntSettleAnotherOnesTrouble() throws {
+        var team = LeadTask(slug: "t", title: "t", contract: LeadContract(goal: "t", acceptance: [], boundaries: [], context: ""), status: .blocked)
+        team.since = 900
+        team.team = ["lead-part", "api", "ui"].map { LeadTeamMember(name: $0, part: $0, branch: "agent/t--\($0)", worktree: "/w/\($0)") }
+        team.checkpoints = [LeadCheckpoint(text: "api: post() stores a post", at: 1_100), LeadCheckpoint(text: "ui: lane drawn", at: 1_200)]
+        let standing = ChatTaskStanding(team)
+        #expect(standing.worked == nil && standing.members == ["api": 1_100, "ui": 1_200])
+        let blocked = try updates(fold([Self.card("b", "worker t", "The worker on t is blocked: no keys.", at: 1_000)]).first)
+        #expect(blocked.alarming(tasks: ["t": standing]))
+
+        team.status = .failed
+        let failed = try updates(fold([Self.card("a", "verifier t", "The audit of t did not pass: F1.", at: 1_000)]).first)
+        #expect(failed.alarming(tasks: ["t": ChatTaskStanding(team)]))
+
+        team.status = .running
+        let worker = try updates(fold([Self.card("w", "witness", "The worker on t stopped mid-task: its turn ended on an API error (overloaded).", at: 1_000)]).first)
+        let member = try updates(fold([Self.card("m", "witness", "Member api of t's team stopped mid-part: its turn ended on an API error (x).", at: 1_150)]).first)
+        #expect(worker.alarming(tasks: ["t": ChatTaskStanding(team)]), "teammates' milestones aren't its worker's")
+        #expect(member.alarming(tasks: ["t": ChatTaskStanding(team)]), "ui's milestone isn't api's")
+        // The integrator's own milestone settles the worker's stop; api's own settles api's.
+        team.checkpoints?.append(LeadCheckpoint(text: "Took api's part", at: 1_300))
+        #expect(!worker.alarming(tasks: ["t": ChatTaskStanding(team)]))
+        #expect(member.alarming(tasks: ["t": ChatTaskStanding(team)]))
+        team.checkpoints?.append(LeadCheckpoint(text: "api: wall(since:) done", at: 1_400))
+        #expect(!member.alarming(tasks: ["t": ChatTaskStanding(team)]))
+    }
+
+    /// A board that can't be read loads empty: every task's standing is then unknown and the marks stay, where a board
+    /// that read without the task means it's finished and archived (the verifier's F4 at e7d26d62).
+    @Test func aBoardThatDidntLoadKeepsTheMarks() throws {
+        #expect(ChatTaskStanding.of(LeadBoard()) == nil)
+        var board = LeadBoard()
+        board.baseBranch = "main"
+        #expect(ChatTaskStanding.of(board) == [:])
+        let burst = try updates(fold([Self.card("b", "worker x", "The worker on x is blocked: no keys.", at: 1_000)]).first)
+        #expect(burst.alarming(tasks: ChatTaskStanding.of(LeadBoard())))
+        #expect(!burst.alarming(tasks: ChatTaskStanding.of(board)))
     }
 
     /// Two alarming cards in one burst: its mark stays until both are dealt with.

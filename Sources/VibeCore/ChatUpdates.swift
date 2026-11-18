@@ -149,22 +149,38 @@ extension TeamMessage {
         }
     }
 
+    /// The team member a witness's card says stopped ("Member api of x's team stopped mid-part": api); nil for any other.
+    var alarmMember: String? {
+        guard kind == .witness, alarmTask != nil, gist.hasPrefix("Member "), let of = gist.range(of: " of ") else { return nil }
+        return gist[gist.index(gist.startIndex, offsetBy: 7)..<of.lowerBound].nonEmpty
+    }
+
     /// Whether an alarming card's trouble, the card having come `at`, is still current with the lead's tasks as they
     /// are now (`tasks`, by slug; nil: not known, so it is). It's over once its task has moved on: finished (merged,
-    /// kept, folded, abandoned, reverted) or gone from the board (the archive takes finished ones), in another status
-    /// since the card came (running again after "blocked", a re-audit after "didn't pass"), or anything else moved on
-    /// it since (`ChatTaskStanding.touched`: the lead messaged its worker, a worker noted a milestone, an audit started
-    /// or gave its verdict, as a new worker or the old one going on does). A blocked card lasts only while the task is
-    /// blocked, an audit's while it's failed. A crash isn't about a task: the conversation settles it (`ChatUpdates.settled`).
+    /// kept, folded, abandoned, reverted) or gone from the board (the archive takes finished ones), or in another status
+    /// since the card came (running again after "blocked", a re-audit after "didn't pass"). Besides: a blocked card
+    /// lasts while the task is blocked, whatever else happens on it; an audit's while it's failed and no audit started
+    /// or gave a verdict since; a stopped worker's until the lead messages it, it notes a milestone, or an audit starts
+    /// or gives its verdict, as a new worker or the old one going on does. A teammate's milestone moves on only its
+    /// own stop: on a team task members note progress all the time. A crash isn't about a task: the conversation
+    /// settles it (`ChatUpdates.settled`).
     public func stillCurrent(at: Date?, tasks: [String: ChatTaskStanding]?) -> Bool {
         guard alarming else { return false }
         guard let tasks, let slug = alarmTask else { return true }
         guard let standing = tasks[slug], !ChatTaskStanding.finished.contains(standing.status) else { return false }
-        if let at = at?.timeIntervalSince1970, max(standing.since ?? 0, standing.touched ?? 0) > at { return false }
+        let card = at?.timeIntervalSince1970
+        func since(_ time: Double?) -> Bool {
+            guard let card, let time else { return false }
+            return time > card
+        }
+        if since(standing.since) { return false }
         switch kind {
         case .report: return standing.status == .blocked
-        case .audit: return standing.status == .failed
-        default: return true
+        case .audit: return standing.status == .failed && !since(standing.audited)
+        default:
+            // A lead's message reaches a team task's integrator only.
+            if let member = alarmMember { return !since(standing.members[member]) && !since(standing.audited) }
+            return !since(standing.messaged) && !since(standing.worked) && !since(standing.audited)
         }
     }
 
@@ -259,32 +275,55 @@ extension ChatTimeline {
 }
 
 /// A lead's task as far as a red mark on a card about it goes (`TeamMessage.stillCurrent`): its status, when it took
-/// it, and when anything else last moved on it.
+/// it, and when each thing that moves it on last happened.
 public struct ChatTaskStanding: Equatable, Sendable {
     public var status: LeadTask.Status
     /// When it took its status (`LeadTask.since`).
     public var since: Double?
-    /// The latest of: the lead's last message to its worker, its worker's last milestone, its audit's last start and
-    /// last verdict.
-    public var touched: Double?
+    /// The lead's last message to its worker (`LeadTask.messagedAt`).
+    public var messaged: Double?
+    /// Its own worker's last milestone: a team member's ("api: …", `LeadToolset.progress`) isn't its worker's.
+    public var worked: Double?
+    /// Each team member's last milestone, by name (the integrator's are `worked`).
+    public var members: [String: Double]
+    /// Its audit's last start or verdict.
+    public var audited: Double?
 
-    public init(status: LeadTask.Status, since: Double? = nil, touched: Double? = nil) {
+    public init(status: LeadTask.Status, since: Double? = nil, messaged: Double? = nil, worked: Double? = nil,
+                members: [String: Double] = [:], audited: Double? = nil) {
         self.status = status
         self.since = since
-        self.touched = touched
+        self.messaged = messaged
+        self.worked = worked
+        self.members = members
+        self.audited = audited
     }
 
     public init(_ task: LeadTask) {
-        let times = [task.messagedAt, task.checkpoints?.last?.at, task.auditOpening?.at, task.evidence?.at].compactMap { $0 }
-        self.init(status: task.status, since: task.since, touched: times.max())
+        // A member's milestones start with its name (the integrator, member 1, notes its own as the task's worker).
+        let names = (task.team ?? []).dropFirst().map { $0.name + ": " }
+        var worked: Double?
+        var members: [String: Double] = [:]
+        for checkpoint in task.checkpoints ?? [] {
+            if let name = names.first(where: checkpoint.text.hasPrefix) {
+                members[String(name.dropLast(2))] = max(members[String(name.dropLast(2))] ?? 0, checkpoint.at)
+            } else {
+                worked = max(worked ?? 0, checkpoint.at)
+            }
+        }
+        self.init(status: task.status, since: task.since, messaged: task.messagedAt, worked: worked, members: members,
+                  audited: [task.auditOpening?.at, task.evidence?.at].compactMap { $0 }.max())
     }
 
     /// Finished: nothing more happens on it, so no trouble on it is current.
     public static let finished: Set<LeadTask.Status> = [.done, .kept, .folded, .abandoned, .reverted]
 
-    /// A board's tasks, by slug.
-    public static func of(_ board: LeadBoard) -> [String: ChatTaskStanding] {
-        Dictionary(board.tasks.map { ($0.slug, ChatTaskStanding($0)) }, uniquingKeysWith: { first, _ in first })
+    /// A board's tasks, by slug; nil when the board didn't load. One that can't be read loads as an empty board
+    /// (`BoardStore.load`), and a task missing from it would read as finished, clearing every mark: a running lead's
+    /// board that read names its base branch or its lead, so a board with nothing at all is taken as not read.
+    public static func of(_ board: LeadBoard) -> [String: ChatTaskStanding]? {
+        guard board != LeadBoard() else { return nil }
+        return Dictionary(board.tasks.map { ($0.slug, ChatTaskStanding($0)) }, uniquingKeysWith: { first, _ in first })
     }
 }
 
