@@ -152,21 +152,35 @@ source scripts/lib/processes.sh
 # width kept). Swift Testing gives no width of its own: it starts every test as a task on the cooperative pool, and only
 # tests blocking a pool thread used to bound it, one a core. With their waits awaited (2026-11-05) a full run started
 # hundreds at once, and their hosts and scripts took the Mac from load 18 to 193 in three minutes; 23 tests judged by
-# time failed. Set before vs-heavy takes a slot.
+# time failed. Set before vs-heavy takes a slot. Its own default is marked (VIBESWITCHER_TEST_WIDTH_DEFAULT), so a slot's
+# width replaces it where a caller's own width is only capped.
 suite_width() {
-    export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-$(cpu_count)}
+    if [[ -z ${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-} ]]; then
+        export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=$(cpu_count) VIBESWITCHER_TEST_WIDTH_DEFAULT=1
+    fi
 }
-# Then, on the slot vs-heavy gives the run, at most its width, VS_HEAVY_CORES (a caller's narrower width kept), as the
-# build is (scripts/lib/swift-jobs.sh): a test a core of the whole Mac in each of 3 boosted slots ran up to 36 tests at
+# Tests a core on a slot: VIBESWITCHER_TESTS_PER_CORE, a whole number from 1; 2 without one. The tests mostly wait (on
+# their git, scripts, hosts and sockets), each holding its place in the width while it does: on 2026-11-18 a full
+# run's tests took 680 s at a width of 6 and 1009 s at 4 (about 4,050 test-seconds either way) with the test process
+# at 1–35 % CPU, so a test a core left the slot's cores mostly idle. 1 is a test a core, as before.
+tests_per_core() {
+    local per=${VIBESWITCHER_TESTS_PER_CORE:-2}
+    [[ $per =~ ^[0-9]+$ ]] && (( 10#$per >= 1 )) || per=2
+    echo $(( 10#$per ))
+}
+export -f tests_per_core
+# Then, on the slot vs-heavy gives the run, its width, VS_HEAVY_CORES, times `tests_per_core` (a caller's narrower width
+# kept), the build on VS_HEAVY_CORES itself (scripts/lib/swift-jobs.sh): a test a core of the whole Mac in each of 3 boosted slots ran up to 36 tests at
 # once on 12 cores, and at 03:40–03:55 on 2026-11-08 an audit's full suite and other runs side by side took the load to
 # 100–225 and froze the app about 40 times. The width is the cores free when the run starts (the load and the other
 # slots held counted), at least the slot's share (Resources/bin/vs-heavy's `give_width`): capped at the share alone, a
 # merge on a calm Mac took 15 min instead of 8 (2026-11-08 to 11-12). Without a VS_HEAVY_CORES (a whole number above 0), the
 # width as it was. Exported, for the bash vs-heavy runs.
 slot_width() {
-    local width=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-}
+    local width=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-} cap
     if [[ ${VS_HEAVY_CORES:-} =~ ^[0-9]+$ ]] && (( 10#$VS_HEAVY_CORES >= 1 )); then
-        [[ $width =~ ^[0-9]+$ ]] && (( 10#$width <= 10#$VS_HEAVY_CORES )) || width=$(( 10#$VS_HEAVY_CORES ))
+        cap=$(( 10#$VS_HEAVY_CORES * $(tests_per_core) ))
+        [[ -z ${VIBESWITCHER_TEST_WIDTH_DEFAULT:-} && $width =~ ^[0-9]+$ ]] && (( 10#$width <= cap )) || width=$cap
     fi
     export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=$width
 }
