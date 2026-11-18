@@ -17,7 +17,8 @@ one line each, and a status:
   again);
 - **doesn't fit**: with the reason.
 
-Decision references are `decision YYYY-MM-DD HH:MM` and point at `docs/lead/decisions.md` unless they say
+The product inventory was searched for Statistics, the scorecard, notifications, memory and the benches; nothing in it
+covers a "not done" row. Decision references are `decision YYYY-MM-DD HH:MM` and point at `docs/lead/decisions.md` unless they say
 "archive". Backlog ids (A1, B3…) are `docs/process/backlog.md`'s; its Status column is behind the code (A1, A2, A3, A5,
 A6 and B3 landed on 2026-11-08), so the tables cite the code instead.
 
@@ -40,7 +41,7 @@ VibeSwitcher already does most of what these books ask for, and often more stric
 prose, incidents become checks, and decisions are recorded with their reasons. The books' best remaining lever is the
 merge gate, treated as a production service with an objective and an error budget. The nine ranked proposals:
 
-1. **An error budget for the merge gate** (SRE, Implementing SLOs, Deming): 28% of merge runs fail their first try.
+1. **An error budget for the merge gate** (SRE, Implementing SLOs, Deming): 18% of merge runs this week passed only on a whole rerun.
 2. **Tidy first, as its own small task** (Tidy First?, Refactoring): large tasks need a second audit round 59% of the time.
 3. **The git guard fails closed on git it can't see** (Building Secure and Reliable Systems, Secure by Design): two spelling tasks in one evening, and `RefusedGit.swift` itself lists the open spellings.
 4. **Split Sandbox.swift by what's sensitive** (A Philosophy of Software Design, Your Code as a Crime Scene): 36 audits were started only because a UI task touched it.
@@ -80,7 +81,7 @@ By these books' standards, the strongest parts are these.
 - **Small batches and risk-scaled review.** Tasks are kept under about 30 minutes (decision 2026-11-12 10:33). Small,
   non-sensitive tasks merge on their tests (`LeadSmallTask.swift`), and sensitive paths are always audited
   (`LeadRisk.swift`). That is *Lean Software Development* and *Accelerate*'s small-batch finding, with the audit
-  spend placed where the findings are (5–7% Important on small tasks, against 64% on large ones).
+  spend placed where the findings are (5–10% of small tasks had an Important finding, against 64% of large ones).
 - **Contracts as the unit of work.** Each task carries a goal, acceptance checks and boundaries, has one owner through
   completion, and is checked by an independent verifier on another model. That is *The Pragmatic Programmer*'s design
   by contract and *Turn the Ship Around!*'s intent-based delegation, with the working policy in every prompt
@@ -133,7 +134,7 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | Designing Data-Intensive Applications, Kleppmann, 2017 | Unreliable clocks: never order or time out by wall-clock | done: limits count awake time (`MacTime.swift`, decision 2026-11-08 20:36); decisions are stamped by the Mac's clock in one place (`LeadBoard.appendDecision`) |
 | | An append-only log with derived views | done: progress.md is append-only; `product-inventory.md` is generated from the code (`scripts/product-inventory.sh`); finished tasks move to `board-archive.jsonl` |
 | Domain Modeling Made Functional, Wlaschin, 2018 | Make illegal states unrepresentable: legal transitions written once | not done: no transition table; a kept task was merged by auto_advance (incident 2026-10-30 21:42), fixed case by case (`aTaskSetKeptDuringItsMergesTestRunStaysKept`): shortlist 9 |
-| | Parse, don't validate, at the edges | done: wallet requests are parsed strictly into a typed value (`WalletRequestFormat.swift`, vectors in `docs/protocol/vectors/`); `LeadWorkflow` reads workflow.md's known keys only |
+| | Validate at the trust boundary into types that can't hold bad data | done: wallet requests are parsed strictly into a typed value (`WalletRequestFormat.swift`, vectors in `docs/protocol/vectors/`); `LeadWorkflow` reads workflow.md's known keys only |
 | Building Evolutionary Architectures, Ford, Parsons & Kua, 2017 | Fitness functions: an architectural property checked automatically and continuously | partly: lints are fitness functions that run in every merge (`PrivateNamesLint`, `ElapsedTimeLint`, `TemporaryFolderLint`); performance and memory ones are benches outside the merge (decision 2026-10-21 22:52 (3)) and run by nobody on a schedule: shortlist 5 |
 | Secure by Design, Johnsson, Deogun & Sawano, 2019 | Reject what you can't understand; allowlist over denylist | partly: the verifier's commands are an allowlist (`ReadOnlyCommand.swift`); the workers' git guard is a denylist over shell spellings and lists its own open cases (`RefusedGit.swift`): shortlist 3 |
 | | Domain primitives for anything that crosses a trust boundary | done: secret-shaped text is refused in lead mail (decision 2026-11-04 22:18), `SecretShapes.swift`, `SecretShapeLint` |
@@ -196,7 +197,7 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | | Trace one unit of work across components | partly: a task's receipt and waits follow it from start to merge (`LeadReceipt.swift`, `LeadWaits.swift`), and merges carry provenance trailers (`LeadProvenance.swift`); a merge failure's log now reaches the worker (incident 2026-11-09 18:26) |
 | Chaos Engineering, Rosenthal & Jones, 2020 | Inject failures to test the system's response | parked: a chaos corpus for the orchestrator (decision 2026-11-06 22:35 (8)), until an incident calls for it |
 | The Field Guide to Understanding Human Error, Dekker, 2006 | Ask what made the action make sense at the time, not who erred | done: incident entries record context and evidence; retrospectives change tools or contracts, not blame (decisions 2026-11-08 23:16, 2026-11-09 14:20) |
-| | Look for the second story: the system's conditions behind the error | done: "the incidents point to handoffs the system controls, not to too few reviewers" (decision 2026-11-09 14:20) |
+| | The new view: an error is a symptom of trouble deeper in the system | done: "the incidents point to handoffs the system controls, not to too few reviewers" (decision 2026-11-09 14:20) |
 
 ### Flow, teams and management
 
@@ -206,15 +207,15 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | | The surgical team and conceptual integrity: one mind decides the design | done: the lead plans and decides, workers build one contract each, the lead writes no code (`LeadLaunch.deny(.lead)`) |
 | Out of the Crisis, Deming, 1982 | Common-cause vs special-cause variation: don't react to noise, fix the system | partly: the flake ledger waits for 3 flakes before acting (`FlakeLedger.swift`); trends are said only above a sample floor (`SetupScorecard.trendFloor`); a 28% first-try failure rate is a system property that no one owns: shortlist 1 |
 | | PDSA: plan, do, study, act | done, then paused: the impact ledger's hypotheses and verdicts (`docs/process/impact.md`), paused 2026-11-09 |
-| The Goal, Goldratt, 1984 | Find the constraint, exploit it, subordinate everything else to it | partly: the speed review found the constraints (planned work and the Mac's sleep, not capacity: `speed-review-2026-11-12.md`); the sleep half is built (`SleepCost.swift`, task sleep-shows-its-cost); keeping the board fed (its idea 2) isn't |
+| The Goal, Goldratt, 1984 | Find the constraint, exploit it, subordinate everything else to it | partly: the speed review looked for the constraint (planned work and the Mac's sleep, not capacity), and its re-check put extra audit rounds first among costs with a lever (`speed-review-2026-11-12.md`); sleep's cost is shown (`SleepCost.swift`, task sleep-shows-its-cost); rounds are what shortlist 2 goes after |
 | Peopleware, DeMarco & Lister, 1987 | Protect flow time from interruptions | done for the user: questions get a default timer, routine events no message (decisions 2026-10-17 21:27, 2026-11-17 19:55); workers own routine calls instead of asking (decision 2026-10-21 22:52 (2)) |
 | | Quality is set by the builders, not imposed afterwards | done: the worker proves its own work (evidence, blind check, tests under load) before an audit |
-| Lean Software Development, Poppendieck & Poppendieck, 2003 | See the waste: waiting, relearning, handoffs, task switching, partly done work | done, measured: relearning 3.0% of worker time (`worker-rediscovery-2026-11.md`); waiting by cause (`LeadWaits.swift`); sleep 33% of in-flight time (speed review) |
+| Lean Software Development, Poppendieck & Poppendieck, 2003 | See the waste: waiting, relearning, handoffs, task switching, partly done work | done, measured: relearning 3.0% of worker time (`worker-rediscovery-2026-11.md`); waiting by cause (`LeadWaits.swift`); sleep 33% of in-flight time, most of it in ten tasks (speed review and its re-check) |
 | | Decide as late as possible; amplify learning | done: triggered ideas are parked with their trigger (decision 2026-11-06 22:35), and backtests come before building (decision 2026-11-09 11:14) |
 | The Toyota Way, Liker, 2004 | Jidoka: stop the line on a defect | done: main red stops merges (`LeadPipeline.swift`); a blocked pipeline is found and acted on (task merges-never-sit-blocked) |
 | | Poka-yoke: make the mistake impossible rather than warned against | done: `docs/process/lead-rules.md` lists 33 enforced rules; partly for workers' git (a denylist with known gaps, shortlist 3) |
 | Thinking in Systems, Meadows, 2008 | Feedback loops with delays: a balancing loop needs a measured stock | partly: retrospectives close the loop on process (`LeadWorkflow.swift`'s retrospective step); stocks like open flakes or "still to move" lint entries have no target |
-| The Principles of Product Development Flow, Reinertsen, 2009 | Queues are the hidden cost: measure queue size and its cost of delay | done: task waits by cause (`LeadWaits.swift`), chained tasks' cost measured (median 338 min against 117, `speed-review-2026-11-12.md`) |
+| The Principles of Product Development Flow, Reinertsen, 2009 | Queues are the hidden cost: measure queue size and its cost of delay | done: task waits by cause (`LeadWaits.swift`); the cost of an extra audit round measured (median 208 min against 89 from start to merge, the re-check in `speed-review-2026-11-12.md`) |
 | | Small batches; limit work in process | done: max_workers and Mac-wide limits (`LeadWorkflow.swift`, `MacLoad.swift`); batched merges of up to 8 (decision 2026-11-12 15:28) |
 | | Prioritise by cost of delay over duration (WSJF) | partly: the backlog ranks by effect ÷ cost (`docs/process/backlog.md`); the board starts tasks in planned order |
 | Kanban, Anderson, 2010 | Make policies explicit; limit WIP per stage | done: `docs/process/lead-rules.md`; heavy slots and one merge at a time (`TestLock.swift`) |
@@ -258,21 +259,26 @@ ledger is paused), with today's baseline.
   policy agreed beforehand), Deming (a stable failure rate is the system's, not any one task's).
 - **Change:** two objectives for this project's merge runs, over a rolling 7 days, shown in the weekly scorecard
   (`Sources/VibeCore/SetupScorecard.swift`) next to the first-try figures Statistics already computes
-  (`SetupStatsQuality.swift`): at least 85% of merge runs pass on their first run, and the median calm-Mac merge
-  (1-minute load at most 6) takes 10 minutes or less, the target a-calm-mac-merge set. Then one line in the lead's
-  brief (`LeadPrompts.lead` in `Sources/VibeCore/LeadWorkflow.swift`), next to the retrospective step: while either
-  objective is missed, the next tasks the lead plans come from the flake ledger's top entries, the top crashers and
-  the slowest suites, ahead of new features, until both are met again.
-- **Problem and evidence:** the first run fails 28% of the time (25 of 89 this week, 35 of 129 the week before), and
-  34 merges in two weeks passed only on their rerun, each paying for a second full run. The ledger counted 202 flakes
-  over 166 tests in 22 days, and 36 flaky-test tasks have been planned, one at a time, as the 3-flake rule fires.
-  Merges take a median 17.0 min this week against the 10 the project set itself. Fixes come test by test, and nothing
-  says when reliability work should go ahead of features.
+  (`SetupStatsQuality.swift`). First, at most 5% of merge runs pass only on their rerun: that's the noise, while a run
+  that fails twice and sends its branch back is the gate working. Second, the median calm-Mac merge (1-minute load at
+  most 6) takes 10 minutes or less, the target a-calm-mac-merge set. Then one line in the lead's brief (`LeadPrompts.lead`
+  in `Sources/VibeCore/LeadWorkflow.swift`), next to the retrospective step: while either objective is missed, the
+  next tasks the lead plans come from the flake ledger's top entries, the failures that name no test, and the slowest
+  suites, ahead of new features, until both are met again. The backlog's freeze budget (B3, landed 2026-11-08) is the
+  same idea applied to the app's freezes.
+- **Problem and evidence:** this week 16 of the 89 runs that record a first run (18%) passed only on their rerun, and
+  every one of them reran the whole command, so the failing run named no test and paid for a second full run (14%
+  the week before: 18 of 129). Another 8 failed twice and went back to their branch. The ledger counted 202 flakes
+  over 166 tests in 22 days, and 36 flaky-test tasks have been planned one at a time as the 3-flake rule fires. Merges
+  take a median 17.0 min this week against the 10 the project set itself. Nothing says when this work goes ahead of
+  features.
 - **Cost:** small. One scorecard task, and one prompt line. `LeadWorkflow.swift` is on sensitive_paths, so that part
   is audited.
 - **After a week:** the scorecard shows both figures with their n. If the budget was spent, the board shows the
-  ledger's top 3 entries planned. A first-try failure rate under 20% in `merges-*.jsonl` (vibeswitcher rows) would show
-  an effect. Still over 25% after two weeks means the policy is being skipped, or the failures aren't the ledger's named tests (18 of this week's 96 runs reran the whole command, naming no test), which then need their own diagnosis first.
+  ledger's top entries and at least one "names no test" diagnosis planned. The passed-only-on-rerun share in
+  `merges-*.jsonl` (vibeswitcher rows, `result` = passed_on_rerun) falling under 10% would show an effect. Still over
+  15% after two weeks means the policy is being skipped, or the whole-command failures need a diagnosis of their own
+  first.
 
 ### 2. Tidy first, as its own small task
 
@@ -286,8 +292,9 @@ ledger is paused), with today's baseline.
   records, remote, usage), each the first time a task needs it, never as one big split that would conflict with
   everything in flight.
 - **Problem and evidence:** tasks with over an hour of work needed a second audit round 59% of the time, against 18%
-  for tasks under 30 min, and had an Important finding 64% of the time, against 5–7% (decision 2026-11-12 10:33,
-  `speed-review-2026-11-12.md`). On 2026-11-12 a batch of 6 lost 2 tasks to conflicts in `LeadToolset` and the merge
+  for tasks under 30 min, and had an Important finding 64% of the time, against 5–10% (decision 2026-11-12 10:33,
+  `speed-review-2026-11-12.md`). The speed review's re-check found extra audit rounds to be the largest in-flight
+  cost with a lever: two-round tasks took a median 208 min from start to merge, against 89 for one round. On 2026-11-12 a batch of 6 lost 2 tasks to conflicts in `LeadToolset` and the merge
   path (decision 2026-11-12 16:27). `LeadToolset.swift` is in 211 commits since 2026-10-18. It is now on sensitive_paths,
   so every task that touches any of its 321 functions is audited, whatever the change.
 - **Cost:** small. One brief paragraph, then tidy tasks of under 30 min each. Tidying tasks that touch `LeadToolset.swift`
@@ -304,13 +311,15 @@ ledger is paused), with today's baseline.
 - **Change:** in `Sources/VibeCore/RefusedGit.swift`, `refusal(in:)` answers `.unreadable` (deny) when a line hands
   text that names git, case-folded, to another interpreter (`sh`/`bash`/`zsh -c`, `eval`, `env -S`, `source`, `.`,
   `watch`, `xargs sh`), or when a git's option or command word comes from an expansion (`git $x`, `git ${…}`). Those
-  are the spellings its header lists as "not seen here, and so open". Everything else stays as it is. A decision
+  are the spellings its header lists as "not seen here, and so open". worker-git-guard-part's boundaries kept
+  `sh -c` and `eval` out of scope on 2026-11-17, and no decision records why they should stay open. Everything else
+  stays as it is. A decision
   records that a new spelling found later is refused the same way, not hunted case by case.
 - **Problem and evidence:** two spelling tasks on 2026-11-17 (worker-git-guard-the and worker-git-guard-part), each
   sent back with Important findings (process substitution, nesting limits, `find -exec`, case folding) before passing.
   An earlier guard task (the-git-guard-treats, 2026-11-08, trailer commands) passed clean. The 2026-11-17 Code Mode trial's worker ran `git --git-dir=…`
-  unasked. A denylist over a shell language keeps losing to the next spelling. The workers' legitimate git never
-  needs to go through `sh -c` or `eval`.
+  unasked. A denylist over a shell language keeps losing to the next spelling. A worker refused this way can run the same
+  git plainly, so refusing costs a rewrite, not a capability.
 - **Cost:** small to medium. One task, audited for security. The risk is refusing a worker's harmless `sh -c '… git
   status'`; the refusal says to run git plainly.
 - **After a week:** no new guard-spelling task planned (the baseline is two in one evening), and no worker blocked by
@@ -324,7 +333,7 @@ ledger is paused), with today's baseline.
   screen) in one small file that stays on sensitive_paths. Move the fixtures, the control channel's probe commands,
   the shots and the soak code into files that aren't sensitive. A lint test makes sure the moved files start no
   process, write no file outside the sandbox's home, and reach no real session, which is what decision 2026-11-07 19:48
-  says probes must not do.
+  says probes must not do. This revisits those decisions' premise that the whole file stays sensitive.
 - **Problem and evidence:** 36 audits were started only because a branch touched `Sources/VibeSwitcher/Sandbox.swift`
   (5 since 2026-11-11). Sandbox probes are a recurring setback: five tasks edited it outside their boundaries
   (decision 2026-10-30 15:08), and two came back "suspect" with no Important finding (decision 2026-11-07 19:48), each
@@ -347,7 +356,9 @@ ledger is paused), with today's baseline.
   (262 → 713 MB overnight, after two fixes on 2026-11-17). The budgets exist (under 150 MB with the window closed, at
   most 10% growth over churn, flat over five simulated hours), but the benches run only with `--perf`, by hand. Each
   regression has been found in the field, a day later, by the app-health line or the user. The load report shows
-  02:00–06:00 averaging a load of 2–3 when the Mac is awake.
+  02:00–06:00 averaging a load of 2–3 when the Mac is awake. Whether the benches would have gone red on this week's
+  build is unchecked; the first scheduled runs answer it, and if they stay green while the field grows, the bench's
+  traffic needs widening before the schedule is worth keeping.
 - **Cost:** small to medium. One task in the app plus a stats line. Benches leave the default run (decision
   2026-10-21 22:52 (3)), so this doesn't touch merges.
 - **After a week:** results recorded on at least 4 of 7 days. Any growth shows in the stats before or with the
@@ -377,7 +388,8 @@ ledger is paused), with today's baseline.
   visible).
 - **Change:** the weekly scorecard counts the lead's messages to the user per day, split by the four allowed reasons
   of decision 2026-11-17 19:55 (the user must act, something asked for is finished, a real problem, the daily
-  summary). It also gives the share the user acted on: answered, clicked or replied.
+  summary). It also gives the share the user acted on: answered, clicked or replied. It extends the scorecard's
+  questions per delivered task (backlog A1, landed 2026-11-08) from questions to every message.
 - **Problem and evidence:** the same rule had to be written twice (decisions 2026-10-25 22:48 and 2026-11-17 19:55).
   On 2026-11-17 about 14 messages went out and about 4 needed the user, and the user said they don't read 80%.
   lead-chat-noise-fold merged that evening, and its follow-up is running. A rule with no count tends to drift back.
@@ -387,13 +399,14 @@ ledger is paused), with today's baseline.
 
 ### 8. Each retrospective checks whether an incident came back after its check merged
 
-- **From:** *The Site Reliability Workbook* (postmortem action items verified, not just closed), Dekker (the second
-  story).
+- **From:** *The Site Reliability Workbook* (postmortem action items verified, not just closed), Dekker (the new
+  view: an error is a symptom of the system).
 - **Change:** one line in the lead's retrospective step (`LeadPrompts.lead`). For each incident since the last
   retrospective whose check task merged, look for a recurrence in `incidents.md`, the flake list and the merge records.
   A recurrence becomes an incident of its own, naming the check that missed it.
 - **Problem and evidence:** the merge flattening of 2026-11-07 19:46 came back at 22:19 the same day, after its fix
-  had merged (incidents.md). Hung test runs were recorded on 2026-11-06, 2026-11-08 03:34 and 2026-11-08 19:21, and the
+  had merged (incidents.md); the second time came from a stale installed gate (decision 2026-11-09 14:20 (5)), which
+  no check on the fix itself could have caught. Hung test runs were recorded on 2026-11-06, 2026-11-08 03:34 and 2026-11-08 19:21, and the
   third was Mac sleep (decision 2026-11-08 20:36). The retrospectives count follow-ups (decision 2026-11-09 14:20 (4)),
   but not recurrences.
 - **Cost:** tiny. A prompt line; `LeadWorkflow.swift` is sensitive, so it's audited.
