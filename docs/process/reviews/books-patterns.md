@@ -227,3 +227,214 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | Team Topologies, Skelton & Pais, 2019 | Limit cognitive load per team: give each team a bounded domain | partly: a contract bounds each worker; the files they must read don't: `LeadToolset.swift` is read by most lead-tool tasks whatever their part |
 | | Conway's law in reverse: shape the system to the teams you want | doesn't fit as a team rule (workers are short-lived); it does as a file rule: split by who changes what (shortlist 3) |
 | Shape Up, Singer, 2019 | Appetite: fix the time, vary the scope; a circuit breaker at the end | done: a time budget per task (`LeadBudget.swift`), and over budget the worker reports what works and proposes a cut |
+
+## Already tried, decided against or parked
+
+These came up from the books too, but they're settled. They aren't proposed again here.
+
+| Idea (book) | Settled | Where |
+| --- | --- | --- |
+| A team of workers on one task (Brooks's surgical team, inverted) | dropped 2026-11-16 | decision 2026-11-16 07:21 |
+| A shared notes board between workers (Lean: relearning waste) | not built 2026-11-13; reopens over 5% of worker time | decision 2026-11-13 19:24 |
+| Bigger tasks with verification points | superseded the same day, 2026-11-12 | decision 2026-11-12 10:33 (archive 2026-11-12 09:23 for the first one) |
+| A fresh reader for contracts; a "tests got weaker" check (Khorikov, Meszaros) | not built 2026-11-09 | decision 2026-11-09 11:14 and the two backtests in `docs/process/reviews/` |
+| The impact ledger's routine (Deming's PDSA, Farley) | paused 2026-11-09 | decision 2026-11-09 14:20 (2) |
+| A scheduled gardener agent and idle bug sweeps | not built 2026-10-26 | decision 2026-10-26 11:01 (c) |
+| Replays to compare whole harness versions | the user chose estimates only, 2026-11-02 | decision 2026-11-02 23:00 |
+| A chaos corpus, mechanical fail-without-fix, per-contract path globs | parked with triggers, 2026-11-06 | decision 2026-11-06 22:35 |
+| A copy-of-the-build start for worktrees | abandoned 2026-10-26 | archive, decision 2026-10-26 02:06 |
+| Claude Code's OS sandbox for worker shells | weighed and not recommended for speed, 2026-11-12 | `speed-review-2026-11-12.md`, "Weighed and not recommended" |
+| Quarantining flaky tests out of the gate (Software Engineering at Google) | doesn't fit | the working contracts forbid moving a test out of the merge's suite (task faster-test-suite's acceptance); the rerun and the ledger stand in |
+
+## The shortlist
+
+Ranked by value against cost. Each item says where its idea comes from, what changes, the problem here with its
+evidence, a rough cost, and how to tell after a week. The week checks read data that is already recorded (the impact
+ledger is paused), with today's baseline.
+
+### 1. An error budget for the merge gate
+
+- **From:** *Site Reliability Engineering* (SLOs and error budgets), *Implementing Service Level Objectives* (a budget
+  policy agreed beforehand), Deming (a stable failure rate is the system's, not any one task's).
+- **Change:** two objectives for this project's merge runs, over a rolling 7 days, shown in the weekly scorecard
+  (`Sources/VibeCore/SetupScorecard.swift`) next to the first-try figures Statistics already computes
+  (`SetupStatsQuality.swift`): at least 85% of merge runs pass on their first run, and the median calm-Mac merge
+  (1-minute load at most 6) takes 10 minutes or less, the target a-calm-mac-merge set. Then one line in the lead's
+  brief (`LeadPrompts.lead` in `Sources/VibeCore/LeadWorkflow.swift`), next to the retrospective step: while either
+  objective is missed, the next tasks the lead plans come from the flake ledger's top entries, the top crashers and
+  the slowest suites, ahead of new features, until both are met again.
+- **Problem and evidence:** the first run fails 28% of the time (25 of 89 this week, 35 of 129 the week before), and
+  34 merges in two weeks passed only on their rerun, each paying for a second full run. The ledger counted 202 flakes
+  over 166 tests in 22 days, and 36 flaky-test tasks have been planned, one at a time, as the 3-flake rule fires.
+  Merges take a median 17.0 min this week against the 10 the project set itself. Fixes come test by test, and nothing
+  says when reliability work should go ahead of features.
+- **Cost:** small. One scorecard task, and one prompt line. `LeadWorkflow.swift` is on sensitive_paths, so that part
+  is audited.
+- **After a week:** the scorecard shows both figures with their n. If the budget was spent, the board shows the
+  ledger's top 3 entries planned. A first-try failure rate under 20% in `merges-*.jsonl` (vibeswitcher rows) would show
+  an effect. Still over 25% after two weeks means the policy is being skipped or the cause is crashes (item 4).
+
+### 2. Tidy first, as its own small task
+
+- **From:** *Tidy First?* (separate structure changes from behaviour changes), *Refactoring* (preparatory refactoring),
+  *Working Effectively with Legacy Code* (sprout class).
+- **Change:** a planning step in the lead's brief (`LeadPrompts.lead`, where contracts are written). When a task's
+  change would be easier after restructuring, such as moving a tool family out of `LeadToolset.swift` or extracting a
+  function, the lead plans that restructuring as its own task first: no behaviour change, tests unchanged and green.
+  The behaviour task runs `after` it. `LeadToolset.swift` then shrinks one family at a time (merge, audit, starts,
+  records, remote, usage), each the first time a task needs it, never as one big split that would conflict with
+  everything in flight.
+- **Problem and evidence:** tasks with over an hour of work needed a second audit round 59% of the time, against 18%
+  for tasks under 30 min, and had an Important finding 64% of the time, against 5–7% (decision 2026-11-12 10:33,
+  `speed-review-2026-11-12.md`). On 2026-11-12 a batch of 6 lost 2 tasks to conflicts in `LeadToolset` and the merge
+  path (decision 2026-11-12 16:27). `LeadToolset.swift` is in 211 commits since 2026-10-18. It is now on sensitive_paths,
+  so every task that touches any of its 321 functions is audited, whatever the change.
+- **Cost:** small. One brief paragraph, then tidy tasks of under 30 min each. Tidying tasks that touch `LeadToolset.swift`
+  are audited while it stays sensitive. Moving the non-guard tool families into files off the list would need the
+  user's review floor (decision 2026-11-07 20:08), so that is the user's call.
+- **After a week:** at least one tidy task planned ahead of a behaviour task, merged in one round, and the behaviour
+  task's audit rounds compared with the 1.4 baseline. `LeadToolset.swift`'s line count goes down.
+
+### 3. The git guard fails closed on git it can't see
+
+- **From:** *Secure by Design* (reject input you can't fully understand; prefer allowlists), *Building Secure and
+  Reliable Systems* (least privilege; design for understandability), and this project's own rule that hardening fails
+  closed (decision 2026-10-25 16:33 (a)).
+- **Change:** in `Sources/VibeCore/RefusedGit.swift`, `refusal(in:)` answers `.unreadable` (deny) when a line hands
+  text that names git, case-folded, to another interpreter (`sh`/`bash`/`zsh -c`, `eval`, `env -S`, `source`, `.`,
+  `watch`, `xargs sh`), or when a git's option or command word comes from an expansion (`git $x`, `git ${…}`). Those
+  are the spellings its header lists as "not seen here, and so open". Everything else stays as it is. A decision
+  records that a new spelling found later is refused the same way, not hunted case by case.
+- **Problem and evidence:** three guard tasks so far (the-git-guard-treats on 2026-11-08, then worker-git-guard-the
+  and worker-git-guard-part on 2026-11-17), each with Important findings over rounds (F1–F3 for process substitution,
+  nesting limits, `find -exec`, case folding). The 2026-11-17 Code Mode trial's worker ran `git --git-dir=…`
+  unasked. A denylist over a shell language keeps losing to the next spelling. The workers' legitimate git never
+  needs to go through `sh -c` or `eval`.
+- **Cost:** small to medium. One task, audited for security. The risk is refusing a worker's harmless `sh -c '… git
+  status'`; the refusal says to run git plainly.
+- **After a week:** no new guard-spelling task planned (the baseline is three in ten days), and no worker blocked by
+  the new refusal for a harmless command, judged from their reports to the lead.
+
+### 4. A crash costs one test shard, not the whole merge
+
+- **From:** *Release It!* (bulkheads), *Software Engineering at Google* (test sizes with their own runners and
+  limits).
+- **Change:** `scripts/test.sh` runs the Swift tests as a few processes within the slot's width, split by size
+  (pure VibeCore; socket and host; app and sandbox), each with its own result line. `Sources/VibeCore/MergeRerun.swift`
+  reruns only a shard that crashed or failed, and the merge record names the shard. This is the speed review's
+  improvement 4, never planned, with this week's numbers. It comes after faster-test-suite merges: that task may
+  split suites across processes but must not touch the merge path or the rerun.
+- **Problem and evidence:** 18 of this week's 96 merge runs reran the whole command (27 of 139 the week before),
+  each costing another full run at a median of 17 min. Whole reruns list 360–525 unfinished tests, so one crash takes
+  the suite down (`speed-review-2026-11-12.md`). 11 of 19 whole reruns that week passed, so most crashes are
+  intermittent.
+- **Cost:** medium. Two tasks: `scripts/test.sh` (shared test infrastructure, so its worker runs the full suite), then
+  `MergeRerun.swift` (sensitive, audited).
+- **After a week:** whole-command reruns in `merges-*.jsonl` fall from 18 a week to a few, replaced by shard reruns.
+  Minutes spent rerunning drop by half or more. The first-try rate from item 1 moves only if the crashes are fixed
+  too, so this check is about rerun cost.
+
+### 5. Split Sandbox.swift by what's sensitive
+
+- **From:** *A Philosophy of Software Design* (information hiding: keep each decision in one module), *Your Code as
+  a Crime Scene* (hotspots), *Clean Architecture* (separate policy from detail).
+- **Change:** keep what makes the sandbox safe (its own home, defaults and session host, fake sessions only, off
+  screen) in one small file that stays on sensitive_paths. Move the fixtures, the control channel's probe commands,
+  the shots and the soak code into files that aren't sensitive. A lint test makes sure the moved files start no
+  process, write no file outside the sandbox's home, and reach no real session, which is what decision 2026-11-07 19:48
+  says probes must not do.
+- **Problem and evidence:** 36 audits were started only because a branch touched `Sources/VibeSwitcher/Sandbox.swift`
+  (5 since 2026-11-11). Sandbox probes are a recurring setback: five tasks edited it outside their boundaries
+  (decision 2026-10-30 15:08), and two came back "suspect" with no Important finding (decision 2026-11-07 19:48), each
+  costing a second round. It is the file most named in overlap warnings (11 of them), with 4,608 lines and 126
+  commits since 2026-10-18.
+- **Cost:** medium. One audited task of about an hour. Taking the moved files off sensitive_paths lowers the review
+  floor, so it is the user's click in Settings (decision 2026-11-07 20:08).
+- **After a week:** progress lines starting an audit only for Sandbox.swift go from 5 in a week to 0. UI tasks that
+  add a probe merge as small tasks.
+
+### 6. The memory benches run by themselves on a calm Mac
+
+- **From:** *Building Evolutionary Architectures* (fitness functions, run continuously), *Release It!* (steady state).
+- **Change:** a deterministic job, not an agent (decision 2026-10-26 11:01 (c)), run once a day by the app, as the
+  load recorder is: when the Mac is on AC, awake and calm, it runs `scripts/test.sh --perf --filter
+  'FootprintBenchTests|SandboxSoakBenchTests'` under `vs-heavy` on main's latest build and appends the result to
+  `~/.vibeswitcher/stats/`. The app-health line (`AppHealth.swift`) reports a failing budget with the commit range since
+  the last pass.
+- **Problem and evidence:** the app's memory growing has needed 9 tasks since 2026-10-17, the latest on 2026-11-18
+  (262 → 713 MB overnight, after two fixes on 2026-11-17). The budgets exist (under 150 MB with the window closed, at
+  most 10% growth over churn, flat over five simulated hours), but the benches run only with `--perf`, by hand. Each
+  regression has been found in the field, a day later, by the app-health line or the user. The load report shows
+  02:00–06:00 averaging a load of 2–3 when the Mac is awake.
+- **Cost:** small to medium. One task in the app plus a stats line. Benches leave the default run (decision
+  2026-10-21 22:52 (3)), so this doesn't touch merges.
+- **After a week:** results recorded on at least 4 of 7 days. Any growth shows in the stats before or with the
+  app-health line, not after it.
+
+### 7. Accelerate's stability metrics in the weekly scorecard
+
+- **From:** *Accelerate* (change failure rate and time to restore, beside throughput).
+- **Change:** `SetupScorecard.swift` adds (a) change failure rate: merged tasks that needed a corrective follow-up, from
+  receipts and task origins (`LeadOrigins.swift`), as the retrospective counts it by hand today (decision 2026-11-09
+  14:20 (4)); and (b) time to restore: minutes the pipeline was blocked by main red or the lead's records failing a
+  check, from `LeadPipeline.swift`'s causes.
+- **Problem and evidence:** throughput and time to install are counted (`SetupScorecard.swift`), but stability isn't.
+  On 2026-11-12 every merge was blocked for about 2 h 45 min (incident 2026-11-12 13:47), and main was red for about
+  four hours the same day (`worker-rediscovery-2026-11.md`). Neither shows in any weekly figure.
+- **Cost:** small to medium. One task. The scorecard reads exact data only.
+- **After a week:** both figures appear for this week and the last, with their n. The next retrospective uses them
+  instead of a hand count.
+
+### 8. Lead messages measured by whether they needed the user
+
+- **From:** *Site Reliability Engineering* (every page actionable), *Making Work Visible* (unplanned work made
+  visible).
+- **Change:** the weekly scorecard counts the lead's messages to the user per day, split by the four allowed reasons
+  of decision 2026-11-17 19:55 (the user must act, something asked for is finished, a real problem, the daily
+  summary). It also gives the share the user acted on: answered, clicked or replied.
+- **Problem and evidence:** the same rule had to be written twice (decisions 2026-10-25 22:48 and 2026-11-17 19:55).
+  On 2026-11-17 about 14 messages went out and about 4 needed the user, and the user said they don't read 80%.
+  lead-chat-noise-fold merged that evening, and its follow-up is running. A rule with no count tends to drift back.
+- **Cost:** small. One scorecard task that reads the lead's tool calls by kind.
+- **After a week:** at most about 4 messages a day, and at least half of them needing the user, against about 4 in 14 on
+  2026-11-17.
+
+### 9. Each retrospective checks whether an incident came back after its check merged
+
+- **From:** *The Site Reliability Workbook* (postmortem action items verified, not just closed), Dekker (the second
+  story).
+- **Change:** one line in the lead's retrospective step (`LeadPrompts.lead`). For each incident since the last
+  retrospective whose check task merged, look for a recurrence in `incidents.md`, the flake list and the merge records.
+  A recurrence becomes an incident of its own, naming the check that missed it.
+- **Problem and evidence:** the merge flattening of 2026-11-07 19:46 came back at 22:19 the same day, after its fix
+  had merged (incidents.md). Hung test runs were recorded on 2026-11-06, 2026-11-08 03:34 and 2026-11-08 19:21, and the
+  third was Mac sleep (decision 2026-11-08 20:36). The retrospectives count follow-ups (decision 2026-11-09 14:20 (4)),
+  but not recurrences.
+- **Cost:** tiny. A prompt line; `LeadWorkflow.swift` is sensitive, so it's audited.
+- **After a week:** the next retrospective lists each recent incident with "recurred: yes or no".
+
+### 10. One transition table for a task's states
+
+- **From:** *Domain Modeling Made Functional* (make illegal states unrepresentable), *Domain-Driven Design*
+  (aggregates guard their invariants).
+- **Change:** `Sources/VibeCore/LeadBoard.swift` gets one function that says which status may follow which (for
+  example, nothing leaves `kept` except the lead's own update, and nothing leaves `folded` or `abandoned`). The 14
+  direct `status =` writes in 4 files go through it, and a test walks every pair.
+- **Problem and evidence:** auto_advance merged a task the lead had set to kept (incident 2026-10-30 21:42), which was
+  fixed case by case (`aTaskSetKeptDuringItsMergesTestRunStaysKept`). That's one incident, and the 2026-11-06 rule is
+  incident first, then the check, so this item sits last. Do it when a task already has to change those writes, as a
+  tidy-first step (item 2).
+- **Cost:** small to medium. `LeadBoard.swift` and `LeadToolset.swift` are sensitive, so it's audited.
+- **After a week:** the table's test is in, and any transition it refuses is logged. No refusal in a week means the
+  table matches today's behaviour.
+
+## The pain points, mapped
+
+| Pain point | Covered by |
+| --- | --- |
+| Merges take 16–20 min | faster-test-suite (running); items 1 (the 10-minute objective keeps its gain) and 4 (no whole-suite reruns) |
+| Flaky tests from Mac sleep | already handled at the source: awake-time limits (`MacTime.swift`, task test-waits-count-awake), `ElapsedTimeLint`, the flakes fixed on 2026-11-17 (decision 2026-11-17 17:02); item 1 gives the rest a budget |
+| Notification noise in the lead chat | lead-chat-noise-fold (merged 2026-11-17) and its follow-up (running); item 8 measures whether it holds |
+| Guard rails bypassed by shell spellings | item 3 |
+| Memory growth | app-memory-grows-again (running) finds this week's cause; item 6 catches the next one before the field does |
+| Hot files (LeadToolset, LeadAdvance) | items 2 (LeadToolset shrinks a family at a time) and 5 (the other hotspot, Sandbox.swift); LeadAdvance (1,288 lines) is sensitive by design and small enough to keep whole |
