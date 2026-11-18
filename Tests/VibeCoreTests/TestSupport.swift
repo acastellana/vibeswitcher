@@ -28,26 +28,38 @@ private let fakeTheDisk: @convention(c) () -> Void = {
     }
 }
 
-/// Runs as the test bundle loads too: SIGPIPE is caught, so a write to a pipe or socket whose reader has gone fails with
-/// EPIPE in the test that made it instead of ending the whole run. On 2026-11-18 a full run's test process died of one
-/// 62 s in ("exited with unexpected signal code 13"), every test after it unrun and none named. Caught, not ignored, as
-/// in the app (which leaves it at its default): what a test starts gets SIGPIPE at its default, a caught signal being
-/// reset by exec where an ignored one is inherited. Each one caught is said on stderr with the writer's stack. Every
-/// target's tests run in one process: each installs this same handler, so it's there whichever ran last.
+/// Runs as the test bundle loads too: SIGPIPE is caught, so a write to a pipe or socket whose reader has gone (without
+/// F_SETNOSIGPIPE or SO_NOSIGPIPE) fails with EPIPE instead of ending the whole run. On 2026-11-18 a full run's test
+/// process died of one 62 s in ("exited with unexpected signal code 13"), every test after it unrun and none named.
+/// Caught, not ignored, as in the app (which leaves it at its default): what a test starts gets SIGPIPE at its default,
+/// a caught signal being reset by exec where an ignored one is inherited. Every target's tests run in one process:
+/// each installs this same handler. The run still fails on one, naming it (`brokenPipesFailTheRun`, VibeCoreTests).
 @_used @_section("__DATA,__mod_init_func")
 private let catchBrokenPipes: @convention(c) () -> Void = {
     var action = sigaction()
-    action.__sigaction_u.__sa_handler = { _ in
-        let note: StaticString = "test run: SIGPIPE caught, a write to a pipe or socket whose reader had gone (it fails with EPIPE); the writer:\n"
-        _ = write(STDERR_FILENO, note.utf8Start, note.utf8CodeUnitCount)
-        withUnsafeTemporaryAllocation(of: UnsafeMutableRawPointer?.self, capacity: 48) { frames in
-            backtrace_symbols_fd(frames.baseAddress!, backtrace(frames.baseAddress!, 48), STDERR_FILENO)
-        }
-    }
+    action.__sigaction_u.__sa_handler = { _ in }
     sigemptyset(&action.sa_mask)
     action.sa_flags = SA_RESTART
     sigaction(SIGPIPE, &action, nil)
 }
+
+/// Each SIGPIPE the run gets fails it, as an issue in no test, the run going on: the app leaves SIGPIPE at its default,
+/// so the write that raised it (one of the app's whose reader had gone, unguarded) would end the app. A kqueue's
+/// EVFILT_SIGNAL hears it however it's handled, ignored too. A pipe's SIGPIPE goes to the process, not the thread that
+/// wrote, so no stack would name the writer.
+@_used @_section("__DATA,__mod_init_func")
+private let failOnBrokenPipes: @convention(c) () -> Void = { _ = brokenPipesFailTheRun }
+
+private let brokenPipesFailTheRun: DispatchSourceSignal = {
+    let source = DispatchSource.makeSignalSource(signal: SIGPIPE, queue: DispatchQueue(label: "broken-pipes"))
+    source.setEventHandler {
+        Issue.record(Comment(rawValue: "SIGPIPE: a write to a pipe or socket whose reader had gone, without F_SETNOSIGPIPE or "
+                             + "SO_NOSIGPIPE (\(source.data) since the last). The run caught it; the app, at SIGPIPE's default, "
+                             + "would have died of it. Give the writer F_SETNOSIGPIPE or SO_NOSIGPIPE."))
+    }
+    source.resume()
+    return source
+}()
 
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
 /// This counts awake time through `MacTime`, so a sleep cannot exhaust a wait at the wake.

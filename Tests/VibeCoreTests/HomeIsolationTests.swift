@@ -419,4 +419,4 @@ struct HomeIsolationTests {
     }
 }
 
-final class TestBundleAnchor {}
+private final class TestBundleAnchor {}

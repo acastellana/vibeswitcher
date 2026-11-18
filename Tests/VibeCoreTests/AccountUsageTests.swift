@@ -231,30 +231,6 @@ struct AccountUsageTests: LeadTeamFixture {
         #expect(UsageStatusLine.runCommand("wc -c | tr -d ' '", input: big, patience: 60) == Data("100000\n".utf8))
     }
 
-    /// `aBigInputToACommandThatDoesntReadItStillShowsItsOutput` in a process whose SIGPIPE is at its default: this run
-    /// catches it (`catchBrokenPipes`), so a SIGPIPE here would only be said, where there it ends the process.
-    @Test func aBigInputRaisesNoSIGPIPE() async throws {
-        let bundle = try #require(Bundle(for: TestBundleAnchor.self).executablePath)
-        let helper = try #require(HomeIsolationTests.testingHelper, "no swiftpm-testing-helper to start the bundle with")
-        var environment = ProcessInfo.processInfo.environment
-        environment["VIBESWITCHER_SIGPIPE_PROBE"] = "1"
-        let (status, output) = try await HomeIsolationTests.run(helper, ["--test-bundle-path", bundle, bundle, "--testing-library", "swift-testing",
-                                                                       "--filter", "AccountUsageTests/sigpipeProbe"], environment: environment)
-        #expect(status == 0, "\(output)")
-        #expect(output.contains("sigpipe probe: 3 commands, no SIGPIPE"), "\(output)")
-    }
-
-    /// Runs only in the child of `aBigInputRaisesNoSIGPIPE`.
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["VIBESWITCHER_SIGPIPE_PROBE"] == "1"))
-    func sigpipeProbe() {
-        signal(SIGPIPE, SIG_DFL)
-        let big = Data(repeating: 0x61, count: 100_000)
-        for command in ["echo mine", "exec 0<&-; echo closed", "wc -c | tr -d ' '"] {
-            #expect(!UsageStatusLine.runCommand(command, input: big, patience: 60).isEmpty)
-        }
-        print("sigpipe probe: 3 commands, no SIGPIPE")
-    }
-
     @Test func aCommandPastItsPatienceIsStoppedWithWhatItPrinted() {
         // It printed, then never ends: stopped at its patience, what it printed kept.
         #expect(UsageStatusLine.runCommand("echo early; exec sleep 600", input: Data(), patience: 1) == Data("early\n".utf8))

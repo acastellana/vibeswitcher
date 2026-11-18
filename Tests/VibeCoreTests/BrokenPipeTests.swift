@@ -2,8 +2,7 @@ import Darwin
 import Testing
 
 /// This target's load-time handler for SIGPIPE ran (see `catchBrokenPipes` in TestSupport.swift): a write to a pipe
-/// whose reader has gone fails with EPIPE in its test, and doesn't end the run. `AccountUsageTests.aBigInputRaisesNoSIGPIPE`
-/// checks a writer of the app's in a process where SIGPIPE is at its default.
+/// whose reader has gone fails with EPIPE, and doesn't end the run (which `brokenPipesFailTheRun` fails, naming it).
 struct BrokenPipeTests {
     @Test func theRunCatchesSIGPIPE() {
         var current = sigaction()

@@ -344,6 +344,9 @@ struct StyledScreenHostTests {
                     continue
                 }
                 _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
+                // As the real host's (`UnixSocket.configure`): a reply to a client that has gone fails, not SIGPIPE.
+                var noSigPipe: Int32 = 1
+                setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
                 func answer(_ seq: Int, _ event: HostEvent) {
                     guard let payload = try? HostCoding.encode(HostEventEnvelope(replyTo: seq, event: event)) else { return }
                     let frame = HostFrame.encode(.control, payload)
