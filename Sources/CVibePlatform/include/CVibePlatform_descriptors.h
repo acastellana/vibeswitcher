@@ -40,5 +40,17 @@ int vibe_receive_descriptor_in_room(int socket, size_t room);
 // may name its namespace's pids.
 ssize_t vibe_send_claiming(int fd, const void *bytes, size_t count, pid_t pid, uid_t uid, gid_t gid);
 
+// The door's (the session sandbox plan's SB4): sendmsg(2) of `count` bytes over the Unix socket `socket` carrying the
+// `fdCount` descriptors of `fds` (at most 8; SCM_RIGHTS) with the first byte, with no SIGPIPE (MSG_NOSIGNAL). What
+// sendmsg returns: the bytes sent, or -1 and errno (EINVAL for more than 8 descriptors or none of the bytes).
+ssize_t vibe_send_with_descriptors(int socket, const void *bytes, size_t count, const int *fds, size_t fdCount);
+
+// The door's: recvmsg(2) of at most `count` bytes from the Unix socket `socket` into `bytes`, with room for `room`
+// descriptors (at most 8) in `fds`, each close-on-exec from its arrival (MSG_CMSG_CLOEXEC). `*fdCount` is how many came
+// (each one the caller's to close), and `*cut` is 1 when the kernel had more than the room took (MSG_CTRUNC: it
+// dropped and closed the rest itself), so a caller can refuse a message that carried more than it asked for. What
+// recvmsg returns: the bytes read (0 at the end of a stream), or -1 and errno, with no descriptor left open.
+ssize_t vibe_receive_with_descriptors(int socket, void *bytes, size_t count, int *fds, size_t room, size_t *fdCount, int *cut);
+
 #endif
 #endif

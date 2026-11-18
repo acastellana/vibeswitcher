@@ -2,8 +2,13 @@ import Foundation
 
 extension Platform {
     /// TCP sockets on a numeric address, for the node's web listener and whatever connects to it: a listener, a
-    /// connection, and what an accepted connection is given. No name is ever resolved: an address is IPv4's dotted
-    /// form or IPv6's, as `inet_pton` reads them, and anything else is `.notAnAddress`.
+    /// connection, and what an accepted connection is given. No name is ever resolved here: an address is IPv4's
+    /// dotted form or IPv6's, as `inet_pton` reads them, and anything else is `.notAnAddress`.
+    ///
+    /// The session sandbox's egress proxy (the session sandbox plan's SB9) adds two forms of its own, each system's
+    /// in its file: `resolve`, the one place a name is resolved, and `connect(to:port:timeout:)`, to an address as
+    /// its bytes in network order (4 for IPv4, 16 for IPv6) with a bound on the wait. What to allow is judged above
+    /// this layer (`EgressRules`), on bytes, never on a name's text. The Mac has no proxy: its two fail with ENOTSUP.
     ///
     /// Each system makes the socket in a file of its own (TCP+Linux.swift, TCP+Darwin.swift), close-on-exec: Linux from
     /// the call that makes it (`SOCK_CLOEXEC`), the Mac right after it. A connection taken from a listener comes
@@ -73,6 +78,24 @@ extension Platform {
             }
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
             return .success(fd)
+        }
+
+        /// A blocking listener on 127.0.0.1 at `port` (0: one the system picks), with its port: `listen`'s, with
+        /// its accept left waiting. For tests, which stand a box's listener in with one. Fails with the call's
+        /// errno (EINVAL for what isn't a call's), nothing left open.
+        public static func listenOnLoopback(port: UInt16 = 0) -> Result<(fd: Int32, port: UInt16), Platform.Errno> {
+            switch listen(family: .ipv4, address: "127.0.0.1", port: port, backlog: 64) {
+            case .failure(.system(_, let code)): return .failure(Platform.Errno(code: code))
+            case .failure(.notAnAddress): return .failure(Platform.Errno(code: EINVAL))
+            case .success(let fd):
+                let flags = fcntl(fd, F_GETFL)
+                guard flags >= 0, fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) == 0, let given = localPort(fd) else {
+                    let code = errno
+                    Sys.close(fd)
+                    return .failure(Platform.Errno(code: code))
+                }
+                return .success((fd, given))
+            }
         }
 
         /// A socket connected to `address`:`port`, close-on-exec and blocking, with no SIGPIPE on a write to a peer

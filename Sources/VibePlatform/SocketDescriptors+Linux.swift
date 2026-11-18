@@ -30,5 +30,43 @@ extension Platform.Sockets {
     public static func peerHasGone(_ socket: Int32) -> Bool {
         vibe_peer_has_gone(socket) != 0
     }
+
+    /// Sends `bytes` over the Unix socket `socket` with the descriptors `fds` (at most 8; `SCM_RIGHTS`) riding on the
+    /// first byte, with no SIGPIPE when the peer has gone: the session sandbox's door, where a relay sends its one line
+    /// with its stdin, stdout and stderr. What sendmsg returns: the bytes that went (a stream may take fewer: the
+    /// descriptors went with the first), or -1 and `errno`. Each of `fds` stays open here.
+    public static func send(_ bytes: [UInt8], with fds: [Int32], over socket: Int32) -> Int {
+        bytes.withUnsafeBytes { raw in
+            fds.withUnsafeBufferPointer { numbers in
+                vibe_send_with_descriptors(socket, raw.baseAddress, raw.count, numbers.baseAddress, numbers.count)
+            }
+        }
+    }
+
+    /// What one read of a Unix socket brought: its bytes (none at the end of a stream), the descriptors that rode on
+    /// them, each close-on-exec and the caller's to close, and whether more came than there was room for (`cut`: the
+    /// kernel closed those itself).
+    public struct Received: Sendable {
+        public var bytes: [UInt8]
+        public var descriptors: [Int32]
+        public var cut: Bool
+    }
+
+    /// One read of at most `count` bytes from the Unix socket `socket`, with room for `room` descriptors (at most 8),
+    /// each close-on-exec from its arrival. nil and `errno` when the read fails (EAGAIN on a socket that doesn't block
+    /// and has nothing), with no descriptor left open.
+    public static func receive(over socket: Int32, count: Int, room: Int) -> Received? {
+        var bytes = [UInt8](repeating: 0, count: max(count, 1))
+        var fds = [Int32](repeating: -1, count: 8)
+        var taken = 0
+        var cut: Int32 = 0
+        let got = bytes.withUnsafeMutableBytes { raw in
+            fds.withUnsafeMutableBufferPointer { numbers in
+                vibe_receive_with_descriptors(socket, raw.baseAddress, count, numbers.baseAddress, room, &taken, &cut)
+            }
+        }
+        guard got >= 0 else { return nil }
+        return Received(bytes: Array(bytes[0..<got]), descriptors: Array(fds[0..<taken]), cut: cut != 0)
+    }
 }
 #endif

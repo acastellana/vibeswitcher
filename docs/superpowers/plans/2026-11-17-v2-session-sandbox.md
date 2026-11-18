@@ -973,7 +973,7 @@ stands for the door line. **Worktree:** `sb-door`.
 - The porter's first statements are the server's (`PlatformLintTests`' order): close the inherited image, harden,
   exit if traced, mark its descriptors.
 
-- [ ] **Step 1: Failing tests.** `DoorProtocolTests` (pure): `aHelloSurvivesItsCoding`,
+- [x] **Step 1: Failing tests.** `DoorProtocolTests` (pure): `aHelloSurvivesItsCoding`,
   `anOversizedOrMalformedHelloIsRefused`. `PorterTests`:
   - `nothingFromInsideChoosesTheRoleTheRootOrTheTask`
   - `aModeItsRoleDoesntHaveIsRefused`
@@ -982,7 +982,7 @@ stands for the door line. **Worktree:** `sb-door`.
   - `aHelperThatOutlivesItsRelayIsEnded`
   - `thePorterEndsWhenItsDoorLineCloses`
   - `aHelperThatDiedIsStartedAgainAtTheNextConnection`
-- [ ] **Step 2:** `DoorTests` (the built `vibeswitcher-mcp` and `vibeswitcher-hook`, `FakeClaude`, a scratch host):
+- [x] **Step 2:** `DoorTests` (the built `vibeswitcher-mcp` and `vibeswitcher-hook`, `FakeClaude`, a scratch host):
   - `aToolCallMadeInsideIsAnsweredByTheToolServerOutside`
   - `aHooksEventWritesTheStateFileOfItsSessionsTerminal`
   - `aHooksOutputAndExitStatusComeBack`
@@ -990,8 +990,20 @@ stands for the door line. **Worktree:** `sb-door`.
   - `aSteerMessageIsDeliveredThroughTheDoor`
   - `theStatusLineAndThePermissionHookWorkThroughTheDoor`
   - `withNoDoorTheToolServerAndTheHookRunAsBefore`, and on the Mac `theMacsToolServerNeverRelays`
-- [ ] **Step 3:** `MCPLintTests.theRelayAndThePorterComeBeforeAnythingReadsAPath` (the hooks' place in both mains).
-- [ ] **Step 4:** Implementation.
+- [x] **Step 3:** `MCPLintTests.theRelayAndThePorterComeBeforeAnythingReadsAPath` (the hooks' place in both mains).
+- [x] **Step 4:** Implementation.
+
+**As built (2026-11-17, `v2-sandbox-b`):** a helper the porter starts finds its session's connector in
+`VIBESWITCHER_SESSION_CONNECTOR` and `VIBESWITCHER_SESSION_HOST_SOCKET`, which `DoorRelay.runIfConfined` registers
+first thing (so the hook's main needs no second hook). The hook's helper is given `--for-pid P --caller-socket N`, `N`
+the door connection kept open in it: `HookCaller.pid` takes `P` only when `N`'s peer is `P`, so a plain process can't
+name another session's agent (`PorterTests.aHookTakesItsRelaysPidOnlyFromItsConnection`). A confined status line
+always runs with `--user-settings-only` (a project's settings are in a folder the box writes). A verifier has no
+permission hook through the door until `SessionHelper` carries its audit checkout (SB11). A porter serves at most
+`Porter.maxConnections` connections at once, each line within `Porter.helloPatience`. Added tests:
+`PorterTests.aBoxCantHoldMoreThanItsShareOfRequests`, `aHookTakesItsRelaysPidOnlyFromItsConnection`,
+`DoorTests.theHelpersReachTheHostOnlyThroughTheSessionsConnector`. Multi-descriptor messages are
+`Platform.Sockets.send(_:with:over:)` and `receive(over:count:room:)` (`shim_descriptors.c`).
 
 ### Task SB5: The host confines what a lead starts
 
@@ -1173,15 +1185,24 @@ SB0's prototype. **Worktree:** `sb-attack`.
 - It logs a line per refused request: the session, the host and port asked, the reason. Never a header or a byte of
   the tunnel.
 
-- [ ] **Step 1: Failing tests.** `EgressRulesTests`: `aNameOffTheListIsRefused`,
+- [x] **Step 1: Failing tests.** `EgressRulesTests`: `aNameOffTheListIsRefused`,
   `loopbackTheTailnetLinkLocalAndMetadataAreRefusedWhateverTheListSays`,
   `aListedNameThatResolvesToARefusedAddressIsRefused`, `privateRangesNeedTheProjectsWord`,
   `anAddressLiteralIsRefused`, `onlyPort443UnlessTheEntryNamesAnother`, `aWildcardCoversSubdomainsAndNotTheNameItself`.
-- [ ] **Step 2:** `EgressProxyTests`: `aTunnelToAListedHostCarriesBytesBothWays`,
+- [x] **Step 2:** `EgressProxyTests`: `aTunnelToAListedHostCarriesBytesBothWays`,
   `aRefusedRequestGets403AndALogLineWithNoPayload`, `eachListenerHasItsOwnList`,
   `aSlowOrSilentClientHoldsUpNoOther`, `theProxyIsNotDumpableAndIsStartedAgain`,
   `plainHttpIsCarriedOnlyToAListedHost`, `aSessionsListenerIsClosedWithItsSession`.
-- [ ] **Step 3:** Implementation.
+- [x] **Step 3:** Implementation.
+
+**As built (2026-11-17, `v2-sandbox-b`):** `EgressRules` has `privateHosts` beside `hosts` (the project's word for
+private ranges), `admits(host:port:)` (the name judged before anything resolves it) and `defaultHosts` (SB-D7's list as
+data, the recommended value until the user settles it: `api.anthropic.com`, `console.anthropic.com`). The proxy
+connects only to the addresses the rules judged, rewrites a plain request's Host to the URL's and adds `Connection:
+close`. `Dialer` is a struct of two closures. TCP is `Platform.TCP` (Linux only; the Mac's forms fail). Added tests:
+`EgressProxyTests.theLimitsHold`, `theProxyEndsWithItsControlAndTakesOnlyWellFormedMessages`,
+`EgressRulesTests.theDefaultListIsDataAndNamesOnlyTheAgentsHosts`, `addressesReadAsTheyAreWritten`. Not stopped
+by any list: TLS fronting through a listed host's address (the proxy doesn't read inside a tunnel).
 
 ### Task SB10: Boxes on their own network
 

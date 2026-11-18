@@ -943,3 +943,11 @@ token, which it now asks for) and `api.anthropic.com:443`. `.credentials.json` u
 login revoked there was nothing to write). The test login needs logging in again (the user's; an agent never logs
 in), and until then the allow-list is unproven against a real turn. `platform.claude.com` joins SB-D7's list of what
 Claude Code asks for.
+
+## A hook through the session sandbox's door (the session sandbox plan's SB4, 2026-11-17, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+`DoorTests.aHookThroughTheDoorAnswersWithinItsThreeSeconds`: one `UserPromptSubmit` event, the built hook as the relay
+inside (a door stand-in for init, a scratch path for the door), the built tool server as the porter outside starting
+the built hook from a sealed copy, measured by the agent stand-in's shell around the hook's command. Through the door:
+0.021 s; the same hook run plain on the same folders: 0.015 s. The door adds about 5 ms (two socket crossings, one
+`posix_spawn` from a sealed copy), against the hook's 3 s.
