@@ -27,8 +27,11 @@ import Foundation
 /// quiet look (`sealsWhenQuiet`): only a change made while the team ran holds. A plugin whose version folder moved
 /// (`isUpdate`: Claude Code's update, or a shell's forged one, alike on disk) always waits for your Accept, as does one
 /// that comes back changed after a look didn't see it (`gonePrefix`), or is first seen after the seal's first look
-/// that watched plugins (`comesAndGoesSince`: one enabled now, its cache written while nothing watched it). Not watched: what a command computes (`$(…)`, a
-/// glob) or loads itself (a script's own `source`, an interpreter's modules), and plugins' skills and commands.
+/// that watched plugins (`comesAndGoesSince`: one enabled now, its cache written while nothing watched it). A plugin
+/// whose hooks JSON lists hooks modules (`modules`: a Claude Code mod's `register.js`, which runs inside the session)
+/// is watched for them too, and for every file in its version folder a module can import (`moduleParts`). Not
+/// watched: what a command computes (`$(…)`, a glob) or loads itself (a script's own `source`, an interpreter's
+/// modules), what a hooks module reads or starts as it runs, and plugins' skills and commands.
 public enum ConfigSeal {
     /// One thing watched: its name as the lead and you are told it, where it is, and how it's read.
     public struct Watched: Equatable, Sendable {
@@ -115,10 +118,14 @@ public enum ConfigSeal {
     /// writes a new folder and moves its record there; a shell can do the same), or from no folder at all (a look that
     /// found it not installed, Claude Code's record unreadable, or the folder its record names gone, sealed nothing of
     /// what's there now). An edit inside the same folder isn't, nor an uninstall (no folder now). It always waits for
-    /// your Accept, whoever made it.
+    /// your Accept, whoever made it. So does one whose listed hooks module came to, left or moved within what isn't
+    /// read (`isUnreadModule`: missing, a link, outside its folder): what loads then isn't what was sealed, and can't be told.
     static func isUpdate(key: String, recorded: [String: String], now: [String: String]) -> Bool {
         guard isPlugin(name: name(ofKey: key)), let new = now[keysKey(of: key)] else { return false }
         let after = decode(new), before = recorded[keysKey(of: key)].map(decode) ?? [:]
+        if Set(before.keys).union(after.keys).contains(where: { before[$0] != after[$0] && (isUnreadModule(before[$0]) || isUnreadModule(after[$0])) }) {
+            return true
+        }
         guard let to = after[versionKey] ?? after[installKey] else { return false }
         if to != before[versionKey] ?? before[installKey] { return true }
         return before.keys.contains { ($0 == "absent" || $0.hasSuffix(": absent")) && after[$0] == nil }
@@ -797,6 +804,7 @@ public enum ConfigSeal {
         var parts: [(String, String)] = []
         var listed = Set<String>()
         var configs: [Any] = []
+        var files: [(path: String, object: Any)] = []
         let label = { (path: String) -> String in
             path.hasPrefix(root + "/") ? String(path.dropFirst(root.count + 1)) : shown(path, home: home)
         }
@@ -805,7 +813,10 @@ public enum ConfigSeal {
             guard listed.insert(path).inserted else { return }
             let read = jsonPart(path)
             parts.append((label(path), read.digest))
-            if let object = read.object { configs.append(object) }
+            if let object = read.object {
+                configs.append(object)
+                files.append((path, object))
+            }
         }
         let manifest = (root as NSString).appendingPathComponent(".claude-plugin/plugin.json")
         json(manifest)
@@ -821,7 +832,152 @@ public enum ConfigSeal {
         var named: [String] = []
         for config in configs { for command in commands(in: config) { named += namedPaths(command, vars: vars, home: home, base: root) } }
         parts += scriptParts(named, skip: [], listed: &listed, label: label)
+        // The manifest's own paths are the plugin folder's; a hooks file's modules are relative to that file.
+        let manifestPath = URL(fileURLWithPath: manifest).standardized.path
+        let modules = files.flatMap { file -> [String] in
+            let folder = file.path == manifestPath ? root : (file.path as NSString).deletingLastPathComponent
+            return (ConfigSeal.modules(in: file.object) ?? []).map { modulePath($0, in: folder, root: root) }
+        }
+        if files.contains(where: { ConfigSeal.modules(in: $0.object) != nil }) {
+            parts += moduleParts(root, modules: modules, have: Set(parts.map(\.0)), label: label)
+        }
         return parts
+    }
+
+    // MARK: A plugin's hooks modules (2026-11-18)
+
+    /// What a hooks module's part says in place of a hash when the path listed isn't a file in the plugin's folder to
+    /// read (`moduleParts`): all start with `unreadModule`.
+    static let unreadModule = "module "
+    static let moduleAbsent = unreadModule + "absent"
+    static let moduleOutside = unreadModule + "outside"
+    static let moduleLink = unreadModule + "link "
+
+    /// Whether `digest`, a plugin part's, says a listed module wasn't read (missing, a link, outside the folder, not a file).
+    static func isUnreadModule(_ digest: String?) -> Bool { digest?.hasPrefix(unreadModule) ?? false }
+
+    /// The hooks modules of the plugin installed at `root`, one that lists any, as parts: each listed module
+    /// (`modules`, absolute), and every file in the version folder a module can import (`moduleExtensions`: Claude Code
+    /// loads no file named otherwise), by contents, labelled by its path in the folder. Which files a module imports
+    /// isn't parsed out of it: all of them are hashed, so an edit to one it imports is a change, and so is a new one.
+    /// The rest of the folder (docs, skills, Claude Code's own `.in_use` marks, which every session writes) is walked
+    /// by name and never read.
+    ///
+    /// Fail closed, and never out of the folder: a listed module that isn't there (`moduleAbsent`), is a link or under
+    /// one (`moduleLink` and its target's hash, never followed), is a folder or a pipe, or is outside the plugin's
+    /// folder (`moduleOutside`, nothing there asked or read) is a part saying so, so coming to that state is a change,
+    /// one that waits for your Accept whenever it was made (`isUpdate`). Every link in the folder is a part too, by its
+    /// target, never followed: what's behind a link you accepted isn't watched. Each file is opened from its folder's
+    /// descriptor with no link followed, so a folder swapped for a link mid-look reads as unreadable, not as the
+    /// link's target. What's a part already (`have`: a script a command names too, read as that) isn't listed again.
+    static func moduleParts(_ root: String, modules: [String], have: Set<String>, label: (String) -> String) -> [(String, String)] {
+        var parts: [(String, String)] = []
+        var have = have
+        for path in modules {
+            let name = label(path)
+            guard have.insert(name).inserted else { continue }
+            parts.append((name, path.hasPrefix(root + "/") ? moduleDigest(root, relative: String(path.dropFirst(root.count + 1))) : moduleOutside))
+        }
+        let folder = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard folder >= 0 else { return parts + [("modules", "unreadable")] }
+        var count = 0
+        _ = walkCode(folder, relative: "", count: &count) { name, digest in
+            if name == "cut" || have.insert(name).inserted { parts.append((name, digest)) }
+        }
+        return parts
+    }
+
+    /// What's at `relative` in the folder `root`, as a listed module's part: its contents' hash, or why it wasn't read
+    /// (`unreadModule`). Each folder on the way is opened from the one before, no link followed.
+    static func moduleDigest(_ root: String, relative: String) -> String {
+        var folder = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard folder >= 0 else { return moduleAbsent }
+        defer { close(folder) }
+        let names = relative.split(separator: "/").map(String.init)
+        for (index, name) in names.enumerated() {
+            var info = stat()
+            guard fstatat(folder, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { return moduleAbsent }
+            switch (info.st_mode & S_IFMT, index == names.count - 1) {
+            case (S_IFLNK, _):
+                return moduleLink + linkDigest(folder, name)
+            case (S_IFDIR, false):
+                let next = openat(folder, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                guard next >= 0 else { return unreadModule + "unreadable" }
+                close(folder)
+                folder = next
+            case (S_IFREG, true):
+                let digest = fileDigest(folder, name)
+                return digest == "other" || digest == "unreadable" ? unreadModule + digest : digest
+            default:
+                return unreadModule + "other"
+            }
+        }
+        return unreadModule + "other"
+    }
+
+    /// Every file under the open folder `folder` (closed here) that a module can import (`moduleExtensions`), by
+    /// contents, and every link, by its target; names in order, links never followed, at most `maxEntries` entries
+    /// looked at (then "cut", and false).
+    private static func walkCode(_ folder: Int32, relative: String, count: inout Int, part: (String, String) -> Void) -> Bool {
+        guard let stream = fdopendir(folder) else {
+            close(folder)
+            part(relative.isEmpty ? "modules" : relative, "unreadable")
+            return true
+        }
+        defer { closedir(stream) }
+        var names: [String] = []
+        while let entry = readdir(stream) {
+            let name = withUnsafeBytes(of: &entry.pointee.d_name) { String(decoding: $0.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self) }
+            if name != ".", name != ".." { names.append(name) }
+        }
+        let here = dirfd(stream)
+        for name in names.sorted() {
+            count += 1
+            guard count <= maxEntries else {
+                part("cut", "")
+                return false
+            }
+            let shown = relative.isEmpty ? name : relative + "/" + name
+            var info = stat()
+            guard fstatat(here, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { continue }
+            switch info.st_mode & S_IFMT {
+            case S_IFDIR:
+                let next = openat(here, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                guard next >= 0 else {
+                    part(shown, "unreadable")
+                    continue
+                }
+                guard walkCode(next, relative: shown, count: &count, part: part) else { return false }
+            case S_IFLNK:
+                part(shown, "link " + linkDigest(here, name))
+            case S_IFREG where moduleExtensions.contains((name as NSString).pathExtension.lowercased()):
+                part(shown, fileDigest(here, name))
+            default:
+                break
+            }
+        }
+        return true
+    }
+
+    /// The hash of where the link `name` in the open folder `folder` points: its text, never what's there.
+    private static func linkDigest(_ folder: Int32, _ name: String) -> String {
+        var buffer = [UInt8](repeating: 0, count: Int(PATH_MAX))
+        let count = buffer.withUnsafeMutableBytes { readlinkat(folder, name, $0.baseAddress, $0.count) }
+        return hex(SHA256.hash(data: Data(buffer.prefix(max(0, count)))))
+    }
+
+    /// The contents' hash of the regular file `name` in the open folder `folder`, a link there refused: "other" for
+    /// what isn't a regular file, "unreadable".
+    private static func fileDigest(_ folder: Int32, _ name: String) -> String {
+        let fd = openat(folder, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else { return errno == ELOOP ? "other" : "unreadable" }
+        defer { close(fd) }
+        var hasher = SHA256()
+        switch readRegular(fd, limit: nil, chunk: { hasher.update(data: $0) }) {
+        case .digest: return hex(hasher.finalize())
+        case .other: return "other"
+        case .unreadable: return "unreadable"
+        }
     }
 
     /// The scripts the settings file at `path` names by path, as parts: each file its hooks', status line's and
@@ -1034,6 +1190,11 @@ public enum ConfigSeal {
         let fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | (followLink ? 0 : O_NOFOLLOW))
         guard fd >= 0 else { return errno == ELOOP ? .other : .unreadable }
         defer { close(fd) }
+        return readRegular(fd, limit: limit, chunk: chunk)
+    }
+
+    /// `readRegular` of a file already open at `fd` (left open).
+    private static func readRegular(_ fd: Int32, limit: Int?, chunk: (Data) -> Void) -> Contents {
         var info = stat()
         guard fstat(fd, &info) == 0 else { return .unreadable }
         guard (info.st_mode & S_IFMT) == S_IFREG else { return .other }
