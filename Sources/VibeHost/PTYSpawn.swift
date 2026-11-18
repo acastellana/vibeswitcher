@@ -22,6 +22,10 @@ public enum PTYSpawn {
         // rather than ending with nothing on it.
         let said = "VibeSwitcher: " + LaunchPreflight.couldntStart(program[0], code: errno) + "\r\n"
         _ = said.withCString { write(2, $0, strlen($0)) }
+        // Read by the host before this ends: macOS drops what the master hasn't read yet when the terminal's session
+        // leader (this process) exits, and a host reading late (a loaded Mac) then saw an empty screen (2026-11-18).
+        // Returns once read, or at once if the host's side is closed.
+        _ = tcdrain(2)
         _exit(127)
     }
 
