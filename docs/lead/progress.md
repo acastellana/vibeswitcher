@@ -3778,3 +3778,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 12:58 Pipeline held: lead-brief-merge-error, cache-aware-vibeswitcher ready to merge with none landing; cause: every test slot held
 - 2026-11-18 13:00 Merged lead-brief-merge-error: Lead brief: merge error budget, tidy first, and a recurrence check in retrospectives (build 5978f0ab2ede)
 - 2026-11-18 13:00 Flaky in lead-brief-merge-error's merge: claudeCodeStoppingTheStatusLineStopsYourCommandToo(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-18 13:00 Automatically (auto_advance): Merged lead-brief-merge-error (Lead brief: merge error budget, tidy first, and a recurrence check in retrospectives) into main at 9df80b8c, on its passing audit and the full test run. (Its first test run failed on claudeCodeStoppingTheStatusLineStopsYourCommandToo(), (the test command, naming no test) and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026-11-18-lead-brief-merge-error-9df80b8c.log.)
+- 2026-11-18 13:01 Automatically (auto_advance): Cleaned up lead-brief-merge-error (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-18 13:02 Abandoned ui-journeys-b-team: Team experiment instance 1 was decided DROP on 2026-11-16; the normal arm's journeys are in main. The user approved deleting this arm on 2026-11-18 (question 1E64A3DD) to free about 9 GB.
+- 2026-11-18 13:03 Started a worker on scorecard-merge
+- 2026-11-18 13:03 Automatically (auto_advance): Started a worker on scorecard-merge (Scorecard: merge objectives and the lead's messages to the user), its after tasks done (lead-brief-merge-error).
+- 2026-11-18 13:03 Started a worker on lead-context-cost-hand
+- 2026-11-18 13:03 Automatically (auto_advance): Started a worker on lead-context-cost-hand (Lead context cost: hand over after a long idle, keep the cache warm through a short one).
+- 2026-11-18 13:03 Automatically (auto_advance): Overlap for lead-context-cost-hand's start (a warning only: nothing was refused or reordered). LeadWorkflow.swift: team-sessions-load-only (running: its boundaries name it); Sources/VibeCore/LeadWorkflow.swift: team-sessions-load-only (running: its branch changes it).
+- 2026-11-18 13:03 Started a worker on receipts-fable-5-2
+- 2026-11-18 13:03 Automatically (auto_advance): Started a worker on receipts-fable-5-2 (Receipts: Fable 5.2's price, and advisor calls counted).
