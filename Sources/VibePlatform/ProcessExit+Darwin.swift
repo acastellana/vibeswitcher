@@ -5,6 +5,10 @@ import Foundation
 // HostedSession's on its program, SessionParser's on its host).
 extension Platform.ProcessExit {
     enum System {
+        /// The Mac has no descriptor of a process: nothing is held, and nothing held runs.
+        static func hold(_ pid: pid_t) -> Int32? { nil }
+        static func stillRuns(_ held: Int32, pid: pid_t) -> Bool { false }
+
         static func watch(_ pid: pid_t, queue: DispatchQueue, _ ended: @escaping @Sendable () -> Void) -> Watch {
             let watch = Watch(ended)
             let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)

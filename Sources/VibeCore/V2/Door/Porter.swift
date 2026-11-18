@@ -39,8 +39,14 @@ public enum Porter {
     public static let endPatience: TimeInterval = 3
     /// The most connections a porter serves at once: a box that opens more is refused, not given a process each.
     public static let maxConnections = 32
-    /// The agents whose name a hook's line may give.
-    public static let agents: Set<String> = Set(Agent.allCases.map(\.rawValue))
+    /// What a status line's helper is started with for a box: it runs no status line command of anyone's
+    /// (`UsageStatusLine.run`'s `ownCommand`).
+    public static let boxArgument = "--for-a-box"
+    /// The agents whose name a hook's line may give: Claude Code alone. Codex's hooks come from its background daemon
+    /// and find their session among every Codex terminal of the machine, by what the event says
+    /// (`HookOwner.codexTerminal`): a box's event would choose its session. Codex workers are off (D15), and their
+    /// hooks through a door are that later task's.
+    public static let agents: Set<String> = [Agent.claude.rawValue]
 
     /// The modes each role's helpers have. A verifier has no permission hook through the door yet: its hook's folder
     /// is its audit checkout, which the host's record doesn't carry (`SessionHelper` names the task's worktree only).
@@ -69,9 +75,14 @@ public enum Porter {
     /// hook's agent name, out of `agents`:
     ///
     /// - the tool server: `--role R --root ROOT [--task T]`, the host's;
-    /// - the hook: `<agent> --for-pid <caller>` (the porter adds `--caller-socket N`, `HookCaller`);
-    /// - the status line: `--status-line --user-settings-only` whatever the role: a confined session's project
-    ///   settings are in a folder its box writes, and their status line would run outside;
+    /// - the hook: `<agent> --for-pid <caller>` (the porter adds `--caller-socket N`, the process it holds and the
+    ///   box's init, `HookCaller`);
+    /// - the status line: `--status-line --user-settings-only --for-a-box` whatever the role: it keeps the usage the
+    ///   input carries and shows it, and runs no status line command, not a project's (its settings are in a folder
+    ///   the box writes) and not the user's own either (`boxArgument`): that command would run outside, as the user,
+    ///   on input the box wrote, and a status line that asks git about the folder its input names would run git
+    ///   there, with that folder's config and hooks (the plan's "No program is run outside in a folder a box can
+    ///   write");
     /// - the permission hook: `--read-only-permission --root <the worker's worktree, or the root> [--worker]`.
     public static func command(_ hello: DoorProtocol.Hello, helper: SessionHelper, caller: pid_t) -> [String] {
         switch hello.mode {
@@ -81,7 +92,7 @@ public enum Porter {
             let agent = hello.args.first.flatMap { agents.contains($0) ? $0 : nil } ?? Agent.claude.rawValue
             return ["vibeswitcher-hook", agent, HookCaller.pidFlag, String(caller)]
         case .statusLine:
-            return ["vibeswitcher-mcp", UsageStatusLine.argument, UsageStatusLine.userOnlyArgument]
+            return ["vibeswitcher-mcp", UsageStatusLine.argument, UsageStatusLine.userOnlyArgument, boxArgument]
         case .permission:
             let worker = helper.role == LeadLaunch.Role.worker.rawValue
             let folder = worker ? helper.task.map { Worktrees.path(root: helper.root, slug: $0) } ?? helper.root : helper.root
@@ -219,8 +230,12 @@ extension Porter {
                 exit(78)
             }
             say("serving \(arguments.helper.role) at \(arguments.helper.root)" + (arguments.helper.task.map { ", task \($0)" } ?? ""))
+            // Each message on the door line comes with its sender, the box's init, as the kernel names it here. The
+            // host sets this on the line as it makes it (SB5), so a connection handed over before this statement has
+            // its sender too; one that came with none gets no hook (`serve`).
+            Platform.Sockets.enableCredentials(arguments.doorLine)
             while true {
-                guard let connection = Platform.Sockets.receiveDescriptor(over: arguments.doorLine) else {
+                guard let (connection, boxInit) = Platform.Sockets.receiveDescriptorAndSender(over: arguments.doorLine) else {
                     // A message that carried no descriptor, or more than one: refused, and the line kept.
                     if errno == EBADMSG { continue }
                     break
@@ -237,7 +252,7 @@ extension Porter {
                     continue
                 }
                 let thread = Thread { [self] in
-                    serve(connection, toolServer: toolServer, hook: hook)
+                    serve(connection, boxInit: boxInit, toolServer: toolServer, hook: hook)
                     lock.withLock { connections -= 1 }
                 }
                 thread.name = "porter.connection"
@@ -327,9 +342,16 @@ extension Porter {
             }
         }
 
-        /// One door connection, from its line to its answer; the connection closed at the end.
-        private func serve(_ connection: Int32, toolServer: Platform.ProcessSelf.SealedCopy, hook: Platform.ProcessSelf.SealedCopy) {
+        /// One door connection, from its line to its answer; the connection closed at the end. `boxInit`: the process
+        /// that handed it over on the door line (the box's init), 0 when the kernel didn't say.
+        private func serve(_ connection: Int32, boxInit: pid_t, toolServer: Platform.ProcessSelf.SealedCopy, hook: Platform.ProcessSelf.SealedCopy) {
             defer { Sys.close(connection) }
+            // The relay's process, held from before its line is read: a relay may take `helloPatience` over its line
+            // and leave meanwhile, its connection kept open by another process of its box, and its pid alone would
+            // then name whichever process was given it next (`HookCaller`).
+            let relay = Platform.Sockets.peerPID(connection)
+            let held = relay.flatMap { Platform.ProcessExit.hold($0) }
+            defer { if let held { Sys.close(held) } }
             let hello: DoorProtocol.Hello
             var stdio: [Int32]
             switch readHello(connection) {
@@ -347,13 +369,15 @@ extension Porter {
                 answer(connection, DoorProtocol.refusedLine(why))
             }
             if let why = Porter.allowed(hello, for: arguments.helper) { return refuse(why) }
-            guard let caller = Platform.Sockets.peerPID(connection) else { return refuse("the relay's process can't be named") }
+            guard let caller = relay else { return refuse("the relay's process can't be named") }
             let image = hello.mode == .hook ? hook : toolServer
             var argv = Porter.command(hello, helper: arguments.helper, caller: caller)
             var keep = [image.fd, arguments.connector]
             if hello.mode == .hook {
-                argv += [HookCaller.socketFlag, String(connection)]
-                keep.append(connection)
+                guard let held else { return refuse("the relay's process has gone") }
+                guard boxInit > 1 else { return refuse("the door line didn't say which process is this box's init") }
+                argv += [HookCaller.socketFlag, String(connection), HookCaller.heldFlag, String(held), HookCaller.boxFlag, String(boxInit)]
+                keep += [connection, held]
             }
             // Something that reached the copy may have made it readable, and a helper started from a readable image is
             // dumpable from its exec.

@@ -43,6 +43,24 @@ extension Platform.ProcessExit {
             return watch
         }
 
+        static func hold(_ pid: pid_t) -> Int32? {
+            let descriptor = vibe_pidfd_open(pid, 0)
+            return descriptor >= 0 ? descriptor : nil
+        }
+
+        /// A pidfd names its process in /proc/self/fdinfo (`Pid:`, -1 once it is collected) and reads as ready once it
+        /// has exited, never before; anything else isn't one of `hold`'s.
+        static func stillRuns(_ held: Int32, pid: pid_t) -> Bool {
+            guard held >= 0, pid > 0, case .success(let bytes) = Platform.Processes.System.contents("/proc/self/fdinfo/\(held)") else { return false }
+            let named = String(decoding: bytes, as: UTF8.self).split(separator: "\n").first { $0.hasPrefix("Pid:") }
+                .flatMap { pid_t($0.dropFirst(4).trimmingCharacters(in: .whitespaces)) }
+            guard named == pid else { return false }
+            var waiting = pollfd(fd: held, events: Int16(POLLIN), revents: 0)
+            var ready: Int32
+            repeat { ready = poll(&waiting, 1, 0) } while ready < 0 && errno == EINTR
+            return ready == 0
+        }
+
         /// Whether `pid` is no process any more, or one that has exited and waits to be collected.
         static func hasEnded(_ pid: pid_t) -> Bool {
             if kill(pid, 0) != 0, errno == ESRCH { return true }

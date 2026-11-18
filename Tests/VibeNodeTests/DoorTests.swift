@@ -162,8 +162,36 @@ struct DoorTests {
         var took: TimeInterval
     }
 
-    func runHook(_ event: [String: Any], environment: [String: String], ready: (pid_t, String) throws -> Void = { _, _ in }) async throws -> HookRun {
-        let folder = scratch.url("agent")
+    /// What stands for a box's init where a hook runs (`through`): a process on the agent's terminal and above the
+    /// agent, as init is on the session's and above everything in its box. It binds the door (its first argument),
+    /// hands each connection whole over the porter's door line (its second, a descriptor), as init does, and runs the
+    /// rest of its arguments as its child, ending with it. The porter learns it as the box's init from the door line
+    /// itself, and the hook outside takes the session's terminal from it (`HookCaller`).
+    static let initStandIn = """
+        import os, socket, sys, threading
+        door, line = sys.argv[1], socket.socket(fileno=int(sys.argv[2]))
+        listener = socket.socket(socket.AF_UNIX)
+        listener.bind(door)
+        listener.listen(16)
+        def serve():
+            while True:
+                connection, _ = listener.accept()
+                socket.send_fds(line, [b"d"], [connection.fileno()])
+                connection.close()
+        threading.Thread(target=serve, daemon=True).start()
+        child = os.fork()
+        if child == 0:
+            os.execv(sys.argv[3], sys.argv[3:])
+        _, status = os.waitpid(child, 0)
+        os._exit(os.waitstatus_to_exitcode(status) if os.WIFEXITED(status) else 1)
+        """
+
+    /// `through`: the porter whose door the hook goes through, behind an init stand-in on the agent's terminal
+    /// (`initStandIn`); nil for a plain run. `nested`: the agent runs on a second terminal made under the first, as a
+    /// process in a box can make one: a terminal the box's init isn't on.
+    func runHook(_ event: [String: Any], environment given: [String: String], through rig: PorterRig? = nil, nested: Bool = false,
+                 ready: (pid_t, String) throws -> Void = { _, _ in }) async throws -> HookRun {
+        let folder = scratch.url("agent-\(UUID().uuidString.prefix(6))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let agent = folder.appendingPathComponent("claude")
         try FileManager.default.createSymbolicLink(atPath: agent.path, withDestinationPath: "/bin/sh")
@@ -178,12 +206,27 @@ struct DoorTests {
             echo $? $(( $(date +%s%N) - started )) > status.tmp && mv status.tmp status
             """
         try script.write(to: folder.appendingPathComponent("agent.sh"), atomically: true, encoding: .utf8)
+        var command = [agent.path, folder.appendingPathComponent("agent.sh").path]
+        if nested { command = ["/usr/bin/script", "-q", "-e", "-c", command.map(FakeClaude.quoted).joined(separator: " "), "/dev/null"] }
+        var environment = given
+        var line: Int32 = -1
+        defer { if line >= 0 { Sys.close(line) } }
+        if let rig {
+            let door = try scratch.shortFolder("pty").appendingPathComponent("door-\(UUID().uuidString.prefix(6))").path
+            let standIn = folder.appendingPathComponent("init.py")
+            try Self.initStandIn.write(to: standIn, atomically: true, encoding: .utf8)
+            line = dup(rig.doorLine)
+            try #require(line >= 0)
+            command = ["/usr/bin/python3", "-I", standIn.path, door, String(line)] + command
+            environment[DoorProtocol.variable] = door
+        }
         var spawn = Platform.Spawn(executable: "/usr/bin/script", arguments: [
-            "script", "-q", "-e", "-c", "\(FakeClaude.quoted(agent.path)) \(FakeClaude.quoted(folder.appendingPathComponent("agent.sh").path))", "/dev/null"])
+            "script", "-q", "-e", "-c", command.map(FakeClaude.quoted).joined(separator: " "), "/dev/null"])
         spawn.environment = environment.map { "\($0.key)=\($0.value)" }
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
         spawn.stdout = .path("/dev/null", flags: O_WRONLY)
         spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+        if line >= 0 { spawn.keep = [line] }
         let runner = try spawn.start().get()
         defer { kill(runner, SIGKILL); _ = collected(runner, by: MacTime.real.awake() + 10) }
         let who = folder.appendingPathComponent("who")
@@ -231,7 +274,7 @@ struct DoorTests {
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux only: the Mac has no door"))
     func aHooksEventWritesTheStateFileOfItsSessionsTerminal() async throws {
         let world = try world()
-        let run = try await runHook(Self.prompt, environment: insideEnvironment(world))
+        let run = try await runHook(Self.prompt, environment: insideEnvironment(world), through: world.rig)
         #expect(run.status == 0, "\(world.rig.log)")
         let state = world.outside.appendingPathComponent("state/\(run.tty).json")
         let written = try #require(HookState.load(from: state), "\(world.rig.log)")
@@ -245,7 +288,7 @@ struct DoorTests {
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux only: the Mac has no door"))
     func aHooksOutputAndExitStatusComeBack() async throws {
         let world = try world()
-        let run = try await runHook(Self.prompt, environment: insideEnvironment(world)) { pid, tty in
+        let run = try await runHook(Self.prompt, environment: insideEnvironment(world), through: world.rig) { pid, tty in
             let message = SteerMessage(text: "through the door", from: .lead("lead"), agentPid: pid)
             try SteerInbox.post(message, tty: tty, root: world.outside, sealer: SteerSeal(seal: { _ in "sealed" }, verify: { _ in nil }))
         }
@@ -262,7 +305,7 @@ struct DoorTests {
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux only: the Mac has no door"))
     func aHookThroughTheDoorAnswersWithinItsThreeSeconds() async throws {
         let world = try world()
-        let through = try await runHook(Self.prompt, environment: insideEnvironment(world))
+        let through = try await runHook(Self.prompt, environment: insideEnvironment(world), through: world.rig)
         // The same hook run plain, on the outside's folders, for the time the door adds.
         var plainEnvironment = scratchEnvironment(world.inside)
         plainEnvironment["VIBESWITCHER_HOME"] = world.outside.path
@@ -276,7 +319,7 @@ struct DoorTests {
     func aSteerMessageIsDeliveredThroughTheDoor() async throws {
         let world = try world()
         var posted: (id: String, tty: String)?
-        let run = try await runHook(Self.prompt, environment: insideEnvironment(world)) { pid, tty in
+        let run = try await runHook(Self.prompt, environment: insideEnvironment(world), through: world.rig) { pid, tty in
             let message = SteerMessage(text: "steered in", from: .lead("lead"), agentPid: pid)
             try SteerInbox.post(message, tty: tty, root: world.outside, sealer: SteerSeal(seal: { _ in "sealed" }, verify: { _ in nil }))
             posted = (message.id, tty)
@@ -288,13 +331,33 @@ struct DoorTests {
         #expect(world.host.requests.contains { if case .vault(.verify) = $0 { return true } else { return false } })
     }
 
+    /// Everything in a box is the box's to make: a terminal of its own devpts carries the number of one of the
+    /// machine's, and any process there can be named for an agent. A hook run under such a process, on a terminal the
+    /// box's init isn't on, is nobody's: no state file of that terminal's number is written, and what waits there for
+    /// the session that really has it is neither handed over nor marked delivered.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux only: the Mac has no door"))
+    func aHookForAnAgentOnATerminalOfTheBoxsOwnMakingIsNobodys() async throws {
+        let world = try world()
+        var posted: String?
+        let run = try await runHook(Self.prompt, environment: insideEnvironment(world), through: world.rig, nested: true) { pid, tty in
+            let message = SteerMessage(text: "for another session", from: .lead("lead"), agentPid: pid)
+            try SteerInbox.post(message, tty: tty, root: world.outside, sealer: SteerSeal(seal: { _ in "sealed" }, verify: { _ in nil }))
+            posted = message.id
+        }
+        let id = try #require(posted)
+        #expect(run.status == 0, "\(world.rig.log)")
+        #expect(!run.output.contains("for another session"), "\(run.output)")
+        #expect(!FileManager.default.fileExists(atPath: world.outside.appendingPathComponent("state/\(run.tty).json").path))
+        #expect(!SteerInbox.delivered(tty: run.tty, root: world.outside).contains(id))
+    }
+
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux only: the Mac has no door"))
     func theHelpersReachTheHostOnlyThroughTheSessionsConnector() async throws {
         let world = try world()
         // A decoy at the host socket's path: a helper that connected by the path would be counted here.
         let decoy = try UnixSocket.listen(path: world.outside.appendingPathComponent("host.sock").path)
         defer { Sys.close(decoy) }
-        _ = try await runHook(Self.prompt, environment: insideEnvironment(world)) { pid, tty in
+        _ = try await runHook(Self.prompt, environment: insideEnvironment(world), through: world.rig) { pid, tty in
             try SteerInbox.post(SteerMessage(text: "x", from: .lead("lead"), agentPid: pid), tty: tty, root: world.outside,
                                 sealer: SteerSeal(seal: { _ in "sealed" }, verify: { _ in nil }))
         }
@@ -305,20 +368,27 @@ struct DoorTests {
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux only: the Mac has no door"))
     func theStatusLineAndThePermissionHookWorkThroughTheDoor() async throws {
         let world = try world()
-        // The user's own status line, in the outside's home: run outside, its output back inside.
+        // The user's own status line, in the outside's home, and a project's, in a folder a box writes: neither is run
+        // outside. Its input is the box's: a status line that asks git about the folder the input names would run git
+        // there, as the user, with that folder's config. Each would leave its mark.
+        let marks = scratch.url("marks")
+        try FileManager.default.createDirectory(at: marks, withIntermediateDirectories: true)
         let home = world.rig.folder.appendingPathComponent("home/.claude")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        try #"{"statusLine": {"type": "command", "command": "echo outside-status"}}"#.write(to: home.appendingPathComponent("settings.json"), atomically: true, encoding: .utf8)
-        // A project's own status line, in a folder a box writes: never run outside.
+        try #"{"statusLine": {"type": "command", "command": "touch '\#(marks.path)/user'; echo outside-status"}}"#
+            .write(to: home.appendingPathComponent("settings.json"), atomically: true, encoding: .utf8)
         let project = scratch.url("project")
         try FileManager.default.createDirectory(at: project.appendingPathComponent(".claude"), withIntermediateDirectories: true)
-        try #"{"statusLine": {"type": "command", "command": "echo project-status"}}"#.write(to: project.appendingPathComponent(".claude/settings.json"), atomically: true, encoding: .utf8)
+        try #"{"statusLine": {"type": "command", "command": "touch '\#(marks.path)/project'; echo project-status"}}"#
+            .write(to: project.appendingPathComponent(".claude/settings.json"), atomically: true, encoding: .utf8)
         let status = try startToolServer([UsageStatusLine.argument], environment: insideEnvironment(world))
-        status.pipes.write(#"{"cwd": "\#(project.path)", "workspace": {"current_dir": "\#(project.path)", "project_dir": "\#(project.path)"}}"#)
+        status.pipes.write(#"{"cwd": "\#(project.path)", "workspace": {"current_dir": "\#(project.path)", "project_dir": "\#(project.path)"}, "rate_limits": {"five_hour": {"used_percentage": 12}}}"#)
         status.pipes.closeInput()
-        let shown = status.pipes.line(containing: "status")
-        #expect(shown == "outside-status", "\(String(describing: shown)) \(world.rig.log)")
+        // What the helper outside shows instead: the usage its input carried, which it kept.
+        let shown = status.pipes.line(containing: "%") ?? ""
+        #expect(shown.hasPrefix("5h 12%"), "\(shown) \(world.rig.log)")
         #expect(await offPool { collected(status.pid, by: MacTime.real.awake() + 60) } == 0)
+        #expect((try? FileManager.default.contentsOfDirectory(atPath: marks.path)) == [], "a status line command ran outside for a box")
 
         // The permission hook: a read in the worker's worktree is allowed, judged outside by the host's root.
         let root = scratch.url("root")

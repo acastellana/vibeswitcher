@@ -29,6 +29,16 @@ extension Platform {
             System.watch(pid, queue: queue, ended)
         }
 
+        /// A descriptor that holds the process `pid` is now (Linux's `pidfd_open`, close-on-exec), for `stillRuns`:
+        /// the caller closes it. nil when there is no such process, or no such descriptor here (the Mac).
+        public static func hold(_ pid: pid_t) -> Int32? { System.hold(pid) }
+
+        /// Whether `held` (one of `hold`'s) holds the process `pid`, and that process hasn't exited: while it says so,
+        /// `pid` names that process and no other, so what was read of `pid` since `hold` was read of it, and a pid given
+        /// out again meanwhile can't have answered. False once it has exited (collected or not), for a descriptor that
+        /// isn't one of `hold`'s or holds another process, and on the Mac.
+        public static func stillRuns(held: Int32, pid: pid_t) -> Bool { System.stillRuns(held, pid: pid) }
+
         /// What `watch` returns on both systems: the system's source, and `ended` until it has been called.
         final class Watch: Platform.Cancellable, @unchecked Sendable {
             private let lock = NSLock()

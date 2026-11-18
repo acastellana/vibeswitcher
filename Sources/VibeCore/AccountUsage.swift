@@ -342,12 +342,14 @@ public enum UsageStatusLine {
     /// keeps it from showing; then keeps the usage `input` carries. With no status line of yours, shows the usage in a
     /// few words, marked `AccountUsage.ignoredMark` while Settings' "Ignore usage limits" is on (`ignored`: nil reads
     /// mac-limits.json). Never fails: input that isn't JSON keeps nothing (your status line still runs on it).
-    public static func run(input: Data, userOnly: Bool = false, store: AccountUsageStore = AccountUsageStore(), home: String = VibePaths.home,
+    /// `ownCommand` false (a confined session's status line, answered outside its box: `Porter.boxArgument`): your own
+    /// status line isn't run, as with none.
+    public static func run(input: Data, userOnly: Bool = false, ownCommand: Bool = true, store: AccountUsageStore = AccountUsageStore(), home: String = VibePaths.home,
                            now: Date = Date(), patience: TimeInterval = UsageStatusLine.patience, runner: Runner = runCommand,
                            contextStore: LeadContextStore? = nil, ignored: Bool? = nil,
                            show: (Data) -> Void) {
         let object = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any]
-        let command = userCommand(home: home, project: userOnly ? nil : projectFolder(object))
+        let command = ownCommand ? userCommand(home: home, project: userOnly ? nil : projectFolder(object)) : nil
         if let command { show(runner(command, input, patience)) }
         let limits = object.map { AccountUsage.fromStatusLine($0, account: sessionAccount($0, home: home, store: store), now: now) } ?? []
         store.record(limits, now: now)

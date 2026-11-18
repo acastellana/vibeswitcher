@@ -61,7 +61,8 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == UsageStatusLine
     // Claude Code stopping it: heard by your command's runner, which stops your command too, never left running.
     for stop in UsageStatusLine.stopSignals { signal(stop, SIG_IGN) }
     let input = (try? FileHandle.standardInput.readToEnd()) ?? Data()
-    UsageStatusLine.run(input: input, userOnly: CommandLine.arguments.dropFirst(2).contains(UsageStatusLine.userOnlyArgument)) { output in
+    UsageStatusLine.run(input: input, userOnly: CommandLine.arguments.dropFirst(2).contains(UsageStatusLine.userOnlyArgument),
+                        ownCommand: !CommandLine.arguments.dropFirst(2).contains(Porter.boxArgument)) { output in
         try? FileHandle.standardOutput.write(contentsOf: output)
     }
     exit(0)

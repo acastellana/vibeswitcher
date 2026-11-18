@@ -108,3 +108,5 @@ allow: Tests/VibePlatformTests/SocketsTests.swift | Array("/tmp/s".utf8) | the b
 # The session sandbox's boxes (SB1): a box's own /tmp, an empty tmpfs inside its mount namespace, never the machine's.
 allow: Tests/VibePlatformTests/SandboxShimTests.swift | .init("/tmp", .empty(mode: 0o1777)) | the box's own /tmp: a tmpfs mounted inside the box, not the machine's folder
 allow: Tests/VibePlatformTests/SandboxShimTests.swift | "TMPDIR=/tmp" | the TMPDIR a program in the box is given: the box's own /tmp
+allow: Tests/VibeNodeTests/RealBoxTests.swift | .init("/tmp", .empty(mode: 0o1777)) | the box's own /tmp: a tmpfs mounted inside the box, not the machine's folder
+allow: Tests/VibeNodeTests/RealBoxTests.swift | "TMPDIR=/tmp" | the TMPDIR a program in the box is given: the box's own /tmp

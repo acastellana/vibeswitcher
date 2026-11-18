@@ -22,6 +22,16 @@ extension Platform.Sockets {
         return fd >= 0 ? fd : nil
     }
 
+    /// `receiveDescriptor(over:)`, with the process that sent the message: its pid as the kernel put it on the message
+    /// when it was sent (`SCM_CREDENTIALS`, while `socket` has `enableCredentials`), numbered as this process numbers
+    /// it whatever pid namespace the sender is in; 0 when the message came with none. The session sandbox's porter
+    /// reads its door line so: the sender is the box's init.
+    public static func receiveDescriptorAndSender(over socket: Int32) -> (descriptor: Int32, sender: pid_t)? {
+        var sender: pid_t = 0
+        let fd = vibe_receive_descriptor_from(socket, &sender)
+        return fd >= 0 ? (fd, sender) : nil
+    }
+
     /// Whether `socket`'s peer can send nothing more: it has closed its end (every process that held it) or shut it
     /// for writing (`shutdown(SHUT_WR)`), so the socket is shut for reading (`POLLRDHUP`), or it reports a hang-up or an
     /// error. A poll that doesn't wait; a failed poll says gone. On a `SOCK_SEQPACKET` socket a message of no bytes

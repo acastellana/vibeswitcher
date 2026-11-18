@@ -270,6 +270,40 @@ struct EgressProxyTests {
         #expect(world.connections == [EgressRules.Address("203.0.113.9")!])
     }
 
+    /// A plain request's Host is the one the proxy writes, from the URL the rules judged. A line the proxy reads as one
+    /// header and a looser host reads as two (a bare LF or CR inside it), a line carried on from the one before, or a
+    /// name with a space before its colon would name a second Host past it: another site at the same address.
+    @Test func aPlainRequestCantNameASecondHostPastTheProxys() async throws {
+        let smuggled = ["GET http://plain.example/ HTTP/1.1\r\nX-A: b\nHost: other.example\r\n\r\n",
+                        "GET http://plain.example/ HTTP/1.1\r\nX-A: b\rHost: other.example\r\n\r\n",
+                        "GET http://plain.example/a\nHost:other.example HTTP/1.1\r\nAccept: */*\r\n\r\n",
+                        "GET http://plain.example/ HTTP/1.1\r\nX-A: b\r\n Host: other.example\r\n\r\n",
+                        "GET http://plain.example/ HTTP/1.1\r\nHost : other.example\r\n\r\n",
+                        "GET http://plain.example/ HTTP/1.1\r\nHost\u{0}: other.example\r\n\r\n",
+                        "GET http://plain.example/ HTTP/1.1\r\nno colon here\r\n\r\n"]
+        for request in smuggled {
+            guard case .failure = EgressProxy.Server.request(Array(request.utf8)) else {
+                Issue.record("carried on: \(request.debugDescription)")
+                continue
+            }
+        }
+        // What an HTTP client sends goes on as before.
+        let plain = try EgressProxy.Server.request(Array("GET http://plain.example/x HTTP/1.1\r\nHost: plain.example\r\nAccept: */*\r\nX-Tab:\ta\r\n\r\n".utf8)).get()
+        #expect(String(decoding: plain.header, as: UTF8.self) == "GET /x HTTP/1.1\r\nHost: plain.example\r\nAccept: */*\r\nX-Tab:\ta\r\nConnection: close\r\n\r\n")
+        #expect(try EgressProxy.Server.request(Array("CONNECT a.example:443 HTTP/1.1\r\nHost: a.example:443\r\n\r\n".utf8)).get().tunnel)
+
+        // And through the proxy: 400, nothing sent on.
+        let world = StandInWorld()
+        try world.serve("plain.example", at: "203.0.113.9", recording: "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        let (server, box, _) = try proxy(world, log: LogLines())
+        defer { withExtendedLifetime(server) {} }
+        let client = try box.connect()
+        defer { Sys.close(client) }
+        egressSend(client, smuggled[0])
+        #expect(egressReceive(client, until: "\r\n\r\n").hasPrefix("HTTP/1.1 400 "))
+        #expect(world.sent.isEmpty && world.connections.isEmpty)
+    }
+
     @Test func aSessionsListenerIsClosedWithItsSession() async throws {
         let world = StandInWorld()
         try world.serve("a.example", at: "203.0.113.7")

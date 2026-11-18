@@ -9,6 +9,9 @@ extension Platform.Sockets {
     /// Nothing is read, and nil: the Mac has no connector.
     public static func receiveDescriptor(over socket: Int32) -> Int32? { nil }
 
+    /// Nothing is read, and nil: the Mac has no door.
+    public static func receiveDescriptorAndSender(over socket: Int32) -> (descriptor: Int32, sender: pid_t)? { nil }
+
     /// Whether `socket` reports a hang-up or an error (`POLLHUP`, `POLLERR`, `POLLNVAL`): a poll that doesn't wait; a
     /// failed poll says gone. Only the connector asks it, and the Mac has none.
     public static func peerHasGone(_ socket: Int32) -> Bool {

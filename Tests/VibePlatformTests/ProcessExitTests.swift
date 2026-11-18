@@ -11,6 +11,41 @@ import Testing
 struct ProcessExitTests {
     static let hangGuard = TestScriptLinuxTests.hangGuard
 
+    /// A process held (`hold`) is that process for as long as `stillRuns` says so, under the pid it was taken by and
+    /// no other; once it has exited it never runs again, though nobody has collected it and its pid is still its own.
+    /// The Mac has no descriptor of a process: nothing is held there.
+    @Test func aHeldProcessIsToldFromWhateverIsGivenItsPidLater() throws {
+        let cat = try SpawnTests.held(.inherit)
+        var released = false
+        defer {
+            if !released { close(cat.release) }
+            var status: Int32 = 0
+            while waitpid(cat.pid, &status, 0) < 0, errno == EINTR {}
+        }
+        guard !Platform.CodeIdentity.isAvailable else {
+            #expect(Platform.ProcessExit.hold(cat.pid) == nil)
+            #expect(!Platform.ProcessExit.stillRuns(held: STDIN_FILENO, pid: cat.pid))
+            return
+        }
+        let held = try #require(Platform.ProcessExit.hold(cat.pid))
+        defer { close(held) }
+        #expect(fcntl(held, F_GETFD) & FD_CLOEXEC != 0)
+        #expect(Platform.ProcessExit.stillRuns(held: held, pid: cat.pid))
+        // Held as one process, asked about another; and a descriptor that holds no process.
+        #expect(!Platform.ProcessExit.stillRuns(held: held, pid: getpid()))
+        #expect(!Platform.ProcessExit.stillRuns(held: cat.release, pid: cat.pid))
+        #expect(!Platform.ProcessExit.stillRuns(held: -1, pid: cat.pid))
+        // It exits, and isn't collected yet: no longer running, for good.
+        close(cat.release)
+        released = true
+        var waiting = pollfd(fd: held, events: Int16(POLLIN), revents: 0)
+        var ready: Int32
+        repeat { ready = poll(&waiting, 1, Int32(Self.hangGuard * 1_000)) } while ready < 0 && errno == EINTR
+        try #require(ready == 1)
+        #expect(!Platform.ProcessExit.stillRuns(held: held, pid: cat.pid))
+        #expect(Platform.ProcessExit.hold(pid_t.max) == nil)
+    }
+
     /// The calls of a watch's `ended`.
     final class Reports: @unchecked Sendable {
         private let lock = NSLock()

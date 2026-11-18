@@ -59,15 +59,15 @@ let tty: String
 let agentPid: Int32?
 // Whose event this is: this process's ancestors, or, for a hook the porter started outside a box, its relay's
 // (`HookCaller`).
-let caller = HookCaller.pid(CommandLine.arguments)
-switch HookOwner.lineage(ProcessTable.ancestors(of: caller), arguments: arguments) {
+let caller = HookCaller.read(CommandLine.arguments)
+switch HookOwner.lineage(caller.ancestors, arguments: arguments) {
 case .agent(let pid, let agentTTY): (tty, agentPid) = (agentTTY, pid)
 case .nested: exit(0)
 case .detached:
     guard let owner = codexOwner() else { exit(0) }
     (tty, agentPid) = (owner.tty, owner.pid)
 case .none:
-    if let own = ProcessTable.info(pid: caller)?.tty { (tty, agentPid) = (own, nil) }
+    if let own = caller.tty { (tty, agentPid) = (own, nil) }
     else if let owner = codexOwner() { (tty, agentPid) = (owner.tty, owner.pid) }
     else { exit(0) }
 }

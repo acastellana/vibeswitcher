@@ -33,6 +33,8 @@ final class PorterRig: @unchecked Sendable {
               let pair = Platform.Sockets.pair(type: Platform.Sockets.seqpacket) else { throw Platform.Errno(code: errno) }
         doorLine = line.0
         connector = pair.0
+        // As the host makes a door line (SB5): its messages name their sender to the porter from the first.
+        Platform.Sockets.enableCredentials(line.1)
         errors = folder.appendingPathComponent("porter.log")
         let arguments = Porter.Arguments(session: UUID(), helper: helper, doorLine: line.1, connector: pair.1,
                                          hostSocket: hostSocket ?? folder.appendingPathComponent("host.sock").path,
@@ -219,12 +221,15 @@ struct PorterTests {
         let worker = Self.worker
         #expect(Porter.command(.init(mode: .mcp, args: hostile), helper: worker, caller: 77)
                 == ["vibeswitcher-mcp", "--role", "worker", "--root", "/r/main", "--task", "t1"])
-        #expect(Porter.command(.init(mode: .hook, args: ["codex"] + hostile), helper: worker, caller: 77)
-                == ["vibeswitcher-hook", "codex", "--for-pid", "77"])
+        #expect(Porter.command(.init(mode: .hook, args: ["claude"] + hostile), helper: worker, caller: 77)
+                == ["vibeswitcher-hook", "claude", "--for-pid", "77"])
+        // Codex's hooks find their session among every Codex terminal of the machine, by what the event says: no
+        // box's event may choose one.
+        #expect(Porter.allowed(.init(mode: .hook, args: ["codex"]), for: worker) != nil)
         #expect(Porter.allowed(.init(mode: .hook, args: hostile), for: worker) != nil, "a hook's first word is its agent's name, or nothing starts")
-        // A confined session's status line runs only the user's own command: its project settings are in a folder its box writes.
+        // A confined session's status line runs no status line command outside: not a project's, not the user's own.
         #expect(Porter.command(.init(mode: .statusLine, args: hostile), helper: worker, caller: 77)
-                == ["vibeswitcher-mcp", "--status-line", "--user-settings-only"])
+                == ["vibeswitcher-mcp", "--status-line", "--user-settings-only", "--for-a-box"])
         #expect(Porter.command(.init(mode: .permission, args: hostile), helper: worker, caller: 77)
                 == ["vibeswitcher-mcp", "--read-only-permission", "--root", "/r/main/.vibeswitcher/worktrees/t1", "--worker"])
         #expect(Porter.command(.init(mode: .permission, args: hostile), helper: SessionHelper(role: "lead", root: "/r/main"), caller: 77)
@@ -409,30 +414,104 @@ struct PorterTests {
         #expect(rig.answer(held[0])?.hasPrefix("refused ") == true)
     }
 
+    /// A relay as a box holds one, for `HookCaller`: a process connected to a listener of the test's, the child of a
+    /// shell on a terminal of its own (under `script`). The shell stands for the box's init: above the relay, and on
+    /// the session's terminal.
+    final class TerminalRelay: @unchecked Sendable {
+        let runner: pid_t
+        let relay: pid_t
+        /// The shell above the relay, on the terminal.
+        let box: pid_t
+        let listener: Int32
+        /// The relay's connection, as the porter holds it.
+        let accepted: Int32
+
+        init(_ scratch: Scratch, _ name: String) async throws {
+            let folder = try scratch.shortFolder(name)
+            let path = folder.appendingPathComponent("s").path
+            let who = folder.appendingPathComponent("who").path
+            listener = try UnixSocket.listen(path: path)
+            let relaying = "import os,socket,sys,time; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); "
+                + "open(sys.argv[2]+'.tmp','w').write('%d %d' % (os.getpid(), os.getppid())); os.rename(sys.argv[2]+'.tmp', sys.argv[2]); time.sleep(600)"
+            let shell = "/usr/bin/python3 -I -c \(FakeClaude.quoted(relaying)) \(FakeClaude.quoted(path)) \(FakeClaude.quoted(who)) & wait"
+            var spawn = Platform.Spawn(executable: "/usr/bin/script", arguments: ["script", "-q", "-e", "-c", "/bin/sh -c \(FakeClaude.quoted(shell))", "/dev/null"])
+            spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+            spawn.stdout = .path("/dev/null", flags: O_WRONLY)
+            spawn.stderr = .path("/dev/null", flags: O_WRONLY)
+            runner = try spawn.start().get()
+            var taken: Int32 = -1
+            let listening = listener
+            let connected = await eventually(timeout: 30) {
+                if taken < 0 { taken = Platform.Sockets.accept(listening) }
+                return taken >= 0 && FileManager.default.fileExists(atPath: who)
+            }
+            accepted = taken
+            let words = ((try? String(contentsOfFile: who, encoding: .utf8)) ?? "").split(separator: " ").compactMap { pid_t($0) }
+            (relay, box) = (words.first ?? -1, words.dropFirst().first ?? -1)
+            guard connected, relay > 1, box > 1 else {
+                end()
+                throw Platform.Errno(code: ETIMEDOUT)
+            }
+        }
+
+        func end() {
+            for pid in [relay, box] where pid > 1 { kill(pid, SIGKILL) }
+            kill(runner, SIGKILL)
+            _ = collected(runner, by: MacTime.real.awake() + 10)
+            if accepted >= 0 { Sys.close(accepted) }
+            Sys.close(listener)
+        }
+
+        /// The hook's arguments as the porter gives them for this relay, with `pid`, `box` and `held` as given.
+        func arguments(pid: pid_t? = nil, socket: Int32? = nil, box: pid_t? = nil, held: Int32) -> [String] {
+            ["claude", "--for-pid", String(pid ?? relay), "--caller-socket", String(socket ?? accepted), "--caller-held", String(held),
+             "--box-init", String(box ?? self.box)]
+        }
+    }
+
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux only: no peer's pid to prove on the Mac"))
     func aHookTakesItsRelaysPidOnlyFromItsConnection() async throws {
-        let folder = try scratch.shortFolder("caller")
-        let path = folder.appendingPathComponent("s").path
-        let listener = try UnixSocket.listen(path: path)
-        defer { Sys.close(listener) }
-        // Another process, connected: the stand-in for a relay.
-        var spawn = Platform.Spawn(executable: "/usr/bin/python3", arguments: [
-            "python3", "-I", "-c", "import socket,sys,time; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); time.sleep(60)", path])
-        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
-        let relay = try spawn.start().get()
-        defer { kill(relay, SIGKILL); _ = collected(relay, by: MacTime.real.awake() + 10) }
-        var accepted: Int32 = -1
-        #expect(await eventually(timeout: 30) {
-            accepted = Platform.Sockets.accept(listener)
-            return accepted >= 0
-        })
-        defer { Sys.close(accepted) }
-        let other = getppid()
-        #expect(HookCaller.pid(["claude", "--for-pid", String(relay), "--caller-socket", String(accepted)]) == relay)
+        let terminal = try await TerminalRelay(scratch, "caller")
+        defer { terminal.end() }
+        let held = try #require(Platform.ProcessExit.hold(terminal.relay))
+        defer { Sys.close(held) }
+        #expect(HookCaller.pid(terminal.arguments(held: held)) == terminal.relay)
         // Any other pid, or no socket, or a socket that isn't the relay's: this process, as without the arguments.
-        #expect(HookCaller.pid(["claude", "--for-pid", String(other), "--caller-socket", String(accepted)]) == getpid())
-        #expect(HookCaller.pid(["claude", "--for-pid", String(relay)]) == getpid())
-        #expect(HookCaller.pid(["claude", "--for-pid", String(relay), "--caller-socket", String(listener)]) == getpid())
+        #expect(HookCaller.pid(terminal.arguments(pid: getppid(), held: held)) == getpid())
+        #expect(HookCaller.pid(["claude", "--for-pid", String(terminal.relay)]) == getpid())
+        #expect(HookCaller.pid(terminal.arguments(socket: terminal.listener, held: held)) == getpid())
         #expect(HookCaller.pid(["claude"]) == getpid())
+    }
+
+    /// A pid names whichever process holds it when it is read. A relay that left while another process of its box kept
+    /// its connection open would lend its pid to whoever is given it next, another session's process among them; and a
+    /// process that isn't under this box's init is no relay of it, whatever a connection says.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux only: no peer's pid to prove on the Mac"))
+    func aHookActsForNoRelayThatLeftNorForAProcessOutsideItsBox() async throws {
+        let terminal = try await TerminalRelay(scratch, "left")
+        defer { terminal.end() }
+        let held = try #require(Platform.ProcessExit.hold(terminal.relay))
+        defer { Sys.close(held) }
+        #expect(HookCaller.pid(terminal.arguments(held: held)) == terminal.relay)
+        // Under another box's init (a process that isn't above the relay), or with no word of one: nobody's.
+        var bystander = Platform.Spawn(executable: "/bin/sleep", arguments: ["sleep", "600"])
+        bystander.stdin = .path("/dev/null", flags: O_RDONLY)
+        let outside = try bystander.start().get()
+        defer { kill(outside, SIGKILL); _ = collected(outside, by: MacTime.real.awake() + 10) }
+        #expect(HookCaller.pid(terminal.arguments(box: outside, held: held)) == getpid())
+        #expect(HookCaller.pid(Array(terminal.arguments(held: held).dropLast(2))) == getpid())
+        // Held as another process (the bystander's descriptor): nobody's.
+        let wrong = try #require(Platform.ProcessExit.hold(outside))
+        defer { Sys.close(wrong) }
+        #expect(HookCaller.pid(terminal.arguments(held: wrong)) == getpid())
+        // The relay leaves. Its connection still names its pid (the kernel recorded it at the connect), and the pid is
+        // free for any process once its shell has collected it: the hook acts for nobody.
+        kill(terminal.relay, SIGKILL)
+        var gone = pollfd(fd: held, events: Int16(POLLIN), revents: 0)
+        var ready: Int32
+        repeat { ready = poll(&gone, 1, 30_000) } while ready < 0 && errno == EINTR
+        try #require(ready == 1)
+        #expect(Platform.Sockets.peerPID(terminal.accepted) == terminal.relay)
+        #expect(HookCaller.pid(terminal.arguments(held: held)) == getpid())
     }
 }

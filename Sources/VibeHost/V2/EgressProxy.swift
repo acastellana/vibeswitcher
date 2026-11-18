@@ -270,7 +270,22 @@ extension EgressProxy {
             guard let at = bytes.firstRange(of: end) else { return .failure(.init("no whole header")) }
             let header = Array(bytes[..<at.lowerBound])
             let rest = Array(bytes[at.upperBound...])
-            let lines = String(decoding: header, as: UTF8.self).components(separatedBy: "\r\n")
+            // Lines end in CRLF and hold nothing a host could take for another line's end or for a line carried on: a
+            // bare CR or LF (or any other control character but a tab) in a line, and a line that isn't `name: value`
+            // with nothing between the name and its colon, would let a request name a second Host past the one written
+            // here, to a host that reads its lines more loosely than this does.
+            guard let whole = String(bytes: header, encoding: .utf8) else { return .failure(.init("a header that isn't UTF-8")) }
+            let lines = whole.components(separatedBy: "\r\n")
+            for (index, line) in lines.enumerated() {
+                guard !line.unicodeScalars.contains(where: { ($0.value < 0x20 && $0.value != 9) || $0.value == 0x7f }) else {
+                    return .failure(.init("a header line holds a control character"))
+                }
+                guard index > 0 else { continue }
+                let name = line.prefix { $0 != ":" }
+                guard name.count < line.count, !name.isEmpty, name.unicodeScalars.allSatisfy({ headerName.contains($0) }) else {
+                    return .failure(.init("a header line that isn't `name: value`"))
+                }
+            }
             let words = lines[0].split(separator: " ", omittingEmptySubsequences: false)
             guard words.count == 3, words[2] == "HTTP/1.1" || words[2] == "HTTP/1.0" else { return .failure(.init("not an HTTP/1 request")) }
             let method = words[0], target = words[1]
@@ -299,6 +314,9 @@ extension EgressProxy {
             let sent = (["\(method) \(path) \(words[2])", "Host: \(named)"] + kept + ["Connection: close"]).joined(separator: "\r\n") + "\r\n\r\n"
             return .success(Request(host: host, port: port, tunnel: false, header: Array(sent.utf8), rest: rest))
         }
+
+        /// What a header's name is made of (RFC 9110's token).
+        static let headerName = CharacterSet(charactersIn: "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
         /// `host:port` (or `[v6]:port`, `host` alone where `defaultPort` is given) read; nil for anything else. A host
         /// in brackets comes back with them, so the rules see an address literal.

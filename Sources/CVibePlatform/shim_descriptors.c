@@ -42,16 +42,15 @@ int vibe_peer_has_gone(int socket) {
     return ready != 0 && (ready < 0 || (waiting.revents & (POLLRDHUP | POLLHUP | POLLERR | POLLNVAL)));
 }
 
-int vibe_receive_descriptor(int socket) {
-    return vibe_receive_descriptor_in_room(socket, VIBE_DESCRIPTOR_ROOM);
-}
-
-int vibe_receive_descriptor_in_room(int socket, size_t room) {
+// One message's descriptor, taken as vibe_receive_descriptor says, in `room` bytes of control data; `sender`, when
+// given, is the pid the kernel put on the message (SCM_CREDENTIALS), 0 when it came with none.
+static int receive_descriptor(int socket, size_t room, pid_t *sender) {
     union {
         char bytes[VIBE_DESCRIPTOR_ROOM];
         struct cmsghdr aligned;
     } control;
     if (room > sizeof(control.bytes)) room = sizeof(control.bytes);
+    if (sender != NULL) *sender = 0;
     char byte;
     struct iovec piece = { .iov_base = &byte, .iov_len = 1 };
     struct msghdr message = { .msg_iov = &piece, .msg_iovlen = 1, .msg_control = control.bytes, .msg_controllen = room };
@@ -61,7 +60,14 @@ int vibe_receive_descriptor_in_room(int socket, size_t room) {
     int taken = -1;
     size_t passed = 0;
     for (struct cmsghdr *part = CMSG_FIRSTHDR(&message); part != NULL; part = CMSG_NXTHDR(&message, part)) {
-        if (part->cmsg_level != SOL_SOCKET || part->cmsg_type != SCM_RIGHTS || part->cmsg_len <= CMSG_LEN(0)) continue;
+        if (part->cmsg_level != SOL_SOCKET) continue;
+        if (part->cmsg_type == SCM_CREDENTIALS && part->cmsg_len >= CMSG_LEN(sizeof(struct ucred))) {
+            struct ucred from;
+            memcpy(&from, CMSG_DATA(part), sizeof(from));
+            if (sender != NULL) *sender = from.pid;
+            continue;
+        }
+        if (part->cmsg_type != SCM_RIGHTS || part->cmsg_len <= CMSG_LEN(0)) continue;
         size_t here = (part->cmsg_len - CMSG_LEN(0)) / sizeof(int);
         for (size_t index = 0; index < here; index++) {
             int descriptor;
@@ -80,6 +86,18 @@ int vibe_receive_descriptor_in_room(int socket, size_t room) {
     // socket itself: shut for reading (POLLRDHUP), as it is once the peer has closed its end or shut it for writing.
     errno = count == 0 && passed == 0 && vibe_peer_has_gone(socket) ? EPIPE : EBADMSG;
     return -1;
+}
+
+int vibe_receive_descriptor(int socket) {
+    return receive_descriptor(socket, VIBE_DESCRIPTOR_ROOM, NULL);
+}
+
+int vibe_receive_descriptor_in_room(int socket, size_t room) {
+    return receive_descriptor(socket, room, NULL);
+}
+
+int vibe_receive_descriptor_from(int socket, pid_t *sender) {
+    return receive_descriptor(socket, VIBE_DESCRIPTOR_ROOM, sender);
 }
 
 ssize_t vibe_send_claiming(int fd, const void *bytes, size_t count, pid_t pid, uid_t uid, gid_t gid) {

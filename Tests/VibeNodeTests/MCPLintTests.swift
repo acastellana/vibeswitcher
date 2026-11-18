@@ -36,7 +36,9 @@ struct MCPLintTests {
         let hook = try String(contentsOf: Self.repo.appendingPathComponent("Sources/vibeswitcher-hook/main.swift"), encoding: .utf8)
         #expect(Self.problems(hook, hooks: ["DoorRelay.runIfConfined("]) == [])
         // And the hook finds its agent from its caller, never from itself alone.
-        #expect(hook.contains("ProcessTable.ancestors(of: caller)") && !hook.contains("ancestors(of: getpid())"))
+        // (`HookCaller.read` gives the ancestors it read while the caller was held; the main reads none itself.)
+        #expect(hook.contains("HookOwner.lineage(caller.ancestors,") && hook.contains("let caller = HookCaller.read(CommandLine.arguments)")
+            && !hook.contains("ProcessTable.ancestors(of:") && !hook.contains("ProcessTable.info(pid: caller)"))
     }
 
     @Test func theRuleKnowsAHookOutOfPlace() {

@@ -27,6 +27,12 @@ int vibe_receive_descriptor(int socket);
 // of no bytes reads as 0, as the end does: this tells them apart.
 int vibe_peer_has_gone(int socket);
 
+// vibe_receive_descriptor, also saying who sent the message: `*sender` is the pid the kernel put on it as it was sent
+// (SCM_CREDENTIALS, which it does while this socket has SO_PASSCRED), as this process numbers it; 0 when the message
+// came with none (sent before SO_PASSCRED was set). The session sandbox's porter reads its door line with it: the
+// sender is the box's init, whichever pid namespace it is in.
+int vibe_receive_descriptor_from(int socket, pid_t *sender);
+
 // Tests only. vibe_receive_descriptor with only `room` bytes for the kernel to fill with control data (at most what
 // vibe_receive_descriptor gives it): room for one descriptor, against a message of two, is how a test sees a message
 // the kernel cut short (MSG_CTRUNC) refused, which the full room never brings about on 64-bit Linux.

@@ -317,6 +317,29 @@ extension SocketsTests {
         ended = Self.finish(helper, closing: pair.test)
         #expect(ended?.exit == 0, "\(String(describing: ended))")
     }
+
+    /// A descriptor read with its sender (`receiveDescriptorAndSender`): the pid the kernel put on the message, which
+    /// the session sandbox's porter takes for its box's init. A message sent before the socket asked for senders
+    /// comes with none.
+    @Test func aDescriptorComesWithTheProcessThatSentIt() throws {
+        var unnamed: [Int32] = [-1, -1], named: [Int32] = [-1, -1]
+        try #require(socketpair(AF_UNIX, Platform.Sockets.stream, 0, &unnamed) == 0 && socketpair(AF_UNIX, Platform.Sockets.stream, 0, &named) == 0)
+        defer { (unnamed + named).forEach { close($0) } }
+        #expect(Platform.Sockets.sendDescriptor(STDIN_FILENO, over: unnamed[0]))
+        Platform.Sockets.enableCredentials(unnamed[1])
+        let before = try #require(Platform.Sockets.receiveDescriptorAndSender(over: unnamed[1]))
+        close(before.descriptor)
+        #expect(before.sender == 0)
+        Platform.Sockets.enableCredentials(named[1])
+        #expect(Platform.Sockets.sendDescriptor(STDIN_FILENO, over: named[0]))
+        let after = try #require(Platform.Sockets.receiveDescriptorAndSender(over: named[1]))
+        #expect(fcntl(after.descriptor, F_GETFD) & FD_CLOEXEC != 0)
+        close(after.descriptor)
+        #expect(after.sender == getpid())
+        // No descriptor, no sender: nothing, as `receiveDescriptor` gives.
+        #expect(send(named[0], "x", 1, Int32(MSG_NOSIGNAL)) == 1)
+        #expect(Platform.Sockets.receiveDescriptorAndSender(over: named[1]) == nil && errno == EBADMSG)
+    }
 }
 #else
 extension SocketsTests {
@@ -329,6 +352,7 @@ extension SocketsTests {
         var waiting = pollfd(fd: ends[0], events: Int16(POLLIN), revents: 0)
         #expect(poll(&waiting, 1, 0) == 0, "something was sent")
         #expect(Platform.Sockets.receiveDescriptor(over: ends[0]) == nil)
+        #expect(Platform.Sockets.receiveDescriptorAndSender(over: ends[0]) == nil)
     }
 }
 #endif
