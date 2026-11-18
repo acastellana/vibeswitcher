@@ -3689,3 +3689,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 07:49 Planned app-memory-grows-again: App memory grows again: 262 → 713 MB overnight (Nov 17–18), relief frees nothing
 - 2026-11-18 07:49 Started a worker on app-memory-grows-again
 - 2026-11-18 07:49 Automatically (auto_advance): Started a worker on app-memory-grows-again (App memory grows again: 262 → 713 MB overnight (Nov 17–18), relief frees nothing).
+- 2026-11-18 09:07 Planned faster-test-suite: Faster test suite: VibeSwitcher's merges take 16–20 min; find and speed up the slowest tests
+- 2026-11-18 09:07 Started a worker on faster-test-suite
+- 2026-11-18 09:07 Automatically (auto_advance): Started a worker on faster-test-suite (Faster test suite: VibeSwitcher's merges take 16–20 min; find and speed up the slowest tests).
+- 2026-11-18 09:07 Planned resume-and-reopen-all: Resume and Reopen all drop a launch preset's environment variables
+- 2026-11-18 09:07 Started a worker on resume-and-reopen-all
+- 2026-11-18 09:07 Automatically (auto_advance): Started a worker on resume-and-reopen-all (Resume and Reopen all drop a launch preset's environment variables).
+- 2026-11-18 09:08 Planned patterns-from-the-top: Patterns from the top 50 software-engineering books: what VibeSwitcher should adopt
