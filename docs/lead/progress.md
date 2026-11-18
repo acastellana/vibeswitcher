@@ -3733,3 +3733,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 10:52 Automatically (auto_advance): Merged patterns-from-the-top (Patterns from the top 50 software-engineering books: what VibeSwitcher should adopt) into main at 6179e8b5, on its passing audit and the full test run.
 - 2026-11-18 10:52 Automatically (auto_advance): Cleaned up patterns-from-the-top (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-18 11:03 Started a worker on folded-update-line-its
+- 2026-11-18 11:08 Started a worker on faster-test-suite
+- 2026-11-18 11:08 The worker on folded-update-line-its answered findings: folded-update-line-its:F1 fixed at 52d34f17: 52d34f17: ChatTaskStanding replaces `touched` with messaged / worked (the task's own worker's milestones only) / members (each teammate's milestones, by the 'name: ' prefix) / audited. A blocked card stays current while the task is blocked; a failed-audit card while it's failed and no audit started or gave a verdict since; a worker's stop clears on the lead's message, its own milestone or an audit event; a member's stop only on that member's milestone…
