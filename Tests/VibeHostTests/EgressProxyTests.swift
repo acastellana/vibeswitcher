@@ -319,25 +319,38 @@ struct EgressProxyTests {
     }
 
     /// A connection's descriptors closed, their numbers given to another connection: ending the old one cuts nothing.
+    ///
+    /// The number is taken only as the system gives it out again (the lowest free one, so nearly always at once), never
+    /// forced with `dup2`: this process runs other tests beside this one, and a number closed here may be theirs a
+    /// moment later. Forcing it replaced whatever they had just opened under it (a file, a folder, a listener) and
+    /// failed them at random. When another thread was given the number first, the try is made again.
     @Test func anEndedConnectionNeverShutsADescriptorNumberGivenOutAgain() async throws {
-        let old = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
-        let connection = EgressProxy.Server.Connection(client: old.0)
-        let reused = old.0
-        connection.close()
-        Sys.close(old.1)
-        // A fresh connection on the same number, as the system hands numbers out again.
-        let fresh = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
-        defer { Sys.close(fresh.1) }
-        if fresh.0 != reused {
-            #expect(dup2(fresh.0, reused) == reused)
-            Sys.close(fresh.0)
+        for _ in 0..<200 {
+            let old = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+            let connection = EgressProxy.Server.Connection(client: old.0)
+            let number = old.0
+            connection.close()
+            Sys.close(old.1)
+            // A fresh connection, on the same number when the system hands it out again.
+            let fresh = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+            guard fresh.0 == number || fresh.1 == number else {
+                Sys.close(fresh.0)
+                Sys.close(fresh.1)
+                continue
+            }
+            let (reused, other) = fresh.0 == number ? (fresh.0, fresh.1) : (fresh.1, fresh.0)
+            defer {
+                Sys.close(reused)
+                Sys.close(other)
+            }
+            connection.end()
+            egressSend(other, "still")
+            #expect(egressReceive(reused, until: "still", within: 5) == "still", "the reused number was shut")
+            egressSend(reused, "both ways")
+            #expect(egressReceive(other, until: "both ways", within: 5) == "both ways")
+            return
         }
-        defer { Sys.close(reused) }
-        connection.end()
-        egressSend(fresh.1, "still")
-        #expect(egressReceive(reused, until: "still", within: 5) == "still", "the reused number was shut")
-        egressSend(reused, "both ways")
-        #expect(egressReceive(fresh.1, until: "both ways", within: 5) == "both ways")
+        Issue.record("the number was never given out again here: nothing was checked")
     }
 
     @Test func theLimitsHold() async throws {
