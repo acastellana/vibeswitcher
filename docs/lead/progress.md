@@ -3967,3 +3967,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 22:18 Workflow: verifier_model = `opus`
 - 2026-11-18 22:19 Pushed main at 334ff4a3 (190 commits) to origin/main, on the user's click
 - 2026-11-18 22:19 Planned sensitive-audits-fall: Sensitive audits fall back to the verifier_model when Fable is refused at its limit (review audit)
+- 2026-11-18 22:30 Planned architecture-diagram: Architecture diagram: VibeSwitcher's parts, its caged agents and the outside, one page
+- 2026-11-18 22:33 Started a worker on architecture-diagram
