@@ -3696,3 +3696,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 09:07 Started a worker on resume-and-reopen-all
 - 2026-11-18 09:07 Automatically (auto_advance): Started a worker on resume-and-reopen-all (Resume and Reopen all drop a launch preset's environment variables).
 - 2026-11-18 09:08 Planned patterns-from-the-top: Patterns from the top 50 software-engineering books: what VibeSwitcher should adopt
+- 2026-11-18 09:12 Sent app-memory-grows-again's worker contract v2 (it had v1)
+- 2026-11-18 09:14 Planned folded-update-line-its: Folded update line: its red dot clears once the problem it flagged is dealt with
