@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeSwitcher Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --fg: #16181d;
+    --muted: #5b6270;
+    --faint: #8a91a0;
+    --box: #ffffff;
+    --box-line: #c9ced8;
+    --core: #e8f0fe;
+    --core-line: #2f6fe0;
+    --core-fg: #1b4fb0;
+    --amber: #b86e00;
+    --amber-box: #fff6e6;
+    --zone: #d9a54a;
+    --arrow: #6b7383;
+    --note-bg: #fff1d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115;
+      --fg: #e8eaef;
+      --muted: #a2a9b7;
+      --faint: #737a88;
+      --box: #181b22;
+      --box-line: #353b47;
+      --core: #132036;
+      --core-line: #5b95ff;
+      --core-fg: #9cc0ff;
+      --amber: #f0a73a;
+      --amber-box: #221a0d;
+      --zone: #8a6526;
+      --arrow: #8d95a5;
+      --note-bg: #2b200d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1115;
+    --fg: #e8eaef;
+    --muted: #a2a9b7;
+    --faint: #737a88;
+    --box: #181b22;
+    --box-line: #353b47;
+    --core: #132036;
+    --core-line: #5b95ff;
+    --core-fg: #9cc0ff;
+    --amber: #f0a73a;
+    --amber-box: #221a0d;
+    --zone: #8a6526;
+    --arrow: #8d95a5;
+    --note-bg: #2b200d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+    padding: 24px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left));
+  }
+  main { max-width: 1440px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); margin: 0 0 18px; max-width: 72ch; line-height: 1.5; }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 10px; }
+  svg { display: block; width: 100%; min-width: 1100px; height: auto; }
+  svg text { font-family: Inter, system-ui, -apple-system, sans-serif; fill: var(--fg); }
+  .col-head { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; fill: var(--muted); }
+  .title { font-size: 14px; font-weight: 600; }
+  .sub { font-size: 11px; fill: var(--muted); }
+  .lbl { font-size: 10.5px; fill: var(--muted); }
+  .box { fill: var(--box); stroke: var(--box-line); stroke-width: 1.2; }
+  .core { fill: var(--core); stroke: var(--core-line); stroke-width: 1.6; }
+  .core-title { font-size: 15px; font-weight: 700; fill: var(--core-fg); }
+  .core-item { font-size: 12.5px; font-weight: 600; fill: var(--core-fg); }
+  .caged { fill: var(--amber-box); stroke: var(--amber); stroke-width: 1.4; stroke-dasharray: 6 4; }
+  .zone { fill: none; stroke: var(--zone); stroke-width: 1.2; stroke-dasharray: 2 4; }
+  .zone-lbl { font-size: 10.5px; fill: var(--amber); font-weight: 600; letter-spacing: 0.04em; }
+  .edge { fill: none; stroke: var(--arrow); stroke-width: 1.3; }
+  .head { fill: var(--arrow); }
+  .note { fill: var(--note-bg); stroke: var(--amber); stroke-width: 1; }
+  .note-text { font-size: 11px; font-weight: 600; fill: var(--amber); }
+  .noedge { font-size: 11px; font-style: italic; fill: var(--amber); }
+  .key { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 16px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 13px; }
+  .key li { display: flex; align-items: center; gap: 8px; }
+  .sw { width: 26px; height: 16px; border-radius: 4px; flex: none; }
+  .sw-door { background: var(--box); border: 1.2px solid var(--box-line); }
+  .sw-core { background: var(--core); border: 1.6px solid var(--core-line); }
+  .sw-caged { background: var(--amber-box); border: 1.4px dashed var(--amber); }
+  .sw-note { background: var(--note-bg); border: 1px solid var(--amber); }
+</style>
+</head>
+<body>
+<main>
+  <h1>VibeSwitcher: who talks to whom</h1>
+  <p class="lede">The app on your Mac sits between you and the agents it starts: every agent runs caged in a terminal the session host owns, reaches the rest only through VibeSwitcher's tools, and nothing leaves for GitHub or a wallet until you click.</p>
+  <div class="scroll">
+    <svg id="map" viewBox="0 0 1400 860" role="img" aria-labelledby="map-title map-desc">
+      <title id="map-title">VibeSwitcher map</title>
+      <desc id="map-desc">Four columns: outside (you, phone, GitHub, Wallet Manager, ~/.claude); VibeSwitcher on your Mac (app window, phone access, remote sync, wallet courier, config seal, session host and vs-heavy slots around a core of the board, auto_advance, witness and the merge gate, with no model); caged agents (lead, workers, verifiers, headless helper); outside (other projects' leads, Claude and Codex subscriptions, other projects sharing the slots).</desc>
+    </svg>
+  </div>
+  <ul class="key">
+    <li><span class="sw sw-core"></span>The core: plain code, no model</li>
+    <li><span class="sw sw-door"></span>A door: the one way through to something outside</li>
+    <li><span class="sw sw-caged"></span>A caged agent: a session with deny rules, reaching out only through VibeSwitcher</li>
+    <li><span class="sw sw-note"></span>Only your click</li>
+  </ul>
+</main>
+<script>
+(function () {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("map");
+  const H = 66;
+  const ROWS = [96, 236, 376, 516];
+  const BOTTOM = 704;
+  const COL = {
+    outL: { x: 30, w: 160 },
+    door: { x: 240, w: 190 },
+    core: { x: 545, w: 200 },
+    caged: { x: 890, w: 210 },
+    outR: { x: 1160, w: 210 }
+  };
+
+  function el(name, attrs, text) {
+    const node = document.createElementNS(NS, name);
+    for (const k in attrs) node.setAttribute(k, attrs[k]);
+    if (text != null) node.textContent = text;
+    svg.appendChild(node);
+    return node;
+  }
+
+  // Arrowhead: a small filled triangle at the end point, pointing along the last segment.
+  function head(x, y, fromX, fromY) {
+    const a = Math.atan2(y - fromY, x - fromX), s = 7;
+    const p = (da) => (x - s * Math.cos(a + da)).toFixed(1) + "," + (y - s * Math.sin(a + da)).toFixed(1);
+    el("polygon", { class: "head", points: x + "," + y + " " + p(0.42) + " " + p(-0.42) });
+  }
+
+  // A path through `pts`, with an arrowhead at the end (and at the start when `both`).
+  function edge(pts, both) {
+    el("path", { class: "edge", d: pts.map((p, i) => (i ? "L" : "M") + p[0] + " " + p[1]).join(" ") });
+    const n = pts.length;
+    head(pts[n - 1][0], pts[n - 1][1], pts[n - 2][0], pts[n - 2][1]);
+    if (both) head(pts[0][0], pts[0][1], pts[1][0], pts[1][1]);
+  }
+
+  function label(x, y, text, anchor) {
+    el("text", { class: "lbl", x: x, y: y, "text-anchor": anchor || "middle" }, text);
+  }
+
+  function box(col, y, title, sub, kind, h) {
+    const c = COL[col], hh = h || H;
+    el("rect", { class: kind || "box", x: c.x, y: y, width: c.w, height: hh, rx: 9 });
+    const mid = y + hh / 2;
+    el("text", { class: "title", x: c.x + 14, y: sub ? mid - 4 : mid + 5 }, title);
+    if (sub) el("text", { class: "sub", x: c.x + 14, y: mid + 14 }, sub);
+  }
+
+  // A pair of horizontal arrows between two boxes on one row: `right` above (left to right), `left` below.
+  function pair(x1, x2, y, right, left) {
+    const up = y + 24, down = y + 44, mid = (x1 + x2) / 2;
+    edge([[x1 + 2, up], [x2 - 2, up]]);
+    edge([[x2 - 2, down], [x1 + 2, down]]);
+    if (right) label(mid, up - 6, right);
+    if (left) label(mid, down + 15, left);
+  }
+
+  // Column heads.
+  [["OUTSIDE", 30], ["VIBESWITCHER ON YOUR MAC", 240], ["CAGED AGENTS", 868], ["OUTSIDE", 1160]].forEach(function (h) {
+    el("text", { class: "col-head", x: h[1], y: 44 }, h[0]);
+  });
+
+  // Outside, left.
+  const outsideLeft = [
+    ["You", "at the Mac"],
+    ["Phone", "your devices, over Tailscale"],
+    ["GitHub", "the project's remote"],
+    ["Wallet Manager", "another Mac, or this one"]
+  ];
+  // VibeSwitcher's doors.
+  const doors = [
+    ["App window", "chat, cards, Settings"],
+    ["Phone access", "Tailscale only · paired devices"],
+    ["Remote sync", "fetch · merge · push request"],
+    ["Wallet courier", "Passage or same-Mac folder"]
+  ];
+  // What crosses each door, to the core (above) and back (below).
+  const doorCore = [
+    ["answers, clicks", "updates, questions"],
+    ["messages", "transcripts, alerts"],
+    ["origin/main, tested", "push request"],
+    ["results", "requests you sent"]
+  ];
+  ROWS.forEach(function (y, i) {
+    box("outL", y, outsideLeft[i][0], outsideLeft[i][1]);
+    box("door", y, doors[i][0], doors[i][1]);
+    edge([[COL.outL.x + COL.outL.w + 2, y + H / 2], [COL.door.x - 2, y + H / 2]], true);
+    pair(COL.door.x + COL.door.w, COL.core.x, y, doorCore[i][0], doorCore[i][1]);
+  });
+
+  // The amber note under the doors: what leaves only on your click.
+  el("rect", { class: "note", x: 232, y: 598, width: 226, height: 26, rx: 6 });
+  el("text", { class: "note-text", x: 345, y: 615, "text-anchor": "middle" }, "push and wallet sends: only your click");
+
+  // The core.
+  el("rect", { class: "core", x: COL.core.x, y: 84, width: COL.core.w, height: 516, rx: 12 });
+  el("text", { class: "core-title", x: COL.core.x + 16, y: 112 }, "The core");
+  const core = [
+    ["the board", "tasks, contracts, states"],
+    ["auto_advance", "merges, audits, next starts"],
+    ["witness", "an agent stalled, waiting, ended"],
+    ["merge gate", "tests the merged result,"],
+    [null, "then fast-forwards main"],
+    ["no model", "plain code decides; a model"],
+    [null, "only advises (the risk check)"]
+  ];
+  let cy = 122;
+  core.forEach(function (c) {
+    if (c[0]) { cy += 22; el("text", { class: "core-item", x: COL.core.x + 16, y: cy }, c[0]); cy += 18; }
+    else cy += 15;
+    el("text", { class: "sub", x: COL.core.x + 16, y: cy }, c[1]);
+  });
+
+  // The caged zone and its agents.
+  el("rect", { class: "zone", x: 868, y: 76, width: 252, height: 590, rx: 14 });
+  const caged = [
+    ["Lead", "plans, delegates · no code"],
+    ["Worker × N", "one worktree each · no push"],
+    ["Verifier × N", "read-only · another model"],
+    ["Headless helper", "claude -p · haiku · no tools"]
+  ];
+  const coreCaged = [
+    ["reports, wakes", "tool calls"],
+    ["contract, messages", "done report"],
+    ["branch head", "verdict, findings"],
+    ["diff stat", "summary, risk"]
+  ];
+  ROWS.forEach(function (y, i) {
+    box("caged", y, caged[i][0], caged[i][1], "caged");
+    pair(COL.core.x + COL.core.w, COL.caged.x, y, coreCaged[i][0], coreCaged[i][1]);
+  });
+  // No edge between workers and verifiers.
+  el("text", { class: "noedge", x: 995, y: 332, "text-anchor": "middle" }, "no edge: the audit stays independent");
+
+  // Outside, right: other leads, and the models.
+  box("outR", ROWS[0], "Other projects' leads", "tell_lead · never approval");
+  pair(COL.caged.x + COL.caged.w, COL.outR.x, ROWS[0], "mail", "mail");
+  const modelTop = ROWS[1] - 10, modelH = ROWS[3] + H + 10 - modelTop;
+  el("rect", { class: "box", x: COL.outR.x, y: modelTop, width: COL.outR.w, height: modelH, rx: 9 });
+  el("text", { class: "title", x: COL.outR.x + 14, y: modelTop + modelH / 2 - 4 }, "Claude · Codex");
+  el("text", { class: "sub", x: COL.outR.x + 14, y: modelTop + modelH / 2 + 14 }, "your subscriptions");
+  [1, 2, 3].forEach(function (i) {
+    const y = ROWS[i] + H / 2;
+    edge([[COL.caged.x + COL.caged.w + 2, y], [COL.outR.x - 2, y]], true);
+    label((COL.caged.x + COL.caged.w + COL.outR.x) / 2, y - 6, "model");
+  });
+
+  // Bottom row.
+  box("outL", BOTTOM, "~/.claude", "settings, hooks, plugins");
+  box("door", BOTTOM, "Config seal", "holds starts and merges");
+  box("core", BOTTOM, "Session host", "owns every terminal");
+  box("caged", BOTTOM, "vs-heavy slots", "N builds or test runs at once");
+  box("outR", BOTTOM, "Other projects", "share the slots");
+
+  // ~/.claude is watched by the seal.
+  edge([[COL.outL.x + COL.outL.w + 2, BOTTOM + H / 2], [COL.door.x - 2, BOTTOM + H / 2]]);
+  label(215, BOTTOM + H / 2 - 6, "hashed");
+  // The seal holds the core's starts and merges: an elbow into the core's lower left.
+  edge([[COL.door.x + COL.door.w + 2, BOTTOM + 22], [505, BOTTOM + 22], [505, 650], [580, 650], [580, 602]]);
+  label(470, BOTTOM + 16, "holds starts");
+  // Core and session host, both ways.
+  edge([[625, 602], [625, BOTTOM - 2]]);
+  edge([[665, BOTTOM - 2], [665, 602]]);
+  label(673, 660, "type, read", "start");
+  // The host's terminals hold the caged agents.
+  edge([[COL.core.x + COL.core.w + 2, BOTTOM + 22], [830, BOTTOM + 22], [830, 640], [866, 640]]);
+  label(788, BOTTOM + 16, "terminals");
+  // Test runs from the caged zone take a slot.
+  edge([[995, 668], [995, BOTTOM - 2]]);
+  label(1003, 690, "test runs", "start");
+  // Other projects use the same slots.
+  edge([[COL.outR.x - 2, BOTTOM + H / 2], [COL.caged.x + COL.caged.w + 2, BOTTOM + H / 2]]);
+  label(1130, BOTTOM + H / 2 - 6, "same");
+})();
+</script>
+</body>
+</html>
