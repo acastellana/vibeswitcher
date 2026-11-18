@@ -1266,7 +1266,9 @@ points, so it is never honoured (the check and the copy take loose objects and p
   (2026-11-18), also on the list:* the transcripts' folder (`~/.claude/projects/<name>/`, read-write to the box, and
   read outside by `read_session`, receipts, `tellLead` and the status line's `transcript_path`: a link planted there
   is followed as one in a worktree would be); every path a hook's payload or a status line's input names
-  (`transcript_path`, `cwd`), which is the box's word; and the status line's own command (SB4's review note: run by
+  (`transcript_path`, `cwd`), which is the box's word (still open: a status line that names another session's
+  transcript has that session's context reading written, `LeadContextStore.record`; the helper should take a
+  transcript only from the session's own folder of them); and the status line's own command (SB4's review note: run by
   the relay inside, or not at all, never outside).
 - [ ] **Step 2: Failing tests.** `BoxPathTests`: `aLinkOutOfTheFolderIsRefused`, `aLinkInsideTheFolderIsFollowed`,
   `aPathThroughDotDotIsRefused`, `aFolderSwappedForALinkDuringTheOpenIsRefused`. `DeputyTests`:
@@ -1367,6 +1369,9 @@ by any list: TLS fronting through a listed host's address (the proxy doesn't rea
   place where `sandbox_hosts` and `sandbox_run_hosts` meet the default list
   (`EgressRulesTests.aSessionsRulesComeFromItsRoleAndTheProjectsKeys`).
 - `EgressRules.defaultHosts` is SB-D24's list.
+- `EgressProxyTests.anEndedConnectionNeverShutsADescriptorNumberGivenOutAgain` forced a closed number back with
+  `dup2`, in a process that runs other tests beside it: it replaced whatever they had just opened under that number
+  and failed them at random in the whole suite. It takes the number only as the system gives it out again.
 
 ### Task SB10: Boxes on their own network
 
