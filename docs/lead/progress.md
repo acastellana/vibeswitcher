@@ -3711,3 +3711,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 09:32 Released app-memory-grows-again's worker (idle since its done report on e1176b23) while its audit runs
 - 2026-11-18 09:32 Automatically (auto_advance): Released app-memory-grows-again's worker, idle since its done report on e1176b23, while its audit runs (ended pid 68665 (Worker: App memory grows again: 262 → 713 MB overnight (Nov 17–18), relief frees nothing)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-18 09:44 Audit of app-memory-grows-again: complete, clean, round 1: 3 Nit open
+- 2026-11-18 09:49 Audit of resume-and-reopen-all: complete, clean, round 1: 1 Nit open
