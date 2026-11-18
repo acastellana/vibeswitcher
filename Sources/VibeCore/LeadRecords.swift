@@ -5,7 +5,7 @@ import Foundation
 /// the plan's reasoning survives a deleted `.vibeswitcher`, another Mac or a new lead, and `decisions-archive.md`, where
 /// `archive_decisions` moves the decisions every lead start no longer needs to read. The board stays local.
 ///
-/// The lead itself may not edit files or run git that writes; its tool server commits for it, batched (after each
+/// The lead itself may not edit files or run git that writes; its tool server commits for it, batched (before and after each
 /// merge, and at most every `interval` otherwise), as small commits of their own that touch only those two files
 /// (`Worktrees.commitFiles`), and the product inventory when the code before it makes another (`ProductInventory`):
 /// the user's own staged and unstaged changes in the main checkout stay as they are. A
@@ -268,14 +268,15 @@ public final class LeadRecords: @unchecked Sendable {
         try? VibePaths.writePrivate(Data((named.joined(separator: "\n") + "\n").utf8), to: failedOnFile)
     }
 
-    /// Before a merge starts: when the records have changes not committed and the last merge failed on one of them (a
-    /// lint over docs/lead/, say), or a redaction waits (`LeadRedaction`), they're committed now, so the merge tests
-    /// the fix rather than the line it fixes. On 2026-11-12 the fix of a progress.md line waited behind every merge,
-    /// each built on the bad line. Nil when nothing was due; else what the flush did.
+    /// Before every merge (one task's or a batch's) starts: when the records have changes not committed, they're
+    /// committed now, the usual records commit, so the merge tests and lands on the records as they are rather than on
+    /// lines they've since fixed. On 2026-11-12 the fix of a progress.md line waited behind every merge, each built on
+    /// the bad line; until 2026-11-18 this ran only once a merge had failed on the records (`mergeFailedOn`) or a
+    /// redaction waited, so the merge before it failed first (9 that week). Nil when nothing was due; else what the
+    /// flush did.
     @discardableResult
     public func commitBeforeMerge(base: String, now: Date = Date()) -> Outcome? {
-        guard let dir = store.recordsDir, !mergeFailedOn.isEmpty || !LeadRedaction.pending(store).isEmpty,
-              changed(Self.paths(dir), on: base) else { return nil }
+        guard let dir = store.recordsDir, changed(Self.paths(dir), on: base) else { return nil }
         return flush(base: base, now: now)
     }
 

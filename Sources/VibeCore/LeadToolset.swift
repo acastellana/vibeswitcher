@@ -4396,11 +4396,14 @@ public final class LeadToolset: MCPToolset {
         MergeRerun.baseline(commit: base, plan: plan, workflow: workflow, pairing: pairing)
     }
 
-    /// Before a merge of `merging` starts: the records committed first when the last merge failed on one of them, or a
-    /// redaction waits (`LeadRecords.commitBeforeMerge`), noted in the progress log.
+    /// Before a merge of `merging` starts: the records committed first when they have changes not committed
+    /// (`LeadRecords.commitBeforeMerge`). Noted in the progress log only when the last merge failed on one of them or a
+    /// redaction waited: the routine commit before each merge adds no line of its own (it would leave the records
+    /// changed again after every one), and a routine commit that waits or fails shows in status (`statusLine`).
     func commitRecordsFirst(not merging: String) {
         let failedOn = records.mergeFailedOn
-        guard let outcome = records.commitBeforeMerge(base: base) else { return }
+        let noted = !failedOn.isEmpty || !LeadRedaction.pending(store).isEmpty
+        guard let outcome = records.commitBeforeMerge(base: base), noted else { return }
         let why = failedOn.isEmpty ? "a redaction (redact_record) waited" : "the last merge failed on \(failedOn.joined(separator: ", "))"
         switch outcome {
         case .committed(let commit):
