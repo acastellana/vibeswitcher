@@ -366,6 +366,8 @@ struct MergeGateTests: LeadTeamFixture {
         let worktree = RecentProjects.shellQuote(Worktrees.path(root: root, slug: "add-b"))
         configure(lead, ["test_command": "cd \(worktree) && echo late > late.txt && git add late.txt && git commit -q -m late"])
         try audited(lead, runtime, root: root)
+        // The records go in before the merge starts (`LeadRecords.commitBeforeMerge`): committed now, the base stays put.
+        lead.records.flush(base: "main")
         let main = Git.run(["rev-parse", "main"], in: root).output
         let tested = Git.run(["rev-parse", "agent/add-b"], in: root).output
 

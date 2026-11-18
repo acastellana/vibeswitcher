@@ -76,6 +76,8 @@ extension LeadToolsetTests {
         // As the lead sets them: merge runs only the commands it set.
         let set = call(lead, "configure", ["test_timeout_min": "0.05", "test_command": "sleep \(ShellTests.childRuns) & echo $! > \(marks)/child; wait"])
         #expect(!set.isError, "\(set.text)")
+        // The records go in before the merge starts (`LeadRecords.commitBeforeMerge`): committed now, the base stays put.
+        lead.records.flush(base: "main")
         let main = Git.run(["rev-parse", "main"], in: root).output
         let started = Date()
         let merged = call(lead, "merge", ["task": "add-b"])
