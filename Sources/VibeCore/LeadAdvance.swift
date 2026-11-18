@@ -313,7 +313,7 @@ public final class LeadAdvance: @unchecked Sendable {
         let outcomes = text.components(separatedBy: "\n").filter { $0.hasPrefix("- ") }.map { String($0.dropFirst(2)) }
         guard !outcomes.isEmpty else { return true }
         return outcomes.contains { line in
-            return !["Started a worker on ", "Started the audit of ", "Released ", "Cleaned up ", "Resumed after sleep: "].contains { line.hasPrefix($0) }
+            return !["Started a worker on ", "Started the audit of ", "Released ", "Cleaned up ", "Resumed after sleep: ", nudgedPrefix].contains { line.hasPrefix($0) }
         }
     }
 
@@ -452,7 +452,9 @@ public final class LeadAdvance: @unchecked Sendable {
             switch task.status {
             // A running one too: the lead's message to its worker (the verdict's report says VibeSwitcher sends the
             // findings) puts it back to work before this pass may come to it, a merge's test run ahead of it.
-            case .failed, .running: sendBack(task.slug, onHold: onHold)
+            case .failed, .running:
+                sendBack(task.slug, onHold: onHold)
+                if task.status == .running { nudgeStopped(task.slug) }
             case .done, .reverted: cleanup(task.slug)
             // Its audit under way: its worker, idle since its done report, frees its Mac slot (before the starts).
             case .review: release(task.slug)
@@ -1052,6 +1054,63 @@ public final class LeadAdvance: @unchecked Sendable {
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].autoSentBack = head
         }
+    }
+
+    /// How the host says a turn ended to wait on its background task (`LeadActivity.idle(background:)`'s text).
+    static let waitingOnJob = String(LeadActivity.idle(background: "").text.prefix { $0 != "(" })
+
+    /// The report line of a nudge sent (`nudgeStopped`): news, not a wake (the lead is woken if the worker stops again).
+    static let nudgedPrefix = "Nudged "
+
+    /// What a worker whose turn ended without a report is sent, once (`LeadStopNudge`): what the lead typed by hand
+    /// six times on 2026-11-17/18.
+    static func nudgeText(job: String?, refused: LeadReportRefusal?) -> String {
+        "Your turn ended without a report reaching the lead"
+            + (job.map { " (VibeSwitcher sees \($0.replacingOccurrences(of: "the background job it waited on", with: "the background job your turn waited on")))" } ?? "")
+            + ". If your work is finished, call report(done) now and stay until it answers: its pre-done check can take minutes, waiting for a "
+            + "Mac-wide test slot first, so don't end your turn while the call runs. If it's refused, fix what it names and report again"
+            + (refused.map { " (your last one was refused at \(LeadBoard.clock($0.at)): “\(LeadToolset.clip($0.text, 300))”)" } ?? "")
+            + ". If something blocks you, report(blocked) saying what you need. "
+            + "(VibeSwitcher sends this once, by itself; if your turn ends again without a report, the lead is told.)"
+    }
+
+    /// A running task's worker whose turn ended without a report, handed over by the witness (`LeadStopNudge`, see
+    /// `LeadWitness.stopsForAdvance`), gets the standard prompt once, in its live session: only while the witness has
+    /// lately seen it still in that stop (`LeadStopNudge.fresh`: a pass minutes late, the worker gone back to work, sends
+    /// nothing), it's idle between turns by the host's word as it was then, waits on no prompt, usage limit or teammate,
+    /// has no report call under way, and has had no message since that stop (the lead's would start its turn). Sent: in
+    /// the report and the progress log, without waking the lead. Not sent: said once, and the witness tells the lead as ever.
+    private func nudgeStopped(_ slug: String) {
+        let now = Date().timeIntervalSince1970
+        guard !beingMerged(slug), let task = due(slug, [.running]), let worker = task.worker, worker != task.stopped,
+              let nudge = task.stopNudge, nudge.worker == worker, nudge.sentAt == nil, nudge.fresh(now: now),
+              task.reportCall?.inFlight(now: Date()) != true, (task.messagedAt ?? 0) < nudge.stoppedAt,
+              task.peerWait(session: worker, now: now) == nil,
+              let info = (try? lead.advanceSessions())?.first(where: { $0.id == worker && $0.live }),
+              info.waiting == nil, info.usageLimit == nil,
+              // Its turn over. The host may say it waits on its background task only when the stop the witness handed
+              // over showed so: a task the witness saw gone, or a shell of its own left running long before (a server)
+              // that its turn doesn't wait on. Otherwise that's a turn of its own waiting on its job, no stop.
+              info.status == LeadActivity.idle(background: nil).text
+                || (nudge.background == true && info.status?.hasPrefix(Self.waitingOnJob) == true) else { return }
+        let stopped = LeadBoard.clock(nudge.stoppedAt)
+        let unsent: String?
+        do {
+            unsent = try sendToWorker(slug, Self.nudgeText(job: nudge.job, refused: task.reportRefused), states: [.running])
+        } catch let stuck as NotSubmitted {
+            unsent = stuck.text
+        } catch { return }
+        if let unsent {
+            once("nudge|\(slug)|\(worker)", "Couldn't nudge \(slug)'s worker, whose turn ended at \(stopped) without a report (\(unsent)): message it to report done or blocked.")
+            return
+        }
+        try? lead.store.update { board in
+            guard let index = board.taskIndex(slug), board.tasks[index].worker == worker,
+                  board.tasks[index].stopNudge?.worker == worker else { return }
+            board.tasks[index].stopNudge?.sentAt = Date().timeIntervalSince1970
+        }
+        did(Self.nudgedPrefix + "\(slug)'s worker: its turn ended at \(stopped) without a report reaching you, so VibeSwitcher sent it the standard prompt "
+            + "(report done or blocked now, and stay until the report answers). It's sent once: if it stops again without reporting, you're told.")
     }
 
     /// The message was typed into its worker's box, but not submitted (see `LeadDelivery.submitted`): what message says.

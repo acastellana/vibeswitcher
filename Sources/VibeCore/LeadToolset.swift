@@ -939,7 +939,7 @@ public final class LeadToolset: MCPToolset {
             case "redact_record": return try redactRecord(arguments)
             case "sessions": return MCPToolResult(text: sessionsText())
             case "configure": return try configure(arguments)
-            case "report": return try report(arguments)
+            case "report": return try reporting(arguments)
             case "ask_lead": return try askLead(arguments)
             case "progress": return try progress(arguments)
             case "answer_findings": return try answerFindings(arguments)
@@ -5938,6 +5938,40 @@ public final class LeadToolset: MCPToolset {
 
     /// The report a worker gives at its task's time budget (see `LeadBudget`): not done, for the lead to decide on.
     static let overBudgetStatus = "over_budget"
+
+    /// report(), the call kept on the board while it runs (`LeadReportCall`: the witness and auto_advance say nothing
+    /// of its worker's stop meanwhile, its client having put a long call in the background), its refusal kept
+    /// (`LeadTask.reportRefused`), and a report that goes through clears both and the stop's nudge (`LeadStopNudge`):
+    /// a later stop is a first one again. A team member's report is its part's, kept on no task.
+    private func reporting(_ arguments: [String: Any]) throws -> MCPToolResult {
+        guard memberSeat() == nil, let slug = try? taskSlug(arguments) else { return try report(arguments) }
+        let start = Date().timeIntervalSince1970
+        let call = LeadReportCall(at: start, pid: getpid(),
+                                  until: start + LeadDoneCheck.callTimeout(limit: doneCheckLimit ?? workflow.doneCheckTimeout))
+        try? store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].reportCall = call
+        }
+        var refusal: LeadReportRefusal?
+        defer {
+            try? store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                if board.tasks[index].reportCall == call { board.tasks[index].reportCall = nil }
+                if let refusal {
+                    board.tasks[index].reportRefused = refusal
+                } else {
+                    board.tasks[index].reportRefused = nil
+                    board.tasks[index].stopNudge = nil
+                }
+            }
+        }
+        do {
+            return try report(arguments)
+        } catch {
+            refusal = LeadReportRefusal(at: Date().timeIntervalSince1970, text: Self.clip((error as? Problem)?.text ?? "\(error)", 600))
+            throw error
+        }
+    }
 
     private func report(_ arguments: [String: Any]) throws -> MCPToolResult {
         // A team member's report is its part's (`memberReport`), never the task's.

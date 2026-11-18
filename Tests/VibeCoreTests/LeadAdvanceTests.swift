@@ -190,7 +190,18 @@ struct LeadAdvanceTests: LeadTeamFixture {
                     return
                 }
                 runtime.onSessions = nil
-                replace()
+                // The lead's call on a thread of its own, as a real lead's runs, the start waiting for it: nested in the
+                // loop's start, its frames overflowed the loop thread's 512 KB stack in a debug build whenever LeadTask
+                // grew (2026-11-18, four branches). The fake's lock is let go meanwhile: the lead's call reads it too.
+                let done = DispatchSemaphore(value: 0)
+                runtime.calls.unlock()
+                Thread.detachNewThread {
+                    replace()
+                    done.signal()
+                }
+                let replaced = done.wait(timeout: .now() + hangGuard)
+                runtime.calls.lock()
+                #expect(replaced == .success)
             }
             runtime.calls.unlock()
         } else {

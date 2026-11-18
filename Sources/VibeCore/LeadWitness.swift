@@ -230,6 +230,133 @@ public enum LeadWitness {
         }
     }
 
+    /// What becomes of a running task's worker whose turn ended without a report (`notices`' stop).
+    enum StopTurn: Equatable {
+        /// A report call of its is under way (`LeadReportCall`): nothing to say.
+        case inFlight
+        /// A first stop: auto_advance nudges it (`stopsForAdvance`), the lead isn't told.
+        case toNudge
+        /// Handed over or nudged already, this stop not past it yet: nothing to say meanwhile.
+        case nudging
+        /// The lead is told, as ever: auto_advance doesn't move the task, or didn't nudge within `advanceGrace`.
+        case tell
+        /// Stopped again after the one nudge (sent at `sentAt`), or the nudge brought no turn within `advanceGrace`.
+        case again(sentAt: Double)
+    }
+
+    /// How often the witness confirms an unsent nudge whose worker is still in that stop (`handOver`), and how recent a
+    /// confirmation the loop sends on (`LeadStopNudge.fresh`): a few of the app's looks, so a pass that comes minutes
+    /// late, its worker gone back to work meanwhile, sends nothing.
+    public static let nudgeConfirmEvery: TimeInterval = 20
+    public static let nudgeFresh: TimeInterval = 60
+
+    /// `nudge`, not sent yet, is for the stop `info` is in now: the same stop (its status's since) the witness handed
+    /// over, nothing written to its transcript since. One for an earlier stop is no record of this one: its worker went
+    /// back to work (the user typed, a background command returned) and stopped again, or hasn't stopped since.
+    static func sameStop(_ nudge: LeadStopNudge, _ info: Seen) -> Bool {
+        guard let since = info.since, Int(since.timeIntervalSince1970) == Int(nudge.stoppedAt) else { return false }
+        return (info.lastActivity ?? -.infinity) < nudge.seenAt
+    }
+
+    static func stopTurn(_ task: LeadTask, worker: String, info: Seen, now: Date, advancing: Bool) -> StopTurn {
+        if task.reportCall?.inFlight(now: now) == true { return .inFlight }
+        let at = now.timeIntervalSince1970
+        if let nudge = task.stopNudge, nudge.worker == worker, nudge.sentAt != nil || sameStop(nudge, info) {
+            if let sent = nudge.sentAt {
+                // Quiet since after the nudge went in: a turn of its own ended since.
+                let quietSince = max(info.since?.timeIntervalSince1970 ?? -.infinity, info.lastActivity ?? -.infinity)
+                return quietSince > sent || at - sent >= advanceGrace ? .again(sentAt: sent) : .nudging
+            }
+            return advancing && at - nudge.seenAt < advanceGrace ? .nudging : .tell
+        }
+        return advancing && task.autoAdvance != false ? .toNudge : .tell
+    }
+
+    /// The lead's word on a worker's stop without a report (nil: none now, see `stopTurn`), with the last refused
+    /// report call's refusal when there is one.
+    static func stopText(_ task: LeadTask, worker: String, info: Seen, now: Date, advancing: Bool) -> String? {
+        let job = info.diedJob.map { ": \($0.goneText)" } ?? ""
+        let refused = task.reportRefused.map { " Its last report call, at \(LeadBoard.clock($0.at)), was refused: “\(LeadToolset.clip($0.text, 300))”." } ?? ""
+        switch stopTurn(task, worker: worker, info: info, now: now, advancing: advancing) {
+        case .inFlight, .toNudge, .nudging: return nil
+        case .tell:
+            return "The worker on \(task.slug) stopped without calling report\(job).\(refused) read_session to see where it is, then message it."
+        case .again(let sent):
+            return "The worker on \(task.slug) stopped without calling report again\(job). auto_advance already sent it its one nudge at "
+                + "\(LeadBoard.clock(sent)) (report done or blocked, and stay until the report answers), and no report has come since.\(refused) "
+                + "read_session to see where it is, then message it."
+        }
+    }
+
+    /// A worker's stop auto_advance nudges (see `LeadStopNudge`).
+    public struct StopForAdvance: Equatable, Sendable {
+        public var slug: String
+        public var worker: String
+        /// When its turn ended (its status's since).
+        public var stoppedAt: Double
+        /// The background job its turn waited on is gone, in words (`TranscriptTail.Background.goneText`).
+        public var job: String?
+        /// Its turn showed as waiting on a background task or shell (see `LeadStopNudge.background`).
+        public var background = false
+        /// The stop its unsent record is for, still (`sameStop`): `handOver` confirms that record rather than replacing it.
+        public var confirming = false
+    }
+
+    /// The running tasks' workers stopped without a report for the first time, which the lead's loop nudges instead
+    /// of the lead being woken (`stopTurn`'s `toNudge`): the stop `notices` would tell, with no report call under way,
+    /// on a task that moves by itself. Not one waiting on a prompt, at a usage limit, on an API error, or on a
+    /// teammate's answer: those keep their own notices. The app records each on the board (`LeadStopNudge`) and
+    /// nudges the loop.
+    public static func stopsForAdvance(board: LeadBoard, seen: [String: Seen], now: Date = Date()) -> [StopForAdvance] {
+        board.tasks.compactMap { task in
+            guard task.status == .running, let worker = task.worker, worker != task.stopped, let info = seen[worker],
+                  info.live, !info.agentQuit, info.usageLimit == nil, info.apiError == nil,
+                  !noToolsSessions(task, seen: seen, now: now).contains(worker),
+                  task.peerWait(session: worker, now: now.timeIntervalSince1970) == nil,
+                  let event = waiting(info, session: worker, now: now, input: "", stopped: ""), event.key.contains("|stopped-") else { return nil }
+            let confirming: Bool
+            switch stopTurn(task, worker: worker, info: info, now: now, advancing: true) {
+            case .toNudge: confirming = false
+            // Handed over, not sent yet, and still that stop: confirmed again for the loop (`handOver`).
+            case .nudging where task.stopNudge?.sentAt == nil: confirming = true
+            default: return nil
+            }
+            var background = info.diedJob != nil || !info.shells.isEmpty
+            if case .idle(_?)? = info.activity { background = true }
+            return StopForAdvance(slug: task.slug, worker: worker, stoppedAt: info.since?.timeIntervalSince1970 ?? now.timeIntervalSince1970,
+                                  job: info.diedJob?.goneText, background: background, confirming: confirming)
+        }
+    }
+
+    /// Records each of `stops` on its task for the lead's loop to nudge (`LeadStopNudge`), unless its worker was nudged
+    /// already (once) or the task moved on meanwhile. A stop recorded and not sent yet is confirmed (`confirmedAt`) every
+    /// `nudgeConfirmEvery` while its worker is still in it, and one for an earlier stop is replaced: the loop sends only
+    /// on a recent confirmation. Whether anything was written (the board's write makes the loop look).
+    @discardableResult
+    public static func handOver(_ stops: [StopForAdvance], on board: inout LeadBoard, now: Date = Date()) -> Bool {
+        var recorded = false
+        let at = now.timeIntervalSince1970
+        for stop in stops {
+            guard let index = board.taskIndex(stop.slug), board.tasks[index].status == .running, board.tasks[index].worker == stop.worker else { continue }
+            if var nudge = board.tasks[index].stopNudge, nudge.worker == stop.worker {
+                guard nudge.sentAt == nil else { continue }
+                // Only the stop it's for (`sameStop`): one with the same since but written to after the hand-over is a
+                // new stop, replaced below, or the record would be neither sent (never fresh) nor told (blind check).
+                if stop.confirming, Int(nudge.stoppedAt) == Int(stop.stoppedAt) {
+                    guard at - (nudge.confirmedAt ?? nudge.seenAt) >= nudgeConfirmEvery else { continue }
+                    nudge.confirmedAt = at
+                    board.tasks[index].stopNudge = nudge
+                    recorded = true
+                    continue
+                }
+            }
+            board.tasks[index].stopNudge = LeadStopNudge(worker: stop.worker, stoppedAt: stop.stoppedAt, seenAt: at, job: stop.job,
+                                                         background: stop.background, confirmedAt: at)
+            recorded = true
+        }
+        return recorded
+    }
+
     /// Of `endedForAdvance`, those `events` leaves to the loop while it runs (the app's `firstSeen`: when it first saw
     /// each so): its report told of it already (the retry's verifier, which ended too), or it was seen less than
     /// `advanceGrace` ago. Past that with no retry (the verifier still awaited), the lead is told as ever.
@@ -242,8 +369,11 @@ public enum LeadWitness {
     }
 
     /// `advanced`: the verifiers left to auto_advance (see `leftToAdvance`), not told here.
-    public static func events(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = []) -> [(key: String, text: String)] {
-        notices(board: board, seen: seen, now: now, advanced: advanced).map { ($0.key, $0.text()) }
+    /// `advancing`: the lead's loop runs with auto_advance on, so a worker's first stop without a report is its to
+    /// nudge (`stopsForAdvance`), not told here.
+    public static func events(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = [],
+                              advancing: Bool = false) -> [(key: String, text: String)] {
+        notices(board: board, seen: seen, now: now, advanced: advanced, advancing: advancing).map { ($0.key, $0.text()) }
     }
 
     /// An event to tell, its text built only when read (`text()`): a waiting session's quotes what it waits for in
@@ -252,7 +382,8 @@ public enum LeadWitness {
     public typealias Notice = (key: String, text: @Sendable () -> String)
 
     /// `events`, their texts not built yet.
-    public static func notices(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = []) -> [Notice] {
+    public static func notices(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = [],
+                               advancing: Bool = false) -> [Notice] {
         var events: [Notice] = []
         func add(_ key: String, _ text: @autoclosure @escaping @Sendable () -> String) { events.append((key, text)) }
         for task in board.tasks where task.status != .done {
@@ -278,10 +409,12 @@ public enum LeadWitness {
                     // shows as "waiting on @x"); past it, the usual notice (T9).
                 } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
                                                          input: waitingText("The worker on \(task.slug)", info, now: now, advice: "Answer it with message, or ask the user if it's theirs to decide."),
-                                                         stopped: task.status == .running && task.peerWait(session: worker, now: now.timeIntervalSince1970) == nil ? "The worker on \(task.slug) stopped without calling report\(info.diedJob.map { ": \($0.goneText)" } ?? ""). read_session to see where it is, then message it." : nil) {
+                                                         stopped: task.status == .running && task.peerWait(session: worker, now: now.timeIntervalSince1970) == nil
+                                                            ? stopText(task, worker: worker, info: info, now: now, advancing: advancing) : nil) {
                     events.append(event)
                 }
-                if info.live {
+                // A report call of its under way (its check waiting for a slot, then running) is no stall either.
+                if info.live, task.reportCall?.inFlight(now: now) != true {
                     for stall in LeadStall.detect(info, task: task, now: now, waitingOn: task.peerWait(session: worker, now: now.timeIntervalSince1970)) where !stall.heldBack {
                         // A job of its own that's alive is labelled so, not as a stall needing the lead.
                         add(stall.key(session: worker), "The worker on \(task.slug) is \(stall.report(now: now)). \(stall.waitsOnOwnJob ? "If that shell isn't what it's waiting for, read_session(\(task.slug)) or message it." : stall.advice(slug: task.slug))")
@@ -566,8 +699,8 @@ public enum LeadWitness {
 
     /// `messages`, their texts built only when read (see `Notice`): the app builds them off the main thread.
     public static func unbuiltMessages(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = [],
-                                       told: (String) -> Bool) -> [(keys: [String], text: @Sendable () -> String)] {
-        let fresh = notices(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
+                                       advancing: Bool = false, told: (String) -> Bool) -> [(keys: [String], text: @Sendable () -> String)] {
+        let fresh = notices(board: board, seen: seen, now: now, advanced: advanced, advancing: advancing).filter { !told($0.key) }
         let ended = Set(fresh.map(\.key).filter { $0.hasSuffix("|ended") })
         guard ended.count > 1 else { return fresh.map { ([$0.key], $0.text) } }
         let lines = endings(board: board, seen: seen).filter { ended.contains($0.key) }
@@ -618,6 +751,7 @@ public enum LeadWitness {
         var found: [String: LeadStall] = [:]
         for task in board.tasks {
             guard let worker = task.worker, worker != task.stopped, let info = seen[worker], !info.neverGotTools(now: now),
+                  task.reportCall?.inFlight(now: now) != true,
                   let stall = LeadStall.detect(info, task: task, now: now, waitingOn: task.peerWait(session: worker, now: now.timeIntervalSince1970)).first
                     ?? LeadStall.awaitingPrompt(info, task: task, now: now) else { continue }
             found[task.id] = stall

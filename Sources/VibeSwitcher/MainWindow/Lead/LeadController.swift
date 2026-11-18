@@ -251,7 +251,8 @@ struct TeamReading {
     var lockWaits: [String: TestLock.Wait] = [:]
     var workflow = LeadWorkflow()
     /// The lead's loop runs with workflow.md's auto_advance on: a verifier that ends without a verdict is its to
-    /// audit again (see `LeadWitness.leftToAdvance`). Looked at only while a task is in review.
+    /// audit again (see `LeadWitness.leftToAdvance`), a worker's first stop without a report its to nudge
+    /// (`LeadWitness.stopsForAdvance`). Looked at only while a task is in review or running.
     var advancing = false
     /// The live members with no agent in the scan whose agent's process has exited, by a process table read here (see
     /// `HostSession.agentRuns`): only these have quit. One whose agent waits on a background command runs on.
@@ -282,7 +283,7 @@ struct TeamReading {
             team.lockWaits = lock.waits(for: Dictionary(folders, uniquingKeysWith: { first, _ in first }))
         }
         team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
-        team.advancing = team.workflow.autoAdvance && board.tasks.contains { $0.status == .review } && LeadAdvance.running(BoardStore(root: root))
+        team.advancing = team.workflow.autoAdvance && board.tasks.contains { [.review, .running].contains($0.status) } && LeadAdvance.running(BoardStore(root: root))
         // The table is read only when the scan lacks a member's agent (rare), here off the main thread.
         let unseen = board.tasks.flatMap(\.watched).compactMap { id in
             hosted[id].flatMap { $0.isLive && sessions[id] == nil ? (id: id, session: $0) : nil }
@@ -311,6 +312,9 @@ struct WitnessWork {
     var endedForAdvance: [String] = []
     /// The workers auto_advance releases while their audits run, between turns now (`LeadWitness.releasableForAdvance`).
     var releasableForAdvance: [String] = []
+    /// The workers whose turn ended without a report for the first time, which auto_advance nudges
+    /// (`LeadWitness.stopsForAdvance`), when it runs.
+    var stopsForAdvance: [LeadWitness.StopForAdvance] = []
     /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
     var messages: [(keys: [String], text: @Sendable () -> String)] = []
     var sleepInterruptions: [LeadSleepRecovery.Interruption] = []
@@ -346,9 +350,11 @@ struct WitnessWork {
             advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: first)
             step?("releasableForAdvance")
             releasableForAdvance = LeadWitness.releasableForAdvance(board: board, seen: seen)
+            step?("stopsForAdvance")
+            stopsForAdvance = LeadWitness.stopsForAdvance(board: board, seen: seen, now: now)
         }
         step?("unbuiltMessages")
-        messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told)
+        messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, advancing: advancing, told: told)
         if let recoveryRoot {
             // This initializer runs on the boards' queue. Never lock/read the ledger or write a nudge on main.
             let recovering = LeadSleepRecovery.enqueue(sleepInterruptions, root: recoveryRoot)
@@ -1996,6 +2002,18 @@ final class LeadController: ObservableObject {
             if advanceSeen[key] == nil {
                 advanceSeen[key] = now
                 LeadAdvance.nudge(root: root)
+            }
+        }
+        // A worker whose turn ended without a report for the first time: recorded on its task for its loop, which sends
+        // it the standard prompt once (`LeadStopNudge`); the board's write makes the loop look. The lead isn't told.
+        // Each look until it's on the board (a write that failed is tried again), written only when it isn't yet.
+        let stops = work.stopsForAdvance
+        if !stops.isEmpty {
+            reads.async { _ in
+                let store = BoardStore(root: root)
+                var board = store.load()
+                guard LeadWitness.handOver(stops, on: &board, now: now) else { return }
+                if (try? store.update { LeadWitness.handOver(stops, on: &$0, now: now) }) == true { LeadAdvance.nudge(root: root) }
             }
         }
         // Only the keys here: each text is built where it's posted, off the main thread. One a look before this told

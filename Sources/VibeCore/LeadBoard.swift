@@ -105,6 +105,83 @@ public struct LeadEvidence: Codable, Equatable, Sendable {
     public var passes: Bool { completion == .complete && integrity == .clean }
 }
 
+/// A worker's report call while it runs: the report tool's, from its start until it answers (`LeadToolset.report`).
+/// The witness and auto_advance say nothing of the worker's stop meanwhile: a report is on its way. On 2026-11-18 a done
+/// report's pre-done check waited for a test slot while every slot was held, the worker's client put the call in the
+/// background and its turn ended, and the lead was woken to say "call report" for a report already on its way
+/// (scorecard-merge, lead-context-cost-hand; folded-update-line-its and faster-test-suite's second stop were likely the
+/// same, every slot held then too).
+public struct LeadReportCall: Codable, Equatable, Sendable {
+    public var at: Double
+    /// The tool server running it: a call whose process is gone (crashed, killed) isn't under way.
+    public var pid: Int32
+    /// Past its longest (`LeadDoneCheck.callTimeout`): no longer counted under way, whatever its process does.
+    public var until: Double
+
+    public init(at: Double, pid: Int32, until: Double) {
+        self.at = at
+        self.pid = pid
+        self.until = until
+    }
+
+    /// Still under way at `now`: before `until`, its tool server alive.
+    public func inFlight(now: Date) -> Bool {
+        guard now.timeIntervalSince1970 < until, pid > 0 else { return false }
+        return kill(pid, 0) == 0 || errno == EPERM
+    }
+}
+
+/// A worker's report call that was refused: when, and the refusal's words (clipped).
+public struct LeadReportRefusal: Codable, Equatable, Sendable {
+    public var at: Double
+    public var text: String
+
+    public init(at: Double, text: String) {
+        self.at = at
+        self.text = text
+    }
+}
+
+/// The one nudge auto_advance sends a worker whose turn ended without a report reaching the lead (the witness's
+/// "stopped without calling report"): the witness hands the stop over (`LeadWitness.stopsForAdvance`), the lead's loop
+/// sends the standard prompt (`LeadAdvance`), and the lead is told only if the worker stops again without reporting,
+/// or if the nudge couldn't go. Six times on 2026-11-17/18 the lead was woken for this and typed the same sentence.
+public struct LeadStopNudge: Codable, Equatable, Sendable {
+    /// The worker session it's for: a new worker's stop is a first one.
+    public var worker: String
+    /// When the stop began (its status's since), and when the witness handed it over.
+    public var stoppedAt: Double
+    public var seenAt: Double
+    /// What the witness saw of it besides (the background job its turn waited on is gone), for the nudge.
+    public var job: String?
+    /// When the nudge went into the worker's box; nil until then.
+    public var sentAt: Double?
+    /// The host showed that stop's turn waiting on a background task or shell (one the witness saw gone, or a shell
+    /// left running that the turn doesn't wait on): only then may the loop take "waiting on its background task" for it.
+    public var background: Bool?
+    /// The witness's last look that saw its worker still in that stop (`LeadWitness.handOver`); the loop sends only on
+    /// a recent one (`LeadWitness.nudgeFresh`), never on a stop its worker has left since (F1: the loop's pass came
+    /// minutes after the record, the worker back at work and waiting on its test run by then).
+    public var confirmedAt: Double?
+
+    public init(worker: String, stoppedAt: Double, seenAt: Double, job: String? = nil, sentAt: Double? = nil,
+                background: Bool? = nil, confirmedAt: Double? = nil) {
+        self.worker = worker
+        self.stoppedAt = stoppedAt
+        self.seenAt = seenAt
+        self.job = job
+        self.sentAt = sentAt
+        self.background = background
+        self.confirmedAt = confirmedAt
+    }
+
+    /// The loop may still send it at `now`: within `LeadWitness.advanceGrace` of the hand-over (past it the lead is
+    /// told instead), and confirmed by the witness within `LeadWitness.nudgeFresh`.
+    public func fresh(now: Double) -> Bool {
+        now - seenAt < LeadWitness.advanceGrace && now - (confirmedAt ?? seenAt) < LeadWitness.nudgeFresh
+    }
+}
+
 /// A milestone a worker noted with its `progress` tool.
 public struct LeadCheckpoint: Codable, Equatable, Sendable {
     public var text: String
@@ -1009,6 +1086,13 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Its last merge dry run (merge(dry_run: true), `LeadDryRun`): the merge's rebase and test run without the
     /// fast-forward, and when it passed or failed; nil: none ran.
     public var dryRun: LeadDryRun?
+    /// Its worker's report call while it runs (see `LeadReportCall`): its stop meanwhile is no news.
+    public var reportCall: LeadReportCall?
+    /// Its worker's last report call that was refused, until one goes through: what the lead and the nudge are told.
+    public var reportRefused: LeadReportRefusal?
+    /// The one nudge auto_advance sends its worker when a turn ends without a report (see `LeadStopNudge`); cleared by
+    /// a report that goes through.
+    public var stopNudge: LeadStopNudge?
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }
