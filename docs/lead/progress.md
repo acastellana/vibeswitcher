@@ -3728,3 +3728,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 10:21 Audit of folded-update-line-its: incomplete, clean, round 1: 1 Important open, 3 Nit open
 - 2026-11-18 10:21 Started a worker on folded-update-line-its
 - 2026-11-18 10:21 Automatically (auto_advance): Sent folded-update-line-its's worker the open Important findings folded-update-line-its:F1 from its audit at e7d26d62 (in a new worker: its last one was released during the audit).
+- 2026-11-18 10:39 Pipeline held: patterns-from-the-top ready to merge with none landing; cause: the load hold
+- 2026-11-18 10:52 Merged patterns-from-the-top: Patterns from the top 50 software-engineering books: what VibeSwitcher should adopt (build 5978f0ab2ede)
