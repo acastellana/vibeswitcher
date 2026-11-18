@@ -103,7 +103,8 @@ extension LeadAdvanceTests {
         #expect(lead.auditModel(lead.workflow, task: one) == "sonnet")
     }
 
-    @Test(arguments: ["opus", "sonnet"]) func sensitiveAuditUsesConfiguredVerifierWhileFableIsRefused(model: String) throws {
+    @Test(arguments: ["opus", "sonnet"], [false, true])
+    func sensitiveAuditUsesConfiguredVerifierWhileFableIsRefused(model: String, overrideUsage: Bool) throws {
         let (root, runtime, lead) = try fableTeam(["verifier_model": model])
         runtime.claude = "claude --model opus"
         _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
@@ -126,10 +127,10 @@ extension LeadAdvanceTests {
         #expect(status.contains("the fable limit") && !status.contains("seven day overage included (every model)"), "\(status)")
         try runtime.kill(first)
         #expect(lead.auditModel(lead.workflow, task: task("touchy", root), security: true) == model)
-        let audited = lead.call("audit", ["task": "touchy"])
+        // Cover ordinary starts and an override retry, which previously launched straight into Fable's limit.
+        let audited = lead.call("audit", ["task": "touchy", "override_usage": overrideUsage])
         #expect(!audited.isError, "\(audited.text)")
-        let verifier = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-touchy'") })
-        #expect(verifier.id != first)
+        let verifier = try #require(runtime.spawned.last { $0.id != first && $0.command.contains("--name 'verify-touchy'") })
         #expect(verifier.command.contains("--model '\(model)'"), "\(verifier.command)")
         #expect(audited.text.contains("on \(model) in Fable's place"), "\(audited.text)")
         #expect(task("touchy", root)?.launchedModels?[verifier.id] == model)
