@@ -3700,3 +3700,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 09:14 Planned folded-update-line-its: Folded update line: its red dot clears once the problem it flagged is dealt with
 - 2026-11-18 09:26 Started a worker on patterns-from-the-top
 - 2026-11-18 09:26 Automatically (auto_advance): Started a worker on patterns-from-the-top (Patterns from the top 50 software-engineering books: what VibeSwitcher should adopt).
+- 2026-11-18 09:31 Started a worker on folded-update-line-its
+- 2026-11-18 09:31 Automatically (auto_advance): Started a worker on folded-update-line-its (Folded update line: its red dot clears once the problem it flagged is dealt with).
+- 2026-11-18 09:31 Automatically (auto_advance): Overlap for folded-update-line-its's start (a warning only: nothing was refused or reordered). Sources/VibeSwitcher/Sandbox.swift: ui-journeys-b-team (kept: its branch changes it).
+- 2026-11-18 09:31 Raised resume-and-reopen-all to audit (the risk check, at 853d9f23): it has code that adds locks or threads (Sources/VibeCore/LaunchPresets.swift: private static let unknownPresetsLock = NSLock())
+- 2026-11-18 09:31 Released resume-and-reopen-all's worker (idle since its done report on 853d9f23) while its audit runs
+- 2026-11-18 09:31 Automatically (auto_advance): Started the audit of resume-and-reopen-all at 853d9f23 (The risk check raised it to audit: it has code that adds locks or threads (Sources/VibeCore/LaunchPresets.swift: private static let unknownPresetsLock = NSLock())). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-18 09:32 Raised app-memory-grows-again to audit (the risk check, at e1176b23): it has code that deletes or rewrites files or data (Sources/VibeSwitcher/MainWindow/Lead/TeamChurnBench.swift: try? FileManager.default.removeItem(atPath: flag))
+- 2026-11-18 09:32 Automatically (auto_advance): Started the audit of app-memory-grows-again at e1176b23 (The risk check raised it to audit: it has code that deletes or rewrites files or data (Sources/VibeSwitcher/MainWindow/Lead/TeamChurnBench.swift: try? FileManager.default.removeItem(atPath: flag))).
+- 2026-11-18 09:32 Released app-memory-grows-again's worker (idle since its done report on e1176b23) while its audit runs
+- 2026-11-18 09:32 Automatically (auto_advance): Released app-memory-grows-again's worker, idle since its done report on e1176b23, while its audit runs (ended pid 68665 (Worker: App memory grows again: 262 → 713 MB overnight (Nov 17–18), relief frees nothing)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
