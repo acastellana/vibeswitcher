@@ -45,10 +45,11 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/wire.js` | The node's values in the shapes the views read, inventing nothing (a field the node doesn't send stays empty). |
 | `js/mock.js` | Stands in for the node with `?mock`. |
 | `wire/` | The validators and vectors, generated from the node's encoders (`vibeswitcher wire-vectors`): don't edit them. |
-| `js/ui.js` | What this window shows: the route (`#/s/<id>`, `#/node`), grouping, filter, panes; the list's arrangement. |
+| `js/ui.js` | What this window shows: the route (`#/s/<id>`, `#/node`), grouping, filter, panes, the inspector; the list's arrangement. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |
 | `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes. |
-| `js/views/` | `sidebar`, `session` (header and panes), `chat`, `cards`, `lead` (strip and Team pane), `node`, `start`, `palette`. |
+| `js/activity.js` | The inspector's Activity, made from a chat's items: files changed with their line counts, commands run. |
+| `js/views/` | `sidebar`, `session` (header and panes), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `node`, `start`, `palette`. |
 
 ## Keys
 
@@ -59,9 +60,54 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | ⌥1–9 / Alt+1–9 (⌘1–9 where the browser gives it up) | Go to the nth session in the list |
 | ⌥↓ ⌥↑ / Alt+↓ Alt+↑ | Next, previous session |
 | ⌥F / Alt+F | Filter the list |
-| ⌥⌘1 2 3 / Ctrl+Alt+1 2 3 | Terminal, Chat, Team |
+| ⌥⌘1 2 / Ctrl+Alt+1 2 | Terminal, Chat |
+| ⌥⌘0 / Ctrl+Alt+0, ⌥0 / Alt+0 | Toggle Inspector (the Mac's View › Toggle Inspector) |
+| ⌥⌘3 / Ctrl+Alt+3 | The inspector's Team tab, for a lead or a session of its team |
+| Esc | Closes the inspector where it is a sheet |
 | ↑ in an empty message box | Into the last open card |
 | In a card: 1–9, ↑ ↓, ↩, H | Answer with that option; move; answer with the focused one; hold the timer |
+
+## The inspector
+
+The Mac's right pane (`InspectorView`), with its tabs and its names: **Team** (for a lead, and for a worker or a
+verifier whose lead the node says), **Overview** (Status, Place, Time, Agent, and Team for a session with a role) and
+**Activity** (the files a session changed with `+added −removed`, and the commands it ran). The button at the header's
+end and ⌥⌘0 open and close it.
+
+- **A column** from 1180px of window up: the session's own column gives it 320px in one step, what's centred there
+  glides over (a transform), and the inspector fades in (opacity and transform, 160 ms; nothing with reduced motion).
+  **A sheet** under that width, so the chat is never cramped: from the right over the chat on a narrow desktop, from the
+  foot of the screen on a phone. Esc, its ×, or a touch beside it closes it.
+- **Remembered in this browser** (`localStorage`, which may refuse: then for this page only): `vs.inspector` (`open` or
+  `closed`, the column's; a sheet always starts closed) and `vs.inspector.tab`. Team remembered on a session with no
+  team shows Overview there, and Team again back on a lead.
+- **It shows what the node sent.** A fact the node doesn't send has no row; a tab it sends nothing for says so in one
+  line. A value that comes and goes while you watch (the tool call running, what the session says) keeps its row, so
+  nothing under it moves. Nothing is drawn while it is closed.
+
+| Shows | From |
+| --- | --- |
+| Overview › Status: State, Since, Running, and what it says | `shownStatus`, `since`, `activity`, `detail` |
+| Overview › Place: Folder, Runs in | `cwd` (as `~/…` with the node's `home`), `hosted` |
+| Overview › Time: Started, Running for | `startedAt` |
+| Overview › Agent: Agent, Terminal | `agent`, `terminal` |
+| Overview › Team: Role | `role` |
+| Team › Lead: Questions, Held, Reports, its notice | the lead's `questions`, `held`, `reportsWaiting`, `notice` |
+
+**Asked of the node** for the rest (the mock sends all of it, so `?mock` shows the finished look):
+
+| Shows | Needs |
+| --- | --- |
+| Overview › Place: Branch | a session's `branch` (the Mac reads `GitBranch.current(in: cwd)`) |
+| Overview › Agent: Session, Process, Command, Size | a session's `agentSession` (the agent's own session id), `pid`, `command`, `size: { cols, rows }` |
+| Overview › Team: Lead, Task; the Team tab for a worker or a verifier | a worker's or verifier's `lead` (the project's id) and its task's slug (the wire's `task` is what it works on, in words) |
+| Team › Tasks | the `boards` collection (below) |
+| Activity | the `chat` collection (the contract's §6): a tool's `detail` of type `edit` (`path`, `changes`), `write` (`path`, `content`) or `command`, and its `result` (`failed`, `at`) |
+| Folders as `~/…` | the node's `home` |
+
+The Mac's inspector also shows what no client field carries yet: a session's exit status and time, a command's exit
+code, a file created or deleted (as against written), a turn's tokens and cost (`ActivityFeed`), and the Team tab's
+decisions, scorecard, answered questions and files.
 
 ## The feed
 
@@ -131,6 +177,14 @@ or verifier's `lead` isn't on the wire yet, so it is listed on its own; `paused`
   paused: false,
   lead: 'local:project:Zx3k…',        // for a lead, worker or verifier: the project's id (NodeIds.project)
   task: 'sync-landing-base',          // a worker's or verifier's task slug
+  // For the inspector's Overview (the node sends `startedAt`, `activity` and `activitySince` today):
+  startedAt: '2026-11-17T08:40:02.000Z',
+  activity: 'Run unit tests',         // the tool call it runs right now, null between two
+  branch: 'landing-base',             // its folder's git branch
+  agentSession: '01a9c3d7-…',         // the agent's own session id
+  pid: 51022,
+  command: 'claude',                  // what the host started in its terminal; null for one the host doesn't run
+  size: { cols: 132, rows: 38 },      // its terminal's; null for one the host doesn't run
 }
 ```
 
@@ -216,5 +270,5 @@ The client folds a run of `tool` items into one line ("Ran 2 commands · edited 
 ## What isn't here yet
 
 The terminal (a placeholder pane), starting and ending sessions, Settings, held-config and base-move cards, the
-scorecard, notifications, the manifest and service worker, and the device key: an approval here is a click, where the
+scorecard and the rest of the Mac's Team tab (decisions, answered questions, files), notifications, the manifest and service worker, and the device key: an approval here is a click, where the
 design signs the card's facts (security rule 1).

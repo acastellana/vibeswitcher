@@ -42,22 +42,32 @@ export function createMock(store, options = {}) {
 
   // ---- The node's state, as the server would hold it ----
 
-  const session = (sid, fields) => ({
-    id: sid, terminal: 'pts/' + (3 + sessions.size), agent: 'claude', cwd: SITE, status: 'idle', since: ago(60), hosted: true, role: null,
-    title: null, detail: null, paused: false, lead: null, task: null, ...fields,
-  });
+  // Every fact the inspector's Overview can show, so the mock shows the finished look. The node sends the first rows
+  // today; `branch`, `agentSession`, `pid`, `command` and `size` are asked of it (README.md, "Session").
+  const session = (sid, fields) => {
+    const agent = fields.agent || 'claude';
+    const hosted = fields.hosted !== false;
+    const hex = /^[0-9a-f]{8}$/.test(sid.slice(6, 14)) ? sid.slice(6, 14) : 'c7e40b18';
+    return {
+      id: sid, terminal: 'pts/' + (3 + sessions.size), agent, cwd: SITE, status: 'idle', since: ago(60), hosted, role: null,
+      title: null, detail: null, paused: false, lead: null, task: null,
+      startedAt: fields.since || ago(60), activity: null, activitySince: null, branch: 'main',
+      agentSession: `${hex.split('').reverse().join('')}-0c2e-4a71-b3d5-9f6e8a1c2b40`, pid: 51022 + 37 * sessions.size,
+      command: hosted ? agent : null, size: hosted ? { cols: 132, rows: 38 } : null, ...fields,
+    };
+  };
   const sessions = new Map();
   const add = (sid, fields) => sessions.set(sid, session(sid, fields));
   if (!options.empty) {
-    add(LEAD, { status: 'needs-you', since: ago(39), role: 'lead', lead: SITE_PROJECT, title: 'Sync the landing pages and finish the sidebar review' });
-    add(W_SYNC, { status: 'working', since: ago(252), role: 'worker', lead: SITE_PROJECT, task: 'sync-landing-base', title: 'Sync landing-base with main', detail: 'Resolving the hero’s conflicts' });
-    add(W_CLEAN, { agent: 'codex', status: 'idle', since: ago(130), role: 'worker', lead: SITE_PROJECT, task: 'cleanup-ended-folders', title: 'Clean up ended sessions’ folders' });
-    add(V_CLEAN, { status: 'working', since: ago(118), role: 'verifier', lead: SITE_PROJECT, task: 'cleanup-ended-folders', title: 'Clean up ended sessions’ folders', detail: 'Checking the work' });
-    add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py' });
-    add(WEBHOOKS, { agent: 'codex', cwd: PAYOUTS, status: 'working', since: ago(95), title: 'Retry failed bank webhooks', detail: 'Running the retry tests' });
-    add(DARK, { status: 'done', since: ago(380), title: 'Add dark mode to the settings page' });
-    add(PREVIEW, { cwd: DOCS, status: 'background', since: ago(720), title: 'Preview the docs site', detail: '1 shell · 12m: npm run dev' });
-    add('local:pts/9', { cwd: DOCS, status: 'idle', since: ago(5400), hosted: false, terminal: 'pts/9', title: 'Tidy the README' });
+    add(LEAD, { status: 'needs-you', since: ago(39), startedAt: ago(5400), role: 'lead', lead: SITE_PROJECT, branch: 'landing-base', title: 'Sync the landing pages and finish the sidebar review' });
+    add(W_SYNC, { status: 'working', since: ago(252), role: 'worker', lead: SITE_PROJECT, task: 'sync-landing-base', branch: 'agent/sync-landing-base', title: 'Sync landing-base with main', detail: 'Resolving the hero’s conflicts', activity: 'Edit pages/hero.html', activitySince: ago(12) });
+    add(W_CLEAN, { agent: 'codex', status: 'idle', since: ago(130), startedAt: ago(1300), role: 'worker', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders' });
+    add(V_CLEAN, { status: 'working', since: ago(118), role: 'verifier', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders', detail: 'Checking the work', activity: 'Read tools/cleanup.py', activitySince: ago(60) });
+    add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py' });
+    add(WEBHOOKS, { agent: 'codex', cwd: PAYOUTS, status: 'working', since: ago(95), startedAt: ago(400), branch: 'retry-webhooks', title: 'Retry failed bank webhooks', detail: 'Running the retry tests', activity: 'pytest tests/test_webhook_retry.py', activitySince: ago(95) });
+    add(DARK, { status: 'done', since: ago(380), startedAt: ago(1900), branch: 'settings-dark-mode', title: 'Add dark mode to the settings page' });
+    add(PREVIEW, { cwd: DOCS, status: 'background', since: ago(720), startedAt: ago(760), title: 'Preview the docs site', detail: '1 shell · 12m: npm run dev' });
+    add('local:pts/9', { cwd: DOCS, status: 'idle', since: ago(5400), startedAt: ago(5600), hosted: false, terminal: 'pts/9', pid: 40312, title: 'Tidy the README' });
   }
 
   const leads = new Map(options.empty ? [] : [[SITE_PROJECT, {
@@ -137,6 +147,10 @@ export function createMock(store, options = {}) {
       prompt('Sync the landing pages and finish the sidebar review.', 5400),
       tool('Read', 'Read workflow.md', { type: 'read', path: `${SITE}/.vibeswitcher/workflow.md` }, 5390),
       reply('Six tasks on the board. Two are independent and start now; the upload test waits on the sync, and the sidebar pass comes after the review.', 5370),
+      command('git merge --no-ff agent/footer-links', 'Merge made by the ‘ort’ strategy.\n pages/footer.html | 8 ++++----\n 1 file changed, 4 insertions(+), 4 deletions(-)', 3900),
+      edit(`${SITE}/docs/lead/progress.md`, [{ old: '## Merged', new: '## Merged\n\n- footer-links: the footer’s links point at the new pages (c41d7b9)' }], 3895),
+      command('git merge --no-ff agent/cache-static-assets', 'Merge made by the ‘ort’ strategy.\n 3 files changed, 41 insertions(+), 6 deletions(-)', 2400),
+      edit(`${SITE}/docs/lead/progress.md`, [{ old: '(c41d7b9)', new: '(c41d7b9)\n- cache-static-assets: static assets are cached for a year, by content hash (8a3f1e2)' }], 2395),
       { id: next('n'), kind: 'team', from: 'worker', title: 'Question from the worker on sidebar-consistency', text: 'Should the unread badge show 99+ past 99, or the exact count?', at: ago(1500) },
       reply('Told it 99+. The static assets and the footer links are merged; the sync and the clean-up are moving.', 1490),
       { id: next('n'), kind: 'team', from: 'worker', title: 'Report from the worker on cleanup-ended-folders', text: 'Ended sessions’ folders are removed after 7 days, and never one a live session points at. Tests added; ready for review.', at: ago(125) },
@@ -278,11 +292,11 @@ export function createMock(store, options = {}) {
   // A command that runs for a while, then shows its output.
   function run(sid, line, output, ms, done, failed = false) {
     const item = { id: next('t'), kind: 'tool', name: 'Bash', title: line, detail: { type: 'command', command: line }, at: new Date().toISOString(), result: null };
-    emit(chatPut(sid, item), setSession(sid, { detail: line }));
+    emit(chatPut(sid, item), setSession(sid, { detail: line, activity: line, activitySince: item.at }));
     later(ms, () => {
       if (!sessions.has(sid)) return;
       item.result = { output, failed, at: new Date().toISOString() };
-      emit(chatPut(sid, item));
+      emit(chatPut(sid, item), setSession(sid, { activity: null, activitySince: null }));
       done?.();
     });
   }
@@ -306,7 +320,7 @@ export function createMock(store, options = {}) {
     later(7000, () => {
       const pending = chats.get(WEBHOOKS).find((item) => item.kind === 'tool' && item.result === null);
       pending.result = { output: '8 passed in 2.13s', failed: false, at: new Date().toISOString() };
-      emit(chatPut(WEBHOOKS, pending));
+      emit(chatPut(WEBHOOKS, pending), setSession(WEBHOOKS, { activity: null, activitySince: null }));
       stream(WEBHOOKS, 'All 8 retry tests pass: a 5xx is retried after 30 s, 60 s, 120 s and 240 s, then logged as failed for good. A 4xx is never retried.',
         () => emit(setSession(WEBHOOKS, { status: 'done', since: new Date().toISOString(), detail: null })));
     });
@@ -435,11 +449,11 @@ export function createMock(store, options = {}) {
       if (!ask || ask.answer) return refused('It isn’t asking that any more.');
       ask.answer = args.answer;
       const pending = items.find((item) => item.kind === 'tool' && item.result === null);
-      emit(chatPut(args.session, ask), setSession(args.session, { status: 'working', since: new Date().toISOString(), detail: 'Running the payout tests' }));
+      emit(chatPut(args.session, ask), setSession(args.session, { status: 'working', since: new Date().toISOString(), detail: 'Running the payout tests', activity: 'pytest tests/test_payouts.py', activitySince: new Date().toISOString() }));
       later(2400, () => {
         if (pending) {
           pending.result = { output: '5 passed, 1 failed\n\nFAILED tests/test_payouts.py::test_two_workers_run_once', failed: true, at: new Date().toISOString() };
-          emit(chatPut(args.session, pending));
+          emit(chatPut(args.session, pending), setSession(args.session, { activity: null, activitySince: null }));
         }
         stream(args.session, 'One test fails, and it’s the one that names the bug: `test_two_workers_run_once`. Moving the lock above the schedule read next.',
           () => emit(setSession(args.session, { status: 'done', since: new Date().toISOString(), detail: null })));
