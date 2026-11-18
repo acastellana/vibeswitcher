@@ -3811,3 +3811,11 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 13:48 Planned flaky-headless-test-fix: Flaky headless test: fix it from the failure log that now shows the probe's output
 - 2026-11-18 13:48 Started a worker on flaky-headless-test-fix
 - 2026-11-18 13:48 Automatically (auto_advance): Started a worker on flaky-headless-test-fix (Flaky headless test: fix it from the failure log that now shows the probe's output).
+- 2026-11-18 13:53 Audit of config-seal-cover-the: complete, clean, round 1: 1 Nit open
+- 2026-11-18 13:55 Audit of git-guard-fails-closed: incomplete, clean, round 1: 1 Important open, 3 Nit open, 1 Pre-existing open
+- 2026-11-18 13:55 Started a worker on git-guard-fails-closed
+- 2026-11-18 13:55 Automatically (auto_advance): Sent git-guard-fails-closed's worker the open Important findings git-guard-fails-closed:F1 from its audit at f856e0b7 (in a new worker: its last one was released during the audit).
+- 2026-11-18 14:09 Pipeline held: receipts-fable-5-2 ready to merge with none landing; cause: every test slot held
+- 2026-11-18 14:10 Automatically (auto_advance): Merge of receipts-fable-5-2 failed: Tests fail rebased onto main: the run stopped partway: 2635 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running Sent its worker the output; it's back at work.
+- 2026-11-18 14:13 Audit of faster-test-suite: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-11-18 14:13 Sent flaky-headless-test-fix's worker contract v2 (it had v1)

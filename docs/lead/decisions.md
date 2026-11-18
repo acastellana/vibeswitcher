@@ -367,3 +367,7 @@ Each answers a measured problem: 18% of the week's merges passed only on a rerun
 
 On 2026-11-18 the user's /model switch to Fable 5.2 saved itself as the default for new sessions, and new workers then started on Fable at about twice Opus's price, on a day the account had already hit its weekly limit. workflow.md has no project-wide worker model setting, so until one exists the pin is per task.
 
+## 2026-11-18 13:56:12 No cache heartbeat (keep-warm) for the lead. Only the handover after a long idle with a large context is built (task lead-context-cost-hand).
+
+Measured on the week to 2026-11-18, with the handover in place: a heartbeat sent only while work is in flight avoids 2 of the 27 cold lead wakes, saving about $2.34 a week for $0.17 spent. But it reads 3 to 4 times more tokens than it saves, on a plan whose limits count tokens, and each heartbeat is a turn typed into the lead's chat. The user asked for this check on 2026-11-18 (answer to 001841F9). Revisit if usage is billed in dollars, or if cold wakes with work in flight become common.
+
