@@ -3824,3 +3824,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 14:25 Workflow: max_workers = `4`
 - 2026-11-18 14:30 Merged faster-test-suite: Faster test suite: VibeSwitcher's merges take 16–20 min; find and speed up the slowest tests (in a batch: faster-test-suite, config-seal-cover-the landed on one test run) (build 5978f0ab2ede)
 - 2026-11-18 14:30 Merged config-seal-cover-the: Config seal: cover the hook modules a plugin's hooks.json lists (in a batch: faster-test-suite, config-seal-cover-the landed on one test run) (build 5978f0ab2ede)
+- 2026-11-18 14:30 Automatically (auto_advance): Merged faster-test-suite at e72cd504 (its passing audit), config-seal-cover-the at edfb12f9 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-18 14:30 Started a worker on memory-benches-run-by
+- 2026-11-18 14:30 Automatically (auto_advance): Started a worker on memory-benches-run-by (Memory benches run by themselves once a day on a calm Mac), its after tasks done (faster-test-suite).
+- 2026-11-18 14:30 Automatically (auto_advance): Cleaned up faster-test-suite; ended pid 98778 (Worker: Faster test suite: VibeSwitcher's merges take 16–20 min; find and speed up the slowest tests) (freed 2.6 GB of build output and temporary folders). It stays done.
+- 2026-11-18 14:30 Automatically (auto_advance): Cleaned up config-seal-cover-the (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-18 14:32 Started a worker on find-the-test-that
+- 2026-11-18 14:32 Automatically (auto_advance): Started a worker on find-the-test-that (Find the test that writes to a dead pipe, then switch merges to two tests a core), its after tasks done (faster-test-suite).
+- 2026-11-18 14:32 Automatically (auto_advance): Overlap for find-the-test-that's start (a warning only: nothing was refused or reordered). scripts/test.sh: git-guard-fails-closed (running: its boundaries name it).
+- 2026-11-18 14:33 Released team-sessions-load-only's worker (idle since its done report on 741ab35b) while its audit runs
+- 2026-11-18 14:33 Automatically (auto_advance): Started the audit of team-sessions-load-only at 741ab35b (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
