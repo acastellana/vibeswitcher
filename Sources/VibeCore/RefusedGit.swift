@@ -26,9 +26,10 @@ import Foundation
 /// What can't be read is refused, not guessed at (`Refusal.Unread`; decision 2026-10-25 16:33: hardening fails closed):
 /// the same git run plainly is read, so a refusal costs a rewrite. That is text naming git (`names`: without its case,
 /// quotes and backslashes taken out) handed to another interpreter: a shell's `-c` string (`sh`/`bash`/`zsh -c '…'`,
-/// behind `xargs` or `find -exec` too), `eval`, `trap`, `watch`, `env -S`, or a name made for it (`alias g='git …'`,
-/// `hash -p /usr/bin/git g`); text that isn't all on the line (a word of it made from an expansion or put in by `xargs`
-/// or `find`, or a shell or `source`/`.` reading its input: a here-string, a here-document, a pipe, `/dev/stdin`,
+/// behind `xargs` or `find -exec` too), `eval`, `trap`, `watch`, `env -S`, zsh's glob qualifiers (`*(e:'…':)`), or a
+/// name made for it (`alias g='git …'`, `hash -p /usr/bin/git g`); text that isn't all on the line (a word of it made
+/// from an expansion, by this shell or the one it's handed to, `x=git; eval '$x push'`, or put in by `xargs` or `find`;
+/// zsh's `${(e)x}`; or a shell or `source`/`.` reading its input: a here-string, a here-document, a pipe, `/dev/stdin`,
 /// `<(…)`, zsh's `=(…)`, a shell option this doesn't read (`bash -s`, fish's), or any path when the command is given
 /// input) on a line that names git anywhere. And a git whose option or command word the shell makes from an expansion
 /// (`git $x …`, `git ${o:--C} x`, `git {push,x}`, `git pus?`, zsh's `git =x` and `git pus(h|x)`), or that the program
@@ -149,6 +150,7 @@ public enum RefusedGit {
         var budget = 64 * line.unicodeScalars.count + 100_000
         let rules = Rules(rules)
         let named = names(line)
+        if named, evaluatesValue(line) { return .unreadable(.handed("zsh's (e) flag")) }
         for command in commands {
             if let refusal = refusal(command: command, rules: rules, named: named, budget: &budget) { return refusal }
         }
@@ -296,6 +298,10 @@ public enum RefusedGit {
                         home: String? = nil, filled: [String] = []) -> Refusal? {
         guard depth <= ShellWords.depthLimit else { return .unreadable(.tangled) }
         let words = command.words
+        // zsh's glob qualifiers and groups (`*(e:'…':)`, `*(+f)` run code): their text, read as text handed over.
+        if command.group, let refusal = handed(words, to: "a zsh glob qualifier", reads: false, named: named, budget: &budget) {
+            return refusal
+        }
         // A short form's test the scanner split (`if [[ -n a && -n b ]] git …`, `=~ (a|b) ]] git …`), or zsh's
         // `{ … } always { … }`: what follows its `]]` or `always` is read as a command too.
         if let close = words.firstIndex(where: { $0 == "]]" || $0 == "always" }),
@@ -587,14 +593,33 @@ public enum RefusedGit {
     }
 
     /// Text handed to `interpreter` in `arguments`: refused when it names git, and when it isn't all there to read
-    /// (the shell makes a word of it from an expansion, or `reads`: it comes through the interpreter's input) on a
-    /// line that names git anywhere.
+    /// (the shell makes a word of it from an expansion, the interpreter makes one, `x=git; eval '$x push'`, or `reads`:
+    /// it comes through the interpreter's input) on a line that names git anywhere.
     static func unread(by interpreter: String, _ arguments: ShellWords.Command, reads: Bool, named: Bool, budget: inout Int) -> Refusal? {
-        budget -= arguments.words.reduce(arguments.words.count) { $0 + $1.utf8.count }
+        if named, arguments.made.contains(where: \.expanded) { return .unreadable(.handed(interpreter)) }
+        return handed(arguments.words, to: interpreter, reads: reads, named: named, budget: &budget)
+    }
+
+    /// Text that `interpreter` reads again (`words`, as written): refused when it names git, or on a line that names
+    /// git when it holds an expansion that interpreter makes (a `$` or a backtick) or `reads` its input too.
+    static func handed(_ words: [String], to interpreter: String, reads: Bool, named: Bool, budget: inout Int) -> Refusal? {
+        budget -= words.reduce(words.count) { $0 + $1.utf8.count }
         guard budget >= 0 else { return .unreadable(.tangled) }
-        if names(arguments.words.joined(separator: " ")) { return .unreadable(.handed(interpreter)) }
-        if named, reads || arguments.made.contains(where: \.expanded) { return .unreadable(.handed(interpreter)) }
-        return nil
+        if names(words.joined(separator: " ")) { return .unreadable(.handed(interpreter)) }
+        let expands = words.contains { $0.utf8.contains(UInt8(ascii: "$")) || $0.utf8.contains(UInt8(ascii: "`")) }
+        return named && (reads || expands) ? .unreadable(.handed(interpreter)) : nil
+    }
+
+    /// zsh's `(e)` flag on a parameter (`${(e)x}`, `${(%e)x}`): it runs the substitutions in the value as commands.
+    /// Flags longer than a parameter's ever are read as having it (and the line isn't read past them).
+    static func evaluatesValue(_ line: String) -> Bool {
+        var rest = Substring(line)
+        while let open = rest.range(of: "${(") {
+            rest = rest[open.upperBound...]
+            let flags = rest.prefix(64).prefix { $0 != ")" }
+            if flags.contains("e") || flags.count == 64 { return true }
+        }
+        return false
     }
 
     /// The string attached to env's `-S` (`--split-string`) when `option` is one, alone (then empty: the next word is
@@ -663,9 +688,11 @@ enum ShellWords {
         var input = false
         /// The words in an array's parentheses (`a=(x y)`): read as a command, though the shell runs none.
         var array = false
+        /// The words in zsh's glob group or qualifier (`pus(h|x)`, `*(e:'…':)`): read as a command, and as text handed over.
+        var group = false
 
         subscript(range: Range<Int>) -> Command {
-            Command(words: Array(words[range]), made: Array(made[range]), input: input, array: array)
+            Command(words: Array(words[range]), made: Array(made[range]), input: input, array: array, group: group)
         }
         /// The words from `index` on.
         func from(_ index: Int) -> Command { self[min(index, words.count)..<words.count] }
@@ -721,8 +748,8 @@ enum ShellWords {
 
         /// Reads commands until `terminator` (`)` of a subshell or `$(`, or a backtick) or the line's end; past it.
         /// `array`: the words of an array's parentheses; `input`: the list's commands take the input of the subshell
-        /// they're in.
-        mutating func list(until terminator: Character?, array: Bool = false, input inherited: Bool = false) {
+        /// they're in; `group`: the words of zsh's glob group or qualifier.
+        mutating func list(until terminator: Character?, array: Bool = false, group: Bool = false, input inherited: Bool = false) {
             guard enter() else { return }
             // The word this list is read inside of (`a$(…)b`) keeps how it was made.
             let outer = made
@@ -731,7 +758,7 @@ enum ShellWords {
                 depth -= 1
                 made = outer
             }
-            var command = Command(input: inherited, array: array)
+            var command = Command(input: inherited, array: array, group: group)
             var word: String?
             var redirectTarget = false
             func endWord() {
@@ -751,7 +778,7 @@ enum ShellWords {
                 // A command not begun keeps the input a pipe before a line break gave it (`a |⏎ b`).
                 if !command.words.isEmpty {
                     commands.append(command)
-                    command = Command(input: inherited, array: array)
+                    command = Command(input: inherited, array: array, group: group)
                 }
                 redirectTarget = false
             }
@@ -798,11 +825,12 @@ enum ShellWords {
                     // their own, marked as one that isn't run. After other text it's zsh's glob group (`git pus(h|x)`):
                     // the word before it is one the shell makes, and the group is read as commands, a wider reading.
                     let array = word.map { $0.hasSuffix("=") && $0.utf8.filter { $0 == UInt8(ascii: "=") }.count == 1 && RefusedGit.assigned($0) != nil } ?? false
-                    if word != nil, !array, peek(1) != ")" { made.insert(.pattern) }
+                    let group = word != nil && !array && peek(1) != ")"
+                    if group { made.insert(.pattern) }
                     let input = command.input
                     endCommand()
                     i += 1
-                    list(until: ")", array: array, input: input && !array)
+                    list(until: ")", array: array, group: group, input: input && !array)
                 case ")":
                     endCommand()
                     i += 1

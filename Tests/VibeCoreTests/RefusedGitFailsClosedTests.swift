@@ -208,6 +208,13 @@ struct RefusedGitFailsClosedTests {
         "bash -x <<< 'git push origin main'", "echo 'git push' | bash -euo pipefail", "bash -euo pipefail; git status",
         "bash -s scripts/x.sh <<< 'git push'", "fish -C 'git push' x.fish", "bash -D scripts/x.sh; git status", "bash -o $o scripts/x.sh; git status",
         "bash $flags scripts/x.sh; git status", "bash -x <(echo git push)", "zsh -f =(echo git push)", "bash --rcfile x <<< 'git push'",
+        // The blind check's: an expansion the second interpreter makes, written as text on the line (quoted, escaped).
+        "x=git; eval '$x -C /x status'", "x=git sh -c '$x push origin main'", "export x=git; sh -c '$x push origin main'",
+        "x=git; sh -c \"\\$x push origin main\"", "x=git; zsh -c '$x -C /x status'", "x=git; sh -c '${x} -C /x status'",
+        "x=git env -S '${x} -C /x status'", "x=git; env -S'${x} push'", "x=git; trap '$x push origin main' EXIT", "x=git; watch '$x status'",
+        "x=git; eval \\$x -C /x status", "x=git; sh -c '`echo $x` push'",
+        // zsh's `(e)` flag, and a glob qualifier that runs code: text evaluated again.
+        "x='$(git -C /x status)'; : ${(e)x}", "x='$(git push)'; print -r -- ${(%e)x}", "ls *(e:'git -C /x status':)", "ls *(+$f); git status",
     ]
 
     /// Rules on git's command, read in git's own programs by their name, and behind the redirections above.
@@ -228,6 +235,9 @@ struct RefusedGitFailsClosedTests {
         "bash -euo pipefail scripts/x.sh && git status", "zsh -f scratch/probe.zsh; git status", "bash -- scripts/x.sh; git status",
         "sh -e scripts/x.sh && git log -1", "bash -x scripts/test.sh --filter 'RefusedGit' 2>&1 | tail -20; git status",
         "bash +o posix scripts/x.sh; git status", "bash --norc -e scripts/x.sh; git status",
+        // An interpreter's own expansion on a line that doesn't name git; a glob qualifier that runs nothing; zsh's flags.
+        "sh -c 'echo $HOME'", "eval 'echo $x'", "trap 'rm -f \"$tmp\"' EXIT", "ls *(.); git status", "ls *(om[1]); git status",
+        "echo ${(j:,:)arr}; git status", "x='$(echo hi)'; : ${(e)x}",
     ]
 
     @Test(arguments: [LeadLaunch.Role.worker, .verifier, .lead])
