@@ -12,16 +12,18 @@ struct ChatUpdatesRow: View {
     let expanded: Set<String>
     let openImage: (ChatImage) -> Void
     @Environment(\.teamSummaries) private var summaries
+    @Environment(\.chatTaskStandings) private var standings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let open = expanded.contains(updates.id)
         VStack(alignment: .leading, spacing: 8) {
             Group {
-                if let summaries {
-                    SummarizedLine(summaries: summaries, updates: updates, open: open, toggle: toggle)
+                // Only a line whose mark can change with the board watches it.
+                if let standings, updates.watchesBoard {
+                    StandingsReader(standings: standings) { tasks in line(open: open, marked: updates.alarming(tasks: tasks)) }
                 } else {
-                    UpdatesLine(updates: updates, text: updates.line(), open: open, toggle: toggle)
+                    line(open: open, marked: updates.alarming)
                 }
             }
             if open {
@@ -42,6 +44,14 @@ struct ChatUpdatesRow: View {
         }
     }
 
+    @ViewBuilder private func line(open: Bool, marked: Bool) -> some View {
+        if let summaries {
+            SummarizedLine(summaries: summaries, updates: updates, marked: marked, open: open, toggle: toggle)
+        } else {
+            UpdatesLine(updates: updates, text: updates.line(), marked: marked, open: open, toggle: toggle)
+        }
+    }
+
     private func toggle() {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { chat.toggle(updates.id) }
     }
@@ -51,11 +61,12 @@ struct ChatUpdatesRow: View {
 private struct SummarizedLine: View {
     @ObservedObject var summaries: TeamSummaryModel
     let updates: ChatUpdates
+    let marked: Bool
     let open: Bool
     let toggle: () -> Void
 
     var body: some View {
-        UpdatesLine(updates: updates, text: updates.line { summaries.line($0, id: $1) }, open: open, toggle: toggle)
+        UpdatesLine(updates: updates, text: updates.line { summaries.line($0, id: $1) }, marked: marked, open: open, toggle: toggle)
             // On showing, again when summaries are turned on or the burst gains a card.
             .task(id: "\(summaries.enabled)|\(updates.cards.count)") {
                 for card in updates.cards { summaries.request(card.message, id: card.entry.id) }
@@ -63,9 +74,44 @@ private struct SummarizedLine: View {
     }
 }
 
+/// The lead's tasks as its board has them now, for the lines whose mark can change with it (`ChatUpdates.watchesBoard`).
+private struct StandingsReader<Content: View>: View {
+    @ObservedObject var standings: ChatTaskStandings
+    let content: ([String: ChatTaskStanding]?) -> Content
+
+    var body: some View { content(standings.tasks) }
+}
+
+/// The lead's tasks as its board has them, for the folded update lines' red marks (`ChatUpdates.alarming(tasks:)`):
+/// one object for as long as the chat is up, set from the board the Team panel already gets (`ChatContainer`), and
+/// published only when a task's standing changes. A new value in the environment at each board change would have every
+/// row's environment looked at again (see `LeadAnswer`); only the lines that watch the board observe this.
+final class ChatTaskStandings: ObservableObject {
+    /// By slug; nil: not a lead's chat, or its board not read.
+    @Published private(set) var tasks: [String: ChatTaskStanding]?
+
+    func update(_ tasks: [String: ChatTaskStanding]?) {
+        if tasks != self.tasks { self.tasks = tasks }
+    }
+}
+
+private struct ChatTaskStandingsKey: EnvironmentKey {
+    static let defaultValue: ChatTaskStandings? = nil
+}
+
+extension EnvironmentValues {
+    /// The lead's tasks for the folded update lines' marks; nil: none (every alarming card counts as current).
+    var chatTaskStandings: ChatTaskStandings? {
+        get { self[ChatTaskStandingsKey.self] }
+        set { self[ChatTaskStandingsKey.self] = newValue }
+    }
+}
+
 private struct UpdatesLine: View {
     let updates: ChatUpdates
     let text: String
+    /// A card in it is a failure that's still current (`ChatUpdates.alarming(tasks:)`).
+    let marked: Bool
     let open: Bool
     let toggle: () -> Void
 
@@ -77,7 +123,7 @@ private struct UpdatesLine: View {
                     .frame(width: 20, height: 20)
                     .background(Circle().fill(TeamMessageCard.tint.opacity(0.09)))
                     .overlay(alignment: .topTrailing) {
-                        if updates.alarming { Circle().fill(Color.red).frame(width: 7, height: 7).offset(x: 1, y: -1) }
+                        if marked { Circle().fill(Color.red).frame(width: 7, height: 7).offset(x: 1, y: -1) }
                     }
                 Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.tail)
@@ -93,7 +139,7 @@ private struct UpdatesLine: View {
         .buttonStyle(.plain)
         .chatRowControl()
         .help(text)
-        .chatRowButton((updates.alarming ? "Includes a failure. " : "") + text, toggle: toggle)
+        .chatRowButton((marked ? "Includes a failure. " : "") + text, toggle: toggle)
         .accessibilityValue(open ? "Expanded" : "Collapsed")
         .padding(.leading, 30)
     }

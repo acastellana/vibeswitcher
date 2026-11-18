@@ -5,9 +5,9 @@ import Testing
 /// The lead's chat folds each burst of VibeSwitcher's cards for it into one line (the user, 2026-11-17: "we have too
 /// much noise.... i dont even read 80%").
 struct ChatUpdatesTests {
-    static func card(_ id: String, _ about: String, _ body: String) -> ChatEntry {
+    static func card(_ id: String, _ about: String, _ body: String, at: Double? = nil) -> ChatEntry {
         let message = TeamMessage(sender: .vibeSwitcher(about), body: body)
-        return ChatEntry(id: id, at: nil, kind: .steered(text: message.text, fromLead: true), team: message)
+        return ChatEntry(id: id, at: at.map(Date.init(timeIntervalSince1970:)), kind: .steered(text: message.text, fromLead: true), team: message)
     }
     static func from(_ id: String, _ sender: TeamMessage.Sender, _ body: String) -> ChatEntry {
         let message = TeamMessage(sender: sender, body: body)
@@ -147,6 +147,91 @@ struct ChatUpdatesTests {
         #expect(try !updates(fold([Self.advance, Self.note, Self.passed]).first).alarming)
         // A failure only the wake-up names isn't one of its cards.
         #expect(try !updates(fold([Self.wake, Self.passed]).first).alarming)
+    }
+
+    /// A burst's mark lasts only while the trouble it reports is current: the user saw one at 9:12 on 2026-11-18 for a
+    /// worker blocked on a task the lead had already re-planned, its worker running again.
+    @Test func aTasksTroubleMarksTheLineUntilTheTaskMovesOn() throws {
+        let blocked = Self.card("blocked", "worker x", "The worker on x is blocked: the worker couldn't reproduce the leak.", at: 1_000)
+        let burst = try updates(fold([Self.passed, blocked]).first)
+        #expect(burst.watchesBoard && blocked.team?.alarmTask == "x")
+        // Blocked before the card came, still blocked: marked; with no board known, too.
+        #expect(burst.alarming(tasks: ["x": ChatTaskStanding(status: .blocked, since: 990)]))
+        #expect(burst.alarming(tasks: nil) && burst.alarming)
+        // Running again, merged, abandoned, folded, kept, or gone from the board: not.
+        for status in [LeadTask.Status.running, .done, .abandoned, .folded, .kept, .planned] {
+            #expect(!burst.alarming(tasks: ["x": ChatTaskStanding(status: status, since: 1_010)]), "\(status)")
+        }
+        #expect(!burst.alarming(tasks: ["x": ChatTaskStanding(status: .done, since: 990)]))
+        #expect(!burst.alarming(tasks: [:]))
+        // Blocked again after the card (a new card says so): this one's dealt with; so is one the lead answered.
+        #expect(!burst.alarming(tasks: ["x": ChatTaskStanding(status: .blocked, since: 1_010)]))
+        #expect(!burst.alarming(tasks: ["x": ChatTaskStanding(status: .blocked, since: 990, touched: 1_020)]))
+
+        // An audit that didn't pass, until a new audit starts, a later verdict passes or anything moves the task on.
+        let failed = Self.card("audit", "verifier b", "The audit of b did not pass: F1 the sheet never closes.", at: 2_000)
+        let audit = try updates(fold([failed]).first)
+        #expect(audit.alarming(tasks: ["b": ChatTaskStanding(status: .failed, since: 1_990, touched: 1_990)]))
+        #expect(!audit.alarming(tasks: ["b": ChatTaskStanding(status: .review, since: 2_100)]), "a new audit started")
+        #expect(!audit.alarming(tasks: ["b": ChatTaskStanding(status: .failed, since: 1_990, touched: 2_100)]), "a new audit, or a later failing verdict")
+        var passing = LeadTask(slug: "b", title: "b", contract: LeadContract(goal: "b", acceptance: [], boundaries: [], context: ""), status: .review)
+        passing.since = 1_990
+        passing.evidence = LeadEvidence(completion: .complete, integrity: .clean, summary: "ok", at: 2_200)
+        #expect(!audit.alarming(tasks: ["b": ChatTaskStanding(passing)]), "a later passing verdict")
+        passing.auditOpening = LeadAuditOpening(commit: "abc", at: 2_100, notes: [])
+        passing.evidence = nil
+        #expect(!audit.alarming(tasks: ["b": ChatTaskStanding(passing)]), "a re-audit started")
+
+        // A worker stopped on an API error, until it works again or a new one starts.
+        let stopped = Self.card("stop", "witness", Self.stopped.team!.body, at: 3_000)
+        let halt = try updates(fold([stopped]).first)
+        #expect(stopped.team?.alarmTask == "d")
+        #expect(halt.alarming(tasks: ["d": ChatTaskStanding(status: .running, since: 100, touched: 2_900)]))
+        var going = LeadTask(slug: "d", title: "d", contract: LeadContract(goal: "d", acceptance: [], boundaries: [], context: ""), status: .running)
+        going.since = 100
+        going.checkpoints = [LeadCheckpoint(text: "going on", at: 3_050)]
+        #expect(!halt.alarming(tasks: ["d": ChatTaskStanding(going)]), "its worker noted a milestone")
+        going.checkpoints = nil
+        going.messagedAt = 3_010
+        #expect(!halt.alarming(tasks: ["d": ChatTaskStanding(going)]), "the lead told it to go on")
+        // The witness's other stops name their task too.
+        #expect(Self.card("v", "witness", "The verifier on y stopped mid-audit: its turn ended on an API error (overloaded).").team?.alarmTask == "y")
+        #expect(Self.card("m", "witness", "Member api of team-wall's team stopped mid-part: its turn ended on an API error (x).").team?.alarmTask == "team-wall")
+        #expect(Self.card("q", "witness", "The worker on f stopped without calling report. read_session to see where it is.").team?.alarmTask == "f")
+    }
+
+    /// Two alarming cards in one burst: its mark stays until both are dealt with.
+    @Test func aBurstWithTwoTroublesKeepsItsMarkUntilBothAreDealtWith() throws {
+        let blocked = Self.card("blocked", "worker x", "The worker on x is blocked: no network.", at: 1_000)
+        let failed = Self.card("audit", "verifier b", "The audit of b did not pass: F1.", at: 1_001)
+        let burst = try updates(fold([blocked, Self.note, failed]).first)
+        let stuck = ChatTaskStanding(status: .blocked, since: 900), failing = ChatTaskStanding(status: .failed, since: 950)
+        #expect(burst.alarming(tasks: ["x": stuck, "b": failing]))
+        #expect(burst.alarming(tasks: ["x": ChatTaskStanding(status: .running, since: 1_100), "b": failing]))
+        #expect(burst.alarming(tasks: ["x": stuck, "b": ChatTaskStanding(status: .review, since: 1_100)]))
+        #expect(!burst.alarming(tasks: ["x": ChatTaskStanding(status: .running, since: 1_100), "b": ChatTaskStanding(status: .done, since: 1_200)]))
+    }
+
+    /// An app health crash: marked until a later health report no longer lists it as new, or the lead replies after it.
+    @Test func aCrashMarksTheLineUntilALaterReportOrAReply() throws {
+        let crash = Self.crash
+        #expect(crash.team?.newCrashes == ["- VibeSwitcher-2026-11-17.ips"])
+        #expect(try updates(fold([crash]).first).alarming(tasks: [:]))
+        #expect(!ChatUpdates(items: [.team(crash, crash.team!)], settled: ["health"]).alarming)
+        // A later report with only an error count: settled.
+        let later = Self.card("health2", AppHealth.sender, "Error lines in app.log within 10 min, by kind: x ×3")
+        #expect(try !updates(fold([crash, Self.note, later]).first).alarming)
+        // A later report listing it again as new (and one more): not yet.
+        let again = Self.card("health3", AppHealth.sender, crash.team!.body + "\n- VibeSwitcher-2026-11-18.ips")
+        let both = fold([crash, Self.prompt("p", "hm"), again])
+        #expect(try updates(both.first).alarming)
+        #expect(try updates(both.last).alarming)
+        // The lead replied after it: settled, in its burst and after.
+        let replied = fold([crash, Self.tool("t", "Read"), Self.reply("r", "Filed the crash.")])
+        #expect(try !updates(replied.first).alarming)
+        // The crash isn't about a task: the board doesn't settle it.
+        #expect(try updates(fold([crash]).first).alarming(tasks: ["x": ChatTaskStanding(status: .done)]))
+        #expect(try !updates(fold([crash]).first).watchesBoard)
     }
 
     /// Search finds a card inside a folded burst, at the burst; the text the agent got is unchanged.

@@ -48,6 +48,8 @@ struct ChatContainer: View {
     @State private var questionDrafts = LeadQuestionDrafts()
     /// Answers a lead's question from the chat's history, one closure for as long as the chat is up.
     @State private var leadAnswer = LeadAnswer()
+    /// The lead's tasks for the folded update lines' red marks, from the board the Team panel gets.
+    @StateObject private var taskStandings = ChatTaskStandings()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,10 +79,13 @@ struct ChatContainer: View {
                 .environment(\.chatFolder, model.selectedRow?.cwd)
                 .environment(\.chatRunner, chat.runner)
                 .environment(\.teamSummaries, leads.summaries)
+                .environment(\.chatTaskStandings, taskStandings)
                 .environment(\.leadQuestionDrafts, questionDrafts)
                 .environment(\.answerLeadQuestion, leadAnswer.answer)
                 // The lead's all-done cards, in its own conversation only.
                 .onChange(of: lead?.board.allDone ?? [], initial: true) { _, marks in chat.showAllDone(marks) }
+                // Its tasks as they stand: a folded update line's mark goes once the trouble it reported is dealt with.
+                .onChange(of: lead.map { ChatTaskStanding.of($0.board) }, initial: true) { _, tasks in taskStandings.update(tasks) }
                 // Its questions that closed without your answer, where they closed (only open ones are pinned under it).
                 .onChange(of: lead?.board.questions ?? [], initial: true) { _, questions in chat.showQuestions(questions, notices: leads.answerNotices) }
                 .onChange(of: leads.answerNotices) { _, notices in chat.showQuestions(lead?.board.questions ?? [], notices: notices) }

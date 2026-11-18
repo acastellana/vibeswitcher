@@ -1010,7 +1010,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         do {
             // Its board makes the folders it's in.
             try BoardStore(root: root).update { board in
-                board.tasks = tasks.map { LeadTask(slug: $0.0, title: $0.1, contract: contract, status: $0.2) }
+                // In their states since before its conversation (`leadTurns` starts 10 minutes back).
+                board.tasks = tasks.map { item in
+                    var task = LeadTask(slug: item.0, title: item.1, contract: contract, status: item.2)
+                    task.createdAt = Date().timeIntervalSince1970 - 3_600
+                    return task
+                }
                 var question = LeadQuestion(text: "Should the sidebar keep its review badges?", options: ["Keep them", "Drop them"],
                                             at: withdrawnAt - 300)
                 question.withdrawnAt = withdrawnAt
@@ -1321,8 +1326,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
         tool("mcp__vibeswitcher__board", [:], "8 tasks.")
         card(AppHealth.sender, "Crashes (reports in ~/Library/Logs/DiagnosticReports):\n- VibeSwitcher-2026-11-17-101500.ips: EXC_BAD_ACCESS in ChatSync.read\n"
             + "Turn what's a real bug into a task.")
-        card("witness", "The worker on upload-test stopped mid-task: its turn ended on an API error (overloaded). Tell it to go on with message(upload-test, …); it picks up where it was.")
-        add("assistant", [["type": "text", "text": "Two need you: the git-guard audit failed on a staged secret, and the app crashed once in the chat's reader. I've sent the finding back and filed the crash."]], usage: true)
+        // Its one trouble still current: upload-test is blocked on the board (`task upload-test running` moves it on,
+        // and the line's red mark goes). git-guard isn't on the board any more, and the reply below settles the crash.
+        card("worker upload-test", "The worker on upload-test is blocked: the worker couldn't reproduce the flaky upload on a clean run.")
+        add("assistant", [["type": "text", "text": "Two need you: the git-guard audit failed on a staged secret, and the app crashed once in the chat's reader. I've sent the finding back and filed the crash; upload-test waits on a repro."]], usage: true)
         return (lines.joined(separator: "\n") + "\n", withdrawnAt)
     }
 
@@ -1436,6 +1443,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
         ("inspector team|overview|activity|hide|show", "the inspector on that tab, or collapsed or shown, as its segmented control and Toggle Inspector do"),
         ("board [N]", "adds N finished tasks (default 250) to the fake lead's board (start the lead first)"),
+        ("task SLUG STATUS", "moves a task on the fake lead's board to STATUS (running, blocked, done, abandoned, folded…), as its lead's tools would, and shows the change as a real one is (start the lead first)"),
         ("churn [N]", "changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is"),
         ("publish [N]", "has the lead controller publish N times (default 50), each laid out and drawn, and times them"),
         ("hangs [reset]", "the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait between two beats (reset: from now on)"),
@@ -2458,6 +2466,25 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             leads.refresh()
             settle { reply(true, "\(count) finished tasks added to the lead's board") }
+        case "task":
+            // A task of the fake lead's moved to another status: the board stamps the change, as for a real one.
+            let parts = rest.split(separator: " ").map(String.init)
+            guard parts.count == 2, let status = LeadTask.Status(rawValue: parts[1]) else {
+                return reply(false, "task SLUG STATUS, STATUS one of " + LeadTask.Status.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
+            do {
+                let found = try BoardStore(root: root).update { board -> Bool in
+                    guard let index = board.taskIndex(parts[0]) else { return false }
+                    board.tasks[index].status = status
+                    return true
+                }
+                guard found else { return reply(false, "no task \(parts[0]) on the fake lead's board") }
+            } catch {
+                return reply(false, "couldn't write the lead's board: \(error)")
+            }
+            leads.refresh()
+            settle { reply(true, "\(parts[0]) is \(status.rawValue) now") }
         case "churn":
             // The fake lead's board changing N times, 0.15 s apart (a checkpoint each, as a busy team's do), each read
             // and shown the way a real change is (`LeadController.refresh`): `hangs` then says what it cost.

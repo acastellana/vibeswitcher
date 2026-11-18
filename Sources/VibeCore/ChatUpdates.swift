@@ -8,8 +8,14 @@ import Foundation
 public struct ChatUpdates: Equatable, Sendable {
     /// The folded items, in order: team cards and tool runs, starting with a card.
     public let items: [ChatItem]
+    /// The cards (by entry id) whose trouble the conversation after them settled (`ChatTimeline.foldUpdates`): an app
+    /// health crash a later report no longer lists as new, or one the lead replied to.
+    public let settled: Set<String>
 
-    public init(items: [ChatItem]) { self.items = items }
+    public init(items: [ChatItem], settled: Set<String> = []) {
+        self.items = items
+        self.settled = settled
+    }
 
     /// The first item's: it stays as the burst grows, so an opened one stays open.
     public var id: String { "updates:" + (items.first?.id ?? "") }
@@ -26,8 +32,23 @@ public struct ChatUpdates: Equatable, Sendable {
         shown.compactMap { if case .team(let entry, let message) = $0 { return (entry, message) } else { return nil } }
     }
 
-    /// Whether a card in it is a failure the user may care about (`TeamMessage.alarming`): its line is marked.
-    public var alarming: Bool { cards.contains { $0.message.alarming } }
+    /// Whether a card in it is a failure the user may care about (`TeamMessage.alarming`) and still current: its line
+    /// is marked. Without the board, a task's trouble counts as current.
+    public var alarming: Bool { alarming(tasks: nil) }
+
+    /// Whether a card in it is a failure the user may care about (`TeamMessage.alarming`) that's still current, with
+    /// the lead's tasks as its board has them now (`ChatTaskStanding.of`; nil: not known): a task's trouble lasts until
+    /// the task moves on after its card came (`TeamMessage.stillCurrent`), a crash until the conversation settles it
+    /// (`settled`). The user saw a red mark at 9:12 on 2026-11-18 for a worker blocked on a task the lead had already
+    /// re-planned and its worker was running again: "I want things to be as clean as possible."
+    public func alarming(tasks: [String: ChatTaskStanding]?) -> Bool {
+        cards.contains { card in
+            card.message.alarming && !settled.contains(card.entry.id) && card.message.stillCurrent(at: card.entry.at, tasks: tasks)
+        }
+    }
+
+    /// Whether its mark can change with the board: a card in it is alarming about a task.
+    public var watchesBoard: Bool { cards.contains { $0.message.alarming && $0.message.alarmTask != nil } }
 
     /// "4 updates · audit of x started · worker freed": the count, then each card in a few words, from its AI summary
     /// (`summary`, by the card's entry id; nil while there's none) or else its own label (`TeamMessage.foldLabel`).
@@ -108,6 +129,59 @@ extension TeamMessage {
         }
     }
 
+    /// The task an alarming card's trouble is about: an audit's, a blocked worker's, or the one whose worker, verifier
+    /// or team member the witness saw stop ("The worker on x stopped mid-task", "Member api of x's team stopped
+    /// mid-part"). nil for one that isn't alarming, or a crash.
+    public var alarmTask: String? {
+        guard alarming else { return nil }
+        switch kind {
+        case .audit, .report: return task
+        case .witness:
+            let line = gist
+            for opening in ["The worker on ", "The verifier on "] where line.hasPrefix(opening) {
+                return line.dropFirst(opening.count).prefix { !$0.isWhitespace }.nonEmpty
+            }
+            if line.hasPrefix("Member "), let of = line.range(of: " of "), let team = line.range(of: "'s team ", range: of.upperBound..<line.endIndex) {
+                return line[of.upperBound..<team.lowerBound].nonEmpty
+            }
+            return nil
+        default: return nil
+        }
+    }
+
+    /// Whether an alarming card's trouble, the card having come `at`, is still current with the lead's tasks as they
+    /// are now (`tasks`, by slug; nil: not known, so it is). It's over once its task has moved on: finished (merged,
+    /// kept, folded, abandoned, reverted) or gone from the board (the archive takes finished ones), in another status
+    /// since the card came (running again after "blocked", a re-audit after "didn't pass"), or anything else moved on
+    /// it since (`ChatTaskStanding.touched`: the lead messaged its worker, a worker noted a milestone, an audit started
+    /// or gave its verdict, as a new worker or the old one going on does). A blocked card lasts only while the task is
+    /// blocked, an audit's while it's failed. A crash isn't about a task: the conversation settles it (`ChatUpdates.settled`).
+    public func stillCurrent(at: Date?, tasks: [String: ChatTaskStanding]?) -> Bool {
+        guard alarming else { return false }
+        guard let tasks, let slug = alarmTask else { return true }
+        guard let standing = tasks[slug], !ChatTaskStanding.finished.contains(standing.status) else { return false }
+        if let at = at?.timeIntervalSince1970, max(standing.since ?? 0, standing.touched ?? 0) > at { return false }
+        switch kind {
+        case .report: return standing.status == .blocked
+        case .audit: return standing.status == .failed
+        default: return true
+        }
+    }
+
+    /// The crashes an app health digest lists as new (the lines under "Crashes (reports in …):"); empty for any other card.
+    public var newCrashes: Set<String> {
+        guard kind == .notice, sender == .vibeSwitcher(AppHealth.sender) else { return [] }
+        var found: Set<String> = []
+        var inside = false
+        for line in body.split(whereSeparator: \.isNewline).map(String.init) {
+            if line.hasPrefix("Crashes (reports in ") { inside = true; continue }
+            guard inside else { continue }
+            guard line.hasPrefix("- ") else { break }
+            found.insert(line)
+        }
+        return found
+    }
+
     /// The card in a few words when it has no AI summary: auto_advance's first step (its card's first line is the
     /// same for every one), the wake-up's own line, else its title.
     public var foldLabel: String {
@@ -128,13 +202,20 @@ extension ChatTimeline {
     /// tool runs between them (`ChatUpdates.quiet`), as one `.updates` item. Anything else ends a burst: your words,
     /// the lead's replies, a closed question, an all-done card, "New since you looked". A tool run after a burst's
     /// last card isn't between cards and stays out of it.
+    ///
+    /// An app health crash's card is settled (`ChatUpdates.settled`) once a later health report no longer lists all
+    /// its crashes as new, or the lead replied after it.
     public static func foldUpdates(_ items: [ChatItem]) -> [ChatItem] {
+        let settled = settledCrashes(items)
         var folded: [ChatItem] = []
         folded.reserveCapacity(items.count)
         var burst: [ChatItem] = []
         var tools: [ChatItem] = []
         func close() {
-            if !burst.isEmpty { folded.append(.updates(ChatUpdates(items: burst))) }
+            if !burst.isEmpty {
+                let ids = settled.isEmpty ? [] : Set(burst.lazy.map(\.id)).intersection(settled)
+                folded.append(.updates(ChatUpdates(items: burst, settled: ids)))
+            }
             folded += tools
             burst = []
             tools = []
@@ -155,4 +236,58 @@ extension ChatTimeline {
         close()
         return folded
     }
+
+    /// The app health cards (by entry id) whose crashes the conversation after them settled: a later health report
+    /// leaves one of them out (it lists only what's new), or the lead replied after it.
+    static func settledCrashes(_ items: [ChatItem]) -> Set<String> {
+        var settled: Set<String> = []
+        var replied = false
+        // The crashes every later report lists as new; nil: no later report.
+        var listedLater: Set<String>?
+        for item in items.reversed() {
+            switch item {
+            case .reply: replied = true
+            case .team(let entry, let message) where message.sender == .vibeSwitcher(AppHealth.sender):
+                let crashes = message.newCrashes
+                if message.alarming, replied || listedLater.map({ !crashes.isSubset(of: $0) }) == true { settled.insert(entry.id) }
+                listedLater = listedLater.map { $0.intersection(crashes) } ?? crashes
+            default: break
+            }
+        }
+        return settled
+    }
+}
+
+/// A lead's task as far as a red mark on a card about it goes (`TeamMessage.stillCurrent`): its status, when it took
+/// it, and when anything else last moved on it.
+public struct ChatTaskStanding: Equatable, Sendable {
+    public var status: LeadTask.Status
+    /// When it took its status (`LeadTask.since`).
+    public var since: Double?
+    /// The latest of: the lead's last message to its worker, its worker's last milestone, its audit's last start and
+    /// last verdict.
+    public var touched: Double?
+
+    public init(status: LeadTask.Status, since: Double? = nil, touched: Double? = nil) {
+        self.status = status
+        self.since = since
+        self.touched = touched
+    }
+
+    public init(_ task: LeadTask) {
+        let times = [task.messagedAt, task.checkpoints?.last?.at, task.auditOpening?.at, task.evidence?.at].compactMap { $0 }
+        self.init(status: task.status, since: task.since, touched: times.max())
+    }
+
+    /// Finished: nothing more happens on it, so no trouble on it is current.
+    public static let finished: Set<LeadTask.Status> = [.done, .kept, .folded, .abandoned, .reverted]
+
+    /// A board's tasks, by slug.
+    public static func of(_ board: LeadBoard) -> [String: ChatTaskStanding] {
+        Dictionary(board.tasks.map { ($0.slug, ChatTaskStanding($0)) }, uniquingKeysWith: { first, _ in first })
+    }
+}
+
+private extension Substring {
+    var nonEmpty: String? { isEmpty ? nil : String(self) }
 }
