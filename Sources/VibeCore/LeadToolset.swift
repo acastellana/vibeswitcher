@@ -5978,7 +5978,10 @@ public final class LeadToolset: MCPToolset {
         do {
             return try report(arguments)
         } catch {
-            refusal = LeadReportRefusal(at: Date().timeIntervalSince1970, text: Self.clip((error as? Problem)?.text ?? "\(error)", 600))
+            // Masked as it's kept, before the clip can cut a secret short of its shape: the text (a failed pre-done check's
+            // ends with its output) goes on to board.json, the witness's word to the lead and the worker's nudge.
+            let text = Redaction.secrets(in: (error as? Problem)?.text ?? "\(error)")
+            refusal = LeadReportRefusal(at: Date().timeIntervalSince1970, text: Self.clip(text, 600))
             throw error
         }
     }
