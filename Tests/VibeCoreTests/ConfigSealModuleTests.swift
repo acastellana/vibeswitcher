@@ -237,6 +237,40 @@ extension ConfigSealTests {
         #expect(parts.contains { $0.0 == "hooks/register.js" && !isUnread($0.1) } == lists, "\(parts)")
     }
 
+    /// Blind check: a listed module that a hook's command names too is read as that script (a link followed, as
+    /// before); made a link, it's still told as a module that isn't a file to read, so it waits for Accept when quiet.
+    @Test func aModuleACommandAlsoNamesIsStillHeldAsAModuleWhenItBecomesALink() throws {
+        let installed = try mod()
+        let module = installed + "/hooks/register.js"
+        try write(#"{"modules":["./register.js"],"hooks":{"Stop":[{"hooks":[{"type":"command","command":"node ${CLAUDE_PLUGIN_ROOT}/hooks/register.js"}]}]}}"#,
+                  installed + "/hooks/hooks.json")
+        try write("export const register = () => {}\n", home + "/elsewhere/register.js")
+        let item = try #require(watchedPlugin("m"))
+        #expect(try #require(ConfigSeal.parts(item)).map(\.0).filter { $0.hasPrefix("hooks/register.js") } == ["hooks/register.js"])
+        let root = try repo()
+        let runtime = FakeRuntime()
+        _ = try lead(root, runtime)
+        let asLead = vault(for: runtime)
+        #expect(try asLead.checkConfig(root: root) == LeadVault.ConfigCheck())
+        try FileManager.default.removeItem(atPath: module)
+        try FileManager.default.createSymbolicLink(atPath: module, withDestinationPath: home + "/elsewhere/register.js")
+        let parts = try #require(ConfigSeal.parts(item))
+        #expect(parts.contains { $0.0 == "hooks/register.js (hooks module)" && isUnread($0.1) }, "\(parts)")
+        #expect(try asLead.checkConfig(root: root).held == [ConfigSeal.pluginPrefix + "m@mkt"])
+    }
+
+    /// Blind check: folders nested past what the walk opens (a descriptor a level) are told as unreadable, a part, so
+    /// a file a module can import below them is never left out silently.
+    @Test func foldersNestedTooDeepAreToldNotLeftOut() throws {
+        let root = try mod()
+        let deep = (0..<40).map { "d\($0)" }.joined(separator: "/")
+        try write("export const deep = 1\n", root + "/" + deep + "/deep.js")
+        let item = try #require(watchedPlugin("m"))
+        let parts = try #require(ConfigSeal.parts(item))
+        #expect(!parts.contains { $0.0.hasSuffix("deep.js") })
+        #expect(parts.filter { $0.1 == "unreadable" }.map(\.0) == [(0...32).map { "d\($0)" }.joined(separator: "/")], "\(parts.map(\.0))")
+    }
+
     /// A module is found from the manifest too: one it carries inline is the plugin folder's, and a hooks file it
     /// names lists its modules relative to that file.
     @Test func modulesTheManifestCarriesOrNamesAreWatched() throws {

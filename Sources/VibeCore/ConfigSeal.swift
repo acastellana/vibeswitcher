@@ -853,6 +853,13 @@ public enum ConfigSeal {
     static let moduleOutside = unreadModule + "outside"
     static let moduleLink = unreadModule + "link "
 
+    /// After the name of a listed module that's a part already as a command's script, for its own part (`moduleParts`).
+    static let moduleSuffix = " (hooks module)"
+
+    /// Folders under a plugin's folder walked this deep at most for what a module can import (one descriptor is open
+    /// per level): deeper is told as unreadable, never left out silently.
+    static let maxModuleDepth = 32
+
     /// Whether `digest`, a plugin part's, says a listed module wasn't read (missing, a link, outside the folder, not a file).
     static func isUnreadModule(_ digest: String?) -> Bool { digest?.hasPrefix(unreadModule) ?? false }
 
@@ -869,19 +876,25 @@ public enum ConfigSeal {
     /// one that waits for your Accept whenever it was made (`isUpdate`). Every link in the folder is a part too, by its
     /// target, never followed: what's behind a link you accepted isn't watched. Each file is opened from its folder's
     /// descriptor with no link followed, so a folder swapped for a link mid-look reads as unreadable, not as the
-    /// link's target. What's a part already (`have`: a script a command names too, read as that) isn't listed again.
+    /// link's target. What's a part already (`have`: a script a command names too, read as that) isn't listed again,
+    /// but for a listed module that isn't a file to read, which is one more part saying so (`moduleSuffix`).
     static func moduleParts(_ root: String, modules: [String], have: Set<String>, label: (String) -> String) -> [(String, String)] {
         var parts: [(String, String)] = []
         var have = have
         for path in modules {
             let name = label(path)
-            guard have.insert(name).inserted else { continue }
-            parts.append((name, path.hasPrefix(root + "/") ? moduleDigest(root, relative: String(path.dropFirst(root.count + 1))) : moduleOutside))
+            let digest = path.hasPrefix(root + "/") ? moduleDigest(root, relative: String(path.dropFirst(root.count + 1))) : moduleOutside
+            if have.insert(name).inserted {
+                parts.append((name, digest))
+            } else if isUnreadModule(digest), have.insert(name + moduleSuffix).inserted {
+                // Read already as the script a command names (a link followed there): as a module it still says so.
+                parts.append((name + moduleSuffix, digest))
+            }
         }
         let folder = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard folder >= 0 else { return parts + [("modules", "unreadable")] }
         var count = 0
-        _ = walkCode(folder, relative: "", count: &count) { name, digest in
+        _ = walkCode(folder, relative: "", depth: 0, count: &count) { name, digest in
             if name == "cut" || have.insert(name).inserted { parts.append((name, digest)) }
         }
         return parts
@@ -918,7 +931,7 @@ public enum ConfigSeal {
     /// Every file under the open folder `folder` (closed here) that a module can import (`moduleExtensions`), by
     /// contents, and every link, by its target; names in order, links never followed, at most `maxEntries` entries
     /// looked at (then "cut", and false).
-    private static func walkCode(_ folder: Int32, relative: String, count: inout Int, part: (String, String) -> Void) -> Bool {
+    private static func walkCode(_ folder: Int32, relative: String, depth: Int, count: inout Int, part: (String, String) -> Void) -> Bool {
         guard let stream = fdopendir(folder) else {
             close(folder)
             part(relative.isEmpty ? "modules" : relative, "unreadable")
@@ -942,12 +955,12 @@ public enum ConfigSeal {
             guard fstatat(here, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { continue }
             switch info.st_mode & S_IFMT {
             case S_IFDIR:
-                let next = openat(here, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                let next = depth < maxModuleDepth ? openat(here, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC) : -1
                 guard next >= 0 else {
                     part(shown, "unreadable")
                     continue
                 }
-                guard walkCode(next, relative: shown, count: &count, part: part) else { return false }
+                guard walkCode(next, relative: shown, depth: depth + 1, count: &count, part: part) else { return false }
             case S_IFLNK:
                 part(shown, "link " + linkDigest(here, name))
             case S_IFREG where moduleExtensions.contains((name as NSString).pathExtension.lowercased()):
