@@ -44,6 +44,22 @@ struct AccountUsageTests: LeadTeamFixture {
         return try #require(TranscriptTail.read(url: file)?.usageLimit, "no usage limit read")
     }
 
+    @Test func explicitFableLimitScopesAnOverageRefusalButUnnamedOverageStillHoldsEveryModel() throws {
+        let named = UsageLimit(said: "You've hit your Fable limit · resets Nov 24 at 1am",
+                               resetsAt: Self.tomorrow, at: Self.now.timeIntervalSince1970,
+                               kind: "seven_day_overage_included", apiError: "usage_limit_reached")
+        let scoped = try #require(refusal(named, model: "opus"))
+        #expect(scoped.model == "fable" && scoped.resetsAt == named.resetsAt && scoped.reached)
+        for words in ["You've hit your weekly limit", "You've hit your limit. Switch to Fable with /model."] {
+            var unnamed = named
+            unnamed.said = words
+            let global = try #require(refusal(unnamed, model: "fable"))
+            #expect(global.model == nil && global.resetsAt == named.resetsAt && global.reached)
+            let usage = AccountUsage(limits: [global])
+            #expect(usage.hold(model: "opus", now: Self.now) != nil && usage.fableHeldBack(now: Self.now) == nil)
+        }
+    }
+
     /// A live refusal for startup tests; the historical transcript above keeps its original parsing expectations.
     /// Live at the test clock (`now`, the time every test here reads the usage at): it resets a day after it.
     func activeFableRefusal(now: Date = AccountUsageTests.now) throws -> UsageLimit {
