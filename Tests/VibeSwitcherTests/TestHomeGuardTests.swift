@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import VibeCore
 
@@ -14,5 +15,14 @@ struct TestHomeGuardTests {
     @Test func theRunReadsARoomyDiskNotTheMacs() {
         #expect(DiskSpace.testRun.map { $0.free >= 100 * DiskSpace.gigabyte } == true)
         #expect(DiskSpace.free(at: "/") == DiskSpace.testRun?.free)
+    }
+
+    /// This target's load-time handler for SIGPIPE ran (see `catchBrokenPipes` in TestSupport.swift, and VibeCoreTests'
+    /// `BrokenPipeTests`): a write to a pipe whose reader has gone fails in its test, and doesn't end the run.
+    @Test func theRunCatchesSIGPIPE() {
+        var current = sigaction()
+        sigaction(SIGPIPE, nil, &current)
+        // Neither its default (0), which ends the run, nor a moment's ignoring by a test (HostedSessionTests) matters here.
+        #expect((current.__sigaction_u.__sa_handler.map { unsafeBitCast($0, to: Int.self) } ?? 0) != 0)
     }
 }
