@@ -267,7 +267,18 @@ public struct LeadTokens: Codable, Equatable, Sendable {
     public var sameModel: Bool?
     /// Of its tokens and cost, its sessions' advisor calls' (`LeadAdvisorTokens`), priced at the advisor's model's
     /// rates; nil when it made none, and for receipts from before they were read. Its models aren't in `models`.
-    public var advisor: LeadAdvisorTokens?
+    public var advisor: LeadAdvisorTokens? {
+        get { advisorBox?.value }
+        set { advisorBox = newValue.map(LeadAdvisorTokens.Box.init) }
+    }
+    /// `advisor`, on the heap: a LeadTokens sits inline in every task's receipt, and the board's code copies tasks on
+    /// the stack (stored inline, the advisor's ~90 bytes overflowed a deep test thread's stack in `BoardStore.restore`).
+    private var advisorBox: LeadAdvisorTokens.Box?
+
+    private enum CodingKeys: String, CodingKey {
+        case input, output, cacheRead, cacheWrite, cacheWrite1h, sessions, models, cost, unpriced, codex, sameModel
+        case advisorBox = "advisor"
+    }
 
     public init(input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0, sessions: Int = 0,
                 models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil, codex: Int? = nil, sameModel: Bool? = nil,
@@ -350,6 +361,15 @@ public struct LeadAdvisorTokens: Codable, Equatable, Sendable {
     }
 
     public var total: Int { input + output + cacheRead + cacheWrite }
+
+    /// An immutable heap copy (`LeadTokens.advisor`'s storage), coded and compared as its value.
+    final class Box: Codable, Equatable, Sendable {
+        let value: LeadAdvisorTokens
+        init(_ value: LeadAdvisorTokens) { self.value = value }
+        init(from decoder: Decoder) throws { value = try LeadAdvisorTokens(from: decoder) }
+        func encode(to encoder: Encoder) throws { try value.encode(to: encoder) }
+        static func == (a: Box, b: Box) -> Bool { a.value == b.value }
+    }
 
     /// "1 call, 52.0k tokens (in 50.0k, out 2.0k; claude-fable-5-2), est. $0.48"; "…, cost unknown (no price for x)".
     public var text: String {
