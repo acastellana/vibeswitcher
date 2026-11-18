@@ -3977,3 +3977,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 23:04 Merged architecture-diagram: Architecture diagram: VibeSwitcher's parts, its caged agents and the outside, one page (no audit: review none) (build 31d37278312c)
 - 2026-11-18 23:04 Automatically (auto_advance): Merged architecture-diagram (Architecture diagram: VibeSwitcher's parts, its caged agents and the outside, one page) into main at 9be2d042, review none: on its worker's done report on d4e6f534 and the full test run.
 - 2026-11-18 23:04 Automatically (auto_advance): Cleaned up architecture-diagram (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-18 23:11 Released flaky-host-tests-turn's worker (idle since its done report on 60309016) while its audit runs
+- 2026-11-18 23:11 Started a worker on the-lead-s-records
