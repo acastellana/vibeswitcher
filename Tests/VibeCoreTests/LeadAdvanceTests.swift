@@ -69,7 +69,12 @@ struct LeadAdvanceTests: LeadTeamFixture {
         init(_ lead: LeadToolset, run: ((@escaping () -> Void) -> Bool)? = nil) {
             self.lead = lead
             lead.startAdvancing(run: run ?? { work in
-                Thread.detachNewThread(work)
+                // A main thread's stack (8 MB), not a detached one's 512 KB: in a debug build a pass that starts a
+                // worker runs ~50 frames deep, each with copies of the board's tasks, and filled 512 KB (2026-11-18:
+                // a receipt field 14 bytes larger overflowed it in BoardStore.restore and ended the whole test run).
+                let thread = Thread(block: work)
+                thread.stackSize = 8 << 20
+                thread.start()
                 return true
             })
             lead.advancing?.passed = { [weak self] in self?.ended() }
