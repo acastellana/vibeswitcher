@@ -194,7 +194,7 @@ struct HostedSessionTests {
         let ddErrors = scratch.url("dd-errors").path
         let script = "\(jobControlOff)stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 2>'\(ddErrors)' | od -c | head -1; stty sane; \(keepRunning)"
         let session = try start(script, probe: probe)
-        #expect(await eventually { probe.text.contains("033") }, "\(probe.diagnosis(session)) dd=\(errors(ddErrors))")   // od printed the reply's ESC: answered
+        #expect(await eventually { probe.text.contains("033") }, "dd=\(errors(ddErrors)) \(probe.diagnosis(session))")   // od printed the reply's ESC: answered
         probe.queue.sync { session.terminate(); session.close() }
 
         // Asks once it's told to go (with a view attached by then), then reads one byte: the host's answer if it gave
@@ -204,11 +204,11 @@ struct HostedSessionTests {
         let attached = try start("\(jobControlOff)stty raw -echo; printf 'go?'; dd bs=1 count=1 2>>'\(ddErrors2)' >/dev/null; "
             + "printf '\\033[6n'; dd bs=1 count=1 2>>'\(ddErrors2)' | od -c; stty sane; \(keepRunning)", probe: probe2)
         probe2.queue.sync { attached.clientsAttached = true }   // a view would answer; the host must not
-        #expect(await eventually { probe2.text.contains("go?") }, "\(probe2.diagnosis(attached)) dd=\(errors(ddErrors2))")
+        #expect(await eventually { probe2.text.contains("go?") }, "dd=\(errors(ddErrors2)) \(probe2.diagnosis(attached))")
         probe2.queue.sync { attached.write(Data("g".utf8)) }
-        #expect(await eventually { probe2.text.contains("\u{1B}[6n") }, "\(probe2.diagnosis(attached)) dd=\(errors(ddErrors2))")
+        #expect(await eventually { probe2.text.contains("\u{1B}[6n") }, "dd=\(errors(ddErrors2)) \(probe2.diagnosis(attached))")
         probe2.queue.sync { attached.write(Data("Z".utf8)) }
-        #expect(await eventually { probe2.text.contains("Z") }, "\(probe2.diagnosis(attached)) dd=\(errors(ddErrors2))")
+        #expect(await eventually { probe2.text.contains("Z") }, "dd=\(errors(ddErrors2)) \(probe2.diagnosis(attached))")
         #expect(!probe2.text.contains("033"))
         probe2.queue.sync { attached.terminate(); attached.close() }
     }
