@@ -50,6 +50,15 @@ struct RefusedGitFailsClosedTests {
         // source and `.` of text on the line.
         "source /dev/stdin <<< 'git push origin main'", ". /dev/stdin <<< 'git push'", "source <(echo git push)", ". <(echo 'git push')",
         "source /dev/stdin <<'EOF'\ngit push origin main\nEOF", "source =(echo git push)", "source \"$f\"; git status",
+        // The blind check's: the input by another path, or with a `-c` that isn't the shell's option.
+        "source //dev/stdin <<< 'git push origin main'", "source /./dev/stdin <<< 'git push'", "cd / && source dev/stdin <<< 'git push'",
+        "bash //dev/stdin <<< 'git push'", "echo 'git push' | bash dev/stdin", "echo 'git push' |\nbash dev/stdin",
+        "echo 'git push' | (bash dev/stdin)", "source dev/stdin <<'EOF'\ngit push\nEOF", "echo 'git push origin main' | bash -s -- -c",
+        "bash -s -- -c <<< 'git push origin main'", "echo 'git push origin main' | sh -s x -c", "echo 'git push' |& zsh",
+        // The blind check's: text that xargs or find puts in.
+        "echo 'git push origin main' | xargs -I{} sh -c '{}'", "echo '\"git push origin main\"' | xargs sh -c",
+        "echo 'git push' | xargs -I{} env -S '{}'", "echo git push | xargs sh -c '\"$@\"' _", "echo git push | xargs eval",
+        "find . -name a -exec sh -c '{}' \\; ; git status",
     ]
 
     /// A git whose option or command word the shell makes, or the program running it fills in.
@@ -67,6 +76,8 @@ struct RefusedGitFailsClosedTests {
         "echo push origin main | xargs git", "xargs git -P", "echo push | xargs -n 1 git", "xargs -I% git % origin main",
         "xargs -I {} git {} status", "xargs -I{} git -P {}", "xargs -J % git -P %", "find . -name push -exec git {} origin main \\;",
         "find . -exec git -P {} \\;", "find . -execdir git --namespace {} log \\;",
+        // The whole command from xargs' input, behind a wrapper.
+        "echo git push origin main | xargs env", "echo git push | xargs timeout 60", "echo git push | xargs nohup",
     ]
 
     /// Harmless lines for every role: interpreters given text that doesn't name git, git with an expansion after its
@@ -76,6 +87,8 @@ struct RefusedGitFailsClosedTests {
         "eval \"$(direnv hook zsh)\"", "zsh -c 'swift build 2>&1 | tail -5'", "sh -c 'echo hi' && git status",
         "bash -c 'ls | wc -l'; git log --oneline", "sh -c 'curl -s https://github.com/x/y | wc -c'", "bash -c 'grep -c digit a.txt'",
         "trap 'rm -f \"$tmp\"' EXIT", "watch -n 5 ls", "env -S 'swift build'", "env -uSSH_AUTH_SOCK git status", "env FOO=1 swift test",
+        "bash -o pipefail -c 'ls'", "bash scripts/test.sh --filter 'RefusedGit' < /dev/null", "ls | bash scripts/count.sh",
+        "git ls-files | xargs", "ls *.swift | xargs -I{} sh -c 'wc -l {}'", "echo a || bash scripts/x.sh; git status",
         "echo hi | sh", "source ~/.config/x/tokens.env", ". scripts/env.sh", "source .venv/bin/activate && git status",
         // An expansion after git's command.
         "git log \"$branch\"", "git log \"$base\"..HEAD", "git log --oneline -- \"$f\"", "git show HEAD:\"$f\"", "git log -$n",
@@ -161,14 +174,19 @@ struct RefusedGitFailsClosedTests {
         for line in ["g=git; $g push origin main", "g=git; ${g} status", "g=git; \"$g\" push", "g=/usr/bin/git; $g -P push", "=git -P push",
                      "=git status", "$(echo git) push", "`which git` status", "\"$(which git)\" log", "g=git; noglob $g push",
                      "g=git; timeout 60 $g push", "g=git; env $g push", "cd src && $(command -v git) status", "$EDITOR .git/config",
-                     "2>&1$(echo git) push", "\"\"$(echo git) push"] {
+                     "2>&1$(echo git) push", "\"\"$(echo git) push",
+                     // The blind check's: braces that make git and its command.
+                     "command {git,push,origin,main}", "\"\"{git,-C,/x,status}", "env {git,push,origin,main}", "command {sh,-c,'git push'}"] {
             #expect(try guardRail.hookDenies(line, cwd: guardRail.root), "\(role)'s hook lets through: \(line)")
             let reason = RefusedGit.refusal(in: line)?.reason ?? ""
             #expect(reason.contains("a command whose name the shell makes"), "\(line): \(reason)")
         }
         for line in ["\"$(git rev-parse --show-toplevel)/scripts/x.sh\" args", "$(git rev-parse --show-toplevel)/scripts/test.sh --filter X",
                      "\"$HOME/bin/tool\" x", "$EDITOR notes.md", "\"$TMPDIR/probe\" && echo ok", "$(brew --prefix)/bin/swiftlint",
-                     "x=1; $cmd arg", "=ls -l", "$(command -v swift) build", "`which swift` build", "./scripts/*.sh; git status"] {
+                     "x=1; $cmd arg", "=ls -l", "$(command -v swift) build", "`which swift` build", "./scripts/*.sh; git status",
+                     // The blind check's: an array's words aren't a command.
+                     "files=($(git ls-files '*.swift')); wc -l \"${files[@]}\"", "changed=( $(git log --format=%h -3) )",
+                     "args=(\"$a\" \"$b\"); git status", "files+=($(git ls-files)); echo ${#files}"] {
             #expect(try !guardRail.hookDenies(line, cwd: guardRail.root), "\(role)'s hook refuses: \(line)")
         }
         let reason = try #require(RefusedGit.refusal(in: "g=git; $g push origin main")?.reason)
@@ -196,5 +214,11 @@ struct RefusedGitFailsClosedTests {
         #expect(try !worker.hookDenies(many + "echo done", cwd: worker.root))
         #expect(try worker.hookDenies(many + "eval 'git push'", cwd: worker.root))
         #expect(try worker.hookDenies(many + "git $x", cwd: worker.root))
+        // The blind check's: many `-I` and a long word before a refused option cost their product to look through.
+        // Refused as too tangled, without looking (as slowly as it liked, `git -C` was refused; the hook's timeout wasn't).
+        let slow = "echo x | xargs " + String(repeating: "-IQ ", count: 20_000) + "git --namespace=" + String(repeating: "b", count: 200_000)
+            + " -C /other push"
+        #expect(RefusedGit.refusal(in: slow)?.reason.contains("too tangled") == true)
+        #expect(try worker.hookDenies("echo x | xargs -IQ -IR git --namespace=b -C /other push", cwd: worker.root))
     }
 }

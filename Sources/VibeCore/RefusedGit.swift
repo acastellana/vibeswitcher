@@ -25,16 +25,19 @@ import Foundation
 /// the same git run plainly is read, so a refusal costs a rewrite. That is text naming git (`names`: without its case,
 /// quotes and backslashes taken out) handed to another interpreter: a shell's `-c` string (`sh`/`bash`/`zsh -c '…'`,
 /// behind `xargs` or `find -exec` too), `eval`, `trap`, `watch`, `env -S`; text that isn't all on the line (a word of it
-/// made from an expansion, or a shell or `source`/`.` reading its input: a here-string, a here-document, a pipe,
-/// `/dev/stdin`, `<(…)`) on a line that names git anywhere. And a git whose option or command word the shell makes from
+/// made from an expansion or put in by `xargs` or `find`, or a shell or `source`/`.` reading its input: a here-string,
+/// a here-document, a pipe, `/dev/stdin`, `<(…)`, or any path when the command is given input) on a line that names
+/// git anywhere. And a git whose option or command word the shell makes from
 /// an expansion (`git $x …`, `git ${o:--C} x`, `git {push,x}`, `git pus?`, zsh's `git =x`), or that the program running
 /// it fills in (`xargs git`, `xargs -I% git % x`, `find -exec git {} \;`). And, on a line that names git, a program
-/// whose own name the shell makes from a variable, zsh's `=`, or a substitution alone (`g=git; $g push`, `=git push`,
-/// `$(echo git) push`; not a path built on one, `"$(git rev-parse --show-toplevel)/scripts/x.sh"`).
+/// whose own name the shell makes from a variable, braces, zsh's `=`, or a substitution alone (`g=git; $g push`,
+/// `command {git,push}`, `=git push`, `$(echo git) push`; not a path built on one, `"$(git rev-parse
+/// --show-toplevel)/scripts/x.sh"`).
 ///
 /// Not seen here, and so open: a file a shell runs or sources (`bash x.sh`, `source x`, which is how every script
 /// runs), and another language's interpreter or a program not listed that runs a command (`python3 -c`, `perl -e`,
-/// `osascript`, `script`, `ssh`); text that reaches git without naming it (`a=gi; ${a}t push`, `$'\x67it'`, base64);
+/// `osascript`, `script`, `ssh`); input a shell takes from further off (`… | { true; bash dev/stdin; }`, `zsh -c
+/// '. /dev/stdin' <<< …`); text that reaches git without naming it (`a=gi; ${a}t push`, `$'\x67it'`, base64);
 /// git's own programs by their path (`…/git-core/git-push`); an argument after git's command that the shell makes
 /// (`git checkout $b`: a rule reads it as written); a variable set another way (`read GIT_DIR` after `set -a`, a file
 /// sourced; `HOME` or `XDG_CONFIG_HOME` set on its own or exported, which every program reads, before a git); and a git
@@ -300,6 +303,8 @@ public enum RefusedGit {
         // words after the command's last.
         var filled = filled
         var appends = false
+        // xargs' input is the whole command of a wrapper after it (`xargs env`), not just words after a command.
+        var wrapped = false
         var index = 0
         while index < words.count {
             budget -= 1
@@ -329,6 +334,7 @@ public enum RefusedGit {
                 index += 1
             } else if let wrapper = wrappers[name] {
                 index += 1
+                wrapped = appends
                 // `env NAME=value git …` (and sudo's), each variable checked as one set before the command, and an
                 // option's value that sets one (`arch -arm64 -e GIT_DIR=x git …`, or attached, `-eGIT_DIR=x`).
                 while index < words.count, starts(words[index], with: "-") || ((name == "env" || name == "sudo") && assigned(words[index]) != nil) {
@@ -339,7 +345,8 @@ public enum RefusedGit {
                     if name == "env", let string = split(option) {
                         var text = command.from(index)
                         text.words[0] = string
-                        if let refusal = unread(by: "env -S", text, reads: false, named: named, budget: &budget) { return refusal }
+                        guard let fills = fills(text.words, appends: appends, filled, named: named, budget: &budget) else { return .unreadable(.tangled) }
+                        if let refusal = unread(by: "env -S", text, reads: fills, named: named, budget: &budget) { return refusal }
                     }
                     var values = [option]
                     if wrapper.valued.contains(option), index + 1 < words.count { values.append(words[index + 1]) }
@@ -362,7 +369,7 @@ public enum RefusedGit {
                 break
             }
         }
-        guard index < words.count else { return nil }
+        guard index < words.count else { return appends && wrapped && named ? .unreadable(.expanded("xargs")) : nil }
         let program = folded((words[index] as NSString).lastPathComponent)
         if exporters.contains(program) {
             // `export GIT_DIR=x`, `declare -x GIT_DIR`: refused whatever runs after it on the line.
@@ -408,23 +415,28 @@ public enum RefusedGit {
             }
             return nil
         }
-        if let refusal = handed(to: program, command.from(index + 1), named: named, budget: &budget) { return refusal }
+        if let refusal = handed(to: program, command.from(index + 1), appends: appends, filled: filled, named: named, budget: &budget) {
+            return refusal
+        }
         guard program == "git" else {
-            // The program's own name made by the shell (`g=git; $g push`, zsh's `=git push`, `$(echo git) push`) on a
-            // line that names git: it may be git. A path built on a substitution (`"$(git rev-parse
-            // --show-toplevel)/scripts/x.sh"`) is an everyday form, and the command inside it is read on its own.
+            // The program's own name made by the shell (`g=git; $g push`, zsh's `=git push`, `$(echo git) push`,
+            // `command {git,push}`) on a line that names git: it may be git. A path built on a substitution
+            // (`"$(git rev-parse --show-toplevel)/scripts/x.sh"`) is an everyday form, and the command inside it is
+            // read on its own. An array's words aren't run (`files=($(git ls-files))`).
             let how = command.made[index]
-            let made = how.contains(.variable) || how == .substitution || (how.contains(.pattern) && starts(words[index], with: "="))
-            return named && made ? .unreadable(.program(words[index])) : nil
+            let made = how.contains(.variable) || how == .substitution
+                || (how.contains(.pattern) && (starts(words[index], with: "=") || words[index].contains("{")))
+            return named && made && !command.array ? .unreadable(.program(words[index])) : nil
         }
         if let home { return .variable(home) }
         index += 1
         // git's own options, up to its command: the first word that isn't one. Each as written: one the shell makes
         // from an expansion (`git $x …`, `git ${o:--C} x`, `git {push,x}`, an option's value too) can't be read, nor
         // one the program running git fills in (`xargs -I% git % x`, `find -exec git {} \;`).
-        func unseen(_ at: Int) -> Bool {
-            budget -= filled.count
-            return command.made[at].expanded || filled.contains { words[at].contains($0) }
+        func unseen(_ at: Int) -> Refusal? {
+            if command.made[at].expanded { return .unreadable(.expanded(words[at])) }
+            guard let fills = fills([words[at]], appends: false, filled, named: true, budget: &budget) else { return .unreadable(.tangled) }
+            return fills ? .unreadable(.expanded(words[at])) : nil
         }
         while index < words.count {
             budget -= 1
@@ -432,9 +444,9 @@ public enum RefusedGit {
             let word = words[index]
             let option = starts(word, with: "-") && word != "-" && word != "--"
             if option, options.contains(where: { starts(word, with: $0) }) { return .option(word) }
-            if unseen(index) { return .unreadable(.expanded(word)) }
+            if let refusal = unseen(index) { return refusal }
             guard option else { break }
-            if valued.contains(word), index + 1 < words.count, unseen(index + 1) { return .unreadable(.expanded(words[index + 1])) }
+            if valued.contains(word), index + 1 < words.count, let refusal = unseen(index + 1) { return refusal }
             index += valued.contains(word) ? 2 : 1
         }
         // No command on the line: xargs' input is the command (`echo push | xargs git`).
@@ -458,23 +470,60 @@ public enum RefusedGit {
     static let evaluators: Set<String> = ["eval", "trap", "watch"]
 
     /// Why a command that hands text to another interpreter is refused, if it is: `program` (its name, without its
-    /// case) run with `arguments`. A shell or `source` given a file by a plain path isn't read here: the file isn't
-    /// on the line.
-    static func handed(to program: String, _ arguments: ShellWords.Command, named: Bool, budget: inout Int) -> Refusal? {
-        if evaluators.contains(program) { return unread(by: program, arguments, reads: false, named: named, budget: &budget) }
-        guard shells.contains(program) || sourcers.contains(program) else { return nil }
+    /// case) run with `arguments`, behind an xargs that `appends` its input's words or a program that replaces
+    /// `filled` in them. A shell or `source` given a file by a plain path isn't read here: the file isn't on the line.
+    static func handed(to program: String, _ arguments: ShellWords.Command, appends: Bool, filled: [String], named: Bool,
+                       budget: inout Int) -> Refusal? {
+        guard evaluators.contains(program) || shells.contains(program) || sourcers.contains(program) else { return nil }
+        // Words of its text that xargs or find put in aren't on the line.
+        guard let fills = fills(arguments.words, appends: appends, filled, named: named, budget: &budget) else { return .unreadable(.tangled) }
+        if evaluators.contains(program) { return unread(by: program, arguments, reads: fills, named: named, budget: &budget) }
+        guard let first = arguments.words.first else {
+            // A shell alone reads its input; `source` alone runs nothing.
+            return shells.contains(program) && named ? .unreadable(.handed(program)) : nil
+        }
         // A script's path, as written and nothing else (`bash scripts/test.sh --filter X`): not `/dev/stdin`, not
         // `<(…)`, not after an option (`bash -x …`, read as text handed over: a wider reading only refuses more).
-        if let first = arguments.words.first, arguments.made[0] == .text, !starts(first, with: "-"), !starts(first, with: "+"),
-           !starts(folded(first), with: "/dev/") {
-            return nil
+        // Given input on a line that names git, the path may be that input by another name (`//dev/stdin`).
+        if arguments.made[0] == .text, !starts(first, with: "-"), !starts(first, with: "+"), !starts(folded(first), with: "/dev/") {
+            return arguments.input && named ? .unreadable(.handed(program)) : nil
         }
-        // Without a `-c` (alone or in a cluster, `-lc`; fish's `--command`), a shell reads its commands from its
-        // input: a here-string, a here-document, a pipe.
-        let string = shells.contains(program) && arguments.words.contains {
-            starts($0, with: "--command") || (starts($0, with: "-") && !starts($0, with: "--") && $0.utf8.contains(UInt8(ascii: "c")))
+        // Without a `-c`, a shell reads its commands from its input: a here-string, a here-document, a pipe.
+        let string = shells.contains(program) && takesString(arguments.words)
+        return unread(by: program, arguments, reads: !string || fills, named: named, budget: &budget)
+    }
+
+    /// Whether a shell's options have a `-c` (alone or in a cluster, `-lc`; fish's `--command`): only its own options,
+    /// before `--` or its first operand (`bash -s -- -c` reads its input). An option's value isn't an operand (`-o
+    /// pipefail`, `--rcfile x`).
+    static func takesString(_ arguments: [String]) -> Bool {
+        var index = 0
+        while index < arguments.count {
+            let word = arguments[index]
+            guard word != "--", starts(word, with: "-") || starts(word, with: "+") else { return false }
+            if starts(word, with: "--") {
+                if starts(word, with: "--command") { return true }
+                index += ["--rcfile", "--init-file"].contains(word) ? 2 : 1
+            } else {
+                if starts(word, with: "-"), word.utf8.contains(UInt8(ascii: "c")) { return true }
+                index += word.utf8.last == UInt8(ascii: "o") || word.utf8.last == UInt8(ascii: "O") ? 2 : 1
+            }
         }
-        return unread(by: program, arguments, reads: !string, named: named, budget: &budget)
+        return false
+    }
+
+    /// Whether the program running a command puts text of its own in `words`: xargs' input after them (`appends`), or
+    /// in place of `filled` where a word has it (xargs' `-I`, find's `{}`). Asked only on a line that names git; nil
+    /// when looking costs more than `budget` has left (many `-I`, long words).
+    static func fills(_ words: [String], appends: Bool, _ filled: [String], named: Bool, budget: inout Int) -> Bool? {
+        guard named, !appends, !filled.isEmpty else { return named && appends }
+        let weight = filled.reduce(0) { $0 + $1.utf8.count }
+        for word in words {
+            budget -= word.utf8.count * weight + filled.count
+            guard budget >= 0 else { return nil }
+            if filled.contains(where: { word.contains($0) }) { return true }
+        }
+        return false
     }
 
     /// Text handed to `interpreter` in `arguments`: refused when it names git, and when it isn't all there to read
@@ -550,8 +599,14 @@ enum ShellWords {
     struct Command {
         var words: [String] = []
         var made: [Made] = []
+        /// Its input is given on the line: a pipe into it, a here-string, a here-document, a `<` redirection.
+        var input = false
+        /// The words in an array's parentheses (`a=(x y)`): read as a command, though the shell runs none.
+        var array = false
 
-        subscript(range: Range<Int>) -> Command { Command(words: Array(words[range]), made: Array(made[range])) }
+        subscript(range: Range<Int>) -> Command {
+            Command(words: Array(words[range]), made: Array(made[range]), input: input, array: array)
+        }
         /// The words from `index` on.
         func from(_ index: Int) -> Command { self[min(index, words.count)..<words.count] }
     }
@@ -605,7 +660,9 @@ enum ShellWords {
         }
 
         /// Reads commands until `terminator` (`)` of a subshell or `$(`, or a backtick) or the line's end; past it.
-        mutating func list(until terminator: Character?) {
+        /// `array`: the words of an array's parentheses; `input`: the list's commands take the input of the subshell
+        /// they're in.
+        mutating func list(until terminator: Character?, array: Bool = false, input inherited: Bool = false) {
             guard enter() else { return }
             // The word this list is read inside of (`a$(…)b`) keeps how it was made.
             let outer = made
@@ -614,7 +671,7 @@ enum ShellWords {
                 depth -= 1
                 made = outer
             }
-            var command = Command()
+            var command = Command(input: inherited, array: array)
             var word: String?
             var redirectTarget = false
             func endWord() {
@@ -631,8 +688,11 @@ enum ShellWords {
             }
             func endCommand() {
                 endWord()
-                if !command.words.isEmpty { commands.append(command) }
-                command = Command()
+                // A command not begun keeps the input a pipe before a line break gave it (`a |⏎ b`).
+                if !command.words.isEmpty {
+                    commands.append(command)
+                    command = Command(input: inherited, array: array)
+                }
                 redirectTarget = false
             }
             while let c = peek() {
@@ -652,15 +712,24 @@ enum ShellWords {
                     made = []
                 case ";", "&", "|":
                     endCommand()
-                    i += 1
+                    if c == "|", peek(1) != "|" {
+                        // A pipe (`|`, `|&`): the next command reads what the last one wrote.
+                        i += peek(1) == "&" ? 2 : 1
+                        command.input = true
+                    } else {
+                        i += c == "|" ? 2 : 1
+                    }
                 case "(" where word == nil && isArithmetic():
                     // An arithmetic command, `((x<<2))`: its `<<` is a shift, and only its substitutions run.
                     word = arithmetic()
                 case "(":
-                    // A subshell (or an array's parentheses: its words are then a command of their own, which is harmless).
+                    // A subshell, which takes the input of the command it's in place of; or an array's parentheses
+                    // (`a=(x y)`, `a+=(x)`), whose words are then a command of their own, marked as one that isn't run.
+                    let array = word?.hasSuffix("=") == true
+                    let input = command.input
                     endCommand()
                     i += 1
-                    list(until: ")")
+                    list(until: ")", array: array, input: input && !array)
                 case ")":
                     endCommand()
                     i += 1
@@ -712,6 +781,7 @@ enum ShellWords {
                 case "<" where peek(1) == "<" && peek(2) != "<":
                     endWord()
                     i += 2
+                    command.input = true
                     hereDocument()
                 case "<", ">":
                     // A file descriptor's number before it isn't a word; the next word is the target.
@@ -730,6 +800,7 @@ enum ShellWords {
                         made.insert(.substitution)
                         continue
                     }
+                    if c == "<" { command.input = true }
                     while let d = peek(), d == "<" || d == ">" || d == "|" { i += 1 }
                     if peek() == "&" {
                         i += 1
