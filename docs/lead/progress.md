@@ -3756,3 +3756,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 11:43 Merged folded-update-line-its: Folded update line: its red dot clears once the problem it flagged is dealt with (build 5978f0ab2ede)
 - 2026-11-18 11:43 Automatically (auto_advance): Merged folded-update-line-its (Folded update line: its red dot clears once the problem it flagged is dealt with) into main at e1adbde1, on its passing audit and the full test run.
 - 2026-11-18 11:43 Automatically (auto_advance): Cleaned up folded-update-line-its (freed 2.6 GB of build output and temporary folders). It stays done.
+- 2026-11-18 11:53 Released lead-brief-merge-error's worker (idle since its done report on 1900961c) while its audit runs
+- 2026-11-18 11:53 Automatically (auto_advance): Started the audit of lead-brief-merge-error at 1900961c (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-18 11:53 Started a worker on git-guard-fails-closed
