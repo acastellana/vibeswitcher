@@ -375,3 +375,7 @@ Measured on the week to 2026-11-18, with the handover in place: a heartbeat sent
 
 About 160 probed runs caught the signal once, before the sharper probe existed (roughly 1% of early-suite runs), while merges' full runs under load hit it far more often: 12 of the week's 37 flakes and 3 of today's merges. More hunting costs heavy slots for little chance; an always-on probe costs nothing per run and catches it where it actually happens.
 
+## 2026-11-18 19:57:48 Tasks whose checks run VibeSwitcher's host or terminal tests (they bind Unix sockets and open ptys: VibeHostTests, the terminal and input suites) go to a Claude worker (agent: claude), never auto or Codex. Codex's sandbox refuses `bind` (Operation not permitted), so it can't show a host test red or green, nor run its load proof.
+
+2026-11-18: flaky-host-tests-turn went to Codex by agent auto while Claude's weekly overage limit was reached; its baseline load run failed 36 issues a run on `bind: Operation not permitted` before reaching the code under test. Same shape as the 2026-11-11 rule for sandbox-screenshot UI tasks.
+
