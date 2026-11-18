@@ -93,6 +93,14 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// touching no sensitive or strict path and not flagged by the risk check, merges as review none that round
     /// (`small_task_min:`; 0: off; see `LeadSmallTask`).
     public var smallTaskMin = LeadSmallTask.defaultMinutes
+    /// A lead idle this many minutes whose context is at least `handoverTokens` hands over to a fresh lead
+    /// (`handover_idle_min:`; 0: off; under `LeadRotation.minimumIdleMinutes` reads as that; see `LeadRotation.idle`):
+    /// its next wake starts small instead of carrying, or re-sending, the old context. Measured defaults
+    /// (docs/process/reviews/cache-clock-and-mods.md): 50 minutes, while the 1-hour prompt cache is still warm.
+    public var handoverIdleMinutes = LeadRotation.defaultIdleMinutes
+    /// The context, in tokens, from which an idle lead hands over (`handover_tokens:`; 0: off; under
+    /// `LeadRotation.minimumTokens` reads as that, above what a fresh lead starts with). Measured default: 150000.
+    public var handoverTokens = LeadRotation.defaultTokens
     /// This project's lead gets VibeSwitcher's own health digests (`watch_app_logs:`, see `AppHealth`): its freezes,
     /// crashes and error lines, and a daily trend. Off for every project but the one that builds VibeSwitcher.
     public var watchAppLogs = false
@@ -178,6 +186,8 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "risk_model": workflow.riskModel = flag(value) ?? true
                 case "audit_sample_percent": workflow.auditSamplePercent = Int(value).map { min(100, max(0, $0)) } ?? LeadAuditSample.defaultPercent
                 case "small_task_min": workflow.smallTaskMin = Int(value).map { max(0, $0) } ?? LeadSmallTask.defaultMinutes
+                case "handover_idle_min": workflow.handoverIdleMinutes = Int(value).map(LeadRotation.idleMinutes) ?? LeadRotation.defaultIdleMinutes
+                case "handover_tokens": workflow.handoverTokens = Int(value).map(LeadRotation.tokens) ?? LeadRotation.defaultTokens
                 case "watch_app_logs": workflow.watchAppLogs = flag(value) ?? false
                 default: break
                 }
@@ -512,7 +522,8 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "lead_model", "lead_advisor", "worker_advisor", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
-                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "watch_app_logs", "agent_default"]
+                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "watch_app_logs", "agent_default",
+                                      "handover_idle_min", "handover_tokens"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -715,6 +726,14 @@ public struct LeadWorkflow: Equatable, Sendable {
     # audit_reason), merges as review none that round: its tests, the risk check and the audit sample are its checks.
     # 0: off. Empty: 30.
     small_task_min: 30
+    # A lead idle this many minutes with a context of at least handover_tokens hands over to a fresh lead (a handover
+    # note, the board, the decisions and its last turns), so its next wake doesn't carry or re-send the old context.
+    # Never while its turn runs or a question to you is under 10 minutes old, nor with Settings' lead rotation at never.
+    # 0: off. Empty: 50 (under 10 reads as 10).
+    handover_idle_min: 50
+    # The context, in tokens, from which an idle lead hands over. 0: off. Empty: 150000 (under 100000 reads as 100000:
+    # a fresh lead starts near 80000).
+    handover_tokens: 150000
     ---
     Notes for the lead: conventions, priorities, what not to touch. The lead reads this at the start of every session.
     """

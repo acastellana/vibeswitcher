@@ -571,10 +571,13 @@ final class LeadController: ObservableObject {
     private var rotationLooking: Set<String> = []
     private var rotationAsked: [String: (session: UUID, at: Date, reason: String, marker: String)] = [:]
     private var rotationRetry: [String: Date] = [:]
+    /// Idle handovers tried per lead session since the user last typed to it (`LeadRotation.maxIdleAttempts`).
+    private var idleAttempts: [UUID: Int] = [:]
     private let rotationLaunched = Date()
 
     func noteLeadInput(_ id: UUID) {
         rotationInput[id] = rotationNow()
+        idleAttempts[id] = nil
         rotationAsked = rotationAsked.filter { $0.value.session != id }
         rotationCommits[id]?.cancel()
         rotationGeneration[id, default: 0] += 1
@@ -2192,8 +2195,9 @@ final class LeadController: ObservableObject {
         let observer = rotationObserver ?? LeadObserver(home: home)
         let inbox = inbox, vault = vault
         let context = LeadContextStore(root: inbox, home: home)
-        reads.async({ _ -> (path: String, log: ChatLog, reason: String, gate: FileLock?)? in
-            let board = BoardStore(root: root).load()
+        let idleSpent = idleAttempts[session.id, default: 0] >= LeadRotation.maxIdleAttempts
+        reads.async({ _ -> (path: String, log: ChatLog, reason: String, idle: Bool, cold: Bool, tail: LeadRotation.Tail?, gate: FileLock?)? in
+            let store = BoardStore(root: root), board = store.load()
             guard board.leadSession == session.id.uuidString,
                   vault.current(.lead, root: root, task: nil)?.session == session.id.uuidString,
                   let agent = LeadHandover.named(board),
@@ -2202,10 +2206,21 @@ final class LeadController: ObservableObject {
                   LeadRotation.quiet(activity: observer.reading(session, agentPid: agent.pid).activity,
                                      queued: !SteerInbox.pending(tty: agent.tty, root: inbox).filter { $0.agentPid == agent.pid }.isEmpty,
                                      lastInput: lastInput, now: now),
-                  let reason = LeadRotation.reason(mode: mode, started: session.startedAt, percent: context.percent(transcript: path, started: session.startedAt), now: now)
+                  // The user's conversation is never cut mid-exchange: a question just asked waits for its answer.
+                  !LeadRotation.conversationOpen(openQuestionsAskedAt: board.openQuestions.map(\.askedAt),
+                                                 asking: log.pendingQuestions != nil, now: now)
             else { return nil }
+            let tail = LeadRotation.tail(path: path)
+            let workflow = LeadWorkflow.load(from: store.folder + "/workflow.md")
+            // Once the note is asked for, the reason stands: the note's own reply ends the idle the rule measured.
+            let scheduled = (asked?.session == session.id ? asked?.reason : nil)
+                ?? LeadRotation.reason(mode: mode, started: session.startedAt, percent: context.percent(transcript: path, started: session.startedAt), now: now)
+            let idle = scheduled == nil && !idleSpent ? LeadRotation.idle(tail: tail, idleMinutes: workflow.handoverIdleMinutes, tokens: workflow.handoverTokens, now: now) : nil
+            guard let reason = scheduled ?? idle else { return nil }
             guard let gate = FileLock.attempt(LeadRotation.gate(root)) else { return nil }
-            return (path, log, reason, gate)
+            // An idle handover past the cache's lifetime writes its own note: asking would re-send the whole old context.
+            // The scheduled rotations ask, as before.
+            return (path, log, reason, idle != nil, idle != nil && LeadRotation.cold(tail: tail, now: now), tail, gate)
         }) { [weak self] reading in
             guard let self else { reading?.gate?.release(); return }
             defer { self.rotationEvent("checked") }
@@ -2216,6 +2231,14 @@ final class LeadController: ObservableObject {
             }
             guard generation == self.rotationVersion(root: root, session: session.id), self.rotationMode() == mode, !self.rotationUserQueued(session.id),
                   self.held[root]?.isEmpty != false else { reading.gate?.release(); return }
+            if asked == nil, reading.idle { self.idleAttempts[session.id, default: 0] += 1 }
+            if asked == nil, reading.cold {
+                self.startingLeads.insert(root)
+                self.launchRotation(root: root, old: session, path: reading.path, note: LeadRotation.coldNote(reading.tail, now: now),
+                                    reason: reading.reason + "; its prompt cache had expired, so VibeSwitcher wrote the note",
+                                    gate: reading.gate!, generation: generation)
+                return
+            }
             guard let asked, asked.session == session.id else {
                 reading.gate?.release()
                 let marker = "VIBESWITCHER_HANDOVER_" + UUID().uuidString
@@ -2340,6 +2363,8 @@ final class LeadController: ObservableObject {
                             throw error
                         }
                         let waiting = LeadHandover.takeWaiting(for: agent, root: inbox)
+                        do { try store.appendProgress("Handed the lead over to a fresh session: \(reason)") }
+                        catch { Breadcrumbs.shared.note("lead handover progress line not written: \(error)") }
                         return (true, waiting, false)
                     } catch {
                         Breadcrumbs.shared.note("scheduled rotation cancelled: \(error)")
@@ -2368,7 +2393,7 @@ final class LeadController: ObservableObject {
                         self.replacing[old.id] = root; self.replacements += 1
                         self.holders[root] = fresh.id
                         self.markReplaced(holders: self.holders)
-                        let notice = "Started a fresh lead session (\(reason))"
+                        let notice = LeadRotation.notice(reason: reason, at: self.rotationNow())
                         self.rotationNotices[fresh.id] = notice
                         self.rotationNotices[old.id] = notice
                         if self.answersTrust { self.answerTrust(fresh.id, folder: root) }

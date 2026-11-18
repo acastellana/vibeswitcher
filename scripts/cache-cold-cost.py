@@ -10,6 +10,7 @@ read into a variable, kept or printed.
     python3 -I scripts/cache-cold-cost.py              # last 7 days, markdown tables
     python3 -I scripts/cache-cold-cost.py --days 14 --json
     python3 -I scripts/cache-cold-cost.py --until "2026-11-18 12:00" --events   # a fixed window, each re-send listed
+    python3 -I scripts/cache-cold-cost.py --keep-warm     # the lead's cold wakes one by one, and keep-warm only while work is in flight
 
 What it takes from a transcript line, and nothing else:
 - its `type`, `timestamp`, and for a session's name `customTitle` / `agentName`;
@@ -55,6 +56,8 @@ import sys
 import time
 
 PING_EVERY_S = 55 * 60      # a keep-warm request this often holds a 1 h cache
+ACTIVE_WINDOWS = [600, 1800, 3300]   # a worker or verifier request this recent (or a merge's run) is work in flight
+HANDOVER_AT = 150_000       # the handover threshold --keep-warm assumes (handover_tokens' default)
 ROTATE_IDLE_S = 50 * 60     # the idle at which a large lead would hand over, its cache still warm
 FRESH_LEAD = 80_000         # a fresh lead's context once it has read its handover (its first prompt is ~58k)
 REPLACED_S = 600            # a worker started this soon after its task's audit ended replaces a released one
@@ -382,12 +385,113 @@ def median(xs):
     return xs[len(xs) // 2] if xs else 0
 
 
+def keep_warm_report(sessions, tasks, audits, spans, idles, compactions, now, table, price_as, day):
+    """The lead's cold wakes one by one, and a keep-warm request only while work is in flight: what it would have
+    avoided and cost, with no handover and with the handover at HANDOVER_AT (after which the old context is gone)."""
+    busy = sorted(r["t"] for s in sessions if s["role"] in ("worker", "verifier") and not s["sub"]
+                  for line, rs in s["lines"].items() if not line.endswith("|advisor") for r in rs)
+    merges = [t["merge"] for t in tasks.values() if t.get("merge")]
+    opened = [(float(t["started"]), float(t["ended"]) if t.get("ended") else now) for t in tasks.values() if t.get("started")]
+    asleep = lambda t: spans is not None and any(a <= t < b for a, b in spans)
+
+    def working(t, window):
+        if window is None:
+            return any(a <= t < b for a, b in opened)
+        i = bisect.bisect_left(busy, t - window)
+        return (i < len(busy) and busy[i] <= t) or any(a <= t < b for a, b in merges)
+
+    def dollars(model):
+        """(one heartbeat's dollars per context token plus its fixed part, one cold re-send's extra per token)."""
+        price = price_of(model, table, price_as) or {"input": 0.0, "cacheRead": 0.0}
+        inp, read = price["input"] / 1e6, price["cacheRead"] / 1e6
+        # A heartbeat reads the context, writes its own ~200 tokens to the 1 h bucket and gets ~30 output tokens back.
+        return read, 200 * 2 * inp + 30 * price.get("output", 5 * price["input"]) / 1e6, 2 * inp - read
+
+    def keep(start, end, window, cap):
+        """(requests sent, kept warm, why it stopped)."""
+        last, sent = start, 0
+        while True:
+            if end <= last + 3600:
+                return sent, sent > 0, "kept warm" if sent else "warm anyway"
+            due = last + PING_EVERY_S
+            if asleep(due):
+                return sent, False, "asleep at the request's time"
+            if not working(due, window):
+                return sent, False, "nothing in flight"
+            if sent >= cap:
+                return sent, False, "gave up at the cap"
+            sent += 1
+            last = due
+
+    cold = [g for g in idles if g["t"] - g["prev"] > 3600]
+    print()
+    print(f"### The lead's cold wakes, and what was in flight {PING_EVERY_S // 60} min into the idle")
+    print("| wake | gap | of it asleep | context before | re-sent | cause | compacted in the gap | handed over at "
+          f"{count(HANDOVER_AT)} | a worker, verifier or merge active (in the last " + " / ".join(f"{w // 60}" for w in ACTIVE_WINDOWS)
+          + f" min; any task open) | keep-warm while one was active in the last {ACTIVE_WINDOWS[0] // 60} min, no handover |")
+    print("| --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |")
+    tally = collections.Counter()
+    for g in cold:
+        gap = g["t"] - g["prev"]
+        compacted = any(g["prev"] < c < g["t"] for c in compactions)
+        flight = "/".join("yes" if working(g["prev"] + PING_EVERY_S, w) else "no" for w in ACTIVE_WINDOWS + [None])
+        sent, _kept, why = keep(g["prev"], g["t"], ACTIVE_WINDOWS[0], 24)
+        tally[why] += 1
+        print(f"| {day(g['t'])} | {gap / 3600:.1f} h | {pct(g['slept'], gap)} | {count(g['before'])} | {count(g['resent'])} | "
+              f"{g['cause'].split(' (')[0]} | {'yes' if compacted else ''} | {'yes' if g['handover'] else ''} | {flight} | "
+              f"{why}{f' ({sent} sent)' if sent else ''} |")
+    print()
+    print(f"Of the {len(cold)} cold wakes: " + ", ".join(f"{n} {why}" for why, n in tally.most_common()) + ".")
+    print()
+    print(f"### Keep-warm only while work is in flight: a request every {PING_EVERY_S // 60} min of the lead's idle, not through sleep")
+    print("| work in flight means | with the handover | at most | cold re-sends avoided | re-sent tokens avoided | requests | tokens they read | est. saved | est. spent |")
+    print("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    labels = [f"a worker, verifier or merge active in the last {w // 60} min" for w in ACTIVE_WINDOWS] + ["any task open on the board"]
+    for label, window in zip(labels, ACTIVE_WINDOWS + [None]):
+        for handover in (False, True):
+            for cap in (4, 24):
+                avoided = tokens_saved = sent = read_tokens = 0
+                saved = spent = 0.0
+                for g in idles:
+                    if handover and g["handover"]:
+                        n, start, was = FRESH_LEAD, g["prev"] + ROTATE_IDLE_S, FRESH_LEAD   # the fresh lead, from minute 50
+                    elif handover:
+                        n = g["carried"] if g["carried"] is not None else g["before"]
+                        start, was = g["prev"], min(g["resent"], n)
+                    else:
+                        n, start, was = g["before"], g["prev"], g["resent"]
+                    per_token, fixed, extra = dollars(g["model"])
+                    k, kept, _why = keep(start, g["t"], window, cap)
+                    sent += k
+                    read_tokens += k * n
+                    spent += k * (n * per_token + fixed)
+                    if kept and g["t"] - start > 3600:
+                        avoided += 1
+                        tokens_saved += was
+                        saved += was * extra
+                print(f"| {label} | {'yes' if handover else 'no'} | {cap} | {avoided} | {count(tokens_saved)} | {sent} | {count(read_tokens)} | "
+                      f"${saved:,.2f} | ${spent:,.2f} |")
+    print()
+    print("### Break-even: one heartbeat against one cold re-send")
+    print("| context | model | one heartbeat (reads it) | one cold re-send (writes it) | of it extra over a warm read | heartbeats per re-send | idle hours of heartbeats |")
+    print("| ---: | --- | ---: | ---: | ---: | ---: | ---: |")
+    for model in sorted({g["model"] for g in idles}):
+        per_token, fixed, extra = dollars(model)
+        for n in (100_000, 150_000, 218_000, 300_000):
+            beat, resend = n * per_token + fixed, n * extra
+            if beat > 0:
+                print(f"| {count(n)} | {model} | ${beat:.3f} | ${n * (extra + per_token):.2f} | ${resend:.2f} | {resend / beat:.0f} | "
+                      f"{resend / beat * PING_EVERY_S / 3600:.0f} h |")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--days", type=float, default=7)
     ap.add_argument("--until", metavar="'YYYY-MM-DD HH:MM'", help="the window's end, local time (default: now)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--events", action="store_true", help="also list each cold re-send: when, whose, its gap and context")
+    ap.add_argument("--keep-warm", action="store_true",
+                    help="also list the lead's cold wakes with what was in flight, and keep-warm only while work is in flight, with and without the handover")
     ap.add_argument("--price-as", action="append", default=[], metavar="MODEL=PRICED",
                     help="take MODEL's rates from PRICED (a model the Receipts table has), for a model it has no price for")
     args = ap.parse_args()
@@ -455,6 +559,7 @@ def main():
     rotate_at = [100_000, 150_000, 200_000]
     rotate = {n: zero() for n in rotate_at}
     caps = [1, 2, 4, 8, 24]
+    lead_idles = []        # the lead's idles past ROTATE_IDLE_S, for --keep-warm
     buckets = [(0, 300, "≤ 5 min"), (300, 1800, "5–30 min"), (1800, 3300, "30–55 min"), (3300, 3600, "55–60 min"),
                (3600, 4200, "60–70 min"), (4200, 7200, "70–120 min"), (7200, 1e12, "> 2 h")]
 
@@ -484,6 +589,9 @@ def main():
                         if shrank:
                             offsets[n] = 0.0            # nothing left for a handover to save here
                         carried = before_ - offsets[n]
+                        if n == HANDOVER_AT:
+                            r["handover_carried"] = carried
+                            r["handover"] = bool(not shrank and gap_ > ROTATE_IDLE_S and carried >= n)
                         if not shrank and gap_ > ROTATE_IDLE_S and carried >= n:
                             ro["rotations"] += 1
                             awake = spans is None or overlap(prev["t"], prev["t"] + ROTATE_IDLE_S, spans) < 60
@@ -576,6 +684,12 @@ def main():
                         t["compact_n" if shrank else "other_miss_n"] += 1
                 if r["cw1h"] > 0 or r["cw5m"] > 0:
                     ttl = 3600 if r["cw1h"] >= r["cw5m"] else 300
+                if g == "lead" and prev is not None and counted and r["t"] - prev["t"] > ROTATE_IDLE_S:
+                    lead_idles.append({"prev": prev["t"], "t": r["t"], "before": prev["in"] + prev["read"] + prev["cw"],
+                                       "resent": min(r["cw"], max(0, prev["in"] + prev["read"] + prev["cw"] - r["read"])),
+                                       "model": r["model"], "carried": r.get("handover_carried"), "handover": r.get("handover", False),
+                                       "cause": cause(s["role"], s["slug"], sub, prev["t"], r["t"], ttl or 3600, r["origin"], s["errors"], ctx),
+                                       "slept": overlap(prev["t"], r["t"], spans) if spans else 0})
                 prev = r
         for c in s["compactions"]:
             if since <= c["t"] <= now and not s["sub"]:
@@ -731,6 +845,9 @@ def main():
             print(f"| {day(e['at'])} | {e['group']} | {e['task']} | {e['cause']} | {e['gap'] / 3600:.1f} h | {pct(e['slept'], e['gap'])} | "
                   f"{count(e['context'])} | {count(e['resent'])} | {e['model']} |")
         print()
+    if args.keep_warm:
+        keep_warm_report(sessions, tasks, audits, spans, lead_idles, compactions=[c["t"] for s in sessions if s["role"] == "lead" and not s["sub"]
+                                                                                for c in s["compactions"]], now=now, table=table, price_as=price_as, day=day)
     print("Models by tokens: " + ", ".join(f"{m} {count(v)}" for m, v in sorted(models.items(), key=lambda x: -x[1])) + ".")
 
 

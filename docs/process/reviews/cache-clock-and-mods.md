@@ -461,3 +461,213 @@ Each is outside this task's boundaries. None was changed.
   proposal says which part is which.
 - Usage-limit stops made by VibeSwitcher itself, and the split between the user's typing and the app's notices, are not
   visible in what the script reads.
+
+## Follow-up: the handover built, keep-warm measured and not built (2026-11-18)
+
+Written by the worker of task lead-context-cost-hand. The user asked on 2026-11-18 whether a heartbeat that keeps the
+lead's cache fresh makes sense. This uses the same window and prices as section 1: the 7 days to 2026-11-18 11:45, with
+Fable 5.2 priced as Fable 5.1. Only usage numbers and timestamps were read. To reproduce:
+
+```sh
+python3 -I scripts/cache-cold-cost.py --until "2026-11-18 11:45" --price-as claude-fable-5-2=claude-fable-5-1 --keep-warm
+```
+
+`--keep-warm` adds the three tables below to the script's output.
+
+"Work in flight" is what VibeSwitcher itself would go by (`KeepAwake.working`): a worker or verifier working, or the lead
+merging. The transcripts can only approximate it, as a worker's or verifier's request in the last 10, 30 or 55 minutes,
+or a merge's test run. The loosest reading, any task open on the board, also counts tasks that were only waiting on the
+user's answer.
+
+**One difference from section 1.** The Mac's power log (`pmset -g log`) no longer reaches back to the morning of 11-11.
+So this run sees less sleep in the first cold wake's gap (11-11 14:08) and calls it typed in, where section 1 called it
+a Mac sleep. That leaves 10 sleep-caused cold wakes here instead of 11. Every other number in section 1 stands.
+
+### In short
+
+**Handover: built.** At 150k tokens and 50 idle minutes it would have run 8 times in the week.
+
+- It saves about 81M cache-read tokens. The script's estimate is $27 and 0.5M cache-write tokens, but that overstates it.
+  In 5 of the 8 handovers (11-12 08:24, 11-14 07:38, 11-15 07:46, 11-15 11:14, 11-18 03:37), the wake came over an hour
+  after the fresh lead started. Its own ~80k cache had expired by then and was written again: 0.4M tokens the
+  simulation doesn't charge, about $6 at these prices. So it saves about $21, and the cache writes roughly break even.
+  The 81M reads are the saving.
+- It spends about $0.43 on the 5 notes the old lead writes while its cache is still warm, reading 1.0M tokens.
+- It also pays for 8 fresh starts of about 80k tokens each, 0.64M in all, already netted in the 0.5M.
+
+**Keep-warm: settled, not built (the lead agreed, 2026-11-18).** Sent only while work is in flight, a heartbeat would
+have kept 2 of the 27 cold lead wakes warm.
+
+- **Dollars:** it pays 12 to 14 times what it costs. With the handover running it saves $2.34 a week and spends $0.17. Without the
+  handover it saves $6.72 and spends $0.54 to $0.71.
+- **Tokens:** it loses. Its requests read about 0.6M tokens to save 0.17M, 3 to 4 times more than they save. The plan's
+  limits count tokens, and how they weigh a read against a write isn't known (section 2).
+- **An injected turn:** each heartbeat is a turn typed into the lead's conversation, which the user reads, and it resets
+  the idle that the handover and Claude Code's compaction go by.
+- **Upper bound:** counting any open task as work in flight, it would have saved $13.75 for $2.17, reading 8.4M tokens
+  to save 1.2M.
+
+At about $2 a week in API dollars, paid for in more tokens than it saves and with a turn in the user's chat, it doesn't
+pay.
+
+**What would change the answer:**
+
+- Usage billed in dollars rather than counted against token limits. Then the dollar ratio decides, though the
+  sum stays a few dollars a week.
+- Many more cold wakes with work in flight, for example overnight batches with workers running past the hour while the
+  lead idles. A week with dozens would be worth measuring again with this command.
+- A way to refresh the cache that isn't a turn in the conversation.
+
+**Claude Code's idle compaction.** A heartbeat sent after it refreshes only the summary. One sent before it would by
+inference stop the compaction and keep the large context. The handover at minute 50 comes before both.
+
+### Break-even: one heartbeat against one cold re-send
+
+A heartbeat reads the context N from the cache, writes its own ~200 tokens to the 1-hour bucket, and gets ~30 tokens back.
+A cold re-send writes N to the 1-hour bucket (2× input) instead of reading it. The wake that follows pays the read either
+way, so the "extra" column is what keep-warm can save per re-send.
+
+| context | model | one heartbeat (reads it) | one cold re-send (writes it) | of it extra over a warm read | heartbeats per re-send | idle hours of heartbeats |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 100k | claude-fable-5-2 | $0.030 | $2.00 | $1.98 | 65 | 59 h |
+| 150k | claude-fable-5-2 | $0.043 | $3.00 | $2.96 | 69 | 63 h |
+| 218k | claude-fable-5-2 | $0.060 | $4.36 | $4.31 | 72 | 66 h |
+| 300k | claude-fable-5-2 | $0.081 | $6.00 | $5.93 | 74 | 67 h |
+| 100k | claude-opus-5-5 | $0.022 | $0.80 | $0.78 | 35 | 32 h |
+| 150k | claude-opus-5-5 | $0.032 | $1.20 | $1.17 | 36 | 33 h |
+| 218k | claude-opus-5-5 | $0.046 | $1.74 | $1.70 | 37 | 34 h |
+| 300k | claude-opus-5-5 | $0.062 | $2.40 | $2.34 | 38 | 34 h |
+
+In dollars a heartbeat costs 1/35 to 1/74 of a re-send, so 32 to 67 idle hours of heartbeats equal one cold re-send. In
+tokens the two are equal: a heartbeat reads N tokens, and a re-send writes N.
+
+### Each of the week's 27 cold lead wakes
+
+What the columns mean:
+
+- **Compacted:** Claude Code compacted the lead in the gap.
+- **Handed over:** the 150k / 50-minute handover would have run. The context counted is the one left after the
+  simulation's earlier handovers.
+- **In flight:** whether work was in flight 55 minutes into the idle, when a heartbeat would be sent.
+- **Last column:** what keep-warm would have done, with no handover.
+
+| wake | gap | of it asleep | context before | re-sent | cause | compacted in the gap | handed over at 150k | a worker, verifier or merge active (in the last 10 / 30 / 55 min; any task open) | keep-warm while one was active in the last 10 min, no handover |
+| --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |
+| 2026-11-11 14:08 | 1.4 h | 2.7% | 106k | 106k | typed in after an idle |  |  | no/no/no/yes | nothing in flight |
+| 2026-11-11 15:32 | 1.1 h | 51.0% | 108k | 108k | Mac sleep |  |  | no/no/no/yes | nothing in flight |
+| 2026-11-11 18:33 | 3.0 h | 16.3% | 108k | 108k | typed in after an idle |  |  | no/no/no/yes | nothing in flight |
+| 2026-11-11 22:29 | 1.8 h | 0.0% | 134k | 134k | typed in after an idle |  |  | no/no/no/yes | nothing in flight |
+| 2026-11-12 08:24 | 7.7 h | 0.0% | 175k | 175k | typed in after an idle |  | yes | no/no/no/yes | nothing in flight |
+| 2026-11-12 21:26 | 1.7 h | 30.9% | 196k | 196k | typed in after an idle |  | yes | no/no/no/yes | nothing in flight |
+| 2026-11-13 00:43 | 3.3 h | 47.5% | 197k | 197k | typed in after an idle |  |  | no/no/no/yes | nothing in flight |
+| 2026-11-13 08:51 | 8.1 h | 89.0% | 198k | 198k | Mac sleep |  |  | no/no/no/yes | asleep at the request's time |
+| 2026-11-13 10:12 | 1.3 h | 43.0% | 202k | 4k | Mac sleep |  |  | no/no/no/yes | asleep at the request's time |
+| 2026-11-13 16:57 | 6.7 h | 8.8% | 205k | 72k | typed in after an idle | yes |  | no/no/no/yes | nothing in flight |
+| 2026-11-13 18:30 | 1.5 h | 0.0% | 76k | 76k | typed in after an idle |  |  | no/no/no/yes | nothing in flight |
+| 2026-11-14 07:38 | 6.2 h | 20.2% | 233k | 233k | woken by the user's answer to a question |  | yes | no/no/no/yes | nothing in flight |
+| 2026-11-14 09:57 | 2.3 h | 4.7% | 238k | 238k | typed in after an idle |  |  | yes/yes/yes/yes | kept warm (2 sent) |
+| 2026-11-15 07:46 | 20.6 h | 40.5% | 330k | 321k | typed in after an idle |  | yes | yes/yes/yes/yes | nothing in flight (5 sent) |
+| 2026-11-15 11:14 | 2.2 h | 91.9% | 435k | 435k | Mac sleep |  | yes | yes/yes/yes/yes | asleep at the request's time |
+| 2026-11-15 19:21 | 5.9 h | 0.0% | 457k | 74k | typed in after an idle | yes |  | no/no/no/yes | nothing in flight |
+| 2026-11-16 01:37 | 1.1 h | 92.6% | 223k | 0 | Mac sleep |  | yes | yes/yes/yes/yes | asleep at the request's time |
+| 2026-11-16 04:37 | 1.2 h | 99.4% | 230k | 0 | Mac sleep |  |  | yes/yes/yes/yes | asleep at the request's time |
+| 2026-11-16 05:38 | 1.0 h | 99.3% | 231k | 0 | Mac sleep |  |  | yes/yes/yes/yes | asleep at the request's time |
+| 2026-11-16 13:18 | 1.0 h | 93.7% | 339k | 339k | Mac sleep |  | yes | no/no/no/yes | asleep at the request's time |
+| 2026-11-16 16:33 | 2.2 h | 0.0% | 345k | 74k | typed in after an idle | yes |  | no/no/no/yes | nothing in flight |
+| 2026-11-16 23:38 | 7.1 h | 0.0% | 76k | 48k | typed in after an idle |  |  | no/no/no/yes | nothing in flight |
+| 2026-11-17 07:53 | 5.0 h | 99.0% | 119k | 92k | Mac sleep |  |  | no/no/no/yes | asleep at the request's time |
+| 2026-11-17 15:30 | 1.7 h | 0.0% | 218k | 38k | typed in after an idle | yes |  | no/no/no/yes | nothing in flight |
+| 2026-11-18 03:37 | 4.1 h | 49.1% | 254k | 0 | typed in after an idle |  | yes | no/no/no/yes | nothing in flight |
+| 2026-11-18 07:48 | 3.6 h | 94.0% | 256k | 256k | Mac sleep |  |  | no/no/no/yes | asleep at the request's time |
+| 2026-11-18 09:04 | 1.3 h | 0.0% | 260k | 260k | typed in after an idle |  |  | yes/yes/yes/yes | kept warm (1 sent) |
+
+Of the 27 cold wakes: 16 nothing in flight, 9 asleep at the request's time, 2 kept warm.
+
+- **Asleep:** a heartbeat can't be sent from a sleeping Mac, so these can't be helped. They are 9 of the 10
+  sleep-caused wakes. The 10th, 11-11 15:32, had no work in flight.
+- **Nothing in flight:** the team was idle, mostly waiting on the user. In one of these (11-15 07:46), 5 heartbeats would
+  have gone out while work ran. They stopped when the work did, and the wake came cold anyway.
+- **Kept warm:** 11-14 09:57 and 11-18 09:04.
+
+The 10-, 30- and 55-minute windows agree on every wake. Only the loosest reading, any task open, says yes for all 27.
+
+### Keep-warm only while work is in flight
+
+| work in flight means | with the handover | at most | cold re-sends avoided | re-sent tokens avoided | requests | tokens they read | est. saved | est. spent |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| a worker, verifier or merge active in the last 10 min | no | 4 | 2 | 497k | 7 | 2.1M | $6.72 | $0.54 |
+| a worker, verifier or merge active in the last 10 min | no | 24 | 2 | 497k | 8 | 2.4M | $6.72 | $0.62 |
+| a worker, verifier or merge active in the last 10 min | yes | 4 | 2 | 171k | 7 | 575k | $2.34 | $0.17 |
+| a worker, verifier or merge active in the last 10 min | yes | 24 | 2 | 171k | 7 | 575k | $2.34 | $0.17 |
+| a worker, verifier or merge active in the last 30 min | no | 4 | 2 | 497k | 7 | 2.1M | $6.72 | $0.54 |
+| a worker, verifier or merge active in the last 30 min | no | 24 | 2 | 497k | 8 | 2.4M | $6.72 | $0.62 |
+| a worker, verifier or merge active in the last 30 min | yes | 4 | 2 | 171k | 7 | 575k | $2.34 | $0.17 |
+| a worker, verifier or merge active in the last 30 min | yes | 24 | 2 | 171k | 7 | 575k | $2.34 | $0.17 |
+| a worker, verifier or merge active in the last 55 min | no | 4 | 2 | 497k | 7 | 2.1M | $6.72 | $0.54 |
+| a worker, verifier or merge active in the last 55 min | no | 24 | 2 | 497k | 9 | 2.7M | $6.72 | $0.71 |
+| a worker, verifier or merge active in the last 55 min | yes | 4 | 2 | 171k | 7 | 575k | $2.34 | $0.17 |
+| a worker, verifier or merge active in the last 55 min | yes | 24 | 2 | 171k | 8 | 655k | $2.34 | $0.20 |
+| any task open on the board | no | 4 | 10 | 1.3M | 40 | 9.0M | $16.54 | $2.23 |
+| any task open on the board | no | 24 | 14 | 1.7M | 57 | 13.1M | $21.16 | $3.28 |
+| any task open on the board | yes | 4 | 9 | 815k | 39 | 6.0M | $8.28 | $1.53 |
+| any task open on the board | yes | 24 | 14 | 1.2M | 55 | 8.4M | $13.75 | $2.17 |
+
+The review's own estimate, $34 saved for $5 spent, let heartbeats run through every idle, with work in flight or not.
+Kept to work in flight, keep-warm meets almost no cold wakes. While the team works, its reports wake the lead more often
+than hourly (section 1). The long idles are the user's absences, when nothing is in flight. Since keep-warm wasn't built,
+the contract's cap N on heartbeats in a row doesn't arise.
+
+### Keep-warm and Claude Code's idle compaction
+
+All 13 compactions in the window were automatic, at 200k tokens or more, and came 50 to 60 minutes after the session's
+last response. That matches Claude Code's idle compaction at about 54 minutes. A keep-warm request has to be sent before
+the 60-minute TTL, at minute 55 here.
+
+- **After the compaction (minute 54 to 60):** the heartbeat finds the context already compacted to a summary, 38k to 74k
+  tokens this week. It keeps only that warm, which saves little: the compaction's own request had just refreshed the cache.
+- **Before the compaction:** the heartbeat is a request in the session, so the session isn't idle at minute 54. By
+  inference Claude Code then doesn't compact it, and every later request carries the large context. This wasn't tested:
+  it needs a real lead, and this task's tests use fake sessions only.
+
+Either way a heartbeat works against the cheaper outcome, which is letting a large context go. The handover at minute 50
+comes before both.
+
+Something can hold the handover past minute 54: a question asked in the last 10 minutes, or the 5-minute retry after a
+failed attempt. Then the compaction gets there first. The handover sees the `compact_boundary` in the transcript's tail
+and leaves that lead alone.
+
+### What was built
+
+- **Settings** in `.vibeswitcher/workflow.md`, also set with `configure`:
+  - `handover_idle_min: 50`. 0 is off, and a value under 10 reads as 10.
+  - `handover_tokens: 150000`. 0 is off, and a value under 100000 reads as 100000. A fresh lead starts near 80k tokens,
+    so a lower threshold would hand it over every idle hour.
+  - Settings › Project lead's lead rotation set to never turns the handover off too.
+- **The rule** (`LeadRotation.idle`):
+  - The lead has been idle past the threshold, counted from the last response in its transcript.
+  - Its context then was at least the token threshold.
+  - It wasn't compacted after that response.
+- **How it runs:** the rule joins the scheduled rotation's reasons and uses its path (`LeadController.rotateIfDue`). The
+  lead must be quiet, with no queued report and no typing for 2 minutes. The old lead writes a note. A fresh lead starts
+  from the board, `decisions.md`, its last turns and `scheduled-lead-handover.md`. Then the role moves on the board and in
+  the vault.
+- **Never mid-exchange.** Each of these holds the handover:
+  - the lead's turn running, a report queued for it, or its own question dialog open;
+  - a question on the board less than 10 minutes old (`LeadRotation.conversationOpen`). This holds the scheduled rotation
+    too.
+- **When the cache has expired, or will before a note could land** (past minute 55, as after the Mac slept through
+  minute 50), the idle handover writes its note itself instead of asking for one. Asking would be the very re-send the handover avoids. The simulation
+  charged a note only for the 5 handovers with the Mac awake at minute 50. The scheduled rotations still ask, as before.
+- **At most 2 tries per idle.** A note that never comes (a timeout, a failed start) cancels the try. The ask's own reply
+  restarts the idle, so the rule would try again 50 minutes later, all night. It gives up after 2 tries
+  (`LeadRotation.maxIdleAttempts`) until the user types to the lead again.
+- **It hands over ahead of the wake, not at it.** The app's 3-second refresh runs the rule. A wake that comes first
+  still goes to the old lead: the user typing, or a report, in the seconds a handover takes once the Mac wakes from a
+  sleep past minute 50. In the first 2 minutes after the app starts, no handover runs.
+- **The note VibeSwitcher writes itself** can't name what lived only in the old lead's context. The board's timers and
+  the last turns with the user still carry over.
+- **What it tells:**
+  - The chat's line under the fresh lead says when and why: "Started a fresh lead session at 13:32 (the last one had been
+    idle 52 minutes with 238k tokens of context, past handover_idle_min 50 and handover_tokens 150k)".
+  - The same reason goes in `progress.md`: "Handed the lead over to a fresh session: …". Every handover is logged this
+    way, the scheduled ones too.

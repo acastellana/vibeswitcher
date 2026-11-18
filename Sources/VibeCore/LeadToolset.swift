@@ -847,6 +847,8 @@ public final class LeadToolset: MCPToolset {
                                          "risk_model": P(type: "boolean", description: "Whether the risk check also asks headless Claude, from the diff's stat, the contract and the base branch's REVIEW.md (no code), to raise a review none task to audit (default true); it only raises, and a timeout or error leaves the deterministic triggers' result"),
                                          "audit_sample_percent": P(type: "integer", description: "The share of review none tasks, in percent (0 to 100), that auto_advance audits anyway when their worker reports done (default 10; 0: off): a seeded random draw, recorded on the task, so the unaudited path's escape rate is known, not assumed zero"),
                                          "small_task_min": P(type: "integer", description: "A review audit task whose worker reports done on its first round with fewer minutes of counted work than this, touching no sensitive_paths or strict_paths, not flagged by the risk check, not Codex's and not filed with an audit_reason, merges as review none that round: its tests, the risk check and the audit sample are its checks (default 30; 0: off)"),
+                                         "handover_idle_min": P(type: "integer", description: "You hand over to a fresh lead (a handover note, the board, decisions and your last turns) once you've been idle this many minutes with a context of at least handover_tokens, so your next wake doesn't carry or re-send the old context; never while your turn runs or a question to the user is under 10 minutes old (default 50, while your 1-hour prompt cache is warm; 0: off; else at least \(LeadRotation.minimumIdleMinutes))"),
+                                         "handover_tokens": P(type: "integer", description: "The context, in tokens, from which an idle lead hands over (default 150000; 0: off; else at least \(LeadRotation.minimumTokens), above a fresh lead's start)"),
                                          "watch_app_logs": P(type: "boolean", description: "Whether you get VibeSwitcher's own health digests (default false; only for the project that builds VibeSwitcher): its freezes, crashes and error lines as it logs them, and a daily trend, each as a witness report to turn into tasks where it's a real bug")]),
                 Self.leadPostTool,
             ]
@@ -5597,6 +5599,18 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "small_task_min must be a whole number of minutes, 0 (off) or more.") }
                 value = String(count)
+            case "handover_idle_min":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), count == 0 || count >= LeadRotation.minimumIdleMinutes else {
+                    throw Problem(text: "handover_idle_min must be a whole number of minutes: 0 (off) or \(LeadRotation.minimumIdleMinutes) or more.")
+                }
+                value = String(count)
+            case "handover_tokens":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), count == 0 || count >= LeadRotation.minimumTokens else {
+                    throw Problem(text: "handover_tokens must be a whole number of tokens: 0 (off) or \(LeadRotation.minimumTokens) or more.")
+                }
+                value = String(count)
             case "task_budget_min":
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "task_budget_min must be a whole number of minutes, 0 (no budget) or more.") }
@@ -5689,7 +5703,8 @@ public final class LeadToolset: MCPToolset {
                                           "merge_batching": after.mergeBatching.rawValue,
                                           "risk_lines": String(after.riskLines), "risk_model": String(after.riskModel),
                                           "audit_sample_percent": String(after.auditSamplePercent), "small_task_min": String(after.smallTaskMin),
-                                          "watch_app_logs": String(after.watchAppLogs), "agent_default": after.agentDefault.rawValue]
+                                          "watch_app_logs": String(after.watchAppLogs), "agent_default": after.agentDefault.rawValue,
+                                          "handover_idle_min": String(after.handoverIdleMinutes), "handover_tokens": String(after.handoverTokens)]
             // A limit cleared reads back as its default.
             let defaults = ["lead_model": LeadWorkflow.defaultLeadModel, "lead_advisor": LeadWorkflow.defaultLeadAdvisor, "worker_advisor": "none",
                             "disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
@@ -5701,7 +5716,8 @@ public final class LeadToolset: MCPToolset {
                             "merge_batching": LeadWorkflow().mergeBatching.rawValue,
                             "risk_lines": String(LeadWorkflow().riskLines), "risk_model": String(LeadWorkflow().riskModel),
                             "audit_sample_percent": String(LeadWorkflow().auditSamplePercent), "small_task_min": String(LeadWorkflow().smallTaskMin),
-                            "agent_default": LeadWorkflow().agentDefault.rawValue]
+                            "agent_default": LeadWorkflow().agentDefault.rawValue,
+                            "handover_idle_min": String(LeadWorkflow().handoverIdleMinutes), "handover_tokens": String(LeadWorkflow().handoverTokens)]
             for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
                 throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
             }
@@ -7191,6 +7207,10 @@ public final class LeadToolset: MCPToolset {
         lines.append("- small_task_min: " + (workflow.smallTaskMin > 0
             ? "\(workflow.smallTaskMin) (a review audit task done on its first round in fewer minutes of work, touching no sensitive or strict path and not flagged by the risk check, nor Codex's, nor filed with an audit_reason, merges as review none that round)"
             : "0 (off: review audit tasks are always audited)"))
+        lines.append("- handover_idle_min: \(workflow.handoverIdleMinutes), handover_tokens: \(workflow.handoverTokens) "
+            + (workflow.handoverIdleMinutes > 0 && workflow.handoverTokens > 0
+               ? "(idle that many minutes with that much context, you hand over to a fresh lead: a note, the board, decisions and your last turns; never while the user's Settings › Project lead says lead rotation never)"
+               : "(off: no handover at a long idle)"))
         if workflow.watchAppLogs {
             lines.append("- watch_app_logs: true (VibeSwitcher's own freezes, crashes, error lines and daily trend come to you as witness reports)")
         }
