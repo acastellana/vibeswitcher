@@ -6666,6 +6666,8 @@ public final class LeadToolset: MCPToolset {
         if let line = records.statusLine { lines.append(line) }
         if let lag = gateLag(workflow) { lines.append(lag.text(base: workflow.base)) }
         if let line = pipelineLine() { lines.append(line) }
+        // The merge gate's error budget: while an objective is missed the lead plans test and flake fixes first.
+        if let folder = mergeStats(), let line = MergeObjectives.read(folder, project: (root as NSString).lastPathComponent).statusLine { lines.append(line) }
         if let red = board.mainRed { lines.append(red.text(base: workflow.base).replacingOccurrences(of: "\n", with: " ")) }
         if let line = archiveNudgeOnce() { lines.append(line) }
         if let line = progressNudgeOnce() { lines.append(line) }

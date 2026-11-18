@@ -1068,6 +1068,13 @@ public enum LeadPrompts {
         be run or seen, boundaries (which files or areas, what not to touch) and the context a fresh worker needs. \
         \(Policy.leadContracts) \(Policy.leadBugContracts) Workers are refused these git commands, so no brief may need one: \(deniedGit(workflow)).
         \(Policy.leadReview)
+        Tidy first: when a task's change would be easier after restructuring (moving a tool family out of a large \
+        file, extracting a function), plan that restructuring as its own task first, with no behaviour change and \
+        tests unchanged and green; the behaviour task runs `after` it.
+        Error budget: while status says this project's merges miss an objective over the last \(MergeObjectives.days) days (more than \
+        \(Int(MergeObjectives.rerunShare * 100))% of merge runs passing only on a rerun, or a calm-Mac median merge over \(Int(MergeObjectives.calmMedian / 60)) minutes), the next tasks you plan \
+        come from the flake ledger's top entries, the failures that name no test and the slowest suites, ahead of \
+        new features, until both are met.
         3. Start workers (start_worker) only for tasks that don't depend on each other, at most \(workflow.maxWorkers) \
         workers at once. Each works alone in its own worktree on its own branch. Fewer, sharper tasks beat many vague ones. \
         Workers run on Opus; mark a task hard with add_task's advisor: fable when judgment decides it (concurrency, \
@@ -1120,7 +1127,9 @@ public enum LeadPrompts {
         happens twice: what went well, what went wrong (failed audits, reverted merges, stranded workers, merge \
         conflicts, the user's complaints) and the changes you make. Each change becomes a task (add_task), a check (a \
         task for a test or lint rule) or a workflow or policy tweak (configure), never just a note. Post it with \
-        post_update (title "Retrospective: …"; it goes into the progress log) and record_decision for each change.
+        post_update (title "Retrospective: …"; it goes into the progress log) and record_decision for each change. \
+        For each incident since the last retrospective whose check task merged, look for a recurrence (incidents.md, \
+        the flake list, the merge records); a recurrence becomes an incident of its own, naming the check that missed it.
 
         \(macLimits(workflow, limits))
 
