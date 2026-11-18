@@ -85,9 +85,10 @@ public struct SandboxInputs: Equatable, Sendable {
 /// (`SandboxPolicy.hidden`) but the agent's named config entries. A PATH folder there is left out; anything else there
 /// refuses the plan.
 public enum SandboxPlanner {
-    /// The folder the door is in, inside (an empty one of the box's own) and the door.
-    public static let doorFolder = "/run/vibeswitcher"
-    public static let door = doorFolder + "/door"
+    /// The door, inside (`DoorProtocol.path`: where the relays look for it), and the folder it is in (an empty one of
+    /// the box's own).
+    public static let door = DoorProtocol.path
+    public static let doorFolder = (DoorProtocol.path as NSString).deletingLastPathComponent
     public static let hostname = "vibeswitcher"
 
     /// The package caches a worker and a branch run read through a layer of their own, under the account's home.
@@ -246,7 +247,7 @@ public enum SandboxPlanner {
         environment += ["HOME=\(inputs.home)", "PATH=\((toolchain.filter { inputs.pathFolders.map { URL(fileURLWithPath: $0).standardizedFileURL.path }.contains($0) } + ["/usr/local/bin", "/usr/bin", "/bin"]).joined(separator: ":"))",
                         "SHELL=/bin/bash", "TMPDIR=\(inputs.temporary)", "VIBESWITCHER_ROLE=\(role.rawValue)"]
         if agent {
-            environment += ["VIBESWITCHER_DOOR=\(door)", "DISABLE_AUTOUPDATER=1"]
+            environment += ["\(DoorProtocol.variable)=\(door)", "DISABLE_AUTOUPDATER=1"]
         }
         if role == .worker, let common = try? gitRoots(inputs.worktree ?? "").get().common {
             environment += ["GIT_OBJECT_DIRECTORY=\(objectsFolder(inputs))", "GIT_ALTERNATE_OBJECT_DIRECTORIES=\(common)/objects"]

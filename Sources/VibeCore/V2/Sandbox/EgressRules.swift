@@ -26,13 +26,30 @@ public struct EgressRules: Codable, Equatable, Sendable {
     }
 
     /// The default list per agent: SB-D7 waits for the user, and this is its recommended value, kept as data so it
-    /// changes in one place. Claude Code's API host, and the host its login is refreshed at; telemetry and updates are
-    /// off in a box (`DISABLE_AUTOUPDATER`, SB2), so neither of theirs is here. SB0's gated run records the hosts it
-    /// asks for, and SB10's settles the list with the user.
+    /// changes in one place. For Claude Code: its API host; `platform.claude.com`, where it takes a new token (SB0's
+    /// third gated run), and `mcp-proxy.anthropic.com`, the account's claude.ai connectors (SB0's second), both the
+    /// lead's decision of 2026-11-18 (SB-D24); and `console.anthropic.com`, listed for the login before the runs and
+    /// asked for by none of them. Telemetry and updates are off in a box (`DISABLE_AUTOUPDATER`, SB2), so neither of
+    /// theirs is here. SB10's gated run settles the list with the user.
     public static let defaultHosts: [Agent: [String]] = [
-        .claude: ["api.anthropic.com", "console.anthropic.com"],
+        .claude: ["api.anthropic.com", "platform.claude.com", "mcp-proxy.anthropic.com", "console.anthropic.com"],
         .codex: [],
     ]
+
+    /// A session's rules from its role and its project's guarded keys (`SandboxPolicy`, the plan's Network table):
+    /// - a worker: its agent's default hosts and the project's `sandbox_hosts`;
+    /// - a verifier's agent and the lead: their agent's default hosts only;
+    /// - a branch run: the project's `sandbox_run_hosts`, and no agent's.
+    /// A host the project named is the project's word for a private address too (`privateHosts`); a default host
+    /// never is.
+    public static func session(role: SandboxRole, policy: SandboxPolicy, agent: Agent?) -> EgressRules {
+        let defaults = agent.flatMap { defaultHosts[$0] } ?? []
+        switch role {
+        case .worker: return EgressRules(hosts: defaults + policy.hosts, privateHosts: policy.hosts)
+        case .verifier, .lead: return EgressRules(hosts: defaults)
+        case .branchRun: return EgressRules(hosts: policy.runHosts, privateHosts: policy.runHosts)
+        }
+    }
 
     /// An address: its bytes in network order, 4 for IPv4 and 16 for IPv6.
     public struct Address: Hashable, Codable, Sendable, CustomStringConvertible {

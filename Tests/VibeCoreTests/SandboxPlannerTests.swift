@@ -416,6 +416,28 @@ struct SandboxPlannerTests {
         }
     }
 
+    /// The two lanes' seam: the door the planner gives a box is the one the relays look for and the porter answers
+    /// (`DoorProtocol`), and a role gets a door exactly when the porter has helpers for it.
+    @Test func everyRoleWithADoorHasHelpersAndABranchRunHasNone() throws {
+        let world = try world()
+        for role in SandboxRole.allCases {
+            let plan = try plan(world.inputs(role))
+            let helpers = Porter.modes[role.rawValue]
+            if role == .branchRun {
+                #expect(plan.door == nil && helpers == nil)
+                #expect(Porter.allowed(.init(mode: .mcp, args: []), for: SessionHelper(role: role.rawValue, root: world.root, task: "t1")) != nil)
+            } else {
+                #expect(plan.door == DoorProtocol.path)
+                #expect(plan.environment.contains("\(DoorProtocol.variable)=\(DoorProtocol.path)"))
+                // The folder the door is bound in is the box's own, and only its user's.
+                #expect(plan.mounts.contains { $0.target == (DoorProtocol.path as NSString).deletingLastPathComponent && $0.kind == .empty(mode: 0o700) })
+                #expect(helpers?.contains(.mcp) == true && helpers?.contains(.hook) == true, "\(role)")
+            }
+        }
+        // And no role the porter serves is one the planner doesn't know.
+        #expect(Set(Porter.modes.keys).isSubset(of: Set(SandboxRole.allCases.map(\.rawValue))))
+    }
+
     @Test func aBranchRunHasNoDoorNoTerminalNoAgentAndNoNetwork() throws {
         let world = try world()
         let plan = try plan(world.inputs(.branchRun))

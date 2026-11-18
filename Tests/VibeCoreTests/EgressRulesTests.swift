@@ -151,9 +151,47 @@ struct EgressRulesTests {
     @Test func theDefaultListIsDataAndNamesOnlyTheAgentsHosts() {
         let claude = EgressRules.defaultHosts[.claude] ?? []
         #expect(claude.contains("api.anthropic.com"))
+        // The lead's decision of 2026-11-18 (SB-D24): where Claude Code takes a new token, and the account's connectors.
+        #expect(claude.contains("platform.claude.com") && claude.contains("mcp-proxy.anthropic.com"))
+        #expect(claude.allSatisfy { $0.hasSuffix(".anthropic.com") || $0.hasSuffix(".claude.com") }, "\(claude)")
         for entry in claude {
             #expect(EgressRules(hosts: [entry]).admits(host: entry, port: 443) == nil, "\(entry) isn't an entry that matches itself")
             #expect(!entry.hasPrefix("*."), "a default entry names one host: \(entry)")
+        }
+    }
+
+    /// The two lanes' seam: the hosts a project's guarded keys name (`SandboxPolicy.host`'s form) are entries these
+    /// rules read, at the port they name, and each role gets its own list and nobody else's.
+    @Test func aSessionsRulesComeFromItsRoleAndTheProjectsKeys() throws {
+        let policy = SandboxPolicy(hosts: [try SandboxPolicy.host("registry.npmjs.org", key: "sandbox_hosts").get(),
+                                           try SandboxPolicy.host("*.Example.com:8443", key: "sandbox_hosts").get()],
+                                   runHosts: [try SandboxPolicy.host("packages.example.org", key: "sandbox_run_hosts").get()])
+        let worker = EgressRules.session(role: .worker, policy: policy, agent: .claude)
+        #expect(worker.admits(host: "api.anthropic.com", port: 443) == nil)
+        #expect(worker.admits(host: "registry.npmjs.org", port: 443) == nil)
+        #expect(worker.admits(host: "a.example.com", port: 8443) == nil && worker.admits(host: "a.example.com", port: 443) != nil)
+        #expect(worker.admits(host: "packages.example.org", port: 443) != nil)
+        // The project's word opens a private address for the hosts it named, never for the agent's.
+        let private10 = [EgressRules.Address("10.1.2.3")!]
+        #expect(worker.decision(host: "registry.npmjs.org", port: 443, resolved: private10) == .allow(private10))
+        guard case .refuse = worker.decision(host: "api.anthropic.com", port: 443, resolved: private10) else {
+            Issue.record("the agent's API host reached a private address")
+            return
+        }
+        // A verifier's agent and the lead: the agent's hosts only. A branch run: the run's hosts only, no agent's.
+        for role in [SandboxRole.verifier, .lead] {
+            let rules = EgressRules.session(role: role, policy: policy, agent: .claude)
+            #expect(rules.admits(host: "api.anthropic.com", port: 443) == nil && rules.admits(host: "registry.npmjs.org", port: 443) != nil)
+            #expect(rules.privateHosts.isEmpty)
+        }
+        let run = EgressRules.session(role: .branchRun, policy: policy, agent: .claude)
+        #expect(run.admits(host: "packages.example.org", port: 443) == nil)
+        #expect(run.admits(host: "api.anthropic.com", port: 443) != nil && run.admits(host: "registry.npmjs.org", port: 443) != nil)
+        #expect(EgressRules.session(role: .branchRun, policy: .standard, agent: nil).hosts.isEmpty)
+        // Every form the keys take is a form the rules read: none silently matches nothing.
+        for written in ["api.example.com", "*.example.com", "api.example.com:8080", "*.a-b.example.com:1"] {
+            let host = try SandboxPolicy.host(written, key: "sandbox_hosts").get()
+            #expect(EgressRules.entry(host) != nil, "\(written)")
         }
     }
 
