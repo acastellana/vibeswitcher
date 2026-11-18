@@ -348,6 +348,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `size WxH` — resizes the main window's content (e.g. 1728x1015) — `Sources/VibeSwitcher/Sandbox.swift`
 - `inspector team|overview|activity|hide|show` — the inspector on that tab, or collapsed or shown, as its segmented control and Toggle Inspector do — `Sources/VibeSwitcher/Sandbox.swift`
 - `board [N]` — adds N finished tasks (default 250) to the fake lead's board (start the lead first) — `Sources/VibeSwitcher/Sandbox.swift`
+- `task SLUG STATUS` — moves a task on the fake lead's board to STATUS (running, blocked, done, abandoned, folded…), as its lead's… — `Sources/VibeSwitcher/Sandbox.swift`
 - `churn [N]` — changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is — `Sources/VibeSwitcher/Sandbox.swift`
 - `publish [N]` — has the lead controller publish N times (default 50), each laid out and drawn, and times them — `Sources/VibeSwitcher/Sandbox.swift`
 - `hangs [reset]` — the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait… — `Sources/VibeSwitcher/Sandbox.swift`

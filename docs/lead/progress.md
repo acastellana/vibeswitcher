@@ -3738,3 +3738,19 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 11:13 Automatically (auto_advance): Started the audit of folded-update-line-its at 52d34f17 (An audit was started on it: its verdict decides).
 - 2026-11-18 11:13 Released folded-update-line-its's worker (idle since its done report on 52d34f17) while its audit runs
 - 2026-11-18 11:13 Automatically (auto_advance): Released folded-update-line-its's worker, idle since its done report on 52d34f17, while its audit runs (ended pid 60845 (Worker: Folded update line: its red dot clears once the problem it flagged is dealt with)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-18 11:15 Audit of folded-update-line-its: complete, clean, round 2: 1 Important closed, 3 Nit closed
+- 2026-11-18 11:18 Planned cache-aware-vibeswitcher: Cache-aware VibeSwitcher: measure what cold prompt caches cost us, and a policy for Claude Code mods in team sessions
+- 2026-11-18 11:18 Automatically (auto_advance): Didn't start cache-aware-vibeswitcher: cache-aware-vibeswitcher's worker not started: ~/.claude/settings.json changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if the…
+- 2026-11-18 11:20 Started a worker on cache-aware-vibeswitcher
+- 2026-11-18 11:20 Automatically (auto_advance): Started a worker on cache-aware-vibeswitcher (Cache-aware VibeSwitcher: measure what cold prompt caches cost us, and a policy for Claude Code mods in team sessions).
+- 2026-11-18 11:22 Planned lead-brief-merge-error: Lead brief: merge error budget, tidy first, and a recurrence check in retrospectives (review audit)
+- 2026-11-18 11:22 Planned scorecard-merge: Scorecard: merge objectives and the lead's messages to the user
+- 2026-11-18 11:22 Planned git-guard-fails-closed: Git guard fails closed: refuse git handed to another interpreter or built from an expansion (review audit, for security)
+- 2026-11-18 11:22 Planned memory-benches-run-by: Memory benches run by themselves once a day on a calm Mac (review audit)
+- 2026-11-18 11:26 Started a worker on lead-brief-merge-error
+- 2026-11-18 11:26 Automatically (auto_advance): Started a worker on lead-brief-merge-error (Lead brief: merge error budget, tidy first, and a recurrence check in retrospectives).
+- 2026-11-18 11:26 Started a worker on git-guard-fails-closed
+- 2026-11-18 11:26 Automatically (auto_advance): Started a worker on git-guard-fails-closed (Git guard fails closed: refuse git handed to another interpreter or built from an expansion).
+- 2026-11-18 11:26 Automatically (auto_advance): Overlap for git-guard-fails-closed's start (a warning only: nothing was refused or reordered). scripts/sandbox-app.sh: ui-journeys-b-team (kept: its branch changes it); scripts/test.sh: faster-test-suite (running: its branch changes it and its boundaries name it).
+- 2026-11-18 11:36 Pipeline held: folded-update-line-its ready to merge with none landing; cause: every test slot held
+- 2026-11-18 11:43 Merged folded-update-line-its: Folded update line: its red dot clears once the problem it flagged is dealt with (build 5978f0ab2ede)
