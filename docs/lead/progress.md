@@ -3788,3 +3788,21 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 13:03 Automatically (auto_advance): Overlap for lead-context-cost-hand's start (a warning only: nothing was refused or reordered). LeadWorkflow.swift: team-sessions-load-only (running: its boundaries name it); Sources/VibeCore/LeadWorkflow.swift: team-sessions-load-only (running: its branch changes it).
 - 2026-11-18 13:03 Started a worker on receipts-fable-5-2
 - 2026-11-18 13:03 Automatically (auto_advance): Started a worker on receipts-fable-5-2 (Receipts: Fable 5.2's price, and advisor calls counted).
+- 2026-11-18 13:04 Committed the records at 4ef25ae4 before merging cache-aware-vibeswitcher: the last merge failed on docs/lead/decisions.md, docs/lead/progress.md
+- 2026-11-18 13:21 Pipeline held: cache-aware-vibeswitcher ready to merge with none landing; cause: every test slot held
+- 2026-11-18 13:21 Planned find-the-test-that: Find the test that writes to a dead pipe, then switch merges to two tests a core (review audit)
+- 2026-11-18 13:33 Automatically (auto_advance): Started the audit of faster-test-suite at d9d98355 (It touches sensitive_paths (Sources/VibeCore/Worktrees.swift), so it's treated as audit whatever its review says).
+- 2026-11-18 13:33 Released git-guard-fails-closed's worker (idle since its done report on f856e0b7) while its audit runs
+- 2026-11-18 13:33 Automatically (auto_advance): Started the audit of git-guard-fails-closed at f856e0b7 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-18 13:33 Released team-sessions-load-only's worker (idle since its done report on b8d827f8) while its audit runs
+- 2026-11-18 13:33 Automatically (auto_advance): Started the audit of team-sessions-load-only at b8d827f8 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-18 13:38 Automatically (auto_advance): Started the audit of config-seal-cover-the at 507093f8 (Its review is audit).
+- 2026-11-18 13:38 Released config-seal-cover-the's worker (idle since its done report on 507093f8) while its audit runs
+- 2026-11-18 13:38 Automatically (auto_advance): Released config-seal-cover-the's worker, idle since its done report on 507093f8, while its audit runs (ended pid 5046 (Worker: Config seal: cover the hook modules a plugin's hooks.json lists)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-18 13:42 Automatically (auto_advance): Started the audit of faster-test-suite at e7cf9d89 (An audit was started on it: its verdict decides).
+- 2026-11-18 13:44 Audit of team-sessions-load-only: complete, clean, round 1: 4 Nit open
+- 2026-11-18 13:46 Started a worker on team-sessions-load-only
+- 2026-11-18 13:46 Automatically (auto_advance): Started a worker on team-sessions-load-only (Team sessions load only allowlisted plugins).
+- 2026-11-18 13:46 Automatically (auto_advance): Overlap for team-sessions-load-only's start (a warning only: nothing was refused or reordered). LeadWorkflow.swift: lead-context-cost-hand (running: its boundaries name it); Sources/VibeCore/LeadToolset.swift: lead-context-cost-hand (running: its branch changes it); Sources/VibeCore/LeadWorkflow.swift: lead-context-cost-hand (running: its branch changes it).
+- 2026-11-18 13:47 Merged cache-aware-vibeswitcher: Cache-aware VibeSwitcher: measure what cold prompt caches cost us, and a policy for Claude Code mods in team sessions (build 5978f0ab2ede)
+- 2026-11-18 13:47 Flaky in cache-aware-vibeswitcher's merge: headlessAnswersQueriesOnlyWhenNoClient(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
