@@ -3949,3 +3949,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 20:21 Sent memory-benches-run-by's worker contract v3 (it had v2)
 - 2026-11-18 20:26 Planned session-host-measure-the: Session host: measure the vault calls' stack use on its 512 KB queue threads
 - 2026-11-18 20:36 Merged flaky-status-line-test: Flaky status-line test: claudeCodeStoppingTheStatusLineStopsYourCommandToo fails after 300 s under load (no audit: review none) (build 0f7f4ba1b57f)
+- 2026-11-18 20:36 Automatically (auto_advance): Merged flaky-status-line-test (Flaky status-line test: claudeCodeStoppingTheStatusLineStopsYourCommandToo fails after 300 s under load) into main at bd8d2f83, review none: on its worker's done report on a0f9ed15 and the full test run.
+- 2026-11-18 20:36 Automatically (auto_advance): Cleaned up flaky-status-line-test; ended pid 59735 (Worker: Flaky status-line test: claudeCodeStoppingTheStatusLineStopsYourCommandToo fails after 300 s under load) (freed 2.6 GB of build output and temporary folders). It stays done.
