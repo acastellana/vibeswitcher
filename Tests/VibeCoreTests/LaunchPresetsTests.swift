@@ -196,5 +196,8 @@ struct LaunchPresetsTests {
         let list = presets.presets(for: "/p")
         #expect(try resume(.sidebar, label: "Claude", command: "claude", presets: list).env.isEmpty)
         #expect(try resume(.sidebar, label: "Claude", command: "claude --model opus", presets: list).env == ["MODEL": "opus"])
+        // Resumed once already, its command carries the earlier `--resume`: still the preset it ran.
+        #expect(try resume(.sidebar, label: "Claude", command: "claude --resume 'c-0'", presets: list).env.isEmpty)
+        #expect(try resume(.sidebar, label: "Claude", command: "claude --model opus --resume 'c-0'", presets: list).env == ["MODEL": "opus"])
     }
 }

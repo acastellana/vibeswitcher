@@ -303,12 +303,16 @@ public enum LaunchPlan {
     }
 
     /// The preset a window session was started from, found again by what the host keeps of it: its label (the preset's
-    /// name) and agent, and when two presets share the name, the one whose command it ran. Nil when no preset goes by
+    /// name) and agent, and when two presets share the name, the one whose command it ran (a resumed session's command
+    /// is the preset's plus its `--resume …`: the longest preset command it starts with). Nil when no preset goes by
     /// that name any more (renamed or deleted), or the session wasn't started from one (a lead, a worker).
     public static func launchedFrom(label: String, agent: Agent, command: String?, among presets: [LaunchPreset]) -> LaunchPreset? {
         let named = presets.filter { $0.name == label && $0.agent == agent }
-        let ran = command?.trimmingCharacters(in: .whitespaces)
-        return named.first { LaunchPlan.command(for: $0) == ran } ?? named.first
+        guard named.count > 1, let ran = command?.trimmingCharacters(in: .whitespaces) else { return named.first }
+        let ranBy = named.compactMap { preset in
+            LaunchPlan.command(for: preset).flatMap { ran == $0 || ran.hasPrefix($0 + " ") ? (preset, $0.count) : nil }
+        }
+        return ranBy.max { $0.1 < $1.1 }?.0 ?? named.first
     }
 
     /// Resumed with no preset's environment: noted once per label and folder in a run, not at every resume.
