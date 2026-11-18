@@ -296,9 +296,32 @@ public enum LaunchPlan {
     /// and the restart card's (`RestartReopen.spawnRequest`) both start this.
     public static func resumeRequest(cwd: String, base: String?, agent: Agent, sessionID: String, cols: Int, rows: Int,
                                      label: String, presets: [LaunchPreset]) -> SpawnRequest {
-        SpawnRequest(cwd: cwd, command: resumeCommand(base: base, agent: agent, sessionID: sessionID), env: [:], cols: cols,
-                     rows: rows, keepShell: false, label: label, agent: agent.rawValue)
+        let preset = launchedFrom(label: label, agent: agent, command: base, among: presets)
+        if preset == nil { noteUnknownPreset(label: label, cwd: cwd) }
+        return SpawnRequest(cwd: cwd, command: resumeCommand(base: base, agent: agent, sessionID: sessionID), env: preset?.env ?? [:],
+                            cols: cols, rows: rows, keepShell: false, label: label, agent: agent.rawValue)
     }
+
+    /// The preset a window session was started from, found again by what the host keeps of it: its label (the preset's
+    /// name) and agent, and when two presets share the name, the one whose command it ran. Nil when no preset goes by
+    /// that name any more (renamed or deleted), or the session wasn't started from one (a lead, a worker).
+    public static func launchedFrom(label: String, agent: Agent, command: String?, among presets: [LaunchPreset]) -> LaunchPreset? {
+        let named = presets.filter { $0.name == label && $0.agent == agent }
+        let ran = command?.trimmingCharacters(in: .whitespaces)
+        return named.first { LaunchPlan.command(for: $0) == ran } ?? named.first
+    }
+
+    /// Resumed with no preset's environment: noted once per label and folder in a run, not at every resume.
+    private static func noteUnknownPreset(label: String, cwd: String) {
+        unknownPresetsLock.lock()
+        let first = unknownPresetsNoted.insert("\(label)\n\(cwd)").inserted
+        unknownPresetsLock.unlock()
+        guard first else { return }
+        Breadcrumbs.shared.note("resume: no preset named “\(label)” for \((cwd as NSString).lastPathComponent); resumed without a preset's environment")
+    }
+
+    private static let unknownPresetsLock = NSLock()
+    nonisolated(unsafe) private static var unknownPresetsNoted: Set<String> = []
 
     /// The sidebar's Resume of a window session the host still lists (ended, or still running).
     public static func resumeRequest(resuming host: HostSession, agent: Agent, sessionID: String, presets: [LaunchPreset]) -> SpawnRequest {
