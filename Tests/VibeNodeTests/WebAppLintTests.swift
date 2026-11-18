@@ -66,10 +66,12 @@ struct WebAppLintTests {
     /// Every file under `root`'s `WebApp/`, relative to `root`.
     static func files(under root: URL) -> [String] {
         let base = root.appendingPathComponent(folder)
-        guard let walk = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.isRegularFileKey]) else { return [] }
+        // Relative names from the walk itself: the Mac gives a scratch folder's files under /private/var where the folder
+        // was named /var, so cutting the base's length off a file's path named the wrong file there.
+        guard let walk = FileManager.default.enumerator(atPath: base.path) else { return [] }
         var paths: [String] = []
-        for case let url as URL in walk where (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
-            paths.append(folder + "/" + url.path.dropFirst(base.path.count + 1))
+        for case let name as String in walk where walk.fileAttributes?[.type] as? FileAttributeType == .typeRegular {
+            paths.append(folder + "/" + name)
         }
         return paths.sorted()
     }
