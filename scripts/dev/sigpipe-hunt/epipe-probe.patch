@@ -32,18 +32,19 @@ index 68b1fb90..428e2c47 100644
 +    }
 +}
 diff --git a/Tests/VibeCoreTests/TestSupport.swift b/Tests/VibeCoreTests/TestSupport.swift
-index 7b5d3456..65a1512b 100644
+index 7b5d3456..b7417685 100644
 --- a/Tests/VibeCoreTests/TestSupport.swift
 +++ b/Tests/VibeCoreTests/TestSupport.swift
-@@ -53,6 +53,7 @@ private let failOnBrokenPipes: @convention(c) () -> Void = { _ = brokenPipesFail
+@@ -53,6 +53,8 @@ private let failOnBrokenPipes: @convention(c) () -> Void = { _ = brokenPipesFail
  private let brokenPipesFailTheRun: DispatchSourceSignal = {
      let source = DispatchSource.makeSignalSource(signal: SIGPIPE, queue: DispatchQueue(label: "broken-pipes"))
      source.setEventHandler {
-+        EPipeProbe.dump()
++        EPipeSnapshot.flush(to: hookDumpFD)
++        EPipeProbe.dump(signals: source.data)
          Issue.record(Comment(rawValue: "SIGPIPE: a write to a pipe or socket whose reader had gone, without F_SETNOSIGPIPE or "
                               + "SO_NOSIGPIPE (\(source.data) since the last). The run caught it; the app, at SIGPIPE's default, "
                               + "would have died of it. Give the writer F_SETNOSIGPIPE or SO_NOSIGPIPE."))
-@@ -206,3 +207,60 @@ extension Scratch {
+@@ -206,3 +208,279 @@ extension Scratch {
          UserDefaults(suiteName: url(prefix).appendingPathComponent("defaults").path)!
      }
  }
@@ -51,7 +52,7 @@ index 7b5d3456..65a1512b 100644
 +// TEMPORARY PROBE (not to commit): every thread's stack at a SIGPIPE, to name the writer.
 +import Darwin.Mach
 +enum EPipeProbe {
-+    static func dump() {
++    static func dump(signals: UInt = 0) {
 +        guard let path = ProcessInfo.processInfo.environment["VS_EPIPE_DUMP"] else { return }
 +        var list: thread_act_array_t?
 +        var count: mach_msg_type_number_t = 0
@@ -82,7 +83,8 @@ index 7b5d3456..65a1512b 100644
 +            }
 +            thread_resume(thread)
 +        }
-+        var out = "=== SIGPIPE at \(Date()) (\(count) threads)\n"
++        var out = "=== SIGPIPE at \(Date()) \(String(format: "%.3f", Date().timeIntervalSince1970)) (\(count) threads, \(signals) signals)\n"
++        var all = ""
 +        for i in 0..<Int(count) {
 +            var lines: [String] = []
 +            for n in 0..<depth {
@@ -94,13 +96,231 @@ index 7b5d3456..65a1512b 100644
 +                } else { lines.append(String(pc, radix: 16)) }
 +            }
 +            let text = lines.joined(separator: "\n  ")
-+            if text.contains("write") || text.contains("send") || text.contains("Write") || text.contains("Send") {
++            let probe = text.replacingOccurrences(of: "mach_msg_overwrite", with: "")
++            if probe.contains("write") || probe.contains("send") || probe.contains("Write") || probe.contains("Send") {
 +                out += "--- thread \(i)\n  " + text + "\n"
++            } else if !text.isEmpty {
++                all += "--- (all) thread \(i)\n  " + text + "\n"
 +            }
 +        }
++        if !out.contains("--- thread") { out += all }
 +        pcs.deallocate()
 +        if let handle = FileHandle(forWritingAtPath: path) ?? { FileManager.default.createFile(atPath: path, contents: nil); return FileHandle(forWritingAtPath: path) }() {
 +            handle.seekToEndOfFile(); handle.write(Data(out.utf8)); try? handle.close()
 +        }
++    }
++}
++
++// TEMPORARY PROBE (not to commit): the writer itself, from its own thread. The test bundle's pointers to write,
++// writev, send, sendto and sendmsg are rebound (this process's own image only) to wrappers that call the real one and,
++// on EPIPE, append the writing thread's stack, the descriptor's kind and the test to $VS_EPIPE_DUMP.
++import MachO
++nonisolated(unsafe) private var realWrite: (@convention(c) (Int32, UnsafeRawPointer?, Int) -> Int)?
++nonisolated(unsafe) private var realWritev: (@convention(c) (Int32, UnsafePointer<iovec>?, Int32) -> Int)?
++nonisolated(unsafe) private var realSend: (@convention(c) (Int32, UnsafeRawPointer?, Int, Int32) -> Int)?
++nonisolated(unsafe) private var realSendto: (@convention(c) (Int32, UnsafeRawPointer?, Int, Int32, UnsafePointer<sockaddr>?, socklen_t) -> Int)?
++nonisolated(unsafe) private var realSendmsg: (@convention(c) (Int32, UnsafePointer<msghdr>?, Int32) -> Int)?
++nonisolated(unsafe) var hookDumpFD: Int32 = -1
++private let hookNoted = NSLock()
++nonisolated(unsafe) private var hookCount = 0
++
++private func notedEPIPE(_ what: String, _ fd: Int32, _ result: Int) -> Int {
++    guard result < 0 else { return result }
++    let saved = errno
++    if saved == EPIPE, hookDumpFD >= 0, let write = realWrite, fcntl(fd, F_GETNOSIGPIPE) != 1, hookNoted.withLock({ hookCount += 1; return hookCount <= 300 }) {
++        var info = stat()
++        let kind: String
++        if fstat(fd, &info) == 0 {
++            switch info.st_mode & S_IFMT {
++            case S_IFIFO: kind = "pipe"
++            case S_IFSOCK: kind = "socket"
++            default: kind = "mode \(String(info.st_mode, radix: 8))"
++            }
++        } else { kind = "fstat failed" }
++        let pipeFlag = fcntl(fd, F_GETNOSIGPIPE)
++        var text = "=== EPIPE \(what)(fd \(fd), \(kind), F_GETNOSIGPIPE \(pipeFlag)) at \(String(format: "%.3f", Date().timeIntervalSince1970)) "
++            + "thread \(pthread_mach_thread_np(pthread_self())) test \(Test.current?.name ?? "none")\n"
++        text += Thread.callStackSymbols.joined(separator: "\n") + "\n"
++        let bytes = Array(text.utf8)
++        _ = write(hookDumpFD, bytes, bytes.count)
++    }
++    errno = saved
++    return result
++}
++
++private let hookedWrite: @convention(c) (Int32, UnsafeRawPointer?, Int) -> Int = { fd, buffer, count in
++    notedEPIPE("write", fd, realWrite!(fd, buffer, count))
++}
++private let hookedWritev: @convention(c) (Int32, UnsafePointer<iovec>?, Int32) -> Int = { fd, vectors, count in
++    notedEPIPE("writev", fd, realWritev!(fd, vectors, count))
++}
++private let hookedSend: @convention(c) (Int32, UnsafeRawPointer?, Int, Int32) -> Int = { fd, buffer, count, flags in
++    notedEPIPE("send", fd, realSend!(fd, buffer, count, flags))
++}
++private let hookedSendto: @convention(c) (Int32, UnsafeRawPointer?, Int, Int32, UnsafePointer<sockaddr>?, socklen_t) -> Int = { fd, buffer, count, flags, to, length in
++    notedEPIPE("sendto", fd, realSendto!(fd, buffer, count, flags, to, length))
++}
++private let hookedSendmsg: @convention(c) (Int32, UnsafePointer<msghdr>?, Int32) -> Int = { fd, message, flags in
++    notedEPIPE("sendmsg", fd, realSendmsg!(fd, message, flags))
++}
++
++enum EPipeHook {
++    static func install() {
++        guard let path = ProcessInfo.processInfo.environment["VS_EPIPE_DUMP"] else { return }
++        hookDumpFD = open(path + ".writers", O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0o600)
++        let handle = UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
++        func real<T>(_ name: String, _ type: T.Type) -> T? { dlsym(handle, name).map { unsafeBitCast($0, to: type) } }
++        realWrite = real("write", (@convention(c) (Int32, UnsafeRawPointer?, Int) -> Int).self)
++        realWritev = real("writev", (@convention(c) (Int32, UnsafePointer<iovec>?, Int32) -> Int).self)
++        realSend = real("send", (@convention(c) (Int32, UnsafeRawPointer?, Int, Int32) -> Int).self)
++        realSendto = real("sendto", (@convention(c) (Int32, UnsafeRawPointer?, Int, Int32, UnsafePointer<sockaddr>?, socklen_t) -> Int).self)
++        realSendmsg = real("sendmsg", (@convention(c) (Int32, UnsafePointer<msghdr>?, Int32) -> Int).self)
++        let replacements: [String: UInt64] = [
++            "_write": UInt64(UInt(bitPattern: unsafeBitCast(hookedWrite, to: UnsafeRawPointer.self))),
++            "_writev": UInt64(UInt(bitPattern: unsafeBitCast(hookedWritev, to: UnsafeRawPointer.self))),
++            "_send": UInt64(UInt(bitPattern: unsafeBitCast(hookedSend, to: UnsafeRawPointer.self))),
++            "_sendto": UInt64(UInt(bitPattern: unsafeBitCast(hookedSendto, to: UnsafeRawPointer.self))),
++            "_sendmsg": UInt64(UInt(bitPattern: unsafeBitCast(hookedSendmsg, to: UnsafeRawPointer.self))),
++        ]
++        var report = "=== hook: "
++        for index in 0..<_dyld_image_count() {
++            guard let name = _dyld_get_image_name(index).map({ String(cString: $0) }), name.contains("PackageTests"),
++                  let header = _dyld_get_image_header(index) else { continue }
++            let slide = _dyld_get_image_vmaddr_slide(index)
++            report += "\(name): " + rebind(header, slide: slide, replacements) + "\n"
++        }
++        let bytes = Array(report.utf8)
++        _ = realWrite?(hookDumpFD, bytes, bytes.count)
++        EPipeSnapshot.install()
++    }
++
++    private static func rebind(_ header: UnsafePointer<mach_header>, slide: Int, _ replacements: [String: UInt64]) -> String {
++        let base = UnsafeRawPointer(header)
++        var command = base + MemoryLayout<mach_header_64>.size
++        var linkedit: segment_command_64?
++        var symtab: symtab_command?
++        var dysymtab: dysymtab_command?
++        var segments: [UnsafeRawPointer] = []
++        for _ in 0..<header.pointee.ncmds {
++            let load = command.load(as: load_command.self)
++            switch Int32(bitPattern: load.cmd) {
++            case LC_SEGMENT_64:
++                let segment = command.load(as: segment_command_64.self)
++                let name = withUnsafeBytes(of: segment.segname) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
++                if name == "__LINKEDIT" { linkedit = segment } else if name.hasPrefix("__DATA") || name == "__AUTH_CONST" { segments.append(command) }
++            case LC_SYMTAB: symtab = command.load(as: symtab_command.self)
++            case LC_DYSYMTAB: dysymtab = command.load(as: dysymtab_command.self)
++            default: break
++            }
++            command += Int(load.cmdsize)
++        }
++        guard let linkedit, let symtab, let dysymtab else { return "no symbol tables" }
++        let linkBase = UInt(bitPattern: slide) &+ UInt(linkedit.vmaddr) &- UInt(linkedit.fileoff)
++        let symbols = UnsafePointer<nlist_64>(bitPattern: linkBase + UInt(symtab.symoff))!
++        let strings = UnsafePointer<CChar>(bitPattern: linkBase + UInt(symtab.stroff))!
++        let indirect = UnsafePointer<UInt32>(bitPattern: linkBase + UInt(dysymtab.indirectsymoff))!
++        var done: [String] = []
++        for segmentCommand in segments {
++            let segment = segmentCommand.load(as: segment_command_64.self)
++            var section = segmentCommand + MemoryLayout<segment_command_64>.size
++            for _ in 0..<segment.nsects {
++                let info = section.load(as: section_64.self)
++                let type = Int32(bitPattern: info.flags) & SECTION_TYPE
++                if type == S_LAZY_SYMBOL_POINTERS || type == S_NON_LAZY_SYMBOL_POINTERS {
++                    let pointers = UnsafeMutablePointer<UInt64>(bitPattern: UInt(bitPattern: slide) &+ UInt(info.addr))!
++                    let count = Int(info.size) / 8
++                    for slot in 0..<count {
++                        let symbol = indirect[Int(info.reserved1) + slot]
++                        if symbol & UInt32(INDIRECT_SYMBOL_ABS) != 0 || symbol & UInt32(INDIRECT_SYMBOL_LOCAL) != 0 { continue }
++                        let name = String(cString: strings + Int(symbols[Int(symbol)].n_un.n_strx))
++                        guard let replacement = replacements[name] else { continue }
++                        let page = UInt(bitPattern: pointers + slot) & ~UInt(vm_page_size - 1)
++                        let changed = vm_protect(mach_task_self_, vm_address_t(page), vm_size_t(vm_page_size), 0,
++                                                 VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY)
++                        guard changed == KERN_SUCCESS else { done.append("\(name) not writable (\(changed))"); continue }
++                        pointers[slot] = replacement
++                        done.append(name)
++                    }
++                }
++                section += MemoryLayout<section_64>.size
++            }
++        }
++        return done.joined(separator: ", ")
++    }
++}
++
++@_used @_section("__DATA,__mod_init_func")
++private let installEPipeHook: @convention(c) () -> Void = { DispatchQueue.global().async { EPipeHook.install() } }
++
++// TEMPORARY PROBE (not to commit): every thread's stack taken in the SIGPIPE handler itself, microseconds after the
++// write that raised it (the dispatch source's handler runs much later). Symbolized by `EPipeSnapshot.flush`.
++enum EPipeSnapshot {
++    static let depth = 40, most = 400
++    nonisolated(unsafe) static let pcs = UnsafeMutablePointer<UInt64>.allocate(capacity: most * depth)
++    nonisolated(unsafe) static var threads = 0
++    nonisolated(unsafe) static var taken = false
++    nonisolated(unsafe) static var handlerThread: UInt32 = 0
++
++    static let handler: @convention(c) (Int32) -> Void = { _ in
++        guard !taken else { return }
++        var list: thread_act_array_t?
++        var count: mach_msg_type_number_t = 0
++        guard task_threads(mach_task_self_, &list, &count) == KERN_SUCCESS, let all = list else { return }
++        let me = mach_thread_self()
++        handlerThread = me
++        let total = min(Int(count), most)
++        pcs.initialize(repeating: 0, count: most * depth)
++        for i in 0..<total where all[i] != me {
++            guard thread_suspend(all[i]) == KERN_SUCCESS else { continue }
++            var state = arm_thread_state64_t()
++            var size = mach_msg_type_number_t(MemoryLayout<arm_thread_state64_t>.size / MemoryLayout<natural_t>.size)
++            let got = withUnsafeMutablePointer(to: &state) {
++                $0.withMemoryRebound(to: natural_t.self, capacity: Int(size)) { thread_get_state(all[i], ARM_THREAD_STATE64, $0, &size) }
++            }
++            if got == KERN_SUCCESS {
++                let row = pcs + i * depth
++                row[0] = state.__pc; row[1] = state.__lr
++                var fp = state.__fp, n = 2
++                while n < depth, fp != 0, fp & 7 == 0 {
++                    let frame = UnsafePointer<UInt64>(bitPattern: UInt(fp))!
++                    let next = frame[0]
++                    row[n] = frame[1]; n += 1
++                    if next <= fp { break }
++                    fp = next
++                }
++            }
++            thread_resume(all[i])
++        }
++        threads = total
++        taken = true
++    }
++
++    static func install() {
++        var action = sigaction()
++        action.__sigaction_u.__sa_handler = handler
++        sigemptyset(&action.sa_mask)
++        action.sa_flags = SA_RESTART
++        sigaction(SIGPIPE, &action, nil)
++    }
++
++    /// The snapshot, symbolized, appended to `fd`; then ready for the next signal.
++    static func flush(to fd: Int32) {
++        guard taken else { return }
++        var out = "=== SNAPSHOT in the handler (thread \(handlerThread), \(threads) threads)\n"
++        for i in 0..<threads {
++            var lines: [String] = []
++            for n in 0..<depth {
++                let pc = (pcs + i * depth)[n] & 0x0000_7FFF_FFFF_FFFF
++                if pc == 0 { continue }
++                var info = Dl_info()
++                if dladdr(UnsafeRawPointer(bitPattern: UInt(pc)), &info) != 0, let name = info.dli_sname {
++                    lines.append(String(cString: name))
++                } else { lines.append(String(pc, radix: 16)) }
++            }
++            if !lines.isEmpty { out += "--- thread \(i)\n  " + lines.joined(separator: "\n  ") + "\n" }
++        }
++        let bytes = Array(out.utf8)
++        _ = realWrite?(fd, bytes, bytes.count)
++        taken = false
 +    }
 +}
