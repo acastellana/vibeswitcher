@@ -62,6 +62,10 @@ struct TeamMessageCard: View {
                             .padding(.horizontal, 11).padding(.vertical, 7)
                             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.accentColor.opacity(0.16)))
                             .accessibilityLabel("Your words: \(message.body)")
+                    } else if message.kind == .teammatePost {
+                        // A teammate's words as they are: no markup drawn, no link to follow.
+                        Text(verbatim: message.body).font(.system(size: 13)).lineSpacing(2).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         MarkdownView(text: message.body, fontSize: 13).frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -83,6 +87,7 @@ struct TeamMessageCard: View {
         case .userAnswer: return "person.fill"
         case .leadMessage: return "person.2"
         case .notice: return "bell"
+        case .teammatePost: return TeammateMark.symbol
         }
     }
 
@@ -93,7 +98,7 @@ struct TeamMessageCard: View {
 
     private var failed: Bool { message.kind == .audit && message.title.contains("didn't pass") }
 
-    private var symbolColor: Color { failed ? .red : Self.tint }
+    private var symbolColor: Color { failed ? .red : message.kind == .teammatePost ? TeammateMark.color : Self.tint }
 }
 
 /// The TL;DR line: asked for once when the card shows, drawn when it's come (nothing with summaries off).

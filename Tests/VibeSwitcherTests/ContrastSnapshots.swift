@@ -4,7 +4,7 @@ import Testing
 import VibeCore
 @testable import VibeSwitcher
 
-/// The popover, sidebar and pill in light and dark, with Increase Contrast off and on (`Contrast.override`, so the
+/// The popover and sidebar in light and dark, with Increase Contrast off and on (`Contrast.override`, so the
 /// system setting stays as it is). Only with `CONTRAST_SNAPSHOT_DIR=/some/folder scripts/test.sh --filter
 /// ContrastSnapshots`: contrast-light.png, contrast-light-increased.png, contrast-dark.png, contrast-dark-increased.png.
 @MainActor
@@ -43,7 +43,7 @@ struct ContrastSnapshots {
     }
 }
 
-/// The real popover and sidebar (no sessions: header, banner, footer), their rows, the pill and the menu bar dots.
+/// The real popover and sidebar (no sessions: header, banner, footer), their rows and the menu bar dots.
 private struct ContrastPicture: View {
     let store: SessionStore
     let sessions: [Session]
@@ -57,7 +57,6 @@ private struct ContrastPicture: View {
             HStack(spacing: 24) {
                 Image(nsImage: bar).resizable().interpolation(.high)
                     .frame(width: bar.size.width * 2, height: bar.size.height * 2)
-                FloatingDots(sessions: sessions, onOpen: { _ in }, onShowList: {})
                 Spacer()
             }
             .padding(.horizontal, 12).frame(height: 48)

@@ -7,7 +7,8 @@
 # scripts/load-report.sh [FROM [TO]]     days as yyyy-MM-dd; TO defaults to today, FROM to 6 days before TO
 #   --home DIR     VibeSwitcher's folder instead of $VIBESWITCHER_HOME, else ~/.vibeswitcher
 #
-# A freeze counts in the bucket of the minute's sample nearest it (within 2 minutes), else as "unsampled".
+# A freeze counts in the bucket of the minute's sample nearest it (within 2 minutes), else as "unsampled". Then the
+# freezes during merge runs per hour, all and by the width each run got (merges' `cores`).
 set -euo pipefail
 
 home="${VIBESWITCHER_HOME:-$HOME/.vibeswitcher}"
@@ -149,6 +150,39 @@ for name in NAMES:
     print(f"{name:<9}{row['minutes']:>9}{share:>8}{row['freezes']:>9}{rate:>10}{len(row['merges']):>8}{suite:>14}{fails:>15}")
 if unsampled:
     print(f"{'unsampled':<9}{'':>9}{'':>8}{unsampled:>9}   (freezes with no load sample within 2 minutes)")
+
+# Freezes while merge runs ran (each run once: a batch's lines share theirs), by the width its run got (`cores`, from
+# vs-heavy's line; "-" on lines without it): the check that a wider run on a calm Mac didn't bring more freezes.
+runs = {}
+for m in merges:
+    if not m.get("t") or m.get("duration_s") is None:
+        continue
+    key = m.get("batch") or (m["t"], m.get("project"), m.get("task"))
+    at = local(m["t"])
+    runs[key] = (at, at + dt.timedelta(seconds=m["duration_s"]), m.get("cores"))
+
+def during(windows):
+    """Minutes the windows cover (overlaps once) and the freezes inside them."""
+    covered, end = 0.0, None
+    for a, b in sorted((a, b) for a, b, _ in windows):
+        if end is not None and a < end:
+            a = end
+        if b > a:
+            covered += (b - a).total_seconds()
+            end = b if end is None or b > end else end
+    frozen = sum(1 for h in hangs if any(a <= h <= b for a, b, _ in windows))
+    return covered / 60, frozen
+
+if runs:
+    print()
+    def line(name, windows):
+        minutes, frozen = during(windows)
+        rate = f"{frozen / (minutes / 60):.2f}" if minutes else "-"
+        return f"{name}: {len(windows)} runs, {minutes:.0f} min, {frozen} freezes, {rate} per hour"
+    print(line("During merge runs", list(runs.values())))
+    widths = sorted({w for _, _, w in runs.values()}, key=lambda w: (w is None, w or 0))
+    for width in widths:
+        print("  " + line(f"width {width if width is not None else '-'}", [r for r in runs.values() if r[2] == width]))
 
 if samples:
     print()

@@ -1,0 +1,21 @@
+# Push to talk in a fake Claude's composer, through its fake /voice: no microphone (the sandbox's is always allowed and
+# never opened) and no speech service (the fake Claude hears the transcript it's told). The text lands in the box and
+# stays there, unsent.
+desc Dictate into a fake session's composer: the mic held (recording), let go, the transcript in the box, not sent.
+chat
+tell {"op": "voice", "mode": "hold", "transcript": "run the tests on the composer view"}
+dictation press
+shot recording
+dictation release
+composer unsent run the tests on the composer view
+shot dictated
+
+# What changes from run to run on its own (as in smoke.journey, the same window): the session's age in its sidebar row
+# and the header's state pill, the clock time under the question, and the inspector's clock and run values.
+mask *-main-* 430 250 75 45
+mask *-main-* 1115 118 140 44
+mask *-main-* 1940 325 95 35
+mask *-main-* 2220 256 340 130
+mask *-main-* 2245 770 315 55
+mask *-main-* 2440 825 120 75
+mask *-main-* 2100 1050 460 550

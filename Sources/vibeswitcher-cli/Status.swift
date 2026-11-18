@@ -88,6 +88,7 @@ enum StatusCommand {
         for path in notes?["replacedPaths"]?.array ?? [] { out.append("the host took back its path \(inert(path.string))") }
         out += facts.lines + modeLines
         out.append("voice rule: \(inert(result["rule"]?["says"]?.string))")
+        if let line = webLine(result["web"]) { out.append(line) }
         let sessions = result["sessions"]?.array ?? []
         out.append(sessions.isEmpty ? "No agent sessions." : "sessions:")
         for session in sessions {
@@ -176,6 +177,19 @@ enum StatusCommand {
 
     /// Untrusted text for the terminal (`ConfigSeal.inert`, no length limit).
     static func inert(_ text: String?) -> String { ConfigSeal.inert(text ?? "?", limit: .max) }
+
+    /// `status`'s `web` (the live plan's I1) as one line: the page's address while it listens, with the tokens and
+    /// pages, or why the port couldn't be had; nil from a server that doesn't say.
+    static func webLine(_ web: NodeWire.Value?) -> String? {
+        guard let web, let state = web["state"]?.string else { return nil }
+        let tokens = web["tokens"]?.int ?? 0, connections = web["connections"]?.int ?? 0
+        switch state {
+        case "off": return "web: off (`vibeswitcher web` opens it)" + (tokens > 0 ? "; \(tokens) tokens alive" : "")
+        case "listening":
+            return "web: http://127.0.0.1:\(web["port"]?.int.map(String.init) ?? "?")/, \(tokens) tokens alive, \(connections) pages open"
+        default: return "web: \(inert(state))"
+        }
+    }
 
     /// `{"format":1,"node":"local","sessions":[{"id","terminal","agent","cwd","status","since"}]}`: `cwd` null when
     /// it isn't known, `since` an ISO 8601 date.

@@ -21,17 +21,6 @@ enum Snapshot {
             write(view: host, to: "\(outputDirectory)/\(name).png")
         }
 
-        for (name, appearance) in [("panel-light", NSAppearance.Name.aqua), ("panel-dark", .darkAqua)] {
-            let host = NSHostingView(rootView: FloatingDotsView(store: store, onOpen: { _ in }, onShowList: {})
-                .padding(10).background(Color(nsColor: .windowBackgroundColor)))
-            host.appearance = NSAppearance(named: appearance)
-            host.frame = NSRect(origin: .zero, size: host.fittingSize)
-            let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
-            window.contentView = host
-            host.layoutSubtreeIfNeeded()
-            write(view: host, to: "\(outputDirectory)/\(name).png")
-        }
-
         var sidebarView = PopoverView(store: store, state: PopoverState(), preferences: Preferences(),
                                       onOpen: { _ in }, onInstallHooks: {}, onQuit: {})
         sidebarView.isSidebar = true

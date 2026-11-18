@@ -647,6 +647,26 @@ struct LeadStartTests {
         #expect(temporary.hasPrefix(world.host.root.appendingPathComponent("tmp").path + "/"), "\(temporary)")
     }
 
+    /// A scratch node's lead takes its test and build slots under the node's root (`<root>/tmp`, where its sessions'
+    /// temporary folders are), never the account's `vibeswitcher-<uid>` in the shared temporary folder: its merges and
+    /// audits don't wait on a slot the account's own work holds (a suite under `vs-heavy`, on a machine with one slot),
+    /// and leave nothing among the account's. Its tool server finds them by its environment (`TestLock.standard`).
+    @Test func theLeadsTestAndBuildSlotsAreUnderTheScratchRoot() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let lead = try started(await world.start())
+        let slots = world.host.root.appendingPathComponent("tmp").path
+        #expect(world.spawns.value.first?.env[TestLock.directoryVariable] == slots)
+        let session = try #require(world.leads().first { $0.id == lead })
+        let harness = NodeHarness(found: session, on: world.host, fake: world.fake)
+        try await harness.waitFor { harness.agentPid != nil }
+        let pid = try #require(harness.agentPid)
+        let environment = try #require(Self.environment(of: pid))
+        #expect(environment[TestLock.directoryVariable] == slots)
+        #expect(TestLock.standard(environment)?.directory == slots)
+        #expect(slots != "\(Platform.Files.sharedTemporaryRoot)/vibeswitcher-\(getuid())")
+    }
+
     /// The security document's decision 15: the lead's tool server starts no Codex worker.
     @Test func theLeadGetsNoCodexWorkers() async throws {
         let world = try await world()

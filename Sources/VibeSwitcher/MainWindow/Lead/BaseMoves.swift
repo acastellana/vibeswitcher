@@ -20,6 +20,8 @@ final class BaseMoves: ObservableObject {
         case vault
         /// The window, from a git command you sent from it.
         case typed
+        /// The window, from the lead's own vs-shell cards you pressed Run on (their ids).
+        case card([String])
         /// You, with Accept.
         case you
     }
@@ -85,6 +87,18 @@ final class BaseMoves: ObservableObject {
         sent = Array((sent + [LeadVault.Typed(session: session, line: line, cwd: cwd, at: now)]).suffix(50))
     }
 
+    /// You pressed Run on a vs-shell card (`ShellRequest`) at `at`, just before its shell started: its command is kept
+    /// as a line you sent, with the card's id, when it holds a git command that can move a branch. It accounts for a
+    /// move only when the session that filed the card is the lead of the repository that moved (`check`): the lead's
+    /// own request, which you ran. On 2026-11-12 a card's `git add docs/lead && git commit` was refused as a move nobody
+    /// made, and you had to Accept it as well.
+    func ranCard(_ request: ShellRequest, at: Date = Date()) {
+        let now = at.timeIntervalSince1970
+        sent.removeAll { now - $0.at > Self.typedFor }
+        guard !GitMoves.commands(in: request.command, cwd: request.cwd).isEmpty else { return }
+        sent = Array((sent + [LeadVault.Typed(session: request.session, line: request.command, cwd: request.cwd, at: now, card: request.id)]).suffix(50))
+    }
+
     /// The leads' roots, every few seconds (the lead controller's refresh). The reflog's and workflow.md's stamps are
     /// taken off the main thread too: a stat waited 3 s on a busy disk (hang-20261027-175604).
     func look(_ roots: Set<String>, now: Date = Date()) {
@@ -115,6 +129,9 @@ final class BaseMoves: ObservableObject {
         guard vault.headMoved(root: root, branch: branch) != nil, let move = try? vault.acceptMove(root: root, branch: branch) else { return .still }
         if move.accepted { return move.from == move.to ? .still : .taken(move, .vault, used: []) }
         if move.waiting == true { return .waiting }
+        // A card's command counts only when this repository's lead filed it: its own request, which you ran.
+        let lead = vault.current(.lead, root: root, task: nil)?.session?.lowercased()
+        let typed = typed.filter { $0.card == nil || (lead != nil && $0.session.lowercased() == lead) }
         // A team session's command could have made it: only you say so.
         guard move.team != true, !typed.isEmpty,
               let history = LeadVault.BaseHistory.read(root: root, branch: branch, since: move.from), history.head == move.to else { return .ask(move) }
@@ -123,7 +140,8 @@ final class BaseMoves: ObservableObject {
         let runs = LeadVault.runs(typed: used, root: root, branch: branch, recorded: move.from, head: history.head, now: at)
         let yours = LeadVault.judge(from: move.from, history: history, branch: branch, runs: runs, now: at, slack: 0)
         guard yours.accepted, (try? vault.setHead(yours.to, root: root, branch: branch)) != nil else { return .ask(move, used: used) }
-        return .taken(yours, .typed, used: used)
+        let cards = used.compactMap { $0.card }
+        return .taken(yours, cards.isEmpty ? .typed : .card(cards), used: used)
     }
 
     /// What a look found, on the main thread, with the stamps it took after (nil: none, while a command still runs).
@@ -193,6 +211,7 @@ final class BaseMoves: ObservableObject {
         switch taker {
         case .vault: line = move.acceptedLine
         case .typed: line = "accepted \(move.count) on \(move.branch) that you ran from VibeSwitcher's window: " + commits
+        case .card(let ids): line = "accepted \(move.count) on \(move.branch) that the lead's vs-shell card\(ids.count == 1 ? "" : "s") \(ids.joined(separator: ", ")) asked for and you ran: " + commits
         case .you: line = "You accepted \(move.count) on \(move.branch) in VibeSwitcher: " + commits
         }
         log("lead: \(line) (\(move.from.prefix(8)) → \(move.to.prefix(8)))")

@@ -182,7 +182,7 @@ extension BoostSection {
 }
 
 /// One whole-number limit: a field and a stepper, within `range`.
-private struct BoostStepper: View {
+struct BoostStepper: View {
     let label: SettingLabel
     /// Its name for VoiceOver: the field and stepper hide their labels.
     let name: String

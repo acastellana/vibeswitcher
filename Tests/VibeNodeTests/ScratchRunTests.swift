@@ -132,6 +132,11 @@ struct ScratchRunTests {
         #expect(try await scratchGit(repo.path, ["show", "main:src/parser.txt"]) == "Write the parser", "the worker's change on the base")
         #expect(Self.ranForMerge(marker, task: parser), "check.sh's marker: \((try? String(contentsOf: marker, encoding: .utf8)) ?? "none")")
         #expect(BoardStore(root: repo.path).load().task(parser)?.status == .done)
+        // Run under a test and build slot of the node's own (`<root>/tmp`), never one of the account's: this suite holds
+        // one of those itself (scripts/test.sh), the only one on a machine under 12 cores, where the merge waited for
+        // it until its call gave up (the `v2 linux` run of 2026-11-17, 4 cores: "no reply to request 2" after 300 s).
+        #expect(FileManager.default.fileExists(atPath: node.root.appendingPathComponent("tmp/test-build.lock").path),
+                "the merge's slot: \((try? FileManager.default.contentsOfDirectory(atPath: node.root.appendingPathComponent("tmp").path)) ?? [])")
         cli.assertEveryCallInScratchForm()
     }
 
@@ -199,6 +204,15 @@ struct ScratchRunTests {
         #expect(Self.approvalOption(["Approve \(other)", "Not yet"], audited: audited) == nil)
         #expect(Self.approvalOption(["Not yet", "Approve \(audited.uppercased())"], audited: audited) == "Approve \(audited.uppercased())")
         #expect(Self.approvalOption(["Approve \(other)", "Approve \(audited)"], audited: audited) == "Approve \(audited)")
+    }
+
+    /// The gated run stops, saying so, when a session's screen shows the account's usage limit, and not for the status
+    /// line's own count of it.
+    @Test func theUsageLimitsNoticeIsToldOnAScreen() {
+        #expect(Self.showsUsageLimit("● Working\n  You've hit your weekly limit · resets Nov 18, 6pm (Europe/Madrid)\n❯ 1. Stop and wait"))
+        #expect(Self.showsUsageLimit("You've hit your limit · resets 3am") && Self.showsUsageLimit("You've hit your 5-hour limit"))
+        #expect(!Self.showsUsageLimit("❯ \n  weekly 29%\n  ⏵⏵ auto mode on (shift+tab to cycle)"))
+        #expect(!Self.showsUsageLimit("● The greeting is within the limit of one word."))
     }
 
     /// A worker's commit is one on its `agent/` branch that touches `src/`: a commit on the base before the branch was
@@ -296,14 +310,44 @@ struct ScratchRunTests {
         #expect(started.output.contains(script.resolvingSymlinksInPath().path), "\(started.output)")
         step("2, the lead started")
 
+        // What the run is at, for the record and for a run that stops: each session's screen (empty cells as spaces),
+        // the board, the open cards, the node's own log.
+        func screen(_ session: HostSession, last: Int = 45) -> String {
+            Platform.lines((node.screen(session.id) ?? "no screen").replacingOccurrences(of: "\u{0}", with: " "))
+                .map { String($0.reversed().drop { $0 == " " }.reversed()) }.filter { !$0.isEmpty }.suffix(last).joined(separator: "\n")
+        }
+        func look(_ when: String) async {
+            let sessions = ((try? node.sessions()) ?? []).filter(\.isLive)
+            let cards = await Self.openCards(node).map { "\($0.text) \($0.options)" }
+            print("S10: \(when): the board \(Self.tasks(repo)); cards \(cards)")
+            for session in sessions { print("S10: \(when): the screen of \(session.label) (\(session.tty)):\n\(screen(session))") }
+            print("S10: \(when): the node said:\n\(node.said.replacingOccurrences(of: "\u{0}", with: " "))")
+        }
+
         // The cards as they come: the lead's question answered with its first option, an approval only of exactly the
-        // greeting's audited commit (the vault's verdict), as a user would; until the greeting's task is merged, up to
-        // the suite's limit.
-        let greeting = slugs[0]
+        // greeting's audited commit (the vault's verdict), as a user would; until the greeting's task is merged. Each
+        // change of what the run is at (the board's tasks, the live sessions, the vault's verdict) is printed with its
+        // time. It stops early, saying where, when the account's usage limit shows on a session's screen, when nothing
+        // at all moved for `Self.stallLimit` (the board, git's branches, the cards, the sessions and their hooks'
+        // last events), and at the suite's limit.
+        let expected = slugs[0]
+        var greeting = expected
         var question: String?, approvalCard: String?, answeredCards: Set<String> = []
-        var merged = false
+        var merged = false, stopped: String?
+        var shown = "", moved = "", movedAt = began
+        // The `agent/*` branches seen with a worker's commit (a cleanup takes a merged task's branch away).
+        var committed: Set<String> = []
+        func noteCommits() {
+            let found = Self.workerBranches(repo, since: first)
+            committed.formUnion(found.branches.filter { !found.withoutCommit.contains($0) })
+        }
         let deadline = began + 55 * 60
-        while !merged, MacTime.real.awake() < deadline {
+        while !merged, stopped == nil, MacTime.real.awake() < deadline {
+            let board = BoardStore(root: repo.path).load()
+            // The greeting's task as the lead named it (the goal gives its title: the worktree trusted beforehand is its slug's).
+            if let named = board.tasks.first(where: { $0.slug == expected })?.slug ?? board.tasks.first(where: { $0.title.lowercased().contains("greeting") })?.slug {
+                greeting = named
+            }
             for card in await Self.openCards(node) where !answeredCards.contains(card.id) {
                 if card.options.contains(where: { LeadVault.approvedCommit(in: $0) != nil }) {
                     // No verdict yet: looked at again on the next round. One on another commit: left unanswered.
@@ -322,26 +366,52 @@ struct ScratchRunTests {
                     let ran = try await cli.run(["answer", card.id, card.options.first ?? "Hello"], typed: true)
                     #expect(ran.status == 0 && ran.output.contains("answered: the lead is told"), "\(ran.output)\n\(node.said)")
                     if question == nil { question = card.id }
-                    step("the lead's question answered (\(card.text))")
+                    step("the lead's question answered (\(card.text): \(card.options.first ?? "Hello"))")
                 }
                 answeredCards.insert(card.id)
             }
-            merged = BoardStore(root: repo.path).load().task(greeting)?.status == .done
-            if !merged { try await Task.sleep(nanoseconds: 2_000_000_000) }
+            merged = board.task(greeting)?.status == .done
+            noteCommits()
+            let sessions = ((try? node.sessions()) ?? []).filter(\.isLive)
+            let verdict = try await Self.verdict(node, repo, task: greeting)
+            let state = "tasks \(Self.tasks(repo)); sessions \(sessions.map(\.label).sorted()); committed \(committed.sorted()); "
+                + "verdict \(verdict.map { "\($0.passes ? "passes" : "fails") at \($0.commit.prefix(8))" } ?? "none")"
+            if state != shown {
+                shown = state
+                step(state)
+            }
+            // Anything at all moving: what's shown, git's branches, the cards answered, each session's hooks' last event.
+            let hooks = sessions.map { "\($0.tty) \(HookState.load(from: node.root.appendingPathComponent("state/\($0.tty).json"))?.lastEventAt ?? 0)" }
+            let now = "\(state) \(Git.run(["for-each-ref", "--format=%(refname) %(objectname)"], in: repo.path).output) \(answeredCards.count) \(hooks)"
+            if now != moved { (moved, movedAt) = (now, MacTime.real.awake()) }
+            if let limited = sessions.first(where: { Self.showsUsageLimit(screen($0)) }) {
+                stopped = "the account's usage limit shows on the screen of \(limited.label)"
+            } else if MacTime.real.awake() - movedAt > Self.stallLimit {
+                stopped = "nothing moved for \(Int(Self.stallLimit / 60)) min"
+            }
+            if !merged, stopped == nil { try await Task.sleep(nanoseconds: 2_000_000_000) }
         }
-        step(merged ? "3, \(greeting) merged" : "3, \(greeting) not merged within the limit")
-        print("S10: the board: \(BoardStore(root: repo.path).load().tasks.map { "\($0.slug) \($0.status)" })")
-        try #require(merged, "\(greeting) never merged: \(node.said.replacingOccurrences(of: "\u{0}", with: " "))")
+        step(merged ? "3, \(greeting) merged" : "3, \(greeting) not merged: \(stopped ?? "the suite's limit")")
+        if !merged { await look("stopped (\(stopped ?? "the suite's limit"))") }
+        try #require(merged, "\(greeting) never merged: \(stopped ?? "the suite's limit")")
 
-        // Two agent/* branches, each with a worker's commit.
-        try Self.assertWorkersCommitted(repo, since: first, count: 2)
+        // Two agent/* branches, each with a worker's commit: the other task's worker may still be at it (waited for,
+        // its commit the event).
+        let committing = MacTime.real.awake() + 10 * 60
+        while committed.count < 2, MacTime.real.awake() < committing {
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+            noteCommits()
+        }
+        if committed.count < 2 { await look("the second worker's commit never came") }
+        #expect(committed.count == 2, "the agent/* branches with a worker's commit: \(committed.sorted()); now \(Self.workerBranches(repo, since: first))")
+        step("both workers committed (\(committed.sorted()))")
         // A verdict in the vault, from a verifier on a model other than the workers': the workers on Sonnet and the
         // verifier on haiku, as their transcripts in the config folder say and the landed commit's verifier trailer.
         let verdict = try #require(try await Self.verdict(node, repo, task: greeting), "the vault holds no verdict for \(greeting)")
         #expect(verdict.passes, "\(verdict)")
         let landed = try await Self.landed(repo, since: first).first { Self.trailer("VS-Task", in: $0) == greeting } ?? ""
         let workerModel = Self.trailer("VS-Worker-Model", in: landed), verifierModel = Self.trailer("VS-Verifier-Model", in: landed)
-        let ran = slugs.map { Self.sessionModels(config: config, root: project, slug: $0) }
+        let ran = [greeting, slugs[1]].map { Self.sessionModels(config: config, root: project, slug: $0) }
         let workers = ran.flatMap(\.workers), verifiers = ran[0].verifiers
         print("S10: the workers ran on \(workers), the verifier on \(verifiers); the trailers say \(workerModel ?? "none") and \(verifierModel ?? "none")")
         #expect(ran.allSatisfy { !$0.workers.isEmpty }, "a worker's transcript missing: \(ran)")
@@ -446,6 +516,19 @@ struct ScratchRunTests {
     static func workerBranches(_ repo: URL, since first: String) -> (branches: [String], withoutCommit: [String]) {
         let branches = Platform.lines(Git.run(["for-each-ref", "--format=%(refname:short)", "refs/heads/agent/"], in: repo.path).output)
         return (branches, branches.filter { (Int(Git.run(["rev-list", "--count", "\(first)..\($0)", "--", "src/"], in: repo.path).output) ?? 0) < 1 })
+    }
+
+    /// The board's tasks, each with its status, in a line.
+    static func tasks(_ repo: URL) -> [String] { BoardStore(root: repo.path).load().tasks.map { "\($0.slug) \($0.status.rawValue)" } }
+
+    /// How long the gated run waits with nothing at all moving before it stops and says where it is.
+    static let stallLimit: TimeInterval = 12 * 60
+
+    /// Whether a session's screen shows Claude Code's notice of the account's usage limit ("You've hit your weekly
+    /// limit · resets …", 2.1.325).
+    static func showsUsageLimit(_ screen: String) -> Bool {
+        screen.range(of: #"hit your [a-z0-9\- ]*limit"#, options: [.regularExpression, .caseInsensitive]) != nil
+            || screen.range(of: "usage limit reached", options: .caseInsensitive) != nil
     }
 
     /// The models `slug`'s worker and verifier sessions ran on, from their transcripts in the Claude Code config folder

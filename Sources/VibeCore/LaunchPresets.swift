@@ -290,6 +290,15 @@ public enum LaunchPlan {
         }
     }
 
+    /// The window session a Resume starts: the agent's conversation `sessionID` picked up in `cwd`, run as `base` (the
+    /// ended session's command) ran it, in a window session labelled as that one was. The sidebar's Resume and the
+    /// restart card's both start this (`RestartReopen.spawnRequest`).
+    public static func resumeRequest(cwd: String, base: String?, agent: Agent, sessionID: String, cols: Int, rows: Int,
+                                     label: String) -> SpawnRequest {
+        SpawnRequest(cwd: cwd, command: resumeCommand(base: base, agent: agent, sessionID: sessionID), env: [:], cols: cols,
+                     rows: rows, keepShell: false, label: label, agent: agent.rawValue)
+    }
+
     /// Shell variable names: an ASCII letter or underscore, then ASCII letters, digits, underscores.
     public static func validEnvName(_ name: String) -> Bool {
         guard let first = name.unicodeScalars.first, first.isASCII, first == "_" || CharacterSet.letters.contains(first)

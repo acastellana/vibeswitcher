@@ -2508,7 +2508,7 @@ its Needs. E9's Step 2 is still required, as the spec says.
     commit fails only on the two binding checks.
   - `realClaudeScript(root:config:claude:)` takes the `claude` it runs; `theRealClaudeScriptAddsSonnetOnlyWhenNoModelIsGiven`
     checks it ungated, with a stand-in.
-- [ ] **Step 2: The gated run.** `aScratchTeamPlansBuildsAuditsAndMerges`, enabled only with
+- [x] **Step 2: The gated run.** `aScratchTeamPlansBuildsAuditsAndMerges`, enabled only with
   `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` on the run's command line.
   - A real lead on Sonnet with a scripted goal: exactly two tasks touching `src/`, one question to the user, both
     workers started, one audit, one merge.
@@ -2546,7 +2546,17 @@ its Needs. E9's Step 2 is still required, as the spec says.
   - Each of these is checked ungated (`theRunsModelsAreReadByRoleFromTheConfigFoldersTranscripts`,
     `anApprovalIsTypedOnlyForTheAuditedCommit`, `aWorkersCommitIsOneOnItsBranchThatTouchesSrc`). Each was shown
     failing on stubs that do what the old code did.
-- [ ] **Step 3: Verify.**
+
+  *2026-11-17, S10:* **passed on its first gated run** (18:46, Claude Code 2.1.326, 75.2 s; one of the three runs
+  used), after E9's Step 2 passed the same day. The lead on Sonnet asked its question (answered Hello), added the two
+  tasks under the goal's titles, started both workers (live at once), each committed on its `agent/` branch, the
+  greeting's verifier on haiku gave a passing verdict, the lead asked for the approval of exactly that commit, and the
+  merge landed with `check.sh` run: every assertion above held. Before the run the harness gained what a run that stops
+  needs: each change of the board, the sessions, the commits and the verdict printed with its time; an early stop,
+  with every session's screen, the board, the cards and the node's log, when a screen shows the account's usage limit
+  (`showsUsageLimit`, checked ungated) or nothing at all moved for 12 minutes; the greeting's task found by slug or
+  title; the workers' commits noted as the run goes. The times, the models and the cost are in the inventory.
+- [x] **Step 3: Verify.**
   - `bash scripts/test.sh --filter ScratchRunTests`: Step 1 runs, Step 2 is skipped.
   - under load: `scripts/test-under-load.sh --load 24 -r 3 -f 'ScratchRunTests'`.
   - With the user's go-ahead, per run (at most three):
@@ -2556,7 +2566,13 @@ its Needs. E9's Step 2 is still required, as the spec says.
 
   *2026-11-16, S10:* the first two done (Step 1 passes, Step 2 skipped; 3 of 3 under load); the gated runs wait for
   Nov 18 and the user's go-ahead, after E9 Step 2.
+  *2026-11-17, S10:* done. One gated run, passed, recorded in the inventory (the version, the models, each step's
+  time, the cost seen; nothing failed). `ScratchRunTests` ungated again: 7 pass, the gated case skipped; and 3 of 3
+  under load 24 with the day's other new and changed cases (39 tests in 7 suites, 56 to 57 s a run). The rehearsal
+  failed on the `v2 linux` run's 4-core runner that day (its merge waiting for the suite's own test and build slot);
+  the fix is the engine's (a scratch node's lead takes its own slots), in the inventory beside the run.
 - [ ] **Step 4:** commit ("v2: a full scratch team run"). Push, both green: by the lead before M2, by the user after.
+  *2026-11-17:* committed on `v2-step8`, not pushed: the push and both jobs green are the lead's.
 
 **Done when:** Step 1 passes on Linux, and Step 2 passed once here (or waits, saying why, as an open item). That is the
 bootstrap path's step 9 "Proves": the design's stage 4 Done-when on a scratch repository.

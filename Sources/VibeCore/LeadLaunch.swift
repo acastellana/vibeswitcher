@@ -78,8 +78,10 @@ public enum LeadLaunch {
     /// The user's own settings for every project, edited in Settings › Project lead (the app writes them; no role's
     /// session does): the Mac-wide limits on sessions and load (`MacLimits`), the boost the app decided (`BoostState`,
     /// which raises them) and the working policy (`WorkingPolicy`). They aren't among the vault's guarded settings, so
-    /// a worker that wrote them could raise its own cap.
+    /// a worker that wrote them could raise its own cap. And the open sessions' record (`RestartReopen.file`): the
+    /// restart card runs each recorded session's command on your click, so a session that wrote it could plant one.
     static let userSettings = ["Edit(~/.vibeswitcher/mac-limits.json)", "Write(~/.vibeswitcher/mac-limits.json)",
+                               "Edit(~/.vibeswitcher/open-sessions.json)", "Write(~/.vibeswitcher/open-sessions.json)",
                                "Edit(~/.vibeswitcher/boost.json)", "Write(~/.vibeswitcher/boost.json)",
                                "Edit(~/.vibeswitcher/policy.md)", "Write(~/.vibeswitcher/policy.md)"]
 
@@ -113,6 +115,156 @@ public enum LeadLaunch {
     /// verifier loads no auto-memory (`verifierEnvironment`); settings, CLAUDE.md and skills a shell writes stay open.
     static let claudeHome = ["Edit(~/.claude/**)", "Write(~/.claude/**)"]
 
+    /// What Claude Code keeps in `~/.claude` of every session on this Mac, other projects' included: the prompt
+    /// history (`promptHistory`), pasted text (`paste-cache`), the shell's state at each session's start
+    /// (`shell-snapshots`), the files its edits replaced (`file-history`), plans, task and todo lists, session records,
+    /// debug logs, feedback drafts, background jobs' timelines (`jobs`), its daemon's folder (`daemon`: its `control.key`
+    /// is a credential), telemetry, the hooks' environment scripts (`session-env`) and its backups. Not one of them is a
+    /// file a session reads with its tools to run: Claude Code reads the hooks' scripts itself, by `readFile`, and puts
+    /// their text ahead of each Bash command (2.1.325, read in its bundle), which no Read rule binds. Refused to workers
+    /// and verifiers (an audit's finders among them), whose reports
+    /// and commits go into a public repository: with the user's `defaultMode: auto`, Claude Code (2.1.325, read in its
+    /// bundle) runs Read, Grep and Glob outside the working folder without asking, the safe-allowlist path, so before
+    /// these rules a worker's Read of another project's prompts was allowed unasked. A Read rule also binds Claude Code's
+    /// own path check of a shell read (`cat`, `head`, `tail`, `grep`, `sed`, `wc`, an input redirection: "was blocked by
+    /// a deny rule"); the hook allows none outside the worktree (`ReadOnlyCommand.reachesOutside`). Its path as
+    /// resolved, and the other projects' transcript folders, are added at launch (`otherSessions`). The lead keeps them.
+    /// `daemon.json`, a file beside the daemon's folder, is named too (audit workers-and-verifiers-5). Everything else
+    /// directly in `~/.claude` but `claudeKeep` is denied by listing it at launch (`otherSessions`); these stay named so
+    /// the known ones never depend on that listing.
+    static let sessionStores = ["paste-cache", "shell-snapshots", "file-history", "plans", "tasks", "todos", "sessions", "debug", "feedback",
+                                "jobs", "daemon", "daemon.json", "telemetry", "session-env", "backups"]
+    static let claudeStores = [promptHistory] + sessionStores.flatMap { ["Read(~/.claude/\($0))", "Read(~/.claude/\($0)/**)"] }
+
+    /// What directly in `~/.claude` a worker or verifier may still Read with its tools; every other entry there is
+    /// denied at launch (`otherSessions`), so a store Claude Code adds later is denied without anyone naming it. Only
+    /// what a session reads with the Read tool to work: what Claude Code loads itself (CLAUDE.md, `rules`, settings,
+    /// `agents`, `commands`, hooks' scripts) it reads by `readFile`, which no Read rule binds (2.1.325, as `session-env`
+    /// showed in workers-and-verifiers-5), so those are denied with the rest. When in doubt, denied. A key with a `/`
+    /// keeps that entry of a folder: the folder (`plugins`) is listed in turn and the rest of it denied.
+    static let claudeKeep: [String: String] = [
+        // A skill's text ends "Base directory for this skill: <path>" (2.1.325's bundle): its references and scripts
+        // there are read with the Read tool.
+        "skills": "user skills: a skill's reference files are read from its folder",
+        // Installed plugins' skills and scripts (`CLAUDE_PLUGIN_ROOT`), read the same way. Not the rest of `plugins`:
+        // `data` (`CLAUDE_PLUGIN_DATA`, a plugin's own store, read by its scripts) and its config may hold a credential.
+        "plugins/cache": "plugin skills: their reference files and scripts are read from the installed plugin's folder",
+        "plugins/marketplaces": "a marketplace's plugins: their skills' files are read from its clone",
+        // Each project's transcripts and auto-memory: the other projects' folders are denied one by one below, the
+        // project's own (its memory among them) stay readable.
+        "projects": "the project's own memory and transcripts; other projects' folders are denied by listing them",
+    ]
+
+    /// What a worker or verifier started in `cwd` for the project at `root` is also denied, read from `home` at its
+    /// launch: `claudeStores` by their paths as resolved, where `~/.claude` (or one of them) is a link elsewhere and the
+    /// `~` rule doesn't see the target; every other entry directly in `~/.claude` but `claudeKeep` (as written and as
+    /// resolved), listed now, so a store a later Claude Code adds is denied unnamed; and the Claude Code project folders (`~/.claude/projects/<folder>`: transcripts,
+    /// tool results, auto-memory) of every other repository there now. The project's own stay readable: the main
+    /// checkout's (its auto-memory, shared with its worktrees') and each of its worktrees' (`<root>/.vibeswitcher/
+    /// worktrees/…`), the role's own session among them; a team verifier's members are `memberTranscripts`'.
+    /// A folder made after the launch (a project first opened later) isn't denied: a deny rule can't say "all but".
+    /// Throws when a path as resolved is one a rule can't name as it is (`isRuleSafe`): the role isn't started rather
+    /// than started without its rule, as a team verifier's unreadable board (`team`); so does a `~/.claude` or `projects`
+    /// folder that's there but can't be listed (none at all is no other project's sessions), and an entry of `~/.claude`
+    /// whose name a rule can't hold.
+    public static func otherSessions(root: String, cwd: String, home: String = VibePaths.home) throws -> [String] {
+        let claude = (home as NSString).appendingPathComponent(".claude")
+        func real(_ path: String) -> String? {
+            guard let found = realpath(path, nil) else { return nil }
+            defer { free(found) }
+            return String(cString: found)
+        }
+        var rules: [String] = []
+        // `entry` of `~/.claude` as resolved, where that isn't its `~` path.
+        func resolvedRules(_ entry: String) throws -> [String] {
+            let path = (claude as NSString).appendingPathComponent(entry)
+            guard let resolved = real(path) ?? real(claude).map({ ($0 as NSString).appendingPathComponent(entry) }),
+                  resolved != path else { return [] }
+            try holdable(resolved, for: path)
+            return entry == "history.jsonl" ? ["Read(/\(resolved))"] : ["Read(/\(resolved))", "Read(/\(resolved)/**)"]
+        }
+        for store in ["history.jsonl"] + sessionStores { rules += try resolvedRules(store) }
+        // Everything else directly in `~/.claude` but `claudeKeep`, as it is now: one made after the launch isn't
+        // denied (a deny rule can't say "all but"). A `~/.claude` that's there but can't be listed starts no worker or
+        // verifier; none at all holds nothing to deny.
+        let named = Set(["history.jsonl"] + sessionStores)
+        // Denies each entry of `folder` (relative to `~/.claude`, "" for itself) neither kept nor named; a folder holding
+        // a kept entry (`plugins`) is listed in turn. Returns false when `folder` isn't there.
+        func denyUnkept(in folder: String) throws -> Bool {
+            let listed = folder.isEmpty ? claude : (claude as NSString).appendingPathComponent(folder)
+            let entries: [String]
+            do { entries = try FileManager.default.contentsOfDirectory(atPath: listed) } catch {
+                var info = stat()
+                guard stat(listed, &info) == 0 || errno != ENOENT else { return false }
+                throw BoardError(text: "\(listed) couldn't be listed (\((error as NSError).localizedDescription)), so no worker or verifier "
+                    + "was started: what's in it couldn't be denied.")
+            }
+            for entry in entries.sorted() {
+                let relative = folder.isEmpty ? entry : folder + "/" + entry
+                guard claudeKeep[relative] == nil, !named.contains(relative) else { continue }
+                if claudeKeep.keys.contains(where: { $0.hasPrefix(relative + "/") }) {
+                    _ = try denyUnkept(in: relative)
+                    continue
+                }
+                // A name a rule can't hold as it is (a glob's `*`, a parenthesis) would go undenied: none is started instead.
+                guard isRuleSafe(entry) else {
+                    throw BoardError(text: "\(listed)/\(entry) has a name a permission rule can't hold as it is, so no worker or verifier "
+                        + "was started: rename it to one of letters, digits, spaces, . _ and -.")
+                }
+                rules += ["Read(~/.claude/\(relative))", "Read(~/.claude/\(relative)/**)"] + (try resolvedRules(relative))
+            }
+            return true
+        }
+        guard try denyUnkept(in: "") else { return rules }
+        let projects = (claude as NSString).appendingPathComponent("projects")
+        let entries: [String]
+        do { entries = try FileManager.default.contentsOfDirectory(atPath: projects) } catch {
+            // Only a folder that isn't there (nor where a link leads) starts the role without these rules.
+            var info = stat()
+            guard stat(projects, &info) == 0 || errno != ENOENT else { return rules }
+            throw BoardError(text: "\(projects) couldn't be listed (\((error as NSError).localizedDescription)), so no worker or verifier "
+                + "was started: other projects' transcripts there couldn't be denied.")
+        }
+        func name(_ path: String) -> String { (claudeProjectFolder(path, home: home) as NSString).lastPathComponent }
+        let roots = spellings(root)
+        let own = Set((roots + spellings(cwd)).map(name))
+        // Every worktree's folder starts so; past 200 characters Claude Code cuts the name there and adds a hash.
+        let worktrees = roots.map { String(projectName(($0 as NSString).appendingPathComponent(".vibeswitcher/worktrees") + "/").prefix(200)) }
+        let resolvedProjects = real(projects).flatMap { $0 != projects ? $0 : nil }
+        if let resolvedProjects { try holdable(resolvedProjects, for: projects) }
+        for entry in entries.sorted() where !own.contains(entry) && !worktrees.contains(where: { entry.hasPrefix($0) }) {
+            // Claude Code names its folders with letters, digits and "-": anything else isn't one, and a rule may not
+            // hold its name as it is.
+            guard entry.unicodeScalars.allSatisfy(ruleSafe.contains) else { continue }
+            rules += ["Read(~/.claude/projects/\(entry))", "Read(~/.claude/projects/\(entry)/**)"]
+            if let resolvedProjects { rules += ["Read(/\(resolvedProjects)/\(entry))", "Read(/\(resolvedProjects)/\(entry)/**)"] }
+        }
+        return rules
+    }
+
+    /// The characters a name in a rule holds as they are: none a glob reads (`*`, `?`, `[`, `{`, `!`), nor `(` or `)`.
+    static let ruleSafe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    /// A path a rule holds as it is: `ruleSafe`'s characters, `/`, and a space inside a name (an iCloud Drive folder's
+    /// "Mobile Documents"), which a gitignore pattern reads as itself; not one that ends a name, which it drops.
+    static func isRuleSafe(_ path: String) -> Bool {
+        path.unicodeScalars.allSatisfy { $0 == "/" || $0 == " " || ruleSafe.contains($0) } && !path.hasSuffix(" ") && !path.contains(" /")
+    }
+
+    /// Throws unless `resolved`, where `path` leads, is one a rule can name (`isRuleSafe`).
+    static func holdable(_ resolved: String, for path: String) throws {
+        guard !isRuleSafe(resolved) else { return }
+        throw BoardError(text: "\(path) leads to \(resolved), which a permission rule can't name as it is, so no worker or verifier "
+            + "was started: rename that folder, or point the link at one whose path holds only letters, digits, spaces, . _ and -.")
+    }
+
+    /// `path` as given, as Foundation resolves it, and as the kernel does (`/private` kept: Claude Code names a project
+    /// folder after that).
+    static func spellings(_ path: String) -> [String] {
+        var found = [path, URL(fileURLWithPath: path).resolvingSymlinksInPath().path]
+        if let real = realpath(path, nil) { found.append(String(cString: real)); free(real) }
+        return found
+    }
+
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
     /// (and commits to the base branch): a worker editing it would conflict with those commits.
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
@@ -122,7 +274,8 @@ public enum LeadLaunch {
                 + crossSession + LinuxLaunch.denyRules(for: .lead)  // Linux's own (S10): none on the Mac.
         case .verifier:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
-                + crossSession + claudeHome + LinuxLaunch.denyRules(for: .verifier)  // Linux's own (S10): none on the Mac.
+                + crossSession + claudeHome + claudeStores
+                + LinuxLaunch.denyRules(for: .verifier)  // Linux's own (S10): none on the Mac.
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -147,7 +300,7 @@ public enum LeadLaunch {
                           "Bash(git rm * \(records)*)"]
             }
             return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession + claudeHome
-                + LinuxLaunch.denyRules(for: .worker)  // Linux's own (S10): none on the Mac.
+                + claudeStores + LinuxLaunch.denyRules(for: .worker)  // Linux's own (S10): none on the Mac.
         }
     }
 
@@ -245,17 +398,108 @@ public enum LeadLaunch {
     /// names it: a JavaScript string hash of the UTF-16 path, its absolute value in base 36).
     public static func claudeProjectFolder(_ path: String, home: String = VibePaths.home) -> String {
         let units = Array(path.utf16)
-        var name = String(units.map { unit -> Character in
-            let scalar = UnicodeScalar(unit).map(Character.init)
-            guard let scalar, scalar.isASCII, scalar.isLetter || scalar.isNumber else { return "-" }
-            return scalar
-        })
+        var name = projectName(path)
         if name.count > 200 {
             var hash: Int32 = 0
             for unit in units { hash = (hash &<< 5) &- hash &+ Int32(unit) }
             name = String(name.prefix(200)) + "-" + String(abs(Int64(hash)), radix: 36)
         }
         return (home as NSString).appendingPathComponent(".claude/projects/\(name)")
+    }
+
+    /// `path` with every character but an ASCII letter or digit made a "-", before any cut (`claudeProjectFolder`).
+    static func projectName(_ path: String) -> String {
+        String(path.utf16.map { unit -> Character in
+            let scalar = UnicodeScalar(unit).map(Character.init)
+            guard let scalar, scalar.isASCII, scalar.isLetter || scalar.isNumber else { return "-" }
+            return scalar
+        })
+    }
+
+    /// What a team task's verifier may not read on top of `deny(.verifier)`: the Claude Code project folders of the
+    /// task's members (`~/.claude/projects/<folder>`, `claudeProjectFolder`), where their transcripts are, and with
+    /// them every teammate's post delivered into one. Each member's worktree (the integrator's is the task's own, the
+    /// others' `<slug>--<name>`) by its path as given and as resolved, and the task's own worktree whatever its team
+    /// says: the audit stays independent of what the members told each other (docs/lead/decisions.md, 2026-11-13;
+    /// team-on-one-task-design.md, 4). `~` is the session's own home, where Claude Code keeps them; `home` is where
+    /// they're listed from. Read rules hold Grep and Glob too; a shell read outside the worktree isn't one the
+    /// verifier's hook lets run (`hooks`). None for a plain task: its rules stay `deny(.verifier)`'s.
+    ///
+    /// A member's folder is denied whole, but for one of `cwd`'s, where the verifier itself starts (the task's own
+    /// worktree, the integrator's): Claude Code keeps the verifier's own session there too, and a tool result over
+    /// about 30 KB (a team's `git diff main...HEAD`) is saved to `<folder>/<its session>/tool-results/` for it to Read
+    /// back. There, every session's transcript (`*.jsonl`, the verifier's own included) and every entry already in the
+    /// folder at its launch (earlier sessions' folders: the integrator's tool results, subagents, memory) are denied;
+    /// only the verifier's own session's folder, made after this, isn't. An entry whose name a rule can't hold as it is,
+    /// or a folder that's there but can't be listed, denies that folder whole.
+    ///
+    /// What a session there makes after the launch (an integrator restarted mid-audit, a subagent of one already
+    /// there) is denied where its transcripts are: every `.jsonl` at any depth and every `subagents` folder
+    /// (`laterSessions`). Not the rest of a session folder made after the launch, its `tool-results` above all: the
+    /// verifier's own is one, its session id isn't known before it starts, and a deny rule can't make an exception
+    /// (deny wins over allow; a rule has no "all but"). So a large tool result of a session started after the verifier
+    /// stays readable to it. The prompt history (`promptHistory`), where every post typed into a member is kept, is
+    /// denied to every verifier already (`claudeStores`).
+    public static func memberTranscripts(root: String, slug: String, team: [LeadTeamMember]?, cwd: String? = nil,
+                                         home: String = VibePaths.home) -> [String] {
+        guard let team, !team.isEmpty else { return [] }
+        return memberFolders(root: root, slug: slug, team: team, cwd: cwd, home: home)
+    }
+
+    /// Claude Code's prompt history: each prompt typed into a session on this Mac, a post delivered into a member's
+    /// among them, with its project's path.
+    public static let promptHistory = "Read(~/.claude/history.jsonl)"
+
+    /// In the verifier's own project folder (`rule`, as `~/…`), what holds a transcript in a session made after its
+    /// launch: a `.jsonl` at any depth (a subagent's, `<session>/subagents/agent-<id>.jsonl`) and a `subagents` folder.
+    static func laterSessions(_ rule: String) -> [String] {
+        ["Read(\(rule)/**/*.jsonl)", "Read(\(rule)/**/subagents)", "Read(\(rule)/**/subagents/**)"]
+    }
+
+    static func memberFolders(root: String, slug: String, team: [LeadTeamMember], cwd: String?, home: String) -> [String] {
+        func name(_ path: String) -> String { (claudeProjectFolder(path, home: home) as NSString).lastPathComponent }
+        let own = Set((cwd.map(spellings) ?? []).map(name))
+        let worktrees = [Worktrees.path(root: root, slug: slug)] + team.map(\.worktree)
+        let names = Set(worktrees.flatMap(spellings).map(name)).sorted()
+        return names.flatMap { folder -> [String] in
+            let rule = "~/.claude/projects/\(folder)"
+            let whole = ["Read(\(rule))", "Read(\(rule)/**)"]
+            guard own.contains(folder) else { return whole }
+            let listed = (home as NSString).appendingPathComponent(".claude/projects/\(folder)")
+            let entries: [String]
+            do { entries = try FileManager.default.contentsOfDirectory(atPath: listed).sorted() } catch {
+                // Not there yet, it holds no earlier session; there but not listable, it's denied whole.
+                var info = stat()
+                guard lstat(listed, &info) != 0, errno == ENOENT else { return whole }
+                entries = []
+            }
+            guard entries.allSatisfy({ $0.unicodeScalars.allSatisfy(ruleSafe.contains) }) else { return whole }
+            // `memory*` too: `setAsideMemory`, after this, renames one.
+            return ["Read(\(rule)/*.jsonl)"] + laterSessions(rule) + ["Read(\(rule)/memory*)", "Read(\(rule)/memory*/**)"] + entries.flatMap { ["Read(\(rule)/\($0))", "Read(\(rule)/\($0)/**)"] }
+        }
+    }
+
+    /// The members of the task `task` (its slug or id) on the board of `root`, or nil: a plain task, or none on the
+    /// board (none yet is an empty board). Only the tasks' names and teams are decoded, so a board this build reads
+    /// partly still says. Throws when the board is there but can't be read or isn't a board's JSON: a team task's
+    /// verifier must not start without its members' rules (`memberTranscripts`).
+    static func team(root: String, task: String) throws -> [LeadTeamMember]? {
+        struct Teams: Decodable {
+            struct Task: Decodable { var id: String?; var slug: String?; var team: [LeadTeamMember]? }
+            var tasks: [Task]?
+        }
+        let file = (BoardStore(root: root).folder as NSString).appendingPathComponent("board.json")
+        guard let data = FileManager.default.contents(atPath: file) else {
+            let code = errno
+            guard access(file, F_OK) == 0 else { return nil }
+            throw BoardError(text: "\(file) couldn't be read (\(String(cString: strerror(code)))), so the verifier wasn't started.")
+        }
+        let tasks: [Teams.Task]
+        do { tasks = try JSONDecoder().decode(Teams.self, from: data).tasks ?? [] } catch {
+            throw BoardError(text: "\(file) doesn't read as a board (\(error)), so the verifier wasn't started.")
+        }
+        let found = tasks.first { $0.id == task || $0.slug == task }
+        return found?.team?.isEmpty == false ? found?.team : nil
     }
 
     /// Moves aside the auto-memory Claude Code keeps for a session started in `cwd`, a task's worktree (by its path as
@@ -308,11 +552,12 @@ public enum LeadLaunch {
     /// Writes the role's files (0600) and returns the command line to run. They go in `folder`: the vault's run folder
     /// for the role (`LeadVault.runFolder`, outside the repository); `<root>/.vibeswitcher/run/<name>/` when none is given.
     /// The session's TMPDIR is made under `temporary` for `cwd`, where it's started (the task's worktree, else `root`):
-    /// what its swift builds and tests leave there goes with it (see `SessionTemp`).
+    /// what its swift builds and tests leave there goes with it (see `SessionTemp`). `resume`: the agent's conversation to
+    /// carry on (`--resume`), `start` then being its next message.
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
-                               server: String, name: String, model: String? = nil, branch: String? = nil,
-                               records: String? = nil, folder: URL? = nil, cwd: String? = nil,
-                               temporary: URL = SessionTemp.root) throws -> Prepared {
+                               server: String, name: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
+                               branch: String? = nil, records: String? = nil, folder: URL? = nil, cwd: String? = nil,
+                               temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -330,8 +575,16 @@ public enum LeadLaunch {
                                    to: URL(fileURLWithPath: mcpFile))
         // Where it's started (the task's worktree, else `root`): the hook's paths stay in it.
         let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
+        // A team task's verifier is also denied its members' transcripts, its team as the board has it: a board that
+        // can't be read starts no verifier, rather than one without those rules (none yet is an empty board).
+        var rules = deny(role, base: branch, records: records)
+        // Another project's sessions, as this Mac's `~/.claude` has them now (`otherSessions`); not the lead's.
+        if role != .lead { rules += try otherSessions(root: root, cwd: cwd, home: home) }
+        if role == .verifier, let task {
+            rules += memberTranscripts(root: root, slug: task, team: try team(root: root, task: task), cwd: cwd, home: home)
+        }
         var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
-                                                       "deny": deny(role, base: branch, records: records)]]
+                                                       "deny": rules]]
         var env = environment(role)
         if role == .verifier {
             // Never started with its commands as itself (see `verifierEnvironment`).
@@ -351,7 +604,13 @@ public enum LeadLaunch {
         let trimmed = base.trimmingCharacters(in: .whitespaces)
         // The model given replaces one the project's command names (`--model x`, `--model=x`): `claude --help` doesn't
         // say which of two wins.
-        var parts = [trimmed.isEmpty ? "claude" : model == nil ? trimmed : withoutModel(trimmed)]
+        // Likewise an effort given replaces the command's own. The command's own advisor never goes through, passed one
+        // or not: lead_advisor, worker_advisor and the task decide a session's advisor (`run`), so a command's
+        // `--advisor fable` can't reach a session while Fable is held back, a task that says none, or a main it ranks
+        // below (an interactive session exits at launch on that pairing).
+        var command = without("--advisor", in: trimmed.isEmpty ? "claude" : model == nil ? trimmed : withoutModel(trimmed))
+        if effort != nil { command = without("--effort", in: command) }
+        var parts = [command.isEmpty ? "claude" : command]
         // From its file, so the prompt's length and characters never matter on the command line.
         parts.append("--append-system-prompt-file \(quote(promptFile))")
         parts.append("--mcp-config \(quote(mcpFile))")
@@ -362,10 +621,19 @@ public enum LeadLaunch {
         parts += LinuxLaunch.permissionMode(command: parts[0])  // Named, auto, unless the project's command names one.
         parts.append("--name \(quote(name))")
         if let model { parts.append("--model \(quote(model))") }
+        // Consulted at decision points (Claude Code's advisor; the flag isn't in `claude --help`).
+        if let advisor { parts.append("--advisor \(quote(advisor))") }
+        if let effort { parts.append("--effort \(quote(claudeEffort(effort)))") }
+        // A lead reopened after a restart (`RestartReopen`): its same conversation, `start` its next message. Nothing
+        // else differs from a fresh start: the same files, rules and environment.
+        if let resume { parts.append("--resume \(quote(resume))") }
         parts.append("-- \(quote(start))")
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
         // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).
         prepared.environment[SessionNote.roleVariable] = role.rawValue
+        // The lead's model, for its tool server to note on the board (`LeadBoard.leadModel`): a refusal its session
+        // stops at is then kept for that model, so a lead stopped at Fable's limit holds Fable back.
+        if role == .lead, let model { prepared.environment[leadModelVariable] = model }
         // Also from the start (Claude Code takes the settings' env as it reads them).
         if role == .verifier { prepared.environment.merge(verifierEnvironment(server: server)) { $1 } }
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
@@ -406,6 +674,8 @@ public enum LeadLaunch {
          "merge takes the base's copy of the lead's records whatever the branch did to them (`Worktrees.takeBaseRecords`), and the Claude audit's integrity check reads the rest of the diff"),
         ("no reads of VibeSwitcher's private files (~/.vibeswitcher/lead, ~/.vibeswitcher/steer)",
          "its brief, and the session host's checks: it tells callers apart by their process, never by what they've read"),
+        ("no reads of Claude Code's prompt history and other sessions' stores (~/.claude/history.jsonl, paste-cache, file-history, other projects' transcripts)",
+         "its brief only: its sandbox limits writes, not reads; the Claude audit reads its branch and report for anything of another project's"),
         ("your own Codex rules (~/.codex/rules) stay in force: a command prefix you approved there runs outside the sandbox",
          "Codex's TUI loads them whatever a session says (only `codex exec --ignore-rules` skips them); keep them narrow, and the Claude audit reads what the branch did"),
         ("pkill, killall and debuggers refused by rule",
@@ -463,8 +733,9 @@ public enum LeadLaunch {
     /// What Codex can't hold is `codexUnenforced`. The files go in `folder` as `prepare`'s do: the prompt, and the
     /// configuration given on the command line as JSON, for reading back.
     public static func prepareCodex(root: String, task: String, base: String, prompt: String, start: String, server: String,
-                                    name: String, model: String? = nil, folder: URL? = nil, cwd: String? = nil,
-                                    temporary: URL = SessionTemp.root) throws -> Prepared {
+                                    name: String, model: String? = nil, effort: String? = nil, folder: URL? = nil, cwd: String? = nil,
+                                    temporary: URL = SessionTemp.root,
+                                    toolTimeout: TimeInterval = LeadDoneCheck.callTimeout(limit: LeadDoneCheck.defaultMinutes * 60)) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -475,7 +746,7 @@ public enum LeadLaunch {
         let writable = codexWritableRoots(cwd: cwd, slug: task, temporary: temporaryFolder?.path, root: root)
         let args = [MCPKeeper.flag, "--role", Role.worker.rawValue, "--root", root, "--task", task]
         // In order; each is one `-c key=value`.
-        let config: [(key: String, value: String)] = [
+        var config: [(key: String, value: String)] = [
             ("sandbox_workspace_write.writable_roots", toml(writable)),
             ("sandbox_workspace_write.network_access", "false"),
             // The worktree trusted, as the whole `projects` table (for this session only: the file isn't changed). Not as
@@ -489,6 +760,9 @@ public enum LeadLaunch {
             ("mcp_servers.vibeswitcher.command", toml(server)),
             ("mcp_servers.vibeswitcher.args", toml(args)),
             ("mcp_servers.vibeswitcher.startup_timeout_sec", "60"),
+            // A tool call may take minutes (report runs the pre-done check, `LeadDoneCheck`): Codex's own limit, 60 s
+            // unless set, would drop the call while the check runs, and its worker would see a timeout, not the result.
+            ("mcp_servers.vibeswitcher.tool_timeout_sec", String(Int(toolTimeout.rounded(.up)))),
             // Its tools need no approval: under approval never, Codex refuses a tool call that needs one ("MCP tool call
             // requires approval, but approval policy is never", the real run of 2026-11-01), and no worker could report.
             ("mcp_servers.vibeswitcher.default_tools_approval_mode", toml("approve")),
@@ -497,6 +771,8 @@ public enum LeadLaunch {
             // the wrong place and never gets its role (the host run of 2026-11-01).
             ("mcp_servers.vibeswitcher.env_vars", toml(mcpVariables)),
         ]
+        // The task's effort; not set: config.toml's model_reasoning_effort, as before.
+        if let effort { config.append(("model_reasoning_effort", toml(codexEffort(effort)))) }
         let record: [String: Any] = ["config": config.map { ["key": $0.key, "value": $0.value] }, "writableRoots": writable,
                                      "mcpServer": ["command": server, "args": args],
                                      "unenforced": codexUnenforced.map { ["rule": $0.rule, "instead": $0.instead] }]
@@ -536,6 +812,148 @@ public enum LeadLaunch {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return command }
         let range = NSRange(command.startIndex..., in: command)
         return regex.stringByReplacingMatches(in: command, range: range, withTemplate: "").trimmingCharacters(in: .whitespaces)
+    }
+
+    /// `command` without `option` and its value (`--advisor x`, `--effort=x`); the rest as it was.
+    static func without(_ option: String, in command: String) -> String {
+        let pattern = #"(^|\s+)"# + NSRegularExpression.escapedPattern(for: option) + #"(=|\s+)('[^']*'|"[^"]*"|\S+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return command }
+        let range = NSRange(command.startIndex..., in: command)
+        return regex.stringByReplacingMatches(in: command, range: range, withTemplate: "").trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: Models, advisors and effort
+
+    /// The variable a lead's session carries its `--model` in (none: Claude's default).
+    public static let leadModelVariable = "VIBESWITCHER_LEAD_MODEL"
+
+    /// What a session runs on: its model (`--model`; nil: its command's, else Claude's settings'), the advisor its main
+    /// model consults at decision points (Claude Code's `--advisor`: before it commits to an approach, when an error
+    /// recurs, before it declares done; billed at the advisor's rates only when called), and its reasoning effort
+    /// (`effortLevels`; nil: the CLI's default). The user, 2026-11-12: Opus for nearly everything, Fable where judgment
+    /// decides the outcome (the lead, hard tasks, re-rolls, sensitive audits).
+    public struct Run: Equatable, Sendable {
+        public var model: String?
+        public var advisor: String?
+        public var effort: String?
+
+        public init(model: String? = nil, advisor: String? = nil, effort: String? = nil) {
+            self.model = model
+            self.advisor = advisor
+            self.effort = effort
+        }
+
+        /// "opus, effort high, advisor fable"; `fallback` names the model when none is passed ("its command's model").
+        public func text(fallback: String) -> String {
+            ([model ?? fallback] + [effort.map { "effort \($0)" }, advisor.map { "advisor \($0)" }].compactMap { $0 }).joined(separator: ", ")
+        }
+    }
+
+    /// What a Codex session runs when it's given no model or effort: config.toml's top-level `model` and
+    /// `model_reasoning_effort` (in `$CODEX_HOME`, else `~/.codex`), for showing only; nil for one not set or not read.
+    /// VibeSwitcher never names a Codex model itself.
+    public static func codexDefaults(home: String = VibePaths.home,
+                                     codexHome: String? = ProcessInfo.processInfo.environment["CODEX_HOME"]) -> (model: String?, effort: String?) {
+        let folder = codexHome.flatMap { $0.isEmpty ? nil : $0 } ?? (home as NSString).appendingPathComponent(".codex")
+        guard let text = try? String(contentsOfFile: (folder as NSString).appendingPathComponent("config.toml"), encoding: .utf8) else { return (nil, nil) }
+        var values: [String: String] = [:]
+        for line in text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") { break }
+            guard let equals = trimmed.firstIndex(of: "=") else { continue }
+            let key = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
+            guard key == "model" || key == "model_reasoning_effort" else { continue }
+            var value = trimmed[trimmed.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+            if let hash = value.range(of: " #") { value = String(value[..<hash.lowerBound]).trimmingCharacters(in: .whitespaces) }
+            value = value.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !value.isEmpty { values[key] = value }
+        }
+        return (values["model"], values["model_reasoning_effort"])
+    }
+
+    /// The effort levels a task may set (add_task's and update_task's `effort`).
+    public static let effortLevels = ["low", "medium", "high", "xhigh"]
+    /// The advisors a task may set: fable, opus, or none (no advisor, whatever worker_advisor says).
+    public static let advisorChoices = ["fable", "opus", "none"]
+    /// A hard task's effort when it sets none (a task the lead marks advisor: fable).
+    public static let hardEffort = "high"
+    /// The model a re-rolled task's next worker runs on when the task names none: two rounds of patching that didn't
+    /// land call for more judgment, not more of the same.
+    public static let rerollModel = "fable"
+
+    /// Effort levels from least to most, as both CLIs order theirs.
+    static let effortLadder = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    /// `claude --effort`'s levels (Claude Code's `--help`, 2026-11-12: low, medium, high, xhigh, max).
+    static let claudeEfforts = ["low", "medium", "high", "xhigh", "max"]
+    /// Codex's `model_reasoning_effort` values (codex-cli 0.167.0's: none, minimal, low, medium, high, xhigh, max).
+    static let codexEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+    /// `level` as a CLI with `levels` takes it: itself when it has it, else its nearest on `effortLadder` (the higher one
+    /// on a tie: a task asked for more, not less), else as it is.
+    static func nearestEffort(_ level: String, in levels: [String]) -> String {
+        if levels.contains(level) { return level }
+        guard let at = effortLadder.firstIndex(of: level) else { return level }
+        let known = levels.compactMap { effortLadder.firstIndex(of: $0) }
+        return known.min { (abs($0 - at), -$0) < (abs($1 - at), -$1) }.map { effortLadder[$0] } ?? level
+    }
+
+    static func claudeEffort(_ level: String) -> String { nearestEffort(level, in: claudeEfforts) }
+    static func codexEffort(_ level: String) -> String { nearestEffort(level, in: codexEfforts) }
+
+    /// A model family's rank for the advisor rule ("an advisor must rank at or above your session's main model",
+    /// code.claude.com/docs/en/advisor): fable above opus above sonnet above haiku; nil for one not known.
+    static func rank(_ model: String?) -> Int? {
+        switch AccountUsage.family(model) {
+        case "fable": return 4
+        case "opus": return 3
+        case "sonnet": return 2
+        case "haiku": return 1
+        default: return nil
+        }
+    }
+
+    /// The advisor a session whose main model is `main` (nil: not known) gets, of `advisor`; nil for none. Claude Code
+    /// refuses a pairing whose advisor ranks below its main (a Fable main with an Opus advisor), and an interactive
+    /// session it refuses one for exits at launch: such an advisor is dropped, as is a Fable advisor to a Fable main
+    /// (nothing more to consult), and with the main unknown, every advisor but Fable (which ranks above every main).
+    public static func advisor(_ advisor: String?, main: String?) -> String? {
+        guard let advisor = advisor?.trimmingCharacters(in: .whitespaces).lowercased(), !advisor.isEmpty, advisor != "none",
+              let wanted = rank(advisor) else { return nil }
+        guard let ranked = rank(main) else { return wanted == rank("fable") ? advisor : nil }
+        if ranked == rank("fable") { return nil }
+        return wanted >= ranked ? advisor : nil
+    }
+
+    /// The run a session meant for `model`, `advisor` and `effort` starts with. `defaultModel`: what no `--model` runs
+    /// (the command's own, else Claude's settings'; nil: not known). While Fable is held back (`AccountUsage.fableHeldBack`),
+    /// a session meant for Fable starts on Opus, passed explicitly when it was Fable by default, and a Fable advisor is
+    /// dropped: no session starts with `--advisor fable` then.
+    public static func run(model: String?, advisor: String?, effort: String?, defaultModel: String?, fableHeldBack: Bool) -> Run {
+        var model = model
+        if fableHeldBack, AccountUsage.family(model ?? defaultModel) == AccountUsage.heldBackFamily { model = AccountUsage.fallbackModel }
+        var advisor = advisor
+        if fableHeldBack, AccountUsage.family(advisor) == AccountUsage.heldBackFamily { advisor = nil }
+        return Run(model: model, advisor: Self.advisor(advisor, main: model ?? defaultModel), effort: effort)
+    }
+
+    /// The lead's run: lead_model (Fable by default: the session that decides what to do and judges what comes back),
+    /// Opus in Fable's place while Fable is held back; lead_advisor only while it runs on Opus.
+    public static func leadRun(_ workflow: LeadWorkflow, defaultModel: String?, fableHeldBack: Bool) -> Run {
+        let chosen = run(model: workflow.leadModel, advisor: nil, effort: nil, defaultModel: defaultModel, fableHeldBack: fableHeldBack)
+        guard AccountUsage.family(chosen.model ?? defaultModel) == "opus" else { return chosen }
+        return run(model: chosen.model, advisor: workflow.leadAdvisor, effort: nil, defaultModel: defaultModel, fableHeldBack: fableHeldBack)
+    }
+
+    /// A worker's run on `task`. Claude: the task's model, else Fable once it's been re-rolled (`rerollModel`), else the
+    /// command's; its advisor (none: no advisor), else worker_advisor; its effort, else high for a hard task. Codex: no
+    /// advisor (a Claude flag), the task's model unless an auto task was routed there (`routed`: Claude's model names
+    /// mean nothing to Codex), and the effort as Codex's model_reasoning_effort.
+    public static func workerRun(_ task: LeadTask, workflow: LeadWorkflow, codex: Bool, routed: Bool = false, defaultModel: String?,
+                                 fableHeldBack: Bool) -> Run {
+        let effort = task.effort ?? (task.hard ? hardEffort : nil)
+        if codex { return Run(model: routed ? nil : task.model, effort: effort) }
+        return run(model: task.intendedModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort, defaultModel: defaultModel,
+                   fableHeldBack: fableHeldBack)
     }
 
     /// Where a new lead finds the last turns of the lead it replaces: in the project's `.vibeswitcher` folder (kept out

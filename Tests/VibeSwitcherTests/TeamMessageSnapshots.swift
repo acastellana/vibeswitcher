@@ -6,9 +6,9 @@ import Testing
 
 /// Pictures of a lead's chat with the messages VibeSwitcher handed it, light and dark: the real chat view, offscreen,
 /// on a made-up transcript (a worker's report with its TL;DR, a witness notice, a failed audit opened, the user's
-/// answer relayed, a message in parts, the wake-up typed while it was idle, the agent's replies around them). Only
-/// with `TEAM_MESSAGE_SNAPSHOT_DIR=/some/folder` and HOME and CFFIXED_USER_HOME on a scratch folder, where
-/// the transcript is written.
+/// answer relayed, a message in parts, the wake-up typed while it was idle, a teammate's wall post opened, the agent's
+/// replies around them). Only with `TEAM_MESSAGE_SNAPSHOT_DIR=/some/folder` and HOME and CFFIXED_USER_HOME on a scratch
+/// folder, where the transcript is written.
 @MainActor
 struct TeamMessageSnapshots {
     nonisolated static let folder = ProcessInfo.processInfo.environment["TEAM_MESSAGE_SNAPSHOT_DIR"]
@@ -53,9 +53,13 @@ struct TeamMessageSnapshots {
                                 from: .system("worker big-refactor"), agentPid: 1)
         _ = delivered(context(long.text, from: .system("worker big-refactor"), handedOver: SteerReply.partEnds(long)[0]))
         reply("The audit failed: I'll send the worker the findings.")
+        // A teammate's wall post, steered into a team member: under its teammate's mark, its words as typed.
+        let post = LeadWall.Post(id: 2, at: 0, author: "ui", to: .members(["api"]), needsAnswer: true, replyTo: nil,
+                                 text: "Does wall(since:) give the lead's posts too?\n**This stays as typed**, and so does [this link](https://example.invalid/spec).")
+        let teammate = delivered(context(LeadWall.delivery(post), from: .teammate(member: "ui", task: "team-wall-in-the-app")))
         var data = Data()
         for line in lines { data.append(try JSONSerialization.data(withJSONObject: line)); data.append(0x0A) }
-        return (data, [failed, answer])
+        return (data, [failed, answer, teammate])
     }
 
     @Test(.enabled(if: folder != nil)) func drawTeamMessages() async throws {

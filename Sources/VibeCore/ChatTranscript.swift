@@ -318,8 +318,16 @@ public enum ChatReader {
     }
 
     static func claude(_ line: [String: Any], lineID: String) -> [ChatEvent] {
-        if line["isSidechain"] as? Bool == true || line["isMeta"] as? Bool == true { return [] }
+        if line["isSidechain"] as? Bool == true { return [] }
         let type = line["type"] as? String
+        // `/model`'s answer: the chip shows the new model now, not only after the next reply (whose model then wins). In
+        // a user line it comes before what the line shows (typed text after the command is still a prompt).
+        let switched = modelSwitch(line, type: type).map { [ChatEvent.usage(ChatUsage(model: $0))] } ?? []
+        if line["isMeta"] as? Bool == true || type == "system" { return switched }
+        return switched + claudeEntries(line, type: type, lineID: lineID)
+    }
+
+    private static func claudeEntries(_ line: [String: Any], type: String?, lineID: String) -> [ChatEvent] {
         if type == "attachment", let attachment = line["attachment"] as? [String: Any] {
             // A message typed while the agent worked, taken at its next step: Claude writes it here, not as a user line.
             if attachment["type"] as? String == "queued_command", let text = attachment["prompt"] as? String,
@@ -406,6 +414,52 @@ public enum ChatReader {
                           at: usageEvents.count)
         }
         return events
+    }
+
+    /// The model a `/model` command switched to, from its output: `<local-command-stdout>Set model to `Opus 5.5` and
+    /// saved as your default…</local-command-stdout>`, in a user line or a system `local_command` line. The name may be
+    /// in ANSI bold, backticks or asterisks, and followed by an id in brackets. "Opus 5.5" becomes "claude-opus-5-5", the
+    /// shape replies carry; a bracketed claude id is taken as it is; any other name is kept as written.
+    static func modelSwitch(_ line: [String: Any], type: String?) -> String? {
+        let text: String?
+        switch type {
+        case "system": text = line["content"] as? String
+        case "user":
+            let content = (line["message"] as? [String: Any])?["content"]
+            text = content as? String
+                ?? (content as? [[String: Any]])?.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
+        default: text = nil
+        }
+        guard let text, let open = text.range(of: "<local-command-stdout>"),
+              let close = text.range(of: "</local-command-stdout>", range: open.upperBound..<text.endIndex) else { return nil }
+        // In a user line, only Claude Code's own record of the command: its output first in the line, or after
+        // `/model`'s name. The same words quoted in a prompt, a paste or another agent's message aren't a switch.
+        if type == "user" {
+            let before = text[..<open.lowerBound]
+            guard before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || before.contains("<command-name>/model</command-name>") else { return nil }
+        }
+        var said = String(text[open.upperBound..<close.lowerBound])
+        said = said.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+        guard let start = said.range(of: "Set model to ") else { return nil }
+        var rest = said[start.upperBound...].prefix { $0 != "\n" }
+        if let saved = rest.range(of: " and saved") { rest = rest[..<saved.lowerBound] }
+        let cleaned = rest.filter { $0 != "`" && $0 != "*" }.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: ".")))
+        // "Haiku 5.5 (claude-haiku-5-5-20261001)": the id; "Opus 5.5 (1M context)", "Default (Opus 5.5)": the name.
+        var name = cleaned
+        if let bracket = cleaned.firstIndex(of: "("), let end = cleaned.lastIndex(of: ")"), bracket < end {
+            let inside = cleaned[cleaned.index(after: bracket)..<end].trimmingCharacters(in: .whitespaces)
+            if inside.hasPrefix("claude-") { return inside }
+            let before = cleaned[..<bracket].trimmingCharacters(in: .whitespaces)
+            name = before.lowercased().hasPrefix("default") ? inside : before
+        }
+        guard !name.isEmpty else { return nil }
+        let words = name.split(separator: " ")
+        if words.count == 2, words[0].allSatisfy(\.isLetter),
+           words[1].split(separator: ".", omittingEmptySubsequences: false).allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) {
+            return "claude-" + words[0].lowercased() + "-" + words[1].replacingOccurrences(of: ".", with: "-")
+        }
+        return name
     }
 
     static func claudeDetail(_ name: String, _ input: [String: Any]) -> ToolDetail {

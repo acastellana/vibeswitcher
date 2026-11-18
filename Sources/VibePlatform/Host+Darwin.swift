@@ -2,7 +2,7 @@
 import Foundation
 
 /// The Mac's readings: sysctl, one Mach call, statfs and getrlimit, as VibeCore read them before they moved here
-/// (MacMemory, LoadRecorder, DiskSpace, MCPLog).
+/// (MacMemory, LoadRecorder, DiskSpace, MCPLog, RestartReopen).
 extension Platform.Host {
     /// `kern.memorystatus_vm_pressure_level`: 1 normal, 2 warning, 4 critical; nil when it can't be read.
     public static func memoryPressureLevel() -> Int32? {
@@ -57,6 +57,14 @@ extension Platform.Host {
         var length = MemoryLayout<Int32>.size
         let cap = sysctlbyname("kern.maxfilesperproc", &perProcess, &length, nil, 0) == 0 && perProcess > 0 ? rlim_t(perProcess) : soft
         return Int(min(soft, cap))
+    }
+
+    /// When this Mac last started (`kern.boottime`); nil when it can't be read.
+    public static func bootTime() -> Date? {
+        var time = timeval()
+        var size = MemoryLayout<timeval>.size
+        guard sysctlbyname("kern.boottime", &time, &size, nil, 0) == 0 else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(time.tv_sec) + TimeInterval(time.tv_usec) / 1_000_000)
     }
 }
 #endif

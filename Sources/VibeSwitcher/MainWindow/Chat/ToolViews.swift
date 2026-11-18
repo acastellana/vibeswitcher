@@ -407,21 +407,70 @@ enum ImageCache {
     }()
 
     static func thumbnail(_ image: ChatImage, maxPixels: Int) async -> NSImage? {
-        let key = "\(image.id)@\(maxPixels)" as NSString
-        if let hit = thumbnails.object(forKey: key) { return hit }
         let data = image.data
-        let decoded: (NSImage, Int)? = await Task.detached(priority: .utility) {
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                                            kCGImageSourceThumbnailMaxPixelSize: maxPixels,
-                                            kCGImageSourceShouldCacheImmediately: true,
-                                            kCGImageSourceCreateThumbnailWithTransform: true]
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-            return (NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)), cgImage.width * cgImage.height * 4)
-        }.value
-        guard let decoded else { return nil }
-        thumbnails.setObject(decoded.0, forKey: key, cost: decoded.1)
-        return decoded.0
+        return await thumbnail(key: "\(image.id)@\(maxPixels)") {
+            CGImageSourceCreateWithData(data as CFData, nil).flatMap { decode($0, maxPixels: maxPixels) }
+        }
+    }
+
+    /// An image file's (one attached from the composer), decoded so its height (`fill`: its shorter side) has `pixels`,
+    /// never full size: a screenshot drawn from the file took 20 MB a picture, and a chat of them a gigabyte
+    /// (ChatMemoryTests). Nil: no file, or not an image. Read again when the file changes.
+    static func thumbnail(file path: String, pixels: Int, fill: Bool = false) async -> NSImage? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        let stamp = "\((attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)-\(attributes?[.size] as? Int ?? 0)"
+        return await thumbnail(key: "file:\(path)@\(stamp)@\(pixels)\(fill ? "-fill" : "")") { decode(file: path, pixels: pixels, fill: fill) }
+    }
+
+    /// `thumbnail(file:pixels:fill:)`'s bitmap (on the thread it's called on).
+    static func decode(file path: String, pixels: Int, fill: Bool) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue else { return nil }
+        // Its size from its header (nothing decoded yet) says how long its longer side is at that height.
+        let rotated = ((properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1) >= 5
+        return decode(source, maxPixels: maxPixels(width: rotated ? height : width, height: rotated ? width : height, pixels: pixels, fill: fill))
+    }
+
+    /// The longer side a `width`×`height` image is decoded at so its height (`fill`: its shorter side) has `pixels`, at
+    /// most its own size.
+    static func maxPixels(width: Int, height: Int, pixels: Int, fill: Bool) -> Int {
+        guard width > 0, height > 0 else { return pixels }
+        let side = fill ? min(width, height) : height
+        let longest = Double(max(width, height)) * Double(pixels) / Double(side)
+        return min(max(width, height), Int(longest.rounded(.up)))
+    }
+
+    /// `source`'s image at most `maxPixels` on its longer side, upright.
+    private static func decode(_ source: CGImageSource, maxPixels: Int) -> CGImage? {
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                        kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+                                        kCGImageSourceShouldCacheImmediately: true,
+                                        kCGImageSourceCreateThumbnailWithTransform: true]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    /// Two decodes at a time: making a thumbnail decodes the whole picture first (20 MB a retina screenshot), and a
+    /// chat's worth at once, one a core, raised malloc's peak by as many (+51 MB opening an image-heavy chat, +32 with two).
+    private static let decoding: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "vibeswitcher.thumbnails"
+        queue.qualityOfService = .utility
+        queue.maxConcurrentOperationCount = 2
+        return queue
+    }()
+
+    /// The thumbnail cached under `key`, else what `decode` makes, off the main thread.
+    private static func thumbnail(key: String, decode: @escaping @Sendable () -> CGImage?) async -> NSImage? {
+        let key = key as NSString
+        if let hit = thumbnails.object(forKey: key) { return hit }
+        guard let cgImage = await withCheckedContinuation({ (done: CheckedContinuation<CGImage?, Never>) in
+            decoding.addOperation { done.resume(returning: decode()) }
+        }) else { return nil }
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        thumbnails.setObject(image, forKey: key, cost: cgImage.width * cgImage.height * 4)
+        return image
     }
 
     /// Full size, for the viewer only (not kept).

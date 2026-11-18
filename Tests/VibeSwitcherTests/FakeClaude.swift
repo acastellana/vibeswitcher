@@ -519,6 +519,9 @@ def submit_prompt(text):
     if text == "/model":
         open_picker()
         return
+    if text.startswith("/model "):
+        model_alias(text[len("/model "):].strip())
+        return
     if text.startswith("!"):
         state["shell"] = {"command": text[1:].strip(), "at": now()}
         if state["realShell"]:
@@ -551,6 +554,22 @@ def finish_shell(stdout):
     record({"type": "user", "timestamp": shell["at"], "message": {"role": "user",
             "content": "<bash-input>" + shell["command"] + "</bash-input>"}})
     record({"type": "user", "message": {"role": "user", "content": "<bash-stdout>" + stdout + "</bash-stdout><bash-stderr></bash-stderr>"}})
+
+
+MODEL_NAMES = {"fable": "Fable 5.2", "opus": "Opus 5.5", "sonnet": "Sonnet 5.5", "haiku": "Haiku 5.5"}
+
+
+def model_alias(alias):
+    """`/model opus`: as Claude Code writes it, the command, then its output naming the model (no assistant turn)."""
+    label = MODEL_NAMES.get(alias.lower())
+    out = ("Set model to \u001b[1m" + label + "\u001b[22m and saved as your default for new sessions") if label else \
+        ("Model '" + alias + "' not found")
+    record({"type": "system", "subtype": "local_command", "level": "info", "content": "<command-name>/model</command-name>\n"
+            "<command-message>model</command-message>\n<command-args>" + alias + "</command-args>"})
+    record({"type": "system", "subtype": "local_command", "level": "info", "content": "<local-command-stdout>" + out + "</local-command-stdout>"})
+    state["reply"] = out
+    if label:
+        state["model"] = label
 
 
 def open_question(questions):

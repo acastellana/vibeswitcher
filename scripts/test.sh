@@ -22,10 +22,11 @@
 # swift build and swift test, --perf's too, run under vs-heavy (Resources/bin/vs-heavy, the Mac-wide lock for heavy
 # work that every project's sessions have on PATH): while another run holds it (another worker's suite in any project,
 # a build-app.sh, a merge's tests), this one waits, saying for whom. The web tests and the leftover check run after
-# it's let go. Both build on the slot's share of the cores, `-j $VS_HEAVY_CORES` (scripts/lib/swift-jobs.sh).
+# it's let go. Both build on the width vs-heavy gives the run (the cores free when it starts, at least the slot's share),
+# `-j $VS_HEAVY_CORES` (scripts/lib/swift-jobs.sh).
 #
 # The phone's web tests run after swift test, in the same scratch home and TMPDIR: each Tests/Web/*.test.mjs with
-# node, a failing one named, then one line saying how many passed. Without node on PATH the run stops before the
+# node, a failing one named, then one line saying how many passed; then the node's web client's, WebApp/tests/*.test.mjs. Without node on PATH the run stops before the
 # build, naming it: PhoneWebTests (swift test) skips them without node, and Web/ changes had been checked only by hand.
 #
 # Inside Codex's sandbox (a Codex worker's commands: CODEX_SANDBOX is set) it runs the same, with no flag to give:
@@ -153,6 +154,7 @@ perf_tests=(
     HookBoundsTests/theBuiltHookLeavesInTime
     AppleScriptRunnerTests/aHungScriptEndsInTime
     ProcessTableTests/aSnapshotIsQuickOnABusyMac
+    ChatMemoryTests
 )
 
 source scripts/lib/processes.sh
@@ -165,10 +167,12 @@ source scripts/lib/processes.sh
 suite_width() {
     export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-$(cpu_count)}
 }
-# Then, on the slot vs-heavy gives the run, at most its share of the cores, VS_HEAVY_CORES (a caller's narrower width
-# kept), as the build is (scripts/lib/swift-jobs.sh): a test a core of the whole Mac in each of 3 boosted slots ran up
-# to 36 tests at once on 12 cores, and at 03:40–03:55 on 2026-11-08 an audit's full suite and other runs side by side
-# took the load to 100–225 and froze the app about 40 times. Without a VS_HEAVY_CORES (a whole number above 0), the
+# Then, on the slot vs-heavy gives the run, at most its width, VS_HEAVY_CORES (a caller's narrower width kept), as the
+# build is (scripts/lib/swift-jobs.sh): a test a core of the whole Mac in each of 3 boosted slots ran up to 36 tests at
+# once on 12 cores, and at 03:40–03:55 on 2026-11-08 an audit's full suite and other runs side by side took the load to
+# 100–225 and froze the app about 40 times. The width is the cores free when the run starts (the load and the other
+# slots held counted), at least the slot's share (Resources/bin/vs-heavy's `give_width`): capped at the share alone, a
+# merge on a calm Mac took 15 min instead of 8 (2026-11-08 to 11-12). Without a VS_HEAVY_CORES (a whole number above 0), the
 # width as it was. Exported, for the bash vs-heavy runs.
 slot_width() {
     local width=${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-}
@@ -314,15 +318,17 @@ else
     defaults_before=$(build_defaults)
     # A failed build leaves a mark, so what needs its products is skipped rather than failed (or run on an older build).
     export VS_BUILD_FAILED_MARK=$tool_scratch/build-failed
-    # A test a core, then at most the slot's share (`suite_width`, `slot_width` above).
+    # A test a core, then at most the run's width (`suite_width`, `slot_width` above).
     suite_width
-    # Both on the slot's share of the cores, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh), and so are the tests.
+    # Both on the width vs-heavy gives the run, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh), and so are the tests.
     Resources/bin/vs-heavy --as scripts/test.sh bash -c 'slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
     status=$?
     check_preferences "$preferences_before" "$defaults_before" || status=1
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.
     if [[ -z $perf ]]; then
         run_web_tests Tests/Web || status=1
+        # The node's web client (WebApp/: its store, its socket feed against the wire's vectors, its no-markup lint).
+        run_web_tests WebApp/tests || status=1
         # These use a private host, synthetic data and ad-hoc signed copies: no user sessions or Keychain.
         if [[ -e $VS_BUILD_FAILED_MARK ]]; then
             echo "security socket/signing tests: skipped, the build failed (above): they need its vibeswitcher-host"

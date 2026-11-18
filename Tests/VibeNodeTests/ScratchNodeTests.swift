@@ -81,4 +81,108 @@ struct ScratchNodeTests {
         #expect(FileManager.default.fileExists(atPath: used.folder + "/vsn-left"))
         #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: used.link)) == used.folder)
     }
+
+    // MARK: The live page (the live plan's I1)
+
+    /// A page's whole first connection on a scratch node: `web.open` in the scratch form; the page's file served with
+    /// the policy and one `nosniff`, and 304 for an `ETag` it holds; the WebSocket, `auth` with the pairing code,
+    /// `hello` with a token, the read kinds and the build; the four subscriptions and their snapshots; then a fake
+    /// session's status change arriving as a delta whose `prev` is the snapshot's `seq`. Every frame passes the schema.
+    @Test func aPageSessionFromPairToDelta() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
+        defer { node.stop() }
+        let agent = try await HookedAgent.start(node)
+        try agent.hook(node, "UserPromptSubmit")
+        let opened = try LiveScratch.open(node)
+        #expect(opened.url == "http://127.0.0.1:\(opened.port)/#pair=\(opened.code)")
+
+        let page = try RawClient.ask(port: opened.port, "GET / HTTP/1.1", ["Host: 127.0.0.1:\(opened.port)"])
+        #expect(page.status == 200 && String(decoding: page.body, as: UTF8.self).contains("<html"), "\(page.head)")
+        #expect(page.head.components(separatedBy: "X-Content-Type-Options: nosniff").count == 2, "one nosniff: \(page.head)")
+        #expect(page.head.contains("Content-Security-Policy: default-src 'none'"), "\(page.head)")
+        let etag = try #require(page.head.split(separator: "\r\n").first { $0.hasPrefix("ETag: ") }?.dropFirst(6))
+        let again = try RawClient.ask(port: opened.port, "GET / HTTP/1.1", ["Host: 127.0.0.1:\(opened.port)", "If-None-Match: \(etag)"])
+        #expect(again.status == 304 && again.body.isEmpty, "\(again.head)")
+
+        let socket = try LivePage(port: opened.port)
+        _ = try socket.send("auth", ["pair": .string(opened.code), "client": .string("test")])
+        let hello = try #require(try socket.next())
+        #expect(hello["kind"]?.string == "hello" && hello["auth"]?["token"]?.string != nil, "\(hello)")
+        #expect(hello["peer"]?["voice"]?.string == "other" && hello["assets"]?.string?.count == 8, "\(hello)")
+        let kinds = Set(hello["kinds"]?.array?.compactMap(\.string) ?? [])
+        #expect(kinds == ["status", "questions", "subscribe", "unsubscribe"], "\(kinds)")
+        var seq: [String: Int] = [:]
+        for (sub, collection) in [("s0", "node"), ("s1", "sessions"), ("s2", "leads"), ("s3", "cards")] {
+            let id = try socket.send("subscribe", ["sub": .string(sub), "collection": .string(collection)])
+            let reply = try #require(try socket.next())
+            #expect(reply["re"]?.string == id && reply["result"]?["mode"]?.string == "snapshot", "\(reply)")
+            let snapshot = try #require(try socket.next())
+            #expect(snapshot["kind"]?.string == "snapshot" && snapshot["sub"]?.string == sub && snapshot["epoch"]?.string == hello["epoch"]?.string,
+                    "\(snapshot)")
+            seq[sub] = snapshot["seq"]?.int
+            if collection == "node" {
+                let web = snapshot["entries"]?.array?.first?["value"]?["web"]
+                #expect(web?["state"]?.string == "listening" && web?["port"]?.int == Int(opened.port), "\(String(describing: web))")
+            }
+        }
+        try agent.hook(node, "Stop")
+        let frames = try #require(try socket.until { frame in
+            frame["sub"]?.string == "s1" && frame["changes"]?.array?.contains {
+                $0["id"]?.string == agent.id && $0["value"]?["shownStatus"]?.string == "done"
+            } == true
+        }, "the status change never came: \(node.said)")
+        for delta in frames where delta["kind"]?.string == "delta" {
+            let sub = try #require(delta["sub"]?.string)
+            #expect(delta["prev"]?.int == seq[sub], "\(delta)")
+            seq[sub] = delta["seq"]?.int
+        }
+        #expect(socket.unsound.isEmpty, "\(socket.unsound)")
+    }
+
+    /// No TCP listener until `web.open`: `status` says the web is off, with no port; once opened it listens on the port
+    /// the address names, and `status` says so.
+    @Test func theWebIsOffUntilAsked() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
+        defer { node.stop() }
+        let client = try WireClient(node)
+        let before = try #require(WireClient.reply(client.request("status", action: nil))?.result)
+        #expect(before["web"]?["state"]?.string == "off" && before["web"]?["port"] == .null && before["web"]?["tokens"]?.int == 0, "\(before)")
+        let opened = try LiveScratch.open(node)
+        #expect(try RawClient.connects(address: "127.0.0.1", port: opened.port))
+        let after = try #require(WireClient.reply(client.request("status", action: nil))?.result)
+        #expect(after["web"]?["state"]?.string == "listening" && after["web"]?["port"]?.int == Int(opened.port), "\(after)")
+    }
+
+    /// The web's test flags are a scratch server's: the user's server (`--node`) refuses each and listens on
+    /// `NodeWeb.port` alone, serves the embedded files, and asks the user's voice for `web.open`.
+    @Test func aTestWebFlagIsRefusedOnTheUsersServer() throws {
+        let base = ["vibeswitcher-server", "--host-connector", "3", "--host-socket", "/x/host.sock"]
+        let flags = [ServerArguments.testWebPortFlag + "0", ServerArguments.testWebRootFlag + "/x/web", ServerArguments.testWebPairFlag]
+        let user = try ServerArguments.parse(base + ["--node", "--node-root", "/x/b"] + flags).get()
+        #expect(user.refused == flags)
+        #expect(user.testWebPort == nil && user.testWebRoot == nil && !user.testWebPair)
+        let scratch = try ServerArguments.parse(base + ["--root", "/x", "--node-root", "/x/b"] + flags).get()
+        #expect(scratch.refused.isEmpty && scratch.testWebPort == 0 && scratch.testWebRoot == "/x/web" && scratch.testWebPair)
+        #expect(throws: (any Error).self) { try ServerArguments.parse(base + ["--root", "/x", ServerArguments.testWebRootFlag + "web"]).get() }
+    }
+
+    /// `status` says the web's state: off, then the page's address with its tokens and pages once a page is paired.
+    @Test func statusSaysTheWebsState() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
+        defer { node.stop() }
+        let off = try await node.run(["status"])
+        #expect(off.output.contains("web: off"), "\(off.output)")
+        let opened = try LiveScratch.open(node)
+        let socket = try LivePage(port: opened.port)
+        _ = try socket.send("auth", ["pair": .string(opened.code), "client": .string("test")])
+        #expect(try socket.next()?["kind"]?.string == "hello")
+        // The connection is counted as the hub takes it, a moment after `hello`.
+        var said = ""
+        let deadline = Date().addingTimeInterval(30)
+        while !said.contains("web: http://127.0.0.1:\(opened.port)/, 1 tokens alive, 1 pages open"), Date() < deadline {
+            said = try await node.run(["status"]).output
+        }
+        #expect(said.contains("web: http://127.0.0.1:\(opened.port)/, 1 tokens alive, 1 pages open"), "\(said)")
+    }
+
 }

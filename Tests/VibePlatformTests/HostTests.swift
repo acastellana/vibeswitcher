@@ -52,6 +52,14 @@ struct HostTests {
         if let free = Platform.Host.memoryFreePercent() { #expect((0...100).contains(free)) }
     }
 
+    /// The machine started before this test did, and after 2020.
+    @Test func theBootTimeIsInThePast() throws {
+        let boot = try #require(Platform.Host.bootTime())
+        #expect(boot.timeIntervalSince1970 > 1_577_836_800)
+        // A minute's slack: on WSL the wall clock is set while the machine runs, and the kernel's answer moves with it.
+        #expect(boot.timeIntervalSinceNow < 60)
+    }
+
     @Test func swapOutsNeverGoBack() {
         guard let first = Platform.Host.swapOuts() else { return }
         let second = Platform.Host.swapOuts()
@@ -128,6 +136,20 @@ struct HostTests {
         #expect(Platform.Host.swapOuts(vmstat: vmstat) == 4821)
         #expect(Platform.Host.swapOuts(vmstat: "pswpin 17\npgpgout 1204536\n") == nil)
         #expect(Platform.Host.swapOuts(vmstat: "") == nil)
+    }
+
+    @Test func statGivesTheBootTime() {
+        let stat = """
+            cpu  4705 356 584 3699176 23060 0 23 0 0 0
+            ctxt 2253292
+            btime 1763380000
+            processes 9120
+
+            """
+        #expect(Platform.Host.bootTime(stat: stat) == Date(timeIntervalSince1970: 1_763_380_000))
+        #expect(Platform.Host.bootTime(stat: "ctxt 2253292\nprocesses 9120\n") == nil)
+        #expect(Platform.Host.bootTime(stat: "btime soon\n") == nil)
+        #expect(Platform.Host.bootTime(stat: "") == nil)
     }
 
     static func pressure(some: String, full: String) -> String {

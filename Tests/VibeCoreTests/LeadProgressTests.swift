@@ -65,11 +65,18 @@ struct LeadProgressTests: LeadTeamFixture {
         #expect(verifier.call("progress", ["text": "x"]).isError)
     }
 
-    @Test func theBriefAsksForProgressAtMilestones() throws {
-        let task = LeadTask(slug: "fix", title: "Fix", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
-        let brief = LeadPrompts.worker(task: task, root: "/r", workflow: LeadWorkflow())
-        #expect(brief.contains("call progress"))
-        #expect(brief.contains("milestone"))
+    /// The worker's start message and the progress tool's own description ask for it (the brief no longer repeats it).
+    @Test func theWorkerIsAskedForProgressAtMilestones() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = lead.call("add_task", ["title": "Fix", "goal": "g", "acceptance": ["a"]])
+        _ = lead.call("start_worker", ["task": "fix"])
+        let command = try #require(runtime.spawned.last { $0.label.contains("fix") || $0.command.contains("worker-fix") }).command
+        #expect(command.contains("Call progress at each milestone"), "\(command)")
+        let worker = try issued(.worker, task: "fix", root: root, runtime)
+        let tool = try #require(worker.tools.first { $0.name == "progress" })
+        #expect(tool.description.contains("Call it at each milestone"))
     }
 
     @Test func everyStatusChangeIsStamped() throws {

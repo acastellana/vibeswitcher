@@ -177,6 +177,7 @@ final class FakeSeat: LeadRuntime {
     }
     var server: String { shared.server }
     func claudeCommand(root: String) -> String { shared.claudeCommand(root: root) }
+    func codexCommand(root: String) -> String { shared.codexCommand(root: root) }
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
         try shared.spawn(cwd: cwd, command: command, env: env, label: label, agent: agent)
     }
@@ -215,6 +216,8 @@ extension LeadTeamFixture {
         let book = LeadVault.Book()
         // The agents' config it seals (`ConfigSeal`): a scratch home of its own, never the Mac's or another test's.
         book.configHome = temp.url("config-home").path
+        // The team walls a teammate's post is sealed from: the leads' folder here (`LeadToolset.wallStore`).
+        book.wallFolder = folder
         booksLock.lock()
         books[folder.path] = book
         booksLock.unlock()

@@ -45,6 +45,12 @@ extension Platform.Host {
         return read ? Int(clamping: limit.rlim_cur) : 1024
     }
 
+    /// /proc/stat's `btime`: when the system booted, to the second. The kernel works it out at each read from the wall
+    /// clock, so it moves when the clock is set (WSL after its host slept).
+    public static func bootTime() -> Date? {
+        text(of: "/proc/stat").flatMap(bootTime(stat:))
+    }
+
     // MARK: /proc's text
 
     /// The whole of a /proc file (which says it is 0 bytes long, so it is read to its end); nil when it can't be
@@ -95,6 +101,14 @@ extension Platform.Host {
     static func swapOuts(vmstat: String) -> UInt64? {
         for line in vmstat.split(separator: "\n") where line.hasPrefix("pswpout ") {
             return UInt64(line.dropFirst("pswpout ".count).trimmingCharacters(in: .whitespaces))
+        }
+        return nil
+    }
+
+    /// /proc/stat's "btime 1763380000", seconds since 1970; nil when there's no such line or it isn't a number.
+    static func bootTime(stat: String) -> Date? {
+        for line in stat.split(separator: "\n") where line.hasPrefix("btime ") {
+            return TimeInterval(line.dropFirst("btime ".count).trimmingCharacters(in: .whitespaces)).map(Date.init(timeIntervalSince1970:))
         }
         return nil
     }

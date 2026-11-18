@@ -10,6 +10,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The checks every incident became (`regression_command:`, e.g. a bench corpus run): merge runs it after
     /// test_command, and merges only when it passes too.
     public var regressionCommand: String?
+    /// What a worker's done report runs first (`done_check_command:`; "off": nothing; empty: `LeadDoneCheck`'s default,
+    /// the lint tests and the changed files' suites): a failure refuses the report with its output (`LeadDoneCheck`).
+    public var doneCheckCommand: String?
+    /// How many minutes that check may run before it's stopped and the report goes through (`done_check_min:`).
+    public var doneCheckMinutes: Double = LeadDoneCheck.defaultMinutes
     public var workerAgent = "claude"
     /// The agent of a new task that names none (`agent_default:`): claude (the default) or auto (chosen at each start
     /// from both accounts' usage, see `UsageRouting`). Anything else reads claude. Never codex: a task goes to Codex
@@ -18,6 +23,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The verifier's model (`verifier_model:`); when it's empty, audits run on another model than the workers' (see
     /// `auditModel`), a second opinion.
     public var verifierModel: String?
+    /// The lead's model (`lead_model:`; empty: fable): the session that decides what to do and judges what comes back
+    /// runs on the model best at that (the user, 2026-11-12), Opus in its place while Fable is held back.
+    public var leadModel = LeadWorkflow.defaultLeadModel
+    /// The lead's advisor while it runs on Opus (`lead_advisor:`; empty: fable; none: no advisor), see `LeadLaunch.leadRun`.
+    public var leadAdvisor: String? = LeadWorkflow.defaultLeadAdvisor
+    /// Every worker's advisor when its task sets none (`worker_advisor:`; empty or none: no advisor, the default).
+    public var workerAdvisor: String?
     /// The branch the lead builds on and merges into (`base_branch:`; otherwise the one checked out when the lead
     /// first started there, kept on its board).
     public var baseBranch: String?
@@ -77,6 +89,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// (`audit_sample_percent:`, 0 to 100; 0: off; see `LeadAuditSample`): a tripwire on what the unaudited path lets
     /// through, not a statistic.
     public var auditSamplePercent = LeadAuditSample.defaultPercent
+    /// A review audit task whose worker reports done on its first round with fewer minutes of counted work than this,
+    /// touching no sensitive or strict path and not flagged by the risk check, merges as review none that round
+    /// (`small_task_min:`; 0: off; see `LeadSmallTask`).
+    public var smallTaskMin = LeadSmallTask.defaultMinutes
     /// This project's lead gets VibeSwitcher's own health digests (`watch_app_logs:`, see `AppHealth`): its freezes,
     /// crashes and error lines, and a daily trend. Off for every project but the one that builds VibeSwitcher.
     public var watchAppLogs = false
@@ -130,9 +146,14 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "test_command": workflow.testCommand = present
                 case "init_command": workflow.initCommand = present
                 case "regression_command": workflow.regressionCommand = present
+                case "done_check_command": workflow.doneCheckCommand = present
+                case "done_check_min": workflow.doneCheckMinutes = minutes(value) ?? LeadDoneCheck.defaultMinutes
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
                 case "agent_default": workflow.agentDefault = present.flatMap(LeadTask.WorkerAgent.init(text:)).flatMap { $0 == .codex ? nil : $0 } ?? .claude
                 case "verifier_model": workflow.verifierModel = present
+                case "lead_model": workflow.leadModel = present ?? defaultLeadModel
+                case "lead_advisor": workflow.leadAdvisor = advisorValue(present ?? defaultLeadAdvisor)
+                case "worker_advisor": workflow.workerAdvisor = present.flatMap(advisorValue)
                 case "base_branch": workflow.baseBranch = present
                 case "remote": workflow.remote = present
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
@@ -156,6 +177,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "risk_lines": workflow.riskLines = Int(value).map { max(0, $0) } ?? LeadRisk.defaultLines
                 case "risk_model": workflow.riskModel = flag(value) ?? true
                 case "audit_sample_percent": workflow.auditSamplePercent = Int(value).map { min(100, max(0, $0)) } ?? LeadAuditSample.defaultPercent
+                case "small_task_min": workflow.smallTaskMin = Int(value).map { max(0, $0) } ?? LeadSmallTask.defaultMinutes
                 case "watch_app_logs": workflow.watchAppLogs = flag(value) ?? false
                 default: break
                 }
@@ -169,6 +191,14 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     public static let defaultRecordsDir = "docs/lead"
+    public static let defaultLeadModel = "fable"
+    public static let defaultLeadAdvisor = "fable"
+
+    /// An advisor key's value: the model's name, lowercased; nil for none.
+    static func advisorValue(_ value: String) -> String? {
+        let value = value.trimmingCharacters(in: .whitespaces).lowercased()
+        return value.isEmpty || value == "none" ? nil : value
+    }
 
     /// The most finders an audit runs: contract and acceptance, bugs and regressions, and security or tests.
     public static let maxFinders = 3
@@ -332,6 +362,9 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     var testTimeout: TimeInterval { testTimeoutMinutes * 60 }
 
+    /// done_check_min in seconds.
+    var doneCheckTimeout: TimeInterval { doneCheckMinutes * 60 }
+
     /// stall_min in seconds; nil when it's 0 (no stall watch, only test_timeout_min).
     public var stall: TimeInterval? { stallMinutes > 0 ? stallMinutes * 60 : nil }
 
@@ -404,16 +437,55 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The task's model is board.json's, which any session of the team can write, so it only adds a model to keep the
     /// audit off, never takes the workers' off that list: a worker started on the workers' model that writes another
     /// as its task's still gets an audit on neither (fable, else opus, else sonnet; Claude's default counts as opus).
-    public func auditModel(workerModel: String?, taskModel: String? = nil) -> String {
+    ///
+    /// `heldBack`: a model family Claude refuses now (fable, see `AccountUsage.fableHeldBack`; the workers then run on
+    /// opus, which `workerModel` says). A choice of that family goes to the most capable model that isn't it and that
+    /// the floor allows: opus, or with a floor that keeps audits off the workers' opus, the next one down.
+    ///
+    /// `launchedModel`: the model the task's current worker was started on (`LeadTask.launchedModels`), kept off the
+    /// audit under that floor as the task's model is.
+    ///
+    /// `security`: the audited branch touches sensitive_paths or is flagged for security (`LeadToolset.securityReason`):
+    /// it's audited on Fable, whatever verifier_model says, where the floor allows Fable (not the workers', the task's
+    /// or its worker's under a different-model floor); else as any other audit.
+    public func auditModel(workerModel: String?, taskModel: String? = nil, launchedModel: String? = nil, heldBack: String? = nil,
+                           security: Bool = false) -> String {
+        let chosen = security && securityAllowed(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
+            ? Self.securityAuditModel : unheldAuditModel(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
+        guard let heldBack, LeadReviewFloor.sameModel(chosen, heldBack) else { return chosen }
+        let different = floor?.verifierDifferent == true
+        let workers = LeadReviewFloor.workersModel(workerModel)
+        return ["fable", "opus", "sonnet"].first { model in
+            !LeadReviewFloor.sameModel(model, heldBack)
+                && (!different || (!LeadReviewFloor.sameModel(model, workers) && !LeadReviewFloor.sameModel(model, taskModel)
+                                   && !LeadReviewFloor.sameModel(model, launchedModel)))
+        } ?? "sonnet"
+    }
+
+    /// The model a sensitive or security audit runs on.
+    public static let securityAuditModel = "fable"
+
+    /// Whether the floor lets a sensitive audit run on `securityAuditModel`: always, unless it keeps audits off the
+    /// workers' model and that's one of theirs.
+    private func securityAllowed(workerModel: String?, taskModel: String?, launchedModel: String?) -> Bool {
+        guard floor?.verifierDifferent == true else { return true }
+        let model = Self.securityAuditModel
+        return !LeadReviewFloor.sameModel(model, LeadReviewFloor.workersModel(workerModel)) && !LeadReviewFloor.sameModel(model, taskModel)
+            && !LeadReviewFloor.sameModel(model, launchedModel)
+    }
+
+    private func unheldAuditModel(workerModel: String?, taskModel: String?, launchedModel: String?) -> String {
         let different = floor?.verifierDifferent == true
         if let verifierModel, !verifierModel.isEmpty {
             if !different { return verifierModel }
             if LeadReviewFloor.knownModel(verifierModel), !LeadReviewFloor.sameModel(verifierModel, LeadReviewFloor.workersModel(workerModel)),
-               !LeadReviewFloor.sameModel(verifierModel, taskModel) { return verifierModel }
+               !LeadReviewFloor.sameModel(verifierModel, taskModel), !LeadReviewFloor.sameModel(verifierModel, launchedModel) { return verifierModel }
         }
         guard different else { return Self.otherModel(than: workerModel) }
         let workers = LeadReviewFloor.workersModel(workerModel)
-        return ["fable", "opus", "sonnet"].first { !LeadReviewFloor.sameModel($0, workers) && !LeadReviewFloor.sameModel($0, taskModel) } ?? "sonnet"
+        return ["fable", "opus", "sonnet"].first {
+            !LeadReviewFloor.sameModel($0, workers) && !LeadReviewFloor.sameModel($0, taskModel) && !LeadReviewFloor.sameModel($0, launchedModel)
+        } ?? "sonnet"
     }
 
     /// A model at least as capable as `worker` and not it: fable, or opus for a worker on fable.
@@ -437,10 +509,10 @@ public struct LeadWorkflow: Equatable, Sendable {
         return model
     }
 
-    public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "remote", "verifier_model", "max_workers",
+    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "lead_model", "lead_advisor", "worker_advisor", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
-                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "watch_app_logs", "agent_default"]
+                                      "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "watch_app_logs", "agent_default"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -553,6 +625,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     # runs it after test_command and merges only when it passes too, so a merge that brings an incident back is
     # refused. Empty: nothing more.
     regression_command:
+    # What a worker's done report runs first, in its worktree, holding a test and build slot: a failure refuses the report
+    # with its output, so the worker fixes it before the merge's run. off: nothing. Empty: the test command filtered to
+    # the lint tests (Tests/*LintTests.swift) and the suites of the files the branch changes, when the project has lint
+    # tests; else nothing. A task's own (add_task done_check) comes first.
+    done_check_command:
+    # How many minutes that check may run; past it, or when it can't start, the report goes through, saying so. Empty: 5.
+    done_check_min: 5
     # What a fresh worktree needs before work starts (install, build). Empty: nothing.
     init_command:
     # Who works: claude (Codex support comes later).
@@ -563,6 +642,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     # The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as
     # capable (fable; opus when the workers run fable).
     verifier_model:
+    # The lead's own model (empty: fable, best at deciding what to do and judging what comes back; Opus in its place
+    # while Fable is held back), and its advisor while it runs on Opus (fable, opus or none; empty: fable).
+    lead_model: fable
+    lead_advisor: fable
+    # Every worker's advisor when its task sets none (none, fable or opus). Workers run on Opus; mark a hard task
+    # with add_task's advisor: fable instead.
+    worker_advisor: none
     # The branch workers start from and verified work is merged into. Empty: the one checked out when the lead first
     # started here.
     base_branch:
@@ -624,6 +710,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     # seeded random draw, recorded on the task, tells how often the unaudited path lets problems through. 0: off.
     # Empty: 10.
     audit_sample_percent: 10
+    # A review audit task whose worker reports done on its first round with fewer minutes of counted work than this,
+    # touching no sensitive_paths or strict_paths and not flagged by the risk check (nor Codex's, nor filed with an
+    # audit_reason), merges as review none that round: its tests, the risk check and the audit sample are its checks.
+    # 0: off. Empty: 30.
+    small_task_min: 30
     ---
     Notes for the lead: conventions, priorities, what not to touch. The lead reads this at the start of every session.
     """
@@ -631,8 +722,6 @@ public struct LeadWorkflow: Equatable, Sendable {
 
 /// What each role is told (appended to Claude Code's own system prompt).
 public enum LeadPrompts {
-    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, archive_decisions, record_incident, merge, revert, cleanup, fetch_remote, merge_remote, push_remote, configure"
-
     /// Read before proposing or asking (backlog A5, the cheap A4): on 2026-11-07 the lead proposed four chat features
     /// that already existed (⌘F search, tool groups, Latest, Copy as Markdown).
     static let productCheck = "Before you propose a feature or ask the user anything, check the code, "
@@ -651,15 +740,17 @@ public enum LeadPrompts {
     static let proofLoad = 2 * ProcessInfo.processInfo.activeProcessorCount
     static let proofCommand = "scripts/test-under-load.sh --load \(proofLoad) -r 3 -f '<those tests>'"
 
-    /// What workers are told about the tests they add: on 2026-10-23 three new tests passed in their workers and failed
-    /// in a loaded merge run (a SIGTERM racing the server's handler, a 1 s wall-clock dedupe window, a pid read before
-    /// the state file existed), each a failed merge and a rework.
+    /// What workers are told about the tests they add and about load: on 2026-10-23 three new tests passed in their
+    /// workers and failed in a loaded merge run (a SIGTERM racing the server's handler, a 1 s wall-clock dedupe window, a
+    /// pid read before the state file existed), each a failed merge and a rework. The worker's whole load rule: the
+    /// script caps the load at 2×ncpu and waits while the Mac is loaded, and report refuses a done without the run
+    /// (`LeadToolset`'s load proof), so neither is said here; `loadTests` is the verifier's wording.
     public static let newTests = "New tests: a test waits on the real event it checks (a file, a reply, a semaphore, an "
         + "injected clock), never on a fixed sleep or a wall-clock window: on a loaded Mac those race. Before you report done, "
-        + "run every test your branch adds or changes under load once, through scripts/test-under-load.sh (e.g. "
-        + "`\(proofCommand)`), and put its result line in your report (`all 3 runs passed and left nothing behind`, or the "
-        + "run that failed): report refuses a done without it. A test that fails there isn't done: fix its wait, not the load. A project without the script: "
-        + "say so in your report."
+        + "run every test your branch adds or changes under load once (`\(proofCommand)`) and put its result line in your "
+        + "report. A test that fails there isn't done: fix its wait, not the load. Load the Mac only through "
+        + "scripts/test-under-load.sh, never with busy loops of your own: other sessions and the user share this Mac. A "
+        + "project without the script gets no load: say so in your report."
 
     /// The verifier's part of `newTests`: one run under load of the branch's new tests (a finder panel's first finder
     /// only, so the panel puts that load on the Mac once).
@@ -684,6 +775,15 @@ public enum LeadPrompts {
     public static let scratchFiles = "Scratch files: leave what's in your TMPDIR and your scratchpad where it is; don't rm it. "
         + "Both go when your session ends or the task is cleaned up, and a removal outside the worktree waits on a "
         + "permission prompt only the user can answer (the lead can't, and its messages reach you only after it's answered)."
+
+    /// The worker's files rule: `scratchFiles` (the verifier's wording) and where builds and scratch go, said once.
+    /// A full disk stops every session, and cleanup removes the worktree, its build folders, the TMPDIR and the scratchpad.
+    public static let workerFiles = "Keep your temporary folder small: build or download into the worktree's "
+        + "git-ignored build folders, and put other scratch (test homes, bench output, notes) in your session's TMPDIR or "
+        + "your scratchpad, never inside the worktree. Don't rm any of it: cleanup removes it all, and a removal outside the worktree waits on a "
+        + "permission prompt only the user can answer (the lead can't, and its messages reach you only after it's answered). "
+        + "`git rm <path>` is for tracked files your change deletes. Name in your report a big build folder (a full disk "
+        + "stops every session) or an untracked file left in the worktree (the merge takes only commits)."
 
     /// What workers and verifiers are told about debuggers (`LeadLaunch.debuggers` refuses the usual ones): on
     /// 2026-10-23 a worker's lldb put a password dialog on the user's screen and stalled two merges behind it.
@@ -790,18 +890,17 @@ public enum LeadPrompts {
         /// and the diff catches far more of a worker's mistakes than its own review of them.
         public static func blindCheck(base: String) -> String {
             "start a fresh subagent with the Agent tool whose prompt holds only your task's contract (the Task section below, "
-                + "as written) and the output of `git diff \(base)...HEAD`: not your reasoning, notes or summary. Ask it for any "
+                + "as written) and the output of `git diff \(base)...HEAD`: not your reasoning, notes or summary. Run that diff "
+                + "as a command of its own and paste its output (a `>` to a file is refused). Ask it for any "
                 + "problem that would block the merge, each with a concrete failure scenario (the input or state, and what goes "
                 + "wrong then), and nothing cosmetic. Fix what it finds, or say why not."
         }
 
-        /// What a worker's done report carries, and the blind check before it.
+        /// What a worker's done report carries, and the blind check before it. The evidence's fields, and that a done
+        /// without them is refused, are the report tool's own description (`LeadToolset.evidenceShape`).
         public static func workerEvidence(base: String) -> String {
-            "Evidence: report done with `evidence`, one entry per acceptance check: check (its number, 1 for the first, or its "
-                + "text), how (the command you ran and what it printed, the test's name, or what you looked at), result (what "
-                + "it showed), and screenshots (the paths of any screenshots you took, optional). A task with no acceptance "
-                + "checks needs one entry, for its goal. A done report without an entry for every check is refused, naming the "
-                + "ones missing; blocked needs none. The lead, the verifier and the merge see it. Blind check: before you report "
+            "Evidence: report done with `evidence`, one entry per acceptance check (one for the goal when there are none); "
+                + "the lead, the verifier and the merge see it. Blind check: before you report "
                 + "done, " + blindCheck(base: base) + " Then put in `blind_check` what it found and, for each item, what you "
                 + "did: fixed (in which commit) or why not (\"nothing blocking\" when it found nothing)."
         }
@@ -825,7 +924,10 @@ public enum LeadPrompts {
                 + "a finding's fix), then its passing run after it: a test that would pass either way doesn't cover the fix. "
                 + "Run it by reverting the fix locally and restoring it, in this worktree: with everything committed, take the "
                 + "fix out with `git diff <pre-fix> HEAD -- <the fix's files> | git apply -R` (not the test's files), run the "
-                + "test, and put the fix back with the same command without `-R`; `git status` is clean again."
+                + "test, and put the fix back with the same command without `-R`; `git status` is clean again. Each runs as a "
+                + "command of its own, the commit spelled out: no `$VAR`, nothing after `git apply`, the test run separately. "
+                + "To put back a file you changed but didn't commit (checking it out or restoring it is blocked): "
+                + "`git diff HEAD -- <file> | git apply -R`."
         }
 
         /// How a re-audit checks a fixed finding's test: from the worker's evidence, since the verifier is read-only and
@@ -836,18 +938,17 @@ public enum LeadPrompts {
             + "finding describes (it would pass on the old code too), the finding can still be fixed, but raise a Nit at the "
             + "test's file and line saying which: the test doesn't cover the fix."
 
-        /// How a worker answers its audit's findings (answer_findings): each open one fixed or disagreed with, by id.
+        /// How a worker answers its audit's findings: answer_findings' description says fixed or disagree.
         public static let workerFindings = "Findings: when the lead sends you audit findings by id (F1, F2…), answer each "
-            + "open one with answer_findings: fixed (commit the fix first) or disagree, with a reason the re-audit can check "
-            + "(why the failure it describes can't happen, or what allows it). Then report done again."
+            + "open one with answer_findings, with a reason the re-audit can check (why the failure it describes can't "
+            + "happen, or what allows it). Then report done again."
 
-        /// What happens at a task's time budget (see `LeadBudget`), as the worker's brief says it in one line.
+        /// What happens at a task's time budget (see `LeadBudget`), as the worker's brief says it in one line: the
+        /// message at the budget (`LeadBudget`) says what an over_budget report holds.
         public static func workerBudget(_ minutes: Int?) -> String {
             guard let minutes else { return "Time budget: none for this task." }
             return "Time budget: \(minutes) min of your working time (waiting on the user or the lead doesn't count). When "
-                + "it's reached, VibeSwitcher tells you to stop: commit what works, then report with status over_budget "
-                + "saying what works (with evidence), what's missing and your proposal (finish in N more minutes, cut scope, "
-                + "or another approach), and wait for the lead's decision."
+                + "it's reached, VibeSwitcher tells you to stop and report over_budget, and you wait for the lead's decision."
         }
 
         /// What happens at a task's time budget, as the lead's brief says it in one line.
@@ -956,33 +1057,26 @@ public enum LeadPrompts {
 
         \(WorkingPolicy.section(policy))
 
-        Your tools (the vibeswitcher MCP server): \(tools).
-
-        How you work:
+        How you work (your tools are the vibeswitcher MCP server's):
         0. Set up the project's workflow yourself: when status says workflow.md has a problem or no test_command, \
         set it with configure (status suggests a command from the repository; run it once first if unsure) and tell \
         the user what you set. Don't ask the user to edit workflow.md.
         1. Understand what the user wants. \(productCheck) Ask only what you truly need (direction, product choices, anything risky or \
-        irreversible) with ask_user. It doesn't block: keep working while the user answers; the answer arrives as a \
-        message. For a reversible choice, prefer proposing your answer with a timer (ask_user with proposal, one of \
-        the options, and decide_in minutes, 10 by default): the user can pick another option or hold it, and if no \
-        answer comes in time you get a message to go ahead with your proposal, recorded as your decision. Until that \
-        message, don't act on it. Never put a timer on a blocking question, on merging a sensitive path, on deleting \
-        or discarding work, or on anything outward-facing (publishing, pushing, sending): ask_user refuses those, and \
-        they wait for the user's say.
+        irreversible) with ask_user, and keep working while the user answers. For a reversible choice, propose your \
+        answer with a timer; until its go-ahead message comes, don't act on it.
         2. Break the work into tasks on the board (add_task), each with a contract: a goal, acceptance checks that can \
         be run or seen, boundaries (which files or areas, what not to touch) and the context a fresh worker needs. \
         \(Policy.leadContracts) \(Policy.leadBugContracts) Workers are refused these git commands, so no brief may need one: \(deniedGit(workflow)).
         \(Policy.leadReview)
         3. Start workers (start_worker) only for tasks that don't depend on each other, at most \(workflow.maxWorkers) \
-        workers at once. Each works alone in its own worktree on its own branch. Fewer, sharper tasks beat many vague ones.
+        workers at once. Each works alone in its own worktree on its own branch. Fewer, sharper tasks beat many vague ones. \
+        Workers run on Opus; mark a task hard with add_task's advisor: fable when judgment decides it (concurrency, \
+        root-cause debugging, many parts at once, architecture choices): its worker consults Fable at decision points, at effort high.
         4. Don't sleep, wait or poll. VibeSwitcher sends you a message when a worker finishes, needs input or stalls, and \
         reports wake you even between turns: a short prompt from VibeSwitcher says what came in. When woken, call \
         status and act on the reports. Meanwhile plan the next tasks, review, or answer the user.
         5. When a worker says it's done: \(Policy.leadUnaudited) An audit task: run audit(task). A worker's own report is \
-        a claim, not evidence: for an audit task only the verifier's report counts, and only it moves the task to done. audit refuses a branch that hasn't taken in \
-        \(workflow.base)'s commits to files it changes too, naming them: have the worker `git merge \(workflow.base)` \
-        first. That check is audit's, so the verifier needn't be told \(workflow.base) moved.
+        a claim, not evidence: for an audit task only the verifier's report counts, and only it moves the task to done.
         6. If the audit is complete and clean (a review none task: once its worker reported done), check first that nothing holds the task back: a recorded decision \
         (decisions.md), the task's own contract or notes, or something the user said (e.g. "prototype: never merge \
         until the user has looked"). If something does, don't merge and don't cleanup: update_task(task, status: \
@@ -992,26 +1086,14 @@ public enum LeadPrompts {
         When a merged change broke something and a fix-forward would take longer than undoing it, revert(task, reason) \
         undoes its merge in one tested commit on \(workflow.base); then post_update and record_incident.
         A task that won't merge by itself is never marked failed for it: failed is for work that was tried and didn't \
-        pass, blocked for work that waits on something. Folded when another task carries its work (overtaken, or \
-        batched with others into one): update_task(task, status: folded, into: the task that carries it); it counts \
-        with the merged ones and reads "folded into" that task. Abandoned when nothing will carry it (dropped, no \
-        longer wanted): update_task(task, status: abandoned, reason: why); it counts under Abandoned. For either, \
-        stop_worker first if its worker runs, then cleanup(task), which removes its worktree and branch (an abandoned \
-        task's work with them); start_worker, audit and merge refuse it until you set it back to planned. Removed \
-        only for a record made by mistake that never ran (no worker ever started, no branch, no merge): \
-        update_task(task, status: removed) takes it off the board, kept in board.json for the record; anything that \
-        ran is refused, and is folded or abandoned instead.
-        Audits come with findings, each Important, Nit or Pre-existing at a file:line with its evidence, named \
-        <task>:<id> (status and board(task) list them by severity). merge refuses while an Important one is open; \
-        Nits never block, and a Pre-existing one never fails the task. An Important finding comes with its failure \
-        (failure_scenario: these inputs or this state give this wrong result); one without is recorded as a Nit. \
-        Resolve each Important one: message the worker the open ids; it answers each with answer_findings, fixed (in \
-        a commit) or disagree with a reason, and board(task) shows the answers; then audit again (a re-audit checks \
-        only those findings' concerns and judges the answers: it closes a finding whose disagreement it accepts, \
-        and a closed finding isn't raised again); or dismiss_finding with a reason when it isn't a real problem (for \
-        an Important one the reason must cite a file and line, a decision's timestamp from decisions.md, or the \
-        question id of the user's answer; if the only evidence is your memory, record_decision first or ask_user); or \
-        add_task(from_finding: <task>:<id>) to make it a task of its own (good for Pre-existing ones that matter). \
+        pass, blocked for work that waits on something, folded when another task carries its work, abandoned when \
+        nothing will (update_task says each); for the last two, stop_worker if its worker runs, then cleanup(task).
+        Audits come with findings, each Important, Nit or Pre-existing, named <task>:<id>. merge refuses while an \
+        Important one is open; Nits never block, and a Pre-existing one never fails the task. Resolve each Important \
+        one: message the worker the open ids; it answers each with answer_findings, and board(task) shows the answers; \
+        then audit again (a re-audit checks only those findings' concerns and judges the answers); or dismiss_finding \
+        when it isn't a real problem; or add_task(from_finding: <task>:<id>) to make it a task of its own (good for \
+        Pre-existing ones that matter). \
         \(Policy.nits) After \(LeadAuditLedger.roundCap) audits in a row that left Important findings open, the task's \
         status line says "reconsider the approach": don't send the worker back for a third round; re-roll it \
         (update_task(task, reroll: true), with a sharper contract in the same call if you have one): its worker \
@@ -1161,37 +1243,33 @@ public enum LeadPrompts {
     }
 
     /// `lints`: the repository's lint tests (`Policy.lintTests(in: root)` unless given).
+    /// A team task's worker (`LeadTeam`): `branch`, its own when it isn't the task's (a member's, `agent/<slug>--<name>`),
+    /// and `team`, its part and the team's rules (`LeadTeam.integratorBrief`, `memberBrief`), before the contract. A
+    /// plain task's brief passes neither, and is as it was.
     public static func worker(task: LeadTask, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load(),
-                              lints: [String]? = nil, screenshots: String?? = nil) -> String {
-        """
+                              lints: [String]? = nil, screenshots: String?? = nil, mainRed: LeadMainRed? = nil,
+                              branch: String? = nil, team: String? = nil) -> String {
+        // The base red when it starts (`LeadMainRed.workerText`), but for a worker whose task fixes it.
+        let red = mainRed.flatMap { $0.fixes.contains(task.slug) ? nil : "Main red: " + $0.workerText(base: workflow.base) + "\n" } ?? ""
+        return """
         You are a worker for the project lead of \(root). You have one task, below. Work in this worktree on branch \
-        agent/\(task.slug), and nowhere else.
+        \(branch ?? "agent/\(task.slug)"), and nowhere else.
 
         \(WorkingPolicy.section(policy))
 
-        Start: read the task; \(workflow.initCommand.map { "run `\($0)`; " } ?? "")look at the code you'll touch and the tests that cover it.
+        \(workflow.initCommand.map { "Start by running `\($0)`.\n" } ?? "")\
         While working: stay inside the boundaries. \(Policy.workerOwnership) Commit small, descriptive commits as you go. Don't switch to \(workflow.base), \
-        don't push, don't delete branches; the lead merges. At each milestone (a part working, checks \
-        passing, what's next), call progress with one line: the lead and the user see it on your task's lane. \
-        Keep your temporary folder small: build or download into the worktree's git-ignored build folders, not your \
-        scratchpad. Cleanup removes them with the worktree, so don't rm what's there: name a big one in your report \
-        (a full disk stops every session). Any \
-        other scratch (test homes, bench output, notes) goes in your session's TMPDIR or your scratchpad, never inside \
-        the worktree. If an untracked file is left there anyway, don't rm it: name it in your report (the merge \
-        takes only commits, and cleanup removes the worktree).
-        \(scratchFiles) `git rm <path>` is for tracked files your change deletes.
+        don't push, don't delete branches; the lead merges.
+        \(workerFiles)
         \(debuggers)
         When something needs a real terminal (a password or other prompt, an install, an interactive program, anything \
         that asks questions on stdin or files wallet requests), ask_lead with the exact command, working directory and \
         why it needs a real terminal; the lead files the shell card for the user to Run. Wait for the lead's answer. \
         Don't ask the user to open Terminal.app, paste a command into a shell, or type `! <command>` for it. A password \
         is typed only into that shell, never into chat: don't ask for one here, and never put one in the command.
-        Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
-        pkill and killall are refused: their patterns match the other sessions on this Mac too.
-        \(loadTests)
+        Processes: stop one you started by its pid (`$!`, or `pgrep -f <your worktree path>`): a looser pattern matches \
+        the other sessions on this Mac too, which is why pkill and killall are refused.
         \(newTests)
-        \(heavyWork)
-        Git commands refused here, by your permission rules: \(deniedGit(workflow)).
         Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here by \
         merging: run `git merge \(workflow.base)`, resolve each conflict, `git add` the files, then `git commit` \
         (`git merge --abort` starts over). Then run the affected tests again, commit and report. The lead's merge puts your \
@@ -1210,9 +1288,9 @@ public enum LeadPrompts {
         \(Policy.regressionTest(base: workflow.base))
         \(Policy.workerFindings)
         \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))
-        Stuck: say exactly what you need and stop. Don't fake a pass: never weaken or delete tests.
-        \(task.workerAgent == .codex ? "\n" + codexWorker + "\n" : "")
-        \(WorkerBrief.render(task))
+        Stuck: report blocked with exactly what you need. Don't fake a pass: never weaken or delete tests.
+        \(red)\(task.workerAgent == .codex ? "\n" + codexWorker + "\nGit commands a Claude worker's rules refuse, which you hold yourself: \(deniedGit(workflow)).\n" : "")
+        \(team.map { $0 + "\n\n" } ?? "")\(WorkerBrief.render(task))
         """
     }
 
@@ -1321,7 +1399,7 @@ public enum LeadPrompts {
             let touched = sensitive.prefix(8).joined(separator: ", ") + (sensitive.count > 8 ? ", …" : "")
             switch self {
             case .contract:
-                return "the contract. Run each acceptance check (a focused test for each, not the whole suite again), compare what the branch does with its goal, and look for edits outside the boundaries, weakened or deleted tests, hard-coded results, leftovers and anything that only looks done."
+                return "the contract. Run each acceptance check (a focused test for each, not the whole suite again), compare what the branch does with its goal, and look for edits outside the boundaries, weakened or deleted tests, hard-coded results, leftovers and anything that only looks done. " + unrequested
             case .bugs:
                 return "bugs and regressions. Read the change line by line with the code around it and its callers: wrong conditions, cases it misses, errors it swallows, races, state it leaves behind, and what it breaks that worked before (the test log shows any failure)."
             case .bugsAndSecurity:
@@ -1485,6 +1563,33 @@ public enum LeadPrompts {
         + "security-sensitive (permissions, secrets or credentials, commands built from input, hooks or settings that run in "
         + "other sessions, sensitive paths) or isn't tied to the task's goal: report those as before."
 
+    /// The first audit's walk from the contract's invariant: a single verifier has no finder's focus to send it past
+    /// the acceptance checks, and most of the eval's misses were a state or a sibling path the happy path skips.
+    static let invariantWalk = "Name the invariant the contract implies, in one sentence of your own in your summary: what has to "
+        + "stay true for its goal to hold. Then test the change against it past the path the acceptance checks take: read the "
+        + "callers of what changed, and walk the states they skip (a run that failed or was stopped, work still in flight, "
+        + "the other branch of each condition it adds)."
+
+    /// Behaviour nobody asked for: boundaries list only what a task mustn't touch, so an extra the contract never
+    /// thought to forbid went unasked. Routine calls are the worker's to make (`routineCallsRule`).
+    static let unrequested = "Ask too what the diff does that the contract doesn't ask for: a behaviour, an option or visible text "
+        + "that no line of it calls for. Such a finding's evidence quotes the contract line it comes closest to, or says none "
+        + "does. It is a Nit unless it does harm or the user would see it; then it is Important, with the harm or what the user "
+        + "sees as its failure_scenario. Never raise one for a routine call listed in the worker's done report."
+
+    /// A doubt about behaviour once could be filed as a Nit, where it can't hold the merge: four of the eval's bugs
+    /// were found and left there. Style Nits aren't doubts.
+    static let settleDoubts = "A doubt about what the code does has to be settled before submit_audit, not filed: reading the "
+        + "path is enough to write a failure_scenario, and where it's cheap run a focused test or a probe under your TMPDIR. It "
+        + "ends one of three ways: Important with its failure_scenario; dropped, because the code refutes it; or, only if you "
+        + "couldn't settle it, a Nit whose evidence starts \"Unresolved:\" and gives the one fact that decides it and the "
+        + "command that would settle it. Style and naming Nits aren't doubts: this changes nothing for them."
+
+    /// Important findings hold the merge, so each is checked against what reaches its line first; a finding that
+    /// survives that is stronger evidence, and one a guard already stops never reaches the worker.
+    static let readWhatReaches = "Before you raise an Important finding, read the callers, guards and tests that reach that line "
+        + "and name them in its evidence. One of them already stopping the failure drops the finding; if none does, it stands."
+
     static let reportHeading = "## The worker's done report"
 
     /// The verifier's section of the worker's done report on the audited commit (nil: there's none on it).
@@ -1513,7 +1618,7 @@ public enum LeadPrompts {
         \(reaudit.map { recheck($0, amended: amended != nil) } ?? """
         Check: run every acceptance check\(sharedRun ? "" : ", " + Policy.verifierTests(Policy.lintTests(in: root), test: workflow.testCommand)); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
-        tests, hard-coded results, leftovers and anything that only looks done.\(sharedRun ? "" : " " + Policy.verifierSuite(test: workflow.testCommand))
+        tests, hard-coded results, leftovers and anything that only looks done. \(invariantWalk) \(unrequested)\(sharedRun ? "" : " " + Policy.verifierSuite(test: workflow.testCommand))
         """)
         \(amended.map { "\n" + contractReaudit($0) + "\n" } ?? "")
         \(notesRule)
@@ -1532,9 +1637,10 @@ public enum LeadPrompts {
         outside the boundaries that neither a note of the lead's nor the worker's listed routine calls accept, and \
         that does harm), and every Important finding gives its failure_scenario: these inputs or this state give \
         this wrong result or crash. One you can't give a failure for isn't Important: an Important finding without \
-        failure_scenario is recorded as a Nit. Nit: everything else, style, naming, a doubt, an edit outside the \
-        boundaries that is correct (worth fixing, never holds the merge back). Pre-existing: already wrong before \
-        this branch; never fails the task. \
+        failure_scenario is recorded as a Nit. Nit: everything else, style, naming, a doubt left Unresolved as below, an \
+        edit outside the boundaries that is correct (worth fixing, never holds the merge back). Pre-existing: already \
+        wrong before this branch; never fails the task. \
+        \(settleDoubts) \(readWhatReaches) \
         The evidence rule: each finding names the file and line where it is (path from the repository's root) and \
         what shows it: the command you ran and what it gave, or what the code at that line does. No finding without \
         it; a hunch is not a finding. Nothing found: leave findings out. Whatever stays open as Important holds the \

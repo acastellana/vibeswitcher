@@ -73,6 +73,14 @@ public final class Requests: @unchecked Sendable {
     public var installRoot: String?
     /// The waits a `build.switch` runs on (a test's shorter ones).
     public var switchTiming = SwitchRequest.Timing()
+    /// The web's gate and tokens (the live plan's I1, `NodeLive`): what `web.open` and `web.revoke` act on; none:
+    /// both are refused.
+    public var web: WebAccess?
+    /// `status`'s `web`: the listener's state (`NodeLive.webValue`); none: off.
+    public var webValue: (() -> NodeWire.Value)?
+    /// A scratch server's `--test-web-pair`: `web.open` is taken from any process of the uid, its voice and typed code
+    /// not asked (the sandbox's and the tests' scratch form). Never on the user's node (`ServerArguments` refuses it).
+    public var openWebForAnyone = false
     /// The repository a request's folder is in (`repository(_:)`, git: never on `queue`); a test's instead.
     var repositoryOf: @Sendable (String) -> String = { Requests.repository($0) }
 
@@ -105,6 +113,18 @@ public final class Requests: @unchecked Sendable {
                               rule: rule.mode.rawValue)
     }
 
+    /// The hello a web connection gets once its `auth` was admitted (the live wire contract's §2): the Unix socket's,
+    /// with the kinds its rights may send, a peer that is never the user's, `auth`, and the build of the files served.
+    /// On `queue`.
+    public func webHello(_ admission: WebAdmission, assets: String) -> NodeWire.Hello {
+        var hello = hello(peer: nil)
+        hello.kinds = WebAccess.kinds(for: admission.rights)
+        hello.peer = .init(voice: "other", why: WebAccess.peerWhy)
+        hello.auth = admission.auth
+        hello.assets = assets
+        return hello
+    }
+
     /// Asks the host's notes (`HostLink.notes`) and keeps them; `done` once they came, or didn't. Each housekeeping
     /// asks, and `status` asks too. On `queue`.
     public func refreshNotes(_ done: @escaping () -> Void = {}) {
@@ -119,7 +139,7 @@ public final class Requests: @unchecked Sendable {
 
     /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
-                                               "hooks.install", "hooks.remove", "build.switch"]
+                                               "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -135,6 +155,10 @@ public final class Requests: @unchecked Sendable {
     public func handle(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
         let needs = NodeWire.kinds[request.kind] ?? .user
         if needs == .leadToolServer { return questionPost(request, from: facts, reply: reply) }
+        if request.kind == "web.open", openWebForAnyone {
+            note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
+            return act(request, reply: reply)
+        }
         if needs == .user {
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
                 note("refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
@@ -196,6 +220,9 @@ public final class Requests: @unchecked Sendable {
         case "base.accept", "base.keep": baseAnswer(request, reply: reply)
         case "hooks.install", "hooks.remove": hooks(request, reply: reply)
         case "build.switch": buildSwitch(request, reply: reply)
+        case "web.open", "web.revoke":
+            guard let web else { return reply(.init(re: request.id, error: .init(.refused, "this server has no web listener"))) }
+            if request.kind == "web.open" { webOpen(request, web: web, reply: reply) } else { webRevoke(request, web: web, reply: reply) }
         default: reply(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)")))
         }
     }
@@ -274,7 +301,7 @@ public final class Requests: @unchecked Sendable {
                              "notes": notes.map { Self.value($0.notes, at: $0.at) } ?? .null]),
             "rule": .object(["mode": .string(rule.mode.rawValue), "says": .string(rule.says),
                              "scopes": .array(rule.scopes.map { .string($0.pattern) })]),
-            "sessions": .array(list.map(Self.value)),
+            "sessions": .array(list.map(\.liveValue)),
             "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
             "cards": Self.counts(engine?.cards.counts() ?? [:]),
             "accepted": .array(accepted.map(\.value)),
@@ -284,12 +311,13 @@ public final class Requests: @unchecked Sendable {
                 + ((engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])).map(NodeWire.Value.string)),
             "restart": engine?.restartValue ?? .null,
             "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
+            "web": webValue?() ?? NodeStatusStore.webOff,
         ])
     }
 
     /// A lead as `status` lists it: the store's, with its open and blocking questions and its open cards (E6), and how
     /// many of the witness's looks this server applied for it (`looks`, E8's review).
-    private func leadValue(_ lead: LeadStore.Lead) -> NodeWire.Value {
+    func leadValue(_ lead: LeadStore.Lead) -> NodeWire.Value {
         guard case .object(var fields) = lead.value else { return lead.value }
         fields["looks"] = .int(engine?.witnessLooks[lead.root] ?? 0)
         let open = engine?.cards.list(project: lead.project) ?? []

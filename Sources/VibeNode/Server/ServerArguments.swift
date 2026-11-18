@@ -5,7 +5,7 @@ import VibeCore
 /// `--host-connector N --host-socket PATH`, then `--node --node-root PATH` (the user's node) or `--root PATH
 /// --node-root PATH` (a scratch host's), then each `--server-arg X` a scratch host was given. The test flags
 /// (`--test-user-scopes=…`, `--test-housekeeping=…`, `--test-child=…`, `--test-first-look`,
-/// `--test-install-root=…`) come only that way; a server with `--node`
+/// `--test-install-root=…`, and the web's `--test-web-port=…`, `--test-web-root=…`, `--test-web-pair`) come only that way; a server with `--node`
 /// refuses each, with a log line, and takes nothing from it.
 public struct ServerArguments: Equatable, Sendable {
     /// The connector's descriptor, inherited.
@@ -33,6 +33,15 @@ public struct ServerArguments: Equatable, Sendable {
     /// between, and `status` the install record (`<it>/installs`). The user's node takes the account's own
     /// (`NodeFolders.defaultPrefix`), never this.
     public var testInstallRoot: String?
+    /// A scratch server's web port (the live plan's I1): 0 for one the kernel picks. The user's node listens on
+    /// `NodeWeb.port` alone, never this.
+    public var testWebPort: UInt16?
+    /// A scratch server serves the page's files from this folder, read at each request (`FolderAssets`), instead of the
+    /// embedded ones, so the web lane sees a change at the next load.
+    public var testWebRoot: String?
+    /// A scratch server takes `web.open` from any process of the uid, with no voice or typed code (the sandbox's and the
+    /// tests' "scratch form"): the user's node never does.
+    public var testWebPair = false
     /// The test flags a server with `--node` left out, each as given.
     public var refused: [String] = []
 
@@ -41,6 +50,9 @@ public struct ServerArguments: Equatable, Sendable {
     public static let testChildFlag = "--test-child="
     public static let testFirstLookFlag = "--test-first-look"
     public static let testInstallRootFlag = "--test-install-root="
+    public static let testWebPortFlag = "--test-web-port="
+    public static let testWebRootFlag = "--test-web-root="
+    public static let testWebPairFlag = "--test-web-pair"
 
     /// The housekeeping period without a test's: 30 s (S2).
     public static let housekeeping = 30
@@ -57,6 +69,9 @@ public struct ServerArguments: Equatable, Sendable {
         var child: String?
         var firstLook = false
         var installRoot: String?
+        var webPort: UInt16?
+        var webRoot: String?
+        var webPair = false
         var tests: [String] = []
         var index = 1
         func value() -> String? {
@@ -105,6 +120,20 @@ public struct ServerArguments: Equatable, Sendable {
                 let path = String(word.dropFirst(testInstallRootFlag.count))
                 guard path.hasPrefix("/") else { return .failure(Usage("\(testInstallRootFlag) needs an absolute path")) }
                 installRoot = path
+            case _ where word.hasPrefix(testWebPortFlag):
+                tests.append(word)
+                guard let port = UInt16(word.dropFirst(testWebPortFlag.count)) else {
+                    return .failure(Usage("\(testWebPortFlag) needs a port's number (0: the kernel's pick)"))
+                }
+                webPort = port
+            case _ where word.hasPrefix(testWebRootFlag):
+                tests.append(word)
+                let path = String(word.dropFirst(testWebRootFlag.count))
+                guard path.hasPrefix("/") else { return .failure(Usage("\(testWebRootFlag) needs an absolute path")) }
+                webRoot = path
+            case testWebPairFlag:
+                tests.append(word)
+                webPair = true
             default:
                 return .failure(Usage("unknown argument \(word)"))
             }
@@ -115,7 +144,7 @@ public struct ServerArguments: Equatable, Sendable {
         guard node != (root != nil) else { return .failure(Usage("one of --node and --root is needed")) }
         var parsed = ServerArguments(connector: connector, hostSocket: hostSocket, node: node, root: root, nodeRoot: nodeRoot,
                                      testUserScopes: scopes, testHousekeeping: housekeeping, testChild: child, testFirstLook: firstLook,
-                                     testInstallRoot: installRoot)
+                                     testInstallRoot: installRoot, testWebPort: webPort, testWebRoot: webRoot, testWebPair: webPair)
         if node {
             parsed.refused = tests
             parsed.testUserScopes = nil
@@ -123,6 +152,9 @@ public struct ServerArguments: Equatable, Sendable {
             parsed.testChild = nil
             parsed.testFirstLook = false
             parsed.testInstallRoot = nil
+            parsed.testWebPort = nil
+            parsed.testWebRoot = nil
+            parsed.testWebPair = false
         }
         return .success(parsed)
     }

@@ -193,12 +193,28 @@ enum Sandbox {
     }
 
     /// `window` drawn as it is, its frame included, and the view that was drawn. Nil when it couldn't be drawn.
-    static func bitmap(of window: NSWindow) -> (view: NSView, image: NSBitmapImageRep)? {
+    /// With `windowBackground`, what's left transparent shows the window's background, as on screen (`underlayWindowBackground`).
+    static func bitmap(of window: NSWindow, windowBackground: Bool = false) -> (view: NSView, image: NSBitmapImageRep)? {
         guard let view = window.contentView?.superview ?? window.contentView,
               let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         underlayTerminalBackgrounds(in: view, bitmap)
+        if windowBackground { underlayWindowBackground(of: window, bitmap) }
         return (view, bitmap)
+    }
+
+    /// An alert's panel draws its background as a material that only the window server composites: `cacheDisplay`
+    /// leaves it transparent, so in dark its white title and buttons came out on a viewer's white. The window's
+    /// background colour, in the window's own look, goes behind what was drawn, where it is transparent.
+    static func underlayWindowBackground(of window: NSWindow, _ bitmap: NSBitmapImageRep) {
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        window.effectiveAppearance.performAsCurrentDrawingAppearance {
+            NSColor.windowBackgroundColor.setFill()
+            NSRect(origin: .zero, size: bitmap.size).fill(using: .destinationOver)
+        }
     }
 
     /// A terminal leaves its default background transparent for the layer's colour to show through, which a drawing of
@@ -354,6 +370,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// Push to talk with no microphone and no OpenAI: a recorder that hands over a made-up recording, an HTTP client
     /// that answers a made-up transcript, a key in memory (`dictation key|nokey|press|release|note`).
     let dictationKey = AppProof.MemorySecret()
+    /// The fake session the last `dictation press` went to, and how many messages it had been sent then (`composer unsent
+    /// TEXT` fails when it was sent more since: the dictated text went out by itself, however it arrived).
+    var sentAtPress: (id: UUID, count: Int)?
     lazy var dictation: DictationController = {
         let controller = DictationController(keyStore: dictationKey, recorder: SandboxRecorder(), microphone: SandboxMicrophone(),
                                              transcription: OpenAITranscription(client: SandboxTranscriber()), findKey: { nil })
@@ -411,6 +430,19 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if preferences.walletPeerID.isEmpty { preferences.walletPeerID = Driver.walletPeers[0].peerID }
         return desk
     }()
+    /// The reminders to run /doctor prompt-audit in the fake leads' projects (`prompt-audit`), kept in the sandbox's
+    /// state; it reads the sandbox home's transcripts only.
+    lazy var promptAudit: PromptAuditDesk = {
+        let desk = PromptAuditDesk(file: state.appendingPathComponent("prompt-audit.json"), home: home)
+        desk.roots = { [weak self] in self.map { Array($0.leads.boards.keys) } ?? [] }
+        preferences.$promptAuditReminders.combineLatest(preferences.$promptAuditDays)
+            .sink { [weak desk] on, days in
+                desk?.enabled = on
+                desk?.intervalDays = days
+            }
+            .store(in: &cancellables)
+        return desk
+    }()
     /// The shells fake agents ask for (`shell-ask`), stamped by the sandbox's vault as the host would for the selected
     /// fake session. Run starts a shell session in the sandbox's own host (its own home), never the user's.
     lazy var shellDesk: ShellDesk = {
@@ -427,6 +459,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard let self else { return then(.notYet) }
             leads.tell(text, from: .system("from New Shell"), session: id, then: then)
         }
+        desk.hostSessions = { [weak self] in self?.host.sessions ?? [] }
         desk.atOnce = { [weak self] in self?.preferences.letAgentsOpenShells ?? false }
         desk.launch = { [weak self] request, then in
             guard let self else { return then(.failure(ShellAsk.Refusal("the sandbox is quitting"))) }
@@ -574,6 +607,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 self?.model.update(sessions: sessions, hosted: hosted, table: table, hostAnswered: state != .connecting)
             }
             .store(in: &cancellables)
+        // A Run-card shell's command ending, or its session: the asker hears how it ended (as the app's desk does).
+        host.$sessions.map { $0.map { "\($0.id) \($0.commandEnd != nil) \($0.isLive)" } }.removeDuplicates().dropFirst()
+            .receiveLatest(on: RunLoop.main).sink { [weak self] _ in self?.shellDesk.refresh() }.store(in: &cancellables)
         // A fake agent leaves with its session, as a real one does.
         host.$sessions.receiveLatest(on: RunLoop.main).sink { [weak self] sessions in
             guard let self else { return }
@@ -607,6 +643,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // Its fake `passage listen`, ended by its pid.
         walletDesk.close()
         shellDesk.close()
+        promptAudit.close()
         shellTidier.close()
         Breadcrumbs.shared.flush()
         RunnableCommand.Script.removeAll()
@@ -1082,6 +1119,58 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ]
     }
 
+    /// The team task `team wall` puts on the fake lead's board.
+    static let teamWallSlug = "team-wall-in-the-app"
+
+    /// `team wall`: a running team task on the fake lead's board, its 3 members with their parts and progress, and 5
+    /// posts on its wall (one with markup and a link, shown as typed; one asking @core, so ui is waiting on it); its
+    /// lane shown in the Team tab, opened to its Wall section.
+    func teamWall(_ done: @escaping (String?) -> Void) {
+        guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
+        let slug = Self.teamWallSlug
+        let now = Date().timeIntervalSince1970
+        let contract = LeadContract(goal: "The Team view shows a team task's members and its wall.", acceptance: ["It shows."], boundaries: [], context: "")
+        let parts = [("core", "Shared types, the sandbox hooks and the integration"), ("api", "The post and wall tools"),
+                     ("ui", "The Team view's member lines and Wall section")]
+        do {
+            try BoardStore(root: root).update { board in
+                board.tasks.removeAll { $0.slug == slug }
+                var task = LeadTask(id: slug, slug: slug, title: "Team wall in the app", contract: contract, status: .running)
+                task.since = now - 1_500
+                task.team = parts.enumerated().map { index, part in
+                    LeadTeamMember(name: part.0, part: part.1, branch: index == 0 ? "agent/\(slug)" : "agent/\(slug)--\(part.0)",
+                                   worktree: root + "/.vibeswitcher/worktrees/" + (index == 0 ? slug : "\(slug)--\(part.0)"),
+                                   from: index == 0 ? nil : "4f1c2a9e")
+                }
+                task.checkpoints = [
+                    LeadCheckpoint(text: "Shared types and stubs committed; split at 4f1c2a9", at: now - 1_400),
+                    LeadCheckpoint(text: "api: post() stores and checks a post; wall(since:) next", at: now - 900),
+                    LeadCheckpoint(text: "ui: member lines drawn in the lane; the Wall section next", at: now - 600),
+                    LeadCheckpoint(text: "Took api's part; its tests pass on the team branch", at: now - 240),
+                ]
+                // ui's question to @core below (post #5), its deadline running: the lane's "waiting on @core".
+                task.team?[2].waits = [LeadPeerWait(post: 5, on: "@core", until: now + 9 * 60)]
+                board.tasks.insert(task, at: 0)
+            }
+            // A wall of its own each time: the posts below, from the first.
+            let wall = try LeadWall(root: root, slug: slug, clock: { now - 60 })
+            try? FileManager.default.removeItem(at: wall.file)
+            try wall.post("post() and wall(since:) are in. A post is capped at 1,500 characters: see Sources/VibeCore/LeadWall.swift on my branch.",
+                          by: "api", to: ["@all"])
+            try wall.post("Does wall(since:) give the lead's posts too? The Wall marks each post's author.\n**This stays as typed**, and so does [this link](https://example.invalid/spec).",
+                          by: "ui", to: ["@api"], needsAnswer: true)
+            try wall.post("Both: the lead's are marked as the lead's and sealed; show one only when its seal holds.", by: "api", to: ["@ui"], replyTo: 2)
+            try wall.post("Taking api's part now. ui, merge agent/\(slug) in once it's there.", by: "core", to: ["@api", "@ui"])
+            try wall.post("Can I use the Team view's Fold for the earlier posts, or are you changing it?", by: "ui", to: ["@core"], needsAnswer: true)
+        } catch {
+            return done("couldn't write the team task: \(error)")
+        }
+        UserDefaults.standard.set("team", forKey: "inspectorTab")
+        leads.refresh()
+        done(nil)
+    }
+
     /// `leadmail`: the made-up messages written to the fake lead's record, as tell_lead keeps them, and its Team tab shown.
     func leadMail(_ done: @escaping (String?) -> Void) {
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
@@ -1254,7 +1343,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // The sandbox's finished Run-card shells leave as the app's do (and typing into one is recorded from now on).
         shellTidier.start(interval: 5)
         let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
-                                              dictation: dictation, wallet: walletDesk, boost: boostWatch, shells: shellDesk)
+                                              dictation: dictation, wallet: walletDesk, boost: boostWatch, shells: shellDesk,
+                                              promptAudit: promptAudit)
         controller.onBoostMark = { [weak self] in self?.showSettings(.performance, reveal: .boost) }
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
@@ -1313,7 +1403,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("mouse on|off", "the shown session's program asks for mouse reporting (DECSET 1002 and 1006, as Claude Code's fullscreen does), or stops"),
         ("type TEXT", "types TEXT into the chat's composer (through its text view, as the keyboard does)"),
         ("send", "presses Return in the composer: the message goes to the fake session"),
+        ("composer paste|clear|expect TEXT", "the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a Copy's, never yours), and prints what it holds then; clear empties it; expect fails unless it holds exactly TEXT, saying what it holds"),
+        ("composer [unsent TEXT]", "prints what the shown chat's composer holds and how many messages its fake session was sent; unsent TEXT fails unless the box comes to hold exactly TEXT and nothing was sent since the last dictation press (e.g. after dictation press/release: the text lands in the box, unsent)"),
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
+        ("lines FILE N", "waits up to 30 s for FILE (a path under the sandbox's home, e.g. projects/example-api/ran.txt) to hold N lines, then fails unless it holds exactly N: a command that appends a line there each time it runs ran N times (scripts/ui-journeys/run-card.journey)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
         ("new [codex|shell|zsh] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the sandbox's home"),
@@ -1332,6 +1425,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("startlead", "starts a real project lead (LeadController.startLead, as Project Lead does: the host first if none runs, its vault grant) in a new repository, its agent a fake Claude, and shows its chat; first thing after `run --empty`, no session host runs before it"),
         ("lead [FILE]", "shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
+        ("team wall", "puts a running team task on the fake lead's board (start the lead first): 3 members with their parts and progress, one waiting on a teammate, and 5 posts on its wall; shows the Team tab with its lane opened to the Wall section"),
         ("team named", "starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>, verify-<slug>) and moves the lead's agent into its .vibeswitcher/worktrees (start the lead first): its team still folds under it"),
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
@@ -1346,6 +1440,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
         ("wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]", "the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card shows in that chat, waiting for Send to Wallet Manager; with address, from an 0x address, so the card also offers Sign in browser wallet; the options replace the made-up request's values (scripts/e2e/wallet-e2e.sh); --data makes it a contract call (an approve's calldata, say)"),
         ("shell-ask [COMMAND]", "the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in its folder, as vs-shell run does: its card shows in that chat, waiting for Run"),
+        ("prompt-audit due|model|snooze|off", "the selected fake lead's project as due for a /doctor prompt-audit (due: 15 days since VibeSwitcher first saw it; model: its sessions now answer on another model than the last run's), its card shown in the lead's chat; snooze and off press Remind Me in a Week and Not for This Project"),
         ("shell-click run|decline|dismiss", "presses that button on the newest shell request card in the selected chat (run starts the shell session in the sandbox's own host and selects it, and prints ran or the card's \"Not run: …\" line)"),
         ("shell-tidy SECONDS", "how long a handled shell card (started, declined, expired) shows before it leaves by itself, for cards handled from now on (4 by default); a long time keeps one on screen for a shot"),
         ("shell-idle SECONDS", "how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and looks now: a shell finished that long ago, back at its prompt and not typed into, moves under Ended"),
@@ -1377,7 +1472,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("shot-real NAME", "draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png… (`shot` sets each window to light, then dark: to see Theme, use this)"),
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder, its side panes out of their glass (a drawing can't composite glass), and fails if one comes out blank or in the wrong look's colors"),
-        ("pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT", "the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views (where, their tooltip); hover moves the pointer onto the message holding TEXT; drag presses on the message holding FROM and lets go on the one holding TO; copy is ⌘C (to a pasteboard of the sandbox's own, never the general one), printing what it copied; menu right-clicks the message holding TEXT and prints its menu"),
+        ("pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT|menu-copy TEXT", "the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views (where, their tooltip); hover moves the pointer onto the message holding TEXT; drag presses on the message holding FROM and lets go on the one holding TO; copy is ⌘C (to the sandbox's own pasteboard, never yours), printing what it copied; menu right-clicks the message holding TEXT and prints its menu; menu-copy right-clicks it and picks its menu's Copy, printing what it copied"),
         ("offline on|off", "the app loses its connection to the sandbox's own host and doesn't get it back (the host and fake sessions keep running), as while the host is unreachable; off: it connects again"),
         ("unproved", "connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions"),
         ("quit", "quits (the host and fake sessions end with it)"),
@@ -1412,6 +1507,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
             editor.reload()
             return AnyView(Form { ReviewFloorSection(editor: editor) }.formStyle(.grouped).frame(width: 620, height: 720))
         }),
+        // The notice on waking from a long sleep with work in flight, as its banner shows it (the sandbox posts no
+        // notifications): two made-up projects' tasks, a made-up clock asleep 2 h 10 min, through `SleepWatch` as the
+        // lead controller looks at each refresh.
+        ("sleep-notice", { driver in
+            let notice = Driver.sleepNotice(home: driver.home)
+            return AnyView(SleepNoticeBanner(title: notice.title, text: notice.body).padding(16).frame(width: 420))
+        }),
         ("toolchain-note", { _ in
             let before = ToolchainSnapshot(developerDir: "/Library/Developer/CommandLineTools", swift: "Apple Swift version 6.4.1",
                                            sdkPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX27.sdk", sdkVersion: "27",
@@ -1421,6 +1523,28 @@ private final class Driver: NSObject, NSApplicationDelegate {
             after.sdkVersion = "27.2"
             after.commandLineTools = "27.2"
             return AnyView(ToolchainNoteView(note: LeadWitness.toolchainText(before: before, after: after)!))
+        }),
+        // The restart card on three made-up sessions (on a record file of the sandbox's own; nothing reopens): a lead,
+        // one of your own you renamed, and one whose folder is gone, shown as such.
+        ("restart-card", { driver in
+            let projects = driver.home + "/projects"
+            func entry(_ project: String, name: String? = nil, role: RestartReopen.Role = .user, agent: Agent = .claude) -> RestartReopen.Entry {
+                RestartReopen.Entry(id: UUID(), folder: projects + "/" + project, agent: agent, agentSessionID: UUID().uuidString, role: role,
+                                    project: project, name: name ?? project, command: nil, label: role == .lead ? "Lead · \(project)" : "Claude",
+                                    cols: 120, rows: 36)
+            }
+            let entries = [entry("example-payouts", role: .lead), entry("example-site", name: "Billing redesign"),
+                           entry("old-prototype", agent: .codex)]
+            let file = URL(fileURLWithPath: driver.home + "/restart-card/open-sessions.json")
+            // Written before the Mac started: the card says it restarted.
+            try? RestartReopen.save(entries, to: file, at: Date(timeIntervalSince1970: 0))
+            let offer = RestartOffer(file: file)
+            offer.folderExists = { !$0.hasSuffix("/old-prototype") }
+            offer.resumeSession = { [weak driver] request in driver?.refuse("reopening \(request.label)") }
+            offer.reopenLead = { [weak driver] root, _ in driver?.refuse("reopening the lead of \(root)") }
+            offer.close = { [weak driver] in driver?.closeSheet() }
+            offer.decide(hostSessions: nil)
+            return AnyView(RestartCardView(offer: offer))
         }),
         ("new-project", { driver in
             AnyView(NewProjectSheet(model: NewProjectModel(location: driver.home + "/projects"),
@@ -1597,6 +1721,27 @@ private final class Driver: NSObject, NSApplicationDelegate {
         return walletDesk.cards.last { walletDesk.sessions[$0.id] == id }
     }
 
+    /// `prompt-audit due|model|snooze|off`: the selected lead's project made due (its record set, as if VibeSwitcher had
+    /// seen it 15 days ago, or with a model change), or its card's snooze or off pressed. Nothing is typed anywhere.
+    private func promptAuditCard(_ rest: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let root = model.selectedRow.flatMap({ leads.lead(for: $0) })?.root else { return reply(false, "no lead selected: lead first") }
+        let now = Date()
+        var project = PromptAudit.Project(firstSeen: now.addingTimeInterval(-15 * 86_400))
+        project.models = ["claude-opus-5-5"]
+        switch rest.isEmpty ? "due" : rest {
+        case "due": break
+        case "model":
+            let ran = now.addingTimeInterval(-3 * 86_400).timeIntervalSince1970
+            (project.lastRun, project.since) = (ran, ran)
+            project.sessions = ["lead.jsonl": PromptAudit.Seen(model: "claude-fable-5-2", last: now.timeIntervalSince1970 - 600)]
+        case "snooze": promptAudit.snooze(root); return settle { reply(true, "snoozed a week: \(self.promptAudit.due[root] == nil ? "no card" : "card still shown")") }
+        case "off": promptAudit.turnOff(root); return settle { reply(true, "off for this project: \(self.promptAudit.due[root] == nil ? "no card" : "card still shown")") }
+        default: return reply(false, "prompt-audit due|model|snooze|off")
+        }
+        promptAudit.set(root, project)
+        settle { reply(self.promptAudit.due[root] != nil, self.promptAudit.due[root].map { PromptAudit.reason($0, now: now) } ?? "no card") }
+    }
+
     /// `shell-ask [COMMAND]`: the selected fake session's agent asks for a shell, as `vs-shell run` does (`ShellAsk.run`,
     /// the sandbox's vault placing it in that session, as the host would from its process).
     private func shellAsk(_ command: String, _ reply: @escaping (Bool, String) -> Void) {
@@ -1626,9 +1771,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { reply(true, "\(what)\(outcome): the card is now \(now.map { ShellCard.title($0.state) } ?? "gone")") }
         }
         guard action == .run else { return shellDesk.act(action, on: card.id) { said("") } }
-        shellDesk.run(card.id) { outcome in
+        shellDesk.run(card.id) { [weak self] outcome in
             switch outcome {
-            case .ran: said(" ran")
+            case .ran:
+                // The shell session it started is the selected one: waits (up to 30 s) for its command to end, as the
+                // host reports it, so what's shown next is the command's whole output.
+                guard let self, let shell = model.selectedRow?.hostID else { return said(" ran") }
+                waitFor({ [weak self] in self?.host.sessions.first { $0.id == shell }?.commandEnd != nil }) { ended in
+                    said(ended ? " ran, its command ended" : " ran, its command still running")
+                }
             case .refused(let reason): said(" (\(reason))")
             }
         }
@@ -2130,6 +2281,31 @@ private final class Driver: NSObject, NSApplicationDelegate {
         return SetupScorecard(week: week, previous: previous, installs: installs)
     }
 
+    /// The wake notice `SleepWatch` gives after a made-up 2 h 10 min sleep with three tasks in flight in two made-up
+    /// projects; its ledger goes to a file of the sandbox's own home.
+    static func sleepNotice(home: String) -> (title: String, body: String) {
+        var wall = Date().timeIntervalSince1970 - 2 * 3600 - 600, awake: TimeInterval = 0
+        let watch = SleepWatch(time: MacTime(wall: { Date(timeIntervalSince1970: wall) }, awake: { awake }),
+                               file: URL(fileURLWithPath: home + "/sleep-cost-sandbox.json"))
+        func task(_ slug: String, _ status: LeadTask.Status) -> LeadTask {
+            var task = LeadTask(slug: slug, title: slug, contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
+            task.status = status
+            return task
+        }
+        var site = LeadBoard(), payouts = LeadBoard()
+        site.tasks = [task("cache-headers", .running), task("login-flow", .review), task("dark-mode", .planned)]
+        payouts.tasks = [task("refund-retries", .running)]
+        let boards = [home + "/projects/example-site": site, home + "/projects/example-payouts": payouts]
+        var log = MacSleepLog()
+        _ = watch.look(&log, boards: boards)
+        wall += 2 * 3600 + 600
+        _ = watch.look(&log, boards: boards)
+        // Told once the Mac has stayed awake (a dark wake isn't the user back).
+        wall += SleepWatch.realWake
+        awake += SleepWatch.realWake
+        return watch.look(&log, boards: boards) ?? (title: "no notice", body: "")
+    }
+
     /// The `all-done` sheet's mark: a batch of four, three merged with receipts and one folded.
     static func allDoneMark() -> LeadAllDone {
         let now = Date().timeIntervalSince1970
@@ -2300,7 +2476,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
             switch rest {
             case "team", "overview", "activity": UserDefaults.standard.set(rest, forKey: "inspectorTab")
             case "hide", "show":
-                if UserDefaults.standard.bool(forKey: "inspectorCollapsed") != (rest == "hide") { window?.toggleInspectorAction(nil) }
+                // Set on the pane itself, not animated, whatever the saved default says: Toggle Inspector's animated
+                // collapse is driven by the display, so while the Mac's display sleeps it never ends, and the pane stays
+                // drawn while it reports collapsed (the team arm's journeys at night drew the inspector on every shot).
+                // Saved as the toggle saves it.
+                if let inspector = (window?.window?.contentViewController as? NSSplitViewController)?
+                    .splitViewItems.first(where: { $0.behavior == .inspector }) {
+                    inspector.isCollapsed = rest == "hide"
+                    UserDefaults.standard.set(inspector.isCollapsed, forKey: "inspectorCollapsed")
+                } else {
+                    return reply(false, "inspector \(rest): the main window has no inspector pane")
+                }
             default: return reply(false, "inspector team|overview|activity|hide|show")
             }
             settle { reply(true, "inspector: \(rest)") }
@@ -2330,9 +2516,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             composer.window?.makeFirstResponder(composer)
             composer.doCommand(by: #selector(NSResponder.insertNewline(_:)))
             reply(true, "sent")
+        case "composer": composerCommand(rest, reply)
         case "tell": tell(rest, reply)
         case "notify": notify(rest, reply)
         case "runblock": runBlock(confirmed: rest == "yes", reply)
+        case "lines": lines(rest, reply)
         case "clear":
             // Ended first, then removed (the host keeps an ended session's row until it's removed).
             let ids = host.sessions.map(\.id)
@@ -2400,6 +2588,19 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 lines.append(String(format: "longest between beats (0.25 s apart when free): %.2f s, ended %@", longest.gap, "\(longest.at)"))
             }
             reply(true, lines.isEmpty ? "none" : lines.joined(separator: "\n"))
+        case "team" where rest == "wall":
+            teamWall { [weak self] problem in
+                guard let self else { return }
+                if let problem { return reply(false, problem) }
+                self.chat("lead") { ok, text in
+                    guard ok else { return reply(false, text) }
+                    // The Team tab reads the walls with its 5-second tick: one tick, then its row opened to the Wall.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                        NotificationCenter.default.post(name: TeamTaskList.revealRow, object: Self.teamWallSlug)
+                        self.settle { reply(true, "a team task with 3 members and 5 posts on its wall, its lane opened to the Wall section in the Team tab") }
+                    }
+                }
+            }
         case "team" where rest == "named": startNamedTeam { problem in reply(problem == nil, problem ?? "worker and verifier started, the lead's agent in its worktrees folder") }
         case "team": startWorker { problem in reply(problem == nil, problem ?? "worker started") }
         case "unfold":
@@ -2501,6 +2702,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             default: return reply(false, "boost off|on|away|present|battery|battery-on|battery-low|veto|mark")
             }
             boostWatch.look { [weak self] in self?.settle { reply(true, self?.boostWatch.state?.text ?? "not decided") } }
+        case "prompt-audit": promptAuditCard(rest, reply)
         case "shell-ask": shellAsk(rest, reply)
         case "shell-click": shellClick(rest, reply)
         case "shell-fail":
@@ -2608,7 +2810,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { [weak self] in reply(true, self?.lookReport() ?? "") }
         case "panes":
             panes(rest.isEmpty ? "panes" : rest, reply)
-        case "pointer": pointer(Array(words.dropFirst()), reply)
+        // A journey line (scripts/ui-journeys.sh) hands its words over as one argument: split again then. Given
+        // separately (the shell's form), they stay as given, so a quoted FROM of several words still works.
+        case "pointer": pointer(words.count == 2 ? rest.split(separator: " ").map(String.init) : Array(words.dropFirst()), reply)
         case "offline":
             guard rest == "on" || rest == "off" else { return reply(false, "offline on|off") }
             host.reconnectDelays = rest == "on" ? [3600] : [0.2, 0.5, 1, 2, 3, 5]
@@ -2631,7 +2835,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     // MARK: The pointer over the chat
 
-    /// The shown chat's message text views, top to bottom, each writing to the sandbox's own pasteboard.
+    /// The shown chat's message text views, top to bottom. Each writes to `NSPasteboard.general`, the sandbox's own
+    /// (`redirectPasteboard`), where the composer's ⌘V reads, as in the app.
     private func chatTexts() -> [ChatTextView] {
         guard let root = window?.window?.contentView else { return [] }
         var found: [ChatTextView] = []
@@ -2640,11 +2845,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             view.subviews.forEach(walk)
         }
         walk(root)
-        for text in found where text.pasteboard == .general { text.pasteboard = sandboxPasteboard }
         return found.sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
     }
-
-    private let sandboxPasteboard = NSPasteboard(name: NSPasteboard.Name("VibeSwitcherSandbox-\(getpid())"))
 
     /// A point (in the window) on the first line of the message holding `text`: on that text when found, else its start.
     private func point(onMessage text: String) -> (ChatTextView, NSPoint)? {
@@ -2741,9 +2943,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 reply(!selected.isEmpty, "window key \(nsWindow.isKeyWindow), pressed on \(self.describe(hit)) (first mouse \(hit?.acceptsFirstMouse(for: down) ?? false)) (the message's text view: \(hit === from)), first responder \(self.describe(nsWindow.firstResponder as? NSView)); selected: “\(selected)”")
             }
         case "copy":
-            _ = chatTexts()
-            sandboxPasteboard.clearContents()
-            // Only a message's own text view: it writes to the sandbox's pasteboard, anything else to the general one.
+            NSPasteboard.general.clearContents()
             guard let focused = nsWindow.firstResponder as? ChatTextView else {
                 return reply(false, "the first responder is \(describe(nsWindow.firstResponder as? NSView)), not a message: not copied")
             }
@@ -2751,7 +2951,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             // (The sandbox puts up no menu bar: the app's own menu, as AppDelegate installs it.)
             let item = MainMenu.build().items.compactMap(\.submenu).flatMap(\.items).first { $0.keyEquivalent == "c" && $0.keyEquivalentModifierMask == .command }
             let handled = item.flatMap(\.action).map { NSApp.sendAction($0, to: focused, from: item) } ?? false
-            let copied = sandboxPasteboard.string(forType: .string)
+            let copied = NSPasteboard.general.string(forType: .string)
             reply(copied != nil, "menu item \(item?.title ?? "none"), handled \(handled), first responder \(describe(nsWindow.firstResponder as? NSView)); copied: “\(copied ?? "")”")
         case "areas":
             // The tracking areas over the message holding TEXT, from its view up to the window, and each owner's kind.
@@ -2777,8 +2977,56 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 return reply(false, "no menu on \(describe(hit))")
             }
             reply(true, "on \(describe(hit)): " + menu.items.map { $0.isSeparatorItem ? "—" : $0.title }.joined(separator: ", "))
+        case "menu-copy":
+            // The menu a right-click on the message holding TEXT opens, and its Copy picked as a click on it does.
+            guard let (_, at) = point(onMessage: rest) else { return reply(false, "no message holds \(rest)") }
+            let frame = content.superview ?? content
+            let hit = frame.hitTest(frame.convert(at, from: nil))
+            guard let event = mouseEvent(.rightMouseDown, at: at), let menu = hit?.menu(for: event) else {
+                return reply(false, "no menu on \(describe(hit))")
+            }
+            guard let index = menu.items.firstIndex(where: { $0.title == "Copy" }) else {
+                return reply(false, "no Copy in the menu on \(describe(hit)): " + menu.items.map(\.title).joined(separator: ", "))
+            }
+            NSPasteboard.general.clearContents()
+            menu.performActionForItem(at: index)
+            let copied = NSPasteboard.general.string(forType: .string)
+            reply(copied != nil, "picked Copy in the menu on \(describe(hit)); copied: “\(copied ?? "")”")
         default:
-            reply(false, "pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT")
+            reply(false, "pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT|menu-copy TEXT")
+        }
+    }
+
+    // MARK: The composer
+
+    /// `composer [paste|clear|expect TEXT|unsent TEXT]`.
+    private func composerCommand(_ rest: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard let composer = composer() else { return reply(false, "no composer: show a fake session's chat first (chat)") }
+        let words = rest.split(separator: " ", maxSplits: 1).map(String.init)
+        func holds() -> String { "the composer holds “\(composer.string)”" }
+        switch words.first ?? "" {
+        case "paste":
+            // ⌘V as the main menu has it, sent to the composer once it has the keyboard (the window isn't key, so not
+            // through NSApp's key window): it reads NSPasteboard.general, the sandbox's own.
+            composer.window?.makeFirstResponder(composer)
+            let item = MainMenu.build().items.compactMap(\.submenu).flatMap(\.items).first { $0.keyEquivalent == "v" && $0.keyEquivalentModifierMask == .command }
+            guard let item, let action = item.action else { return reply(false, "no menu item for ⌘V") }
+            let handled = NSApp.sendAction(action, to: composer, from: item)
+            settle { reply(handled, "⌘V (\(item.title)) handled \(handled); \(holds())") }
+        case "clear":
+            composer.window?.makeFirstResponder(composer)
+            composer.selectAll(nil)
+            composer.deleteBackward(nil)
+            settle { reply(composer.string.isEmpty, holds()) }
+        case "expect":
+            let expected = words.count > 1 ? words[1] : ""
+            reply(composer.string == expected, composer.string == expected ? holds() : "\(holds()), not “\(expected)”")
+        case "": checkComposer("", reply)
+        case "unsent":
+            guard words.count > 1 else { return reply(false, "composer unsent TEXT") }
+            checkComposer(words[1], reply)
+        default:
+            reply(false, "composer [paste|clear|expect TEXT|unsent TEXT]")
         }
     }
 
@@ -2938,6 +3186,43 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// `composer [unsent TEXT]`: what the shown chat's composer holds and how many messages its fake session was sent. With TEXT,
+    /// a failure unless the box comes to hold exactly TEXT (waited for, as a dictation's text lands a beat after its run
+    /// ends) and no message holding TEXT went to the session (a ui journey's check that dictated text stays unsent).
+    private func checkComposer(_ expected: String, _ reply: @escaping (Bool, String) -> Void) {
+        guard composer() != nil else { return reply(false, "no composer: show a fake session's chat first (chat)") }
+        let selected = model.selectedRow?.hostID
+        let fake = fakeList.first { $0.id == selected }
+        let box = { [weak self] in self?.composer()?.string ?? "" }
+        waitFor({ expected.isEmpty || box() == expected }) { [weak self] _ in
+            let sent = fake?.transcript.map(Self.userMessages) ?? []
+            let text = box()
+            let label = fake?.label ?? "the session"
+            let summary = "the box holds “\(text)”; \(label) was sent \(sent.count) message\(sent.count == 1 ? "" : "s")"
+            if expected.isEmpty { return reply(true, summary) }
+            // Since the last dictation began (as it arrived: a fake Claude's /voice may swallow its spaces), or anything
+            // holding TEXT.
+            let since = self?.sentAtPress.flatMap { $0.id == fake?.id && sent.count > $0.count ? Array(sent[$0.count...]) : nil } ?? []
+            if let message = since.last ?? sent.last(where: { $0.contains(expected) }) {
+                return reply(false, "sent, not kept in the box: \(label) got “\(message)” after the dictation began; \(summary)")
+            }
+            reply(text == expected, text == expected ? summary : "the box doesn't hold “\(expected)”: \(summary)")
+        }
+    }
+
+    /// The prompts a fake Claude's transcript holds (its user lines' text; tool results and meta lines left out).
+    private static func userMessages(_ transcript: String) -> [String] {
+        guard let text = try? String(contentsOfFile: transcript, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { line in
+            guard let object = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                  object["type"] as? String == "user", object["isMeta"] as? Bool != true,
+                  let message = object["message"] as? [String: Any] else { return nil }
+            if let content = message["content"] as? String { return content }
+            let parts = (message["content"] as? [[String: Any]] ?? []).compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
+            return parts.isEmpty ? nil : parts.joined(separator: "\n")
+        }
+    }
+
     /// `dictation key|nokey|note|ack|press|release|letgo|cancel|turnon`.
     private func dictate(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
         switch what {
@@ -2954,7 +3239,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "press", "release", "letgo":
             guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
             let (agent, key) = (row.session?.agent, row.draftKey)
-            if what == "press" { dictation.press(key, agent: agent) { "Words that may come up: sandbox." } } else { dictation.release(key) }
+            if what == "press" {
+                if let fake = fakeList.first(where: { $0.id == row.hostID }), let transcript = fake.transcript {
+                    sentAtPress = (fake.id, Self.userMessages(transcript).count)
+                }
+                dictation.press(key, agent: agent) { "Words that may come up: sandbox." }
+            } else { dictation.release(key) }
             let claude = dictation.isClaude(key)
             waitFor({ [weak self] in
                 guard let dictation = self?.dictation else { return true }
@@ -3103,27 +3393,42 @@ private final class Driver: NSObject, NSApplicationDelegate {
     }
 
     /// The shown chat's last code block that has a Run (`RunButton`): what its confirmation shows, as the sheet; once
-    /// `confirmed`, run as the button runs it after you press Run there.
+    /// `confirmed`, run as the button runs it after you press Run there. Waits up to 30 s for such a block (a reply
+    /// `tell` just handed the fake lands in the chat once its transcript is read), and once run, for the chat to have
+    /// it as recorded (not on its way).
     private func runBlock(confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
         guard let chat = window?.chat, model.showsChat else { return reply(false, "no chat: show a fake session's chat first (chat)") }
-        let replies = chat.items.compactMap { item -> String? in
-            guard case .reply(let entry) = item, case .reply(let text) = entry.kind else { return nil }
-            return text
-        }
-        let runnable = replies.reversed().lazy.compactMap { text in
-            MarkdownBlocks.parse(text).reversed().lazy.compactMap { block -> RunnableCommand.Runnable? in
-                guard case .code(let language, let code) = block else { return nil }
-                return RunnableCommand.runnable(code: code, language: language)
+        func lastRunnable() -> RunnableCommand.Runnable? {
+            let replies = chat.items.compactMap { item -> String? in
+                guard case .reply(let entry) = item, case .reply(let text) = entry.kind else { return nil }
+                return text
+            }
+            return replies.reversed().lazy.compactMap { text in
+                MarkdownBlocks.parse(text).reversed().lazy.compactMap { block -> RunnableCommand.Runnable? in
+                    guard case .code(let language, let code) = block else { return nil }
+                    return RunnableCommand.runnable(code: code, language: language)
+                }.first
             }.first
-        }.first
-        guard let runnable else { return reply(false, "no code block with a Run in the chat's replies") }
+        }
+        waitFor({ lastRunnable() != nil }) { [weak self] _ in
+            guard let self else { return }
+            guard let runnable = lastRunnable() else { return reply(false, "no code block with a Run in the chat's replies") }
+            self.runBlock(runnable, in: chat, confirmed: confirmed, reply)
+        }
+    }
+
+    private func runBlock(_ runnable: RunnableCommand.Runnable, in chat: ChatModel, confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
         closeSheet()
         guard let way = chat.runner.way else { return reply(false, "no Run shown: the selected session takes no commands") }
         if confirmed {
+            let asked = runnable.needsConfirmation ? "asked first, then " : ""
             return RunButton.run(runnable, way: way, with: chat.runner, confirm: { _ in true }) { [weak self] outcome in
                 guard let self else { return }
                 switch outcome {
-                case .ran?: self.settle { reply(true, "ran it: \(runnable.typed(way))") }
+                case .ran?:
+                    self.waitFor({ chat.pending.isEmpty }) { recorded in
+                        self.settle { reply(true, "\(asked)ran it: \(runnable.typed(way))" + (recorded ? "" : " (the chat still shows it on its way)")) }
+                    }
                 case .refused(let reason)?: self.settle { reply(false, reason) }
                 case nil: reply(false, "cancelled")
                 }
@@ -3138,6 +3443,30 @@ private final class Driver: NSObject, NSApplicationDelegate {
         shown.orderFrontRegardless()
         Sandbox.hide(shown)
         settle { reply(true, "Run's confirmation shown (sheet-runblock)") }
+    }
+
+    /// `lines FILE N`: how a journey checks that a command it ran ran N times (each run appends a line to FILE, a path
+    /// under the sandbox's home). Waits up to 30 s for FILE to hold N lines (a Run's command lands after its reply: a
+    /// shell card's in a shell session of its own), then fails unless it holds exactly N: none came, or more did.
+    private func lines(_ arguments: String, _ reply: @escaping (Bool, String) -> Void) {
+        let words = arguments.split(separator: " ").map(String.init)
+        guard words.count == 2, let expected = Int(words[1]), expected >= 0 else { return reply(false, "lines FILE N") }
+        let name = words[0]
+        guard !name.hasPrefix("/"), !name.split(separator: "/").contains("..") else {
+            return reply(false, "lines FILE N: FILE is a path under the sandbox's home, e.g. projects/example-api/ran.txt")
+        }
+        let path = (home as NSString).appendingPathComponent(name)
+        func count() -> Int {
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return 0 }
+            return text.split(separator: "\n", omittingEmptySubsequences: true).count
+        }
+        waitFor({ count() >= expected }) { _ in
+            let held = count()
+            let times = held == 1 ? "once" : "\(held) times"
+            reply(held == expected, held == expected
+                ? "\(name): \(held) line\(held == 1 ? "" : "s"), as expected"
+                : "\(name) holds \(held) line\(held == 1 ? "" : "s"), not \(expected): its command \(held == 0 ? "didn't run" : "ran " + times)")
+        }
     }
 
     func closeSheet() {
@@ -3271,7 +3600,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// Draws `lift`'s window into `file`, then checks its panes. What went wrong, or nil. A file with a bad pane is still
     /// written, to be looked at.
     private func drawChecked(_ lift: LiftedGlass, label: String, to file: URL) -> String? {
-        guard let drawn = Sandbox.bitmap(of: lift.window), Sandbox.write(drawn.image, to: file) else { return "couldn't draw \(file.lastPathComponent)" }
+        // A sheet (the Run confirmation's alert among them) on its window's background, as it shows on screen.
+        guard let drawn = Sandbox.bitmap(of: lift.window, windowBackground: label.hasPrefix("sheet-")), Sandbox.write(drawn.image, to: file) else { return "couldn't draw \(file.lastPathComponent)" }
         let problems = lift.problems(view: drawn.view, image: drawn.image, sidebarHasRows: label == "main" && !store.sessions.isEmpty)
         return problems.isEmpty ? nil : "bad panes in \(file.lastPathComponent): " + problems.joined(separator: "; ")
     }
@@ -4198,5 +4528,29 @@ private struct MenuBarStrip: View {
             }
         }
         .frame(width: caption ? 360 : 300).padding(12)
+    }
+}
+
+/// A notification banner as macOS draws one (the sandbox posts none, so a shot shows its words this way).
+struct SleepNoticeBanner: View {
+    let title: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 36, height: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text("VibeSwitcher").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("now").font(.caption).foregroundStyle(.secondary)
+                }
+                Text(title).font(.headline)
+                Text(text).font(.callout).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
     }
 }

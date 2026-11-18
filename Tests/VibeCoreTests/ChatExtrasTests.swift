@@ -18,8 +18,9 @@ struct ChatExtrasTests {
         return log
     }
 
-    func assistant(_ blocks: [[String: Any]], id: String = "msg1", uuid: String = "a1", usage: [String: Any]? = nil) -> [String: Any] {
-        var message: [String: Any] = ["role": "assistant", "id": id, "model": "claude-opus-5-5", "content": blocks]
+    func assistant(_ blocks: [[String: Any]], id: String = "msg1", uuid: String = "a1", usage: [String: Any]? = nil,
+                   model: String = "claude-opus-5-5") -> [String: Any] {
+        var message: [String: Any] = ["role": "assistant", "id": id, "model": model, "content": blocks]
         if let usage { message["usage"] = usage }
         return ["type": "assistant", "uuid": uuid, "timestamp": "2026-10-16T10:00:00Z", "message": message]
     }
@@ -33,6 +34,83 @@ struct ChatExtrasTests {
         #expect(chat.usage?.contextTokens == 1100)
         #expect(chat.outputTokens == 100)
         #expect(chat.usage?.contextWindow == nil)
+    }
+
+    /// "i changed to opus but the chat view didnt update": `/model opus` answered, and the chip still read Fable 5.2
+    /// until the next reply. The command's output in the transcript switches it at once.
+    @Test func modelCommandSwitchesTheModelBeforeTheNextReply() {
+        let usage: [String: Any] = ["input_tokens": 10, "cache_read_input_tokens": 1000, "output_tokens": 50]
+        let stdout = "<local-command-stdout>Set model to `Opus 5.5` and saved as your default for new sessions</local-command-stdout>"
+        let switched = log([
+            assistant([["type": "text", "text": "a"]], uuid: "a1", usage: usage, model: "claude-fable-5-2"),
+            ["type": "user", "uuid": "u1", "timestamp": "2026-10-16T10:01:00Z", "message": ["role": "user", "content": stdout]],
+        ])
+        #expect(switched.usage?.model == "claude-opus-5-5")
+        #expect(switched.usage?.contextTokens == 1010)
+        #expect(switched.entries.count == 1)   // the command's output isn't a prompt
+    }
+
+    /// Claude Code's other ways of writing it: a system local_command line, the name in ANSI bold, an id in brackets.
+    @Test func modelCommandOutputInItsOtherShapes() {
+        let fable = assistant([["type": "text", "text": "a"]], uuid: "a1", usage: ["input_tokens": 5, "output_tokens": 1],
+                              model: "claude-fable-5-2")
+        func system(_ text: String) -> [String: Any] {
+            ["type": "system", "subtype": "local_command", "uuid": "s1", "timestamp": "2026-10-16T10:01:00Z",
+             "content": "<local-command-stdout>\(text)</local-command-stdout>"]
+        }
+        #expect(log([fable, system("Set model to \u{1B}[1mSonnet 5.5\u{1B}[22m")]).usage?.model == "claude-sonnet-5-5")
+        #expect(log([fable, system("Set model to **Haiku 5.5** (claude-haiku-5-5-20261001)")]).usage?.model == "claude-haiku-5-5-20261001")
+        #expect(log([fable, system("Set model to Opus 5.5 (1M context)")]).usage?.model == "claude-opus-5-5")
+        #expect(log([fable, ["type": "user", "uuid": "u1", "message": ["role": "user", "content": [
+            ["type": "text", "text": "<local-command-stdout>Set model to Opus 5.5</local-command-stdout>"]]]]]).usage?.model == "claude-opus-5-5")
+        // Kept, failed or other commands' output leave the model alone.
+        #expect(log([fable, system("Kept model as Fable 5.2")]).usage?.model == "claude-fable-5-2")
+        #expect(log([fable, system("Model 'foo' not found")]).usage?.model == "claude-fable-5-2")
+        // Typed by the user, it's a prompt, not a switch.
+        #expect(log([fable, ["type": "user", "uuid": "u1", "message": ["role": "user", "content": "Set model to Opus 5.5"]]]).usage?.model
+                == "claude-fable-5-2")
+    }
+
+    /// Claude Code may write the command, its output and text typed after it in one user line: the text stays a prompt.
+    /// The same words quoted in a prompt (a pasted task, a log) aren't a switch, and the prompt shows.
+    @Test func modelCommandOutputInAPromptLine() {
+        let fable = assistant([["type": "text", "text": "a"]], uuid: "a1", usage: ["input_tokens": 5, "output_tokens": 1],
+                              model: "claude-fable-5-2")
+        let combined = "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>\n"
+            + "<local-command-stdout>Set model to Opus 5.5</local-command-stdout>\nnow fix the bug"
+        let both = log([fable, ["type": "user", "uuid": "u1", "message": ["role": "user", "content": combined]]])
+        #expect(both.usage?.model == "claude-opus-5-5")
+        #expect(both.prompts == ["now fix the bug"])
+        let quoted = "The chip should follow `<local-command-stdout>Set model to `Opus 5.5` and saved as your default</local-command-stdout>`"
+        let pasted = log([fable, ["type": "user", "uuid": "u1", "message": ["role": "user", "content": quoted]]])
+        #expect(pasted.usage?.model == "claude-fable-5-2")
+        #expect(pasted.prompts.count == 1)
+        let wrapped = "<pasted_content id=\"p1\">\n<local-command-stdout>Set model to Opus 5.5</local-command-stdout>\n</pasted_content id=\"p1\">"
+        #expect(log([fable, ["type": "user", "uuid": "u1", "message": ["role": "user", "content": wrapped]]]).usage?.model == "claude-fable-5-2")
+    }
+
+    /// The next reply says which model really answered: if it differs from what /model said, it wins.
+    @Test func aLaterReplyOnAnotherModelWins() {
+        let chat = log([
+            assistant([["type": "text", "text": "a"]], uuid: "a1", usage: ["input_tokens": 5, "output_tokens": 1], model: "claude-fable-5-2"),
+            ["type": "system", "subtype": "local_command", "uuid": "s1", "timestamp": "2026-10-16T10:01:00Z",
+             "content": "<local-command-stdout>Set model to Opus 5.5 and saved as your default for new sessions</local-command-stdout>"],
+            assistant([["type": "text", "text": "b"]], id: "msg2", uuid: "a2", usage: ["input_tokens": 5, "output_tokens": 1],
+                      model: "claude-sonnet-5-5"),
+        ])
+        #expect(chat.usage?.model == "claude-sonnet-5-5")
+        // Read in two parts, the earlier part's switch doesn't replace the later reply's model either.
+        var split = ChatLog()
+        let all = lines([
+            assistant([["type": "text", "text": "a"]], uuid: "a1", usage: ["input_tokens": 5, "output_tokens": 1], model: "claude-fable-5-2"),
+            ["type": "system", "subtype": "local_command", "uuid": "s1",
+             "content": "<local-command-stdout>Set model to Opus 5.5</local-command-stdout>"],
+        ])
+        split.append(ChatReader.read(lines([assistant([["type": "text", "text": "b"]], id: "msg2", uuid: "a2",
+                                                       usage: ["input_tokens": 5, "output_tokens": 1], model: "claude-sonnet-5-5")]),
+                                     format: .claude).events)
+        split.prepend(ChatReader.read(all, format: .claude).events)
+        #expect(split.usage?.model == "claude-sonnet-5-5")
     }
 
     @Test func codexTokenCountsAndModel() {

@@ -1,7 +1,7 @@
 import Foundation
 
-/// Your own sessions apart from the workers and verifiers the project leads started: the menu bar's dots, the pill
-/// and the counts are yours (a lead included); each lead's team is listed after them, under its project.
+/// Your own sessions apart from the workers and verifiers the project leads started: the menu bar's dots and the
+/// counts are yours (a lead included); each lead's team is listed after them, under its project.
 public enum SessionTeams {
     /// One project's workers and verifiers.
     public struct Team: Equatable, Sendable {

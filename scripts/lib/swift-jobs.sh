@@ -1,6 +1,7 @@
 # Sourced by the scripts that run swift build and swift test under vs-heavy (test.sh, build-app.sh). vs-heavy gives the
-# command it runs VS_HEAVY_CORES, its slot's share of the Mac (the cores ÷ the slots, rounded up, at least 2: 4 on a
-# 12-core Mac with 3 slots; see Resources/bin/vs-heavy). Left to itself SwiftPM compiles on every core: on 2026-11-01 a
+# command it runs VS_HEAVY_CORES, its width: the cores free when it starts, at least its slot's share of the Mac (the
+# cores ÷ the slots, rounded up, at least 2: 4 on a 12-core Mac with 3 slots; see Resources/bin/vs-heavy's
+# `give_width`). Left to itself SwiftPM compiles on every core: on 2026-11-01 a
 # merge's build ran 9 swift-frontends at ~900 % CPU inside one slot, beside two other slots' jobs, at load 62–84.
 #
 # heavy_swift VERB [ARGS...]: `swift VERB --build-system native -j 2 -Xswiftc -jD ARGS...` (`swiftpm_options`) with

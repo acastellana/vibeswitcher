@@ -117,6 +117,14 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
         }
     }
 
+    func integer(forKey key: String) -> Int {
+        switch object(forKey: key) {
+        case let number as NSNumber: return number.intValue
+        case let text as String: return NSString(string: text).integerValue
+        default: return 0
+        }
+    }
+
     func dictionary(forKey key: String) -> [String: Any]? {
         object(forKey: key) as? [String: Any]
     }

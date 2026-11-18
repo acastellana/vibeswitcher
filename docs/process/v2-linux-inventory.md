@@ -564,7 +564,8 @@ role, and `start_worker` ended each worker 45 s on ("its vibeswitcher tools didn
 affected (its root is `<home>/.vibeswitcher`, and its sessions' HOME is the user's); on a scratch node the link is the
 same layout.
 
-**`aRealLeadOnSonnetAsksAndIsAnswered` (gated on `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`) has not passed: an open item.**
+**`aRealLeadOnSonnetAsksAndIsAnswered` (gated on `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`) did not pass on 2026-11-16; it
+passed on 2026-11-17 (the next section).**
 Three gated runs, Claude Code **2.1.325** (`~/.local/bin/claude`, the native build), `--model sonnet` (Sonnet 5.5 on the
 screen), the scratch node's `<root>/v2/test/claude` a script running it with the config folder; the scratch
 repository's trust entry written into the folder's `.claude.json` and taken out at the end:
@@ -599,6 +600,51 @@ The next run, after the weekly limit resets (Nov 18) and with the user's go-ahea
 spent): `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<config> bash scripts/test.sh --filter EngineEndToEndTests/aRealLead`,
 its `E9:` lines giving each step's time here.
 
+## A real lead asks and is answered, both ways (the engine's E9 Step 2, 2026-11-17, Linux 5.15.167.4-microsoft-standard-WSL2)
+
+`EngineEndToEndTests.aRealLeadOnSonnetAsksAndIsAnswered`, run as `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=~/.vibeswitcher-test-claude
+bash scripts/test.sh --filter 'EngineEndToEndTests/aRealLead'`: a `ScratchNode` holding its first look, the lead a
+real Claude Code **2.1.326** (`~/.local/bin/claude`, the native build) with `--model sonnet` (Sonnet 5.5 on the
+screen), its status hooks and the repository's trust entry written into the throwaway config folder for the run and
+taken out at its end (checked after each run: no hook, no trust entry; `settings.json.vibeswitcher-backup` is the
+installer's one-time copy). Three runs, **the last two passed**:
+
+| Step (`E9:` lines) | Run 1, 18:11 | Run 2, 18:27 | Run 3, 18:30 |
+| --- | --- | --- | --- |
+| 1, config held and accepted, base shown and accepted | 0.4 s | 0.6 s | 0.6 s |
+| 2, the lead started | 0.2 s | 0.2 s | 0.3 s |
+| 3, the lead asked; `questions` lists the card | 3.8 s | 3.8 s | 4.6 s |
+| 4, its turn ended (its Stop hook) | not waited for | 1.2 s | 0.9 s |
+| 5, `answer CARD Reader`, the code typed, to the answer in the lead | 0.0 s to answer, then never typed | 0.3 s, typed in as its prompt | 0.3 s, typed in as its prompt |
+| 6, the lead asked its second question | | 2.1 s | 1.2 s |
+| 7, `answer CARD Scanner` at once, to the answer in the lead | | 1.4 s, handed over by its Stop hook | 1.6 s, handed over by its Stop hook |
+| 8, what it said next named the answer, its turn ended | | (checked on the wrong message) | 0.9 s |
+| In all | failed after 305 s | passed, 10.3 s | passed, 11.3 s |
+
+- **Run 1 failed on the case, not the node.** The answer was given 0.1 s after the lead asked, while its turn was still
+  running (its hooks' last event PostToolUse). The engine types only into a lead between turns, so the answer waited
+  in its inbox and the lead's own Stop hook handed it over about 1.5 s later: "Stop hook says: … The user sent this while you
+  were working (through VibeSwitcher) … > Answer to your question DB5A8357 “Which name should we use for the project's
+  parser?”: Reader", and the lead went on: "The user chose Reader as the parser's name…". The case waited 5 minutes for
+  the answer as a typed prompt (`lastPrompt`), which was never due. Both are the product's ways; the case asserted one.
+- **The case now shows both, each checked by the way it went** (the lead's transcript: a prompt whose digest is the
+  one the vault records for the user's message, or a hook's added context holding that message under the user's
+  sender line, which the hook gives only a message whose seal the vault took). The idle lead (its Stop hook waited
+  for) had its answer typed in 0.3 s after `answer`, the message as it is, not prefixed; the second answer, given at
+  once, was handed over by the Stop hook of the turn that asked, the inbox's delivered record gained it, nothing was
+  typed, and the lead's next words named it ("You chose Reader for the parser and Scanner for the lexer."). Each
+  answer reached the lead once.
+- **Run 2's check of the lead's next message was satisfied too early**: the message its Stop hook reported as it handed
+  the answer over ("…whether to call the lexer Lexer or Scanner, and I'm waiting for your answer") names both options.
+  The case now reads the lead's own words after the answer in its transcript; run 3 passed with it.
+- A real transcript (2.1.326) records a hook's added context as an `attachment` of type `hook_additional_context`
+  (`hookEvent: Stop`, `content` a list of strings), as `FakeClaude`'s does, and a typed prompt as a `user` line whose
+  content is the text.
+- The hook's way with `FakeClaude`, ungated: `anAnswerBeforeTheTurnEndsIsTakenByTheLeadsHookAsTheUsers` (the answer
+  waits sealed as the user's while the turn runs, nothing typed; the Stop hook, its seals checked by the scratch
+  host's vault, hands it over under the user's sender line; the delivered record holds it; its seal is retired and it
+  is typed no more).
+
 ## A full scratch team run (the bootstrap path's step 9, the start plan's S10, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
 
 `ScratchRunTests` in `Tests/VibeNodeTests/ScratchRunTests.swift`, on a `ScratchNode` (never the user's node), everything
@@ -618,10 +664,66 @@ code prompt. Three mutants of the product fail it, each on its own assertion: th
 vault recording the approval under another commit, and `approved` ignoring the task and commit.
 
 **`aScratchTeamPlansBuildsAuditsAndMerges` (gated on `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR`, a real lead on Sonnet,
-the verifier on haiku) has not run: an open item.** The test account is at its weekly limit until Nov 18, and E9's
-Step 2 passes first. Each run needs the user's go-ahead, three at most:
-`VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=~/.vibeswitcher-test-claude vs-heavy bash scripts/test.sh --filter
-ScratchRunTests/aScratchTeamPlansBuildsAuditsAndMerges`, its `S10:` lines giving each step's time and the models here.
+the verifier on haiku) had not run on 2026-11-16** (the test account at its weekly limit, E9's Step 2 not passed).
+**It passed on 2026-11-17, on its first run** (one of the three allowed):
+`VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=~/.vibeswitcher-test-claude bash scripts/test.sh --filter
+ScratchRunTests/aScratchTeamPlansBuildsAuditsAndMerges`, 18:46, Claude Code **2.1.326** (`~/.local/bin/claude`), the
+test passing in 75.2 s. Its `S10:` lines, the time from the run's start:
+
+| At | What the run was at |
+| --- | --- |
+| 0.4 s, 0.6 s | 1, the config and the base accepted (each code typed); 2, the lead started |
+| 4.9 s | the lead's question listed ("Which greeting word should src/greeting.txt hold?") and answered with its first option, Hello |
+| 9.1 s, 11.2 s | `add-the-greeting` planned, then `add-the-farewell` (the slugs of the goal's titles, whose worktrees the case trusted beforehand) |
+| 13.2 s, 15.3 s | the greeting's worker live, then the farewell's: both at once beside the lead |
+| 21.6 s, 25.8 s | a worker's commit touching `src/` on `agent/add-the-greeting`, then on `agent/add-the-farewell` |
+| 36.3 s | both tasks in review (each worker reported done) |
+| 44.7 s | the greeting's verifier live |
+| 55.2 s | the vault holds a passing verdict at `cda96ecb` |
+| 67.9 s | the lead's approval card listed, and answered with exactly `Approve cda96ecb…` (the verdict's commit), the code typed |
+| 74.3 s | 3, `add-the-greeting` done: merged on `main`; 4, checked |
+
+- **Checked:** two `agent/*` branches each with a worker's commit; the verdict passing; the user's approval recorded
+  for the greeting at the verdict's commit, and the landed commit's `VS-Review` naming it; exactly one commit on
+  `main` with a `VS-Task` trailer (the greeting's); `check.sh` run in the merge's worktree (its marker); the question's
+  `answer` action and its message's digest in the vault; every command line call in scratch form.
+- **Models, from each role's own transcript in the config folder:** both workers on `claude-sonnet-5-5`, the verifier
+  on `claude-haiku-5-5`; the landed commit's `VS-Verifier-Model` says haiku and its `VS-Worker-Model` "unknown" (the
+  node's receipts read its scratch home, not the config folder, as the case's review noted).
+- **The cost seen** (each session's own `cost-state` in its transcript, what Claude Code counts at list prices; the
+  account is a subscription): the lead $0.20, the greeting's worker $0.20, the farewell's $0.15, the verifier $0.007:
+  $0.56 in all. The lead's status line read "weekly 29%" just before the run (E9's last).
+- **Nothing failed, in the product or in the harness.** No file of the config folder was left changed (no hook, no
+  trust entry), and no process of the run was left.
+- **What the harness gained before the run** (from E9's Step 2, and for a run that stops): each change of the board's
+  tasks, the live sessions, the branches with a worker's commit and the vault's verdict is printed with its time (the
+  table above); the run stops early, printing every session's screen, the board, the open cards and the node's log,
+  when a session's screen shows the account's usage limit or nothing at all has moved for 12 minutes (the board, git's
+  branches, the cards, each session's hooks' last event), instead of waiting out its 55 minutes; the greeting's task is
+  found by its slug or, failing that, its title; the workers' commits are noted as the run goes (a `cleanup` would take
+  a merged task's branch away), the second worker's waited for. The answers go as E9's Step 2 showed: one given while
+  the lead's turn runs reaches it through its own hook, one given to an idle lead is typed in; the case takes either.
+
+**The rehearsal on a machine with one test and build slot (2026-11-17).** The `v2 linux` run on `200e2c32` (its core
+job, a 4-core runner) failed `aScratchTeamOfFakesBuildsAuditsAndMerges` after 386 s: the fake lead's `merge` call
+answered "TimeoutError: no reply to request 2", so nothing had landed (no `VS-Task` trailer, no `src/parser.txt` on
+`main`). The timeout that fired is the test's own (the fake's MCP client, 300 s for that call); the merge wasn't slow,
+it was waiting. Its tests run under a slot of the account's test and build lock (`/tmp/vibeswitcher-<uid>`, `TestLock`);
+`scripts/test.sh` runs the whole suite under `vs-heavy`, holding one; a machine under 12 cores has one slot
+(`MacLimits.defaultHeavySlots`, the cores ÷ 6); and the scratch node's lead has none of the suite's environment
+(`VIBESWITCHER_TEST_LOCK`, by which `vs-heavy` knows it runs under its own holder). So the merge queued behind the
+suite that started it, until its call gave up. Here (24 cores, 4 slots) it took the next slot, and passed. Reproduced
+with one slot forced (`VIBESWITCHER_HEAVY_SLOTS=1` on the run and `heavy_slots: 1` in the scratch workflow): the same
+three issues, and while the merge waited the account's lock folder held its ticket ("VibeSwitcher's merge test of
+c92b15b8 in …/vsn-CC48ED34/repo … slots 1") behind slot 1's holder, "scripts/test.sh in …/step8".
+**Fixed in the engine:** a scratch node's lead gets `VIBESWITCHER_TEST_LOCK_DIR=<root>/tmp` (`LeadEngine.environment`),
+where its sessions' temporary folders are, as the user's node keeps both in `vibeswitcher-<uid>`, and as the bootstrap
+path's step 9 says of a scratch host ("its own `VIBESWITCHER_HOME` and lock"): its merges and audits neither wait on
+the account's slots nor show among them. With it the forced-single-slot run passes in 53 s.
+`LeadStartTests.theLeadsTestAndBuildSlotsAreUnderTheScratchRoot` and the rehearsal's check of the node's own slot file
+(`<root>/tmp/test-build.lock`) each fail without it. Left as it is: a scratch node's workers get the host's session
+variables only, so a `vs-heavy` a real worker runs there still takes the account's slots, and the server's witness
+reads the workers' waits from the account's lock.
 
 ## The config seal's Linux list (the start plan's S7, 2026-11-16, Linux 5.15.167.4-microsoft-standard-WSL2)
 

@@ -127,6 +127,38 @@ import Testing
         }
     }
 
+    /// After a restart (no host running), the card's reopen of a lead: a lead start like any other (the host started, a
+    /// fresh grant bound to the new session), carrying on its conversation, its one message the restart notice naming
+    /// the task that had a worker running.
+    @Test func aReopenedLeadCarriesOnItsConversationAndIsToldOnceOfTheRestart() async throws {
+        let world = try world { "exec '\($0)' \"$@\"" }
+        defer { world.stop() }
+        try BoardStore(root: world.root).update { board in
+            var task = LeadTask(slug: "fix-login", title: "Fix the login", contract: LeadContract(goal: "", acceptance: [], boundaries: [], context: ""),
+                                status: .running)
+            task.worker = UUID().uuidString
+            board.tasks.append(task)
+        }
+        #expect(world.client.state == .notRunning)
+        world.controller.reopenLead(root: world.root, conversation: "conv-lead-1")
+        #expect(await until { world.vault.current(.lead, root: world.root, task: nil)?.session != nil || !world.alerts.list.isEmpty })
+        #expect(world.alerts.list.isEmpty, "\(world.alerts.list)")
+        let id = try #require(world.vault.current(.lead, root: world.root, task: nil)?.session.flatMap(UUID.init(uuidString:)))
+        let session = try #require(world.client.sessions.first { $0.id == id })
+        #expect(session.label.hasPrefix("Lead · ") && session.cwd == world.root)
+        let command = try #require(session.command)
+        let notice = RestartReopen.leadNotice(board: BoardStore(root: world.root).load())
+        #expect(notice.contains("fix-login (Fix the login)"))
+        // Its conversation, then its one message: the notice, not a fresh lead's start.
+        #expect(command.hasSuffix(" --resume 'conv-lead-1' -- " + RecentProjects.shellQuote(notice)), "\(command)")
+        #expect(command.components(separatedBy: " -- ").count == 2)
+        #expect(command.contains("--mcp-config ") && command.contains("--settings "))
+        if world.client.sessions.first(where: { $0.id == id })?.isLive == true {
+            world.client.kill(id)
+            #expect(await until { world.client.sessions.first { $0.id == id }?.isLive != true })
+        }
+    }
+
     @Test func aHostThatDoesntStartSaysSoNotConnectionRefused() async throws {
         let world = try world { _ in "exit 1" }
         defer { world.stop() }

@@ -65,7 +65,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         choose: { [weak self] menu, index, typing in self?.sync.choose(index, typing: typing, drawn: menu) },
         moveTab: { [weak self] tab in self?.sync.moveTab(to: tab) },
         showTerminal: { [weak self] in self?.model.showsChat = false },
-        dismissMenu: { [weak self] in self?.sync.cancel() }, wallet: wallet, shells: shells)
+        dismissMenu: { [weak self] in self?.sync.cancel() }, wallet: wallet, shells: shells, promptAudit: promptAudit)
         .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) }
         .environment(\.dictation, dictation))
     }
@@ -127,13 +127,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let wallet: WalletDesk?
     /// The shells agents asked for, as cards in their chats (none in the benches).
     private let shells: ShellDesk?
+    /// The reminders to run /doctor prompt-audit, as a card in each lead's chat (none in the benches).
+    private let promptAudit: PromptAuditDesk?
     /// Boost mode as decided, for the toolbar's mark (none in the benches).
     private let boost: BoostWatch?
 
     init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions, leads: LeadController,
          briefing: BriefingModel? = nil, dictation: DictationController? = nil, wallet: WalletDesk? = nil,
-         boost: BoostWatch? = nil, shells: ShellDesk? = nil) {
+         boost: BoostWatch? = nil, shells: ShellDesk? = nil, promptAudit: PromptAuditDesk? = nil) {
         self.wallet = wallet
+        self.promptAudit = promptAudit
         self.shells = shells
         self.boost = boost
         self.leads = leads

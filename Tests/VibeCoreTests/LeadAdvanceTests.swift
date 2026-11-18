@@ -1036,6 +1036,99 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(!FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "add-b")))
     }
 
+    /// add-b merged, its worktree gone from git, and a plain folder left at its path holding `files` (name: text): what
+    /// Finder or a stray write leaves behind. Its path.
+    func leftover(_ root: String, _ files: [String: String]) throws -> String {
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        #expect(Git.run(["worktree", "remove", "--force", worktree], in: root).ok)
+        try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
+        for (name, text) in files { try text.write(toFile: worktree + "/" + name, atomically: true, encoding: .utf8) }
+        #expect(!Git.run(["worktree", "list", "--porcelain"], in: root).output.contains(worktree))
+        return worktree
+    }
+
+    /// 2026-11-12 on: "Didn't cleanup|an-animated-explainer: fatal: '…' is not a working tree" after every launch, for a
+    /// done task whose folder held only Finder's .DS_Store. Such a folder goes with the cleanup.
+    @Test func autoCleanupRemovesALeftoverFolderHoldingOnlyDSStore() async throws {
+        let (root, runtime, lead) = try mergedByHand()
+        let worktree = try leftover(root, [".DS_Store": "finder"])
+        #expect(!lead.call("update_task", ["task": "add-b", "auto_advance": true]).isError)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        await advancing.settle()
+        // A refusal reads "Didn't cleanup add-b: …", any other error "Didn't cleanup|add-b: fatal: … is not a working tree".
+        let failed = { reports(runtime).contains { $0.contains("Didn't cleanup add-b") || $0.contains("Didn't cleanup|add-b") } }
+        #expect(await advancing.until { reports(runtime).contains { $0.contains("Cleaned up add-b") } || failed() })
+        #expect(!failed(), "\(reports(runtime))")
+        #expect(!FileManager.default.fileExists(atPath: worktree))
+        #expect(Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+        #expect(task("add-b", root)?.worktree == nil)
+    }
+
+    /// A stray folder holding anything besides .DS_Store stays, with its branch: named once, and not tried again by
+    /// auto_advance on later passes or after a restart (a new loop, its told-once memory empty). Once the user empties
+    /// it (Finder's .DS_Store left behind), auto_advance cleans it up: the mark holds only while it's still kept.
+    @Test func autoCleanupReportsAStrayFolderWithFilesOnceAcrossRestarts() async throws {
+        let (root, runtime, lead) = try mergedByHand()
+        let worktree = try leftover(root, [".DS_Store": "finder", "notes.txt": "the user's\n"])
+        #expect(!lead.call("update_task", ["task": "add-b", "auto_advance": true]).isError)
+        let told = { reports(runtime).filter { $0.contains("Didn't cleanup add-b") || $0.contains("Didn't cleanup|add-b") } }
+        let advancing = Advancing(lead)
+        await advancing.settle()
+        #expect(await advancing.until { !told().isEmpty })
+        await advancing.settle()
+        await advancing.settle()
+        advancing.stop()
+        #expect(told().count == 1 && told()[0].contains("notes.txt") && told()[0].contains("isn't a git worktree"), "\(told())")
+        #expect(task("add-b", root)?.strayKept?.contains("notes.txt") == true)
+        let restarted = Advancing(lead)
+        defer { restarted.stop() }
+        await restarted.settle()
+        await restarted.settle()
+        #expect(told().count == 1, "\(told())")
+        #expect((try? String(contentsOfFile: worktree + "/notes.txt", encoding: .utf8)) == "the user's\n")
+        #expect(FileManager.default.fileExists(atPath: worktree + "/.DS_Store"))
+        #expect(!Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+        #expect(task("add-b", root)?.worktree != nil)
+        try FileManager.default.removeItem(atPath: worktree + "/notes.txt")
+        await restarted.settle()
+        #expect(await restarted.until { reports(runtime).contains { $0.contains("Cleaned up add-b") } }, "\(reports(runtime))")
+        #expect(!FileManager.default.fileExists(atPath: worktree))
+        #expect(task("add-b", root)?.strayKept == nil)
+    }
+
+    /// An empty stray folder goes with the cleanup the lead calls, as a .DS_Store-only one does.
+    @Test func cleanupRemovesAnEmptyStrayFolder() throws {
+        let (root, _, lead) = try mergedByHand()
+        let worktree = try leftover(root, [:])
+        let cleaned = lead.call("cleanup", ["task": "add-b"])
+        #expect(!cleaned.isError, "\(cleaned.text)")
+        #expect(!FileManager.default.fileExists(atPath: worktree))
+        #expect(Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+        #expect(task("add-b", root)?.worktree == nil && task("add-b", root)?.strayKept == nil)
+    }
+
+    /// A symlink at the worktree path is never followed or removed through, force or not: what it leads to (a folder
+    /// with a build folder, say) stays whole, and the symlink is named.
+    @Test func cleanupNeverFollowsASymlinkAtTheWorktreePath() throws {
+        let (root, _, lead) = try mergedByHand()
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        #expect(Git.run(["worktree", "remove", "--force", worktree], in: root).ok)
+        let target = temp.url("elsewhere").path
+        try FileManager.default.createDirectory(atPath: target + "/.build", withIntermediateDirectories: true)
+        try "kept\n".write(toFile: target + "/.build/out", atomically: true, encoding: .utf8)
+        try ".".write(toFile: target + "/.DS_Store", atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(atPath: worktree, withDestinationPath: target)
+        for force in [false, true] {
+            let refused = lead.call("cleanup", ["task": "add-b", "force": force])
+            #expect(refused.isError && refused.text.contains("is a symlink"), "\(refused.text)")
+        }
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: worktree)) == target)
+        #expect(FileManager.default.fileExists(atPath: target + "/.build/out") && FileManager.default.fileExists(atPath: target + "/.DS_Store"))
+        #expect(!Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
+        #expect(task("add-b", root)?.strayKept?.contains("symlink") == true)
+    }
+
     /// Tasks add-b and add-c reported done, add-b's merge held in its tests until `release` (the first test run waits
     /// for it, as a long suite would), and `meanwhile` done while it waits.
     func duringAMerge(_ meanwhile: (LeadToolset) -> Void) async throws -> (root: String, runtime: FakeRuntime, advancing: Advancing) {
@@ -1354,6 +1447,45 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(holds().count == 3, "\(holds())")
     }
 
+    /// The speed review (2026-11-12) couldn't tell how long battery holds lasted: only their start was logged. The
+    /// hold's progress line says how many tasks it pauses and since when, and its end is logged with how long it lasted.
+    @Test func aBatteryHoldSaysWhatItPausesAndItsEndIsLogged() async throws {
+        let (root, runtime, lead) = try team()
+        var low = PowerState(onBattery: true, percent: 20)
+        low.heldUnder = 50
+        let power = Locked<PowerState?>(low)
+        lead.power = { power.get() }
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Waits", "goal": "g", "acceptance": ["a"]])
+        func said(_ prefix: String) -> [String] { reports(runtime).filter { $0.contains(prefix) } }
+        #expect(await advancing.until { said("Held: on battery").count == 1 })
+        let progress = { (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)) ?? "" }
+        #expect(progress().contains("Held: on battery under your 50 % limit, so nothing starts, audits or merges by itself until AC power returns: "), "\(progress())")
+        #expect(progress().range(of: #"\d+ tasks? paused since \d\d:\d\d \(\d+ planned, 0 in review\)"#, options: .regularExpression) != nil
+                || progress().contains("no task paused yet, since"), "\(progress())")
+        // AC power back: the end is logged, once, with how long it lasted; the task starts.
+        power.set(PowerState(onBattery: false, percent: 60, charging: true))
+        LeadAdvance.nudge(root: root)
+        #expect(await advancing.until { task("waits", root)?.status == .running })
+        #expect(progress().range(of: #"Released: on AC power, after \d+ min\."#, options: .regularExpression) != nil, "\(progress())")
+        await advancing.settle()
+        #expect(progress().components(separatedBy: "Released:").count == 2, "\(progress())")
+    }
+
+    /// Status says what the Mac's sleep paused of this project's work, from the app's ledger.
+    @Test func statusSaysWhatSleepPaused() throws {
+        let (root, _, lead) = try team()
+        var cost = SleepCost()
+        let now = Date().timeIntervalSince1970
+        cost.record(MacSleepLog.Wake(from: now - 7200, to: now - 3600, slept: 3600), inFlight: [root: ["a", "b"], "/elsewhere": ["c"]])
+        lead.sleepCost = { cost }
+        let status = lead.call("status", [:]).text
+        // Today's or yesterday's, or both (run between 01:00 and 02:00 the sleep is shared between them): the week has it whole.
+        #expect(status.contains("Sleep paused in-flight work (running or in review), by the Mac's awake clock: today "), "\(status)")
+        #expect(status.contains("7 days 2.0 task-hours"), "\(status)")
+    }
+
     // MARK: two at once, and restarts
 
     @Test func twoWorkersReportingAtOnceMergeOneAfterTheOtherNeverAtOnce() async throws {
@@ -1593,5 +1725,66 @@ struct LeadAdvanceTests: LeadTeamFixture {
     final class NoTools: MCPToolset {
         var tools: [MCPToolInfo] { [] }
         func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult { MCPToolResult(text: "none", isError: true) }
+    }
+}
+
+/// auto_advance and a team task's parts (T7): a member's part_done moves nothing but its notice to the integrator, and
+/// the starts count the live members as start_worker does.
+extension LeadAdvanceTests {
+    /// A team task `build-it` of core (the integrator), ui and docs, auto_advance on for it, split and its three workers
+    /// running, before the loop starts.
+    func splitTeam(_ root: String, _ runtime: FakeRuntime, _ lead: LeadToolset) throws {
+        let parts: [[String: Any]] = [["name": "core", "part": "the types"], ["name": "ui", "part": "the views"], ["name": "docs", "part": "the guide"]]
+        #expect(!lead.call("add_task", ["title": "Build it", "goal": "g", "acceptance": ["a"], "team": parts, "auto_advance": false]).isError)
+        #expect(!lead.call("start_worker", ["task": "build-it"]).isError)
+        #expect(!lead.call("update_task", ["task": "build-it", "auto_advance": true]).isError)
+        try commit("api.swift", "protocol API {}\n", in: Worktrees.path(root: root, slug: "build-it"))
+        let split = try seat("worker-build-it", runtime).call("split", [:])
+        #expect(!split.isError, "\(split.text)")
+        let members = lead.call("start_worker", ["task": "build-it"])
+        #expect(!members.isError, "\(members.text)")
+        #expect(runtime.spawned.count == 3)
+    }
+
+    @Test func aMembersPartDoneMovesNothingButItsNoticeToTheIntegrator() async throws {
+        let (root, runtime, lead) = try team(test: nil, ["max_workers": 6])
+        try splitTeam(root, runtime, lead)
+        let integrator = try #require(task("build-it", root)?.worker)
+        let main = head("refs/heads/main", root)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        try commit("ui.swift", "struct UI {}\n", in: Worktrees.path(root: root, slug: "build-it--ui"))
+        let ui = try seat("worker-build-it--ui", runtime)
+        let reported = ui.call("report", ["status": "part_done", "changed": "ui.swift", "caveats": "none", "verify": "swift test --filter UITests"])
+        #expect(!reported.isError, "\(reported.text)")
+        let notices = { runtime.calls.withLock { runtime.steered.filter { $0.target == integrator && $0.text.contains("reports its part done") }.count } }
+        #expect(await advancing.until { notices() == 1 })
+        await advancing.settle()
+        await advancing.settle()
+        #expect(notices() == 1)
+        // Nothing else moved: no audit, no merge, no session started, nothing recorded as done.
+        #expect(task("build-it", root)?.status == .running && task("build-it", root)?.verifier == nil && task("build-it", root)?.report == nil)
+        #expect(runtime.calls.withLock { runtime.spawned.count } == 3)
+        #expect((try? vault.unaudited(root: root, task: "build-it"))?.reported == nil)
+        #expect(!reports(runtime).contains { $0.contains("build-it") })
+        #expect(head("refs/heads/main", root) == main)
+    }
+
+    @Test func theStartsCountLiveTeamMembersAsStartWorkerDoes() async throws {
+        let (root, runtime, lead) = try team(test: nil, ["max_workers": 3])
+        try splitTeam(root, runtime, lead)
+        // Three workers run (the integrator and two members): max_workers is reached, so a planned task waits, quietly.
+        #expect(!lead.call("add_task", ["title": "Other", "goal": "g", "acceptance": ["a"]]).isError)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        await advancing.settle()
+        await advancing.settle()
+        #expect(task("other", root)?.status == .planned)
+        #expect(!reports(runtime).contains { $0.contains("Didn't start other") }, "\(reports(runtime))")
+        #expect(!progress(root).contains("Didn't start other"))
+        // A member's worker ends: there's room, and it starts.
+        runtime.calls.withLock { runtime.killed.append(runtime.spawned[2].id) }
+        await advancing.settle()
+        #expect(await advancing.until { task("other", root)?.status == .running })
     }
 }

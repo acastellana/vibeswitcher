@@ -32,6 +32,9 @@ public final class NodeServer: @unchecked Sendable {
     private var watched: (device: UInt64, inode: UInt64)?
     private var ticks: Subscription?
     private var connections: [ObjectIdentifier: Connection] = [:]
+    /// The live protocol's hub (`NodeLive`, the live plan's I1): `subscribe` and `unsubscribe` on this socket are its, for
+    /// any peer of the uid (LW-D8), and their events come between replies on the same lines. None: both are refused.
+    public var hub: LiveHub?
 
     /// `root`: the node's root (`<root>/v2/server.sock`). `housekeeping`: seconds between checks of the path (and asks
     /// of the host's notes), on `clock` (none: only on the folder's changes). `note`: the server's log.
@@ -182,6 +185,13 @@ public final class NodeServer: @unchecked Sendable {
             if request.must == true { bye("a request this server must understand and doesn't (\(request.kind))", connection) }
             return
         }
+        if request.kind == "subscribe" || request.kind == "unsubscribe" {
+            guard let hub else {
+                return send(NodeWire.line(NodeWire.Reply(re: request.id, error: .init(.unknownKind, "this server has no live hub"))), on: connection)
+            }
+            _ = hub.handle(request, on: connection.transport(of: self), rights: .read)
+            return
+        }
         let facts = PeerFacts.read(pid: sender.pid, token: sender)
         // `Requests` answers on `queue`.
         requests.handle(request, from: facts) { [weak self, weak connection] reply in
@@ -195,9 +205,9 @@ public final class NodeServer: @unchecked Sendable {
 
     // MARK: Writing
 
-    private func bye(_ reason: String, _ connection: Connection) {
+    private func bye(_ reason: String, code: String? = nil, _ connection: Connection) {
         guard !connection.closing else { return }
-        send(NodeWire.line(NodeWire.Bye(reason: reason)), on: connection)
+        send(NodeWire.line(NodeWire.Bye(reason: reason, code: code)), on: connection)
         connection.closing = true
         connection.reading?.cancel()
         connection.reading = nil
@@ -236,7 +246,8 @@ public final class NodeServer: @unchecked Sendable {
         }
         connection.writing?.cancel()
         connection.writing = nil
-        if connection.closing { close(connection) }
+        if connection.closing { return close(connection) }
+        connection.lineTransport?.drained()
     }
 
     /// The connection closed: its sources cancelled, and its socket closed once the last of them has ended (a
@@ -252,7 +263,15 @@ public final class NodeServer: @unchecked Sendable {
         connection.writing = nil
         connection.closeWhenUnwatched()
         connections[ObjectIdentifier(connection)] = nil
+        if let transport = connection.lineTransport { hub?.closed(transport) }
     }
+
+    /// The hub's events and replies on `connection`'s lines, and how many bytes wait there. On `queue`.
+    fileprivate func sendMessage(_ message: Data, on connection: Connection) {
+        send(message + Data([UInt8(ascii: "\n")]), on: connection)
+    }
+
+    fileprivate func byeFromHub(code: String, reason: String, on connection: Connection) { bye(reason, code: code, connection) }
 
     /// One client: its socket, the process accepted (`SO_PEERCRED`), what it sent so far and what waits to go out.
     final class Connection {
@@ -268,6 +287,15 @@ public final class NodeServer: @unchecked Sendable {
         /// The sources on `fd` not yet ended (their cancel handlers, on the queue, count them down).
         var sources = 0
         private var descriptorClosed = false
+        /// The connection as the hub's transport, made on its first `subscribe`.
+        fileprivate var lineTransport: LineTransport?
+
+        fileprivate func transport(of server: NodeServer) -> LineTransport {
+            if let made = lineTransport { return made }
+            let made = LineTransport(server: server, connection: self)
+            lineTransport = made
+            return made
+        }
 
         init(fd: Int32, token: Platform.PeerToken) {
             self.fd = fd
@@ -284,5 +312,47 @@ public final class NodeServer: @unchecked Sendable {
             descriptorClosed = true
             Sys.close(fd)
         }
+    }
+}
+
+/// A Unix socket's connection as the hub writes to it (LW-D8): each message a line, after the replies before it. It
+/// stops being `writable` from `busyBytes` waiting to be written, and `onWritable` follows once they all are. On the
+/// server's queue, as the hub is.
+fileprivate final class LineTransport: LiveTransport, @unchecked Sendable {
+    /// The bytes waiting from which the hub holds a connection's events (and folds them) until it drains.
+    static let busyBytes = 1 << 20
+
+    private weak var server: NodeServer?
+    private weak var connection: NodeServer.Connection?
+    private var owed = false
+    var onWritable: (() -> Void)?
+
+    init(server: NodeServer, connection: NodeServer.Connection) {
+        self.server = server
+        self.connection = connection
+    }
+
+    func send(_ message: Data) {
+        guard let server, let connection else { return }
+        server.sendMessage(message, on: connection)
+    }
+
+    var writable: Bool {
+        guard let connection, !connection.closed else { return false }
+        guard connection.pending.count >= Self.busyBytes else { return true }
+        owed = true
+        return false
+    }
+
+    /// Everything waiting was written.
+    func drained() {
+        guard owed else { return }
+        owed = false
+        onWritable?()
+    }
+
+    func close(code: String, reason: String) {
+        guard let server, let connection else { return }
+        server.byeFromHub(code: code, reason: reason, on: connection)
     }
 }

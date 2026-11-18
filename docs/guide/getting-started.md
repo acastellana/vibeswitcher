@@ -104,7 +104,7 @@ detail.
 | General | Open at login, open the window at launch, **Show Welcome…**, the projects folder. |
 | Notifications | Banners, the sound and reminders. |
 | Appearance | The terminal's font, theme and colours, cursor, scrollback, Option as Meta, bell. |
-| Sessions & Sidebar | The menu bar's order, the floating dots panel, sidebar mode, minimizing on pause. |
+| Sessions & Sidebar | The menu bar's order, sidebar mode, minimizing on pause. |
 | Launch Presets | Each preset's command, flags, environment, and whether it runs in the window or in Terminal. |
 | Agents | Whether agents may open shells without asking, the hooks, Codex's trust of them. |
 | Project lead | AI summaries, a fresh lead session when one has grown long, messages between leads, your working policy, the review rules floor. |

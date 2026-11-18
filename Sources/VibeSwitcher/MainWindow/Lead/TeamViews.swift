@@ -43,10 +43,15 @@ struct TeamRowView: View, Equatable {
     let open: (String) -> Void
     /// Opens another task's row (its id): a folded task's link.
     var openTask: (String) -> Void = { _ in }
+    /// A team task's members, a line each under its title (`TeamMemberLine`); none for a plain task.
+    var members: [TeamMemberLine] = []
+    /// A team task's wall as its details show it; nil for a plain task.
+    var wall: [LeadWall.Post]? = nil
     let toggle: () -> Void
 
     static func == (a: TeamRowView, b: TeamRowView) -> Bool {
         a.row == b.row && a.summary == b.summary && a.isOpen == b.isOpen && a.row.stateText(now: a.now) == b.row.stateText(now: b.now)
+            && a.members == b.members && a.wall == b.wall
             // Its links and actions to the worker's and the verifier's sessions, there while they're listed.
             && a.row.task.worker.map(a.canOpen) == b.row.task.worker.map(b.canOpen)
             && a.row.task.verifier.map(a.canOpen) == b.row.task.verifier.map(b.canOpen)
@@ -55,8 +60,11 @@ struct TeamRowView: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             header
+            if !members.isEmpty {
+                TeamMemberLines(lines: members).padding(.leading, 18)
+            }
             if isOpen {
-                TeamRowDetails(row: row, canOpen: canOpen, open: open).padding(.leading, 18).padding(.bottom, 4)
+                TeamRowDetails(row: row, canOpen: canOpen, open: open, wall: wall).padding(.leading, 18).padding(.bottom, 4)
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
@@ -107,6 +115,8 @@ struct TeamRowDetails: View {
     let row: TeamRow
     let canOpen: (String) -> Bool
     let open: (String) -> Void
+    /// A team task's wall (`TeamWallSection`); nil for a plain task, which has none.
+    var wall: [LeadWall.Post]? = nil
 
     var body: some View {
         let task = row.task
@@ -123,6 +133,9 @@ struct TeamRowDetails: View {
                         }
                     }
                 }
+            }
+            if let wall {
+                part("Wall") { TeamWallSection(posts: wall) }
             }
             if let report = task.report, !report.isEmpty {
                 part("Worker report") { Text(report).font(.system(size: 11.5)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
@@ -242,6 +255,8 @@ struct TeamTaskList: View {
     let summary: (TeamRow) -> String?
     let canOpen: (String) -> Bool
     let open: (String) -> Void
+    /// The team tasks' walls, by task slug (`TeamWallReads`).
+    var walls: [String: [LeadWall.Post]] = [:]
     @State var openRows: Set<String> = []
     @State var showFinished = false
     /// The rows as last drawn, for `reveal`: a row equal to the one before keeps its first closure (`TeamRowView` is
@@ -298,13 +313,23 @@ struct TeamTaskList: View {
                         }
                     }
                 }
+                // The sandbox's `team wall` opens its team task's row (its id) to photograph the wall.
+                .onReceive(NotificationCenter.default.publisher(for: Self.revealRow)) { [shown] note in
+                    if let id = note.object as? String { reveal(id, in: shown.rows, proxy) }
+                }
             }
         }
     }
 
+    /// Posted with a task's id, opens its row and scrolls to it (the sandbox's `team wall`).
+    static let revealRow = Notification.Name("VibeSwitcher.TeamTaskList.revealRow")
+
     private func line(_ row: TeamRow, _ proxy: ScrollViewProxy, unexposed: Set<String>) -> some View {
-        TeamRowView(row: row, now: now, summary: summary(row), isOpen: openRows.contains(row.id), canOpen: canOpen, open: open,
-                    openTask: { [shown] in reveal($0, in: shown.rows, proxy) }) {
+        let team = row.task.isTeam
+        let wall = team ? walls[row.task.slug] ?? [] : nil
+        return TeamRowView(row: row, now: now, summary: summary(row), isOpen: openRows.contains(row.id), canOpen: canOpen, open: open,
+                    openTask: { [shown] in reveal($0, in: shown.rows, proxy) },
+                    members: team && row.group != .finished ? TeamMemberLine.lines(row.task, now: now.timeIntervalSince1970) : [], wall: wall) {
             if openRows.contains(row.id) { openRows.remove(row.id) } else { openRows.insert(row.id) }
         }
         .equatable()
@@ -602,6 +627,9 @@ struct LeadTeamPane: View, Equatable {
     /// and counting took seconds of the main thread on a loaded Mac (hang-20261028-175702).
     @State private var mac: MacLine?
     @State var macReads = MacReads()
+    /// The team tasks' walls, read off the main thread with each tick (`TeamWallReads`).
+    @State private var walls: [String: [LeadWall.Post]] = [:]
+    @State var wallReads = TeamWallReads()
 
     static func == (a: LeadTeamPane, b: LeadTeamPane) -> Bool {
         a.root == b.root && a.board.isSame(as: b.board) && a.decisions == b.decisions && a.seen == b.seen && a.rows == b.rows
@@ -649,7 +677,7 @@ struct LeadTeamPane: View, Equatable {
     var body: some View {
         LeadTeamView(root: root, board: board, seen: seen, open: open, answer: answer, notices: notices, decisions: decisions,
                      summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) }, keepingAwake: keepAwake.held.contains(root),
-                     mac: mac, rows: teamRows, recordsDir: recordsDir, mail: mail, linesVersion: summaries.version)
+                     mac: mac, rows: teamRows, recordsDir: recordsDir, mail: mail, linesVersion: summaries.version, walls: walls)
             .onAppear(perform: request)
             .onChange(of: tick) { request() }
             .onChange(of: hosted) { macReads.make(hosted, reread: false) { mac = $0 } }
@@ -664,6 +692,11 @@ struct LeadTeamPane: View, Equatable {
 
     private func request() {
         macReads.make(hosted, reread: true) { mac = $0 }
+        if board.tasks.contains(where: \.isTeam) {
+            wallReads.make(root: root, board: board) { if walls != $0 { walls = $0 } }
+        } else if !walls.isEmpty {
+            walls = [:]
+        }
         let recent = DecisionFeed.split(decisions, now: Date().timeIntervalSince1970, reduceMotion: reduceMotion).recent.map(\.decision)
         summaries.request(rows: teamRows, decisions: recent)
     }

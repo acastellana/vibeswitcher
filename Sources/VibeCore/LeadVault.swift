@@ -219,6 +219,13 @@ public struct LeadVault: Sendable {
         case reportDone(root: String, task: String, commit: String?, evidence: LeadDoneEvidence? = nil)
         /// The task's review level and the commit its worker last reported done on (`Reply.unaudited`).
         case unaudited(root: String, task: String)
+        /// What small_task_min judges a task by, as the vault keeps it (`Reply.smallTask`; see `LeadVault.SmallTaskFacts`).
+        case smallTaskFacts(root: String, task: String)
+        /// The repository's lead only: notes on a task small_task_min judges it by (`LeadVault.SmallTaskNote`).
+        case noteSmallTask(root: String, task: String, note: SmallTaskNote)
+        /// The app only: the sessions its witness sees at work now (`at`, its clock); each worker's task counts the time
+        /// since it was last seen so.
+        case noteWorking(root: String, sessions: [String], at: Double)
         /// The session the calling process runs in, as the host tells from that process (`Reply.session`): the one a
         /// wallet request it files names. Refused outside every session.
         case walletSession
@@ -254,6 +261,8 @@ public struct LeadVault: Sendable {
         case session(String)
         /// A push request (`Request.pushRequest`, `settlePush`), or none.
         case push(LeadPush.Request?)
+        /// `Request.smallTaskFacts`: none while nothing is kept for the task.
+        case smallTask(SmallTaskFacts?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -574,6 +583,8 @@ extension LeadVault {
             /// began. Each counts as running at every look until it ends, or for `maxOpenRun` (a host that went away
             /// mid-run never ends it).
             var openRuns: [String: Double]?
+            /// What small_task_min judges each task by, by task (optional: older vaults have none; see `SmallTaskFacts`).
+            var smallTasks: [String: SmallTaskFacts]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -676,6 +687,10 @@ extension LeadVault {
         private func isHeld(root: String) -> Bool {
             state.holdsFirstLook == true && state.firstLookAccepted?.contains(LeadVault.key(root)) != true
         }
+
+        /// The lead's private folder the team tasks' walls are in (`LeadWall`), which a teammate's post is sealed from:
+        /// nil, the Mac's (`LeadVault.standard`'s); a test's scratch one.
+        public var wallFolder: URL?
 
         /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
         /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read.
@@ -894,6 +909,14 @@ extension LeadVault {
                     team.remove { other in
                         other.role == role && other.task == member.task
                             && (finder == nil || other.finder?.panel != finder?.panel || other.finder?.index == finder?.index)
+                    }
+                    // When its first worker was started, on the host's clock: small_task_min's bound on its work.
+                    if role == .worker, let task, team.smallTasks?[task]?.startedAt == nil {
+                        var all = team.smallTasks ?? [:]
+                        var facts = all[task] ?? SmallTaskFacts()
+                        facts.startedAt = member.issuedAt
+                        all[task] = facts
+                        team.smallTasks = all
                     }
                     if role == .verifier, let task {
                         team.verdicts[task] = nil
@@ -1173,6 +1196,37 @@ extension LeadVault {
                     var kept = team.evidence ?? [:]
                     kept[task] = commit == nil ? nil : evidence
                     team.evidence = kept
+                    // When it said done, on the host's clock: with `startedAt`, small_task_min's bound on its work.
+                    if commit != nil, team.smallTasks?[task] != nil { team.smallTasks?[task]?.reportedAt = Date().timeIntervalSince1970 }
+                }
+                return .ok
+            case .smallTaskFacts(let root, let task):
+                return .smallTask(team(root)?.smallTasks?[task])
+            case .noteSmallTask(let root, let task, let note):
+                // What lowers an audit is the lead's word only: a worker that wrote these would merge with no verdict.
+                guard isLead(caller, root) else { return .refused("Only the repository's lead notes what small_task_min judges a task by.") }
+                change(root, &changed) { team in
+                    var all = team.smallTasks ?? [:]
+                    all[task] = (all[task] ?? SmallTaskFacts()).noting(note)
+                    team.smallTasks = all
+                }
+                return .ok
+            case .noteWorking(let root, let sessions, let at):
+                // Only what the app's witness sees: a session's word about its own work counts for nothing.
+                guard caller == .app else { return .refused("Only VibeSwitcher counts a task's working time.") }
+                guard let current = team(root) else { return .ok }
+                let busy = Set(sessions.map { $0.lowercased() })
+                let tasks = Set(current.members.filter { $0.role == .worker && $0.session.map { busy.contains($0.lowercased()) } == true }.compactMap(\.task))
+                let counting = Set((current.smallTasks ?? [:]).filter { $0.value.workingSince != nil }.keys)
+                guard !tasks.isEmpty || !counting.isEmpty else { return .ok }
+                change(root, &changed) { team in
+                    var all = team.smallTasks ?? [:]
+                    for task in tasks.union(counting) {
+                        var facts = all[task] ?? SmallTaskFacts()
+                        facts.count(working: tasks.contains(task), at: at)
+                        all[task] = facts
+                    }
+                    team.smallTasks = all
                 }
                 return .ok
             case .unaudited(let root, let task):
@@ -1301,7 +1355,34 @@ extension LeadVault {
                       state.teams.values.contains(where: { $0.members.contains { $0.role == role && $0.task == words[1] && $0.session == session } })
                 else { return "Only VibeSwitcher seals a message as its own (a worker or verifier, only its report about its own task)." }
                 return nil
+            case .teammate(let member, let task):
+                return mayDeliverPost(by: member, on: task, text: message.text, caller: caller, agentSession: agentSession)
             }
+        }
+
+        /// Why `caller` may not seal `text` as member `member`'s post on team task `task` (nil: it may). Only the wall's
+        /// delivery seals one (`LeadToolset.deliverWall`): it runs in the lead's own tool server, which alone may reach
+        /// the members' sessions. So: `caller` is the lead of a team where `agentSession`, the recipient, works on that
+        /// task (its integrator, `<task>`, or a member, `<task>--<name>`); and `text` is the delivery
+        /// (`LeadWall.delivery`) of a post that `member` wrote on that task's wall and that is for the recipient (when
+        /// its grant names it). A worker's session, its tool server or its Bash, never seals a teammate's post, as itself
+        /// or as another member; nor does anyone seal words that aren't a stored post.
+        private func mayDeliverPost(by member: String, on task: String, text: String, caller: Caller, agentSession: String?) -> String? {
+            let refusal = "Only VibeSwitcher, or a project lead's tool server delivering a post stored on that team task's wall to one of its members, seals a message as a teammate's."
+            guard case .session(let session) = caller, member != LeadWall.leadAuthor, let to = agentSession else { return refusal }
+            let prefix = task + LeadTeam.joiner
+            guard let team = state.teams.values.first(where: { team in
+                team.members.contains { $0.role == .lead && $0.session == session }
+                    && team.members.contains { $0.role == .worker && $0.session == to && ($0.task == task || $0.task?.hasPrefix(prefix) == true) }
+            }), let seat = team.members.first(where: { $0.role == .worker && $0.session == to })?.task else { return refusal }
+            // The recipient's own name when its grant gives it (a member's); the integrator's is the board's.
+            let recipient = seat.hasPrefix(prefix) ? String(seat.dropFirst(prefix.count)) : nil
+            guard let wall = try? LeadWall(root: team.root, slug: task, folder: wallFolder ?? VibePaths.root.appendingPathComponent("lead", isDirectory: true)),
+                  wall.posts().contains(where: { post in
+                      post.author == member && LeadWall.delivery(post) == text && LeadWall.textRefusal(post.text) == nil
+                          && recipient.map { post.author != $0 && post.to.includes($0) } ?? true
+                  }) else { return refusal }
+            return nil
         }
 
         /// The names a lead's own messages carry, by its project (`LeadMail.project`): `lead of <project>` to its team

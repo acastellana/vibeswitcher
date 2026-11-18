@@ -122,6 +122,7 @@ checks it instead:
 | The refused git commands that stay on its own branch or another `agent/` one (amend, reset --hard, checkout or branch -D of another task's branch) | The sandbox holds the ones that write elsewhere (`main`, tags, config, the remote); the Claude audit's integrity check reads the branch's history |
 | No edits to the records folder (`docs/lead`) | Merge takes the base's copy of the lead's records whatever the branch did to them; the audit reads the rest of the diff |
 | No reads of `~/.vibeswitcher/lead` and `~/.vibeswitcher/steer` | Its brief; the session host tells callers apart by their process, never by what they've read |
+| No reads of Claude Code's prompt history and other sessions' stores (`~/.claude/history.jsonl`, `paste-cache`, `file-history`, other projects' transcripts) | Its brief only: the sandbox limits writes, not reads; the Claude audit reads its branch and report |
 | (none: Codex's own) | Your Codex rules (`~/.codex/rules`) stay in force: a command prefix you approved there runs outside the sandbox. The TUI loads them whatever a session says (only `codex exec --ignore-rules` skips them), so keep them narrow; the audit reads what the branch did |
 | pkill, killall and debuggers refused by rule | Its brief; a sandboxed command signals only its own processes |
 
@@ -524,7 +525,13 @@ The lead's reasoning lives in the repository, in `records_dir` (`docs/lead` by d
 `progress.md`, `incidents.md` and `decisions-archive.md`. The lead can't commit, so its tool server commits these files
 to the lead's branch, after each merge and at most every 5 minutes, as "Lead: decisions and progress". Your staged and
 unstaged changes are left alone. `archive_decisions` moves old entries to `decisions-archive.md` unchanged. Workers may
-not edit that folder.
+not edit that folder. The lead's recording tools refuse text the repository's lints would fail on there (another
+project's name, a credential's shape), and `redact_record` replaces one existing line that fails them; the records
+commit carries that before the next merge, naming it in its message.
+
+When finished work stops landing (a task ready to merge for 20 minutes with no merge since), the lead gets one report
+naming the cause: main red, its own records failing a lint, every test slot held, the load hold, gate code not
+installed, or a merge still running with its expected end. It's repeated at most every 30 minutes, and status shows it.
 
 `workflow.md` (in `.vibeswitcher/`, git-ignored) holds the limits and commands below. The lead changes it with its
 `configure` tool, which keeps your comments. The guard rails (the test and setup commands, `merge_policy`,

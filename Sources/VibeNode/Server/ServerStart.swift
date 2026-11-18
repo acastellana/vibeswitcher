@@ -100,12 +100,19 @@ public enum ServerStart {
         engine.watchRoom()
         let server = NodeServer(root: root, requests: requests, housekeeping: parsed.testHousekeeping ?? ServerArguments.housekeeping,
                                 clock: clock, note: say)
+        // The live protocol and the web (the live plan's I1): the hub on the stores, the Unix socket's `subscribe`, and
+        // the loopback listener, off until `vibeswitcher web` (or a live token at rest) wants it.
+        let live = NodeLive(requests: requests, sessions: sessions, engine: engine, clock: clock, port: parsed.testWebPort ?? NodeWeb.port,
+                            webRoot: parsed.testWebRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, note: say)
+        requests.openWebForAnyone = parsed.testWebPair
+        server.hub = live.hub
         link.onWelcome = { _, _ in
             requests.refreshNotes()
             engine.welcomed()
         }
         link.start()
         sessions.start()
+        queue.sync { live.start() }
         do {
             try server.start()
         } catch {
@@ -113,7 +120,7 @@ public enum ServerStart {
             exit(1)
         }
         say("started, pid \(getpid()), root \(root.path), socket \(server.socketPath)")
-        Retained.keep([link, sessions, requests, server, clock, engine])
+        Retained.keep([link, sessions, requests, server, clock, engine, live])
         dispatchMain()
     }
 

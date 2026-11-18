@@ -168,7 +168,6 @@ Settings (⌘,), category by category: each option, under its section, with the 
 ### Sessions & Sidebar
 - Settings › Sessions & Sidebar — `Sources/VibeSwitcher/SettingsCatalog.swift`
 - Menu bar: Order sessions — `Sources/VibeSwitcher/SettingsWindow.swift`
-- Menu bar: Floating dots panel — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Sidebar: Sidebar mode — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Sidebar: Auto-hide the sidebar (show it at the right edge) — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Sidebar: Show briefly after switching desktops — `Sources/VibeSwitcher/SettingsWindow.swift`
@@ -197,6 +196,8 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - Team: Summarize what each agent is doing with AI — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Team: Start a fresh lead session — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Team: Let project leads message each other — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Team: Remind me to run a prompt audit — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Team: Days between prompt audits — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Working policy: Working policy — `Sources/VibeSwitcher/WorkingPolicySettings.swift`
 - Review rules floor: Project — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
 - Review rules floor: Sensitive paths — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
@@ -312,7 +313,6 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - A lead's Team tab: tasks, decisions, scorecard, messages between leads — `Sources/VibeSwitcher/MainWindow/Lead/TeamViews.swift`
 - Brief Me (⇧⌘B): a spoken briefing across led projects, or one project's — `Sources/VibeSwitcher/Briefing/BriefingViews.swift`
 - Statistics window — `Sources/VibeSwitcher/Statistics/StatisticsView.swift`
-- Floating dots panel — `Sources/VibeSwitcher/FloatingPanel.swift`
 - Menu bar popover: every session, switch, pause, rename — `Sources/VibeSwitcher/PopoverView.swift`
 - Global hot key — `Sources/VibeSwitcher/HotKey.swift`
 - Phone access: a web app for the phone over Tailscale — `Sources/VibeSwitcher/PhoneAccess.swift`
@@ -331,7 +331,10 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `mouse on|off` — the shown session's program asks for mouse reporting (DECSET 1002 and 1006, as Claude Code's fullscreen… — `Sources/VibeSwitcher/Sandbox.swift`
 - `type TEXT` — types TEXT into the chat's composer (through its text view, as the keyboard does) — `Sources/VibeSwitcher/Sandbox.swift`
 - `send` — presses Return in the composer: the message goes to the fake session — `Sources/VibeSwitcher/Sandbox.swift`
+- `composer paste|clear|expect TEXT` — the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a… — `Sources/VibeSwitcher/Sandbox.swift`
+- `composer [unsent TEXT]` — prints what the shown chat's composer holds and how many messages its fake session was sent; unsent TEXT… — `Sources/VibeSwitcher/Sandbox.swift`
 - `runblock [yes]` — the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as… — `Sources/VibeSwitcher/Sandbox.swift`
+- `lines FILE N` — waits up to 30 s for FILE (a path under the sandbox's home, e.g. projects/example-api/ran.txt) to hold N… — `Sources/VibeSwitcher/Sandbox.swift`
 - `tell JSON` — hands a fake Claude (the selected one, or the one labelled "to") a FakeClaude op, e.g. '{"op": "permission"… — `Sources/VibeSwitcher/Sandbox.swift`
 - `notify prepare|allow|deny` — a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare… — `Sources/VibeSwitcher/Sandbox.swift`
 - `new [codex|shell|zsh] [LABEL]` — starts another fake session: a Claude, or a Codex or a plain shell (cat), or an interactive zsh on the… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -350,6 +353,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `startlead` — starts a real project lead (LeadController.startLead, as Project Lead does: the host first if none runs, its… — `Sources/VibeSwitcher/Sandbox.swift`
 - `lead [FILE]` — shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board… — `Sources/VibeSwitcher/Sandbox.swift`
 - `team` — starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and… — `Sources/VibeSwitcher/Sandbox.swift`
+- `team wall` — puts a running team task on the fake lead's board (start the lead first): 3 members with their parts and… — `Sources/VibeSwitcher/Sandbox.swift`
 - `team named` — starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>… — `Sources/VibeSwitcher/Sandbox.swift`
 - `ask [TEXT]` — puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unfold` — shows the selected lead's team under its row in the sidebar — `Sources/VibeSwitcher/Sandbox.swift`
@@ -364,6 +368,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop` — a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-ask [address] [--workspace W] [--from W] [--chain N] [--to 0x…] [--amount WEI] [--expires-in 90m] [--data 0x…] [--reason TEXT]` — the selected fake session's agent files a made-up transaction request, as vs-wallet request does: its card… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-ask [COMMAND]` — the selected fake session's agent asks for a new shell running COMMAND (a made-up program unless given) in… — `Sources/VibeSwitcher/Sandbox.swift`
+- `prompt-audit due|model|snooze|off` — the selected fake lead's project as due for a /doctor prompt-audit (due: 15 days since VibeSwitcher first saw… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-click run|decline|dismiss` — presses that button on the newest shell request card in the selected chat (run starts the shell session in… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-tidy SECONDS` — how long a handled shell card (started, declined, expired) shows before it leaves by itself, for cards… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-idle SECONDS` — how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -394,14 +399,16 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `shot-real NAME` — draws each window in the app's own look, nothing overridden: NAME-main-real.png, NAME-settings-real.png…… — `Sources/VibeSwitcher/Sandbox.swift`
 - `close settings|sheet` — closes Settings or the sheet — `Sources/VibeSwitcher/Sandbox.swift`
 - `shot NAME` — draws each window, light and dark, into the shots folder, its side panes out of their glass (a drawing can't… — `Sources/VibeSwitcher/Sandbox.swift`
-- `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT` — the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views… — `Sources/VibeSwitcher/Sandbox.swift`
+- `pointer rows|areas TEXT|hover TEXT|hover-beside TEXT|drag FROM TO|drag-window FROM TO|copy|menu TEXT|menu-copy TEXT` — the pointer over the shown chat, as made-up events through its window: rows lists its messages' text views… — `Sources/VibeSwitcher/Sandbox.swift`
 - `offline on|off` — the app loses its connection to the sandbox's own host and doesn't get it back (the host and fake sessions… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unproved` — connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions — `Sources/VibeSwitcher/Sandbox.swift`
 - `quit` — quits (the host and fake sessions end with it) — `Sources/VibeSwitcher/Sandbox.swift`
 
 ### Sandbox sheets (`sheet NAME`)
 - `review-floor` — ReviewFloorSection — `Sources/VibeSwitcher/ReviewFloorSettings.swift`
+- `sleep-notice` — SleepNoticeBanner — `Sources/VibeSwitcher/Sandbox.swift`
 - `toolchain-note` — ToolchainNoteView — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
+- `restart-card` — RestartCardView — `Sources/VibeSwitcher/RestartCard.swift`
 - `new-project` — NewProjectSheet — `Sources/VibeSwitcher/MainWindow/NewProject/NewProjectSheet.swift`
 - `menu-bar` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`
 - `menu-bar-dots` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`

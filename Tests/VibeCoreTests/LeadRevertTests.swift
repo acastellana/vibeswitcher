@@ -321,9 +321,10 @@ struct LeadRevertTests: LeadTeamFixture {
 
     // MARK: The lead's brief
 
-    @Test func theLeadsBriefSaysWhenToRevert() {
+    @Test func theLeadsBriefSaysWhenToRevert() throws {
         let prompt = LeadPrompts.lead(project: "p", root: "/p", workflow: LeadWorkflow())
         #expect(prompt.contains("When a merged change broke something and a fix-forward would take longer than undoing it, revert(task, reason)"))
-        #expect(LeadPrompts.tools.contains("merge, revert, cleanup"))
+        // The tool itself is in the lead's tool list (the prompt no longer repeats that list).
+        #expect(try lead(repo(), FakeRuntime()).tools.contains { $0.name == "revert" })
     }
 }

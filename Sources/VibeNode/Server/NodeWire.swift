@@ -1,9 +1,10 @@
 import Foundation
 
 /// The server's protocol on its Unix socket (the engine plan's "The protocol", EN-D2): JSON lines, one message a line,
-/// compact JSON (which never holds a raw newline), at most `maxLine` bytes a line. Request and reply only, no
-/// subscriptions, no events but `bye`: the seed of stage 3's live protocol, whose WebSocket text frames carry the same
-/// objects.
+/// compact JSON (which never holds a raw newline), at most `maxLine` bytes a line. Request and reply, and the events
+/// `hello` and `bye`: the seed of stage 3's live protocol (the live wire contract,
+/// docs/superpowers/specs/2026-11-17-v2-live-wire-contract.md), whose WebSocket text frames carry the same objects and
+/// whose `subscribe`, `snapshot` and `delta` are named here and built by the live plan's tasks.
 ///
 /// Rule 3: a message may gain fields, and readers ignore fields they don't know (`Codable` passes over them).
 public enum NodeWire {
@@ -184,8 +185,15 @@ public enum NodeWire {
         /// `systemd` (the cgroup rule), `weaker` (no cgroup to tell by: the other four lines, and a state change only
         /// from a peer with a controlling terminal) or `closed` (the server's own cgroup unread: no peer is the user's).
         public var rule: String
+        /// A web connection's authentication (the live wire contract's §2): `rights`, `expiresAt`, and `token` only in
+        /// answer to a pairing code. Nil, and not written, on the Unix socket.
+        public var auth: Value?
+        /// The build of the web files this server holds (`/build.json`'s `assets`). Nil, and not written, on the Unix
+        /// socket.
+        public var assets: String?
 
-        public init(node: String, epoch: String, server: Server, host: Host, kinds: [String], peer: Peer, rule: String) {
+        public init(node: String, epoch: String, server: Server, host: Host, kinds: [String], peer: Peer, rule: String,
+                    auth: Value? = nil, assets: String? = nil) {
             v = NodeWire.version
             kind = "hello"
             self.node = node
@@ -195,6 +203,8 @@ public enum NodeWire {
             self.kinds = kinds
             self.peer = peer
             self.rule = rule
+            self.auth = auth
+            self.assets = assets
         }
     }
 
@@ -203,11 +213,15 @@ public enum NodeWire {
         public var v: Int
         public var kind: String
         public var reason: String
+        /// Why, as a word a client acts on (the live wire contract's §10): `auth`, `revoked`, `version`, `too-long`,
+        /// `not-object`, `not-request`, `must` or `stopping`. Nil, and not written, from a server before it.
+        public var code: String?
 
-        public init(reason: String) {
+        public init(reason: String, code: String? = nil) {
             v = NodeWire.version
             kind = "bye"
             self.reason = reason
+            self.code = code
         }
     }
 
@@ -246,6 +260,12 @@ public enum NodeWire {
         case user
         /// The lead's tool server, its post sealed by the host as the lead's (EN-D10).
         case leadToolServer
+        /// A web client's token with the `draft` right (the live plan's LW-D6): never the user's voice, and refused on
+        /// the Unix socket. It changes state (a draft on a card), so the integration task that takes such a kind checks
+        /// the right before `Requests.handle`'s user's-voice path is reached.
+        case webDraft
+        /// A web client's terminal, on a scratch node only (LW-D12).
+        case webTerminal
     }
 
     /// Every kind the protocol names, with the voice it needs. This server takes only `taken` (E1's); the others are
@@ -255,21 +275,35 @@ public enum NodeWire {
         "config.held": .user, "config.accept": .user, "base.show": .user, "base.accept": .user, "base.keep": .user,
         "hooks.install": .user, "hooks.remove": .user, "build.switch": .user,
         "question.post": .leadToolServer, "question.revise": .leadToolServer, "question.withdraw": .leadToolServer,
+        // The live protocol's (the live wire contract), taken from the integration task that wires each (I1 to I4).
+        "subscribe": .anyone, "unsubscribe": .anyone, "chat.page": .anyone,
+        "draft": .webDraft, "draft.clear": .webDraft,
+        "web.open": .user, "web.revoke": .user,
+        "term.open": .webTerminal, "term.close": .webTerminal,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
     /// started; `config.held` and `base.show` make the card the next request takes.
     public static let changesNothing: Set<String> = ["start", "config.held", "base.show"]
 
-    /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included. A kind
-    /// missing from `kinds` needs the user's voice, as `Requests.handle` reads it, so it changes state too.
-    public static func changesState(_ kind: String) -> Bool { (kinds[kind] ?? .user) == .user && !changesNothing.contains(kind) }
+    /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
+    /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
+    /// `Requests.handle` reads it, so it changes state too.
+    public static func changesState(_ kind: String) -> Bool {
+        switch kinds[kind] ?? .user {
+        case .user: return !changesNothing.contains(kind)
+        case .webDraft, .webTerminal: return true
+        case .anyone, .leadToolServer: return false
+        }
+    }
 
     /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6; the hooks
-    /// from the start plan's S6; `build.switch` from its S8b): every kind `kinds` names.
+    /// from the start plan's S6; `build.switch` from its S8b; the live protocol's `subscribe`, `unsubscribe`, `web.open`
+    /// and `web.revoke` from the live plan's I1): every kind `kinds` names but the live protocol's later ones (`chat.page`
+    /// from I2, the drafts from I3, the terminal from I4).
     public static let taken = ["status", "start", "stop", "lead", "questions", "answer", "hold", "config.held", "config.accept",
                                "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
-                               "hooks.install", "hooks.remove", "build.switch"]
+                               "hooks.install", "hooks.remove", "build.switch", "subscribe", "unsubscribe", "web.open", "web.revoke"]
 
     // MARK: Lines
 

@@ -249,11 +249,6 @@ struct SessionsSettings: View {
                         ForEach(SessionOrder.allCases, id: \.self) { Text($0.label).tag($0) }
                     } label: { label }
                 }
-                SettingRow("floating-panel") { label in
-                    Picker(selection: $preferences.floatingPanel) {
-                        ForEach(FloatingPanelMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                    } label: { label }
-                }
             }
             Section("Sidebar") {
                 SettingRow("sidebar-mode") { label in Toggle(isOn: $preferences.sidebarMode) { label } }
@@ -289,6 +284,15 @@ struct ProjectLeadSettings: View {
                 SettingRow("lead-mail") { label in
                     Toggle(isOn: $preferences.leadMail) { label }
                         .accessibilityHint("Off, a lead's message to another project's lead is refused and nothing is sent")
+                }
+                SettingRow("prompt-audit") { label in
+                    Toggle(isOn: $preferences.promptAuditReminders) { label }
+                        .accessibilityHint("Off, no prompt audit cards show in any lead's chat")
+                }
+                SettingRow("prompt-audit-days") { label in
+                    BoostStepper(label: label, name: "Days between prompt audit reminders", value: $preferences.promptAuditDays,
+                                 range: PromptAudit.intervalRange)
+                        .disabled(!preferences.promptAuditReminders)
                 }
             } header: {
                 Text("Team")

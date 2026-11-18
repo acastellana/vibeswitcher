@@ -496,6 +496,10 @@ Each ends in something that runs.
    - *2026-11-16, the start plan's S10:* the owner is written. `ScratchRunTests.aScratchTeamOfFakesBuildsAuditsAndMerges`
      (the rehearsal with `FakeClaude`) passes here; `aScratchTeamPlansBuildsAuditsAndMerges` (gated) hasn't run yet:
      the test account's weekly limit resets Nov 18, and E9's Step 2 passes first. Not done until it passed once.
+   - *2026-11-17:* **done: it passed once here**, on its first gated run (Claude Code 2.1.326; the lead and both
+     workers on Sonnet, the verifier on haiku; 75 s), after E9's Step 2 passed the same day. The run is in the
+     inventory's "A full scratch team run". The scratch host's own lock, named above, is the lead's since that day too
+     (`VIBESWITCHER_TEST_LOCK_DIR=<root>/tmp`): until then a scratch lead's merge took a slot of the account's.
 10. **The bootstrap.**
     - **Before:** the user's steps M2, M3, M5, M6 and M8
       ([above](#things-only-you-can-do-on-the-machine)). `vibeswitcher start` checks interop; the rest are the

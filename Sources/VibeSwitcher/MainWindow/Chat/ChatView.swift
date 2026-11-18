@@ -40,6 +40,8 @@ struct ChatContainer: View {
     var wallet: WalletDesk? = nil
     /// The shells agents asked for: the selected session's cards, beside its wallet cards.
     var shells: ShellDesk? = nil
+    /// The reminders to run /doctor prompt-audit: the lead's project's card, pinned in its chat while due.
+    var promptAudit: PromptAuditDesk? = nil
     /// The answer card's keys: the composer hands it ⌘1–⌘9, ↩ and ↑ / ↓ while it's empty. Held, not observed.
     @State private var cardKeys = AnswerCardKeys()
     /// What you were writing under the lead's questions, kept when one closes (it moves into the conversation).
@@ -59,6 +61,7 @@ struct ChatContainer: View {
                 BaseMovePrompt(moves: leads.baseMoves, root: lead.root)
                 PushRequestPrompt(pushes: leads.pushes, root: lead.root)
                 ConfigHeldPrompt(holds: leads.configHolds, root: lead.root)
+                if let promptAudit { PromptAuditPrompt(desk: promptAudit, root: lead.root, send: composer.send) }
             } else if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) {
                 TodoPanel(todos: todos)
             }
@@ -1367,18 +1370,32 @@ private struct TodoPanel: View {
 }
 
 
-/// An image file referenced by a prompt (attached from the composer); click to open it.
+/// An image file referenced by a prompt (attached from the composer); click to open it. Decoded small, off the main
+/// thread, once (`ImageCache`): drawn from the file, each a screenshot's full size, a chat of them took a gigabyte.
 private struct FileThumbnail: View {
     let path: String
     let height: CGFloat
+    @State private var decoded: NSImage?
+    /// Not an image after all: nothing shows, as before it was decoded here.
+    @State private var failed = false
 
     var body: some View {
-        if let image = NSImage(contentsOfFile: path) {
-            Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(height: height)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
-                .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                .help(path)
+        if !failed {
+            Group {
+                if let decoded {
+                    Image(nsImage: decoded).resizable().aspectRatio(contentMode: .fit).frame(height: height)
+                } else {
+                    RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)).frame(width: height * 1.5, height: height)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
+            .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+            .help(path)
+            .task(id: path) {
+                decoded = await ImageCache.thumbnail(file: path, pixels: Int(height * 2))
+                failed = decoded == nil
+            }
         }
     }
 }

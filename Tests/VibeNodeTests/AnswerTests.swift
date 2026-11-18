@@ -94,8 +94,14 @@ struct AnswerTests {
         #expect(world.card(asked.card.id)?.closed == "decided by its timer: Parser")
     }
 
-    /// The answer's action and the message's digest are in the vault when the lead's inbox gets it (read on the engine's
-    /// reads queue just before it's posted).
+    /// S3: the answer's action and the message's digest are in the vault when the lead's inbox gets the message. The
+    /// vault's record is read at each of the engine's reads of that inbox (`inboxRead`, on its reads queue) while the
+    /// message isn't in it: the last of them is the post's own, which reads and then posts in one step on that queue.
+    /// An earlier read is no post: a look wakes the lead, and its read of the inbox can come while the message is
+    /// still being recorded (under load, 2026-11-17, the refresh after the answer read it so, the vault holding only
+    /// the answer, and the case took that first read for the post's). Here that happens every time: the record is held
+    /// up (the engine's `work`) until a look's read has seen the vault with the answer alone, and the message is in the
+    /// inbox only after its own record.
     @Test func anAnswerIsRecordedInTheVaultBeforeTheLeadIsTold() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
@@ -103,17 +109,32 @@ struct AnswerTests {
         let asked = try await world.asked("Ship it?", options: ["Yes", "No"], lead: harness.session)
         let action = UUID().uuidString.lowercased()
         let client = world.world.link.vaultV2
-        let recorded = Locked<[String]?>(nil)
+        let root = world.host.root
+        // The vault's record of the action at each read of the lead's inbox that didn't find the message there yet.
+        let reads = Locked<[[String]]>([])
         world.queue.sync {
             world.engine.inboxRead = { tty in
-                guard tty == harness.session.tty, recorded.value == nil else { return }
-                recorded.value = ((try? client.userActions()) ?? []).filter { $0.action == action }.map(\.kind)
+                guard tty == harness.session.tty,
+                      !SteerInbox.pending(tty: tty, root: root).contains(where: { $0.from == .user && $0.text.contains("Ship it?") }) else { return }
+                let kinds = ((try? client.userActions()) ?? []).filter { $0.action == action }.map(\.kind)
+                reads.mutate { $0.append(kinds) }
             }
         }
+        // The message's record waits (it runs on the engine's `work`) until a look has read the inbox.
+        let gate = DispatchSemaphore(value: 0)
+        world.engine.work.async(flags: .barrier) { gate.wait() }
+        var released = false
+        defer { if !released { gate.signal() } }
         let reply = try #require(await world.answer(asked.card, "Yes", action: action))
         #expect(reply.ok, "\(reply)")
+        world.world.look()
+        let early = await eventually(timeout: 60) { reads.value.contains(["answer"]) }
+        released = true
+        gate.signal()
+        #expect(early, "no read of the inbox before the message's record: \(reads.value)")
         #expect(await eventually(timeout: 60) { world.world.pending(harness).contains { $0.from == .user && $0.text.contains("Ship it?") } })
-        #expect(recorded.value == ["answer", "message"], "\(String(describing: recorded.value))")
+        // The post's own read, the last before the message was there: both in the vault.
+        #expect(reads.value.last == ["answer", "message"], "\(reads.value)")
         let message = try #require(world.world.pending(harness).first { $0.from == .user })
         #expect(try await offPool { try client.holds(action: action, digest: LeadVaultV2.digest(message.text)) })
     }

@@ -5,7 +5,7 @@ import VibeCore
 @testable import VibeSwitcher
 
 /// Pictures of how status is shown: the menu bar icon (dots, and the counts past 12 sessions), popover rows, sidebar
-/// rows and the pill, one session per status plus a paused one. Only with
+/// rows, one session per status plus a paused one. Only with
 /// `STATUS_SNAPSHOT_DIR=/some/folder swift test --filter StatusSnapshots`; `STATUS_SNAPSHOT_NAME` names the files
 /// (default "status": status-light.png, status-dark.png).
 @MainActor
@@ -111,8 +111,6 @@ private struct StatusPicture: View {
                     }
                     .padding(6).frame(width: 260)
                     .background(scheme == .dark ? Color(white: 0.196) : Color(white: 0.925))
-                    caption("Pill").padding(.top, 10)
-                    FloatingDots(sessions: sessions, onOpen: { _ in }, onShowList: {})
                 }
             }
         }

@@ -1,13 +1,15 @@
 import Foundation
 
-/// What a task cost, kept on it once it ends (merged, folded or abandoned): its worker's working time and the wall
+/// What a task cost, kept on it once it ends (merged, folded or abandoned) or is kept unmerged (an experiment's arm): its worker's working time and the wall
 /// time from its first worker's start to its end; the tokens its workers and its verifiers spent, read from their own
 /// Claude Code transcripts, with an estimated cost (`LeadPrices`); its audit rounds, re-rolls and merge reruns; the
 /// merge's test count; the user's questions about it and the time they waited; and the commits its merge brought, with
 /// where to roll back to. Numbers only: no transcript text is kept. Tasks that ended before receipts have none, and
 /// show nothing. The lead's board(task) shows it; the scorecard and the all-done card sum a batch's (`LeadReceiptTotals`).
 public struct LeadReceipt: Codable, Equatable, Sendable {
-    public enum Ending: String, Codable, Sendable { case merged, folded, abandoned }
+    /// kept: set kept unmerged (update_task status kept), such as a team experiment's arm that ran a merge dry run
+    /// instead of merging: never counted as merged.
+    public enum Ending: String, Codable, Sendable { case merged, folded, abandoned, kept }
 
     public var ending: Ending
     /// When its first worker started (nil: never started); when it ended.
@@ -42,6 +44,39 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
     /// The date of the Codex prices its Codex tokens are in `cost` at (`LeadPrices.codexAsOf`); nil when it read no
     /// Codex tokens, or for a receipt from before Codex was priced (its Codex tokens aren't in `cost`).
     public var codexPricesAsOf: String?
+    /// A team task's members (`LeadTask.team`), in its order, the integrator first: each one's working time and its
+    /// worker's tokens, which `worked` and `worker` sum. nil for a plain task, and for receipts from before teams.
+    public var members: [Member]?
+    /// Merge-ready: when the merge's test run passed after a passing audit (the experiment's endpoint). Merged: its
+    /// merge's test run's end; kept: its last merge dry run's, when that passed. nil otherwise, and for receipts from
+    /// before it was kept.
+    public var mergeReady: Double?
+
+    /// One member of a team task, on its receipt: its name, its worker's counted working time in seconds (nil: not
+    /// counted), and its worker's tokens (nil: no transcript of its worker found).
+    public struct Member: Codable, Equatable, Sendable {
+        public var name: String
+        public var worked: Double?
+        public var worker: LeadTokens?
+
+        public init(name: String, worked: Double? = nil, worker: LeadTokens? = nil) {
+            self.name = name
+            self.worked = worked
+            self.worker = worker
+        }
+
+        /// "core 1 h 2 min worked, 12.1M tokens, est. $3.20"; "ui time not counted, tokens unknown".
+        public var text: String {
+            var parts = [name + " " + (worked.map { "\(LeadToolset.age($0)) worked" } ?? "time not counted")]
+            if let worker {
+                parts.append("\(LeadReceipt.count(worker.total)) tokens")
+                parts.append(worker.cost.map { "est. \(LeadReceipt.dollars($0))" } ?? "cost unknown")
+            } else {
+                parts.append("tokens unknown")
+            }
+            return parts.joined(separator: ", ")
+        }
+    }
 
     public init(ending: Ending, startedAt: Double?, endedAt: Double, worked: Double?, worker: LeadTokens?, verifier: LeadTokens?,
                 rounds: Int = 0, rerolls: Int = 0, mergeReruns: Int = 0, tests: Int? = nil, questions: Int = 0, waitingOnUser: Double = 0,
@@ -65,8 +100,12 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
     }
 
     /// `task`'s receipt as it ends now: the board's numbers for it, `usage` from its transcripts (`LeadReceipts.usage`).
+    /// A team task's receipt lists its members (`Member`), with `memberWorked` (seconds by member name; by default each
+    /// member's own count, `LeadTeamMember.worked`) and their
+    /// tokens from `usage.members`, and sums them: its `worked` is the members' summed when each was counted (else the
+    /// task's own count), its `worker` the members' tokens summed when `usage` read them per member.
     public init(_ task: LeadTask, ending: Ending, questions: [LeadQuestion], usage: LeadReceipts.Usage, tests: Int? = nil,
-                mergeReruns: Int = 0, commits: Int? = nil, now: Double = Date().timeIntervalSince1970) {
+                mergeReruns: Int = 0, commits: Int? = nil, memberWorked: [String: Double]? = nil, now: Double = Date().timeIntervalSince1970) {
         let asked = questions.filter { $0.task == task.slug }
         let merged = ending == .merged ? task.merged : nil
         self.init(ending: ending, startedAt: task.startedAt, endedAt: now, worked: task.worked, worker: usage.worker, verifier: usage.verifier,
@@ -74,8 +113,21 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
                   questions: asked.count, waitingOnUser: asked.reduce(0) { $0 + $1.waitingOnUser(now: now) },
                   onto: merged?.onto, commit: merged?.commit, commits: commits)
         waits = task.waits.map { $0.closed(at: now) }
-        verifier?.sameModel = Self.sameModel(task, worker: usage.worker, verifier: usage.verifier)
-        if (usage.worker?.codex ?? 0) > 0 || (usage.verifier?.codex ?? 0) > 0 { codexPricesAsOf = LeadPrices.codexAsOf }
+        // Kept after a dry run that passed: that run is its merge-ready time and test count.
+        if ending == .kept, let run = task.dryRun, run.passed {
+            mergeReady = run.at
+            if self.tests == nil { self.tests = run.tests }
+        }
+        if task.isTeam, let team = task.team {
+            let counted = memberWorked ?? Dictionary(team.compactMap { member in member.worked.map { (member.name, $0) } }, uniquingKeysWith: { first, _ in first })
+            let listed = team.map { Member(name: $0.name, worked: counted[$0.name], worker: usage.members?[$0.name]) }
+            members = listed
+            if listed.allSatisfy({ $0.worked != nil }) { worked = listed.reduce(0) { $0 + ($1.worked ?? 0) } }
+            if usage.members != nil { worker = LeadReceipts.sum(listed.map(\.worker)) }
+        }
+        let sameModel = Self.sameModel(task, worker: worker, verifier: verifier)
+        verifier?.sameModel = sameModel
+        if (worker?.codex ?? 0) > 0 || (verifier?.codex ?? 0) > 0 { codexPricesAsOf = LeadPrices.codexAsOf }
     }
 
     /// Whether `task`'s verifier ran on its worker's model, so its audit wasn't independent (32 % of audits from
@@ -121,11 +173,16 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
         }
         parts.append(roles.isEmpty ? "tokens unknown (no transcripts of its sessions found)" : roles.joined(separator: ", "))
         if !roles.isEmpty { parts.append(cost.map { "est. \(Self.dollars($0))" } ?? "cost unknown" + Self.unpricedNote([worker, verifier])) }
+        if let members, !members.isEmpty { parts.append("team of \(members.count): " + members.map(\.text).joined(separator: "; ")) }
         var runs = ["\(rounds) audit round\(rounds == 1 ? "" : "s")"]
         if rerolls > 0 { runs.append("\(rerolls) re-roll\(rerolls == 1 ? "" : "s")") }
         if mergeReruns > 0 { runs.append("\(mergeReruns) merge rerun\(mergeReruns == 1 ? "" : "s")") }
         parts.append(runs.joined(separator: ", "))
-        if let tests { parts.append("\(tests) tests in the merge's run") }
+        if let tests { parts.append("\(tests) tests in the merge's \(ending == .kept ? "dry " : "")run") }
+        if let mergeReady {
+            parts.append("merge-ready at \(LeadBoard.clock(mergeReady))" + (startedAt.map { " (\(LeadToolset.age(max(0, mergeReady - $0))) after its start)" } ?? "")
+                         + (ending == .kept ? ", by a dry run: not merged" : ""))
+        }
         if questions > 0 {
             parts.append("\(questions) question\(questions == 1 ? "" : "s") to you, \(LeadScorecard.minutes(waitingOnUser / 60)) min waiting")
         }
@@ -344,10 +401,14 @@ public enum LeadReceipts {
     public struct Usage: Equatable, Sendable {
         public var worker: LeadTokens?
         public var verifier: LeadTokens?
+        /// A team task's: each member's worker tokens by its name (a member with none found is left out), which
+        /// `worker` sums; nil: not read per member (a plain task).
+        public var members: [String: LeadTokens]?
 
-        public init(worker: LeadTokens? = nil, verifier: LeadTokens? = nil) {
+        public init(worker: LeadTokens? = nil, verifier: LeadTokens? = nil, members: [String: LeadTokens]? = nil) {
             self.worker = worker
             self.verifier = verifier
+            self.members = members
         }
     }
 
@@ -414,6 +475,32 @@ public enum LeadReceipts {
             usage.worker = combined(usage.worker, codex)
         }
         return usage
+    }
+
+    /// The tokens of `task`'s sessions: a plain task's as `usage(root:slug:…)` reads them. A team task's (`LeadTask.team`)
+    /// per member as well: the integrator's worker from the task's own folder (`worker-<slug>`, where its verifiers are
+    /// read too), each other member's from its own worktree's (`<slug>--<name>`: `worker-<slug>--<name>`, see
+    /// `LeadTeam.worktree`), with `worker` their sum. A member's folder's verifier sessions aren't read: a team task's
+    /// verifiers run on the task's own.
+    public static func usage(root: String, task: LeadTask, home: String = VibePaths.home, codexHome: String? = nil,
+                             now: Date = Date()) -> Usage {
+        var usage = usage(root: root, slug: task.slug, since: task.createdAt, home: home, codexHome: codexHome, now: now)
+        guard task.isTeam, let team = task.team else { return usage }
+        var members: [String: LeadTokens] = [:]
+        for (index, member) in team.enumerated() {
+            let tokens = index == 0 ? usage.worker
+                : self.usage(root: root, slug: task.slug + LeadTeam.joiner + member.name, since: task.createdAt, home: home,
+                             codexHome: codexHome, now: now).worker
+            if let tokens { members[member.name] = tokens }
+        }
+        usage.members = members
+        usage.worker = sum(team.map { members[$0.name] })
+        return usage
+    }
+
+    /// `tokens` summed (`combined`), in order; nil when none is known.
+    static func sum(_ tokens: [LeadTokens?]) -> LeadTokens? {
+        tokens.compactMap { $0 }.reduce(nil) { total, next in combined(total, next) }
     }
 
     /// `a` and `b` summed: one role's Claude and Codex sessions. The cost is unknown when either's is.
@@ -655,6 +742,8 @@ public struct LeadReceiptTotals: Codable, Equatable, Sendable {
     public var topCost: Double?
     public var topTokens: Int?
     public var pricesAsOf: String
+    /// Of `tasks`, those kept unmerged (receipts ending kept, such as an experiment's arm); nil: none.
+    public var kept: Int?
 
     /// `tasks`' receipts summed; nil when none has one (tasks from before receipts show nothing, not zeros).
     public init?(_ tasks: [LeadTask]) {
@@ -674,11 +763,13 @@ public struct LeadReceiptTotals: Codable, Equatable, Sendable {
             topTokens = receipt.tokens
         }
         pricesAsOf = receipts.map(\.1.pricesAsOf).max() ?? LeadPrices.asOf
+        let kept = receipts.filter { $0.1.ending == .kept }.count
+        self.kept = kept > 0 ? kept : nil
     }
 
     /// "4 tasks, 6.2 h of worker time, 61.3M tokens, est. $38.12; most expensive: Every task gets a receipt (est. $14.80)".
     public var text: String {
-        var parts = ["\(tasks) task\(tasks == 1 ? "" : "s")", "\(LeadTeams.hours(worked)) of worker time", "\(LeadReceipt.count(tokens)) tokens"]
+        var parts = ["\(tasks) task\(tasks == 1 ? "" : "s")" + (kept.map { " (\($0) kept unmerged)" } ?? ""), "\(LeadTeams.hours(worked)) of worker time", "\(LeadReceipt.count(tokens)) tokens"]
         if unpriced == tasks {
             parts.append("cost unknown")
         } else {
@@ -694,7 +785,10 @@ public struct LeadReceiptTotals: Codable, Equatable, Sendable {
     /// The tasks whose receipts status and the scorecard sum: those finished since the last all-done card; with none
     /// since, the last card's batch. `last`: the card's time when it's the last card's.
     public static func current(_ board: LeadBoard) -> (totals: LeadReceiptTotals, last: Double?)? {
-        if let open = LeadReceiptTotals(BatchSummary.batch(board)) { return (open, nil) }
+        // Kept unmerged with a receipt (an experiment's arm) since the batch began: counted, though it's still open work.
+        let start = BatchSummary.batchStart(board)
+        let kept = board.tasks.filter { $0.status == .kept && $0.receipt?.ending == .kept && ($0.receipt?.endedAt ?? start) > start }
+        if let open = LeadReceiptTotals(BatchSummary.batch(board) + kept) { return (open, nil) }
         guard let mark = board.allDone?.last else { return nil }
         let slugs = Set(mark.tasks.map(\.slug))
         let held = board.tasks.filter { slugs.contains($0.slug) }
