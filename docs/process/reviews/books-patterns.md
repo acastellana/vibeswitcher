@@ -198,3 +198,32 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | Chaos Engineering, Rosenthal & Jones, 2020 | Inject failures to test the system's response | parked: a chaos corpus for the orchestrator (decision 2026-11-06 22:35 (8)), until an incident calls for it |
 | The Field Guide to Understanding Human Error, Dekker, 2006 | Ask what made the action make sense at the time, not who erred | done: incident entries record context and evidence; retrospectives change tools or contracts, not blame (decisions 2026-11-08 23:16, 2026-11-09 14:20) |
 | | Look for the second story: the system's conditions behind the error | done: "the incidents point to handoffs the system controls, not to too few reviewers" (decision 2026-11-09 14:20) |
+
+### Flow, teams and management
+
+| Book | Pattern | Status here |
+| --- | --- | --- |
+| The Mythical Man-Month, Brooks, 1975 | Adding people to a late task makes it later (communication grows with team size) | done, measured: the team-on-one-task arm cost 2.0× the tokens and about 8 extra lead turns, and was dropped (decision 2026-11-16 07:21) |
+| | The surgical team and conceptual integrity: one mind decides the design | done: the lead plans and decides, workers build one contract each, the lead writes no code (`LeadLaunch.deny(.lead)`) |
+| Out of the Crisis, Deming, 1982 | Common-cause vs special-cause variation: don't react to noise, fix the system | partly: the flake ledger waits for 3 flakes before acting (`FlakeLedger.swift`); trends are said only above a sample floor (`SetupScorecard.trendFloor`); a 28% first-try failure rate is a system property that no one owns: shortlist 1 |
+| | PDSA: plan, do, study, act | done, then paused: the impact ledger's hypotheses and verdicts (`docs/process/impact.md`), paused 2026-11-09 |
+| The Goal, Goldratt, 1984 | Find the constraint, exploit it, subordinate everything else to it | partly: the speed review found the constraints (planned work and the Mac's sleep, not capacity: `speed-review-2026-11-12.md`); the sleep half is built (`SleepCost.swift`, task sleep-shows-its-cost); keeping the board fed (its idea 2) isn't |
+| Peopleware, DeMarco & Lister, 1987 | Protect flow time from interruptions | done for the user: questions get a default timer, routine events no message (decisions 2026-10-17 21:27, 2026-11-17 19:55); workers own routine calls instead of asking (decision 2026-10-21 22:52 (2)) |
+| | Quality is set by the builders, not imposed afterwards | done: the worker proves its own work (evidence, blind check, tests under load) before an audit |
+| Lean Software Development, Poppendieck & Poppendieck, 2003 | See the waste: waiting, relearning, handoffs, task switching, partly done work | done, measured: relearning 3.0% of worker time (`worker-rediscovery-2026-11.md`); waiting by cause (`LeadWaits.swift`); sleep 33% of in-flight time (speed review) |
+| | Decide as late as possible; amplify learning | done: triggered ideas are parked with their trigger (decision 2026-11-06 22:35), and backtests come before building (decision 2026-11-09 11:14) |
+| The Toyota Way, Liker, 2004 | Jidoka: stop the line on a defect | done: main red stops merges (`LeadPipeline.swift`); a blocked pipeline is found and acted on (task merges-never-sit-blocked) |
+| | Poka-yoke: make the mistake impossible rather than warned against | done: `docs/process/lead-rules.md` lists 33 enforced rules; partly for workers' git (a denylist with known gaps, shortlist 5) |
+| Thinking in Systems, Meadows, 2008 | Feedback loops with delays: a balancing loop needs a measured stock | partly: retrospectives close the loop on process (`LeadWorkflow.swift`'s retrospective step); stocks like open flakes or "still to move" lint entries have no target |
+| The Principles of Product Development Flow, Reinertsen, 2009 | Queues are the hidden cost: measure queue size and its cost of delay | done: task waits by cause (`LeadWaits.swift`), chained tasks' cost measured (median 338 min against 117, `speed-review-2026-11-12.md`) |
+| | Small batches; limit work in process | done: max_workers and Mac-wide limits (`LeadWorkflow.swift`, `MacLoad.swift`); batched merges of up to 8 (decision 2026-11-12 15:28) |
+| | Prioritise by cost of delay over duration (WSJF) | partly: the backlog ranks by effect ÷ cost (`docs/process/backlog.md`); the board starts tasks in planned order |
+| Kanban, Anderson, 2010 | Make policies explicit; limit WIP per stage | done: `docs/process/lead-rules.md`; heavy slots and one merge at a time (`TestLock.swift`) |
+| Turn the Ship Around!, Marquet, 2012 | Intent-based leadership: "I intend to…" instead of asking permission | done: workers own routine calls and list them in their report (decision 2026-10-21 22:52 (2)); the lead asks the user only about direction (decision 2026-10-18 18:50) |
+| Making Work Visible, DeGrandis, 2017 | The time thieves: too much WIP, unknown dependencies, unplanned work, conflicting priorities, neglected work | partly: dependencies are visible (`after`, `LeadOverlap.swift`); unplanned work (incidents, flakes) isn't shown against planned work anywhere |
+| | Visualise all work, including interruptions | done: the Team view and its fading feed (decision 2026-10-17 21:27) |
+| An Elegant Puzzle, Larson, 2019 | Finish migrations: make the new way the default and drive the old one to zero | partly: lints with allow-lists (`ElapsedTimeLintTests.allowed` has entries "still to move") don't count down to zero |
+| | Work on what matters; measure the system, not the people | done: the scorecard reads exact data only (`SetupScorecard.swift`) |
+| Team Topologies, Skelton & Pais, 2019 | Limit cognitive load per team: give each team a bounded domain | partly: a contract bounds each worker; the files they must read don't: `LeadToolset.swift` is read by most lead-tool tasks whatever their part |
+| | Conway's law in reverse: shape the system to the teams you want | doesn't fit as a team rule (workers are short-lived); it does as a file rule: split by who changes what (shortlist 3) |
+| Shape Up, Singer, 2019 | Appetite: fix the time, vary the scope; a circuit breaker at the end | done: a time budget per task (`LeadBudget.swift`), and over budget the worker reports what works and proposes a cut |
