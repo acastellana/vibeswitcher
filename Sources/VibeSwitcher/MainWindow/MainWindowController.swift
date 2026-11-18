@@ -211,6 +211,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             guard let self else { return done(.refused(RunRefusal.noSession)) }
             self.runSelected(runnable, way: way, done)
         }
+        chat.runner.openShell = { [weak self] runnable, folder, session, done in
+            guard let self else { return done(.refused(RunRefusal.noFolder)) }
+            self.openShell(runnable, in: folder, from: session, done)
+        }
         model.$selectedID.removeDuplicates().receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
             .store(in: &cancellables)
@@ -503,6 +507,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         // says why then).
         let way = runWay(model.selectedRow)
         if chat.runner.way != way { chat.runner.way = way }
+        // Run in New Shell: shown while the session shown has a folder and a shell can start (none in the benches).
+        let folder = shells == nil ? nil : model.selectedRow?.cwd
+        if chat.runner.folder != folder { chat.runner.folder = folder }
         // Messages steered to this session that are still waiting (also from before a relaunch), and whether its
         // agent is idle (then they won't be taken by themselves). Idle by the hook event the store's scan read off the
         // main thread: this runs each second, and a state file read here stalled the window (hang-20261031-102359).
@@ -539,6 +546,21 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             if agent == .claude { self.chat.sent(text, expectsSoon: !working) }
             self.chat.scrollToBottom()
             done(.ran)
+        }
+    }
+
+    /// A code block's Run in New Shell: a new shell session in `folder` whose shell runs the block's command at launch,
+    /// as a vs-shell card's Run starts one (`ShellDesk.runBlock`).
+    private func openShell(_ runnable: RunnableCommand.Runnable, in folder: String, from session: UUID?,
+                           _ done: @escaping (RunOutcome) -> Void) {
+        guard let shells else { return done(.refused(RunRefusal.noFolder)) }
+        shells.runBlock(command: runnable.command, cwd: folder, from: session) { [weak self] outcome in
+            if outcome == .ran {
+                Breadcrumbs.shared.note("chat: ran a code block in a new shell (\(runnable.command.count) chars)")
+                // A git command run: what lets the lead's base move it makes be taken as yours, as Run's.
+                if let session { self?.leads.baseMoves.typed(runnable.prompt, session: session.uuidString, cwd: folder) }
+            }
+            done(outcome)
         }
     }
 

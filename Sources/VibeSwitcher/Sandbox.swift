@@ -1430,6 +1430,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("composer paste|clear|expect TEXT", "the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a Copy's, never yours), and prints what it holds then; clear empties it; expect fails unless it holds exactly TEXT, saying what it holds"),
         ("composer [unsent TEXT]", "prints what the shown chat's composer holds and how many messages its fake session was sent; unsent TEXT fails unless the box comes to hold exactly TEXT and nothing was sent since the last dictation press (e.g. after dictation press/release: the text lands in the box, unsent)"),
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
+        ("runshell [yes]", "the shown chat's last code block with a Run, by its Run in New Shell: shows what it asks first, as the sheet (sheet-runshell); with yes, starts the new shell session as the button does once you confirm (selected, as a card's Run does)"),
         ("lines FILE N", "waits up to 30 s for FILE (a path under the sandbox's home, e.g. projects/example-api/ran.txt) to hold N lines, then fails unless it holds exactly N: a command that appends a line there each time it runs ran N times (scripts/ui-journeys/run-card.journey)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
@@ -2608,6 +2609,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "tell": tell(rest, reply)
         case "notify": notify(rest, reply)
         case "runblock": runBlock(confirmed: rest == "yes", reply)
+        case "runshell": runBlock(confirmed: rest == "yes", newShell: true, reply)
         case "lines": lines(rest, reply)
         case "clear":
             // Ended first, then removed (the host keeps an ended session's row until it's removed).
@@ -3487,7 +3489,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// `confirmed`, run as the button runs it after you press Run there. Waits up to 30 s for such a block (a reply
     /// `tell` just handed the fake lands in the chat once its transcript is read), and once run, for the chat to have
     /// it as recorded (not on its way).
-    private func runBlock(confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
+    private func runBlock(confirmed: Bool, newShell: Bool = false, _ reply: @escaping (Bool, String) -> Void) {
         guard let chat = window?.chat, model.showsChat else { return reply(false, "no chat: show a fake session's chat first (chat)") }
         func lastRunnable() -> RunnableCommand.Runnable? {
             let replies = chat.items.compactMap { item -> String? in
@@ -3504,8 +3506,35 @@ private final class Driver: NSObject, NSApplicationDelegate {
         waitFor({ lastRunnable() != nil }) { [weak self] _ in
             guard let self else { return }
             guard let runnable = lastRunnable() else { return reply(false, "no code block with a Run in the chat's replies") }
+            if newShell { return self.runInShell(runnable, in: chat, confirmed: confirmed, reply) }
             self.runBlock(runnable, in: chat, confirmed: confirmed, reply)
         }
+    }
+
+    /// `runshell`: the block's Run in New Shell (`RunInShellButton`), in the sandbox's own session host.
+    private func runInShell(_ runnable: RunnableCommand.Runnable, in chat: ChatModel, confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
+        closeSheet()
+        guard let folder = chat.runner.folder else { return reply(false, "no Run in New Shell shown: the selected session has no folder") }
+        if confirmed {
+            let asked = runnable.needsConfirmation ? "asked first, then " : ""
+            return RunInShellButton.run(runnable, in: folder, with: chat.runner, confirm: { _ in true }) { [weak self] outcome in
+                guard let self else { return }
+                switch outcome {
+                case .ran?: self.settle { reply(true, "\(asked)started a new shell session in \(folder) running: \(runnable.command)") }
+                case .refused(let reason)?: self.settle { reply(false, reason) }
+                case nil: reply(false, "cancelled")
+                }
+            }
+        }
+        let alert = RunInShellButton.confirmation(runnable, folder: folder)
+        alert.layout()
+        let shown = alert.window
+        Sandbox.hide(shown)
+        sheet = shown
+        sheetName = "runshell"
+        shown.orderFrontRegardless()
+        Sandbox.hide(shown)
+        settle { reply(true, "Run in New Shell's confirmation shown (sheet-runshell)") }
     }
 
     private func runBlock(_ runnable: RunnableCommand.Runnable, in chat: ChatModel, confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
