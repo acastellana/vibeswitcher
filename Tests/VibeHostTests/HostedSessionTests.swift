@@ -42,7 +42,20 @@ final class SessionProbe {
     }
 }
 
+/// The first words of a scratch program whose forked commands use the terminal themselves (`stty raw`, a `dd` reading
+/// it): job control off, so they run in the shell's own process group, the terminal's foreground one. With it on (the
+/// shell is interactive), macOS sometimes fails a child's `setpgid` ("sh: child setpgid (N to N): Operation not
+/// permitted") and that child's terminal calls then fail with EIO: an `stty raw` that didn't happen, so the host's
+/// answer waited unread in a cooked terminal, or a `dd` that read nothing (headlessAnswersQueriesOnlyWhenNoClient's
+/// flakes of 2026-11-12 and 2026-11-18). The host had answered; the shell's job control lost it.
+let jobControlOff = "set +m; "
+
 struct HostedSessionTests {
+    /// Where a scratch program's `dd` says what went wrong (its stderr), for the failure's message.
+    let scratch = Scratch()
+
+    func errors(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)).map(\.debugDescription) ?? "none" }
+
     func start(_ command: String?, keepShell: Bool = false, cwd: String = "/tmp", shell: String = "/bin/sh",
                probe: SessionProbe) throws -> HostedSession {
         let request = SpawnRequest(cwd: cwd, command: command, env: ["PROBE": "yes"], cols: 80, rows: 24,
@@ -178,22 +191,24 @@ struct HostedSessionTests {
     @Test func headlessAnswersQueriesOnlyWhenNoClient() async throws {
         // A device-status query (ESC[6n) expects a cursor report (ESC[row;colR) on the program's input.
         let probe = SessionProbe()
-        let script = "stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 2>/dev/null | od -c | head -1; stty sane; \(keepRunning)"
+        let ddErrors = scratch.url("dd-errors").path
+        let script = "\(jobControlOff)stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 2>'\(ddErrors)' | od -c | head -1; stty sane; \(keepRunning)"
         let session = try start(script, probe: probe)
-        #expect(await eventually { probe.text.contains("033") }, "\(probe.diagnosis(session))")   // od printed the reply's ESC: answered
+        #expect(await eventually { probe.text.contains("033") }, "\(probe.diagnosis(session)) dd=\(errors(ddErrors))")   // od printed the reply's ESC: answered
         probe.queue.sync { session.terminate(); session.close() }
 
         // Asks once it's told to go (with a view attached by then), then reads one byte: the host's answer if it gave
         // one, else the Z typed after the question showed (the headless terminal answers as it takes the question in).
         let probe2 = SessionProbe()
-        let attached = try start("stty raw -echo; printf 'go?'; dd bs=1 count=1 2>/dev/null >/dev/null; printf '\\033[6n'; "
-            + "dd bs=1 count=1 2>/dev/null | od -c; stty sane; \(keepRunning)", probe: probe2)
+        let ddErrors2 = scratch.url("dd-errors").path
+        let attached = try start("\(jobControlOff)stty raw -echo; printf 'go?'; dd bs=1 count=1 2>>'\(ddErrors2)' >/dev/null; "
+            + "printf '\\033[6n'; dd bs=1 count=1 2>>'\(ddErrors2)' | od -c; stty sane; \(keepRunning)", probe: probe2)
         probe2.queue.sync { attached.clientsAttached = true }   // a view would answer; the host must not
-        #expect(await eventually { probe2.text.contains("go?") }, "\(probe2.diagnosis(attached))")
+        #expect(await eventually { probe2.text.contains("go?") }, "\(probe2.diagnosis(attached)) dd=\(errors(ddErrors2))")
         probe2.queue.sync { attached.write(Data("g".utf8)) }
-        #expect(await eventually { probe2.text.contains("\u{1B}[6n") }, "\(probe2.diagnosis(attached))")
+        #expect(await eventually { probe2.text.contains("\u{1B}[6n") }, "\(probe2.diagnosis(attached)) dd=\(errors(ddErrors2))")
         probe2.queue.sync { attached.write(Data("Z".utf8)) }
-        #expect(await eventually { probe2.text.contains("Z") }, "\(probe2.diagnosis(attached))")
+        #expect(await eventually { probe2.text.contains("Z") }, "\(probe2.diagnosis(attached)) dd=\(errors(ddErrors2))")
         #expect(!probe2.text.contains("033"))
         probe2.queue.sync { attached.terminate(); attached.close() }
     }
@@ -203,7 +218,7 @@ struct HostedSessionTests {
     @Test func answersProgramStatusQueriesAndKeepsTheStatus() async throws {
         let probe = SessionProbe()
         // It asks once the test says a view is attached (a byte), and runs until the test ends it.
-        let script = "stty raw -echo; echo ready; dd bs=1 count=1 >/dev/null 2>&1; "
+        let script = "\(jobControlOff)stty raw -echo; echo ready; dd bs=1 count=1 >/dev/null 2>&1; "
             + "printf '\\033]7501;?\\033\\\\'; dd bs=1 count=10 2>/dev/null | od -c | head -1; stty sane; "
             + "printf '\\033]7501;state=working:app=claude-code\\007'; "
             + "printf '\\033]7501;state=blocked:app=claude-code:kind=permission:msg=QmFzaA\\033\\\\'; "
