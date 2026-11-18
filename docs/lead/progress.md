@@ -3754,3 +3754,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 11:26 Automatically (auto_advance): Overlap for git-guard-fails-closed's start (a warning only: nothing was refused or reordered). scripts/sandbox-app.sh: ui-journeys-b-team (kept: its branch changes it); scripts/test.sh: faster-test-suite (running: its branch changes it and its boundaries name it).
 - 2026-11-18 11:36 Pipeline held: folded-update-line-its ready to merge with none landing; cause: every test slot held
 - 2026-11-18 11:43 Merged folded-update-line-its: Folded update line: its red dot clears once the problem it flagged is dealt with (build 5978f0ab2ede)
+- 2026-11-18 11:43 Automatically (auto_advance): Merged folded-update-line-its (Folded update line: its red dot clears once the problem it flagged is dealt with) into main at e1adbde1, on its passing audit and the full test run.
+- 2026-11-18 11:43 Automatically (auto_advance): Cleaned up folded-update-line-its (freed 2.6 GB of build output and temporary folders). It stays done.
