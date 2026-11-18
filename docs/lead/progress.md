@@ -3874,3 +3874,22 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 17:33 Automatically (auto_advance): Started the audit of memory-benches-run-by at 72e50c58 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-18 17:36 Released flaky-headless-test-fix's worker (idle since its done report on 7b9e0f2f) while its audit runs
 - 2026-11-18 17:36 Automatically (auto_advance): Started the audit of flaky-headless-test-fix at 7b9e0f2f (It touches sensitive_paths (Sources/VibeHost/PTYSpawn.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-18 17:38 Exception on scorecard-merge by lead of vibeswitcher: edits to Sources/**/LeadBoard.swift, Sources/**/LeadController.swift accepted. Reason: The lead accepts LeadAnswerOutcome.holdMessage in LeadBoard.swift and the one-line call to it in LeadController.swift: the fix for F1 needs the hold relay's wording in one place so it can be excluded …
+- 2026-11-18 17:39 Released scorecard-merge's worker (idle since its done report on ac0cba73) while its audit runs
+- 2026-11-18 17:39 Automatically (auto_advance): Started the audit of scorecard-merge at ac0cba73 (An audit was started on it: its verdict decides). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-18 17:39 Exception on a-worker-that-stops by lead of vibeswitcher: edits to Sources/**/LeadBoard.swift, Sources/**/LeadController.swift, Tests/**/WitnessOffMainTests.swift, Tests/**/LeadToolsetTests*.swift accepted. Reason: The lead accepts the edits the worker listed as needed for the goal: three task fields in LeadBoard.swift shared by the report tool, the witness and the loop; LeadController wiring that hands a stop t…
+- 2026-11-18 17:39 Automatically (auto_advance): Started the audit of team-sessions-load-only at c32abd58 (Its review is audit).
+- 2026-11-18 17:39 Released a-worker-that-stops's worker (idle since its done report on 7ad3dac8) while its audit runs
+- 2026-11-18 17:39 Automatically (auto_advance): Started the audit of a-worker-that-stops at 7ad3dac8 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-18 17:41 Audit of team-sessions-load-only: complete, clean, round 3: 4 Nit closed
+- 2026-11-18 17:42 Audit of scorecard-merge: complete, clean, round 2: 1 Important closed, 3 Nit closed
+- 2026-11-18 17:48 Audit of flaky-headless-test-fix: complete, clean, round 1: 2 Nit open
+- 2026-11-18 17:48 Planned flaky-host-tests-turn: Flaky host tests: turn job control off in every scratch program that runs stty or dd
+- 2026-11-18 17:54 Audit of a-worker-that-stops: complete, clean, round 1: 1 Important open, 3 Nit open
+- 2026-11-18 17:54 Started a worker on a-worker-that-stops
+- 2026-11-18 17:54 Automatically (auto_advance): Sent a-worker-that-stops's worker the open Important findings a-worker-that-stops:F1 from its audit at 7ad3dac8 (in a new worker: its last one was released during the audit).
+- 2026-11-18 17:54 Audit of memory-benches-run-by: complete, clean, round 1: 1 Nit open
+- 2026-11-18 17:56 Pipeline held: receipts-fable-5-2 ready to merge with none landing; cause: a merge in progress
+- 2026-11-18 18:10 The worker on a-worker-that-stops answered findings: a-worker-that-stops:F1 fixed at e96ae201: e96ae201. The record now carries the stop it's for, and the loop acts only on one the witness has just seen. (1) The witness confirms an unsent stopNudge (confirmedAt) every nudgeConfirmEvery (20 s), and only while its worker is still in that stop: the same status since (Int(stoppedAt)), nothing written to its transcript since seenAt, and still a 'stopped' by waiting() with no live job, prompt, peer wait, usage limit or API error (LeadWitness.sameStop, s…
+- 2026-11-18 18:10 Merged receipts-fable-5-2: Receipts: Fable 5.2's price, and advisor calls counted (no audit: review none) (build 0f7f4ba1b57f)
+- 2026-11-18 18:10 Flaky in receipts-fable-5-2's merge: endedRowsFoldAwayAndTheListSkipsThemWhileFolded(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
