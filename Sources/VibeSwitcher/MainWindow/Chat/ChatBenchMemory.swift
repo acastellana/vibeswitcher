@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+import VibeCore
 
 extension ChatBench {
     /// VIBESWITCHER_BENCH_MEMORY=1: what opening the conversation (and what streams into it) costs in memory. A thread
@@ -136,9 +137,15 @@ extension ChatBench {
         private let perSecond: Int
         private(set) var count = 0
 
-        init(path: String, perSecond: Int) {
+        /// VIBESWITCHER_BENCH_STREAM_LEAD=1: a project lead's conversation instead, as a night of team work fills it: a
+        /// VibeSwitcher card (a worker's report, an audit, auto_advance, app health), the lead's status call and its
+        /// long result, its reply, in turn.
+        private let lead: Bool
+
+        init(path: String, perSecond: Int, lead: Bool = false) {
             url = URL(fileURLWithPath: path)
             self.perSecond = perSecond
+            self.lead = lead
         }
 
         func next() {
@@ -146,9 +153,42 @@ extension ChatBench {
             defer { try? handle.close() }
             _ = try? handle.seekToEnd()
             for _ in 0..<perSecond {
-                try? handle.write(contentsOf: Data((Self.line(count) + "\n").utf8))
+                try? handle.write(contentsOf: Data(((lead ? Self.leadLine(count) : Self.line(count)) + "\n").utf8))
                 count += 1
             }
+        }
+
+        /// A lead's line: a VibeSwitcher card, the lead's status call, its result, its reply.
+        static func leadLine(_ index: Int) -> String {
+            let stamp = ISO8601DateFormatter().string(from: Date())
+            let task = "task-\(index / 4)"
+            let message: [String: Any]
+            let type: String
+            switch index % 4 {
+            case 0:
+                type = "user"
+                let about = ["worker \(task)", "verifier \(task)", "auto_advance", "app health"][(index / 4) % 4]
+                let body = "The worker on \(task) says it's done (\(index)): the change is committed and its checks pass.\n\n"
+                    + (0..<12).map { "- check \($0) of \(task): `swift test --filter Check\($0)` passed, 42 tests in 3.\($0) s" }.joined(separator: "\n")
+                    + "\n\nNext: start its audit, or merge it once the verifier passes it."
+                message = ["role": "user", "content": LeadDelivery.typed(body, from: .system(about))]
+            case 1:
+                type = "assistant"
+                message = ["role": "assistant", "content": [["type": "tool_use", "id": "toolu_lead\(index)", "name": "mcp__vibeswitcher__status",
+                                                              "input": ["task": task]]]]
+            case 2:
+                type = "user"
+                let status = (0..<30).map { "{\"task\": \"\(task)-\($0)\", \"state\": \"working\", \"checkpoint\": \"step \($0) of \(index)\"}" }
+                message = ["role": "user", "content": [["type": "tool_result", "tool_use_id": "toolu_lead\(index - 1)",
+                                                        "content": "[" + status.joined(separator: ",\n") + "]"]]]
+            default:
+                type = "assistant"
+                message = ["role": "assistant", "content": [["type": "text", "text": "\(task) is done and checked (\(index)); I started its audit. "
+                    + "Nothing needs you.\n\n- the merge waits on the verifier\n- two tasks still work"]]]
+            }
+            let line: [String: Any] = ["type": type, "uuid": "lead\(index)", "timestamp": stamp, "sessionId": "bench-stream", "message": message]
+            let data = (try? JSONSerialization.data(withJSONObject: line)) ?? Data()
+            return String(decoding: data, as: UTF8.self)
         }
 
         static func line(_ index: Int) -> String {
