@@ -12,9 +12,11 @@ public enum SessionNote {
     /// What every agent VibeSwitcher starts is told about anything needing a real terminal: this note's and the lead's and
     /// worker's prompts' one wording (`LeadPrompts.lead`, `.worker`), since those sessions don't get this note. Claude Code's
     /// own system prompt tells an agent to suggest `! <command>`, so it has to say it replaces that: on 2026-11-08 a lead sent
-    /// the user to Terminal.app and `!` failed three times on a locked signing keychain before `vs-shell run` worked.
+    /// the user to Terminal.app and `!` failed three times on a locked signing keychain before `vs-shell run` worked. A
+    /// server too: on 2026-11-18 a lead showed `python3 -m http.server` in a code block, whose Run would have blocked it.
     public static let realTerminal = "When something needs a real terminal (a password or other prompt, an install, an "
-        + "interactive program, anything that asks questions on stdin or files wallet requests), ask for it with "
+        + "interactive program, anything that asks questions on stdin or files wallet requests, a server, a preview or anything "
+        + "else that keeps running until stopped), ask for it with "
         + "`vs-shell run [--cwd DIR] [--label TEXT] -- COMMAND…` (on your PATH; `vs-shell help`): it puts the exact command on a "
         + "card in this session's chat, and one Run click from the user opens it in a new shell session with a real terminal; "
         + "when the command ends, its exit status and last lines of output come back to you as a message. "
