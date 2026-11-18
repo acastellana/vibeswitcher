@@ -3762,3 +3762,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 12:00 Raised cache-aware-vibeswitcher to audit (the risk check, at 3f01a0d6): it changes 1201 lines outside tests, over risk_lines (400)
 - 2026-11-18 12:00 Automatically (auto_advance): cache-aware-vibeswitcher is audited, not merged: it changes 1201 lines outside tests, over risk_lines (400) (the risk check raised it from review none). Its audit starts once the Mac has room.
 - 2026-11-18 12:00 Planned config-seal-cover-the: Config seal: cover the hook modules a plugin's hooks.json lists (review audit, for security)
+- 2026-11-18 12:07 Audit of lead-brief-merge-error: complete, clean, round 1: 2 Nit open
+- 2026-11-18 12:08 Started a worker on config-seal-cover-the
+- 2026-11-18 12:08 Automatically (auto_advance): Started a worker on config-seal-cover-the (Config seal: cover the hook modules a plugin's hooks.json lists).
+- 2026-11-18 12:09 Released cache-aware-vibeswitcher's worker (idle since its done report on 3f01a0d6) while its audit runs
+- 2026-11-18 12:09 Automatically (auto_advance): Started the audit of cache-aware-vibeswitcher at 3f01a0d6 (Its review is audit. (audited: it changes 1201 lines outside tests, over risk_lines (400), as the risk check found.)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
