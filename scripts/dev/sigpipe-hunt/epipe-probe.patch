@@ -1,0 +1,106 @@
+diff --git a/Tests/VibeCoreTests/BrokenPipeTests.swift b/Tests/VibeCoreTests/BrokenPipeTests.swift
+index 68b1fb90..428e2c47 100644
+--- a/Tests/VibeCoreTests/BrokenPipeTests.swift
++++ b/Tests/VibeCoreTests/BrokenPipeTests.swift
+@@ -1,4 +1,5 @@
+ import Darwin
++import Foundation
+ import Testing
+ 
+ /// This target's load-time handler for SIGPIPE ran (see `catchBrokenPipes` in TestSupport.swift): a write to a pipe
+@@ -11,3 +12,22 @@ struct BrokenPipeTests {
+         #expect((current.__sigaction_u.__sa_handler.map { unsafeBitCast($0, to: Int.self) } ?? 0) != 0)
+     }
+ }
++
++// TEMPORARY (not to commit): a writer the probe should name.
++struct EPipeProbeCheck {
++    @Test(.enabled(if: ProcessInfo.processInfo.environment["VS_EPIPE_SELFTEST"] == "1"))
++    func aLoopWritingToADeadPipe() async {
++        var pair: [Int32] = [-1, -1]
++        _ = pipe(&pair)
++        close(pair[0])
++        let fd = pair[1]
++        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
++            Thread.detachNewThread {
++                let end = Date().addingTimeInterval(1)
++                while Date() < end { _ = Darwin.write(fd, "x", 1) }
++                close(fd)
++                done.resume()
++            }
++        }
++    }
++}
+diff --git a/Tests/VibeCoreTests/TestSupport.swift b/Tests/VibeCoreTests/TestSupport.swift
+index 7b5d3456..65a1512b 100644
+--- a/Tests/VibeCoreTests/TestSupport.swift
++++ b/Tests/VibeCoreTests/TestSupport.swift
+@@ -53,6 +53,7 @@ private let failOnBrokenPipes: @convention(c) () -> Void = { _ = brokenPipesFail
+ private let brokenPipesFailTheRun: DispatchSourceSignal = {
+     let source = DispatchSource.makeSignalSource(signal: SIGPIPE, queue: DispatchQueue(label: "broken-pipes"))
+     source.setEventHandler {
++        EPipeProbe.dump()
+         Issue.record(Comment(rawValue: "SIGPIPE: a write to a pipe or socket whose reader had gone, without F_SETNOSIGPIPE or "
+                              + "SO_NOSIGPIPE (\(source.data) since the last). The run caught it; the app, at SIGPIPE's default, "
+                              + "would have died of it. Give the writer F_SETNOSIGPIPE or SO_NOSIGPIPE."))
+@@ -206,3 +207,60 @@ extension Scratch {
+         UserDefaults(suiteName: url(prefix).appendingPathComponent("defaults").path)!
+     }
+ }
++
++// TEMPORARY PROBE (not to commit): every thread's stack at a SIGPIPE, to name the writer.
++import Darwin.Mach
++enum EPipeProbe {
++    static func dump() {
++        guard let path = ProcessInfo.processInfo.environment["VS_EPIPE_DUMP"] else { return }
++        var list: thread_act_array_t?
++        var count: mach_msg_type_number_t = 0
++        guard task_threads(mach_task_self_, &list, &count) == KERN_SUCCESS, let threads = list else { return }
++        let me = mach_thread_self()
++        let depth = 48
++        let pcs = UnsafeMutablePointer<UInt64>.allocate(capacity: Int(count) * depth)
++        pcs.initialize(repeating: 0, count: Int(count) * depth)
++        for i in 0..<Int(count) where threads[i] != me {
++            let thread = threads[i]
++            guard thread_suspend(thread) == KERN_SUCCESS else { continue }
++            var state = arm_thread_state64_t()
++            var size = mach_msg_type_number_t(MemoryLayout<arm_thread_state64_t>.size / MemoryLayout<natural_t>.size)
++            let got = withUnsafeMutablePointer(to: &state) {
++                $0.withMemoryRebound(to: natural_t.self, capacity: Int(size)) { thread_get_state(thread, ARM_THREAD_STATE64, $0, &size) }
++            }
++            if got == KERN_SUCCESS {
++                let row = pcs + i * depth
++                row[0] = state.__pc; row[1] = state.__lr
++                var fp = state.__fp, n = 2
++                while n < depth, fp != 0, fp & 7 == 0 {
++                    let frame = UnsafePointer<UInt64>(bitPattern: UInt(fp))!
++                    let next = frame[0]
++                    row[n] = frame[1]; n += 1
++                    if next <= fp { break }
++                    fp = next
++                }
++            }
++            thread_resume(thread)
++        }
++        var out = "=== SIGPIPE at \(Date()) (\(count) threads)\n"
++        for i in 0..<Int(count) {
++            var lines: [String] = []
++            for n in 0..<depth {
++                let pc = (pcs + i * depth)[n] & 0x0000_7FFF_FFFF_FFFF
++                if pc == 0 { continue }
++                var info = Dl_info()
++                if dladdr(UnsafeRawPointer(bitPattern: UInt(pc)), &info) != 0, let name = info.dli_sname {
++                    lines.append(String(cString: name))
++                } else { lines.append(String(pc, radix: 16)) }
++            }
++            let text = lines.joined(separator: "\n  ")
++            if text.contains("write") || text.contains("send") || text.contains("Write") || text.contains("Send") {
++                out += "--- thread \(i)\n  " + text + "\n"
++            }
++        }
++        pcs.deallocate()
++        if let handle = FileHandle(forWritingAtPath: path) ?? { FileManager.default.createFile(atPath: path, contents: nil); return FileHandle(forWritingAtPath: path) }() {
++            handle.seekToEndOfFile(); handle.write(Data(out.utf8)); try? handle.close()
++        }
++    }
++}
