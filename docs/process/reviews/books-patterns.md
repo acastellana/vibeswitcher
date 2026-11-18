@@ -38,18 +38,17 @@ A6 and B3 landed on 2026-11-08), so the tables cite the code instead.
 
 VibeSwitcher already does most of what these books ask for, and often more strictly: guard rails are code rather than
 prose, incidents become checks, and decisions are recorded with their reasons. The books' best remaining lever is the
-merge gate, treated as a production service with an objective and an error budget. The ranked proposals:
+merge gate, treated as a production service with an objective and an error budget. The nine ranked proposals:
 
 1. **An error budget for the merge gate** (SRE, Implementing SLOs, Deming): 28% of merge runs fail their first try.
 2. **Tidy first, as its own small task** (Tidy First?, Refactoring): large tasks need a second audit round 59% of the time.
-3. **The git guard fails closed on git it can't see** (Building Secure and Reliable Systems, Secure by Design): three guard tasks so far, and `RefusedGit.swift` itself lists the open spellings.
-4. **A crash costs one test shard, not the merge** (Release It!, Software Engineering at Google): 18 whole-suite reruns this week.
-5. **Split Sandbox.swift by what's sensitive** (A Philosophy of Software Design, Your Code as a Crime Scene): 36 audits were started only because a UI task touched it.
-6. **The memory benches run by themselves on a calm Mac** (Building Evolutionary Architectures, Release It!): the app's memory growth has needed 9 tasks since October.
-7. **Stability metrics in the weekly scorecard** (Accelerate): change failure rate and time to restore are counted by hand today.
-8. **Lead messages measured by whether they needed the user** (SRE, Making Work Visible): the noise rule was written twice, on 10-25 and 11-17.
-9. **Each retrospective checks whether an incident came back after its check merged** (The Site Reliability Workbook, Dekker).
-10. **One transition table for a task's states** (Domain Modeling Made Functional): low on the list, since only one incident backs it.
+3. **The git guard fails closed on git it can't see** (Building Secure and Reliable Systems, Secure by Design): two spelling tasks in one evening, and `RefusedGit.swift` itself lists the open spellings.
+4. **Split Sandbox.swift by what's sensitive** (A Philosophy of Software Design, Your Code as a Crime Scene): 36 audits were started only because a UI task touched it.
+5. **The memory benches run by themselves on a calm Mac** (Building Evolutionary Architectures, Release It!): the app's memory growth has needed 9 tasks since October.
+6. **Time to restore, and escapes, in the weekly scorecard** (Accelerate): pipeline blocks aren't counted at all, and escapes sit apart in Statistics.
+7. **Lead messages measured by whether they needed the user** (SRE, Making Work Visible): the noise rule was written twice, on 10-25 and 11-17.
+8. **Each retrospective checks whether an incident came back after its check merged** (The Site Reliability Workbook, Dekker).
+9. **One transition table for a task's states** (Domain Modeling Made Functional): low on the list, since only one incident backs it.
 
 Details, costs and the week-one checks are in [the shortlist](#the-shortlist).
 
@@ -121,21 +120,21 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | | Unit of work: commit related changes together or not at all | done: the lead's records are committed by the tool server alone (`LeadRecords.swift`, decision 2026-10-17 17:45); batched merges land together or are split (`LeadMergeBatch.swift`) |
 | Domain-Driven Design, Evans, 2003 | Ubiquitous language: one word, one meaning, shared by code and people | done: "vault" vs "wallet" renamed while the format was new (decision 2026-10-31 17:16); "board" vs "wall" kept apart (`team-on-one-task-design.md`) |
 | | Bounded context with a published language and an anticorruption layer | done: wallet requests cross to another app only in a versioned format with test vectors (`docs/protocol/wallet-request.md`, `docs/protocol/vectors/`; decision 2026-10-31 15:15) |
-| | Aggregate guarding its invariants | partly: `LeadBoard.swift` holds a task's states, but 14 direct `status =` writes in 4 files set them; see shortlist 10 |
+| | Aggregate guarding its invariants | partly: `LeadBoard.swift` holds a task's states, but 14 direct `status =` writes in 4 files set them; see shortlist 9 |
 | Enterprise Integration Patterns, Hohpe & Woolf, 2003 | Guaranteed delivery and dead-letter channel: a message that can't be delivered is noticed, not lost | partly: the witness reports a message waiting undelivered (incident 2026-11-03 09:26, Codex steer inbox, now fixed); delivery has no dead-letter record a lead can list |
 | | Idempotent receiver: a resent message has its effect once | done: phone replies are sent once, with honest ✓/✗ (task phone-replies-sent-once); wallet sends go one card at a time with their own outcome (decision 2026-11-10 18:41) |
-| Release It!, Nygard, 2007 | Bulkheads: one failure can't sink the rest | done for sessions (one parser process each, decision 2026-10-18 17:55) and for projects (Mac-wide slots, `TestLock.swift`); not done inside a test run, where one crash fails the whole suite: shortlist 4 |
+| Release It!, Nygard, 2007 | Bulkheads: one failure can't sink the rest | done for sessions (one parser process each, decision 2026-10-18 17:55) and for projects (Mac-wide slots, `TestLock.swift`); inside a test run, sharding was weighed and dropped on 2026-11-12 (the speed review's re-check): reruns take only the failing tests instead (`MergeRerun.swift`) |
 | | Timeouts and circuit breakers | done: `StallWatch.swift` stops a silent run in minutes; the audit round cap stops after two failed rounds (`LeadAdvanceTests.pastTheRoundCapTheTaskIsLeftToTheLead`); usage and battery holds stop starts (`AccountUsage.swift`, `PowerSource.swift`) |
-| | Steady state: a long-running process must not accumulate | partly: `FootprintRelief.swift`, the app-health line's growth trend (`AppHealth.swift`), and the benches `FootprintBenchTests`, `SandboxSoakBenchTests`; the benches run only with `--perf`, by hand: shortlist 6 |
+| | Steady state: a long-running process must not accumulate | partly: `FootprintRelief.swift`, the app-health line's growth trend (`AppHealth.swift`), and the benches `FootprintBenchTests`, `SandboxSoakBenchTests`; the benches run only with `--perf`, by hand: shortlist 5 |
 | A Philosophy of Software Design, Ousterhout, 2018 | Deep modules: a small interface over a lot of behaviour | partly: `RefusedGit`, `MacTime`, `TestLock` are deep; `LeadToolset` is one 7,618-line class with 321 functions, in which every tool family shares one type |
-| | Information hiding: a decision lives in one place | partly: the refused git options are kept once (`RefusedGit.swift` header); what the sandbox may do and its fixtures share one sensitive file (`Sandbox.swift`): shortlist 5 |
+| | Information hiding: a decision lives in one place | partly: the refused git options are kept once (`RefusedGit.swift` header); what the sandbox may do and its fixtures share one sensitive file (`Sandbox.swift`): shortlist 4 |
 | Clean Architecture, Martin, 2017 | The dependency rule: policy doesn't depend on UI or frameworks | done: no file in `Sources/VibeCore` imports AppKit or SwiftUI; the app (`Sources/VibeSwitcher`) and the host (`Sources/VibeHost`) depend on it |
 | | Humble object: keep logic out of what's hard to test | done: the app's logic is in VibeCore and tested headless; UI is checked in the sandbox (`scripts/sandbox-app.sh`) |
 | Designing Data-Intensive Applications, Kleppmann, 2017 | Unreliable clocks: never order or time out by wall-clock | done: limits count awake time (`MacTime.swift`, decision 2026-11-08 20:36); decisions are stamped by the Mac's clock in one place (`LeadBoard.appendDecision`) |
 | | An append-only log with derived views | done: progress.md is append-only; `product-inventory.md` is generated from the code (`scripts/product-inventory.sh`); finished tasks move to `board-archive.jsonl` |
-| Domain Modeling Made Functional, Wlaschin, 2018 | Make illegal states unrepresentable: legal transitions written once | not done: no transition table; a kept task was merged by auto_advance (incident 2026-10-30 21:42), fixed case by case (`aTaskSetKeptDuringItsMergesTestRunStaysKept`): shortlist 10 |
+| Domain Modeling Made Functional, Wlaschin, 2018 | Make illegal states unrepresentable: legal transitions written once | not done: no transition table; a kept task was merged by auto_advance (incident 2026-10-30 21:42), fixed case by case (`aTaskSetKeptDuringItsMergesTestRunStaysKept`): shortlist 9 |
 | | Parse, don't validate, at the edges | done: wallet requests are parsed strictly into a typed value (`WalletRequestFormat.swift`, vectors in `docs/protocol/vectors/`); `LeadWorkflow` reads workflow.md's known keys only |
-| Building Evolutionary Architectures, Ford, Parsons & Kua, 2017 | Fitness functions: an architectural property checked automatically and continuously | partly: lints are fitness functions that run in every merge (`PrivateNamesLint`, `ElapsedTimeLint`, `TemporaryFolderLint`); performance and memory ones are benches outside the merge (decision 2026-10-21 22:52 (3)) and run by nobody on a schedule: shortlist 6 |
+| Building Evolutionary Architectures, Ford, Parsons & Kua, 2017 | Fitness functions: an architectural property checked automatically and continuously | partly: lints are fitness functions that run in every merge (`PrivateNamesLint`, `ElapsedTimeLint`, `TemporaryFolderLint`); performance and memory ones are benches outside the merge (decision 2026-10-21 22:52 (3)) and run by nobody on a schedule: shortlist 5 |
 | Secure by Design, Johnsson, Deogun & Sawano, 2019 | Reject what you can't understand; allowlist over denylist | partly: the verifier's commands are an allowlist (`ReadOnlyCommand.swift`); the workers' git guard is a denylist over shell spellings and lists its own open cases (`RefusedGit.swift`): shortlist 3 |
 | | Domain primitives for anything that crosses a trust boundary | done: secret-shaped text is refused in lead mail (decision 2026-11-04 22:18), `SecretShapes.swift`, `SecretShapeLint` |
 | Building Secure and Reliable Systems, Adkins et al., 2020 | Least privilege: each role gets only what its job needs | done: per-role deny rules (`LeadLaunch.swift`), the lead writes no code, nobody pushes except through the user's click (decision 2026-11-04 22:42) |
@@ -156,14 +155,14 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | | Extract class or move function out of a large class | not done for `LeadToolset.swift` (7,618 lines); see shortlist 2 for why it's done piecemeal rather than as one split |
 | Test-Driven Development: By Example, Beck, 2002 | Red first: a test that fails before the code that passes it | done for fixes: a fix's test is shown failing without it (decision 2026-10-25 09:46; worker brief `regressionTest`); the mechanical check of it is parked (decision 2026-11-06 22:35 (2)) |
 | Working Effectively with Legacy Code, Feathers, 2004 | Seams: a place to change behaviour without editing it, for tests | done: injected clocks and homes (`MacTime.swift`, `Scratch`, the scratch HOME in `scripts/test.sh`), fake ttys (`Tests/VibeSwitcherTests/FakeClaude.swift`) |
-| | Characterization tests before changing code nobody fully understands | partly: guard-rail behaviour is pinned (`LeadGuardRailsTests`, `RefusedGitSpellingsTests`); the merge path is pinned by merge-simulation tests, which hung once under load (incident 2026-11-08 19:21) |
+| | Characterization tests before changing code nobody fully understands | partly: guard-rail behaviour is pinned (`LeadGuardRailsTests`, `RefusedGitSpellingsTests`); the merge path is pinned by merge-simulation tests (`aTaskSetKeptDuringItsMergesTestRunStaysKept`), whose 2026-11-08 "hang" was the Mac asleep (decision 2026-11-08 20:36) |
 | | Sprout method or class: put new behaviour in a new, tested unit | done in practice: new behaviour lands in new files (`LeadSmallTask.swift`, `LeadOverlap.swift`, `LeadSleepRecovery.swift`); their entry points still go through `LeadToolset` |
 | xUnit Test Patterns, Meszaros, 2007 | Erratic test: name the cause (shared fixture, async wait, time, resource leak) and remove it | partly: the flake ledger plans a task at 3 flakes (`FlakeLedger.swift`); 36 flaky-test tasks so far, and the backlog cites 25% of flaky fixes flaking again |
 | | Fresh fixture per test | done: `Scratch` and `shortFolder` per test, never `/tmp` (`TemporaryFolderLint`) |
 | Clean Code, Martin, 2008 | Small functions doing one thing; names that say what | partly: most files are small and named for behaviour; `LeadToolset.swift`'s 321 functions are mostly tool handlers of 20–200 lines |
 | Growing Object-Oriented Software, Guided by Tests, Freeman & Pryce, 2009 | Listen to the tests: hard-to-test code signals a design problem | done: the 2026-10-17 engineering pass found the app untestable (hard-wired paths), which led to the scratch home (`docs/eval/engineering.md`, E-32) |
 | | Testing asynchronous code: probe and poll for an event, never sleep | done: `eventually`/`until` in each target's `TestSupport.swift`; tests proven under load before done (decision 2026-10-23 14:16; `LeadRuleChecksTests.aDoneThatAddsTestsWithoutTheirRunUnderLoadIsRefused`) |
-| Your Code as a Crime Scene, Tornhill, 2015 | Hotspots: churn × complexity points at where defects and coordination cost gather | partly: hot files are known and handled by planning rules (decisions 2026-11-08 07:28, 2026-11-08 17:52, 2026-11-12 16:27; `LeadOverlap.swift` warns on shared files), not by changing the files: shortlist 5 |
+| Your Code as a Crime Scene, Tornhill, 2015 | Hotspots: churn × complexity points at where defects and coordination cost gather | partly: hot files are known and handled by planning rules (decisions 2026-11-08 07:28, 2026-11-08 17:52, 2026-11-12 16:27; `LeadOverlap.swift` warns on shared files), not by changing the files: shortlist 4 |
 | | Temporal coupling: files that always change together belong together | not done: nothing reads co-change from git history; the overlap warning reads boundaries, not history |
 | Unit Testing: Principles, Practices, and Patterns, Khorikov, 2020 | Test observable behaviour, not implementation | done: source-scanning lints are the exception and are named as such (decision 2026-10-31 10:33); behaviour tests drive the tool server as the lead would (`LeadTeamFixture`) |
 | | Few, valuable end-to-end tests; many fast unit tests | partly: the default run holds about 4,400 tests (unit and integration), plus on-demand end-to-end scripts (`scripts/e2e/wallet-e2e.sh`, `scripts/ui-journeys.sh`); there is no size split in the merge run (see Software Engineering at Google below) |
@@ -179,16 +178,16 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | | A fast commit stage (about 10 min) before slower stages | partly: the merge run is the only stage, median 17.0 min this week; a calm-Mac merge was planned at about 9 min (task a-calm-mac-merge, merged 2026-11-12); task faster-test-suite is on it now |
 | | Keep releases reversible | partly: `revert` exists for a merged task; install rollback is an idea (backlog B12) |
 | Site Reliability Engineering, Beyer, Jones, Petoff & Murphy (eds), 2016 | Service-level objectives with an error budget that decides between features and reliability | partly: the gate's first-try rate is shown in Statistics (`SetupStatsQuality.swift`), but no target and no rule act on it: shortlist 1 |
-| | Every alert is actionable; alert on symptoms the user cares about | partly: the lead speaks only in four cases (decision 2026-11-17 19:55); report cards fold into one line (task lead-chat-noise-fold, merged 2026-11-17); nothing measures the share that needed the user: shortlist 8 |
+| | Every alert is actionable; alert on symptoms the user cares about | partly: the lead speaks only in four cases (decision 2026-11-17 19:55); report cards fold into one line (task lead-chat-noise-fold, merged 2026-11-17); nothing measures the share that needed the user: shortlist 7 |
 | | Eliminate toil | done: auto_advance does the routine steps (`LeadAdvance.swift`), idle workers are released during audits, cleanup frees build output by itself |
 | The DevOps Handbook, Kim, Humble, Debois & Willis, 2016 | The three ways: flow, fast feedback, continual learning | done: small tasks, the pre-done check, and retrospectives that turn into tasks or decisions (decision 2026-11-01 08:54, brief's retrospective step) |
 | | Telemetry everywhere, in a shared place | done: the load recorder, merge records, receipts and waits (`LoadRecorder.swift`, `LeadReceipt.swift`, `LeadWaits.swift`), the app-health digest (`AppHealth.swift`) |
-| Accelerate, Forsgren, Humble & Kim, 2018 | The four key metrics: deploy frequency, lead time, change failure rate, time to restore | partly: cost per merge and time to install are in the weekly scorecard (`SetupScorecard.swift`), merges a day in Statistics; change failure rate is counted by hand in retrospectives (decision 2026-11-09 14:20 (4)), and time to restore isn't counted: shortlist 7 |
+| Accelerate, Forsgren, Humble & Kim, 2018 | The four key metrics: deploy frequency, lead time, change failure rate, time to restore | partly: cost per merge and time to install are in the weekly scorecard (`SetupScorecard.swift`); merges a day and escapes (a merge later reverted or named by an incident, Accelerate's change failure) are in Statistics (`SetupStatsQuality.swift`), not the weekly scorecard; corrective follow-ups are counted by hand in retrospectives (decision 2026-11-09 14:20 (4)); time to restore isn't counted: shortlist 6 |
 | | Small batches and loosely coupled work | done: tasks under about 30 min (decision 2026-11-12 10:33); parallel tasks, warned on shared files (`LeadOverlap.swift`) |
-| The Site Reliability Workbook, Beyer et al. (eds), 2018 | Postmortem action items are tracked and their effect checked | partly: each incident plans a check task (`record_incident`); nothing asks later whether the incident came back after its check merged, as it did on 2026-11-07 (19:46, then 22:19): shortlist 9 |
+| The Site Reliability Workbook, Beyer et al. (eds), 2018 | Postmortem action items are tracked and their effect checked | partly: each incident plans a check task (`record_incident`); nothing asks later whether the incident came back after its check merged, as it did on 2026-11-07 (19:46, then 22:19): shortlist 8 |
 | | Alert on burn rate, not single failures | not done; follows from shortlist 1 |
 | Software Engineering at Google, Winters, Manshreck & Wright (eds), 2020 | Flaky tests are tracked and fixed as a cost, not rerun forever | partly: one rerun (`MergeRerun.swift`), the flake ledger and its 3-flake rule (`FlakeLedger.swift`); quarantine (pulling a flaky test out of the gate) doesn't fit: the policy forbids moving a test out of the merge's suite |
-| | Test sizes: small, medium, large, each with its own limits and runner | not done: one `swift test` process runs everything, so one crash takes 360–525 unfinished tests with it (`speed-review-2026-11-12.md`): shortlist 4 |
+| | Test sizes: small, medium, large, each with its own limits and runner | decided against 2026-11-12: sharding the merge run was dropped in the speed review's re-check, because the crash evidence didn't hold; reruns of only the failing tests were built instead (`MergeRerun.swift`) |
 | | The Beyoncé rule: if you liked it, you should have put a test on it | done: incidents become checks; lints scan the whole repository (`PrivateNamesLint`, `SecretShapeLint`, `DocLinksLint`) |
 | Implementing Service Level Objectives, Hidalgo, 2020 | SLIs that measure what users feel, and a budget policy agreed beforehand | not done: the user feels merge latency and sent-back merges; neither has an objective: shortlist 1 |
 | Modern Software Engineering, Farley, 2021 | Optimise for learning: experiments with hypotheses, measured | done, then paused: the impact ledger (`docs/process/impact.md`, decision 2026-11-01 08:54) was paused 2026-11-09 14:20 (2); pre-registered experiments still run (decision 2026-11-16 07:21) |
@@ -225,7 +224,7 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | An Elegant Puzzle, Larson, 2019 | Finish migrations: make the new way the default and drive the old one to zero | partly: lints with allow-lists (`ElapsedTimeLintTests.allowed` has entries "still to move") don't count down to zero |
 | | Work on what matters; measure the system, not the people | done: the scorecard reads exact data only (`SetupScorecard.swift`) |
 | Team Topologies, Skelton & Pais, 2019 | Limit cognitive load per team: give each team a bounded domain | partly: a contract bounds each worker; the files they must read don't: `LeadToolset.swift` is read by most lead-tool tasks whatever their part |
-| | Conway's law in reverse: shape the system to the teams you want | doesn't fit as a team rule (workers are short-lived); it does as a file rule: split by who changes what (shortlist 5) |
+| | Conway's law in reverse: shape the system to the teams you want | doesn't fit as a team rule (workers are short-lived); it does as a file rule: split by who changes what (shortlist 4) |
 | Shape Up, Singer, 2019 | Appetite: fix the time, vary the scope; a circuit breaker at the end | done: a time budget per task (`LeadBudget.swift`), and over budget the worker reports what works and proposes a cut |
 
 ## Already tried, decided against or parked
@@ -243,6 +242,7 @@ These came up from the books too, but they're settled. They aren't proposed agai
 | Replays to compare whole harness versions | the user chose estimates only, 2026-11-02 | decision 2026-11-02 23:00 |
 | A chaos corpus, mechanical fail-without-fix, per-contract path globs | parked with triggers, 2026-11-06 | decision 2026-11-06 22:35 |
 | A copy-of-the-build start for worktrees | abandoned 2026-10-26 | archive, decision 2026-10-26 02:06 |
+| Sharding the merge's test run so a crash costs one shard (Release It!'s bulkheads, Software Engineering at Google's test sizes) | dropped 2026-11-12 | `speed-review-2026-11-12.md`, the re-check's row 4: the crash evidence didn't hold; reruns of only the failing tests were built instead |
 | Claude Code's OS sandbox for worker shells | weighed and not recommended for speed, 2026-11-12 | `speed-review-2026-11-12.md`, "Weighed and not recommended" |
 | Quarantining flaky tests out of the gate (Software Engineering at Google) | doesn't fit | the working contracts forbid moving a test out of the merge's suite (task faster-test-suite's acceptance); the rerun and the ledger stand in |
 
@@ -272,12 +272,13 @@ ledger is paused), with today's baseline.
   is audited.
 - **After a week:** the scorecard shows both figures with their n. If the budget was spent, the board shows the
   ledger's top 3 entries planned. A first-try failure rate under 20% in `merges-*.jsonl` (vibeswitcher rows) would show
-  an effect. Still over 25% after two weeks means the policy is being skipped or the cause is crashes (item 4).
+  an effect. Still over 25% after two weeks means the policy is being skipped, or the failures aren't the ledger's named tests (18 of this week's 96 runs reran the whole command, naming no test), which then need their own diagnosis first.
 
 ### 2. Tidy first, as its own small task
 
 - **From:** *Tidy First?* (separate structure changes from behaviour changes), *Refactoring* (preparatory refactoring),
-  *Working Effectively with Legacy Code* (sprout class).
+  *Working Effectively with Legacy Code* (sprout class). The same idea appeared as "prefactoring first" in
+  `mattpocock-skills.md` (idea 3), which wasn't among the ideas chosen on 2026-11-09 but wasn't dropped either.
 - **Change:** a planning step in the lead's brief (`LeadPrompts.lead`, where contracts are written). When a task's
   change would be easier after restructuring, such as moving a tool family out of `LeadToolset.swift` or extracting a
   function, the lead plans that restructuring as its own task first: no behaviour change, tests unchanged and green.
@@ -305,36 +306,17 @@ ledger is paused), with today's baseline.
   `watch`, `xargs sh`), or when a git's option or command word comes from an expansion (`git $x`, `git ${…}`). Those
   are the spellings its header lists as "not seen here, and so open". Everything else stays as it is. A decision
   records that a new spelling found later is refused the same way, not hunted case by case.
-- **Problem and evidence:** three guard tasks so far (the-git-guard-treats on 2026-11-08, then worker-git-guard-the
-  and worker-git-guard-part on 2026-11-17), each with Important findings over rounds (F1–F3 for process substitution,
-  nesting limits, `find -exec`, case folding). The 2026-11-17 Code Mode trial's worker ran `git --git-dir=…`
+- **Problem and evidence:** two spelling tasks on 2026-11-17 (worker-git-guard-the and worker-git-guard-part), each
+  sent back with Important findings (process substitution, nesting limits, `find -exec`, case folding) before passing.
+  An earlier guard task (the-git-guard-treats, 2026-11-08, trailer commands) passed clean. The 2026-11-17 Code Mode trial's worker ran `git --git-dir=…`
   unasked. A denylist over a shell language keeps losing to the next spelling. The workers' legitimate git never
   needs to go through `sh -c` or `eval`.
 - **Cost:** small to medium. One task, audited for security. The risk is refusing a worker's harmless `sh -c '… git
   status'`; the refusal says to run git plainly.
-- **After a week:** no new guard-spelling task planned (the baseline is three in ten days), and no worker blocked by
+- **After a week:** no new guard-spelling task planned (the baseline is two in one evening), and no worker blocked by
   the new refusal for a harmless command, judged from their reports to the lead.
 
-### 4. A crash costs one test shard, not the whole merge
-
-- **From:** *Release It!* (bulkheads), *Software Engineering at Google* (test sizes with their own runners and
-  limits).
-- **Change:** `scripts/test.sh` runs the Swift tests as a few processes within the slot's width, split by size
-  (pure VibeCore; socket and host; app and sandbox), each with its own result line. `Sources/VibeCore/MergeRerun.swift`
-  reruns only a shard that crashed or failed, and the merge record names the shard. This is the speed review's
-  improvement 4, never planned, with this week's numbers. It comes after faster-test-suite merges: that task may
-  split suites across processes but must not touch the merge path or the rerun.
-- **Problem and evidence:** 18 of this week's 96 merge runs reran the whole command (27 of 139 the week before),
-  each costing another full run at a median of 17 min. Whole reruns list 360–525 unfinished tests, so one crash takes
-  the suite down (`speed-review-2026-11-12.md`). 11 of 19 whole reruns that week passed, so most crashes are
-  intermittent.
-- **Cost:** medium. Two tasks: `scripts/test.sh` (shared test infrastructure, so its worker runs the full suite), then
-  `MergeRerun.swift` (sensitive, audited).
-- **After a week:** whole-command reruns in `merges-*.jsonl` fall from 18 a week to a few, replaced by shard reruns.
-  Minutes spent rerunning drop by half or more. The first-try rate from item 1 moves only if the crashes are fixed
-  too, so this check is about rerun cost.
-
-### 5. Split Sandbox.swift by what's sensitive
+### 4. Split Sandbox.swift by what's sensitive
 
 - **From:** *A Philosophy of Software Design* (information hiding: keep each decision in one module), *Your Code as
   a Crime Scene* (hotspots), *Clean Architecture* (separate policy from detail).
@@ -353,7 +335,7 @@ ledger is paused), with today's baseline.
 - **After a week:** progress lines starting an audit only for Sandbox.swift go from 5 in a week to 0. UI tasks that
   add a probe merge as small tasks.
 
-### 6. The memory benches run by themselves on a calm Mac
+### 5. The memory benches run by themselves on a calm Mac
 
 - **From:** *Building Evolutionary Architectures* (fitness functions, run continuously), *Release It!* (steady state).
 - **Change:** a deterministic job, not an agent (decision 2026-10-26 11:01 (c)), run once a day by the app, as the
@@ -371,21 +353,25 @@ ledger is paused), with today's baseline.
 - **After a week:** results recorded on at least 4 of 7 days. Any growth shows in the stats before or with the
   app-health line, not after it.
 
-### 7. Accelerate's stability metrics in the weekly scorecard
+### 6. Time to restore, and escapes, in the weekly scorecard
 
 - **From:** *Accelerate* (change failure rate and time to restore, beside throughput).
-- **Change:** `SetupScorecard.swift` adds (a) change failure rate: merged tasks that needed a corrective follow-up, from
-  receipts and task origins (`LeadOrigins.swift`), as the retrospective counts it by hand today (decision 2026-11-09
-  14:20 (4)); and (b) time to restore: minutes the pipeline was blocked by main red or the lead's records failing a
-  check, from `LeadPipeline.swift`'s causes.
-- **Problem and evidence:** throughput and time to install are counted (`SetupScorecard.swift`), but stability isn't.
-  On 2026-11-12 every merge was blocked for about 2 h 45 min (incident 2026-11-12 13:47), and main was red for about
-  four hours the same day (`worker-rediscovery-2026-11.md`). Neither shows in any weekly figure.
-- **Cost:** small to medium. One task. The scorecard reads exact data only.
-- **After a week:** both figures appear for this week and the last, with their n. The next retrospective uses them
-  instead of a hand count.
+- **Change:** `SetupScorecard.swift` adds (a) time to restore: minutes the pipeline was blocked by main red or the
+  lead's records failing a check, from `LeadPipeline.swift`'s causes, which nothing counts today; and (b) the escape
+  rate that Statistics already computes (`SetupStatsQuality.swift`: a merge later reverted, or one an incident names),
+  moved beside the week's other figures. That is Accelerate's change failure rate. The retrospective's hand count of
+  corrective follow-ups (decision 2026-11-09 14:20 (4)) stays as is, since it also catches defects that never got an
+  incident or a revert. If it keeps finding many more than the escape count, the escape rule is too narrow, which is
+  worth a decision of its own.
+- **Problem and evidence:** on 2026-11-12 every merge was blocked for about 2 h 45 min (incident 2026-11-12 13:47), and
+  main was red for about four hours the same day (`worker-rediscovery-2026-11.md`). Neither shows in any weekly
+  figure. Escapes (about 4% in the backlog's header) sit on a separate Statistics page that the weekly review doesn't
+  read.
+- **Cost:** small to medium. One task, mostly in (a). The scorecard reads exact data only.
+- **After a week:** both figures appear for this week and the last, with their n, and the next retrospective cites
+  them.
 
-### 8. Lead messages measured by whether they needed the user
+### 7. Lead messages measured by whether they needed the user
 
 - **From:** *Site Reliability Engineering* (every page actionable), *Making Work Visible* (unplanned work made
   visible).
@@ -399,7 +385,7 @@ ledger is paused), with today's baseline.
 - **After a week:** at most about 4 messages a day, and at least half of them needing the user, against about 4 in 14 on
   2026-11-17.
 
-### 9. Each retrospective checks whether an incident came back after its check merged
+### 8. Each retrospective checks whether an incident came back after its check merged
 
 - **From:** *The Site Reliability Workbook* (postmortem action items verified, not just closed), Dekker (the second
   story).
@@ -413,7 +399,7 @@ ledger is paused), with today's baseline.
 - **Cost:** tiny. A prompt line; `LeadWorkflow.swift` is sensitive, so it's audited.
 - **After a week:** the next retrospective lists each recent incident with "recurred: yes or no".
 
-### 10. One transition table for a task's states
+### 9. One transition table for a task's states
 
 - **From:** *Domain Modeling Made Functional* (make illegal states unrepresentable), *Domain-Driven Design*
   (aggregates guard their invariants).
@@ -432,9 +418,9 @@ ledger is paused), with today's baseline.
 
 | Pain point | Covered by |
 | --- | --- |
-| Merges take 16–20 min | faster-test-suite (running); items 1 (the 10-minute objective keeps its gain) and 4 (no whole-suite reruns) |
+| Merges take 16–20 min | faster-test-suite (running); item 1 (the 10-minute objective keeps its gain). Sharding the run is not proposed: dropped 2026-11-12 |
 | Flaky tests from Mac sleep | already handled at the source: awake-time limits (`MacTime.swift`, task test-waits-count-awake), `ElapsedTimeLint`, the flakes fixed on 2026-11-17 (decision 2026-11-17 17:02); item 1 gives the rest a budget |
-| Notification noise in the lead chat | lead-chat-noise-fold (merged 2026-11-17) and its follow-up (running); item 8 measures whether it holds |
+| Notification noise in the lead chat | lead-chat-noise-fold (merged 2026-11-17) and its follow-up (running); item 7 measures whether it holds |
 | Guard rails bypassed by shell spellings | item 3 |
-| Memory growth | app-memory-grows-again (running) finds this week's cause; item 6 catches the next one before the field does |
-| Hot files (LeadToolset, LeadAdvance) | items 2 (LeadToolset shrinks a family at a time) and 5 (the other hotspot, Sandbox.swift); LeadAdvance (1,288 lines) is sensitive by design and small enough to keep whole |
+| Memory growth | app-memory-grows-again (running) finds this week's cause; item 5 catches the next one before the field does |
+| Hot files (LeadToolset, LeadAdvance) | items 2 (LeadToolset shrinks a family at a time) and 4 (the other hotspot, Sandbox.swift); LeadAdvance (1,288 lines) is sensitive by design and small enough to keep whole |
