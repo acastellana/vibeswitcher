@@ -82,8 +82,8 @@ struct StatusLineBinaryTests {
         return (process, pid)
     }
 
-    /// Whether `target` (a pid, or a group as its negative) is gone: ESRCH. EPERM isn't gone: XNU says it for a group
-    /// whose one member left is a child still being made.
+    /// Whether `target` (a pid, or a group as its negative) is gone: ESRCH. EPERM isn't gone: the group still exists,
+    /// though nothing in it took the signal.
     func gone(_ target: pid_t) -> Bool { kill(target, 0) == -1 && errno == ESRCH }
 
     /// What is left of process group `group`, for a failure's message: each member (pid, parent, name) and what a
@@ -124,8 +124,8 @@ struct StatusLineBinaryTests {
 
     /// Stopped while its shell is starting a program (a pipeline's or a `&`'s fork under way), your command leaves none
     /// of it running: XNU's kill of a group passes over a child still being made, which then runs on in the group with
-    /// launchd as its parent. One stop lands in that window now and then (the test above failed so about 1 run in 10
-    /// of a loaded full suite, 2026-11-18); a command starting one program after another is in it most of the time.
+    /// launchd as its parent. One stop lands in that window now and then (the test above failed on this wait in about
+    /// 1 wide run in 10, 2026-11-18); a command starting one program after another is in it most of the time.
     @Test func stoppedWhileYourCommandStartsAProgramNoneOfItIsLeftRunning() async throws {
         for attempt in 1...12 {
             let started = temp.url("status-started-\(attempt)")

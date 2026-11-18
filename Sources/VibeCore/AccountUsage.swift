@@ -536,7 +536,7 @@ public enum UsageStatusLine {
     /// Kills `group` again and again until none of it is left (ESRCH), for at most `groupSweep`. One kill isn't enough:
     /// XNU's kill of a group passes over a child its shell is still making (a pipeline's or a `&`'s fork under way), and
     /// that child then runs on in the group with launchd as its parent (StatusLineBinaryTests, 2026-11-18: a `sleep` left
-    /// so in about 1 full test run in 10 under load). EPERM isn't "none left": it's said while such a child is being made.
+    /// so). EPERM isn't "none left": the group still exists, though nothing in it took the signal (seen while it emptied).
     static func killAll(group: pid_t) {
         let deadline = MacTime.real.awake() + groupSweep
         while kill(-group, SIGKILL) == 0 || errno != ESRCH, MacTime.real.awake() < deadline {
