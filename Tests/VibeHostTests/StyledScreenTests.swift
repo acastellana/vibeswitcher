@@ -275,7 +275,7 @@ struct ClearDraftTests {
         """.write(toFile: script, atomically: true, encoding: .utf8)
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try await client.spawn("/bin/sh \(script)")
+        let session = try await client.spawn("\(jobControlOff)/bin/sh \(script)")
         let id = session.id
         let older = { () -> LeadDelivery.Screen? in
             if case .screenText(_, let text)? = try? HostCall.request(.screen(id: id), socket: host.socket, appKey: host.appKey) { return LeadDelivery.Screen(text: text) }

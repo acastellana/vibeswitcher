@@ -309,7 +309,7 @@ struct HostServerTests {
         // It reads nothing until the test says go (a file appears), however long sending 3 MB takes.
         let go = out + ".go"
         defer { unlink(go) }
-        let session = try await client.spawn("stty raw -echo; echo ready; while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)")
+        let session = try await client.spawn("\(jobControlOff)stty raw -echo; echo ready; while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)")
         await client.attach(session.id)
         #expect(await eventually { client.text(session.id).contains("ready") })
         let piece = 64 << 10
@@ -424,7 +424,7 @@ struct HostCallTests {
     @Test func refusedInputIsAnError() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try await client.spawn("stty raw -echo; echo ready; \(keepRunning)")
+        let session = try await client.spawn("\(jobControlOff)stty raw -echo; echo ready; \(keepRunning)")
         await client.attach(session.id)
         #expect(await eventually { client.text(session.id).contains("ready") })
         var refusal: String?
@@ -468,7 +468,7 @@ struct HostCallTests {
         let client = try TestClient(host)
         let out = scratchRoot.appendingPathComponent("typed-\(UUID().uuidString.prefix(8))").path
         defer { unlink(out) }
-        let session = try await client.spawn("stty raw -echo; echo ready; exec cat > \(out)")
+        let session = try await client.spawn("\(jobControlOff)stty raw -echo; echo ready; exec cat > \(out)")
         await client.attach(session.id)
         #expect(await eventually { client.text(session.id).contains("ready") })
         let brief = (0..<600).map { "Line \($0): " + String(repeating: "brief ", count: 8) }.joined(separator: "\n")

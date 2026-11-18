@@ -2,6 +2,14 @@ import Foundation
 import Testing
 import VibeCore
 
+/// The first words of a scratch program whose forked commands use the terminal themselves (`stty raw`, a `dd` reading
+/// it): job control off, so they run in the shell's own process group, the terminal's foreground one. With it on (the
+/// shell is interactive), macOS sometimes fails a child's `setpgid` ("sh: child setpgid (N to N): Operation not
+/// permitted") and that child's terminal calls then fail with EIO: an `stty raw` that didn't happen, so the host's
+/// answer waited unread in a cooked terminal, or a `dd` that read nothing (headlessAnswersQueriesOnlyWhenNoClient's
+/// flakes of 2026-11-12 and 2026-11-18). The host had answered; the shell's job control lost it.
+let jobControlOff = "set +m; "
+
 /// Set when `refuseTheAccountRoot` has run (a test in each target checks it did).
 var homeGuardRan = false
 
