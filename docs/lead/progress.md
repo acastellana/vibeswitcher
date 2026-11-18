@@ -3979,3 +3979,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 23:04 Automatically (auto_advance): Cleaned up architecture-diagram (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-18 23:11 Released flaky-host-tests-turn's worker (idle since its done report on 60309016) while its audit runs
 - 2026-11-18 23:11 Started a worker on the-lead-s-records
+- 2026-11-18 23:16 Review of merge-reruns-only-what: audit
+- 2026-11-18 23:16 Review of the-config-seal-is: audit
+- 2026-11-18 23:16 Review of sensitive-audits-fall: audit
+- 2026-11-18 23:17 Started a worker on sensitive-audits-fall
+- 2026-11-18 23:17 Automatically (auto_advance): Started a worker on sensitive-audits-fall (Sensitive audits fall back to the verifier_model when Fable is refused at its limit).
+- 2026-11-18 23:17 Started a worker on merge-reruns-only-what
+- 2026-11-18 23:17 Automatically (auto_advance): Started a worker on merge-reruns-only-what (Merge reruns only what failed: a failing first run reruns its named tests, not the whole suite).
+- 2026-11-18 23:17 Automatically (auto_advance): Overlap for merge-reruns-only-what's start (a warning only: nothing was refused or reordered). scripts/test.sh: sigpipe-probe-always-on (running: its boundaries name it).
+- 2026-11-18 23:20 Audit of flaky-host-tests-turn: complete, clean
