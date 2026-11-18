@@ -33,29 +33,28 @@ private let fakeTheDisk: @convention(c) () -> Void = {
 /// process died of one 62 s in ("exited with unexpected signal code 13"), every test after it unrun and none named.
 /// Caught, not ignored, as in the app (which leaves it at its default): what a test starts gets SIGPIPE at its default,
 /// a caught signal being reset by exec where an ignored one is inherited. Every target's tests run in one process:
-/// each installs this same handler. The run still fails on one, naming it (`brokenPipesFailTheRun`, VibeCoreTests).
+/// each installs a handler, this one the SIGPIPE probe's (`EPipeProbe`, which names the writer), the others theirs only
+/// where none is yet, so whichever runs first the probe's is the one. The run still fails on one, naming it
+/// (`brokenPipesFailTheRun`, VibeCoreTests).
 @_used @_section("__DATA,__mod_init_func")
-private let catchBrokenPipes: @convention(c) () -> Void = {
-    var action = sigaction()
-    action.__sigaction_u.__sa_handler = { _ in }
-    sigemptyset(&action.sa_mask)
-    action.sa_flags = SA_RESTART
-    sigaction(SIGPIPE, &action, nil)
-}
+private let catchBrokenPipes: @convention(c) () -> Void = { EPipeProbe.install() }
 
 /// Each SIGPIPE the run gets fails it, as an issue in no test, the run going on: the app leaves SIGPIPE at its default,
 /// so the write that raised it (one of the app's whose reader had gone, unguarded) would end the app. A kqueue's
 /// EVFILT_SIGNAL hears it however it's handled, ignored too. A pipe's SIGPIPE goes to the process, not the thread that
-/// wrote, so no stack would name the writer.
+/// wrote, and this runs after the writer has returned: the issue says what the probe's snapshot, taken in the handler,
+/// found writing (`EPipeProbe.snapshotLines`); the probe's write hook records the writer from its own thread too.
 @_used @_section("__DATA,__mod_init_func")
 private let failOnBrokenPipes: @convention(c) () -> Void = { _ = brokenPipesFailTheRun }
 
 private let brokenPipesFailTheRun: DispatchSourceSignal = {
     let source = DispatchSource.makeSignalSource(signal: SIGPIPE, queue: DispatchQueue(label: "broken-pipes"))
     source.setEventHandler {
-        Issue.record(Comment(rawValue: "SIGPIPE: a write to a pipe or socket whose reader had gone, without F_SETNOSIGPIPE or "
+        let writer = EPipeProbe.snapshotLines()
+        Issue.record(Comment(rawValue: (["SIGPIPE: a write to a pipe or socket whose reader had gone, without F_SETNOSIGPIPE or "
                              + "SO_NOSIGPIPE (\(source.data) since the last). The run caught it; the app, at SIGPIPE's default, "
-                             + "would have died of it. Give the writer F_SETNOSIGPIPE or SO_NOSIGPIPE."))
+                             + "would have died of it. Give the writer F_SETNOSIGPIPE or SO_NOSIGPIPE."] + writer).joined(separator: "\n")))
+        EPipeProbe.counts.withLock { EPipeProbe.reported += 1 }
     }
     source.resume()
     return source

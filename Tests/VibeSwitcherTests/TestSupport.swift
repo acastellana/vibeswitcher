@@ -41,10 +41,14 @@ private let fakeTheDisk: @convention(c) () -> Void = {
 /// process died of one 62 s in ("exited with unexpected signal code 13"), every test after it unrun and none named.
 /// Caught, not ignored, as in the app (which leaves it at its default): what a test starts gets SIGPIPE at its default,
 /// a caught signal being reset by exec where an ignored one is inherited. Every target's tests run in one process:
-/// each installs this same handler. The run still fails on one, naming it (`brokenPipesFailTheRun`, VibeCoreTests).
+/// each installs a handler where none is yet: VibeCoreTests' is the SIGPIPE probe's (`EPipeProbe`, which names the
+/// writer), and whichever target's runs first, the probe's is the one left. The run still fails on one, naming it
+/// (`brokenPipesFailTheRun`, VibeCoreTests).
 @_used @_section("__DATA,__mod_init_func")
 private let catchBrokenPipes: @convention(c) () -> Void = {
     var action = sigaction()
+    sigaction(SIGPIPE, nil, &action)
+    guard action.__sigaction_u.__sa_handler == nil else { return }
     action.__sigaction_u.__sa_handler = { _ in }
     sigemptyset(&action.sa_mask)
     action.sa_flags = SA_RESTART

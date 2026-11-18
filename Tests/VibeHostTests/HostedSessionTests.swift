@@ -143,8 +143,12 @@ struct HostedSessionTests {
     /// The host ignores SIGPIPE/SIGHUP and runs on GCD threads (which block most signals); programs it starts
     /// must get neither: a blocked SIGWINCH means no redraw on resize, an ignored SIGHUP means End can't stop them.
     @Test func spawnedProgramsGetDefaultSignals() async throws {
-        let oldPipe = signal(SIGPIPE, SIG_IGN), oldHup = signal(SIGHUP, SIG_IGN)
-        defer { signal(SIGPIPE, oldPipe); signal(SIGHUP, oldHup) }
+        // Put back whole (sigaction, not signal(), which would drop the SIGPIPE probe's SA_SIGINFO: EPipeProbe).
+        var ignore = sigaction(), oldPipe = sigaction(), oldHup = sigaction()
+        ignore.__sigaction_u.__sa_handler = SIG_IGN
+        sigaction(SIGPIPE, &ignore, &oldPipe)
+        sigaction(SIGHUP, &ignore, &oldHup)
+        defer { sigaction(SIGPIPE, &oldPipe, nil); sigaction(SIGHUP, &oldHup, nil) }
         let probe = SessionProbe()
         let script = "echo mask=$(ps -o sigmask= -p $$ | tr -d ' '); sh -c 'kill -PIPE $$; echo pipe-ignored'; "
             + "sh -c 'kill -HUP $$; echo hup-ignored'; echo end"
