@@ -42,9 +42,9 @@ merge gate, treated as a production service with an objective and an error budge
 
 1. **An error budget for the merge gate** (SRE, Implementing SLOs, Deming): 28% of merge runs fail their first try.
 2. **Tidy first, as its own small task** (Tidy First?, Refactoring): large tasks need a second audit round 59% of the time.
-3. **Split Sandbox.swift by what's sensitive** (A Philosophy of Software Design, Your Code as a Crime Scene): 36 audits were started only because a UI task touched it.
+3. **The git guard fails closed on git it can't see** (Building Secure and Reliable Systems, Secure by Design): three guard tasks so far, and `RefusedGit.swift` itself lists the open spellings.
 4. **A crash costs one test shard, not the merge** (Release It!, Software Engineering at Google): 18 whole-suite reruns this week.
-5. **The git guard fails closed on git it can't see** (Building Secure and Reliable Systems, Secure by Design): three guard tasks so far, and `RefusedGit.swift` itself lists the open spellings.
+5. **Split Sandbox.swift by what's sensitive** (A Philosophy of Software Design, Your Code as a Crime Scene): 36 audits were started only because a UI task touched it.
 6. **The memory benches run by themselves on a calm Mac** (Building Evolutionary Architectures, Release It!): the app's memory growth has needed 9 tasks since October.
 7. **Stability metrics in the weekly scorecard** (Accelerate): change failure rate and time to restore are counted by hand today.
 8. **Lead messages measured by whether they needed the user** (SRE, Making Work Visible): the noise rule was written twice, on 10-25 and 11-17.
@@ -93,7 +93,7 @@ command; and two large files keep pulling unrelated work together.
 
 ## The book list
 
-50 books in four groups, by first-edition year. They include every title the task named, plus these swaps and
+50 books in four groups, each with its first edition's year. They include every title the task named, plus these swaps and
 additions, each chosen because it speaks to a problem this repository's records show:
 
 - **Your Code as a Crime Scene** (Tornhill): its hotspot measure (churn × size) is the hot-file problem, with numbers.
@@ -117,7 +117,7 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | --- | --- | --- |
 | Design Patterns, Gamma, Helm, Johnson & Vlissides, 1994 | Command: requests as objects that can be queued, logged and replayed | done: MCP tool calls are typed requests that `LeadToolset` dispatches and records in progress.md; `ComposerOutbox.swift` queues sends |
 | | Strategy: pick an algorithm at run time behind one interface | done: `agent: auto` routes a task to Claude or Codex (decision 2026-11-02 08:18); `LeadDelivery.way` picks steer or type |
-| Patterns of Enterprise Application Architecture, Fowler, 2002 | Optimistic offline lock: detect a stale write by version, don't lock | done: contracts carry versions, and a clean verdict on an older contract version is audited again (`LeadAdvance.swift`; backlog A6); merge refuses a verdict on a moved head (`LeadGuardRailsTests`) |
+| Patterns of Enterprise Application Architecture, Fowler, 2002 | Optimistic offline lock: detect a stale write by version, don't lock | done: contracts carry versions, and a clean verdict on an older contract version is audited again (`LeadBoard.swift`, `LeadToolset.swift`; backlog A6); merge refuses a verdict on a moved head (`LeadGuardRailsTests`) |
 | | Unit of work: commit related changes together or not at all | done: the lead's records are committed by the tool server alone (`LeadRecords.swift`, decision 2026-10-17 17:45); batched merges land together or are split (`LeadMergeBatch.swift`) |
 | Domain-Driven Design, Evans, 2003 | Ubiquitous language: one word, one meaning, shared by code and people | done: "vault" vs "wallet" renamed while the format was new (decision 2026-10-31 17:16); "board" vs "wall" kept apart (`team-on-one-task-design.md`) |
 | | Bounded context with a published language and an anticorruption layer | done: wallet requests cross to another app only in a versioned format with test vectors (`docs/protocol/wallet-request.md`, `docs/protocol/vectors/`; decision 2026-10-31 15:15) |
@@ -131,7 +131,7 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | | Information hiding: a decision lives in one place | partly: the refused git options are kept once (`RefusedGit.swift` header); what the sandbox may do and its fixtures share one sensitive file (`Sandbox.swift`): shortlist 3 |
 | Clean Architecture, Martin, 2017 | The dependency rule: policy doesn't depend on UI or frameworks | done: no file in `Sources/VibeCore` imports AppKit or SwiftUI; the app (`Sources/VibeSwitcher`) and the host (`Sources/VibeHost`) depend on it |
 | | Humble object: keep logic out of what's hard to test | done: the app's logic is in VibeCore and tested headless; UI is checked in the sandbox (`scripts/sandbox-app.sh`) |
-| Designing Data-Intensive Applications, Kleppmann, 2017 | Unreliable clocks: never order or time out by wall-clock | done: limits count awake time (`MacTime.swift`, decision 2026-11-08 20:36); decisions are stamped by the Mac's clock in one place (`LeadRecords.swift`) |
+| Designing Data-Intensive Applications, Kleppmann, 2017 | Unreliable clocks: never order or time out by wall-clock | done: limits count awake time (`MacTime.swift`, decision 2026-11-08 20:36); decisions are stamped by the Mac's clock in one place (`LeadBoard.appendDecision`) |
 | | An append-only log with derived views | done: progress.md is append-only; `product-inventory.md` is generated from the code (`scripts/product-inventory.sh`); finished tasks move to `board-archive.jsonl` |
 | Domain Modeling Made Functional, Wlaschin, 2018 | Make illegal states unrepresentable: legal transitions written once | not done: no transition table; a kept task was merged by auto_advance (incident 2026-10-30 21:42), fixed case by case (`aTaskSetKeptDuringItsMergesTestRunStaysKept`): shortlist 10 |
 | | Parse, don't validate, at the edges | done: wallet requests are parsed strictly into a typed value (`WalletRequestFormat.swift`, vectors in `docs/protocol/vectors/`); `LeadWorkflow` reads workflow.md's known keys only |
@@ -183,7 +183,7 @@ Algorithms*, *SICP*). None of those propose engineering-process patterns that th
 | | Eliminate toil | done: auto_advance does the routine steps (`LeadAdvance.swift`), idle workers are released during audits, cleanup frees build output by itself |
 | The DevOps Handbook, Kim, Humble, Debois & Willis, 2016 | The three ways: flow, fast feedback, continual learning | done: small tasks, the pre-done check, and retrospectives that turn into tasks or decisions (decision 2026-11-01 08:54, brief's retrospective step) |
 | | Telemetry everywhere, in a shared place | done: the load recorder, merge records, receipts and waits (`LoadRecorder.swift`, `LeadReceipt.swift`, `LeadWaits.swift`), the app-health digest (`AppHealth.swift`) |
-| Accelerate, Forsgren, Humble & Kim, 2018 | The four key metrics: deploy frequency, lead time, change failure rate, time to restore | partly: merges a day and time to install are in the weekly scorecard (`SetupScorecard.swift`); change failure rate is counted by hand in retrospectives (decision 2026-11-09 14:20 (4)), and time to restore isn't counted: shortlist 7 |
+| Accelerate, Forsgren, Humble & Kim, 2018 | The four key metrics: deploy frequency, lead time, change failure rate, time to restore | partly: cost per merge and time to install are in the weekly scorecard (`SetupScorecard.swift`), merges a day in Statistics; change failure rate is counted by hand in retrospectives (decision 2026-11-09 14:20 (4)), and time to restore isn't counted: shortlist 7 |
 | | Small batches and loosely coupled work | done: tasks under about 30 min (decision 2026-11-12 10:33); parallel tasks, warned on shared files (`LeadOverlap.swift`) |
 | The Site Reliability Workbook, Beyer et al. (eds), 2018 | Postmortem action items are tracked and their effect checked | partly: each incident plans a check task (`record_incident`); nothing asks later whether the incident came back after its check merged, as it did on 2026-11-07 (19:46, then 22:19): shortlist 9 |
 | | Alert on burn rate, not single failures | not done; follows from shortlist 1 |
