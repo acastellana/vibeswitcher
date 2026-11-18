@@ -339,7 +339,10 @@ struct LeadLaunchTests {
             let task: String? = role == .lead ? nil : "x"
             let launch = try LeadLaunch.prepare(role: role, root: root, task: task, base: "claude", prompt: prompt, start: "Go.",
                                                 server: "/opt/vibe switcher/vibeswitcher-mcp", name: "\(role.rawValue)-x",
-                                                branch: "project-lead", records: "docs/lead", folder: folder)
+                                                branch: "project-lead", records: "docs/lead", folder: folder,
+                                                // A home of its own: other tests' `.claude` entries in the run's would be
+                                                // denied too (`otherSessions`), and the list below would miss them.
+                                                home: temp.url("home-\(role.rawValue)").path)
             // Nothing in the run folder: the files `prepare` wrote are gone.
             #expect((try FileManager.default.contentsOfDirectory(atPath: folder.path)).isEmpty, "\(role)")
             for file in [launch.settingsFile, launch.mcpFile, launch.promptFile] { #expect(!FileManager.default.fileExists(atPath: file)) }
