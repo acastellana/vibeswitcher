@@ -371,3 +371,7 @@ On 2026-11-18 the user's /model switch to Fable 5.2 saved itself as the default 
 
 Measured on the week to 2026-11-18, with the handover in place: a heartbeat sent only while work is in flight avoids 2 of the 27 cold lead wakes, saving about $2.34 a week for $0.17 spent. But it reads 3 to 4 times more tokens than it saves, on a plan whose limits count tokens, and each heartbeat is a turn typed into the lead's chat. The user asked for this check on 2026-11-18 (answer to 001841F9). Revisit if usage is billed in dollars, or if cold wakes with work in flight become common.
 
+## 2026-11-18 18:53:12 The targeted hunt for the SIGPIPE writer is closed without a catch (find-the-test-that, 2026-11-18), so the merge's test width stays at 1 a core. Instead the probe goes into every test run (task sigpipe-probe-always-on), so the next merge that takes a SIGPIPE names the writer; the fix and the switch to two tests a core follow from that catch. A second flake the hunt reproduced 9 times gets its own task (flaky-status-line-test).
+
+About 160 probed runs caught the signal once, before the sharper probe existed (roughly 1% of early-suite runs), while merges' full runs under load hit it far more often: 12 of the week's 37 flakes and 3 of today's merges. More hunting costs heavy slots for little chance; an always-on probe costs nothing per run and catches it where it actually happens.
+

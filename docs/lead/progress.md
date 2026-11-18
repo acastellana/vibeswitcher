@@ -3898,3 +3898,24 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 18:30 Started a worker on tool-server-threads-run
 - 2026-11-18 18:30 Automatically (auto_advance): Started a worker on tool-server-threads-run (Tool server threads run on 512 KB stacks that a larger board value can overflow), its after tasks done (receipts-fable-5-2).
 - 2026-11-18 18:30 Automatically (auto_advance): Overlap for tool-server-threads-run's start (a warning only: nothing was refused or reordered). LeadAdvance.swift: a-worker-that-stops (running: its boundaries name it); Sources/VibeCore/LeadAdvance.swift: a-worker-that-stops (running: its branch changes it).
+- 2026-11-18 18:30 Committed the records at 7344d4f1 before merging scorecard-merge, memory-benches-run-by, team-sessions-load-only, flaky-headless-test-fix: the last merge failed on docs/lead/decisions.md, docs/lead/progress.md
+- 2026-11-18 18:31 Pipeline held: team-sessions-load-only, scorecard-merge, flaky-headless-test-fix, memory-benches-run-by ready to merge with none landing; cause: a merge in progress
+- 2026-11-18 18:52 Review of find-the-test-that: none
+- 2026-11-18 18:52 Sent find-the-test-that's worker contract v2 (it had v1)
+- 2026-11-18 18:52 Planned sigpipe-probe-always-on: SIGPIPE probe always on: a test run that takes a SIGPIPE names the writer (review audit)
+- 2026-11-18 18:53 Planned flaky-status-line-test: Flaky status-line test: claudeCodeStoppingTheStatusLineStopsYourCommandToo fails after 300 s under load
+- 2026-11-18 18:55 Started a worker on flaky-status-line-test
+- 2026-11-18 18:55 Automatically (auto_advance): Started a worker on flaky-status-line-test (Flaky status-line test: claudeCodeStoppingTheStatusLineStopsYourCommandToo fails after 300 s under load).
+- 2026-11-18 18:55 Raised find-the-test-that to audit (the risk check, at ab4e052c): it changes 757 lines outside tests, over risk_lines (400)
+- 2026-11-18 18:55 Automatically (auto_advance): Started the audit of find-the-test-that at ab4e052c (The risk check raised it to audit: it changes 757 lines outside tests, over risk_lines (400)).
+- 2026-11-18 18:55 Released a-worker-that-stops's worker (idle since its done report on c55a2be0) while its audit runs
+- 2026-11-18 18:55 Automatically (auto_advance): Started the audit of a-worker-that-stops at c55a2be0 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-18 18:57 Audit of a-worker-that-stops: complete, clean, round 2: 1 Important closed, 3 Nit open
+- 2026-11-18 18:57 Planned a-refused-report-s: A refused report's quoted text is masked for secrets before it reaches the board and the lead (review audit, for security)
+- 2026-11-18 19:01 Pipeline held: team-sessions-load-only, scorecard-merge, flaky-headless-test-fix, memory-benches-run-by ready to merge with none landing; cause: every test slot held
+- 2026-11-18 19:05 Audit of find-the-test-that: complete, clean, round 1: 1 Nit open
+- 2026-11-18 19:32 Pipeline held: team-sessions-load-only, scorecard-merge, flaky-headless-test-fix, memory-benches-run-by, a-worker-that-stops, find-the-test-that ready to merge with none landing; cause: a merge in progress
+- 2026-11-18 19:42 Merged scorecard-merge: Scorecard: merge objectives and the lead's messages to the user (in a batch, on a test run of its own) (build 0f7f4ba1b57f)
+- 2026-11-18 19:42 Didn't merge memory-benches-run-by in the batch: tests fail with it on main (everyBenchFlagInMainRunsOnScratchDefaults(); the run stopped partway: 810 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the o…); back to its worker
+- 2026-11-18 19:53 Merged team-sessions-load-only: Team sessions load only allowlisted plugins (in a batch: team-sessions-load-only, flaky-headless-test-fix landed on one test run) (build 0f7f4ba1b57f)
+- 2026-11-18 19:53 Merged flaky-headless-test-fix: Flaky headless test: fix it from the failure log that now shows the probe's output (in a batch: team-sessions-load-only, flaky-headless-test-fix landed on one test run) (build 0f7f4ba1b57f)
