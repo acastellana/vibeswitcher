@@ -282,6 +282,34 @@ extension HostedSessionTests {
         probe.end(session)
     }
 
+    /// The same, with the host reading late (a loaded Mac's): its session queue held from the spawn until the launcher
+    /// has ended, or for 2 s once it's clear it waits to be read. macOS drops what the terminal's master hasn't read when
+    /// its session leader exits, so a launcher that exited right after writing left an empty screen (2026-11-18).
+    @Test func aShellThatIsntThereIsNamedEvenWhenTheHostReadsLate() async throws {
+        let probe = SessionProbe()
+        let request = SpawnRequest(cwd: "/tmp", command: "true", env: ["PROBE": "yes"], cols: 80, rows: 24, keepShell: false,
+                                   label: "Test", agent: nil)
+        let session = try probe.queue.sync {
+            let session = try HostedSession.spawn(request, shell: "/no/such/bin/fakesh", launcher: hostLauncher,
+                                                  baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()],
+                                                  ringCapacity: 1 << 20, queue: probe.queue)
+            probe.attach(session)
+            // Ended (not reaped: the session does that), or still waiting for the host to read it.
+            let deadline = MacTime.real.awake() + 2
+            var ended = siginfo_t()
+            while MacTime.real.awake() < deadline {
+                ended.si_pid = 0
+                if waitid(P_PID, id_t(session.info.childPID), &ended, WEXITED | WNOWAIT | WNOHANG) == 0, ended.si_pid != 0 { break }
+                usleep(10_000)
+            }
+            return session
+        }
+        #expect(await eventually { probe.text.contains("Couldn't start fakesh: it should be at /no/such/bin/fakesh, and isn't (No such file or directory).") },
+                "\(probe.diagnosis(session))")
+        #expect(await eventually { probe.lastChange?.exit?.status == 127 })
+        probe.end(session)
+    }
+
     /// The launcher itself not there: the spawn's error says which program, at which path.
     @Test func aLauncherThatIsntThereIsNamedInTheSpawnsFailure() {
         let request = SpawnRequest(cwd: NSHomeDirectory(), command: "true", env: [:], cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil)
