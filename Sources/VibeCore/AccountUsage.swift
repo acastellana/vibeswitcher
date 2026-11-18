@@ -61,8 +61,8 @@ public struct AccountUsage: Equatable, Sendable {
         public var key: String { (account.map { "\($0)|" } ?? "") + (model.map { "\(name)|\($0)" } ?? name) }
 
         /// The same refusal, whichever account it was kept for.
-        func sameRefusal(_ other: Limit) -> Bool {
-            reached && other.reached && name == other.name && model == other.model && resetsAt == other.resetsAt && at == other.at
+        func sameRefusal(_ other: Limit, ignoringModel: Bool = false) -> Bool {
+            reached && other.reached && name == other.name && (ignoringModel || model == other.model) && resetsAt == other.resetsAt && at == other.at
         }
 
         /// "the weekly limit", "the 5-hour limit", "the fable limit (seven_day_overage_included)".

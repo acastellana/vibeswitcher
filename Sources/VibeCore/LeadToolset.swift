@@ -2210,7 +2210,13 @@ public final class LeadToolset: MCPToolset {
                       var refusal = AccountUsage.fromRefusal(limit, model: sessionModel(info.id, board), now: now) else { return nil }
                 if refusal.account == nil {
                     if kept.contains(where: { $0.sameRefusal(refusal) }) { return nil }
-                    refusal.account = active
+                    // Scope correction must keep the account this untagged refusal was first recorded for,
+                    // even if /login has since moved to another account (or its old account wasn't known).
+                    if refusal.model != nil, let old = kept.first(where: { $0.model == nil && $0.sameRefusal(refusal, ignoringModel: true) }) {
+                        refusal.account = old.account
+                    } else {
+                        refusal.account = active
+                    }
                 }
                 return refusal
             }
