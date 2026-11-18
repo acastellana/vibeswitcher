@@ -322,6 +322,7 @@ struct PerformanceSettings: View {
                     } label: { label }
                 }
                 BatteryHoldRow(preferences: preferences)
+                SettingRow("memory-benches") { label in Toggle(isOn: $preferences.memoryBenches) { label } }
             } header: {
                 Text("Power")
             } footer: {

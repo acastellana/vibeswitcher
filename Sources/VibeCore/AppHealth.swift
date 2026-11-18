@@ -860,6 +860,8 @@ public enum AppHealth {
         /// How many looks the day's trend waited for the app's sleep ledger to reach the day's end (see `look`); nil
         /// while it doesn't wait.
         public var sleepWaits: Int?
+        /// The memory benches' failing run last told (`MemoryBench.Record`'s day and commit), so each is told once.
+        public var benchTold: String?
 
         public struct Told: Codable, Equatable, Sendable {
             public var at: Double
@@ -927,7 +929,10 @@ public enum AppHealth {
         /// What's due now: the digest under way once `window` has passed since it opened, and a day's trend once a
         /// later day starts. Each goes into `pending`; `AppHealthWatcher` hands those to the lead. `sleep`: what the
         /// Mac's sleep paused (`SleepCost`), read for the trend.
-        public mutating func look(now: Date, folders: Folders, memory: Memory?, sleep: () -> SleepCost? = { nil }) {
+        /// `bench`: the memory benches' last run (`MemoryBench`), told once when a budget failed.
+        public mutating func look(now: Date, folders: Folders, memory: Memory?, sleep: () -> SleepCost? = { nil },
+                                  bench: () -> MemoryBench.Record? = { nil }) {
+            if let record = bench(), let report = benchReport(record) { pending.append(report) }
             if let opened, now.timeIntervalSince1970 >= opened + AppHealth.window {
                 if let digest = digest(now: now, folders: folders) { pending.append(digest) }
             }
@@ -1039,6 +1044,32 @@ public enum AppHealth {
                 parts.append("Turn what's a real bug into a task (one already on the board needs nothing"
                              + (starved > 0 ? "; one marked likely starvation needs none" : "") + "); read the reports for the full stacks.")
             }
+            return Redaction.secrets(in: parts.joined(separator: "\n"))
+        }
+
+        /// The memory benches' run, when one of its budgets failed and it wasn't told yet: a line a failing budget,
+        /// naming it, its number and limit, and the subjects of the commits since the last run that passed.
+        mutating func benchReport(_ record: MemoryBench.Record) -> String? {
+            let key = "\(record.day) \(record.commit)"
+            let failing = record.failing
+            guard !failing.isEmpty, benchTold != key else { return nil }
+            benchTold = key
+            let commit = String(record.commit.prefix(8))
+            let since: String
+            if let last = record.lastPass {
+                let subjects = record.sincePass ?? []
+                since = subjects.isEmpty
+                    ? "no commits since the last pass (\(last.prefix(8))): the same code passed before"
+                    : "commits since the last pass (\(last.prefix(8))): " + subjects.map { "\"\($0)\"" }.joined(separator: "; ")
+                        + (subjects.count >= MemoryBench.sinceLimit ? " (the newest \(MemoryBench.sinceLimit))" : "")
+            } else {
+                since = "no run has passed yet to compare with"
+            }
+            var parts = ["VibeSwitcher's memory benches, run by VibeSwitcher itself (no model) on main at \(commit) on \(record.day), "
+                         + "failed \(failing.count == 1 ? "a budget" : "\(failing.count) budgets") (~/.vibeswitcher/stats/\(MemoryBench.statsName)):"]
+            parts += failing.map { "- memory budget failed: \($0.text); \(since)" }
+            parts.append("Turn what's a real bug into a task (one already on the board needs nothing); the run's whole output is in "
+                         + "~/.vibeswitcher/\(MemoryBench.folderName)/last-run.log until the next run.")
             return Redaction.secrets(in: parts.joined(separator: "\n"))
         }
 

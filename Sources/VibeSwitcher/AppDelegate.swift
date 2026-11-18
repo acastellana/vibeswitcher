@@ -236,6 +236,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// The Mac's load, memory, team sessions and heavy slots, once a minute, to ~/.vibeswitcher/stats (`LoadRecorder`).
     private let loadRecorder = LoadRecorder()
     private var loadTimer: Heartbeat.Subscription?
+    /// The memory benches, once a day on a calm Mac (`MemoryBenchWatch`), looked at with the load recorder's minute.
+    private lazy var memoryBench = AppDelegate.memoryBenchWatch(appHealth: { [weak self] in self?.appHealth })
     /// Decides Boost mode for every project's leads (Settings › Project lead, see `BoostWatch`).
     private(set) lazy var boostWatch = BoostWatch(preferences: preferences)
     /// Gives malloc's free pages back as the footprint grows (see `FootprintRelief`).
@@ -499,6 +501,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         loadTimer = Heartbeat.shared.every(60) { [weak self] in
             guard let self else { return }
             loadRecorder.record(census: HostCensus.count(hostClient.sessions.map { ($0.label, $0.cwd, $0.isLive) }))
+            memoryBench.tick(roots: Array(leadController.boards.keys))
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.memoryBench.sleeping()
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.memoryBench.woke(at: Date())
         }
         footprintRelief.start()
         boostWatch.currentFolder = { [weak self] in self?.store.sessions.first(where: \.isCurrent)?.cwd }
@@ -1022,8 +1031,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
     }
 
+    /// The memory benches' watch on this Mac: Settings' switch (read from the defaults, off the main thread), AC power,
+    /// the load, the heavy slots and merges' runs (the lock `vs-heavy` takes), VibeSwitcher's checkout among the leads'
+    /// projects (its workflow's base branch), and the login shell's PATH for the run (swift and node).
+    static func memoryBenchWatch(appHealth: @escaping () -> AppHealthWatcher?) -> MemoryBenchWatch {
+        let sources = MemoryBenchWatch.Sources(
+            enabled: { UserDefaults.standard.object(forKey: "memoryBenches") as? Bool ?? true },
+            conditions: {
+                let heavy = LoadRecorder.heavySlots()
+                let lock = TestLock(directory: ProcessInfo.processInfo.environment[TestLock.directoryVariable] ?? "/private/tmp/vibeswitcher-\(getuid())",
+                                    slots: heavy.slots)
+                return MemoryBench.Conditions(onAC: PowerSourceCache.shared.current()?.knownAC, load: LoadRecorder.averages(), awake: true,
+                                              slotFree: heavy.holders.count < heavy.slots,
+                                              merge: MemoryBench.merge(holders: heavy.holders, waiters: lock.waiters()))
+            },
+            plan: { roots in
+                guard let checkout = AppUpdateWatch.Checkout.find(among: roots, installed: ServerBuild.running) else { return nil }
+                var path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+                if case .found(let found) = LoginShellVariable.read("PATH") { path = found }
+                return MemoryBench.Run(root: checkout.root, base: checkout.base,
+                                       folder: VibePaths.root.appendingPathComponent(MemoryBench.folderName, isDirectory: true),
+                                       stats: VibePaths.statsDir, environment: ["PATH": path])
+            },
+            ended: { outcome in if case .recorded = outcome { appHealth()?.look() } },
+            log: { Breadcrumbs.shared.note($0) })
+        return MemoryBenchWatch(sources: sources, stateFile: VibePaths.root.appendingPathComponent(MemoryBench.folderName).appendingPathComponent("state.json"))
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         Breadcrumbs.shared.note("app: quitting")
+        memoryBench.stop()
         restartOffer.atQuit(yours: !terminatedBySignal)
         // Never leave the Mac silent behind a dictation that was recording (a device that doesn't answer in time: put
         // back at the next launch, from the marker).

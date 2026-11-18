@@ -205,6 +205,7 @@ enum SettingsCatalog {
     ]) + entries(.performance, "Power", [
         Entry("keep-awake", "Keep the Mac awake while the team works", "Stops the Mac going to sleep on its own while a lead's team works; the display can still sleep.", keywords: ["sleep", "caffeinate", "battery", "power"]),
         Entry("battery-hold", "On battery, pause lead work below", "On battery, leads start no new work and merge nothing while the charge is under this level; 0 means never.", keywords: ["battery", "power", "charge"]),
+        Entry("memory-benches", "Run the memory benches once a day", "Once a day, on AC power with the Mac calm, checks VibeSwitcher's memory budgets on main; a failure is told to the lead.", keywords: ["memory", "bench", "footprint", "leak", "nightly", "performance"]),
     ])
 
     private static let dictation = entries(.dictation, "Dictation", [
