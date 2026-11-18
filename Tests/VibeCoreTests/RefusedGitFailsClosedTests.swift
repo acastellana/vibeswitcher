@@ -157,6 +157,30 @@ struct RefusedGitFailsClosedTests {
         #expect(try reason("git $(echo \(String(repeating: "a", count: 500)))").count < 500)
     }
 
+    /// The program's own name made by the shell, on a line that names git: it may be git (`g=git; $g push`; zsh's
+    /// `=git` is git's full path). Refused when it comes from a variable, `=`, or a substitution alone; a path built
+    /// on a substitution is an everyday form and passes, as does any of them on a line that doesn't name git.
+    @Test(arguments: [LeadLaunch.Role.worker, .verifier, .lead])
+    func aProgramNamedByAnExpansionIsRefusedOnALineThatNamesGit(_ role: LeadLaunch.Role) throws {
+        let guardRail = try Guard(role, temp: temp)
+        for line in ["g=git; $g push origin main", "g=git; ${g} status", "g=git; \"$g\" push", "g=/usr/bin/git; $g -P push", "=git -P push",
+                     "=git status", "$(echo git) push", "`which git` status", "\"$(which git)\" log", "g=git; noglob $g push",
+                     "g=git; timeout 60 $g push", "g=git; env $g push", "cd src && $(command -v git) status", "$EDITOR .git/config"] {
+            #expect(try guardRail.hookDenies(line, cwd: guardRail.root), "\(role)'s hook lets through: \(line)")
+            guard case .unreadable(.program)? = RefusedGit.refusal(in: line) else {
+                Issue.record("not refused for its program's name: \(line)")
+                continue
+            }
+        }
+        for line in ["\"$(git rev-parse --show-toplevel)/scripts/x.sh\" args", "$(git rev-parse --show-toplevel)/scripts/test.sh --filter X",
+                     "\"$HOME/bin/tool\" x", "$EDITOR notes.md", "\"$TMPDIR/probe\" && echo ok", "$(brew --prefix)/bin/swiftlint",
+                     "x=1; $cmd arg", "=ls -l", "$(command -v swift) build", "`which swift` build", "./scripts/*.sh; git status"] {
+            #expect(try !guardRail.hookDenies(line, cwd: guardRail.root), "\(role)'s hook refuses: \(line)")
+        }
+        let reason = try #require(RefusedGit.refusal(in: "g=git; $g push origin main")?.reason)
+        #expect(reason.contains("`$g`") && reason.contains("run the git command plainly") && reason.contains("without the variable"))
+    }
+
     /// What names git: the word alone, in a path, in git's variables and folder, in any case; not a longer word.
     @Test func gitIsNamedAsAWordNotInsideOne() {
         for text in ["git", "git push", "/usr/bin/git status", "GIT -P push", "x; git", "GIT_DIR=/x make", "cat .git/config", "g\"\"it", "g\\it",

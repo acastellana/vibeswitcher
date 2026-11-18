@@ -28,7 +28,9 @@ import Foundation
 /// made from an expansion, or a shell or `source`/`.` reading its input: a here-string, a here-document, a pipe,
 /// `/dev/stdin`, `<(…)`) on a line that names git anywhere. And a git whose option or command word the shell makes from
 /// an expansion (`git $x …`, `git ${o:--C} x`, `git {push,x}`, `git pus?`, zsh's `git =x`), or that the program running
-/// it fills in (`xargs git`, `xargs -I% git % x`, `find -exec git {} \;`).
+/// it fills in (`xargs git`, `xargs -I% git % x`, `find -exec git {} \;`). And, on a line that names git, a program
+/// whose own name the shell makes from a variable, zsh's `=`, or a substitution alone (`g=git; $g push`, `=git push`,
+/// `$(echo git) push`; not a path built on one, `"$(git rev-parse --show-toplevel)/scripts/x.sh"`).
 ///
 /// Not seen here, and so open: a file a shell runs or sources (`bash x.sh`, `source x`, which is how every script
 /// runs), and another language's interpreter or a program not listed that runs a command (`python3 -c`, `perl -e`,
@@ -89,6 +91,8 @@ public enum RefusedGit {
             case handed(String)
             /// A git whose option or command word (as written) the shell makes from an expansion.
             case expanded(String)
+            /// A program whose own name (as written) the shell makes from an expansion, on a line that names git.
+            case program(String)
         }
 
         /// The hook's reason, as the session reads it.
@@ -114,6 +118,10 @@ public enum RefusedGit {
                 "VibeSwitcher refuses git with `\(Self.short(word))` where its options or its command go: the shell makes that "
                     + "word from an expansion (a variable, a substitution, braces or a pattern), so it can't check what git "
                     + "runs. Run the git command plainly, its options and command written out, without the variable."
+            case .unreadable(.program(let word)):
+                "VibeSwitcher refuses a command whose name the shell makes from an expansion (`\(Self.short(word))`) on a line "
+                    + "that names git: it can't check whether that runs git. Write the program's name out, and run the git "
+                    + "command plainly, without the variable."
             }
         }
 
@@ -401,7 +409,14 @@ public enum RefusedGit {
             return nil
         }
         if let refusal = handed(to: program, command.from(index + 1), named: named, budget: &budget) { return refusal }
-        guard program == "git" else { return nil }
+        guard program == "git" else {
+            // The program's own name made by the shell (`g=git; $g push`, zsh's `=git push`, `$(echo git) push`) on a
+            // line that names git: it may be git. A path built on a substitution (`"$(git rev-parse
+            // --show-toplevel)/scripts/x.sh"`) is an everyday form, and the command inside it is read on its own.
+            let how = command.made[index]
+            let made = how.contains(.variable) || how == .substitution || (how.contains(.pattern) && starts(words[index], with: "="))
+            return named && made ? .unreadable(.program(words[index])) : nil
+        }
         if let home { return .variable(home) }
         index += 1
         // git's own options, up to its command: the first word that isn't one. Each as written: one the shell makes
