@@ -383,3 +383,7 @@ About 160 probed runs caught the signal once, before the sharper probe existed (
 
 Today five finished workers waited 1–3 h on the 15 GB load-run floor while new ones kept starting, and six of the lead's turns answered the same disk question; two Codex rounds failed their checks only because of the sandbox. The silent-worker and rerun setbacks already have merged or planned fixes.
 
+## 2026-11-18 22:19:43 verifier_model is set to opus temporarily (the user's answer to BD489D1B, 2026-11-18): reviews on Opus until Fable's limit resets on Nov 24, 01:00, then back to Fable. The first lead turn after the reset clears it with configure(verifier_model: ""). Sensitive and security audits still went to Fable regardless (task sensitive-audits-fall-back makes them follow verifier_model while Fable is refused), so those reviews wait until the reset.
+
+Fable's weekly limit was spent while Opus still worked. The user allowed reviews on the workers' model for those days only.
+

@@ -3955,3 +3955,15 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 21:51 Planned new-work-waits-when: New work waits when the disk can't hold its load run: start_worker keeps room for the tasks in flight
 - 2026-11-18 21:51 Update: Retrospective: Nov 18 batch (13 merges) — **Went well:** 13 merges with no reverts. Three real product bugs were found while fixing flakes: a launcher message race, a stray status-line child, and 512 KB stacks overflowing. Batch merges landed…
 - 2026-11-18 21:53 Planned code-blocks-run-in: Code blocks: Run in New Shell for commands that keep running, Run on untagged command blocks, and agents file servers with vs-shell (review audit, for security)
+- 2026-11-18 22:17 Released tool-server-threads-run's worker (idle since its done report on 8c695182) while its audit runs
+- 2026-11-18 22:17 Released memory-benches-run-by's worker (idle since its done report on 2cb1b623) while its audit runs
+- 2026-11-18 22:17 Fetched origin/main at d2277773: main is 190 commits ahead of origin/main and 0 commits behind it
+- 2026-11-18 22:17 Asked the user to push main at 334ff4a3 (190 commits) to origin/main
+- 2026-11-18 22:18 Started a worker on new-work-waits-when
+- 2026-11-18 22:18 Started a worker on code-blocks-run-in
+- 2026-11-18 22:18 Started a worker on a-refused-report-s
+- 2026-11-18 22:18 Started a worker on sigpipe-probe-always-on
+- 2026-11-18 22:18 Started a worker on flaky-host-tests-turn
+- 2026-11-18 22:18 Workflow: verifier_model = `opus`
+- 2026-11-18 22:19 Pushed main at 334ff4a3 (190 commits) to origin/main, on the user's click
+- 2026-11-18 22:19 Planned sensitive-audits-fall: Sensitive audits fall back to the verifier_model when Fable is refused at its limit (review audit)
