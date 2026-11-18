@@ -51,7 +51,9 @@ struct MergeObjectivesTests: LeadTeamFixture {
         let objectives = MergeObjectives(samples, project: "proj", now: Self.now)
         #expect(objectives.calmRuns == 2 && objectives.calmMedianS == 9.5 * 60)
         #expect(!objectives.missed)
-        #expect(objectives.statusLine == "Merge objectives (last 7 days): met.")
+        // Four runs are too few to judge the reruns: the figures, no verdict.
+        #expect(objectives.statusLine == "Merge objectives (last 7 days): 0.0% passed only on rerun (0 of 4; objective 5%, too few runs to judge), "
+            + "median calm-Mac merge 9.5 min (2 runs; objective 10).")
     }
 
     /// Each objective alone misses: exactly 5% on rerun is met, one more isn't; 10 minutes is met, over it isn't.
@@ -60,20 +62,45 @@ struct MergeObjectivesTests: LeadTeamFixture {
         #expect(!MergeObjectives(atLimit, project: "proj", now: Self.now).missed)
         let noisy = MergeObjectives(atLimit + [Self.sample("passed_on_rerun")], project: "proj", now: Self.now)
         #expect(noisy.rerunsMissed && !noisy.calmMissed)
-        #expect(noisy.statusLine?.contains("10% passed only on rerun (2 of 21; objective 5%)") == true && noisy.statusLine?.hasSuffix("missed, plan test and flake fixes first.") == true)
+        #expect(noisy.statusLine?.contains("9.5% passed only on rerun (2 of 21; objective 5%)") == true && noisy.statusLine?.hasSuffix("missed, plan test and flake fixes first.") == true)
         let slow = MergeObjectives([Self.sample("passed", minutes: 10.5)], project: "proj", now: Self.now)
         #expect(slow.calmMissed && !slow.rerunsMissed)
-        #expect(slow.statusLine?.contains("0% passed only on rerun (0 of 1; objective 5%), median calm-Mac merge 10.5 min (1 run; objective 10): missed") == true)
+        #expect(slow.statusLine?.contains("0.0% passed only on rerun (0 of 1; objective 5%, too few runs to judge), median calm-Mac merge 10.5 min (1 run; objective 10): missed") == true)
     }
 
     /// No run on a calm Mac: the median isn't judged, and the line says so when the reruns miss.
     @Test func withNoCalmRunOnlyTheRerunsAreJudged() {
-        let busy = [Self.sample("passed", load: 30, minutes: 40), Self.sample("passed_on_rerun", load: 30, minutes: 40)]
+        let passed = (0..<9).map { _ in Self.sample("passed", load: 30, minutes: 40) }
+        let busy = passed + [Self.sample("passed_on_rerun", load: 30, minutes: 40)]
         let objectives = MergeObjectives(busy, project: "proj", now: Self.now)
         #expect(objectives.calmMedianS == nil && !objectives.calmMissed && objectives.rerunsMissed)
-        #expect(objectives.statusLine == "Merge objectives (last 7 days): 50% passed only on rerun (1 of 2; objective 5%), "
+        #expect(objectives.statusLine == "Merge objectives (last 7 days): 10% passed only on rerun (1 of 10; objective 5%), "
             + "no merge ran on a calm Mac (objective: median 10 min): missed, plan test and flake fixes first.")
-        #expect(MergeObjectives([Self.sample("passed", load: 30, minutes: 40)], project: "proj", now: Self.now).statusLine == "Merge objectives (last 7 days): met.")
+        #expect(MergeObjectives(passed + [Self.sample("passed", load: 30)], project: "proj", now: Self.now).statusLine == "Merge objectives (last 7 days): met.")
+    }
+
+    /// Audit nit 1: the reruns are judged from `minimumRuns` runs; below that one flaky run isn't a miss.
+    @Test func tooFewRunsToJudgeTheReruns() {
+        let one = MergeObjectives([Self.sample("passed_on_rerun")], project: "proj", now: Self.now)
+        #expect(!one.rerunsJudged && !one.rerunsMissed && !one.missed)
+        #expect(one.statusLine == "Merge objectives (last 7 days): 100% passed only on rerun (1 of 1; objective 5%, too few runs to judge), "
+            + "median calm-Mac merge 8.0 min (1 run; objective 10).")
+        let nine = MergeObjectives((0..<9).map { _ in Self.sample("passed_on_rerun") }, project: "proj", now: Self.now)
+        #expect(!nine.rerunsMissed && nine.rerunText.hasSuffix("too few runs to judge)"))
+        let ten = MergeObjectives((0..<9).map { _ in Self.sample("passed") } + [Self.sample("passed_on_rerun")], project: "proj", now: Self.now)
+        #expect(ten.rerunsJudged && ten.rerunsMissed && ten.rerunText == "10% passed only on rerun (1 of 10; objective 5%)")
+        // A calm-Mac median over its objective is still a miss with few runs.
+        #expect(MergeObjectives([Self.sample("passed_on_rerun", minutes: 12)], project: "proj", now: Self.now).missed)
+    }
+
+    /// Audit nit 2: under 10% the share has one decimal, so a miss never prints as the objective (3 of 55: 5.5%).
+    @Test func aShareUnderTenPercentHasADecimal() {
+        let samples = (0..<52).map { _ in Self.sample("passed") } + (0..<3).map { _ in Self.sample("passed_on_rerun") }
+        let objectives = MergeObjectives(samples, project: "proj", now: Self.now)
+        #expect(objectives.rerunsMissed)
+        #expect(objectives.statusLine?.contains("5.5% passed only on rerun (3 of 55; objective 5%), ") == true, "\(objectives.statusLine ?? "")")
+        #expect(MergeObjectives.percent(18.0) == "18%" && MergeObjectives.percent(9.96) == "10.0%" && MergeObjectives.percent(0) == "0.0%")
+        #expect(MergeObjectives.percent(5) == "5.0%" && MergeObjectives.percent(5.04) == "5.04%" && MergeObjectives.percent(4.98) == "4.98%")
     }
 
     @Test func noRunsSayNothing() {
@@ -120,7 +147,8 @@ struct MergeObjectivesTests: LeadTeamFixture {
         for sample in [Self.sample("passed", project: name, now: now), Self.sample("passed", project: "other", load: 2, minutes: 90, now: now)] {
             try sample.append(in: stats, at: now)
         }
-        #expect(lead.call("status", [:]).text.contains("\nMerge objectives (last 7 days): met.\n"))
+        #expect(lead.call("status", [:]).text.contains("\nMerge objectives (last 7 days): 0.0% passed only on rerun (0 of 1; objective 5%, "
+            + "too few runs to judge), median calm-Mac merge 8.0 min (1 run; objective 10).\n"))
 
         for var sample in Self.reviewWeek(now: now) {
             sample.project = name

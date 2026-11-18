@@ -2302,6 +2302,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
         (previous.costed, previous.cost) = (8, 96)
         (previous.leadSpread, previous.leadKept) = (18, true)
         previous.installTimes = [8, 20, 31, 6, 11, 9, 14, 22].map { $0 * 3600 }
+        // Merge objectives: this week 4 of 61 runs passed only on a rerun (missed) and a calm median of 8.4 min; the week
+        // before 16 of 89, 17 min.
+        week.merges = [ScorecardMerges(project: "vibeswitcher", objectives: MergeObjectives(runs: 61, passedOnRerun: 4, calmRuns: 14, calmMedianS: 504))]
+        previous.merges = [ScorecardMerges(project: "vibeswitcher", objectives: MergeObjectives(runs: 89, passedOnRerun: 16, calmRuns: 8, calmMedianS: 1020))]
+        // The leads' messages: 31 this week (12 needing the user, 19 of 29 acted on), 98 the week before.
+        week.messages.byReason = [.mustAct: 12, .finishedOrProblem: 8, .dailySummary: 6, .other: 5]
+        (week.messages.judged, week.messages.acted, week.messages.kept, week.messages.chatKept) = (29, 19, true, true)
+        previous.messages.byReason = [.mustAct: 14, .finishedOrProblem: 41, .dailySummary: 3, .other: 40]
+        (previous.messages.judged, previous.messages.acted, previous.messages.kept, previous.messages.chatKept) = (98, 22, true, true)
         let now = end.timeIntervalSince1970 - day / 2
         let titles = ["Paste images into the chat", "Clean up ended sessions' folders", "Price Codex tokens", "Scorecard in Statistics"]
         let installs = titles.enumerated().map { index, title in

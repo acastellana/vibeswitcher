@@ -1304,6 +1304,12 @@ public enum LeadAnswerOutcome: Equatable, Sendable {
             return nil
         }
     }
+
+    /// The message for the lead when the user holds `question` (its timer stops; it waits for their answer).
+    public static func holdMessage(_ question: LeadQuestion) -> String {
+        "The user is holding your question \(question.short) “\(question.text)”: its timer is off, so don't go ahead with ‘\(question.proposal ?? "")’; "
+            + "wait for their answer."
+    }
 }
 
 /// A result the lead wants you to see.

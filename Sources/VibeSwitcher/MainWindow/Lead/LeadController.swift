@@ -1240,8 +1240,7 @@ final class LeadController: ObservableObject {
             switch result {
             case .success(let held):
                 self.answerNotices[question.id] = nil
-                self.deliver("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with ‘\(held.proposal ?? "")’; "
-                             + "wait for their answer.", from: .user, root: root)
+                self.deliver(LeadAnswerOutcome.holdMessage(held), from: .user, root: root)
             case .failure(let error):
                 self.answerNotices[question.id] = "\(error)"
             }

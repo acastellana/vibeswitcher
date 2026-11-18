@@ -35,9 +35,13 @@ public struct MergeObjectives: Equatable, Sendable {
     /// `project`'s figures from `samples` (any project's, any day's): the lines started in the `days` days up to `now`.
     /// A line whose stamp can't be read isn't counted.
     public init(_ samples: [MergeSample], project: String, now: Date = Date()) {
+        self.init(samples, project: project, after: now.addingTimeInterval(-Double(Self.days) * 86_400), upTo: now)
+    }
+
+    /// `project`'s figures from the lines in `samples` started after `after` and up to `upTo` (the scorecard's weeks).
+    public init(_ samples: [MergeSample], project: String, after from: Date, upTo now: Date) {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        let from = now.addingTimeInterval(-Double(Self.days) * 86_400)
         let counted = samples.filter { sample in
             guard sample.project == project, sample.firstRun != nil, let at = formatter.date(from: sample.t) else { return false }
             return at > from && at <= now
@@ -50,28 +54,53 @@ public struct MergeObjectives: Equatable, Sendable {
 
     /// `project`'s figures from the merge stats kept in `folder` (`VibePaths.statsDir`); a line that isn't a merge's is skipped.
     public static func read(_ folder: URL, project: String, now: Date = Date()) -> MergeObjectives {
+        MergeObjectives(samples(folder, from: now.addingTimeInterval(-Double(days) * 86_400), to: now), project: project, now: now)
+    }
+
+    /// Every project's merge lines kept in `folder` for the local days from `from` to `to`, and one more each side (a
+    /// line is filed under the local day its run started); a line that isn't a merge's is skipped.
+    public static func samples(_ folder: URL, from: Date, to: Date) -> [MergeSample] {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         var samples: [MergeSample] = []
-        // The window's local days, and one more each side: a line is filed under the local day its run started.
-        for back in -1...(days + 1) {
-            let name = LoadStats.fileName("merges", for: now.addingTimeInterval(-Double(back) * 86_400))
+        let back = Int((max(0, to.timeIntervalSince(from)) / 86_400).rounded(.up))
+        for day in -1...(back + 1) {
+            let name = LoadStats.fileName("merges", for: to.addingTimeInterval(-Double(day) * 86_400))
             guard let text = try? String(contentsOf: folder.appendingPathComponent(name), encoding: .utf8) else { continue }
             samples += text.split(separator: "\n").compactMap { try? decoder.decode(MergeSample.self, from: Data($0.utf8)) }
         }
-        return MergeObjectives(samples, project: project, now: now)
+        return samples
     }
 
-    /// Whether more runs passed only on their rerun than the objective allows.
-    public var rerunsMissed: Bool { runs > 0 && Double(passedOnRerun) > Self.rerunShare * Double(runs) }
+    /// The runs the rerun objective is judged from at least: below it one flaky run would read as a miss.
+    public static let minimumRuns = 10
+
+    /// Enough runs to judge the rerun objective by (`minimumRuns`).
+    public var rerunsJudged: Bool { runs >= Self.minimumRuns }
+    /// Whether more runs passed only on their rerun than the objective allows; false with too few runs to judge.
+    public var rerunsMissed: Bool { rerunsJudged && Double(passedOnRerun) > Self.rerunShare * Double(runs) }
     /// Whether the calm-Mac median is over its objective; false with no calm run to judge it by.
     public var calmMissed: Bool { calmMedianS.map { $0 > Self.calmMedian } ?? false }
     public var missed: Bool { rerunsMissed || calmMissed }
 
-    /// "18% passed only on rerun (16 of 89; objective 5%)".
+    /// The share passed only on rerun, in percent; nil with no run.
+    public var rerunPercent: Double? { runs == 0 ? nil : 100 * Double(passedOnRerun) / Double(runs) }
+
+    /// "18%", "5.5%": a whole percent from 10% up, one decimal below it (where the objective is), two when one would
+    /// read as the objective itself while the share isn't (5.04% isn't "5.0%", met or not).
+    public static func percent(_ value: Double) -> String {
+        if value >= 10 { return "\(Int(value.rounded()))%" }
+        let objective = rerunShare * 100
+        let one = String(format: "%.1f", value)
+        if one == String(format: "%.1f", objective), abs(value - objective) > 1e-9 { return String(format: "%.2f", value) + "%" }
+        return one + "%"
+    }
+
+    /// "18% passed only on rerun (16 of 89; objective 5%)", "100% passed only on rerun (1 of 1; objective 5%, too few
+    /// runs to judge)".
     public var rerunText: String {
-        let share = runs == 0 ? 0 : (100 * Double(passedOnRerun) / Double(runs)).rounded()
-        return "\(Int(share))% passed only on rerun (\(passedOnRerun) of \(runs); objective \(Int(Self.rerunShare * 100))%)"
+        "\(Self.percent(rerunPercent ?? 0)) passed only on rerun (\(passedOnRerun) of \(runs); objective \(Int(Self.rerunShare * 100))%"
+            + (rerunsJudged ? ")" : ", too few runs to judge)")
     }
 
     /// "median calm-Mac merge 17.0 min (23 runs; objective 10)", or that no run was on a calm Mac.
@@ -81,10 +110,12 @@ public struct MergeObjectives: Equatable, Sendable {
     }
 
     /// The lead's status line: both figures with their n and what to do while one is missed, a short "met" when both
-    /// are; nil when no run in the window recorded a first run.
+    /// are; with too few runs to judge the reruns and the median met, the figures alone. Nil when no run in the window
+    /// recorded a first run.
     public var statusLine: String? {
         guard runs > 0 else { return nil }
-        guard missed else { return "Merge objectives (last \(Self.days) days): met." }
-        return "Merge objectives (last \(Self.days) days): \(rerunText), \(calmText): missed, plan test and flake fixes first."
+        let head = "Merge objectives (last \(Self.days) days): "
+        if missed { return head + "\(rerunText), \(calmText): missed, plan test and flake fixes first." }
+        return rerunsJudged ? head + "met." : head + "\(rerunText), \(calmText)."
     }
 }
