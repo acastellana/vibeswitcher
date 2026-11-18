@@ -715,7 +715,12 @@ enum ShellWords {
                     hereDocument()
                 case "<", ">":
                     // A file descriptor's number before it isn't a word; the next word is the target.
-                    if let current = word, !current.isEmpty, current.allSatisfy(\.isNumber) { word = nil } else { endWord() }
+                    if let current = word, !current.isEmpty, current.allSatisfy(\.isNumber) {
+                        word = nil
+                        made = []
+                    } else {
+                        endWord()
+                    }
                     i += 1
                     if peek() == "(" {
                         // Process substitution, `<(…)` or `>(…)`: commands of their own, and a word (or the target).

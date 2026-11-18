@@ -165,7 +165,8 @@ struct RefusedGitFailsClosedTests {
         let guardRail = try Guard(role, temp: temp)
         for line in ["g=git; $g push origin main", "g=git; ${g} status", "g=git; \"$g\" push", "g=/usr/bin/git; $g -P push", "=git -P push",
                      "=git status", "$(echo git) push", "`which git` status", "\"$(which git)\" log", "g=git; noglob $g push",
-                     "g=git; timeout 60 $g push", "g=git; env $g push", "cd src && $(command -v git) status", "$EDITOR .git/config"] {
+                     "g=git; timeout 60 $g push", "g=git; env $g push", "cd src && $(command -v git) status", "$EDITOR .git/config",
+                     "2>&1$(echo git) push", "\"\"$(echo git) push"] {
             #expect(try guardRail.hookDenies(line, cwd: guardRail.root), "\(role)'s hook lets through: \(line)")
             guard case .unreadable(.program)? = RefusedGit.refusal(in: line) else {
                 Issue.record("not refused for its program's name: \(line)")
