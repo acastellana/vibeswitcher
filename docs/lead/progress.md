@@ -3686,3 +3686,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 02:53 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
 Error lines in app.log within 10 min, by kind: app: failed ×1
 Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-18 07:49 Planned app-memory-grows-again: App memory grows again: 262 → 713 MB overnight (Nov 17–18), relief frees nothing
+- 2026-11-18 07:49 Started a worker on app-memory-grows-again
+- 2026-11-18 07:49 Automatically (auto_advance): Started a worker on app-memory-grows-again (App memory grows again: 262 → 713 MB overnight (Nov 17–18), relief frees nothing).
