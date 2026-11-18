@@ -363,3 +363,7 @@ The 2026-11-08 decision said to measure the cap's cost on later merges, and the 
 
 Each answers a measured problem: 18% of the week's merges passed only on a rerun, with a 17-minute median; tasks over an hour of work need a second audit round 59% of the time; the git guard needed two rounds of bypass fixes in one evening; memory growth has taken 9 tasks, each found a day late; and the noise rule had to be written twice.
 
+## 2026-11-18 12:17:32 Workers and routine audits run on Opus. Fable is for the lead, for security and sensitive audits, and as advisor on hard tasks (the user's answer to 99E29A76, 2026-11-18). The lead sets model: opus on every task it adds, because a worker otherwise takes the Claude command's default, which follows the user's own /model choice.
+
+On 2026-11-18 the user's /model switch to Fable 5.2 saved itself as the default for new sessions, and new workers then started on Fable at about twice Opus's price, on a day the account had already hit its weekly limit. workflow.md has no project-wide worker model setting, so until one exists the pin is per task.
+

@@ -3767,3 +3767,14 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-18 12:08 Automatically (auto_advance): Started a worker on config-seal-cover-the (Config seal: cover the hook modules a plugin's hooks.json lists).
 - 2026-11-18 12:09 Released cache-aware-vibeswitcher's worker (idle since its done report on 3f01a0d6) while its audit runs
 - 2026-11-18 12:09 Automatically (auto_advance): Started the audit of cache-aware-vibeswitcher at 3f01a0d6 (Its review is audit. (audited: it changes 1201 lines outside tests, over risk_lines (400), as the risk check found.)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-18 12:19 Audit of cache-aware-vibeswitcher: complete, clean, round 1: 5 Nit open
+- 2026-11-18 12:20 Planned team-sessions-load-only: Team sessions load only allowlisted plugins (review audit, for security)
+- 2026-11-18 12:20 Started a worker on team-sessions-load-only
+- 2026-11-18 12:20 Automatically (auto_advance): Started a worker on team-sessions-load-only (Team sessions load only allowlisted plugins).
+- 2026-11-18 12:20 Automatically (auto_advance): Overlap for team-sessions-load-only's start (a warning only: nothing was refused or reordered). Sources/VibeCore/LeadToolset.swift: lead-brief-merge-error (review: its branch changes it); Sources/VibeCore/LeadWorkflow.swift: lead-brief-merge-error (review: its branch changes it).
+- 2026-11-18 12:20 Planned lead-context-cost-hand: Lead context cost: hand over after a long idle, keep the cache warm through a short one (review audit)
+- 2026-11-18 12:20 Planned receipts-fable-5-2: Receipts: Fable 5.2's price, and advisor calls counted
+- 2026-11-18 12:27 Pipeline held: lead-brief-merge-error ready to merge with none landing; cause: every test slot held
+- 2026-11-18 12:58 Pipeline held: lead-brief-merge-error, cache-aware-vibeswitcher ready to merge with none landing; cause: every test slot held
+- 2026-11-18 13:00 Merged lead-brief-merge-error: Lead brief: merge error budget, tidy first, and a recurrence check in retrospectives (build 5978f0ab2ede)
+- 2026-11-18 13:00 Flaky in lead-brief-merge-error's merge: claudeCodeStoppingTheStatusLineStopsYourCommandToo(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
