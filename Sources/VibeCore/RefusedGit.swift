@@ -19,29 +19,34 @@ import Foundation
 /// (`export GIT_DIR=x`, `declare -x`, `readonly`), whatever runs after it; and `HOME` or `XDG_CONFIG_HOME` (git's global
 /// config) set for a git (`arch -e` too). The program and git's command are found without their case (`GIT -P push`,
 /// `git Filter-Branch`: this Mac's volume finds them), behind zsh's precommand modifiers (`noglob`, `nocorrect`, `-`),
-/// its `repeat N` and its short forms' tests (`if [[ … ]] git …`, `while (( … )) git …`).
+/// its `repeat N`, its short forms' tests (`if [[ … ]] git …`, `while (( … )) git …`) and its `{ … } always { … }`,
+/// with a redirection anywhere (`git &>/dev/null push`, `git >&/dev/null push`); and git's own programs by their name in
+/// any folder (`…/libexec/git-core/git-push` is `git push`).
 ///
 /// What can't be read is refused, not guessed at (`Refusal.Unread`; decision 2026-10-25 16:33: hardening fails closed):
 /// the same git run plainly is read, so a refusal costs a rewrite. That is text naming git (`names`: without its case,
 /// quotes and backslashes taken out) handed to another interpreter: a shell's `-c` string (`sh`/`bash`/`zsh -c '…'`,
-/// behind `xargs` or `find -exec` too), `eval`, `trap`, `watch`, `env -S`; text that isn't all on the line (a word of it
-/// made from an expansion or put in by `xargs` or `find`, or a shell or `source`/`.` reading its input: a here-string,
-/// a here-document, a pipe, `/dev/stdin`, `<(…)`, or any path when the command is given input) on a line that names
-/// git anywhere. And a git whose option or command word the shell makes from
-/// an expansion (`git $x …`, `git ${o:--C} x`, `git {push,x}`, `git pus?`, zsh's `git =x`), or that the program running
-/// it fills in (`xargs git`, `xargs -I% git % x`, `find -exec git {} \;`). And, on a line that names git, a program
-/// whose own name the shell makes from a variable, braces, zsh's `=`, or a substitution alone (`g=git; $g push`,
+/// behind `xargs` or `find -exec` too), `eval`, `trap`, `watch`, `env -S`, or a name made for it (`alias g='git …'`,
+/// `hash -p /usr/bin/git g`); text that isn't all on the line (a word of it made from an expansion or put in by `xargs`
+/// or `find`, or a shell or `source`/`.` reading its input: a here-string, a here-document, a pipe, `/dev/stdin`,
+/// `<(…)`, zsh's `=(…)`, a shell option this doesn't read (`bash -s`, fish's), or any path when the command is given
+/// input) on a line that names git anywhere. And a git whose option or command word the shell makes from an expansion
+/// (`git $x …`, `git ${o:--C} x`, `git {push,x}`, `git pus?`, zsh's `git =x` and `git pus(h|x)`), or that the program
+/// running it fills in (`xargs git`, `xargs -I% git % x`, `find -exec git {} \;`). And, on a line that names git, a
+/// program whose own name the shell makes from a variable, braces, zsh's `=`, or a substitution alone (`g=git; $g push`,
 /// `command {git,push}`, `=git push`, `$(echo git) push`; not a path built on one, `"$(git rev-parse
 /// --show-toplevel)/scripts/x.sh"`).
 ///
-/// Not seen here, and so open: a file a shell runs or sources (`bash x.sh`, `source x`, which is how every script
-/// runs), and another language's interpreter or a program not listed that runs a command (`python3 -c`, `perl -e`,
-/// `osascript`, `script`, `ssh`); input a shell takes from further off (`… | { true; bash dev/stdin; }`, `zsh -c
-/// '. /dev/stdin' <<< …`); text that reaches git without naming it (`a=gi; ${a}t push`, `$'\x67it'`, base64);
-/// git's own programs by their path (`…/git-core/git-push`); an argument after git's command that the shell makes
-/// (`git checkout $b`: a rule reads it as written); a variable set another way (`read GIT_DIR` after `set -a`, a file
-/// sourced; `HOME` or `XDG_CONFIG_HOME` set on its own or exported, which every program reads, before a git); and a git
-/// alias the user's config already has. A spelling found later is refused the same way, as unreadable, not listed here.
+/// Not seen here, and so open: a file a shell runs or sources (`bash x.sh`, `bash -x x.sh`, `source x`, which is how
+/// every script runs), and another language's interpreter or a program not listed that runs a command (`python3 -c`,
+/// `perl -e`, `osascript`, `script`, `ssh`); input a shell takes from further off, a reader nested in what's given it
+/// (`… | { true; bash dev/stdin; }`, `zsh -c '. /dev/stdin' <<< …`); text that reaches git without naming it
+/// (`a=gi; ${a}t push`, `$'\x67it'`, base64), or a program's name with text beside a substitution
+/// (`/usr/bin/$(echo git) push`); an argument after git's command that the shell makes (`git checkout $b`: a rule
+/// reads it as written); a variable set another way (`read GIT_DIR` after `set -a`, a file sourced; `HOME` or
+/// `XDG_CONFIG_HOME` set on its own or exported, which every program reads, before a git); a function or alias
+/// defined in a file the shell reads; and a git alias the user's config already has. A spelling found later is
+/// refused the same way, as unreadable, not listed here.
 public enum RefusedGit {
     /// The refused options. `--config-env` is `-c` with its value read from an environment variable.
     public static let options = ["-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--config-env"]
@@ -257,7 +262,7 @@ public enum RefusedGit {
     static func folded(_ name: String) -> String { name.folding(options: [.caseInsensitive], locale: nil) }
 
     static let keywords: Set<String> = ["!", "{", "}", "(", ")", "if", "then", "else", "elif", "fi", "do", "done", "while", "until",
-                                        "coproc"]
+                                        "coproc", "always"]
     /// Programs that run the command after them: their options that take a value (`env -u NAME git …`), and the
     /// operands before the command (`timeout 60 git …`).
     struct Wrapper {
@@ -291,9 +296,9 @@ public enum RefusedGit {
                         home: String? = nil, filled: [String] = []) -> Refusal? {
         guard depth <= ShellWords.depthLimit else { return .unreadable(.tangled) }
         let words = command.words
-        // A short form's test the scanner split (`if [[ -n a && -n b ]] git …`, `=~ (a|b) ]] git …`): what follows its
-        // `]]` is read as a command too.
-        if let close = words.firstIndex(of: "]]"),
+        // A short form's test the scanner split (`if [[ -n a && -n b ]] git …`, `=~ (a|b) ]] git …`), or zsh's
+        // `{ … } always { … }`: what follows its `]]` or `always` is read as a command too.
+        if let close = words.firstIndex(where: { $0 == "]]" || $0 == "always" }),
            let refusal = refusal(command: command.from(close + 1), rules: rules, named: named, budget: &budget, depth: depth + 1,
                                  home: home, filled: filled) {
             return refusal
@@ -418,7 +423,10 @@ public enum RefusedGit {
         if let refusal = handed(to: program, command.from(index + 1), appends: appends, filled: filled, named: named, budget: &budget) {
             return refusal
         }
-        guard program == "git" else {
+        // git's own programs by their name, in any folder (`git-push`, `…/libexec/git-core/git-push`): git's command, with
+        // no global options before it.
+        let dashed = starts(program, with: "git-") && program.utf8.count > "git-".utf8.count
+        guard program == "git" || dashed else {
             // The program's own name made by the shell (`g=git; $g push`, zsh's `=git push`, `$(echo git) push`,
             // `command {git,push}`) on a line that names git: it may be git. A path built on a substitution
             // (`"$(git rev-parse --show-toplevel)/scripts/x.sh"`) is an everyday form, and the command inside it is
@@ -429,7 +437,6 @@ public enum RefusedGit {
             return named && made && !command.array ? .unreadable(.program(words[index])) : nil
         }
         if let home { return .variable(home) }
-        index += 1
         // git's own options, up to its command: the first word that isn't one. Each as written: one the shell makes
         // from an expansion (`git $x …`, `git ${o:--C} x`, `git {push,x}`, an option's value too) can't be read, nor
         // one the program running git fills in (`xargs -I% git % x`, `find -exec git {} \;`).
@@ -438,6 +445,11 @@ public enum RefusedGit {
             guard let fills = fills([words[at]], appends: false, filled, named: true, budget: &budget) else { return .unreadable(.tangled) }
             return fills ? .unreadable(.expanded(words[at])) : nil
         }
+        if dashed {
+            if let refusal = unseen(index) { return refusal }
+            return ruled(["git", String(program.dropFirst("git-".count))] + words[(index + 1)...], rules: rules, budget: &budget)
+        }
+        index += 1
         while index < words.count {
             budget -= 1
             guard budget >= 0 else { return .unreadable(.tangled) }
@@ -455,7 +467,12 @@ public enum RefusedGit {
         // Its command, without the options before it, as the rules name it: `git -P push x` is `git push x`. The
         // command's name without its case, as the rules are read: this Mac's volume finds `git-Filter-Branch` (a script
         // git runs), and a builtin in another case (`git PUSH`) fails anyway. Its options keep theirs (`-c` isn't `-C`).
-        let command = Array((["git", folded(words[index])] + words[(index + 1)...]).joined(separator: " ").utf8)
+        return ruled(["git", folded(words[index])] + words[(index + 1)...], rules: rules, budget: &budget)
+    }
+
+    /// The rule `words` (`git`, its command, the command's words) matches, as a refusal; nil when none does.
+    static func ruled(_ words: [String], rules: Rules, budget: inout Int) -> Refusal? {
+        let command = Array(words.joined(separator: " ").utf8)
         let candidates = rules.candidates(Self.command(of: command))
         budget -= command.count + candidates.count
         guard budget >= 0 else { return .unreadable(.tangled) }
@@ -466,8 +483,9 @@ public enum RefusedGit {
     static let shells: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish"]
     /// The builtins that run a file (or their input) in this shell.
     static let sourcers: Set<String> = ["source", "."]
-    /// What runs its words as a shell line: now (`eval`), on a signal (`trap`), or over and over (`watch`).
-    static let evaluators: Set<String> = ["eval", "trap", "watch"]
+    /// What runs its words as a shell line: now (`eval`), on a signal (`trap`), or over and over (`watch`); or makes a
+    /// name that runs them later (`alias g='git -C x'`, `hash -p /usr/bin/git g`, then `g`).
+    static let evaluators: Set<String> = ["eval", "trap", "watch", "alias", "hash"]
 
     /// Why a command that hands text to another interpreter is refused, if it is: `program` (its name, without its
     /// case) run with `arguments`, behind an xargs that `appends` its input's words or a program that replaces
@@ -478,19 +496,61 @@ public enum RefusedGit {
         // Words of its text that xargs or find put in aren't on the line.
         guard let fills = fills(arguments.words, appends: appends, filled, named: named, budget: &budget) else { return .unreadable(.tangled) }
         if evaluators.contains(program) { return unread(by: program, arguments, reads: fills, named: named, budget: &budget) }
-        guard let first = arguments.words.first else {
+        guard !arguments.words.isEmpty else {
             // A shell alone reads its input; `source` alone runs nothing.
             return shells.contains(program) && named ? .unreadable(.handed(program)) : nil
         }
-        // A script's path, as written and nothing else (`bash scripts/test.sh --filter X`): not `/dev/stdin`, not
-        // `<(…)`, not after an option (`bash -x …`, read as text handed over: a wider reading only refuses more).
-        // Given input on a line that names git, the path may be that input by another name (`//dev/stdin`).
-        if arguments.made[0] == .text, !starts(first, with: "-"), !starts(first, with: "+"), !starts(folded(first), with: "/dev/") {
+        // A script's path, as written (`bash scripts/test.sh --filter X`, `bash -x scripts/x.sh`): the file isn't on the
+        // line. Given input on a line that names git, the path may be that input by another name (`//dev/stdin`).
+        if script(program, arguments) {
             return arguments.input && named ? .unreadable(.handed(program)) : nil
         }
         // Without a `-c`, a shell reads its commands from its input: a here-string, a here-document, a pipe.
         let string = shells.contains(program) && takesString(arguments.words)
         return unread(by: program, arguments, reads: !string || fills, named: named, budget: &budget)
+    }
+
+    /// The shells whose options `script` reads: these take a command string only with `-c`, read their input with `-s`
+    /// (or with no file), and take a value only after `-o`/`-O` (`+o` too).
+    static let posixShells: Set<String> = ["sh", "bash", "zsh", "dash", "ksh"]
+    /// Their flags that take no value and run nothing else (`-x`, `-e`, `-n`, `-l`, `-f`): `set`'s, and the login,
+    /// interactive and restricted ones. Any other letter is read as text handed over (a wider reading only refuses more).
+    static let scriptFlags = Set("abefhiklmnprtuvxBCEHP".utf8)
+    static let scriptLongOptions: Set<String> = ["--login", "--noprofile", "--norc", "--posix", "--restricted", "--verbose",
+                                                 "--noediting"]
+
+    /// Whether a shell or `source` runs a script from a path as written (`bash scripts/test.sh`, `bash -x scripts/x.sh`,
+    /// `bash -euo pipefail scripts/x.sh`): after `posixShells`' flags only, the first operand, not `/dev/…` (its input),
+    /// not one the shell makes (`<(…)`, `$f`). Not with a `-c` or `-s`, or an option it doesn't know.
+    static func script(_ program: String, _ arguments: ShellWords.Command) -> Bool {
+        let words = arguments.words
+        var index = 0
+        if posixShells.contains(program) {
+            while index < words.count, arguments.made[index] == .text, starts(words[index], with: "-") || starts(words[index], with: "+") {
+                let word = words[index]
+                if word == "--" || word == "-" {
+                    index += 1
+                    break
+                }
+                if scriptLongOptions.contains(word) {
+                    index += 1
+                    continue
+                }
+                let letters = Array(word.utf8.dropFirst())
+                let valued = { (letter: UInt8) in letter == UInt8(ascii: "o") || letter == UInt8(ascii: "O") }
+                guard let last = letters.last, letters.allSatisfy({ scriptFlags.contains($0) || valued($0) }),
+                      !letters.dropLast().contains(where: valued) else { return false }
+                guard valued(last) else {
+                    index += 1
+                    continue
+                }
+                guard index + 1 < words.count, arguments.made[index + 1] == .text else { return false }
+                index += 2
+            }
+        }
+        guard index < words.count, arguments.made[index] == .text else { return false }
+        let path = words[index]
+        return !starts(path, with: "-") && !starts(path, with: "+") && !starts(folded(path), with: "/dev/")
     }
 
     /// Whether a shell's options have a `-c` (alone or in a cluster, `-lc`; fish's `--command`): only its own options,
@@ -710,6 +770,10 @@ enum ShellWords {
                     i += 1
                     bodies()
                     made = []
+                case "&" where peek(1) == ">":
+                    // `&>file`, `&>>file`: a redirection of both outputs, not the end of the command.
+                    endWord()
+                    i += 1
                 case ";", "&", "|":
                     endCommand()
                     if c == "|", peek(1) != "|" {
@@ -722,10 +786,19 @@ enum ShellWords {
                 case "(" where word == nil && isArithmetic():
                     // An arithmetic command, `((x<<2))`: its `<<` is a shift, and only its substitutions run.
                     word = arithmetic()
+                case "(" where word == "=":
+                    // zsh's `=(…)`, a process substitution as `<(…)` is (the word `=` alone, so not an array's): its
+                    // commands are read as commands.
+                    i += 1
+                    list(until: ")")
+                    made.insert(.substitution)
                 case "(":
                     // A subshell, which takes the input of the command it's in place of; or an array's parentheses
-                    // (`a=(x y)`, `a+=(x)`), whose words are then a command of their own, marked as one that isn't run.
-                    let array = word?.hasSuffix("=") == true
+                    // (`a=(x y)`, `a+=(x)`, `a[1]=(x)`: a name and one `=`, last), whose words are then a command of
+                    // their own, marked as one that isn't run. After other text it's zsh's glob group (`git pus(h|x)`):
+                    // the word before it is one the shell makes, and the group is read as commands, a wider reading.
+                    let array = word.map { $0.hasSuffix("=") && $0.utf8.filter { $0 == UInt8(ascii: "=") }.count == 1 && RefusedGit.assigned($0) != nil } ?? false
+                    if word != nil, !array, peek(1) != ")" { made.insert(.pattern) }
                     let input = command.input
                     endCommand()
                     i += 1
@@ -740,6 +813,10 @@ enum ShellWords {
                     made.insert(.substitution)
                 case "$" where peek(1) == "(" || peek(1) == "{" || peek(1) == "[":
                     word = (word ?? "") + expansion()
+                case "$" where peek(1) == "\"":
+                    // bash's `$"…"`, a quoted string it may translate: the quoted text (zsh reads `$` and the quotes,
+                    // `$push`; the hook takes bash's reading, which a rule can match).
+                    i += 1
                 case "$" where peek(1) == "'":
                     // ANSI-C quoting: a backslash escapes the next character (`$'it\'s'`). Its other escapes
                     // (`\x67`, `\147`) aren't read: the word is then one the shell makes.
@@ -802,10 +879,13 @@ enum ShellWords {
                     }
                     if c == "<" { command.input = true }
                     while let d = peek(), d == "<" || d == ">" || d == "|" { i += 1 }
-                    if peek() == "&" {
+                    if peek() == "&", let d = peek(1), d.isNumber || d == "-" {
+                        // A descriptor copied or closed (`2>&1`, `>&-`).
                         i += 1
                         while let d = peek(), d.isNumber || d == "-" { i += 1 }
                     } else {
+                        // A file, `>&file` (as `&>file`) included: the next word is the target.
+                        if peek() == "&" { i += 1 }
                         redirectTarget = true
                     }
                 default:

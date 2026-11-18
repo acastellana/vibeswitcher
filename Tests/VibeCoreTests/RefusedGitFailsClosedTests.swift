@@ -193,6 +193,58 @@ struct RefusedGitFailsClosedTests {
         #expect(reason.contains("`$g`") && reason.contains("run the git command plainly") && reason.contains("without the variable"))
     }
 
+    /// The audit's (2026-11-18): zsh's `=(…)` is a process substitution, not an array; `$"…"` is quoted text;
+    /// `&>`, `&>>` and `>&file` are redirections; a name made for git (`alias`, `hash -p`), git's own programs by
+    /// their name, a glob group in git's command, and zsh's `always` block. Refused for every role.
+    static let audited = [
+        "cat =(git -C x status)", ": =(git -C /x status)", "g=git; : =($g push)", ": =($g push); git status", "x=(a); cat =(git -C /x status)",
+        "git $\"-C\" /x status", "git $\"--git-dir\"=/x log",
+        "git &>/dev/null -C /x status", "git &>>log -C /x status", "git >&/dev/null -C /x status", "git >& /dev/null -C /x status",
+        "git 2>&1 >&/dev/null -C /x status", "git &> /dev/null --git-dir=/x log",
+        "alias g='git -C /x'", "alias g=git; g push", "alias g=\"$c\"; git status", "hash -p /usr/bin/git g; g push", "builtin hash -p /usr/bin/git g",
+        "git-$x origin main", "git pus(h|x) origin main", "git -(C|P) /x status",
+        "{ true } always { git -C /x status }", "{ true; } always { git -C /x status; }",
+        // A shell option this doesn't read, with text on the line, or no script: its input, as before.
+        "bash -x <<< 'git push origin main'", "echo 'git push' | bash -euo pipefail", "bash -euo pipefail; git status",
+        "bash -s scripts/x.sh <<< 'git push'", "fish -C 'git push' x.fish", "bash -D scripts/x.sh; git status", "bash -o $o scripts/x.sh; git status",
+        "bash $flags scripts/x.sh; git status", "bash -x <(echo git push)", "zsh -f =(echo git push)", "bash --rcfile x <<< 'git push'",
+    ]
+
+    /// Rules on git's command, read in git's own programs by their name, and behind the redirections above.
+    static let auditedByRule = [
+        "git &>/dev/null push origin main", "git >&/dev/null push", "git $\"push\" origin main",
+        "/Library/Developer/CommandLineTools/usr/libexec/git-core/git-push origin main", "git-push origin main", "GIT-PUSH origin main",
+        ": =(git push origin main)",
+    ]
+
+    static let auditedHarmless = [
+        "files=(a b c)", "arr+=(git)", "arr+=(git); echo ${arr[@]}", "args=(-C x); echo ${args[@]}", "cat =(echo hi)",
+        "echo $\"hi\"; git status", "git log --grep $\"fix\"",
+        "git status &>/dev/null", "git log -1 >&/dev/null && echo ok", "swift build &> build.log; git status", "git status 2>&1 | tail -3",
+        "bash scripts/x.sh &>/dev/null && git status", "git diff --stat >&2",
+        "hash -r; git status", "alias", "git-lfs version", "cat scripts/git-hooks.sh", "echo always; git status", "{ true; } always { echo done; }; git status",
+        // A script run with the shell's own flags.
+        "bash -n scripts/x.sh && git status", "bash -x scripts/test.sh; git log", "bash -euo pipefail scripts/x.sh",
+        "bash -euo pipefail scripts/x.sh && git status", "zsh -f scratch/probe.zsh; git status", "bash -- scripts/x.sh; git status",
+        "sh -e scripts/x.sh && git log -1", "bash -x scripts/test.sh --filter 'RefusedGit' 2>&1 | tail -20; git status",
+        "bash +o posix scripts/x.sh; git status", "bash --norc -e scripts/x.sh; git status",
+    ]
+
+    @Test(arguments: [LeadLaunch.Role.worker, .verifier, .lead])
+    func theAuditsSpellingsAreReadOrRefused(_ role: LeadLaunch.Role) throws {
+        let guardRail = try Guard(role, temp: temp)
+        for line in Self.audited {
+            #expect(try guardRail.hookDenies(line, cwd: guardRail.root), "\(role)'s hook lets through: \(line)")
+        }
+        for line in Self.auditedByRule {
+            #expect(RefusedGit.refusal(in: line, rules: ["Bash(git push:*)"]) == .command("git push:*"), "\(line)")
+            #expect(RefusedGit.refusal(in: line) == nil, "refused without the rule: \(line)")
+        }
+        for line in Self.auditedHarmless {
+            #expect(try !guardRail.hookDenies(line, cwd: guardRail.root), "\(role)'s hook refuses: \(line)")
+        }
+    }
+
     /// What names git in the text handed over: the word alone, in a path, in git's variables and folder, in any case,
     /// behind quotes or a backslash; not a longer word that holds it.
     @Test func gitIsNamedAsAWordNotInsideOne() {
