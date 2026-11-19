@@ -461,7 +461,7 @@ public final class SetupStatsCollector: @unchecked Sendable {
         for key in lead.transcripts {
             let path = claudeProjects.appendingPathComponent(key).path
             var info = stat()
-            guard stat(path, &info) == 0, Double(info.st_mtimespec.tv_sec) >= since.timeIntervalSince1970 else { continue }
+            guard stat(path, &info) == 0, Double(Platform.Files.modified(info).tv_sec) >= since.timeIntervalSince1970 else { continue }
             let events: [LeadChatReader.Event]? = cached(path) { path in
                 (try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped)).map(LeadChatReader.events)
             }

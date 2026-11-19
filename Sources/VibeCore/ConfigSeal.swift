@@ -949,7 +949,7 @@ public enum ConfigSeal {
         defer { closedir(stream) }
         var names: [String] = []
         while let entry = readdir(stream) {
-            let name = withUnsafeBytes(of: &entry.pointee.d_name) { String(decoding: $0.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self) }
+            let name = withUnsafePointer(to: &entry.pointee.d_name) { $0.withMemoryRebound(to: CChar.self, capacity: Int(PATH_MAX)) { String(cString: $0) } }
             if name != ".", name != ".." { names.append(name) }
         }
         let here = dirfd(stream)
@@ -983,9 +983,9 @@ public enum ConfigSeal {
 
     /// The hash of where the link `name` in the open folder `folder` points: its text, never what's there.
     private static func linkDigest(_ folder: Int32, _ name: String) -> String {
-        var buffer = [UInt8](repeating: 0, count: Int(PATH_MAX))
-        let count = buffer.withUnsafeMutableBytes { readlinkat(folder, name, $0.baseAddress, $0.count) }
-        return hex(SHA256.hash(data: Data(buffer.prefix(max(0, count)))))
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        let count = readlinkat(folder, name, &buffer, buffer.count)
+        return hex(SHA256.hash(data: Data(buffer.prefix(max(0, count)).map { UInt8(bitPattern: $0) })))
     }
 
     /// The contents' hash of the regular file `name` in the open folder `folder`, a link there refused: "other" for
