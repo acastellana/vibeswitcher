@@ -148,3 +148,5 @@
 - 2026-11-19 23:26 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
 - 2026-11-19 23:29 Audit of the-merge-s-test: incomplete, clean, round 1: 2 Important unconfirmed, 1 Nit open (2 finders voted: 1 new finding confirmed, 2 unconfirmed)
 - 2026-11-19 23:29 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 23:35 The worker on the-merge-s-test answered findings: the-merge-s-test:F2 fixed at 09ccd894: Fixed in 09ccd894. The suite now builds its own environment instead of inheriting the caller's. Taken out: CODEX_SANDBOX (which makes test.sh skip the security tests, so the old line-206 expectation saw 2 'web tests' lines, not 3) and the width's variables. Set to a value: all six team-session variables from test-environment.sh's team_session_variables. The fake swift now counts which of those it received, and the test expects 0 in both runs. Red on the old…
+- 2026-11-19 23:36 Sent the-vault-s-look's worker contract v2 (it had v1)
