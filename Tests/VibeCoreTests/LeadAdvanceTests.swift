@@ -1403,12 +1403,16 @@ struct LeadAdvanceTests: LeadTeamFixture {
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "Waits", "goal": "g", "acceptance": ["a"]])
-        await advancing.settle()
+        // Waits for the pass that records it, not for settle(): the pass settle() sees end may have started before
+        // add_task (the loop's first, or one whose run went on after the trigger came in) and found no task yet
+        // (2026-11-19, twice under load: waits == []).
+        #expect(await advancing.until { !roomWaits.waits().isEmpty }, "\(roomWaits.waits())")
         #expect(task("waits", root)?.status == .planned)
         let waits = roomWaits.waits()
         #expect(waits.count == 1 && waits[0].wait.auto == true && waits[0].wait.what == "start_worker(waits)", "\(waits)")
         // More passes don't keep recording it.
         _ = lead.call("add_task", ["title": "Later", "goal": "g", "acceptance": ["a"], "after": ["waits"]])
+        await advancing.settle()
         await advancing.settle()
         #expect(roomWaits.waits().count == 1)
 
@@ -1437,9 +1441,10 @@ struct LeadAdvanceTests: LeadTeamFixture {
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "Dip", "goal": "g", "acceptance": ["a"]])
-        await advancing.settle()
+        // The pass that records the wait, not settle()'s (see aStartWaitsForTheMacsRoomAndGoesOnTheAppsNudge).
+        #expect(await advancing.until { roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "start_worker(dip)" } },
+                "\(roomWaits.waits())")
         #expect(task("dip", root)?.status == .planned)
-        #expect(roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "start_worker(dip)" }, "\(roomWaits.waits())")
         // The dip: the 1-minute under load_threshold, the 5-minute not. Nudged as the app's watch would, it still waits.
         set(20, 64)
         LeadAdvance.nudge(root: root)
