@@ -106,3 +106,36 @@ extension LeadAdvanceTests {
         #expect(reaudit.isError && reaudit.text.contains("under way (one-y)"), "\(reaudit.text)")
     }
 }
+
+extension LeadAdvanceTests {
+    /// A verifier that builds and tests nothing (waiting at Claude's trust question, or its turn over without a verdict)
+    /// doesn't hold the cap: the next audit starts. One whose turn waits on its background test run still holds it.
+    @Test(arguments: ["prompt", "needs input", "finished", "api error", "background"])
+    func anIdleVerifierDoesntHoldTheCap(state: String) throws {
+        let (root, runtime, lead) = try team(["heavy_slots": 1])
+        lead.macLimits = { MacLimits(maxSessions: 12) }
+        for slug in ["idle-x", "idle-y"] {
+            #expect(!lead.call("add_task", ["title": slug.replacingOccurrences(of: "-", with: " "), "goal": "g", "acceptance": ["a"], "review": "audit", "auto_advance": false]).isError)
+            #expect(!lead.call("start_worker", ["task": slug]).isError)
+            try work(slug, file: "\(slug).txt", root: root, runtime)
+        }
+        #expect(!lead.call("audit", ["task": "idle-x"]).isError)
+        let verifier = try #require(task("idle-x", root)?.verifier)
+        runtime.calls.withLock {
+            switch state {
+            case "prompt": runtime.waiting[verifier] = PendingPrompt(text: "Do you trust the files in this folder?")
+            case "needs input": runtime.statuses[verifier] = LeadActivity.needsInput("Trust this folder?").text
+            case "finished": runtime.statuses[verifier] = LeadActivity.idle(background: nil).text
+            case "api error": runtime.statuses[verifier] = LeadActivity.apiError("overloaded").text
+            default: runtime.statuses[verifier] = LeadActivity.idle(background: "swift test").text
+            }
+        }
+        let next = lead.call("audit", ["task": "idle-y"])
+        if state == "background" {
+            #expect(next.isError && next.text.contains("under way (idle-x)"), "\(next.text)")
+        } else {
+            #expect(!next.isError, "\(next.text)")
+            #expect(verifiersStarted(runtime) == ["idle-x", "idle-y"])
+        }
+    }
+}

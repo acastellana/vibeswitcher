@@ -15,8 +15,8 @@ extension LeadToolset {
 
     /// This project's audits under way but `slug`'s, in board order: one this tool server is starting (its merged
     /// result's build and test run come before its verifier is on the board), one whose verifiers it waits on still
-    /// work (live, not ended, not submitted, not stopped at a usage limit), and a post-merge Claude re-audit whose
-    /// verifier works.
+    /// work (live, not ended, not submitted, not stopped at a usage limit, not idle: `idleVerifier`), and a post-merge
+    /// Claude re-audit whose verifier works.
     func auditsUnderWay(except slug: String?, sessions: [LeadSessionInfo]) -> [String] {
         auditsUnderWay(except: slug, sessions: sessions, starting: auditStarts.withLock { startingAudits })
     }
@@ -25,7 +25,7 @@ extension LeadToolset {
         let submitted = Set(((try? vault.roster(root: root)) ?? []).filter { $0.submittedAt != nil }.map(\.session))
         let working: (String) -> Bool = { [runtime] id in
             guard !submitted.contains(id), let info = sessions.first(where: { $0.id == id }) else { return false }
-            return info.live && info.usageLimit == nil && runtime.agentEnding(info) == nil
+            return info.live && info.usageLimit == nil && runtime.agentEnding(info) == nil && !Self.idleVerifier(info)
         }
         return store.load().tasks.filter { task in
             guard task.slug != slug else { return false }
@@ -34,6 +34,17 @@ extension LeadToolset {
             if let followup = task.claudeReaudit, followup.pending, followup.evidence == nil, let session = followup.session, working(session) { return true }
             return false
         }.map(\.slug)
+    }
+
+    /// A verifier that builds and tests nothing now, though live: waiting on a prompt (Claude's trust question for a
+    /// branch that changes its settings waits on the user), or its turn over without its verdict (finished, or ended on
+    /// an API error) until someone messages it. Not counted, or such verifiers could hold every one of the project's
+    /// audits back for hours. One whose turn waits on its background task (a test run) still counts.
+    static func idleVerifier(_ info: LeadSessionInfo) -> Bool {
+        if info.waiting != nil { return true }
+        guard let status = info.status else { return false }
+        return status.hasPrefix(LeadActivity.needsInput(nil).text) || status == LeadActivity.idle(background: nil).text
+            || status.hasPrefix(String(LeadActivity.apiError("").text.prefix { $0 != "(" }))
     }
 
     /// Takes `slug`'s place among the audits starting, unless the project's audits are at the cap (and `override` isn't
