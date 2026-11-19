@@ -98,7 +98,9 @@ struct GitGuardWorktreeConfigTests {
         try plant(root: root, worktree: worktree, marks: marks)
         try nodesGit(in: worktree)
         #expect(marked(marks) == ["the-users-post-commit"], "the node's git ran \(marked(marks))")
-        let accepted = try #require(GitGuard.accepted(commonDir: root + "/.git"))
-        #expect(accepted.folder == root + "/.git/hooks" && accepted.run == ["post-commit"], "\(accepted)")
+        // By the guard's own spelling of the common folder, and the file system's of the hooks': the Mac has two.
+        let common = try #require(GitGuard.gitDirs(of: root)?.common)
+        let accepted = try #require(GitGuard.accepted(commonDir: common))
+        #expect(GitGuard.real(accepted.folder) == GitGuard.real(root + "/.git/hooks") && accepted.run == ["post-commit"], "\(accepted)")
     }
 }

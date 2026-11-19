@@ -150,6 +150,13 @@ struct SandboxPlannerBoxTests {
             plan.mounts.removeAll { if case .overlay = $0.kind { return true } else { return false } }
         }
         let scratch = URL(fileURLWithPath: (world.home as NSString).deletingLastPathComponent)
+        // overlayfs leaves each layer's `work/work` with no permission at all (mode 000): opened up afterwards, or the
+        // scratch world can't be removed.
+        let layers = plan.mounts.compactMap { mount -> String? in
+            if case .overlay(_, _, let work) = mount.kind { return work + "/work" }
+            return nil
+        }
+        defer { for layer in layers { chmod(layer, 0o700) } }
         return try await offPool { try PlannedBox.shell(script, plan, in: scratch) }
     }
 
