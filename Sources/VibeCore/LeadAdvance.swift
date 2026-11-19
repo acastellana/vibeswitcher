@@ -196,7 +196,7 @@ public final class LeadAdvance: @unchecked Sendable {
             _ = kevent(queue, &changes, Int32(changes.count), nil, 0, nil)
             stopWrite = pipes[1]
             let stopRead = pipes[0]
-            Thread.detachNewThread { [weak self] in
+            ToolThread.detach { [weak self] in
                 var event = kevent()
                 while true {
                     let count = kevent(queue, nil, 0, &event, 1, nil)

@@ -66,18 +66,51 @@ struct LeadAdvanceTests: LeadTeamFixture {
         private var count = 0
         let lead: LeadToolset
 
+        /// The most stack a run of passes took, in bytes (`StackGauge`), and the runs not yet measured.
+        private var deepestUsed = 0
+        private var measuring = 0
+
         init(_ lead: LeadToolset, run: ((@escaping () -> Void) -> Bool)? = nil) {
             self.lead = lead
+            weak var measured: Advancing?
+            measured = self
             lead.startAdvancing(run: run ?? { work in
-                // A main thread's stack (8 MB), not a detached one's 512 KB: in a debug build a pass that starts a
-                // worker runs ~50 frames deep, each with copies of the board's tasks, and filled 512 KB (2026-11-18:
-                // a receipt field 14 bytes larger overflowed it in BoardStore.restore and ended the whole test run).
-                let thread = Thread(block: work)
-                thread.stackSize = 8 << 20
-                thread.start()
+                // On a thread of the tool server's size (ToolThread.stackSize), as the tool server runs them, each run
+                // measured: `stop` fails the test when one took more than a quarter of it (2026-11-18: a receipt field
+                // 14 bytes larger overflowed a detached thread's 512 KB in BoardStore.restore and ended the test run).
+                measured?.measuringStarts()
+                StackGauge.start(work) { used in measured?.took(used) }
                 return true
             })
             lead.advancing?.passed = { [weak self] in self?.ended() }
+        }
+
+        private func measuringStarts() {
+            lock.lock()
+            measuring += 1
+            lock.unlock()
+        }
+
+        private func took(_ bytes: Int) {
+            lock.lock()
+            deepestUsed = max(deepestUsed, bytes)
+            measuring -= 1
+            lock.broadcast()
+            lock.unlock()
+        }
+
+        /// Once every run started is measured (a run's thread measures after the run has said it ended).
+        private func measured() {
+            lock.lock()
+            while measuring > 0 { lock.wait() }
+            lock.unlock()
+        }
+
+        /// The most stack a run of passes took so far, in bytes.
+        var deepest: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return deepestUsed
         }
 
         private func ended() {
@@ -117,7 +150,11 @@ struct LeadAdvanceTests: LeadTeamFixture {
         }
 
         /// No more passes, the one under way ended: nothing writes the test's folders after it.
-        func stop() { lead.advancing?.stop(wait: true) }
+        func stop(sourceLocation: SourceLocation = #_sourceLocation) {
+            lead.advancing?.stop(wait: true)
+            measured()
+            StackGauge.fits(deepest, "A run of auto_advance's passes", sourceLocation: sourceLocation)
+        }
     }
 
     func task(_ slug: String, _ root: String) -> LeadTask? { BoardStore(root: root).load().task(slug) }

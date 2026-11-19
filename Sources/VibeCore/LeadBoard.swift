@@ -872,11 +872,11 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The last verdict once the worker reported on a newer commit: shown as for an older commit, never merged on;
     /// gone with the next verdict.
     public var outdatedEvidence: LeadEvidence?
-    public var merged: LeadMergeRecord?
+    @Boxed public var merged: LeadMergeRecord?
     /// When its worker asked the lead something (ask_lead) that the lead hasn't answered with a message yet.
     public var leadQuestionAt: Double?
     /// The witness's latest word that its worker stopped making progress (see `LeadStall`); cleared once it moves.
-    public var stall: LeadStall?
+    @Boxed public var stall: LeadStall?
     /// Why the lead keeps it unmerged (status kept).
     public var keptBecause: String?
     /// The slug of the task it's folded into (status folded).
@@ -1077,9 +1077,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var overBudget: LeadOverBudget?
     /// What it cost, once it ended (merged, folded or abandoned): see `LeadReceipt`. nil for tasks that ended before
     /// receipts, and for any still open.
-    public var receipt: LeadReceipt?
+    @Boxed public var receipt: LeadReceipt?
     /// Where its time went while it waited on an audit or a merge's test run (see `LeadWaits`); nil before any.
-    public var waits: LeadWaits?
+    @Boxed public var waits: LeadWaits?
     /// A team task's members, 2 to 4, member 1 the integrator on the task's own branch (see `LeadTeam`); nil: a plain
     /// task, one worker, as before. Not `members`: that's the sessions the witness watches.
     public var team: [LeadTeamMember]?
