@@ -4122,3 +4122,18 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 11:46 Automatically (auto_advance): Merge of new-work-waits-when failed: Tests fail rebased onto main (in a batch): statusAndBoardStayBounded(); the run stopped partway: 856 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running Sent its worker the output; it's back at work.
 - 2026-11-19 11:46 Automatically (auto_advance): Merged tool-server-threads-run at 7ee37e4c (its passing audit) into main as one batch, on 2 test runs for 2 tasks.
 - 2026-11-19 11:46 Automatically (auto_advance): Cleaned up tool-server-threads-run (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-19 11:49 Committed the records at 347a650d before merging merge-reruns-only-what, flaky-under-load: the last merge failed on docs/lead/decisions.md, docs/lead/progress.md
+- 2026-11-19 11:54 Fetched origin/main at cd6c4ae9: main is 17 commits ahead of origin/main and 0 commits behind it
+- 2026-11-19 11:55 Asked the user to push main at 347a650d (17 commits) to origin/main
+- 2026-11-19 11:55 Pushed main at 347a650d (17 commits) to origin/main, on the user's click
+- 2026-11-19 11:57 Audit of codex-workers-a-message: complete, clean, round 1: 2 Nit open
+- 2026-11-19 12:02 Audit of the-config-seal-is: complete, clean, round 1: 1 Important open, 4 Nit open
+- 2026-11-19 12:02 Started a worker on the-config-seal-is
+- 2026-11-19 12:02 Automatically (auto_advance): Sent the-config-seal-is's worker the open Important findings the-config-seal-is:F1 from its audit at 89e39fe9 (in a new worker: its last one was released during the audit).
+- 2026-11-19 12:02 Sent the-config-seal-is's audit contract v3 (it had v2)
+- 2026-11-19 12:02 Sent the-config-seal-is's worker contract v3 (it had v2)
+- 2026-11-19 12:06 Pipeline held: merge-reruns-only-what, flaky-under-load ready to merge with none landing; cause: every test slot held
+- 2026-11-19 12:07 Automatically fetched origin/main at 347a650d: 0 commits from the other Mac at origin/main (347a650dd33dd2e0c9f36f4c2c830feb082afce4): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-19 12:09 The worker on the-config-seal-is answered findings: the-config-seal-is:F1 fixed at 3c585624: 9ff337fa records batch stats when conflict decisions exist even with zero test runs; regression anEntirelyConflictingBatchStillRecordsStats reproduced the missing stats before the fix.; the-config-seal-is:F4 fixed at 3c585624: 9ff337fa releases overlapping superseded prefix pins under the pass lock and clears orphan pins on authenticated lead server startup; existing mismatch/landing drops delete their refs. Restart and five-task bisect regressions failed…
+- 2026-11-19 12:09 Merged merge-reruns-only-what: Merge reruns only what failed: a failing first run reruns its named tests, not the whole suite (in a batch: merge-reruns-only-what, flaky-under-load landed on one test run) (build 405c62896cf6)
+- 2026-11-19 12:09 Merged flaky-under-load: Flaky under load: LeadAdvanceTests/aStartWaitsForTheMacsRoomAndGoesOnTheAppsNudge (in a batch: merge-reruns-only-what, flaky-under-load landed on one test run) (build 405c62896cf6)
