@@ -107,7 +107,11 @@ struct TestEnvironmentTests {
             ancestors.append((next, Platform.Processes.arguments(next), environment.map { $0.contains { $0.hasPrefix("VIBESWITCHER_SESSION=") } }))
             next = link.parent
         }
-        func runs(_ arguments: [String], _ name: String) -> Bool { arguments.contains { $0 == name || $0.hasSuffix("/" + name) } }
+        // The script itself, `bash scripts/test.sh …`: not the bash vs-heavy runs for it, which only bears its name
+        // (`bash -c '…' scripts/test.sh`), nor a vs-heavy that was given it to run.
+        func runs(_ arguments: [String], _ name: String) -> Bool {
+            arguments.count > 1 && (arguments[1] == name || arguments[1].hasSuffix("/" + name))
+        }
         // The nearest script of the two above this process: the one that started it.
         guard let script = ancestors.firstIndex(where: { runs($0.arguments, "scripts/test.sh") || runs($0.arguments, "scripts/test-under-load.sh") }),
               ancestors[script].marked == true else { return }
