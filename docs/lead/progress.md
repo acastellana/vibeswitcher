@@ -4161,3 +4161,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 13:04 Released the-config-seal-is's worker (idle since its done report on deb5045b) while its audit runs
 - 2026-11-19 13:04 Automatically (auto_advance): Released the-config-seal-is's worker, idle since its done report on deb5045b, while its audit runs (ended pid 23691 (Worker: The config seal is checked before a merge's test run, and a passing run survives a seal hold)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-19 13:06 Audit of audits-run-on-codex: complete, clean, round 3: 2 Important closed, 6 Nit (1 open), 1 Pre-existing open
+- 2026-11-19 13:08 Audit of the-config-seal-is: complete, clean, round 2: 1 Important open, 4 Nit (3 open)
+- 2026-11-19 13:08 Planned merge-stats-a-batch: Merge stats: a batch stopped before its first run, and a retained batch's landing, record the right lines
+- 2026-11-19 13:08 the-config-seal-is back in review: no Important finding open, and its audit passed
+- 2026-11-19 13:16 Pipeline held: new-work-waits-when ready to merge with none landing; cause: a merge in progress
+- 2026-11-19 13:21 Merged new-work-waits-when: New work waits when the disk can't hold its load run: start_worker keeps room for the tasks in flight (in a batch, on a test run of its own) (build 295fb14dedaa)
