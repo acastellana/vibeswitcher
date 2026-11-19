@@ -32,3 +32,5 @@
 - 2026-11-19 18:09 Released sb6-1-2-branch's worker (idle since its done report on 6b399fd3) while its audit runs
 - 2026-11-19 18:09 Automatically (auto_advance): Started the audit of sb6-1-2-branch at 6b399fd3 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-19 18:22 Audit of sb6-1-2-branch: finder 2 of 2 submitted (complete, clean, 4 findings)
+- 2026-11-19 18:27 Audit of sb6-1-2-branch: incomplete, clean, round 1: 2 Important unconfirmed, 5 Nit unconfirmed, 1 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 8 unconfirmed)
+- 2026-11-19 18:28 Planned the-full-suite-passes: The full suite passes when the node's own merge gate runs it (review audit)
