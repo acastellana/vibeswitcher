@@ -170,9 +170,9 @@ struct LeadCodexVerifierTests: LeadTeamFixture {
 
     /// From audits-run-on-codex's blind check: a Codex-worked task touching no sensitive_paths merged on a Codex verdict
     /// with no later Claude re-audit, so Codex had the only say on its own work. It gets the same obligation, started
-    /// once the injected limit clears.
-    @Test func codexWorkedCodexMergesGetClaudeAfterReset() async throws {
-        let (root, runtime, lead) = try team(worker: "codex")
+    /// once the injected limit clears; a security-flagged one keeps its security checklist.
+    @Test(arguments: [false, true]) func codexWorkedCodexMergesGetClaudeAfterReset(security: Bool) async throws {
+        let (root, runtime, lead) = try team(worker: "codex", security: security)
         #expect(BoardStore(root: root).load().task("fix")?.workerAgent == .codex)
         #expect(!lead.call("configure", ["auto_advance": false]).isError)
         hold(lead)
@@ -202,6 +202,7 @@ struct LeadCodexVerifierTests: LeadTeamFixture {
         #expect(runtime.agents[session] == "claude")
         let prompt = try String(contentsOf: vault.runFolder(root: root, name: "verify-fix").appendingPathComponent("prompt.md"), encoding: .utf8)
         #expect(prompt.contains("Review the whole change against the pinned baseline") && prompt.contains("Codex worked"))
+        #expect(prompt.contains("## Security checklist") == security)
         #expect(!(try verifier(root, runtime)).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "Claude checked"]).isError)
         #expect(followup(root)["passed"] as? Bool == true)
         #expect(!lead.call("cleanup", ["task": "fix"]).isError)

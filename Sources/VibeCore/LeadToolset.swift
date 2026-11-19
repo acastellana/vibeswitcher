@@ -3262,9 +3262,11 @@ public final class LeadToolset: MCPToolset {
         let baseline = Git.run(["merge-base", onto, head], in: root)
         // Both are known commits of a successfully tested merge. An unreadable baseline keeps the obligation.
         let launched = task.worker.flatMap { task.launchedModels?[$0] }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
+        // A Codex-worked branch touching no sensitive_paths can still be a security one (`securityReason`).
+        let security = Self.securityReason(root: root, head: head, workflow: before, raised: task.riskRaised, sensitive: sensitive) != nil
         task.claudeReaudit = LeadClaudeReaudit(head: head, base: baseline.ok ? baseline.output : onto,
                                              model: workflow.auditModel(workerModel: runtime.workerModel(root: root), taskModel: task.intendedModel,
-                                                                        launchedModel: launched, security: !sensitive.isEmpty), sensitive: sensitive,
+                                                                        launchedModel: launched, security: security), sensitive: sensitive,
                                              codexWorked: codexWorked ? true : nil)
     }
 
@@ -3301,7 +3303,9 @@ public final class LeadToolset: MCPToolset {
             } ?? ""
             let prompt = LeadPrompts.verifier(task: task, root: root, workflow: pinned, notes: leadNotes(opened),
                                               report: doneReport(task, head: followup.head), guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
-                                              security: followup.sensitive.isEmpty ? nil : "it merged over sensitive_paths: " + followup.sensitive.joined(separator: ", "))
+                                              security: followup.sensitive.isEmpty
+                                                ? Self.securityReason(root: root, head: followup.head, workflow: pinned, raised: task.riskRaised, sensitive: [])
+                                                : "it merged over sensitive_paths: " + followup.sensitive.joined(separator: ", "))
                 + "\nThis is the independent post-merge Claude re-audit required after a Codex fallback verdict"
                 + (followup.codexWorked == true ? " on a task Codex worked on" : "") + ". Review the whole change against the pinned baseline "
                 + followup.base + ", not only the earlier findings. It is already merged: report Important findings to the lead through submit_audit; don't merge or change it." + known
