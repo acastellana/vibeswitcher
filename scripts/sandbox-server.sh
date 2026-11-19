@@ -2,7 +2,7 @@
 # A scratch node with its web page on, to look at in a browser (the live plan's G1): a scratch session host and the
 # server built from this worktree, the server's web listener on 127.0.0.1 (a port the kernel picks, never the user's
 # 47830), two fake sessions, a scratch shell (its terminal open to the page: --test-web-terminal) and a fake lead with
-# a question open. It is the tests' own node (ScratchNode, FakeClaude), run by
+# a question open and a made-up board (the Projects tab, its Board link). It is the tests' own node (ScratchNode, FakeClaude), run by
 # Tests/VibeNodeTests/SandboxServerDriver.swift, which runs only when this script names its folder. Its state is a short
 # folder of its own under /tmp (the host's socket is in it): its home, root, tmp and control files. It never touches
 # your ~/.vibeswitcher, ~/.claude, node or browser, and quits by itself after 24 h.

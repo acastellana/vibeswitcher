@@ -4,7 +4,7 @@
 // - Pairing: the address `vibeswitcher web` prints carries a one-time code in its fragment (`#pair=…`). It is taken
 //   off the address bar at once, sent in the first frame, and exchanged for a token the tab keeps (sessionStorage:
 //   this origin's, this tab's) and sends on every later connection.
-// - Following: one subscription per collection the page shows (node, sessions, leads, cards), each with the `seq` it
+// - Following: one subscription per collection the page shows (node, sessions, leads, cards, boards), each with the `seq` it
 //   holds. Per subscription, the contract's four rows: a snapshot is reconciled by id; a delta whose `prev` is ours is
 //   applied; one already held is dropped; anything else applies nothing and subscribes again with `since`.
 // - Reconnecting: every row stays as it is, the page shows a quiet mark, and the socket is opened again at 100, 200,
@@ -28,7 +28,7 @@
 
 import { session as sessionValue, leadsBySession } from './wire.js';
 
-const COLLECTIONS = ['node', 'sessions', 'leads', 'cards'];
+const COLLECTIONS = ['node', 'sessions', 'leads', 'cards', 'boards'];
 const RETRY = [100, 200, 400];
 const RETRY_AFTER = 1000;
 export const TOKEN_KEY = 'vibeswitcher.token';
@@ -156,7 +156,12 @@ export function connectSocket(store, options) {
     }
     // The actions that had no answer go again first, with their own ids (the server answers a repeat as before).
     for (const waiting of [...pending.values()]) send(waiting.message);
-    for (const [name, sub] of subs) if (sub.open !== false) subscribe(name, sub);
+    // A node restarted on a newer build may stream what the last one didn't: each collection is asked for again.
+    store.state.follows = [...COLLECTIONS];
+    for (const [name, sub] of subs) {
+      sub.missing = false;
+      if (sub.open !== false) subscribe(name, sub);
+    }
     settle();
     linked('up');
   }
@@ -188,7 +193,14 @@ export function connectSocket(store, options) {
     // Its own ids (`sub-N`, for subscribe, unsubscribe and chat.page), apart from the store's (`1`, `2`…): a reply is
     // matched to its request by id alone.
     request({ v: 1, id: 'sub-' + nextId++, kind: 'subscribe', args }).then((reply) => {
-      if (!reply.ok) log('VibeSwitcher: the node refused a subscription:', reply.error?.message);
+      if (reply.ok) return;
+      // A node from before the boards: the page goes live without them, and says where a board would be that it has none.
+      if (sub.collection === 'boards' && reply.error?.code === 'bad-args') {
+        sub.missing = true;
+        store.state.follows = store.state.follows.filter((collection) => collection !== 'boards');
+        return settle();
+      }
+      log('VibeSwitcher: the node refused a subscription:', reply.error?.message);
     });
   }
 
@@ -284,7 +296,7 @@ export function connectSocket(store, options) {
 
   // Live once every subscription holds something: the first load shows its lists whole, not one at a time.
   function settle() {
-    if (authed && [...subs.values()].every((sub) => sub.collection === 'chat' || sub.seq !== null)) store.setConnection('live');
+    if (authed && [...subs.values()].every((sub) => sub.collection === 'chat' || sub.missing || sub.seq !== null)) store.setConnection('live');
   }
 
   function replied(message) {

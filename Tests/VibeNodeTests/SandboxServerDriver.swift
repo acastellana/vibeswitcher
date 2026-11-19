@@ -4,7 +4,7 @@ import VibeCore
 @testable import VibeNode
 
 /// `scripts/sandbox-server.sh`'s node (the live plan's G1): a `ScratchNode` with the server's web on, two fake sessions
-/// and a fake lead with a question open, for a person to look at in a browser. **Not a test:** it runs only when the
+/// and a fake lead with a question open and a made-up board, for a person to look at in a browser. **Not a test:** it runs only when the
 /// script names its folder (`VIBESWITCHER_SANDBOX_SERVER`), and it lives until it is told to quit, or until the 24 h
 /// limit. Everything is the tests' own: the scratch host and server built from this worktree, `FakeClaude` as the
 /// lead, stage 1's fake agent as the sessions; nothing reaches the user's `~/.vibeswitcher`, `~/.claude` or node.
@@ -89,6 +89,14 @@ struct SandboxServerDriver {
         try tools.call("ask_user", ["question": "Launch the onboarding page to the testers on Thursday, or wait for the copy review?",
                                     "options": ["Thursday", "Wait for the review"]])
         try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)")
+        // A made-up board for the lead (the board view's): its running task worked by example-site, so its row opens
+        // that session's chat; example-api checks the one in review.
+        let made = WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id, verifier: api.session.id)
+        try BoardStore(root: repo.path).update { $0.tasks = made.tasks }
+        // A new task's `since` is stamped its creation: the times it has been in its state, set again (no status changes).
+        try BoardStore(root: repo.path).update { board in
+            for index in board.tasks.indices { board.tasks[index].since = made.tasks.first { $0.id == board.tasks[index].id }?.since }
+        }
 
         try Data("\(getpid())\n\(node.root.path)\n".utf8).write(to: control.appendingPathComponent("started"))
 

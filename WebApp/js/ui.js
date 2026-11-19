@@ -1,6 +1,6 @@
 // What this window shows, as opposed to what the node knows (store.js): the route, the list's grouping and filter,
 // which pane a session shows, which teams are unfolded, the inspector. The route lives in the address
-// (#/s/<session id>, #/node), so the browser's back button works and a session can be linked to.
+// (#/s/<session id>, #/p/<project id>, #/node), so the browser's back button works and a session can be linked to.
 
 import { ATTENTION, stateOf, lastPart, taskCount } from './words.js';
 
@@ -16,10 +16,16 @@ export function parseRoute(hash) {
   if (session) {
     try { return { name: 'session', id: decodeURIComponent(session[1]) }; } catch { return { name: 'home' }; }
   }
+  const board = hash.match(/^#\/p\/(.+)$/);
+  if (board) {
+    try { return { name: 'board', id: decodeURIComponent(board[1]) }; } catch { return { name: 'home' }; }
+  }
   return hash === '#/node' ? { name: 'node' } : { name: 'home' };
 }
 
 export const sessionHref = (id) => '#/s/' + encodeURIComponent(id);
+// A project's board: its lead's tasks (views/board.js).
+export const boardHref = (project) => '#/p/' + encodeURIComponent(project);
 
 // The inspector is a column beside the chat from this width up; under it the chat would get cramped, so it is a sheet
 // over the chat, opened when asked and closed again by itself.

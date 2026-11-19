@@ -90,6 +90,43 @@ export const TASKS = {
 export const TASK_ORDER = ['running', 'review', 'blocked', 'failed', 'kept', 'planned', 'done', 'reverted', 'folded', 'abandoned'];
 export const FINISHED = new Set(['done', 'reverted', 'folded', 'abandoned', 'kept']);
 
+// A lead's board as the node groups it (BoardValue.groups): what needs someone, what's moving, what waits, what's done.
+// The node sends each task's `group`, `state` and `line`; a board without them (the mock's) is read from its status.
+export const TASK_GROUPS = [
+  { id: 'attention', title: 'Needs attention' },
+  { id: 'running', title: 'Running' },
+  { id: 'waiting', title: 'Waiting' },
+  { id: 'done', title: 'Done today' },
+];
+const GROUP_OF = { blocked: 'attention', failed: 'attention', running: 'running', review: 'running', planned: 'waiting', kept: 'waiting' };
+export const taskGroup = (task) => task.group || GROUP_OF[task.status] || 'done';
+export const taskState = (task) => task.state || TASKS[task.status]?.label || task.status;
+// The dot's colour: a task that needs attention is red, but a blocked one keeps its own purple.
+export function taskTone(task) {
+  if (taskGroup(task) === 'attention' && task.status !== 'blocked') return 'needs-you';
+  return TASKS[task.status]?.tone || 'idle';
+}
+// When it finished: its merge, else when it took its last status.
+const finishedAt = (task) => Date.parse(task.merged?.at || task.since || '') || 0;
+// A finished task from today (the reader's day): the board's "Done today" shows these, and drops older ones.
+export function doneToday(task, now = Date.now()) {
+  const at = finishedAt(task);
+  return at > 0 && new Date(at).toDateString() === new Date(now).toDateString();
+}
+// The board's tasks by group, in the board's order within each; done ones only from today.
+export function boardGroups(board, now = Date.now()) {
+  const tasks = board?.tasks || [];
+  return TASK_GROUPS.map((group) => ({
+    ...group,
+    tasks: tasks.filter((task) => taskGroup(task) === group.id && (group.id !== 'done' || doneToday(task, now))),
+  }));
+}
+// "1 needs attention · 2 running · 1 waiting · 3 done today".
+export function boardSummary(groups) {
+  const words = { attention: (n) => (n === 1 ? '1 needs attention' : `${n} need attention`), done: (n) => `${n} done today` };
+  return groups.filter((group) => group.tasks.length).map((group) => (words[group.id] || ((n) => `${n} ${group.id}`))(group.tasks.length)).join(' · ');
+}
+
 // The strip's counts: "1 working", "1 in review", "4 done".
 export function taskCount(status, count) {
   const words = { running: 'working', review: 'in review', done: 'done', planned: 'queued' };

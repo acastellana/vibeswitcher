@@ -108,7 +108,6 @@ end and ⌥⌘0 open and close it.
 | Overview › Place: Branch | a session's `branch` (the Mac reads `GitBranch.current(in: cwd)`) |
 | Overview › Agent: Session, Process, Command, Size | a session's `agentSession` (the agent's own session id), `pid`, `command`, `size: { cols, rows }` |
 | Overview › Team: Lead, Task; the Team tab for a worker or a verifier | a worker's or verifier's `lead` (the project's id) and its task's slug (the wire's `task` is what it works on, in words) |
-| Team › Tasks | the `boards` collection (below) |
 | Folders as `~/…` | the node's `home` |
 
 The Mac's inspector also shows what no client field carries yet: a session's exit status and time, a command's exit
@@ -248,19 +247,27 @@ or verifier's `lead` isn't on the wire yet, so it is listed on its own; `paused`
 A question with a `proposal`, no `decideBy` and still open is read as **held**. Asked of the node: `heldAt`, so that
 isn't an inference.
 
-### Board (asked of the node; the fields are `LeadTask`'s, `Sources/VibeCore/LeadBoard.swift`)
+### Board (in the node: `BoardValue`, the `boards` collection by project; `vibeswitcher board --json` gives the same)
 
 ```js
-{ project: 'local:project:Zx3k…', baseBranch: 'landing-base',
+{ project: 'local:project:Zx3k…', root: '/home/dev/projects/example-site', baseBranch: 'landing-base',
+  counts: { attention: 1, running: 2, waiting: 1, done: 1 }, more: 0,   // more: tasks past the 150 sent
+  unreadable: null,                                          // why the board can't be shown (too large, not a board)
   tasks: [{
-    id, slug: 'sync-landing-base', title, status: 'running',   // planned, running, review, done, failed, blocked,
-                                                               // kept, folded, abandoned, reverted
-    since, worker: 'local:1b8e…', verifier: null,              // session ids
+    id, slug: 'sync-landing-base', title, status: 'running',   // LeadTask.Status: planned, running, review, done, failed,
+                                                               // blocked, kept, folded, abandoned, reverted
+    group: 'running',                                          // attention, running, waiting, done (BoardValue.groups)
+    state: 'Rework 1', line: 'Rebased onto main…',             // the Mac's Team words, and the dim line under it
+    blocker: null,                                             // a blocked task's blocker, its lines kept (at most 40)
+    worker: 'local:1b8e…', verifier: null,                     // session ids (only a host's UUID), for its chat
+    review: 'audit', position: 0, createdAt, since, startedAt, attempts: 2, budgetMin: 60, overBudget: false,
     branch: 'agent/sync-landing-base', after: [],              // slugs it waits on
-    checkpoints: [{ text, at }], blocker: null,
-    merged: null,                                              // { commit, at, tested }
+    checkpoint: { text, at }, audit: { verdict, open, findings, rounds }, merged: { commit, at, tested },
   }] }
 ```
+
+Every string in it is the sessions' writing made inert by the node (controls replaced, each capped). A finished task is
+sent for a day after it finished; the page shows those of today.
 
 ### Chat item (in the node: `ChatValue`, the contract §6)
 

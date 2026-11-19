@@ -81,7 +81,7 @@ export function createMock(store, options = {}) {
 
   const task = (slug, title, status, fields = {}) => ({ id: slug, slug, title, status, since: ago(300), worker: null, verifier: null, branch: 'agent/' + slug, after: [], checkpoints: [], blocker: null, merged: null, ...fields });
   const boards = new Map(options.empty ? [] : [[SITE_PROJECT, {
-    project: SITE_PROJECT, baseBranch: 'landing-base',
+    project: SITE_PROJECT, root: SITE, baseBranch: 'landing-base',
     tasks: [
       task('sync-landing-base', 'Sync landing-base with main', 'running', { since: ago(252), worker: W_SYNC, checkpoints: [{ text: 'Rebased onto main; resolving the hero’s conflicts', at: ago(70) }] }),
       task('cleanup-ended-folders', 'Clean up ended sessions’ folders', 'review', { since: ago(118), worker: W_CLEAN, verifier: V_CLEAN, checkpoints: [{ text: 'Raised to audit: it has code that deletes files', at: ago(118) }] }),
