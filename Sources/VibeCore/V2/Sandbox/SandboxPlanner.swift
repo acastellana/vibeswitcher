@@ -80,6 +80,10 @@ public struct SandboxInputs: Equatable, Sendable {
 /// there. It reads files only to see what exists (an entry of the agent's config, a cache, a PATH folder) and a
 /// worktree's git pointers (`GitRoots`); it writes nothing, and runs nothing.
 ///
+/// Two names inside a folder a box writes stay read-only there, there or not (`cover`): the worktree's own git config
+/// (`GitRoots.worktreeConfig`), which the node's git reads outside, and the agent's memory (`ClaudeFiles.memory`),
+/// which a later session outside loads as instructions.
+///
 /// Every source is judged before the plan is given: none under the node's folder but its build, the installed hook and
 /// the session's own folder; none under `/run`, `/mnt`, `/init`, `/proc`, `/sys`, `/dev` or the home's hidden folders
 /// (`SandboxPolicy.hidden`) but the agent's named config entries. A PATH folder there is left out; anything else there
@@ -104,7 +108,8 @@ public enum SandboxPlanner {
     static let system = ["/usr", "/etc", "/opt"]
 
     public static func plan(_ inputs: SandboxInputs, exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
-                            gitRoots: (String) -> Result<GitRoots.Roots, SandboxRefusal> = GitRoots.read)
+                            gitRoots: (String) -> Result<GitRoots.Roots, SandboxRefusal> = GitRoots.read,
+                            entry: (String) -> Entry = SandboxPlanner.entry)
         -> Result<Platform.Sandbox.Plan, SandboxRefusal> {
         let role = inputs.role
         let agent = role != .branchRun
@@ -120,6 +125,29 @@ public enum SandboxPlanner {
             let layer = "\(inputs.box)/layers/\(layers)"
             layers += 1
             mounts.append(.init(path, .overlay(lower: path, upper: layer + "/upper", work: layer + "/work")))
+        }
+        /// `target`, a name in a folder the box writes (a real one, bound read-write: `source` is that name in it),
+        /// read-only inside whether or not it is there: the real `source` bound over it, which the box can neither
+        /// write, remove nor rename something onto (a mount point: EROFS, EBUSY). One that isn't there is made first,
+        /// empty, through the folder's own mount (so it is the real one that is made: an empty file, or the point of an
+        /// empty folder in memory that the cover then hides), since only what is there can be bound. A link, or a
+        /// folder where a file belongs, can't be covered (the shim follows no link, and git or the agent would read
+        /// what the box put there): why there is no box then, else nil.
+        ///
+        /// A cover holds while nothing outside the box renames the real name away or renames something over it: the
+        /// kernel then lets go of the mount inside (measured), and the box finds the folder's own name again, writable.
+        /// git outside writes a config by such a rename, and `LeadLaunch.setAsideMemory` renames a worktree's memory:
+        /// neither is done to a live box's worktree by the node today but the second, at its verifier's start (SB6b).
+        func cover(_ target: String, source: String, folder: Bool, what: String) -> SandboxRefusal? {
+            switch (entry(source), folder) {
+            case (.file, false), (.folder, true): break
+            case (.absent, _): mounts.append(.init(target, folder ? .empty(mode: 0o555) : .file(contents: Data(), mode: 0o644)))
+            default:
+                return SandboxRefusal(value: source, reason: "\(what) must be \(folder ? "a folder" : "a file") (or not be there) to be read-only "
+                                      + "in a box: a link or anything else there can't be covered")
+            }
+            mounts.append(.init(target, .readOnly(source: source)))
+            return nil
         }
 
         // The machine's read-only part, and the box's own /proc, /dev, /tmp.
@@ -157,7 +185,8 @@ public enum SandboxPlanner {
         }
 
         // The agent: its binary, its config folder (the session's own, with the user's entries read-only), its
-        // transcripts' real folder, its login, its seeded `.claude.json`, and git's config.
+        // transcripts' real folder with the memory in it read-only, its login, its seeded `.claude.json`, and git's
+        // config.
         let directory = role == .lead ? inputs.root : (inputs.worktree ?? inputs.root)
         if agent {
             if let program = inputs.agentProgram { readOnly(program) }
@@ -170,6 +199,10 @@ public enum SandboxPlanner {
             }
             let transcripts = "/projects/" + ClaudeFiles.projectFolder(cwd: directory)
             mounts.append(.init(inputs.home + "/.claude" + transcripts, .readWrite(source: config + transcripts)))
+            if let refusal = cover(inputs.home + "/.claude" + transcripts + "/" + ClaudeFiles.memory,
+                                   source: config + transcripts + "/" + ClaudeFiles.memory, folder: true, what: "the agent's memory") {
+                return .failure(refusal)
+            }
             mounts.append(.init(inputs.home + "/.claude.json",
                                 .file(contents: ClaudeFiles.seededConfig(from: inputs.agentConfig ?? Data("{}".utf8), cwd: directory,
                                                                           login: inputs.agentLogin), mode: 0o600)))
@@ -216,9 +249,14 @@ public enum SandboxPlanner {
                 }
                 readWrite(objectsFolder(inputs))
             }
-            // The worktree's pointers, read-only over the folders that hold them.
+            // The worktree's pointers, read-only over the folders that hold them; and its own git config, which git
+            // reads once the repository's `extensions.worktreeConfig` is on (and `git sparse-checkout` turns it on).
             readOnly(worktree + "/.git")
             for pointer in ["commondir", "gitdir"] where exists(roots.own + "/" + pointer) { readOnly(roots.own + "/" + pointer) }
+            let config = roots.own + "/" + GitRoots.worktreeConfig
+            if let refusal = cover(config, source: config, folder: false, what: "a worktree's \(GitRoots.worktreeConfig)") {
+                return .failure(refusal)
+            }
         }
 
         // What the project names; the slots; the door.
@@ -275,6 +313,24 @@ public enum SandboxPlanner {
             }
         }
         return folders
+    }
+
+    /// What is at a path, its last component not followed.
+    public enum Entry: Equatable, Sendable {
+        case absent, file, folder
+        /// A link, a socket, a device, or a path that can't be looked at.
+        case other
+    }
+
+    /// What is at `path` (`lstat`).
+    public static func entry(_ path: String) -> Entry {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return errno == ENOENT ? .absent : .other }
+        switch info.st_mode & S_IFMT {
+        case S_IFREG: return .file
+        case S_IFDIR: return .folder
+        default: return .other
+        }
     }
 
     /// Why `source` may not be shown in a box; nil when it may.

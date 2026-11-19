@@ -3,10 +3,11 @@ import Foundation
 /// What Claude Code finds of its config inside a box (the session sandbox plan's "The agent itself", as SB0 measured
 /// Claude Code 2.1.326: the inventory's "The session sandbox, measured"). The config folder (`~/.claude`) is the
 /// session's own; the user's entries that say how the agent behaves are bound into it read-only, so a session can't
-/// change what the next one loads; the transcript's folder is the real one; the login is read-only (SB-D8); everything
-/// else Claude Code writes there starts empty and goes with the box. `~/.claude.json` is a seeded copy in the session's
-/// own home, since Claude Code rewrites it by a rename beside it (six times in one turn, measured), made from an
-/// allow-list of the account's file (`configKeys`).
+/// change what the next one loads; the transcript's folder is the real one, but for the memory in it (`memory`), which
+/// is read-only for the same reason; the login is read-only (SB-D8); everything else Claude Code writes there starts
+/// empty and goes with the box. `~/.claude.json` is a seeded copy in the session's own home, since Claude Code
+/// rewrites it by a rename beside it (six times in one turn, measured), made from an allow-list of the account's file
+/// (`configKeys`).
 ///
 /// A new Claude Code version changes these lists and their test (`SandboxPlannerTests`), nothing else.
 public enum ClaudeFiles {
@@ -19,6 +20,12 @@ public enum ClaudeFiles {
     public static let ownEntries = ["backups", "debug", "history.jsonl", "mcp-needs-auth-cache.json", "projects", "session-env",
                                     "sessions", "shell-snapshots", "jobs", "file-history", "paste-cache", "cache", "tasks",
                                     "teams", "todos", "state", "statsig", "ide"]
+
+    /// Claude Code's memory, a folder in the transcripts' one (`projects/<folder>/memory/`, its index `MEMORY.md`):
+    /// what a session saves there, every later session of that project loads as instructions, the user's and the lead's
+    /// outside any box among them. Read-only in a box, there or not (the review of 2026-11-19): a boxed session reads
+    /// what is there and saves nothing.
+    public static let memory = "memory"
 
     /// The login, read-only in slices 1 to 3 (SB-D8), never copied.
     public static let login = ".credentials.json"

@@ -9,6 +9,12 @@ public enum GitRoots {
     /// The most a pointer file may hold.
     static let pointerLimit = 4096
 
+    /// A worktree's own git config, in its own git folder: git reads it once the repository's
+    /// `extensions.worktreeConfig` is on, in every git run on that worktree, the node's outside among them. So a box
+    /// that writes the folder never writes this (`SandboxPlanner.plan`'s cover). Nothing else there is config: the
+    /// repository's `config` and `hooks/` are the common folder's, read-only to every box.
+    public static let worktreeConfig = "config.worktree"
+
     public struct Roots: Equatable, Sendable {
         /// The repository's common git folder (`<root>/.git`).
         public var common: String
