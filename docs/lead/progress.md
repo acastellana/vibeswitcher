@@ -4079,3 +4079,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 10:45 Flaky in the batch a-refused-report-s, code-blocks-run-in, the-lead-s-records: eachOpenAIRunLeavesATrailInAppLogWithoutTheKeyOrTheText(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
 - 2026-11-19 10:45 Started a worker on the-config-seal-is
 - 2026-11-19 10:45 Automatically (auto_advance): Started a worker on the-config-seal-is (The config seal is checked before a merge's test run, and a passing run survives a seal hold), its after tasks done (the-lead-s-records).
+- 2026-11-19 10:45 Automatically (auto_advance): Merged a-refused-report-s at 017ba548 (its passing audit), code-blocks-run-in at 1531142c (its passing audit), the-lead-s-records at 9d83023a (its passing audit) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-19 10:45 Automatically (auto_advance): Cleaned up a-refused-report-s (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-19 10:45 Automatically (auto_advance): Cleaned up code-blocks-run-in (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-19 10:45 Automatically (auto_advance): Cleaned up the-lead-s-records (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-19 10:45 Update: Merged: Run in New Shell, secret masking in refused reports, records committed before merges — **What changed:**
