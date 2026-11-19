@@ -198,6 +198,134 @@ struct SandboxPlannerTests {
         }
     }
 
+    /// The index of the last mount at `target` of `kind`; nil when there is none.
+    static func index(of target: String, _ kind: Platform.Sandbox.Mount.Kind, in plan: Platform.Sandbox.Plan) -> Int? {
+        plan.mounts.lastIndex { $0.target == target && $0.kind == kind }
+    }
+
+    /// The review of 2026-11-19: with `extensions.worktreeConfig` on, git reads `<own>/config.worktree`, so a worker
+    /// that could write it would set a program (core.fsmonitor, core.hooksPath, a filter) for the node's git, which
+    /// runs outside on that worktree. Whoever writes its own git folder finds the file read-only there, there or not:
+    /// one that isn't there is made empty first (in the folder, as the worktree's git made it), then covered, so it
+    /// can't be created either.
+    @Test func aWorkerCantWriteItsWorktreesGitConfig() throws {
+        let world = try world()
+        let own = world.root + "/.git/worktrees/w1"
+        let config = own + "/config.worktree"
+        for present in [false, true] {
+            if present { try "[core]\n\tsparseCheckout = false\n".write(toFile: config, atomically: true, encoding: .utf8) }
+            for role in [SandboxRole.worker, .verifier, .branchRun] {
+                let plan = try plan(world.inputs(role))
+                // What a program in the box finds there is the real file, read-only: never the writable folder's.
+                #expect(Self.over(config, plan)?.kind == .readOnly(source: config), "\(role), present \(present): \(String(describing: Self.over(config, plan)))")
+                let folder = try #require(Self.index(of: own, .readWrite(source: own), in: plan))
+                let cover = try #require(Self.index(of: config, .readOnly(source: config), in: plan))
+                #expect(folder < cover, "\(role)")
+                // One that isn't there is made between the two, empty; one that is there is never made again.
+                let made = Self.index(of: config, .file(contents: Data(), mode: 0o644), in: plan)
+                #expect(present ? made == nil : made.map { folder < $0 && $0 < cover } == true, "\(role), present \(present): \(String(describing: made))")
+                // Nothing else of the plan writes there.
+                #expect(!Self.writable(plan).contains { Self.within($0, config) }, "\(role)")
+            }
+        }
+        // A lead writes no git folder at all, so it has nothing to cover.
+        #expect(Self.over(world.root + "/.git/config.worktree", try plan(world.inputs(.lead)))?.kind == .readOnly(source: world.root + "/.git"))
+    }
+
+    /// With `extensions.worktreeConfig` on, the worktree's config is covered as it is everywhere, whatever it holds;
+    /// and where no cover can be made over it (a link, a folder: a mount covers neither a link nor what git then
+    /// reads), the box is refused, the extension on or not.
+    @Test func aWorktreeWithWorktreeConfigOnIsCoveredOrRefused() throws {
+        let world = try world()
+        let config = world.root + "/.git/worktrees/w1/config.worktree"
+        for (key, value) in [("core.repositoryFormatVersion", "1"), ("extensions.worktreeConfig", "true")] {
+            #expect(Git.run(["config", key, value], in: world.root).ok)
+        }
+        // Not there yet: covered. Then with what a worker would plant: covered as it is, by the real file.
+        #expect(Self.over(config, try plan(world.inputs(.worker)))?.kind == .readOnly(source: config))
+        #expect(Git.run(["config", "--worktree", "core.fsmonitor", world.worktree + "/planted"], in: world.worktree).ok)
+        #expect(FileManager.default.fileExists(atPath: config))
+        for role in [SandboxRole.worker, .verifier, .branchRun] {
+            #expect(Self.over(config, try plan(world.inputs(role)))?.kind == .readOnly(source: config), "\(role)")
+        }
+        // A link (to a file of the worker's own, say) or a folder there: refused, naming it.
+        for extension_ in ["true", "false"] {
+            #expect(Git.run(["config", "extensions.worktreeConfig", extension_], in: world.root).ok)
+            for folder in [false, true] {
+                try FileManager.default.removeItem(atPath: config)
+                if folder {
+                    try FileManager.default.createDirectory(atPath: config, withIntermediateDirectories: false)
+                } else {
+                    try "[core]\n".write(toFile: world.worktree + "/planted.cfg", atomically: true, encoding: .utf8)
+                    try FileManager.default.createSymbolicLink(atPath: config, withDestinationPath: world.worktree + "/planted.cfg")
+                }
+                for role in [SandboxRole.worker, .verifier, .branchRun] {
+                    let refused = SandboxPlanner.plan(world.inputs(role))
+                    guard case .failure(let refusal) = refused else {
+                        Issue.record("\(role), extension \(extension_), folder \(folder): planned")
+                        continue
+                    }
+                    #expect(refusal.value == config && refusal.reason.contains("config.worktree"), "\(refusal)")
+                }
+            }
+        }
+    }
+
+    /// The review of 2026-11-19: Claude Code keeps its memory in `projects/<folder>/memory/`, and a later session,
+    /// outside any box, loads it as instructions. The transcripts' folder stays the real one, read-write; its
+    /// `memory/` is read-only inside, there or not, so no boxed session writes what the user's or the lead's next
+    /// session is told.
+    @Test func theAgentsMemoryIsntWritableInABox() throws {
+        let world = try world()
+        try FileManager.default.createDirectory(atPath: world.home + "/.claude/projects/" + ClaudeFiles.projectFolder(cwd: world.root),
+                                                withIntermediateDirectories: true)
+        let audit = world.root + "/.vibeswitcher/audits/a1"
+        #expect(Git.run(["worktree", "add", "-q", "--detach", audit], in: world.root).ok)
+        try FileManager.default.createDirectory(atPath: world.home + "/.claude/projects/" + ClaudeFiles.projectFolder(cwd: audit),
+                                                withIntermediateDirectories: true)
+        for present in [false, true] {
+            for (role, directory) in [(SandboxRole.worker, world.worktree), (.verifier, audit), (.lead, world.root)] {
+                let transcripts = world.home + "/.claude/projects/" + ClaudeFiles.projectFolder(cwd: directory)
+                let memory = transcripts + "/memory"
+                if present { try "- [a](a.md)\n".write(toFile: memory + "/MEMORY.md", atomically: true, encoding: .utf8) }
+                let plan = try plan(world.inputs(role, worktree: directory))
+                for path in [memory, memory + "/MEMORY.md", memory + "/planted.md", memory + "/team/x.md"] {
+                    #expect(Self.over(path, plan)?.kind == .readOnly(source: memory), "\(role), present \(present), \(path): \(String(describing: Self.over(path, plan)))")
+                }
+                // The transcript beside it is still the real folder's, read-write.
+                for path in [transcripts + "/0b1c.jsonl", transcripts + "/0b1c/subagents/agent-1.jsonl"] {
+                    #expect(Self.over(path, plan)?.kind == .readWrite(source: transcripts), "\(role): \(path)")
+                }
+                let folder = try #require(Self.index(of: transcripts, .readWrite(source: transcripts), in: plan))
+                let cover = try #require(Self.index(of: memory, .readOnly(source: memory), in: plan))
+                #expect(folder < cover, "\(role)")
+                // One that isn't there is made first (an empty folder, which the cover then hides), so there is
+                // something to cover; one that is there is covered as it is.
+                let made = Self.index(of: memory, .empty(mode: 0o555), in: plan)
+                #expect(present ? made == nil : made.map { folder < $0 && $0 < cover } == true, "\(role), present \(present): \(String(describing: made))")
+                #expect(!Self.writable(plan).contains { Self.within($0, memory) }, "\(role)")
+                if !present { try FileManager.default.createDirectory(atPath: memory, withIntermediateDirectories: false) }
+            }
+        }
+        // A link there (to a folder of the session's own making, say) or a file: no cover can be made, so no box.
+        let memory = world.home + "/.claude/projects/" + ClaudeFiles.projectFolder(cwd: world.worktree) + "/memory"
+        for link in [false, true] {
+            try FileManager.default.removeItem(atPath: memory)
+            if link {
+                try FileManager.default.createSymbolicLink(atPath: memory, withDestinationPath: world.worktree)
+            } else {
+                try "planted".write(toFile: memory, atomically: true, encoding: .utf8)
+            }
+            guard case .failure(let refusal) = SandboxPlanner.plan(world.inputs(.worker)) else {
+                Issue.record("planned over a memory that is \(link ? "a link" : "a file")")
+                continue
+            }
+            #expect(refusal.value == memory && refusal.reason.contains("memory"), "\(refusal)")
+        }
+        // A branch run has no agent, so no transcripts and no memory at all.
+        #expect(!Self.sources(try plan(world.inputs(.branchRun))).contains { Self.within($0, world.home + "/.claude") })
+    }
+
     /// The home's sources a role's plan may name, worked out here from the tables, apart from the planner.
     func named(_ world: World, _ role: SandboxRole, _ policy: SandboxPolicy) -> [String] {
         var named = [world.box, world.temporary, world.runHome, world.build, world.home + "/.vibeswitcher/bin",
