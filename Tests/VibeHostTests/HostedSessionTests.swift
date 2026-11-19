@@ -310,7 +310,8 @@ extension HostedSessionTests {
     /// The same, with the host reading late (a loaded Mac's): its session queue held from the spawn until the launcher
     /// has ended, or for 2 s once it's clear it waits to be read. macOS drops what the terminal's master hasn't read when
     /// its session leader exits, so a launcher that exited right after writing left an empty screen (2026-11-18).
-    @Test func aShellThatIsntThereIsNamedEvenWhenTheHostReadsLate() async throws {
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "Linux's sessions run /bin/bash whatever SHELL names"))
+    func aShellThatIsntThereIsNamedEvenWhenTheHostReadsLate() async throws {
         let probe = SessionProbe()
         let request = SpawnRequest(cwd: NSHomeDirectory(), command: "true", env: ["PROBE": "yes"], cols: 80, rows: 24, keepShell: false,
                                    label: "Test", agent: nil)

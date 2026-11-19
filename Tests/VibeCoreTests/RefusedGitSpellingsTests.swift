@@ -26,7 +26,8 @@ struct RefusedGitSpellingsTests {
                                                 start: "Go.", server: "/opt/vibe switcher/vibeswitcher-mcp", name: "\(role)-spellings",
                                                 branch: "main", records: "docs/lead", folder: temp.url("run-\(role)"), cwd: root,
                                                 temporary: temp.url("session-tmp-\(role)"))
-            settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
+            // Read off the command line: on Linux the settings are there and the file removed (`LinuxLaunch.inline`).
+            settings = try LaunchArguments.json("--settings", in: launch.command)
             let permissions = try #require(settings["permissions"] as? [String: Any])
             self.role = role
             deny = permissions["deny"] as? [String] ?? []
@@ -191,7 +192,11 @@ struct RefusedGitSpellingsTests {
 
     /// The briefs list each refused option once, as before, not again in each spelling the rules add.
     @Test func theBriefsListOfRefusedGitKeepsOneEntryPerOption() {
+        // Linux's own rules (`LinuxLaunch.denyRules`: `git -c credential*` for every role) are the platform's, not a
+        // spelling of an option the rules add: left out. The Mac has none.
+        let platforms = Set(LinuxLaunch.denyRules(for: .worker))
         let listed = LeadLaunch.deniedGit(.worker, base: "main", records: "docs/lead")
+            .filter { !platforms.contains("Bash(\($0))") && !platforms.contains("Bash(\($0):*)") }
         for option in Self.options {
             #expect(listed.filter { $0.hasPrefix("git \(option)") } == ["git \(option)"], "\(option): \(listed)")
         }

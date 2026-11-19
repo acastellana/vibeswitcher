@@ -101,6 +101,9 @@ struct RefusedGitCommandsTests {
     @Test func theTableCoversEachGitRuleOfAWorker() {
         let rules = LeadLaunch.deny(.worker, base: "main", records: "docs/lead").filter { $0.hasPrefix("Bash(git ") }
             .filter { !LeadLaunch.outsideReads.contains($0) && !RefusedGit.spellingRules.contains($0) && !RefusedGit.rules.contains($0) }
+            // Linux's own (`LinuxLaunch.denyRules`: git's credential helper, for every role): the platform's, checked
+            // with it, and refused on Linux alone, so no row of the table, which holds on both systems.
+            .filter { !LinuxLaunch.denyRules(for: .worker).contains($0) }
         #expect(rules.count > 40)
         for rule in rules {
             let covered = Self.workersRefusedCommands.contains { LeadGuardRailsTests.matches(rule, "git \($0)", emptyStar: false) }
