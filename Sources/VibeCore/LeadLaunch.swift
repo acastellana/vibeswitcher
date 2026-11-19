@@ -726,7 +726,7 @@ public enum LeadLaunch {
     public static func listedPlugins(command: String, folder: URL = pluginListFolder, timeout: TimeInterval = 20) -> [String]? {
         guard neutral(folder) else { return nil }
         let program = LaunchPreflight.program(in: command) ?? "claude"
-        let result = Shell.run(executable: "/bin/zsh", args: ["-lc", "exec \"$1\" plugin list --json", "zsh", program],
+        let result = Shell.run(executable: Platform.Tools.loginShell, args: ["-lc", "exec \"$1\" plugin list --json", "zsh", program],
                                in: folder.path, timeout: timeout, grace: 1)
         guard result.ok else { return nil }
         return pluginIDs(json: Data(result.output.utf8))

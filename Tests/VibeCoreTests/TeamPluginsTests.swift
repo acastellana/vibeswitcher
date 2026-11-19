@@ -45,8 +45,9 @@ struct TeamPluginsTests: LeadTeamFixture {
         return url.path
     }
 
+    /// The settings `launch` gives its session: a file's on the Mac, on its command line on Linux (`LinuxLaunch.inline`).
     func settings(_ launch: LeadLaunch.Prepared) throws -> [String: Any] {
-        try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
+        try LaunchArguments.json("--settings", in: launch.command)
     }
 
     @Test func workersAndVerifiersTurnOffEveryPluginTeamPluginsDoesNotName() throws {
@@ -59,7 +60,8 @@ struct TeamPluginsTests: LeadTeamFixture {
             let none = try LeadLaunch.prepare(role: role, root: root, task: "x", base: "claude", prompt: "p", start: "Go.", server: "/s",
                                               name: name, folder: temp.url("run-none-\(role.rawValue)"), home: home)
             #expect(try settings(none)["enabledPlugins"] as? [String: Bool] == [Self.alpha: false, Self.beta: false], "\(role)")
-            #expect(none.command.contains("--settings '\(none.settingsFile)'"))
+            // The session's own settings: its file on the Mac, inline on Linux.
+            #expect(LaunchArguments.value("--settings", in: none.command).map { $0 == none.settingsFile || $0.hasPrefix("{") } == true)
             // team_plugins: A (by its whole id, or by its plugin name alone): only B off.
             for allowed in [Self.alpha, "alpha"] {
                 let some = try LeadLaunch.prepare(role: role, root: root, task: "x", base: "claude", prompt: "p", start: "Go.", server: "/s",
@@ -73,7 +75,7 @@ struct TeamPluginsTests: LeadTeamFixture {
             // VibeSwitcher's own hooks and tool server don't come from a plugin: still there.
             let hooks = try #require(try settings(none)["hooks"] as? [String: Any])
             #expect(hooks["PermissionRequest"] != nil && hooks["PreToolUse"] != nil, "\(role): \(hooks.keys.sorted())")
-            let mcp = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: none.mcpFile))) as? [String: Any])
+            let mcp = try LaunchArguments.json("--mcp-config", in: none.command)
             #expect((mcp["mcpServers"] as? [String: Any])?["vibeswitcher"] != nil)
         }
         // The lead's launch is as before: no enabledPlugins, whatever team_plugins says.
@@ -220,15 +222,14 @@ struct TeamPluginsTests: LeadTeamFixture {
         #expect(!lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]]).isError)
         let started = lead.call("start_worker", ["task": "add-b"])
         #expect(!started.isError, "\(started.text)")
-        let folder = vault.runFolder(root: root, name: "worker-add-b")
-        let worker = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("settings.json"))) as? [String: Any])
+        let worker = try LaunchArguments.json("--settings", in: LaunchArguments.command("worker-add-b", runtime))
         #expect(worker["enabledPlugins"] as? [String: Bool] == [Self.beta: false, "gamma@synced": false])
         // Listed once, with the project's own Claude command; status and configure then say what it left off.
         #expect(runtime.pluginLists == [runtime.claude])
         #expect(lead.call("configure", [:]).text.contains("- team_plugins: alpha only; 2 of the user's 3 off in their sessions"))
         #expect(lead.call("status", [:]).text.contains("alpha only; 2 of the user's 3 off in their sessions"))
         #expect(runtime.pluginLists.count == 1, "configure and status list nothing")
-        let prompt = try String(contentsOf: folder.appendingPathComponent("prompt.md"), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(of: "worker-add-b", runtime)
         #expect(!prompt.contains("plugin"), "the brief says nothing new")
         let worktree = Worktrees.path(root: root, slug: "add-b")
         try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
@@ -238,8 +239,7 @@ struct TeamPluginsTests: LeadTeamFixture {
         #expect(!reported.isError, "\(reported.text)")
         let audit = lead.call("audit", ["task": "add-b"])
         #expect(!audit.isError, "\(audit.text)")
-        let verifier = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: vault.runFolder(root: root, name: "verify-add-b")
-            .appendingPathComponent("settings.json"))) as? [String: Any])
+        let verifier = try LaunchArguments.json("--settings", in: LaunchArguments.command("verify-add-b", runtime))
         #expect(verifier["enabledPlugins"] as? [String: Bool] == [Self.beta: false, "gamma@synced": false])
         // A listing that fails: status says some plugins may still load, not that none do.
         runtime.plugins = nil

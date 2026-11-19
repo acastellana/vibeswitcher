@@ -290,14 +290,14 @@ struct LeadLaunchTests {
     /// The Mac's rules are main's, for each role (each list's SHA-256, its rules one a line): Linux's are added only
     /// where `Platform.Tools.roleDenyRules` has them, at the end. The rules both systems give are checked on both.
     /// Recorded at 47636aaf, the commit stage 2's plan starts from, and again at each merge of main that changes a list:
-    /// last at the merge of 2026-11-17 (main at d2277773: `claudeHome`, `claudeStores`, the restart record and the
-    /// rest), where `LeadLaunch.swift` differs from main's only by v2's hook lines.
+    /// last at the merge of 2026-11-19 (main at cd6c4ae9: `RefusedGit`'s spellings of the refused git options and the
+    /// rest; before it, 2026-11-17's at d2277773), where `LeadLaunch.swift` differs from main's only by v2's hook lines.
     @Test func theMacsDenyRulesAreTodays() throws {
         let recorded: [String: String] = [
-            "lead": "8aa0892f62467afbb4b278588d28357e30655deb2ac458c93b8227dfbbe21b90",
-            "worker-project-lead-docs/lead": "b2ffd091342d22012c4c7e2381e78d71159b141bf183959b715efc41e5ea7b1a",
-            "worker": "332a225d45b98e9119ee677a7b4e83e9a5015a1e67fd4355beab05b8be906b08",
-            "verifier-project-lead-docs/lead": "64380195e9b87b14dc3d567c7d06a3c5d3288adc3449f6ab3c8254693fd7c88d",
+            "lead": "b1fa0d51cdb0e0465897cb73117c382059b58d9ae2ab16bea7390800f35060ad",
+            "worker-project-lead-docs/lead": "3e2107006ca8ece321d2ec885d6f538257ee0918055577c79238d4b37818c2c6",
+            "worker": "24e7c87cde397fd322ee6bb588607d53c1910a083e98d0a20b9618eb4e467ee4",
+            "verifier-project-lead-docs/lead": "b58d389b65b4b6f522e7049a7bb8c83e54b9c48156c9b5bbf0cb73f4662cb8b2",
         ]
         let shapes: [(LeadLaunch.Role, String?, String?)] = [(.lead, nil, nil), (.worker, "project-lead", "docs/lead"), (.worker, nil, nil),
                                                               (.verifier, "project-lead", "docs/lead")]
@@ -360,7 +360,9 @@ struct LeadLaunchTests {
             #expect(permissions["deny"] as? [String] == LeadLaunch.deny(role, base: "project-lead", records: "docs/lead"), "\(role)")
             #expect(permissions["allow"] as? [String] == LeadLaunch.allow(role, base: "project-lead") + LeadLaunch.evidenceReads(role, root: root, task: task),
                     "\(role)")
-            let hooks = LeadLaunch.hooks(role, server: "/opt/vibe switcher/vibeswitcher-mcp", root: task.map { Worktrees.path(root: root, slug: $0) } ?? root)
+            // A worker's hook names its branch and records too (main's `--base`, `--records`, 2026-11-18).
+            let hooks = LeadLaunch.hooks(role, server: "/opt/vibe switcher/vibeswitcher-mcp", root: task.map { Worktrees.path(root: root, slug: $0) } ?? root,
+                                         base: "project-lead", records: "docs/lead")
             #expect(try LinuxLaunch.json(settings["hooks"] as? [String: Any] ?? [:]) == LinuxLaunch.json(hooks), "\(role)")
             #expect(settings["statusLine"] != nil && (settings["env"] as? [String: String])?["GIT_OPTIONAL_LOCKS"] == "0")
             #expect(words.last == "Go." && words[words.count - 2] == "--")
