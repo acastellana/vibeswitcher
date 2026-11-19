@@ -123,6 +123,67 @@ extension Requests {
         }
     }
 
+    // MARK: draft, draft.clear
+
+    /// The longest draft a page may leave, in characters.
+    static let draftLength = 4000
+
+    /// `draft` and `draft.clear` from a web page (the live plan's B5, LW-D6; the wire contract's §8): the user's words
+    /// kept on the card (`CardStore.Card.draft`), or taken off it, and told to nobody: nothing reaches the lead or the
+    /// vault, and nothing is recorded. `vibeswitcher answer CARD` takes the draft in the user's voice, the card's code
+    /// typed. Only `NodeLive` calls this, for a web connection whose token drafts (`WebRequestScreen` judged it first);
+    /// `handle` refuses both kinds on the Unix socket.
+    ///
+    /// The card is named by its whole id (a page holds it); a closed one is `gone`; a draft for a wording the lead has
+    /// revised since is `refused`. The reply carries `applied`, the `cards` stream's `seq` at which the change is in
+    /// it, written after the stream took it (one turn of the queue later, after the stream's own), so a page's overlay
+    /// meets its delta. A repeated action id is answered as the first was, and not done again (the last
+    /// `repliesKept`).
+    func draft(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let action = request.action?.lowercased(), UUID(uuidString: action) != nil else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
+        }
+        if var again = replies[action] {
+            again.re = request.id
+            return reply(again)
+        }
+        let done = { [weak self] (answer: NodeWire.Reply) in
+            self?.keep(answer, for: action)
+            reply(answer)
+        }
+        guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
+        guard let engine else { return done(.init(re: request.id, error: .init(.refused, "this server keeps no cards"))) }
+        guard let id = request.args?["card"]?.string else { return done(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs card"))) }
+        guard let card = engine.cards.cards[id] else {
+            return done(.init(re: request.id, error: .init(.gone, "no card \(ConfigSeal.inert(id, limit: 80)) (it went, or the server restarted)")))
+        }
+        guard let question = card.question, card.kind == .question || card.kind == .approval else {
+            return done(.init(re: request.id, error: .init(.badArgs, "card \(card.id) is a \(card.kind.rawValue) card: it takes no answer")))
+        }
+        guard card.isOpen else { return done(.init(re: request.id, error: .init(.gone, "card \(card.id) is closed: \(card.closed ?? "")"))) }
+        if request.kind == "draft" {
+            guard let text = request.args?["text"]?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return done(.init(re: request.id, error: .init(.badArgs, "draft needs text")))
+            }
+            guard text.count <= Self.draftLength else {
+                return done(.init(re: request.id, error: .init(.badArgs, "a draft is at most \(Self.draftLength) characters")))
+            }
+            guard let version = request.args?["version"]?.int else { return done(.init(re: request.id, error: .init(.badArgs, "draft needs version"))) }
+            guard version == question.version else {
+                return done(.init(re: request.id, error: .init(.refused, "the lead revised question \(ConfigSeal.inert(question.short, limit: 40)) (version \(question.version)): read it again")))
+            }
+            engine.cards.change(card.id) { $0.draft = CardStore.Draft(text: text, version: version, at: Date(), action: action) }
+        } else {
+            engine.cards.change(card.id) { $0.draft = nil }
+        }
+        // Nothing of the text in the log: it is the user's words.
+        note("\(request.kind) on \(card.id) from a web page (action \(action)): kept on the card, told to nobody")
+        queue.async { [weak self] in
+            guard let self else { return }
+            done(.init(re: request.id, result: .object(["applied": .object(["cards": .int(self.liveSeq?("cards") ?? 0)]), "card": .string(card.id)])))
+        }
+    }
+
     // MARK: config
 
     func configHeld(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
@@ -248,6 +309,11 @@ extension Requests {
 }
 
 extension CardStore.Card {
+    /// A draft as the card's `draft` carries it.
+    static func draftValue(_ draft: CardStore.Draft) -> NodeWire.Value {
+        .object(["text": .string(draft.text), "version": .int(draft.version), "at": .date(draft.at), "action": .string(draft.action)])
+    }
+
     /// The card as the protocol carries it. What the lead or a worker wrote (the question, its options, notes, a
     /// commit's subject, file names) is the lead's words or git's: the command line prints every such field inert.
     public var value: NodeWire.Value {
@@ -263,6 +329,8 @@ extension CardStore.Card {
         fields["notice"] = text(notice)
         fields["at"] = .date(at)
         fields["blocking"] = .bool(isBlocking)
+        // The user's own words, drafted on a page: shown as theirs, inert on the command line like every other field.
+        fields["draft"] = draft.map(Self.draftValue) ?? .null
         if let question {
             var q: [String: NodeWire.Value] = [:]
             q["id"] = .string(question.id)

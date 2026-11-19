@@ -4,8 +4,9 @@ The client for a VibeSwitcher 2 node (`docs/superpowers/specs/2026-11-12-vibeswi
 and "Stage 5"). Served by the node itself (embedded in its server, `scripts/webapp-embed.sh`), it follows the node live
 over its WebSocket (`js/socket.js`, the wire contract `docs/superpowers/specs/2026-11-17-v2-live-wire-contract.md`):
 the node's status, the sessions as their status changes, the leads' questions, and a session's conversation as it
-grows. It reads only: an answer is given in a
-terminal, with the line the card shows. With `?mock` it runs on invented data instead and needs no server.
+grows. It reads, and drafts: a pick on a card leaves a draft there, told to nobody, and the card shows the line that
+sends it from a terminal (`vibeswitcher answer CARD`, a click to copy), where the card's code is typed. No click here
+is the user's answer. With `?mock` it runs on invented data instead and needs no server.
 
 ```sh
 bash scripts/sandbox-server.sh run && bash scripts/sandbox-server.sh url   # a scratch node, and the page's address
@@ -119,7 +120,9 @@ decisions, scorecard, answered questions and files.
 id, in one notification: a list is never emptied first) and `store.change(name, [{ id, value }])` for a delta, after
 it has run every frame through `wire/validators.js` and judged each subscription's order (`prev` and `seq`). Until
 `hello` says otherwise (`store.can(kind)`, from `hello.kinds`; `store.follows(collection)`), the views offer only what
-the connection may do: the node's page reads, so a card shows `vibeswitcher answer …` instead of its buttons, the
+the connection may do: the node's page reads and drafts (`draft`, not `answer`), so a card's options leave a draft
+(`store.draft`, an overlay kept until the cards stream reaches the ack's `applied`: `feed.reached`) and the card shows
+the line that confirms it; a page that only reads shows `vibeswitcher answer …` with the options as text; the
 terminal and a lead's board say they come in a later build, and the chat says so where `chat.page` isn't among the
 kinds. `mock.js` keeps the older whole-state messages below for the keyed collections, which the store still takes:
 

@@ -17,8 +17,8 @@ import VibeCore
 /// - **Chats** (slice 2): `ChatStore` on the sessions' transcripts, a session's stream opened by its first `chat`
 ///   subscription and dropped a minute after its last; `chat.page` reads one. The hub takes both.
 /// - **A web connection** is screened first (`WebRequestScreen`: a token reads and drafts, never the user's voice),
-///   then the hub takes `subscribe` and `unsubscribe`, and what is left (`status`, `questions`) goes to `Requests` as a
-///   peer that is nobody's voice.
+///   then the hub takes `subscribe` and `unsubscribe`, a draft goes to `Requests.draft` (I3), and what is left
+///   (`status`, `questions`) goes to `Requests` as a peer that is nobody's voice.
 ///
 /// On the engine's queue (`queue`): the listener's sockets are served there too, so a store's change, the hub's delta
 /// and its frame are written in one turn, with no hop between (the plan's LW-D14).
@@ -93,9 +93,18 @@ public final class NodeLive: @unchecked Sendable {
             }
         }
         access.onRevoke = { web.closeAll(code: "revoked", reason: "this page's access was revoked: run `vibeswitcher web` again") }
-        hub.others = { [weak requests] request, transport, _ in
-            requests?.handle(request, from: NodeLive.webPeer) { reply in transport.send(NodeWire.message(reply)) }
+        hub.others = { [weak requests] request, transport, rights in
+            guard let requests else { return }
+            let answer = { (reply: NodeWire.Reply) in transport.send(NodeWire.message(reply)) }
+            // A draft is a page's alone: its token's right judged again here (the screen judged it first), never `handle`.
+            if NodeWire.kinds[request.kind] == .webDraft {
+                guard rights.contains(.draft) else { return answer(.init(re: request.id, error: .init(.voice, "this page's token doesn't draft"))) }
+                return requests.draft(request, reply: answer)
+            }
+            requests.handle(request, from: NodeLive.webPeer, reply: answer)
         }
+        let hub = hub
+        requests.liveSeq = { [weak hub] in hub?.seq(of: $0) ?? 0 }
         requests.web = access
         requests.webValue = { said.live?.webValue() ?? NodeStatusStore.webOff }
         said.live = self

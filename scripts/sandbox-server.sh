@@ -10,8 +10,10 @@
 # scripts/sandbox-server.sh [options] url    prints the page's address with a fresh pairing code (works once, 120 s)
 # scripts/sandbox-server.sh [options] flip   the first session's turn ends, or starts again: watch the page change
 # scripts/sandbox-server.sh [options] chat   the first session's agent takes a step: watch its chat grow
+# scripts/sandbox-server.sh [options] answer runs `vibeswitcher answer CARD` on the lead's open card, its code typed:
+#                                            what the page drafted is sent, and the card closes on the page
 # scripts/sandbox-server.sh [options] quit   quits it and removes its state folder
-# e.g. run; url (open the address in a browser); flip; quit
+# e.g. run; url (open the address in a browser); flip; pick an answer on the card, answer; quit
 #
 # Options: --dir DIR (where its pid, state pointer and log are kept, .build/sandbox-server), --port N (run: the web's
 # port; by default a free one picked at the start and kept, so the page reconnects across a server restart), --web-root (run: serve WebApp/ from the worktree, read at each request, instead of
@@ -142,6 +144,6 @@ shift
 case $command in
     run) run_sandbox ;;
     quit) quit_sandbox ;;
-    url | flip | chat) ask "$command" ;;
-    *) echo "unknown command $command: run, url, flip, chat, quit (--help)"; exit 64 ;;
+    url | flip | chat | answer) ask "$command" ;;
+    *) echo "unknown command $command: run, url, flip, chat, answer, quit (--help)"; exit 64 ;;
 esac

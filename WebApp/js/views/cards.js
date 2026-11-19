@@ -2,6 +2,10 @@
 // the Mac's question card (LeadViews.swift). An answer shows at once and is taken back, saying why, if the node
 // refuses it (the design's "Actions").
 //
+// On the node's page no click is the user's voice (the plan's LW-D6): a pick leaves a draft on the card, shown at
+// once, and the card shows the one line that confirms it in a terminal, `vibeswitcher answer <card>`, a click to copy.
+// The card closes when the node's delta says it was answered.
+//
 // Keys, with the focus anywhere in a card: 1–9 answer with that option, ↑ ↓ move, ↩ answers with the focused one,
 // H holds the timer. ↑ from an empty message box steps into the last card.
 
@@ -51,6 +55,42 @@ export const cardShort = (id) => id.replace(/^.*:card:/, '').slice(0, 8);
 // An option as an example on the command line, only when it needs no shell quoting beyond the double quotes around
 // it: a lead's words never become a command that does something else when pasted.
 const sample = (option) => (option && /^[^"$`\\!\n]*$/.test(option) ? option : 'your answer');
+
+// The line a terminal confirms the draft with, and a button that copies it: one click, then "Copied" for a moment.
+// Where the clipboard is refused, the line is selected instead, for the keyboard's copy.
+function copyLine(text, label) {
+  const code = h('code', { class: 'copy-text' }, text);
+  const word = h('span', { class: 'copy-word' }, 'Copy');
+  let timer = null;
+  const said = (what, done) => {
+    word.textContent = what;
+    button.classList.toggle('done', done);
+    clearTimeout(timer);
+    timer = setTimeout(() => { word.textContent = 'Copy'; button.classList.remove('done'); }, 1600);
+  };
+  const select = () => getSelection()?.selectAllChildren(code);
+  const button = h('button', { class: 'copy-button', type: 'button', title: `Copy: ${text}`, 'aria-label': `Copy ${label}`, onclick: () => {
+    const done = () => said('Copied', true);
+    const refused = () => { select(); said(KEY_COPY, false); };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, refused); else refused();
+  } }, icon('copy', 13), word);
+  return h('div', { class: 'copy-line' }, h('span', { class: 'copy-prompt', 'aria-hidden': 'true' }, '$'), code, button);
+}
+
+const KEY_COPY = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || '') ? 'Press ⌘C' : 'Press Ctrl+C';
+
+// What a page that drafts shows under the question once a draft is on the card: the answer as it will be sent, the
+// line that sends it, and a way to take it back. `sending` while the node hasn't acked it yet.
+function confirmBox(card, drafted, clear) {
+  const short = cardShort(card.id);
+  return h('div', { class: 'confirm' + (drafted.sending ? ' sending' : ''), role: 'group', 'aria-label': 'Confirm your answer in a terminal' },
+    h('div', { class: 'confirm-head' },
+      h('span', { class: 'confirm-label' }, drafted.sending ? 'Saving your answer…' : 'Your answer'),
+      h('button', { class: 'confirm-clear', type: 'button', title: 'Take the draft off the card', onclick: clear }, 'Clear')),
+    h('p', { class: 'confirm-text' }, drafted.text),
+    copyLine(`vibeswitcher answer ${short}`, 'the command that sends it'),
+    h('p', { class: 'confirm-note' }, 'Run it in a terminal: it shows the card and your answer, and asks for the card’s code. Nothing reaches the lead before that.'));
+}
 
 // A page that may only read (`answer` isn't in what this connection may send: no browser action is the user's voice
 // yet): the options as text, and the line that answers it in a terminal, where the user's own hands type its code.
@@ -140,6 +180,11 @@ export function questionCard(app, first) {
       el.append(h('p', { class: 'timer held' }, 'Held: the timer is off. The lead proposed ', h('strong', null, question.proposal), '; it waits for your answer.'));
     }
 
+    if (!app.store.can('answer') && app.store.can('draft')) {
+      buildDraft(question, counting);
+      return;
+    }
+
     if (!app.store.can('answer')) {
       el.append(...readOnlyAnswer(card, counting).filter(Boolean));
       if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
@@ -170,19 +215,67 @@ export function questionCard(app, first) {
     keys = { buttons: list.buttons, hold: counting ? hold : null };
   }
 
+  // A page that drafts (the node's): the options pick a draft, the box drafts its own words, and the draft shows
+  // with the line that sends it from a terminal.
+  function buildDraft(question, counting) {
+    const drafted = app.store.draftOf(card.id);
+    const pick = (answer) => {
+      const text = answer.trim();
+      if (text && text !== drafted?.text) app.store.draft(card.id, text);
+    };
+    // An option picked: the box's own words, if any, give way to it.
+    const choose = (option) => { if (input) input.value = ''; pick(option); };
+    const list = optionList(question.options, { proposed: question.proposal, choose });
+    list.buttons.forEach((button, index) => {
+      const chosen = drafted?.text === question.options[index];
+      button.setAttribute('aria-pressed', String(chosen));
+      if (chosen) { button.classList.add('chosen'); button.append(icon('check', 13)); }
+    });
+    el.append(list.el);
+
+    const own = drafted && !question.options.includes(drafted.text) ? drafted.text : '';
+    const typed = input?.value ?? '';
+    input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? 'Or answer in your own words' : 'Your answer', 'aria-label': 'Your answer', autocomplete: 'off', maxlength: 4000 });
+    input.value = typed || own;
+    const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, 'Draft');
+    input.addEventListener('input', () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; });
+    el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); pick(input.value); } }, input, send));
+
+    const refused = app.store.state.draftRefused.get(card.id);
+    if (refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, refused));
+    else if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
+
+    if (drafted) el.append(confirmBox(card, drafted, () => app.store.draft(card.id, null)));
+    if (counting) el.append(h('div', { class: 'card-hold' }, h('span', { class: 'card-hold-label' }, 'To stop the timer'), copyLine(`vibeswitcher hold ${cardShort(card.id)}`, 'the command that holds the timer')));
+
+    el.append(h('p', { class: 'card-foot' }, drafted
+      ? (counting ? `Until you confirm it, the lead goes ahead with ${question.proposal} at ${clock(question.decideBy)}.` : 'Pick another answer to change it; the lead hears nothing until you confirm.')
+      : 'Pick an answer, then confirm it in a terminal.'),
+      h('p', { class: 'card-keys', 'aria-hidden': 'true' }, question.options.length > 1 ? `1–${question.options.length} picks · ↑ ↓ and ↩` : '↑ ↓ and ↩'));
+    keys = { buttons: list.buttons, hold: null };
+  }
+
   // The card is built again only when what it shows changed, so typing into it survives every other delta.
   function update(next) {
     card = next;
     const acting = app.store.state.acting.get(card.id);
-    const now = JSON.stringify([card, acting || null, app.store.can('answer')]);
+    const drafting = [app.store.draftOf(card.id), app.store.state.draftRefused.get(card.id) || null, app.store.can('draft')];
+    const now = JSON.stringify([card, acting || null, app.store.can('answer'), drafting]);
     if (now === shape) return;
     const focused = el.contains(document.activeElement);
+    // The option that had the focus keeps it (a pick never sends it to the text box, nor opens a phone's keyboard).
+    const option = [...el.querySelectorAll('.option')].indexOf(document.activeElement);
+    const copy = document.activeElement?.closest?.('.copy-line') ? [...el.querySelectorAll('.copy-button')].indexOf(document.activeElement) : -1;
     shape = now;
     build();
-    if (focused) (el.querySelector('.answer-input') || el).focus();
+    if (!focused) return;
+    const target = option >= 0 ? el.querySelectorAll('.option')[option] : copy >= 0 ? el.querySelectorAll('.copy-button')[copy] : el.querySelector('.answer-input');
+    (target || el).focus();
   }
 
-  cardKeys(el, () => ({ ...keys, choose }));
+  // With the keys too, a page that drafts drafts.
+  const drafts = () => !app.store.can('answer') && app.store.can('draft');
+  cardKeys(el, () => ({ ...keys, choose: drafts() ? (answer) => { if (input) input.value = ''; if (answer.trim()) app.store.draft(card.id, answer.trim()); } : choose }));
   update(first);
   return { el, update };
 }

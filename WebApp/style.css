@@ -399,6 +399,28 @@ code, pre, kbd { font-family: var(--mono); }
 .facts .files { margin-top: 2px; color: var(--ink-2); }
 .facts code { padding: 0; background: none; }
 
+/* A draft on the node's page: the pick marked, then the answer as it will be sent and the line that sends it. */
+.option.chosen { background: var(--accent-fill); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.option.chosen > .icon { flex: none; color: var(--accent); stroke-width: 2; }
+.option[aria-pressed] { transition: background-color 0.12s, box-shadow 0.12s; }
+.confirm { display: grid; gap: 7px; padding: 10px 12px 11px; border-radius: 10px; background: var(--fill); animation: enter 0.16s var(--ease); }
+.confirm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.confirm-label { color: var(--ink-2); font-size: var(--small); font-weight: 600; transition: color 0.16s; }
+.confirm.sending .confirm-label { color: var(--ink-3); }
+.confirm-clear { color: var(--ink-3); font-size: var(--small); }
+.confirm-clear:hover { color: var(--ink); }
+.confirm-text { font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.confirm-note { color: var(--ink-3); font-size: var(--small); }
+.copy-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 4px 4px 11px; border-radius: 8px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }
+.copy-prompt { flex: none; color: var(--ink-3); font-family: var(--mono); font-size: 12px; user-select: none; }
+.card .copy-line .copy-text { flex: 1; min-width: 0; padding: 0; overflow: hidden; background: none; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
+.copy-button { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 6px; color: var(--ink-2); font-size: var(--small); font-weight: 500; transition: background-color 0.12s, color 0.12s; }
+.copy-button:hover { background: var(--fill-2); color: var(--ink); }
+.copy-button.done { color: var(--done); }
+.confirm.sending .copy-line { opacity: 0.6; transition: opacity 0.16s; }
+.card-hold { display: grid; gap: 4px; }
+.card-hold-label { color: var(--ink-3); font-size: var(--small); }
+
 /* ---- The inspector ----
    Over the session's right edge, under its header. Open as a column, the session's own column gives it the room in one
    step (session.js glides what's centred there), so the inspector itself only fades and slides: opacity and transform.

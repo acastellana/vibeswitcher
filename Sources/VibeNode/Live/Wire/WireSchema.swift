@@ -134,7 +134,7 @@ public enum WireSchema {
             shape("chat.page.args", from: "the contract's §6", [field("session", .string), field("before", .string), optional("limit", .int)]),
             shape("chat.page.result", from: contractChat, [field("items", .list(.shape("chat.item"))), field("more", .bool)]),
             shape("draft.args", from: "the contract's §8", [field("card", .string), field("text", .string), field("version", .int)]),
-            shape("draft.result", from: "the contract's §8 until B5", [field("applied", .map(.int)), field("card", .string)]),
+            shape("draft.result", from: "Requests.draft", [field("applied", .map(.int)), field("card", .string)]),
             shape("draft.clear.args", from: "the contract's §8", [field("card", .string)]),
         ]
 
@@ -196,7 +196,7 @@ public enum WireSchema {
                 field("at", .date), field("blocking", .bool), optional("question", .shape("card.question")),
                 optional("approval", .shape("card.approval")), optional("config", .shape("card.config")),
                 optional("base", .shape("card.base")),
-                pending(optional("draft", Kind.shape("card.draft").orNull), "B5's draft, in CardStore.Card.value")]),
+                field("draft", Kind.shape("card.draft").orNull)]),
             shape("card.question", from: "CardStore.Card.value", [
                 field("id", .string), field("short", .string), field("text", .string), field("options", strings),
                 field("priority", .words(["blocking", "important", "whenever"])), field("whyNow", Kind.string.orNull),
@@ -226,7 +226,7 @@ public enum WireSchema {
                 field("branch", .string), field("from", Kind.string.orNull), field("fromIs", .words(["recorded", "given", "unverified", "none"])),
                 field("to", .string), field("reason", Kind.string.orNull), field("commits", .list(.shape("card.base.commit")))]),
             shape("card.base.commit", from: "CardStore.Card.value", [field("sha", .string), field("subject", .string)]),
-            shape("card.draft", from: "the contract's §5 until B5", [field("text", .string), field("version", .int), field("at", .date),
+            shape("card.draft", from: "CardStore.Card.value", [field("text", .string), field("version", .int), field("at", .date),
                                                                     field("action", .string)]),
         ]
 

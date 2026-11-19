@@ -17,6 +17,9 @@
 //   nothing lost, nothing twice. Older items come with `chat.page`, as the view scrolls up to them.
 // - Trust: every frame goes through the validators generated from the node's own encoders (wire/validators.js) before
 //   anything reads it; a frame that fails is dropped and said in the console.
+// - Actions (the contract's §8): a request with an action id is sent again after a reconnect with the same id, and
+//   `reached(collection, seq)` tells the store when a subscription holds an ack's `applied`, so an overlay is dropped
+//   only once the stream shows what it stood for.
 //
 // Everything it touches is passed in, so tests/socket.test.mjs scripts it with a fake socket and clock.
 
@@ -56,6 +59,8 @@ export function connectSocket(store, options) {
   store.state.follows = [...COLLECTIONS];
   // Requests in flight by id: { message, resolve }. An action's is sent again after a reconnect, with the same id.
   const pending = new Map();
+  // Who waits for a collection's subscription to reach a seq: { collection, seq, epoch, resolve }.
+  let waiters = [];
 
   // `#pair=CODE` read and taken off the address bar, so neither the history nor a bookmark keeps it.
   function takePair() {
@@ -165,7 +170,9 @@ export function connectSocket(store, options) {
       args.since = { epoch: sub.epoch, seq: sub.seq };
     }
     sub.asking = true;
-    request({ v: 1, id: String(nextId++), kind: 'subscribe', args }).then((reply) => {
+    // Its own ids (`sub-N`, for subscribe, unsubscribe and chat.page), apart from the store's (`1`, `2`…): a reply is
+    // matched to its request by id alone.
+    request({ v: 1, id: 'sub-' + nextId++, kind: 'subscribe', args }).then((reply) => {
       if (!reply.ok) log('VibeSwitcher: the node refused a subscription:', reply.error?.message);
     });
   }
@@ -182,6 +189,7 @@ export function connectSocket(store, options) {
       sub.asking = false;
       if (sub.collection === 'chat') return store.chatSnapshot(sub.key, { items: message.items || [], after: message.after ?? null, more: !!message.more });
       take(sub.collection, message.entries || [], true);
+      wake();
       return settle();
     }
     if (sub.seq === null) return;
@@ -207,6 +215,30 @@ export function connectSocket(store, options) {
     sub.seq = message.seq;
     sub.asking = false;
     take(sub.collection, message.changes || [], false);
+    wake();
+  }
+
+  // The subscription that follows `collection`.
+  const following = (collection) => [...subs.values()].find((sub) => sub.collection === collection);
+
+  // Waiters whose subscription now holds their seq are told; so is one whose server restarted since (a new epoch's
+  // snapshot is the whole truth: there is nothing left to wait for).
+  function wake() {
+    waiters = waiters.filter((waiter) => {
+      const sub = following(waiter.collection);
+      const done = !sub || (sub.seq !== null && (sub.epoch !== waiter.epoch || sub.seq >= waiter.seq));
+      if (done) waiter.resolve();
+      return !done;
+    });
+  }
+
+  // Resolves once `collection`'s subscription holds `seq` of the epoch it holds now.
+  function reached(collection, seq) {
+    return new Promise((resolve) => {
+      const sub = following(collection);
+      waiters.push({ collection, seq, epoch: sub?.epoch ?? null, resolve });
+      wake();
+    });
   }
 
   // Entries ({id, value}) of one collection into the store, in the views' shapes.
@@ -271,6 +303,7 @@ export function connectSocket(store, options) {
     },
     // The store's own gap check is the mock's; here each subscription keeps its own.
     resync() {},
+    reached,
     // A chat the page shows: followed (again, from what it holds, when it was before).
     subscribeChat(session) {
       let name = chats.get(session);
@@ -289,11 +322,11 @@ export function connectSocket(store, options) {
       const sub = name && subs.get(name);
       if (!sub || !sub.open) return;
       sub.open = false;
-      if (authed) request({ v: 1, id: String(nextId++), kind: 'unsubscribe', args: { sub: name } });
+      if (authed) request({ v: 1, id: 'sub-' + nextId++, kind: 'unsubscribe', args: { sub: name } });
     },
     // The items before `before` (`chat.page`): a promise of the reply.
     pageChat(session, before) {
-      return request({ v: 1, id: String(nextId++), kind: 'chat.page', args: { session, before, limit: 200 } });
+      return request({ v: 1, id: 'sub-' + nextId++, kind: 'chat.page', args: { session, before, limit: 200 } });
     },
     request(message) {
       if (!store.can(message.kind)) {

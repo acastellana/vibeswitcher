@@ -79,7 +79,10 @@ enum CardCommand {
     /// `kind` on the card `wanted` (`answer`, `hold`, `config.accept`, `base.accept`, `base.keep`): the card shown, what
     /// the request does said, the card's code typed (EN-D5; checked again by the server), then the request with a new
     /// action id; the accepted request journaled (ids only). `say` prints the result.
-    static func act(_ kind: String, card wanted: String, args extra: (NodeWire.Value) -> [String: NodeWire.Value] = { _ in [:] },
+    /// `refuse`, given the card found, says the exit status when the request can't go on (nil: it can), before the card
+    /// is printed or the code asked.
+    static func act(_ kind: String, card wanted: String, refuse: (NodeWire.Value) -> Int32? = { _ in nil },
+                    args extra: (NodeWire.Value) -> [String: NodeWire.Value] = { _ in [:] },
                     what: (NodeWire.Value) -> String,
                     say: (NodeWire.Value) -> Void) -> Int32 {
         let context = NodeContext.current()
@@ -95,6 +98,7 @@ enum CardCommand {
         case .success(let found): card = found
         }
         guard let id = card["id"]?.string else { return Say.refused("the server's card has no id") }
+        if let status = refuse(card) { return status }
         CardText.lines(card).forEach(Say.out)
         let code = NodeIds.code(card: id)
         let outcome = TypedWord.ask(code: code, what: what(card))

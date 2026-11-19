@@ -16,6 +16,8 @@ import VibeCore
 /// - `flip`: the first session's turn ends, or starts again (`done` and `working` by turns), as its hook would say.
 /// - `chat`: the first session's agent takes its next step in its transcript (a command and its output, or a reply),
 ///   which its chat on the page shows as it lands. Its transcript starts with a short conversation.
+/// - `answer`: `vibeswitcher answer CARD` with no text on the lead's open card, on a terminal of its own with the
+///   card's code typed, as the user confirms what the page drafted (the live plan's slice 3); its output.
 /// - Unless `VIBESWITCHER_SANDBOX_STILL` is set, the second session's status changes by itself every 20 s too, and the
 ///   first session's agent takes a step every 8 s, so an open page shows the list and the chat living.
 @Suite(NodeTraits.linuxOnly)
@@ -96,10 +98,20 @@ struct SandboxServerDriver {
                     reply += "example-site is \(siteWorking ? "working" : "done")"
                 case "chat":
                     reply += try takeStep()
+                case "answer":
+                    do {
+                        let listed = WireClient.reply(try WireClient(node).request("questions", action: nil))
+                        let card = listed?.result?["cards"]?.array?.first { $0["open"]?.bool == true }?["id"]?.string
+                        guard let card else { throw CancellationError() }
+                        let ran = try await node.runOnTerminal(["answer", card])
+                        reply = (ran.status == 0 ? "ok\n" : "error\n") + ran.output
+                    } catch {
+                        reply = "error\nno open card to answer: \(error)"
+                    }
                 case "quit":
                     reply += "quitting"
                 default:
-                    reply = "error\nunknown command \(word): url, flip, chat, quit"
+                    reply = "error\nunknown command \(word): url, flip, chat, answer, quit"
                 }
                 let answer = control.appendingPathComponent("rep-" + name.dropFirst(4))
                 try Data(reply.utf8).write(to: answer.appendingPathExtension("part"))

@@ -322,11 +322,10 @@ public enum WireVectors {
         return made.value
     }
 
-    /// The card with a draft on it (the contract's §8; B5 adds `draft` to `CardStore.Card.value`).
+    /// The card with a draft on it (the contract's §8), as `CardStore.Card.value` writes it.
     static var draftedCard: NodeWire.Value {
         guard case .object(var fields) = questionCard else { return questionCard }
-        fields["draft"] = .object(["text": .string("Yes, merge it"), "version": .int(2), "at": .string("2026-11-17T09:15:11.898Z"),
-                                   "action": .string(draftAction)])
+        fields["draft"] = CardStore.Card.draftValue(.init(text: "Yes, merge it", version: 2, at: date("2026-11-17T09:15:11.898Z"), action: draftAction))
         return .object(fields)
     }
 
