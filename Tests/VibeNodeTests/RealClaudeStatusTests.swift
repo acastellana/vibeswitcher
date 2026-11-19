@@ -4,7 +4,7 @@ import VibeCore
 
 /// A real Claude Code session on a terminal this test owns goes from working to needs-you to done in
 /// `vibeswitcher status`, through the hooks put in its config folder (with `HookInstaller`, as `hooks install` writes
-/// them). On demand only: it spends the account's usage (one short prompt, on sonnet), and needs a throwaway Claude Code config folder the user
+/// them). On demand only: it spends the account's usage (one short prompt, on haiku, the cheapest model), and needs a throwaway Claude Code config folder the user
 /// logged in once (`CLAUDE_CONFIG_DIR=<folder> claude`, then `/login`; an agent never logs in or copies credentials):
 /// `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<that folder> bash scripts/test.sh --filter RealClaudeStatusTests`.
 ///
@@ -215,7 +215,7 @@ private final class RealSession: @unchecked Sendable {
 
     init(claude: String, prompt: String, in folder: URL, environment: [String: String]) async throws {
         // A size to draw in: `script` gives the pty none when its own stdin isn't a terminal.
-        let command = "stty rows 40 cols 120; cd '\(folder.path)' && exec '\(claude)' --model sonnet --permission-mode manual '\(prompt)'"
+        let command = "stty rows 40 cols 120; cd '\(folder.path)' && exec '\(claude)' --model haiku --permission-mode manual '\(prompt)'"
         terminal.executableURL = URL(fileURLWithPath: "/usr/bin/script")
         #if os(Linux)
         terminal.arguments = ["-q", "-c", command, "/dev/null"]
