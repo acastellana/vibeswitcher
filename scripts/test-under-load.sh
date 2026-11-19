@@ -667,7 +667,16 @@ if [[ ${#command[@]} -eq 0 ]]; then
         [[ -f $path ]] && echo "$path"
     done)
     hashes=""
-    [[ -n $paths ]] && hashes=$(paste <(echo "$paths") <(git hash-object --stdin-paths <<< "$paths"))
+    if [[ -n $paths ]]; then
+        # Each as git keeps it, the blob the done check compares: a file's content, and a symlink's link text (git
+        # hash-object follows a link to its file's content, which no commit of the link has).
+        plain=$(while IFS= read -r path; do [[ -L $path ]] || echo "$path"; done <<< "$paths")
+        [[ -n $plain ]] && hashes=$(paste <(echo "$plain") <(git hash-object --stdin-paths <<< "$plain"))
+        while IFS= read -r path; do
+            [[ -L $path ]] || continue
+            hashes+=$'\n'"$path"$'\t'"$(printf %s "$(readlink "$path")" | git hash-object --stdin)"
+        done <<< "$paths"
+    fi
     jq -n --arg commit "$(git rev-parse -q --verify HEAD 2>/dev/null)" --arg filter "$filter" --argjson runs "$runs" \
         --argjson load "$load" --argjson passed "$([[ $failed -eq 0 ]] && echo true || echo false)" --arg result "$result_line" \
         --argjson counts "[$(IFS=,; echo "${counts[*]-}")]" --argjson finished "$(date +%s)" --arg hashes "$hashes" \
