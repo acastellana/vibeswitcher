@@ -54,8 +54,16 @@ enum CardCommand {
 
     /// The card `wanted` names among every card the server holds: its whole id, or a prefix of its UUID that only one
     /// has.
+    /// The open cards are asked first, the ones an answer, hold or accept is for: every card the server holds can be
+    /// past a line's limit on a node that has run for a day (329 cards, 1.4 MB, 2026-11-19), and then no card could be
+    /// answered. All of them only when no open card is the one.
     static func find(_ wanted: String, client: NodeClient) -> Result<NodeWire.Value, NodeClient.Failure> {
-        switch client.request("questions", args: ["all": .bool(true)]) {
+        if case .success(let card) = find(wanted, client: client, all: false) { return .success(card) }
+        return find(wanted, client: client, all: true)
+    }
+
+    private static func find(_ wanted: String, client: NodeClient, all: Bool) -> Result<NodeWire.Value, NodeClient.Failure> {
+        switch client.request("questions", args: all ? ["all": .bool(true)] : nil) {
         case .failure(let failure): return .failure(failure)
         case .success(let reply):
             guard reply.ok, let cards = reply.result?["cards"]?.array else {
