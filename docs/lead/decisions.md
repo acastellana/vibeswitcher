@@ -407,3 +407,7 @@ A durable pass sealed with the lead's seal could be forged from the lead's shell
 
 Without it, an unauditable obligation would block cleanup forever. The change it tracks is already merged, so closing it removes no gate, and the waiver is explicit, has a reason and is visible on the record, like dismiss_finding.
 
+## 2026-11-19 15:09:00 From the 2026-11-19 retrospective: (1) Root-cause and debugging tasks go to Claude (agent: claude, advisor fable), never auto or Codex. (2) Never delete the build output of a task waiting for review to free disk. new-work-waits-when now holds new starts instead; free disk elsewhere first. (3) The lead files vs-shell commands with the whole command line as one quoted argument, never through `zsh -c` with separate words.
+
+(1) merge-reruns-only-what's Codex round failed 3 Important findings on root cause, and the Claude round fixed them. (2) Deleting 16 GB of build output made 8 reviews rebuild from scratch at load 60–110. (3) The first install card ran `zsh -c security` with no arguments and failed.
+

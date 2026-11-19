@@ -4201,3 +4201,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 14:53 Automatically (auto_advance): Merged session-host-measure-the (Session host: measure the vault calls' stack use on its 512 KB queue threads) into main at 87dda5a3, on its passing audit and the full test run.
 - 2026-11-19 14:53 Automatically (auto_advance): Cleaned up session-host-measure-the (freed 3.4 GB of build output and temporary folders). It stays done.
 - 2026-11-19 15:08 Merged codex-worked-tasks: Codex-worked tasks merged on a Codex verdict get the post-merge Claude re-audit too (build 295fb14dedaa)
+- 2026-11-19 15:08 Automatically (auto_advance): Merged codex-worked-tasks (Codex-worked tasks merged on a Codex verdict get the post-merge Claude re-audit too) into main at a2d8c3a6, on its passing audit and the full test run.
+- 2026-11-19 15:08 Automatically (auto_advance): Cleaned up codex-worked-tasks (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-19 15:08 Update: Today: 18 merges, reviews unblocked, Codex reviews when Claude is out — **Landed today (18 merges, each audited where required):**
+- 2026-11-19 15:09 Planned auto-advance-staggers: auto_advance staggers audits: no more simultaneous audits than the Mac's heavy slots can test (review audit)
+- 2026-11-19 15:09 Update: Retrospective: Nov 19 batch (18 merges, quota stall cleared) — **Went well:** 18 merges and no reverts. Every audit that found something got its finding fixed with a test that fails without the fix. Three real bugs turned up behind symptoms: known issues miscount…
+- 2026-11-19 15:11 Started a worker on auto-advance-staggers
+- 2026-11-19 15:11 Automatically (auto_advance): Started a worker on auto-advance-staggers (auto_advance staggers audits: no more simultaneous audits than the Mac's heavy slots can test).
