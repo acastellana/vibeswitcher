@@ -61,10 +61,11 @@ struct NodeWireTests {
             "web.open": .user, "web.revoke": .user,
             "term.open": .webTerminal, "term.close": .webTerminal,
         ]
-        let sliceOne: Set = ["subscribe", "unsubscribe", "web.open", "web.revoke"]
+        // Slice 1's (I1), and slice 2's `chat.page` (I2).
+        let taken: Set = ["subscribe", "unsubscribe", "web.open", "web.revoke", "chat.page"]
         for (kind, voice) in live {
             #expect(NodeWire.kinds[kind] == voice, "\(kind)")
-            #expect(NodeWire.taken.contains(kind) == sliceOne.contains(kind), "\(kind)")
+            #expect(NodeWire.taken.contains(kind) == taken.contains(kind), "\(kind)")
         }
         // What a server takes is a part of what the protocol names.
         #expect(Set(NodeWire.taken).isSubset(of: Set(NodeWire.kinds.keys)))

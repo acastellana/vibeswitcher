@@ -9,13 +9,14 @@
 # scripts/sandbox-server.sh [options] run    builds (under vs-heavy) and starts it; one per worktree
 # scripts/sandbox-server.sh [options] url    prints the page's address with a fresh pairing code (works once, 120 s)
 # scripts/sandbox-server.sh [options] flip   the first session's turn ends, or starts again: watch the page change
+# scripts/sandbox-server.sh [options] chat   the first session's agent takes a step: watch its chat grow
 # scripts/sandbox-server.sh [options] quit   quits it and removes its state folder
 # e.g. run; url (open the address in a browser); flip; quit
 #
 # Options: --dir DIR (where its pid, state pointer and log are kept, .build/sandbox-server), --port N (run: the web's
 # port; by default a free one picked at the start and kept, so the page reconnects across a server restart), --web-root (run: serve WebApp/ from the worktree, read at each request, instead of
 # the files embedded in the server: a change shows at the next reload), --still (run: no status changes by
-# themselves; by default the second session's changes every 20 s), --wait S (how long a reply is waited for, 600 for
+# themselves; by default the second session's changes every 20 s and the first one's agent takes a step every 8 s), --wait S (how long a reply is waited for, 600 for
 # run, 60 otherwise).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -141,6 +142,6 @@ shift
 case $command in
     run) run_sandbox ;;
     quit) quit_sandbox ;;
-    url | flip) ask "$command" ;;
-    *) echo "unknown command $command: run, url, flip, quit (--help)"; exit 64 ;;
+    url | flip | chat) ask "$command" ;;
+    *) echo "unknown command $command: run, url, flip, chat, quit (--help)"; exit 64 ;;
 esac

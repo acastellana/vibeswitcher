@@ -449,14 +449,14 @@ Every item: `id` (string, the transcript entry's; `tools:<first tool id>` for a 
 | `prompt` | `text` †, `steered` bool (sent into a working agent), `fromLead` bool, `images` [{`id`, `mediaType`, `bytes` int}] | `ChatEntry.Kind.prompt`, `.steered` |
 | `reply` | `text` † (markdown source; the client renders it to DOM nodes itself) | `.reply` |
 | `tools` | `summary` string ("Ran 3 commands · edited 2 files"), `tools` [tool] | `ChatItem.tools`, `ChatTimeline.summary` |
-| `team` | `text` †, `sender` {`kind`: `"user"` \| `"lead"` \| `"vibeSwitcher"`, `name` string?}, `message` `"report"` \| `"audit"` \| `"witness"` \| `"userAnswer"` \| `"leadMessage"` \| `"notice"` | `ChatItem.team`, `TeamMessage` (its further fields are added by the chat task, with vectors) |
+| `team` | `text` † (the sender's words), `title` † (the chat's heading for it), `sender` {`kind`: `"user"` \| `"lead"` \| `"vibeSwitcher"` \| `"teammate"`, `name` string? † (the lead's, what VibeSwitcher speaks of, the teammate's), `task` string? (a teammate's)}, `message` `"report"` \| `"audit"` \| `"witness"` \| `"userAnswer"` \| `"leadMessage"` \| `"notice"` \| `"teammatePost"`, `task` string? (the task it is about), `part` {`index`, `count`}? (of a message too long for one delivery) | `ChatItem.team`, `TeamMessage` (`ChatValue`, B4/E2) |
 
 A tool (`ChatTool`): `id`, `name` †, `title` †, `at` date?, `detail`, `result`?
 
 - `detail` is `{"type": …}` with: `thought` {`text`}, `todos` {`todos` [{`text`, `status`: `pending` \| `active` \|
   `done`}]}, `plan` {`text`}, `command` {`command`}, `edit` {`path`, `changes` [{`old`, `new`}]}, `write` {`path`,
   `content`}, `read` {`path`}, `patch` {`text`}, `questions` {`questions` [{`question`, `options`, `header`?,
-  `descriptions`, `multiSelect`}]}, `agent` {`description`, `prompt`}, `fields` {`fields` [{`name`, `value`}]}
+  `descriptions` [string?], `multiSelect`}]}, `agent` {`description`, `prompt`}, `fields` {`fields` [{`name`, `value`}]}
   (`ToolDetail`). Every string in it is †.
 - `result` (`ChatResult`): `output` †, `truncated` bool, `failed` bool, `at` date?, `images` as above.
 
@@ -476,8 +476,10 @@ A chat delta carries `ops`, applied in order:
 
 **A growing message is appended, not resent.** When an item's new value differs from the one the stream holds only in
 `text`, and the old text is a prefix of the new, the server sends `text` with the difference. Anything else is `set`.
-The client checks `at` against its own text's length: equal, it appends; anything else is a gap (it subscribes again
-with `since`). A folded chat delta is the ops in order, with consecutive `text` ops of one item joined.
+The client checks `at` against its own text's length: equal, it appends; anything else is a gap: it applies nothing of
+that delta and subscribes again with `after` = that item and no `since` (a resume would send the same ops again), and
+the `tail` replaces the item and what followed. A folded chat delta is the ops in order, with consecutive `text` ops of
+one item joined. Each op is one `seq`.
 
 ```json
 {"v":1,"kind":"delta","sub":"c1","prev":318,"seq":320,"at":"2026-11-17T09:14:06.004Z",
@@ -486,6 +488,9 @@ with `since`). A folded chat delta is the ops in order, with consecutive `text` 
           "tools":[{"id":"t_07","name":"Read","title":"Read LoginTests.swift","at":"2026-11-17T09:14:05.990Z",
                     "detail":{"type":"read","path":"Tests/LoginTests.swift"},"result":null}]}}]}
 ```
+
+Vectors: `snapshot.chat`, `delta.chat`, `delta.chat-set` (a `set`, a `remove`, a `team` item added), `chat.page` (the
+request and its reply) and `resume.chat-tail`, all written by `ChatValue` from a transcript the reader read.
 
 Today's reader yields a reply when the agent has written it to its transcript, which Claude Code does a block at a
 time: appends are as fine as the source. A finer source (the agent's own stream) is a store's later work and changes

@@ -299,11 +299,12 @@ public enum NodeWire {
 
     /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6; the hooks
     /// from the start plan's S6; `build.switch` from its S8b; the live protocol's `subscribe`, `unsubscribe`, `web.open`
-    /// and `web.revoke` from the live plan's I1): every kind `kinds` names but the live protocol's later ones (`chat.page`
-    /// from I2, the drafts from I3, the terminal from I4).
+    /// and `web.revoke` from the live plan's I1; `chat.page` from I2): every kind `kinds` names but the live protocol's
+    /// later ones (the drafts from I3, the terminal from I4).
     public static let taken = ["status", "start", "stop", "lead", "questions", "answer", "hold", "config.held", "config.accept",
                                "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
-                               "hooks.install", "hooks.remove", "build.switch", "subscribe", "unsubscribe", "web.open", "web.revoke"]
+                               "hooks.install", "hooks.remove", "build.switch", "subscribe", "unsubscribe", "web.open", "web.revoke",
+                               "chat.page"]
 
     // MARK: Lines
 

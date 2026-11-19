@@ -14,6 +14,8 @@ import VibeCore
 ///   `web-tokens.json` holds a live token. `web.open` binds it (`WebAccess.listen`); a revoke closes every page
 ///   (`revoked`, 4403) and, with nothing alive, the listener. A sweep at each housekeeping drops late codes, closes a
 ///   page whose token ran out, and lets the listener go once nothing wants it.
+/// - **Chats** (slice 2): `ChatStore` on the sessions' transcripts, a session's stream opened by its first `chat`
+///   subscription and dropped a minute after its last; `chat.page` reads one. The hub takes both.
 /// - **A web connection** is screened first (`WebRequestScreen`: a token reads and drafts, never the user's voice),
 ///   then the hub takes `subscribe` and `unsubscribe`, and what is left (`status`, `questions`) goes to `Requests` as a
 ///   peer that is nobody's voice.
@@ -28,6 +30,8 @@ public final class NodeLive: @unchecked Sendable {
     public let web: NodeWebListener
     /// The page's files: the embedded ones, or a scratch server's folder.
     public let assets: LiveAssets
+    /// The sessions' chats; none for a server with no sessions store.
+    public private(set) var chats: ChatStore?
 
     private let requests: Requests
     private let sessions: NodeSessions?
@@ -116,6 +120,10 @@ public final class NodeLive: @unchecked Sendable {
         if let sessions {
             hub.follow(sessions.changes, into: sessionsStream) { $0.liveValue }
             status.watch(sessions.changes)
+            let chats = ChatStore(queue: queue, home: requests.home, sessions: sessions.changes, note: note)
+            chats.start(clock: clock)
+            hub.chats = chats
+            self.chats = chats
         }
         status.watch(requests.link.changes)
         if let engine {

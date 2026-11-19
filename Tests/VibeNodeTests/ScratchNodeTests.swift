@@ -110,7 +110,7 @@ struct ScratchNodeTests {
         #expect(hello["kind"]?.string == "hello" && hello["auth"]?["token"]?.string != nil, "\(hello)")
         #expect(hello["peer"]?["voice"]?.string == "other" && hello["assets"]?.string?.count == 8, "\(hello)")
         let kinds = Set(hello["kinds"]?.array?.compactMap(\.string) ?? [])
-        #expect(kinds == ["status", "questions", "subscribe", "unsubscribe"], "\(kinds)")
+        #expect(kinds == ["status", "questions", "subscribe", "unsubscribe", "chat.page"], "\(kinds)")
         var seq: [String: Int] = [:]
         for (sub, collection) in [("s0", "node"), ("s1", "sessions"), ("s2", "leads"), ("s3", "cards")] {
             let id = try socket.send("subscribe", ["sub": .string(sub), "collection": .string(collection)])
@@ -136,6 +136,51 @@ struct ScratchNodeTests {
             #expect(delta["prev"]?.int == seq[sub], "\(delta)")
             seq[sub] = delta["seq"]?.int
         }
+        #expect(socket.unsound.isEmpty, "\(socket.unsound)")
+    }
+
+    /// Slice 2 (I2): a page follows a session's chat. The fake agent's hook names a transcript in the node's
+    /// `~/.claude/projects`; the page subscribes to its chat, gets its items, then each line the agent writes as an op,
+    /// and pages back with `chat.page`.
+    @Test func aPageFollowsASessionsChat() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
+        defer { node.stop() }
+        let agent = try await HookedAgent.start(node)
+        let transcript = node.home.appendingPathComponent(".claude/projects/-project/1d2e3f40-0000-4000-8000-000000000001.jsonl")
+        try FileManager.default.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data((0..<3).map { ChatWorld.reply("a\($0)", "Reply \($0)") + "\n" }.joined().utf8).write(to: transcript)
+        try agent.hook(node, "UserPromptSubmit", transcript: transcript)
+        let opened = try LiveScratch.open(node)
+        let socket = try LivePage(port: opened.port)
+        _ = try socket.send("auth", ["pair": .string(opened.code), "client": .string("test")])
+        _ = try #require(try socket.next())
+        // The session says it has a transcript once the sessions store has read the hook.
+        _ = try socket.send("subscribe", ["sub": .string("s1"), "collection": .string("sessions")])
+        _ = try #require(try socket.until { frame in
+            (frame["entries"]?.array ?? frame["changes"]?.array ?? []).contains {
+                $0["id"]?.string == agent.id && $0["value"]?["hasTranscript"]?.bool == true
+            }
+        }, "the session never had its transcript: \(node.said)")
+
+        let id = try socket.send("subscribe", ["sub": .string("c1"), "collection": .string("chat"), "key": .string(agent.id), "limit": .int(2)])
+        let replied = try #require(try socket.until { $0["re"]?.string == id }, "no reply to the chat's subscribe")
+        #expect(replied.last?["result"]?["mode"]?.string == "snapshot", "\(replied)")
+        let snapshot = try #require(try socket.until { $0["sub"]?.string == "c1" }?.last)
+        #expect(snapshot["kind"]?.string == "snapshot" && snapshot["more"]?.bool == true, "\(snapshot)")
+        #expect(snapshot["items"]?.array?.compactMap { $0["id"]?.string } == ["a1.0", "a2.0"], "\(snapshot)")
+
+        let handle = try FileHandle(forWritingTo: transcript)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((ChatWorld.reply("a3", "Reply 3") + "\n").utf8))
+        try handle.close()
+        let added = try #require(try socket.until { $0["sub"]?.string == "c1" && $0["kind"]?.string == "delta" }?.last, "no op for the new line")
+        #expect(added["prev"]?.int == snapshot["seq"]?.int, "\(added)")
+        #expect(added["ops"]?.array?.first?["item"]?["id"]?.string == "a3.0", "\(added)")
+
+        let page = try socket.send("chat.page", ["session": .string(agent.id), "before": .string("a1.0")])
+        let paged = try #require(try socket.until { $0["re"]?.string == page }?.last)
+        #expect(paged["result"]?["items"]?.array?.compactMap { $0["id"]?.string } == ["a0.0"] && paged["result"]?["more"]?.bool == false,
+                "\(paged)")
         #expect(socket.unsound.isEmpty, "\(socket.unsound)")
     }
 

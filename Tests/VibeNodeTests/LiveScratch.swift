@@ -49,10 +49,12 @@ struct HookedAgent {
     }
 
     /// Its hook's state now says `event` (`PermissionRequest`: needs you; `UserPromptSubmit`: working; `Stop`: done).
-    func hook(_ node: ScratchNode, _ event: String) throws {
+    /// `transcript`: the transcript its hook names (a file in the node's `~/.claude/projects`), for its chat.
+    func hook(_ node: ScratchNode, _ event: String, transcript: URL? = nil) throws {
         var state = HookState(agent: .claude, tty: session.tty, lastEvent: event, lastEventAt: Date().timeIntervalSince1970)
         state.agentPid = pid
         state.cwd = folder.path
+        state.transcriptPath = transcript?.path
         let states = node.root.appendingPathComponent("state")
         try VibePaths.ensurePrivate(states)
         try state.save(to: states.appendingPathComponent("\(session.tty).json"))

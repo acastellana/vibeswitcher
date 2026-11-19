@@ -172,9 +172,10 @@ struct ServerTests {
         let client = try WireClient(node)
         // Kinds no list names (`lead` is taken from E4, the cards and the lead's questions from E6, the hooks from the
         // start plan's S6, `build.switch` from its S8b). The live protocol's later kinds are named and not yet taken: each
-        // is answered `unknown-kind` until the live plan's integration task that wires it (slice 1's are taken from I1).
+        // is answered `unknown-kind` until the live plan's integration task that wires it (slice 1's are taken from I1,
+        // `chat.page` from I2).
         let live = Set(NodeWire.kinds.keys).subtracting(NodeWire.taken)
-        #expect(live == ["chat.page", "draft", "draft.clear", "term.open", "term.close"])
+        #expect(live == ["draft", "draft.clear", "term.open", "term.close"])
         for kind in ["shell", "exec", ""] + live.sorted() {
             let reply = try #require(WireClient.reply(client.request(kind, args: ["folder": .string("/")])), "\(kind)")
             #expect(reply.ok == false && reply.error?.code == "unknown-kind", "\(kind): \(reply)")
