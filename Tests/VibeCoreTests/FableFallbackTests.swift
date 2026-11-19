@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// While Claude refuses Fable at its usage limit, workers and audits fall back to Opus, and back to Fable at the reset
+/// While Claude refuses Fable at its usage limit, workers fall back to Opus and audits on it to the most capable other
+/// model the floor allows (Mythos, since 2026-11-19 the first of `LeadWorkflow.byCapability`), and back to Fable at the reset
 /// (`AccountUsage.fableHeldBack`, `LeadUsageFallback`; the user's answer of 2026-11-12). On fake sessions only: the
 /// usage is read by an injected clock, never the wall clock's.
 extension LeadAdvanceTests {
@@ -72,40 +73,49 @@ extension LeadAdvanceTests {
     }
 
     @Test func auditsFollowTheReviewFloorWhileFableIsHeldBack() throws {
-        // A floor that keeps audits off the workers' model: workers on Opus, so the audit goes one down, to Sonnet.
+        // A floor that keeps audits off the workers' model, workers on Fable: audits on Mythos, held back or not.
         let (root, runtime, lead) = try fableTeam()
         try vault.setReviewFloor(LeadReviewFloor(), root: root)
         _ = lead.call("add_task", ["title": "One", "goal": "g", "acceptance": ["a"], "review": "audit"])
-        #expect(lead.auditModel(lead.workflow) == "opus")
+        #expect(lead.auditModel(lead.workflow) == "mythos")
         recordFableRefusal()
-        #expect(lead.auditModel(lead.workflow) == "sonnet")
+        #expect(lead.auditModel(lead.workflow) == "mythos")
         #expect(!lead.call("start_worker", ["task": "one"]).isError)
         let audited = lead.call("audit", ["task": "one"])
         #expect(!audited.isError, "\(audited.text)")
         let verifier = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-one'") }?.command)
-        #expect(verifier.contains("--model 'sonnet'"), "\(verifier)")
-        // A floor that allows any model: the most capable that isn't held back, Opus.
+        #expect(verifier.contains("--model 'mythos'"), "\(verifier)")
+        // A floor that allows any model: the same.
         try vault.setReviewFloor(LeadReviewFloor(verifierDifferent: false), root: root)
-        #expect(lead.auditModel(lead.workflow) == "opus")
-        // verifier_model set to Fable by hand goes the same way while it's held back.
+        #expect(lead.auditModel(lead.workflow) == "mythos")
+        // verifier_model set to Fable by hand, held back: the most capable that isn't it, Mythos.
         var workflow = LeadWorkflow()
         workflow.verifierModel = "fable"
-        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable") == "opus")
+        #expect(workflow.auditModel(workerModel: "opus") == "fable")
+        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable") == "mythos")
         workflow.floor = LeadReviewFloor()
-        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable") == "sonnet")
-        // Past the reset: Fable again.
+        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable") == "mythos")
+        // Under the floor, never the workers' Opus nor the task's own Mythos: one down, to Sonnet.
+        #expect(workflow.auditModel(workerModel: "opus", taskModel: "mythos", heldBack: "fable") == "sonnet")
+        #expect(workflow.auditModel(workerModel: "mythos", heldBack: "fable") == "opus")
+        // Past the reset: as before it.
         lead.usageClock = { Date(timeIntervalSince1970: Self.fableReset) }
         try vault.setReviewFloor(LeadReviewFloor(), root: root)
-        #expect(lead.auditModel(lead.workflow) == "opus")
-        // But "one"'s worker ran on Opus: under the floor its audit stays off Opus after the reset too.
+        #expect(lead.auditModel(lead.workflow) == "mythos")
+        // "one"'s worker ran on Opus: under the floor its audit stays off Opus after the reset too.
         let one = try #require(task("one", root))
         #expect(one.launchedModels?[try #require(one.worker)] == "opus")
-        #expect(lead.auditModel(lead.workflow, task: one) == "sonnet")
+        #expect(lead.auditModel(lead.workflow, task: one) == "mythos")
+        // Written into the file as the verifier's, Opus is passed over for it.
+        var written = lead.workflow
+        written.verifierModel = "opus"
+        #expect(written.auditModel(workerModel: "fable", launchedModel: "opus") == "mythos" && written.auditModel(workerModel: "fable") == "opus")
     }
 
     @Test(arguments: [nil, "opus", "sonnet"] as [String?], [false, true])
     func sensitiveAuditUsesFallbackWhenVerifierReportsFableLimit(model: String?, overrideUsage: Bool) throws {
-        let (root, runtime, lead) = try fableTeam(model.map { ["verifier_model": $0] } ?? [:])
+        // Sensitive audits set to Fable (security_audit_model; unset they run on Mythos, which a Fable limit doesn't hold).
+        let (root, runtime, lead) = try fableTeam(["security_audit_model": "fable"].merging(model.map { ["verifier_model": $0] } ?? [:]) { $1 })
         runtime.claude = "claude --model opus"
         _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
         #expect(!lead.call("start_worker", ["task": "touchy"]).isError)
@@ -126,14 +136,14 @@ extension LeadAdvanceTests {
         let status = lead.call("status", [:]).text
         #expect(status.contains("the fable limit") && !status.contains("seven day overage included (every model)"), "\(status)")
         try runtime.kill(first)
-        #expect(lead.auditModel(lead.workflow, task: task("touchy", root), security: true) == "opus")
+        #expect(lead.auditModel(lead.workflow, task: task("touchy", root), security: true) == "mythos")
         // Cover ordinary starts and an override retry, which previously launched straight into Fable's limit.
         let audited = lead.call("audit", ["task": "touchy", "override_usage": overrideUsage])
         #expect(!audited.isError, "\(audited.text)")
         let verifier = try #require(runtime.spawned.last { $0.id != first && $0.command.contains("--name 'verify-touchy'") })
-        #expect(verifier.command.contains("--model 'opus'"), "\(verifier.command)")
-        #expect(audited.text.contains("on opus in Fable's place"), "\(audited.text)")
-        #expect(task("touchy", root)?.launchedModels?[verifier.id] == "opus")
+        #expect(verifier.command.contains("--model 'mythos'"), "\(verifier.command)")
+        #expect(audited.text.contains("on mythos in Fable's place"), "\(audited.text)")
+        #expect(task("touchy", root)?.launchedModels?[verifier.id] == "mythos")
         try runtime.kill(verifier.id)
         lead.usageClock = { Date(timeIntervalSince1970: Self.fableReset) }
         let reset = lead.call("audit", ["task": "touchy"])
@@ -141,9 +151,9 @@ extension LeadAdvanceTests {
         #expect(task("touchy", root)?.launchedModels?[try #require(task("touchy", root)?.verifier)] == "fable")
     }
 
-    @Test(arguments: ["opus", "sonnet"], [false, true])
+    @Test(arguments: ["opus", "mythos"], [false, true])
     func sensitiveAuditsFallBackAutomaticallyAndRespectTheFloor(workers: String, floor: Bool) throws {
-        let (root, runtime, lead) = try fableTeam()
+        let (root, runtime, lead) = try fableTeam(["security_audit_model": "fable"])
         runtime.claude = "claude --model \(workers)"
         if floor { try vault.setReviewFloor(LeadReviewFloor(), root: root) }
         _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
@@ -152,7 +162,8 @@ extension LeadAdvanceTests {
         try FileManager.default.createDirectory(atPath: worktree + "/.github", withIntermediateDirectories: true)
         try commit(".github/ci.yml", "on: push\n", in: worktree)
         recordFableRefusal()
-        let expected = floor && workers == "opus" ? "sonnet" : "opus"
+        // Fable's place goes to Mythos; under a floor that keeps audits off the workers' Mythos, to Opus.
+        let expected = floor && workers == "mythos" ? "opus" : "mythos"
         #expect(lead.auditModel(lead.workflow, task: task("touchy", root), security: true) == expected)
         let audited = lead.call("audit", ["task": "touchy"])
         #expect(!audited.isError, "\(audited.text)")

@@ -194,7 +194,10 @@ The Team tab shows such a task as **Needs audit**, with why. `REVIEW.md` at the 
 what matters in this code; the verifier and the risk check read it from the base branch, so a worker can't change its
 own audit by editing it.
 
-A verifier runs on a different model from the task's worker when `verifier_model` is empty (the default).
+A verifier runs on a different model from the task's worker when `verifier_model` is empty (the default): Mythos,
+or Fable when the workers run Mythos. The important reviews, the audit of a branch that touches `sensitive_paths` or
+is flagged for security, run on `security_audit_model` (Mythos by default; `fable`, `opus` or a `claude-…` id switch
+it), whatever `verifier_model` says, unless your floor keeps audits off the workers' model and that is theirs.
 
 **Findings.** A verdict comes with findings, each at a file and line with its evidence, and a severity:
 
@@ -536,9 +539,10 @@ installed, or a merge still running with its expected end. It's repeated at most
 `workflow.md` (in `.vibeswitcher/`, git-ignored) holds the limits and commands below. The lead changes it with its
 `configure` tool, which keeps your comments. The guard rails (the test and setup commands, `merge_policy`,
 `sensitive_paths`, `strict_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`,
-`risk_lines`, `risk_model`, `audit_sample_percent`, `merge_batching`, `remote`; `Sources/VibeCore/LeadVaultGuarded.swift`)
+`risk_lines`, `risk_model`, `audit_sample_percent`, `merge_batching`, `remote`, `security_audit_model`;
+`Sources/VibeCore/LeadVaultGuarded.swift`)
 count only as the lead last set them: when the file says anything else, `merge` and `start_worker` refuse until the
-lead sets them again.
+lead sets them again (and `audit`, for `audit_finders`, `audit_nit_cap` and `security_audit_model`).
 
 ## Your working policy
 
@@ -559,6 +563,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | `stall_min` | 10 min (0: off; merges, audits and `vs-heavy --stall`) | `StallWatch.swift` |
 | `audit_finders` | 1 (at most 3) | `LeadWorkflow.swift` |
 | `audit_nit_cap` | 5 | `LeadWorkflow.swift` |
+| `security_audit_model` | mythos (sensitive and security audits) | `LeadWorkflow.swift`, `defaultSecurityAuditModel` |
 | `risk_lines` | 400 | `LeadRisk.swift` |
 | `risk_model` | true (a model pass may also raise a task to audit) | `LeadWorkflow.swift` |
 | `audit_sample_percent` | 10 (0: off; review none tasks audited anyway at random, the draw kept on the task) | `LeadAdvance.swift`, `LeadAuditSample.defaultPercent` |

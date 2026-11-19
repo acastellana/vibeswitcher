@@ -23,6 +23,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The verifier's model (`verifier_model:`); when it's empty, audits run on another model than the workers' (see
     /// `auditModel`), a second opinion.
     public var verifierModel: String?
+    /// The model a sensitive or security audit runs on (`security_audit_model:`; empty: mythos, Claude's most capable;
+    /// fable, opus or a claude-… id switch it), where the floor allows it (see `auditModel`). A guard rail
+    /// (`LeadVault.guardedKeys`): a worker's edit of the file doesn't move those audits to a weaker model.
+    public var securityAuditModel = LeadWorkflow.defaultSecurityAuditModel
     /// The lead's model (`lead_model:`; empty: fable): the session that decides what to do and judges what comes back
     /// runs on the model best at that (the user, 2026-11-12), Opus in its place while Fable is held back.
     public var leadModel = LeadWorkflow.defaultLeadModel
@@ -163,6 +167,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
                 case "agent_default": workflow.agentDefault = present.flatMap(LeadTask.WorkerAgent.init(text:)).flatMap { $0 == .codex ? nil : $0 } ?? .claude
                 case "verifier_model": workflow.verifierModel = present
+                case "security_audit_model": workflow.securityAuditModel = present?.lowercased() ?? defaultSecurityAuditModel
                 case "lead_model": workflow.leadModel = present ?? defaultLeadModel
                 case "lead_advisor": workflow.leadAdvisor = advisorValue(present ?? defaultLeadAdvisor)
                 case "worker_advisor": workflow.workerAdvisor = present.flatMap(advisorValue)
@@ -441,17 +446,17 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     /// The settings the lead may change with `configure`.
     /// The model an audit's verifiers run on: verifier_model when it's set; else one other than the workers'
-    /// (`workerModel`, as `claude --model` names it; nil: Claude's default) and at least as capable: fable, Claude's
-    /// most capable, or opus when the workers run fable already. The aliases, as Claude Code 2.1.310 resolves them here
-    /// (2026-10-25): fable → claude-fable-5-1, opus → claude-opus-5-5, sonnet → claude-sonnet-5-5; Claude's default
-    /// for this user's workers is opus (its settings' "model").
+    /// (`workerModel`, as `claude --model` names it; nil: Claude's default) and at least as capable: mythos, Claude's
+    /// most capable, or fable when the workers run mythos already. The aliases, as Claude Code 2.1.310 resolves them here
+    /// (2026-10-25): fable → claude-fable-5-1, opus → claude-opus-5-5, sonnet → claude-sonnet-5-5; mythos is
+    /// claude-mythos-5-2 (2026-11-19); Claude's default for this user's workers is opus (its settings' "model").
     /// Under a floor that says audits run on a different model than the workers', a verifier_model naming theirs is
     /// passed over for that other one.
     /// Under that floor, a task's own model (`taskModel`, add_task's model) counts as the workers' too, and a
     /// verifier_model that names no model this knows (an alias such as default) is passed over as well: it may be theirs.
     /// The task's model is board.json's, which any session of the team can write, so it only adds a model to keep the
     /// audit off, never takes the workers' off that list: a worker started on the workers' model that writes another
-    /// as its task's still gets an audit on neither (fable, else opus, else sonnet; Claude's default counts as opus).
+    /// as its task's still gets an audit on neither (mythos, else fable, opus, sonnet; Claude's default counts as opus).
     ///
     /// `heldBack`: a model family Claude refuses now (fable, see `AccountUsage.fableHeldBack`; the workers then run on
     /// opus, which `workerModel` says). A choice of that family goes to the most capable model that isn't it and that
@@ -461,30 +466,36 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// audit under that floor as the task's model is.
     ///
     /// `security`: the audited branch touches sensitive_paths or is flagged for security (`LeadToolset.securityReason`):
-    /// it's audited on Fable, whatever verifier_model says, where the floor allows Fable (not the workers', the task's
-    /// or its worker's under a different-model floor); else as any other audit.
+    /// it's audited on security_audit_model (`securityAuditModel`, Mythos unless set), whatever verifier_model says,
+    /// where the floor allows that model (not the workers', the task's or its worker's under a different-model floor,
+    /// and a name that says which model it is); else as any other audit.
     public func auditModel(workerModel: String?, taskModel: String? = nil, launchedModel: String? = nil, heldBack: String? = nil,
                            security: Bool = false) -> String {
         let chosen = security && securityAllowed(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
-            ? Self.securityAuditModel : unheldAuditModel(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
+            ? securityAuditModel : unheldAuditModel(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
         guard let heldBack, LeadReviewFloor.sameModel(chosen, heldBack) else { return chosen }
         let different = floor?.verifierDifferent == true
         let workers = LeadReviewFloor.workersModel(workerModel)
-        return ["fable", "opus", "sonnet"].first { model in
+        return Self.byCapability.first { model in
             !LeadReviewFloor.sameModel(model, heldBack)
                 && (!different || (!LeadReviewFloor.sameModel(model, workers) && !LeadReviewFloor.sameModel(model, taskModel)
                                    && !LeadReviewFloor.sameModel(model, launchedModel)))
         } ?? "sonnet"
     }
 
-    /// The model a sensitive or security audit runs on.
-    public static let securityAuditModel = "fable"
+    /// The model a sensitive or security audit runs on when security_audit_model names none: Mythos (the user's
+    /// choice of 2026-11-19; `claude --model mythos`).
+    public static let defaultSecurityAuditModel = "mythos"
+
+    /// The models an audit falls back through, the most capable first.
+    static let byCapability = ["mythos", "fable", "opus", "sonnet"]
 
     /// Whether the floor lets a sensitive audit run on `securityAuditModel`: always, unless it keeps audits off the
-    /// workers' model and that's one of theirs.
+    /// workers' model and that's one of theirs, or a name that doesn't say which model it is (it may be theirs).
     private func securityAllowed(workerModel: String?, taskModel: String?, launchedModel: String?) -> Bool {
         guard floor?.verifierDifferent == true else { return true }
-        let model = Self.securityAuditModel
+        let model = securityAuditModel
+        guard LeadReviewFloor.knownModel(model) else { return false }
         return !LeadReviewFloor.sameModel(model, LeadReviewFloor.workersModel(workerModel)) && !LeadReviewFloor.sameModel(model, taskModel)
             && !LeadReviewFloor.sameModel(model, launchedModel)
     }
@@ -498,14 +509,14 @@ public struct LeadWorkflow: Equatable, Sendable {
         }
         guard different else { return Self.otherModel(than: workerModel) }
         let workers = LeadReviewFloor.workersModel(workerModel)
-        return ["fable", "opus", "sonnet"].first {
+        return Self.byCapability.first {
             !LeadReviewFloor.sameModel($0, workers) && !LeadReviewFloor.sameModel($0, taskModel) && !LeadReviewFloor.sameModel($0, launchedModel)
         } ?? "sonnet"
     }
 
-    /// A model at least as capable as `worker` and not it: fable, or opus for a worker on fable.
+    /// A model at least as capable as `worker` and not it: mythos, or fable for a worker on mythos.
     public static func otherModel(than worker: String?) -> String {
-        worker?.lowercased().contains("fable") == true ? "opus" : "fable"
+        worker?.lowercased().contains(byCapability[0]) == true ? byCapability[1] : byCapability[0]
     }
 
     /// The model a Claude command runs: its own `--model` (or `--model=`), else `home`'s Claude settings' "model"
@@ -524,7 +535,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         return model
     }
 
-    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "lead_model", "lead_advisor", "worker_advisor", "team_plugins", "max_workers",
+    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "security_audit_model", "lead_model", "lead_advisor", "worker_advisor", "team_plugins", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                       "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "watch_app_logs", "agent_default",
@@ -656,8 +667,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     # of pace and Codex has room, else Claude; a task that lands on Codex is audited by a Claude verifier).
     agent_default: claude
     # The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as
-    # capable (fable; opus when the workers run fable).
+    # capable (mythos; fable when the workers run mythos).
     verifier_model:
+    # The model the important reviews run on: the audit of a branch that touches sensitive_paths or is flagged for
+    # security, whatever verifier_model says (mythos, fable, opus, or a claude-… id). Empty: mythos.
+    security_audit_model: mythos
     # The lead's own model (empty: fable, best at deciding what to do and judging what comes back; Opus in its place
     # while Fable is held back), and its advisor while it runs on Opus (fable, opus or none; empty: fable).
     lead_model: fable

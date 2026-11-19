@@ -176,7 +176,7 @@ extension LeadAdvanceTests {
         #expect(pinned.contains("--model 'sonnet'") && !pinned.contains("fable"), "\(pinned)")
     }
 
-    @Test func aSensitiveOrSecurityAuditRunsOnFableOthersOnVerifierModelAndTheFloorWins() throws {
+    @Test func aSensitiveOrSecurityAuditRunsOnSecurityAuditModelOthersOnVerifierModelAndTheFloorWins() throws {
         let (root, runtime, lead) = try team(test: nil, ["auto_advance": false, "max_workers": 5, "verifier_model": "opus"])
         runtime.claude = "claude --model opus"
         _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
@@ -193,29 +193,99 @@ extension LeadAdvanceTests {
         let plainVerifier = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-plain'") }?.command)
         #expect(plainVerifier.contains("--model 'opus'"), "\(plainVerifier)")
         let touchyVerifier = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-touchy'") }?.command)
-        #expect(touchyVerifier.contains("--model 'fable'") && !touchyVerifier.contains("--advisor"), "\(touchyVerifier)")
-        // The floor's checks as before: one that keeps audits off the workers' model, and workers on Fable.
+        // security_audit_model unset: Mythos, with no advisor (none ranks above it).
+        #expect(touchyVerifier.contains("--model 'mythos'") && !touchyVerifier.contains("--advisor"), "\(touchyVerifier)")
+        // Set to Fable, the model before: the next sensitive audit runs on it; cleared, on Mythos again.
+        let set = lead.call("configure", ["security_audit_model": "Fable"])
+        #expect(!set.isError && set.text.contains("- security_audit_model: fable"), "\(set.text)")
+        #expect(lead.workflow.securityAuditModel == "fable" && lead.auditModel(lead.workflow, task: task("touchy", root), security: true) == "fable")
+        let again = lead.call("audit", ["task": "touchy", "restart": true])
+        #expect(!again.isError, "\(again.text)")
+        let fableVerifier = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-touchy'") }?.command)
+        #expect(fableVerifier.contains("--model 'fable'"), "\(fableVerifier)")
+        #expect(lead.auditModel(lead.workflow, task: task("plain", root)) == "opus")
+        #expect(!lead.call("configure", ["security_audit_model": ""]).isError)
+        #expect(lead.workflow.securityAuditModel == "mythos" && lead.auditModel(lead.workflow, task: task("touchy", root), security: true) == "mythos")
+        // A name that doesn't say which model it is, or isn't one word, is refused.
+        for bad in ["default", "best", "two words"] {
+            #expect(lead.call("configure", ["security_audit_model": bad]).isError, "\(bad)")
+        }
+        #expect(lead.workflow.securityAuditModel == "mythos")
+
+        // The key as the file says it: the default, the alias, a full id; routine audits stay on verifier_model.
         var workflow = LeadWorkflow()
-        #expect(workflow.auditModel(workerModel: "opus", security: true) == "fable")
+        #expect(workflow.securityAuditModel == "mythos" && LeadWorkflow.defaultSecurityAuditModel == "mythos")
+        #expect(LeadWorkflow.parse("---\nsecurity_audit_model:\n---").securityAuditModel == "mythos")
+        #expect(LeadWorkflow.parse("---\nsecurity_audit_model: Fable\n---").securityAuditModel == "fable")
+        #expect(LeadWorkflow.parse(LeadWorkflow.template).securityAuditModel == "mythos" && LeadWorkflow.template.contains("security_audit_model: mythos"))
+        #expect(workflow.auditModel(workerModel: "opus", security: true) == "mythos")
         workflow.verifierModel = "sonnet"
-        #expect(workflow.auditModel(workerModel: "opus", security: true) == "fable" && workflow.auditModel(workerModel: "opus") == "sonnet")
-        workflow.verifierModel = nil
+        #expect(workflow.auditModel(workerModel: "opus", security: true) == "mythos" && workflow.auditModel(workerModel: "opus") == "sonnet")
+        workflow.securityAuditModel = "claude-fable-5-1"
+        #expect(workflow.auditModel(workerModel: "opus", security: true) == "claude-fable-5-1")
+        // The floor's checks: one that keeps audits off the workers' model, and the workers', the task's or its
+        // worker's model the one named, by its alias or its id. Then as any other audit: the most capable left.
+        workflow = LeadWorkflow()
         workflow.floor = LeadReviewFloor()
-        #expect(workflow.auditModel(workerModel: "fable", security: true) == "opus")
-        #expect(workflow.auditModel(workerModel: "opus", taskModel: "fable", security: true) == "sonnet")
-        #expect(workflow.auditModel(workerModel: "opus", launchedModel: "fable", security: true) == "sonnet")
+        #expect(workflow.auditModel(workerModel: "opus", security: true) == "mythos")
+        #expect(workflow.auditModel(workerModel: "mythos", security: true) == "fable")
+        #expect(workflow.auditModel(workerModel: "claude-mythos-5-2", security: true) == "fable")
+        #expect(workflow.auditModel(workerModel: "opus", taskModel: "mythos", security: true) == "fable")
+        #expect(workflow.auditModel(workerModel: "opus", launchedModel: "claude-mythos-5-2", security: true) == "fable")
+        #expect(workflow.auditModel(workerModel: "fable", taskModel: "mythos", security: true) == "opus")
+        workflow.securityAuditModel = "fable"
         #expect(workflow.auditModel(workerModel: "opus", security: true) == "fable")
-        // Held back: not Fable after all.
-        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable", security: true) == "sonnet")
+        #expect(workflow.auditModel(workerModel: "fable", security: true) == "mythos")
+        #expect(workflow.auditModel(workerModel: "opus", taskModel: "fable", security: true) == "mythos")
+        #expect(workflow.auditModel(workerModel: "opus", taskModel: "mythos", launchedModel: "fable", security: true) == "sonnet")
+        // A name written into the file that doesn't say which model it is may be the workers': passed over.
+        workflow.securityAuditModel = "default"
+        #expect(workflow.auditModel(workerModel: "opus", security: true) == "mythos")
+        // Fable held back: an audit set to it goes to the most capable other model the floor allows; Mythos isn't held.
+        workflow.securityAuditModel = "fable"
+        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable", security: true) == "mythos")
+        #expect(workflow.auditModel(workerModel: "opus", taskModel: "mythos", heldBack: "fable", security: true) == "sonnet")
+        workflow.securityAuditModel = "mythos"
+        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable", security: true) == "mythos")
         workflow.floor = nil
-        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable", security: true) == "opus")
+        #expect(workflow.auditModel(workerModel: "mythos", heldBack: "fable", security: true) == "mythos")
+        // Mythos is a model family as the others are.
+        #expect(LeadReviewFloor.sameModel("mythos", "claude-mythos-5-2") && !LeadReviewFloor.sameModel("mythos", "fable"))
+        #expect(LeadReviewFloor.knownModel("claude-mythos-5-2") && AccountUsage.family("claude-mythos-5-2[1m]") == "mythos")
+        #expect(LeadLaunch.advisor("fable", main: "mythos") == nil && LeadLaunch.advisor("fable", main: "opus") == "fable")
+    }
+
+    /// security_audit_model is a guard rail: written into workflow.md by a worker (a weaker model for its own
+    /// sensitive branch), no audit starts until the lead sets it again; set by configure, it's the lead's.
+    @Test func aSecurityAuditModelAWorkerWroteStartsNoAudit() throws {
+        let (root, runtime, lead) = try team(test: nil, ["auto_advance": false])
+        runtime.claude = "claude --model opus"
+        #expect(LeadWorkflow.configurable.contains("security_audit_model") && LeadVault.guardedKeys.contains("security_audit_model"))
+        #expect(LeadVault.guardedValue("security_audit_model", in: LeadWorkflow()) == "mythos")
+        _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(!lead.call("start_worker", ["task": "touchy"]).isError)
+        let touchy = Worktrees.path(root: root, slug: "touchy")
+        try FileManager.default.createDirectory(atPath: touchy + "/.github", withIntermediateDirectories: true)
+        try commit(".github/ci.yml", "on: push\n", in: touchy)
+        let path = root + "/.vibeswitcher/workflow.md"
+        try LeadWorkflow.updating(try Data(contentsOf: URL(fileURLWithPath: path)), with: [("security_audit_model", "sonnet")])
+            .write(to: URL(fileURLWithPath: path))
+        let refused = lead.call("audit", ["task": "touchy"])
+        #expect(refused.isError && refused.text.contains("security_audit_model is now `sonnet`"), "\(refused.text)")
+        #expect(!runtime.spawned.contains { $0.command.contains("--name 'verify-touchy'") })
+        // The lead's own word: taken, and the audit runs on it.
+        #expect(!lead.call("configure", ["security_audit_model": "sonnet"]).isError)
+        let audited = lead.call("audit", ["task": "touchy"])
+        #expect(!audited.isError, "\(audited.text)")
+        let verifier = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-touchy'") }?.command)
+        #expect(verifier.contains("--model 'sonnet'"), "\(verifier)")
     }
 
     /// auto_advance checks usage on the model the audit will run on: a sensitive branch's is Fable whatever
     /// verifier_model says, so near Fable's limit its audit waits for the reset (a look again armed) instead of being
     /// tried on Opus's reading and refused on Fable's.
     @Test func autoAdvanceHoldsASensitiveAuditNearFablesLimitThoughVerifierModelIsOpus() async throws {
-        let (root, runtime, lead) = try team(test: nil, ["verifier_model": "opus"])
+        let (root, runtime, lead) = try team(test: nil, ["verifier_model": "opus", "security_audit_model": "fable"])
         runtime.claude = "claude --model opus"
         let now = AccountUsageTests.now, resets = AccountUsageTests.tomorrow
         lead.usageClock = { now }

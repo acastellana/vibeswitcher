@@ -176,11 +176,11 @@ public struct AccountUsage: Equatable, Sendable {
         "Fable held back until \(UsageLimit.resetText(ends(limit))): workers on Opus; audits on another model under the review floor"
     }
 
-    /// The model family a model name is of: fable, opus, sonnet or haiku when it names one ("claude-fable-5-1",
+    /// The model family a model name is of: mythos, fable, opus, sonnet or haiku when it names one ("claude-fable-5-1",
     /// "opus[1m]"), else the name itself, lowercased; nil for none.
     public static func family(_ model: String?) -> String? {
         guard let model = model?.trimmingCharacters(in: .whitespaces).lowercased(), !model.isEmpty else { return nil }
-        return ["fable", "opus", "sonnet", "haiku"].first { model.contains($0) } ?? model
+        return ["mythos", "fable", "opus", "sonnet", "haiku"].first { model.contains($0) } ?? model
     }
 
     /// The windows in a status line's input (`rate_limits`): each with a `used_percentage`, for every model.
@@ -204,13 +204,13 @@ public struct AccountUsage: Equatable, Sendable {
     /// nothing back, and kept for every model it would stop every start.
     public static func fromRefusal(_ limit: UsageLimit, model: String?, now: Date = Date()) -> Limit? {
         let kind = limit.kind ?? "usage"
-        let named = ["fable", "opus", "sonnet", "haiku"].first { kind.lowercased().contains($0) }
+        let named = ["mythos", "fable", "opus", "sonnet", "haiku"].first { kind.lowercased().contains($0) }
         let modelOnly = limit.apiError == "model_requires_usage_credits"
         // Newer Claude refusals use usage_limit_reached and a generic overage kind even for Fable alone.
         // Only an explicit model-limit sentence scopes an unspecified/overage kind; structured global kinds win.
         // Mentioning a model elsewhere doesn't scope a refusal.
         let words = limit.said.trimmingCharacters(in: .whitespacesAndNewlines)
-        let saidModel = ["fable", "opus", "sonnet", "haiku"].first {
+        let saidModel = ["mythos", "fable", "opus", "sonnet", "haiku"].first {
             words.range(of: "^you['’]ve (?:hit|reached) your \($0) limit\\b", options: [.regularExpression, .caseInsensitive]) != nil
         }
         let structuredGlobal = ["five_hour", "seven_day"].contains(kind.lowercased())

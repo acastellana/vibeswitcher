@@ -106,7 +106,8 @@ struct AccountSwitchTests: LeadTeamFixture {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
-        #expect(!call(lead, "configure", ["max_workers": 4]).isError)
+        // Audits on Fable, the model the refusal is about.
+        #expect(!call(lead, "configure", ["max_workers": 4, "verifier_model": "fable"]).isError)
         // Room on the Mac for four workers and three verifiers.
         lead.macLimits = { MacLimits(maxSessions: 8) }
         for title in ["One", "Two", "Three", "Four"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
@@ -123,9 +124,9 @@ struct AccountSwitchTests: LeadTeamFixture {
         refusal.at = Self.now.timeIntervalSince1970
         refusal.resetsAt = Self.now.timeIntervalSince1970 + 86_400
         runtime.usageLimits[verifier] = refusal
-        // Fable held back on A: the audit starts on Opus instead (LeadUsageFallback), Fable itself still held.
+        // Fable held back on A: the audit starts on Mythos instead (LeadUsageFallback), Fable itself still held.
         let moved = call(lead, "audit", ["task": "two"])
-        #expect(!moved.isError && audited("two") == "opus", "\(moved.text)")
+        #expect(!moved.isError && audited("two") == "mythos", "\(moved.text)")
         #expect(lead.usageHold(model: "fable", sessions: try lead.advanceSessions())?.reached == true)
         let status = call(lead, "status").text
         #expect(status.contains("Account usage for al•••@ex•••.com (aaaa…), the account Claude Code is logged in to")
@@ -156,7 +157,7 @@ struct AccountSwitchTests: LeadTeamFixture {
         try login(Self.a, email: "alice@example.com")
         #expect(lead.usageHold(model: "fable", sessions: nil)?.reached == true)
         let back = call(lead, "audit", ["task": "four"])
-        #expect(!back.isError && audited("four") == "opus", "\(back.text)")
+        #expect(!back.isError && audited("four") == "mythos", "\(back.text)")
         #expect(lead.usageHold(model: "sonnet", sessions: nil) == nil)
         // Until its reset, and no longer.
         let reset = Date(timeIntervalSince1970: try #require(refusal.resetsAt))
@@ -173,6 +174,7 @@ struct AccountSwitchTests: LeadTeamFixture {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
+        #expect(!call(lead, "configure", ["verifier_model": "fable"]).isError)
         for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
         for task in ["one", "two"] { #expect(!call(lead, "start_worker", ["task": task]).isError) }
         #expect(!call(lead, "audit", ["task": "one"]).isError)
