@@ -79,6 +79,14 @@ struct SandboxPolicyTests {
         #expect(SandboxPolicy.repositories(home + "/sdk", nil) == .none)
     }
 
+    /// A path is tidied by its spelling alone: `.`, `..` and empty components out, `/private/…` kept as it is (the
+    /// Mac's `standardizedFileURL` drops `/private`, which no longer matches a home resolved by realpath).
+    @Test func aPathIsTidiedByItsSpellingAlone() {
+        #expect(SandboxPolicy.lexical("/private/var/a/./b//c/../d/") == "/private/var/a/b/d")
+        #expect(SandboxPolicy.lexical("/a/..") == "/" && SandboxPolicy.lexical("/..") == "/" && SandboxPolicy.lexical("/") == "/")
+        #expect(SandboxPolicy.lexical("relative/../x") == "relative/../x")
+    }
+
     @Test func aLinkIsResolvedBeforeItIsJudged() throws {
         let home = try home()
         // A harmless-looking name whose link leads into a hidden folder.

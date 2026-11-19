@@ -97,7 +97,7 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
         } else {
             return refuse("a relative path: write it from / or from ~/")
         }
-        let normalized = URL(fileURLWithPath: spelled).standardizedFileURL.path
+        let normalized = lexical(spelled)
         let resolvedPath = resolve(normalized)
         let realHome = resolve(home)
         for candidate in Set([normalized, resolvedPath]) {
@@ -160,6 +160,18 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
     /// Whether `path` is strictly below `folder`.
     static func isBelow(_ path: String, _ folder: String) -> Bool {
         folder == "/" ? path != "/" : path.hasPrefix(folder + "/")
+    }
+
+    /// An absolute `path` with its `.`, `..` and empty components taken out by its spelling alone, links not followed
+    /// (a relative one as it is). Not `standardizedFileURL`: on the Mac that also turns `/private/tmp/…` into `/tmp/…`,
+    /// and a path judged against the home (`accountHome`, resolved) must keep the spelling it was given.
+    public static func lexical(_ path: String) -> String {
+        guard path.hasPrefix("/") else { return path }
+        var parts: [Substring] = []
+        for part in path.split(separator: "/") where part != "." {
+            if part == ".." { _ = parts.popLast() } else { parts.append(part) }
+        }
+        return "/" + parts.joined(separator: "/")
     }
 
     /// `path` with its links followed (`realpath`), or as it is when it names nothing yet.

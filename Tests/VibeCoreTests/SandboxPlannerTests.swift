@@ -239,7 +239,7 @@ struct SandboxPlannerTests {
         let world = try world()
         for held in [world.home, world.home + "/.local", "/var", world.home + "/.config/..", world.home + "/projects/.."] {
             var inputs = world.inputs(.worker)
-            inputs.policy = SandboxPolicy(read: [URL(fileURLWithPath: held).standardizedFileURL.path])
+            inputs.policy = SandboxPolicy(read: [SandboxPolicy.lexical(held)])
             #expect(throws: SandboxRefusal.self, "\(held)") { try SandboxPlanner.plan(inputs).get() }
         }
         // A PATH folder that holds one is left out rather than shown.
