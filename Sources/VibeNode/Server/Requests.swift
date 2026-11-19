@@ -139,7 +139,7 @@ public final class Requests: @unchecked Sendable {
 
     /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
-                                               "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke"]
+                                               "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -214,6 +214,7 @@ public final class Requests: @unchecked Sendable {
         case "questions": questions(request, reply: reply)
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)
+        case "tell": tell(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)
         case "base.show": baseShow(request, reply: reply)

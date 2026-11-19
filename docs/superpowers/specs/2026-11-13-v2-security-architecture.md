@@ -595,12 +595,15 @@ command line alone where it doesn't (a guard rail):
 | `start` (once the node runs: it prints S11 once), `stop` | the user's | `stop` | ends or starts every session |
 | `lead FOLDER --goal …` | the user's | yes | opens an app session, whose git commands `isYours` treats as the user's; refused on a fresh vault until `config accept` and `base accept` are done (S7) |
 | `answer CARD TEXT`, `hold CARD` | the user's | yes (the card's) | the user's answer to the lead, an approval included, bound to the card's id |
+| `tell FOLDER TEXT` | the user's | yes | the user's words to the project's running lead that answer no card: recorded in the vault and delivered as an answer's message is, held until the lead can take it; refused when no lead runs there |
 | `config held`, `base show FOLDER [--from COMMIT]` | the user's | no | change nothing; each makes the card the next request takes |
 | `config accept CARD`, `base accept CARD`, `base keep CARD` | the user's | yes (the card's) | takes held config or a base move as the user's (S7) |
 | `hooks install`, `hooks remove` | the user's | yes | written as the app (`vault.appWrite`), so sealed as the user's |
 | `build.switch` (`switch`, `rollback`) | the user's | yes | hands the host over to another installed build (S8; the bootstrap path's step 8) |
 | `question.post`, `question.revise`, `question.withdraw` | the lead's tool server, with the host's `.lead` seal | no | the lead's questions, never read from the board |
 | any later request that changes state | the user's | yes | until signed approvals |
+
+**(2026-11-19)** `tell` added (the node's first day of use): the same voice, code and record as `answer`, no card.
 
 `status --ack` and `start`'s acknowledgment of S11 are not requests: the command line writes each to the journal
 itself, after its own typed code (the engine's EN-D15), so a seized server can't clear them.
