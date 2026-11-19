@@ -4035,3 +4035,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 09:25 Automatically (auto_advance): Merged task-rows-say-when (Task rows say when a review waits on a usage limit, not "In review") into main at cd7cbb1b, on its passing audit and the full test run.
 - 2026-11-19 09:25 Automatically (auto_advance): Cleaned up task-rows-say-when (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-19 09:26 Update: Merged: task rows say when a review waits on a usage limit — **What changed:** a review that can't run because of a usage limit no longer shows as "In review 11h" with stale progress. The row says, for example, **"Waits for Fable"** with **"Fable's limit resets…
+- 2026-11-19 09:40 Audit of memory-benches-run-by: complete, clean, round 2: 1 Nit open
+- 2026-11-19 09:41 Audit of sensitive-audits-fall: complete, clean, round 1: 2 Nit open
