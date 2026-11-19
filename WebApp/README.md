@@ -28,8 +28,9 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 
 ## Rules
 
-- **No build step, no npm, no dependency.** Plain ES modules and one stylesheet. The design's candidates for later
-  (Preact, xterm.js) aren't here; nothing is vendored.
+- **No build step, no npm.** Plain ES modules and one stylesheet. One thing is vendored: xterm.js and its fit add-on
+  for the terminal (`vendor/`, at exact versions with their hashes, `vendor/README.md`), loaded only where the node
+  opens terminals. Nothing is installed.
 - **What an agent wrote is never markup.** Every node is made by `js/dom.js` from elements and text. Nothing parses
   a string as HTML. `index.html`'s content policy allows the page's own scripts and styles only, with Trusted Types and
   no policy, so the browser refuses it too. `tests/lint.test.mjs` holds the source and the policy to this.
@@ -51,8 +52,10 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/ui.js` | What this window shows: the route (`#/s/<id>`, `#/node`), grouping, filter, panes, the inspector; the list's arrangement. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |
 | `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes. |
+| `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
+| `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
 | `js/activity.js` | The inspector's Activity, made from a chat's items: files changed with their line counts, commands run. |
-| `js/views/` | `sidebar`, `session` (header and panes), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `node`, `start`, `palette`. |
+| `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `node`, `start`, `palette`. |
 
 ## Keys
 
@@ -123,8 +126,8 @@ it has run every frame through `wire/validators.js` and judged each subscription
 the connection may do: the node's page reads and drafts (`draft`, not `answer`), so a card's options leave a draft
 (`store.draft`, an overlay kept until the cards stream reaches the ack's `applied`: `feed.reached`) and the card shows
 the line that confirms it; a page that only reads shows `vibeswitcher answer …` with the options as text; the
-terminal and a lead's board say they come in a later build, and the chat says so where `chat.page` isn't among the
-kinds. `mock.js` keeps the older whole-state messages below for the keyed collections, which the store still takes:
+terminal says it comes in a later build where `term.open` isn't among the kinds (the user's node: LW-D12), as a lead's
+board does, and the chat says so where `chat.page` isn't among the kinds. `mock.js` keeps the older whole-state messages below for the keyed collections, which the store still takes:
 
 ```js
 feed.start()                    // sends store.apply(snapshot), then deltas
@@ -133,7 +136,19 @@ feed.subscribeChat(sessionId)   // follow a chat: store.chatSnapshot(id, { items
 feed.unsubscribeChat(sessionId) // no longer shown: its items stay, and it resumes from them when shown again
 feed.pageChat(sessionId, before)  // → Promise of chat.page's reply: the items just before `before`
 feed.request(message)           // → Promise of { ok: true, result } or { ok: false, error: { code, message } }
+// socket.js only (the mock has no terminal, and its pane says so):
+feed.sendBinary(bytes)          // a terminal's frame; false when the socket isn't up
+feed.onBinary(fn)               // the node's frames, as ArrayBuffers, once authenticated; returns a function that stops them
+feed.onLink(fn)                 // 'up' after each hello, 'down' when the connection dropped (a terminal's stream goes with it)
 ```
+
+The terminal (`js/terminal.js`, `js/views/terminal.js`; the contract's §9) opens `term.open {session, cols, rows}` where
+`hello.kinds` has it, holds the replay until its type 2 and draws it whole over a reset emulator (a resync or a
+reconnect leaves the old screen up, dimmed, until the new one is whole), writes live bytes as they come, sends keys as
+type 1 and the pane's fitted size as type 3, and closes with `term.close` when the pane is left. In the terminal the
+keyboard is the program's (Ctrl+K, Ctrl+J and the rest), but for a Mac's ⌘ keys. The program can't reach past the
+pane: OSC 52 (clipboard), OSC 8 (links) and the titles are swallowed, no link add-on is loaded, and the bell is
+silent.
 
 A chat is the wire's (the contract §6), in both feeds: items of `type` `prompt`, `reply`, `tools` (a run of tool calls,
 with the node's `summary`) and `team`, and deltas of ops. A `text` op whose `at` isn't the length the page holds is a
@@ -279,6 +294,6 @@ reply, and `action` on a prompt this page sent.
 
 ## What isn't here yet
 
-The terminal (a placeholder pane), starting and ending sessions, Settings, held-config and base-move cards, the
+The terminal on the user's own node (a scratch node's only, LW-D12), starting and ending sessions, Settings, held-config and base-move cards, the
 scorecard and the rest of the Mac's Team tab (decisions, answered questions, files), notifications, the manifest and service worker, and the device key: an approval here is a click, where the
 design signs the card's facts (security rule 1).

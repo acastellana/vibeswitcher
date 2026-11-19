@@ -1,0 +1,235 @@
+// The session view's Terminal pane: the session's screen in xterm.js (vendor/, at the exact version vendor/README.md
+// names), fed by js/terminal.js over the node's socket. Only where the connection can open one (a scratch node's:
+// LW-D12); anywhere else the pane says to use the session's own terminal, and xterm.js isn't even loaded.
+//
+// What the program in the session can't do from here (the live plan's Security): write the clipboard (OSC 52 is
+// swallowed; xterm.js has no handler for it, and none is added), open a link (OSC 8 hyperlinks are swallowed and no link
+// add-on is loaded: an address is text), set anything outside the pane (titles are swallowed; nothing listens to the
+// bell, and xterm.js plays no sound). What the emulator answers to a program's queries goes up as input and the node
+// cuts it out (TerminalReplies): only the host's parser answers.
+//
+// The renderer is xterm.js's DOM one. It writes some of its CSS (the cell's size, the theme) into <style> elements it
+// makes, which the page's policy refuses (style-src 'self'): `mirrorStyles` gives the same text to stylesheets made by
+// script (adoptedStyleSheets), which the policy doesn't govern, so the policy stays as it was. The text is xterm.js's,
+// built from this file's options and colours the parser has already turned into #rrggbb: nothing the program prints
+// becomes CSS.
+
+import { h, setText } from '../dom.js';
+import { icon } from '../marks.js';
+import { createTerminal, clampSize } from '../terminal.js';
+
+const FONT = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+
+// The page's own colours (style.css), and a calm ANSI palette in each look, each at least readable on its background.
+const THEMES = {
+  light: {
+    background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', cursorAccent: '#ffffff',
+    selectionBackground: 'rgba(10, 102, 214, 0.2)', selectionInactiveBackground: 'rgba(0, 0, 0, 0.08)',
+    scrollbarSliderBackground: 'rgba(0, 0, 0, 0.14)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.24)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.3)',
+    black: '#1d1d1f', red: '#c4001a', green: '#1a7330', yellow: '#8a5a00', blue: '#0a66d6', magenta: '#8e3bbf', cyan: '#0b6e6a', white: '#8e8e93',
+    brightBlack: '#5e5e62', brightRed: '#d9302c', brightGreen: '#248a3d', brightYellow: '#9c6b00', brightBlue: '#2f7fe0', brightMagenta: '#a550d6', brightCyan: '#148a85', brightWhite: '#636366',
+  },
+  dark: {
+    background: '#1c1c1e', foreground: '#f2f2f4', cursor: '#f2f2f4', cursorAccent: '#1c1c1e',
+    selectionBackground: 'rgba(74, 160, 255, 0.3)', selectionInactiveBackground: 'rgba(255, 255, 255, 0.1)',
+    scrollbarSliderBackground: 'rgba(255, 255, 255, 0.16)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.26)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.32)',
+    black: '#3a3a3c', red: '#ff7a72', green: '#30d158', yellow: '#ffd60a', blue: '#4aa0ff', magenta: '#c98bff', cyan: '#5ed3cc', white: '#d1d1d6',
+    brightBlack: '#8e8e93', brightRed: '#ff9f99', brightGreen: '#5ee07f', brightYellow: '#ffe55c', brightBlue: '#7bbeff', brightMagenta: '#dcb0ff', brightCyan: '#8ae6e0', brightWhite: '#ffffff',
+  },
+};
+
+const darkQuery = globalThis.matchMedia?.('(prefers-color-scheme: dark)');
+function look() {
+  const chosen = document.documentElement.dataset.theme;
+  if (chosen === 'dark' || chosen === 'light') return chosen;
+  return darkQuery?.matches ? 'dark' : 'light';
+}
+
+// xterm.js and its stylesheet, loaded once, the first time a terminal can be shown.
+let loading = null;
+function loadXterm() {
+  if (!loading) {
+    document.head.append(h('link', { rel: 'stylesheet', href: new URL('../../vendor/xterm.css', import.meta.url).href }));
+    loading = Promise.all([import('../../vendor/xterm.mjs'), import('../../vendor/addon-fit.mjs')])
+      .then(([xterm, fit]) => ({ Terminal: xterm.Terminal, FitAddon: fit.FitAddon }));
+  }
+  return loading;
+}
+
+// The CSS xterm.js writes into <style> elements under `root`, applied through stylesheets made by script instead (the
+// policy refuses the elements' own). Each element is taken out of the page once read, so its later text (a new cell
+// size, a new theme) is read from it again without the policy refusing it each time.
+function mirrorStyles(root) {
+  const sheets = new Map();
+  const watch = new MutationObserver(() => { for (const element of sheets.keys()) copy(element); });
+  function copy(element) {
+    const sheet = sheets.get(element);
+    const text = element.textContent;
+    if (sheet.text !== text) { sheet.text = text; sheet.css.replaceSync(text); }
+  }
+  function adopt() {
+    for (const element of root.querySelectorAll('style')) {
+      if (sheets.has(element)) continue;
+      sheets.set(element, { css: new CSSStyleSheet(), text: null });
+      copy(element);
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheets.get(element).css];
+      watch.observe(element, { childList: true, characterData: true, subtree: true });
+      element.remove();
+    }
+  }
+  const added = new MutationObserver(adopt);
+  added.observe(root, { childList: true, subtree: true });
+  adopt();
+  return () => {
+    added.disconnect();
+    watch.disconnect();
+    const ours = new Set([...sheets.values()].map((sheet) => sheet.css));
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => !ours.has(sheet));
+    sheets.clear();
+  };
+}
+
+export function terminalView(app) {
+  const { store, ui, feed } = app;
+  const control = createTerminal({ feed, can: (kind) => store.can(kind) });
+
+  const screen = h('div', { class: 'terminal-screen' });
+  const note = h('p', { class: 'terminal-note', role: 'status' });
+  const says = h('p');
+  const showChat = h('button', { class: 'button quiet', type: 'button', onclick: () => ui.setPane(ui.state.route.id, 'chat') }, 'Show Chat');
+  const retry = h('button', { class: 'button quiet', type: 'button', hidden: true, onclick: () => { const session = shown; control.hide(); show(session); } }, 'Try Again');
+  const heading = h('h2', null, 'Terminal');
+  const placeholder = h('div', { class: 'placeholder' }, icon('terminal', 22), heading, says, showChat, retry);
+  const el = h('div', { class: 'pane terminal-pane' }, screen, note, placeholder);
+
+  let term = null;     // the emulator, once made
+  let fit = null;
+  let unmirror = null;
+  let making = null;
+  let shown = null;    // the session the pane shows
+  let visible = false;
+  let ended = false;
+
+  function sizeNow() {
+    const proposed = fit?.proposeDimensions();
+    return proposed && Number.isFinite(proposed.cols) && Number.isFinite(proposed.rows) ? proposed : { cols: 80, rows: 24 };
+  }
+
+  function make() {
+    if (!making) {
+      making = loadXterm().then(({ Terminal, FitAddon }) => {
+        term = new Terminal({
+          fontFamily: FONT, fontSize: 12.5, lineHeight: 1.2, theme: THEMES[look()], cursorBlink: false, cursorStyle: 'block',
+          cursorInactiveStyle: 'outline', scrollback: 4000, allowProposedApi: false, minimumContrastRatio: 1, linkHandler: null,
+          drawBoldTextInBrightColors: false, rightClickSelectsWord: false,
+        });
+        // The program's reach ends at the pane: no clipboard (52), no link (8), no title (0, 1, 2).
+        for (const code of [0, 1, 2, 8, 52]) term.parser.registerOscHandler(code, () => true);
+        fit = new FitAddon();
+        term.loadAddon(fit);
+        unmirror = mirrorStyles(screen);
+        term.open(screen);
+        term.onData((data) => control.input(data));
+        // Bytes the emulator makes as such (an old mouse mode's reports): one byte per character.
+        term.onBinary((data) => control.input(Uint8Array.from(data, (character) => character.charCodeAt(0) & 0xff)));
+        // A Mac's ⌘ keys stay the page's and the browser's; elsewhere the terminal has the keyboard (app.js).
+        term.attachCustomKeyEventHandler((event) => !event.metaKey);
+        control.attach({ reset: () => term.reset(), write: (bytes) => term.write(bytes) });
+        new ResizeObserver(() => refit()).observe(screen);
+        return term;
+      });
+    }
+    return making;
+  }
+
+  let refitting = false;
+  function refit() {
+    if (!term || refitting || !visible) return;
+    refitting = true;
+    requestAnimationFrame(() => {
+      refitting = false;
+      if (!term || !visible || screen.clientWidth === 0) return;
+      const next = clampSize(sizeNow());
+      if (next.cols !== term.cols || next.rows !== term.rows) term.resize(next.cols, next.rows);
+      control.resize(next);
+    });
+  }
+
+  darkQuery?.addEventListener?.('change', () => { if (term) term.options.theme = THEMES[look()]; });
+  new MutationObserver(() => { if (term) term.options.theme = THEMES[look()]; })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  function draw() {
+    const phase = control.state.phase;
+    const chatFollowed = store.can('chat.page');
+    const session = shown ? store.state.sessions.get(shown) : null;
+    const elsewhere = session && session.hosted === false;
+    const unavailable = phase === 'unavailable' || (!control.available() && !term);
+    let words = null;
+    if (unavailable || elsewhere) {
+      setText(heading, 'Terminal');
+      words = elsewhere
+        ? `This session runs in another terminal (${session.terminal || 'not the host'}): its screen is there.`
+        : chatFollowed ? 'The live terminal comes to this page in a later build. Until then, the session’s conversation is in Chat.'
+          : 'The live terminal comes to this page in a later build.';
+    } else if (phase === 'gone') {
+      setText(heading, 'No terminal for this session');
+      words = control.state.message || 'The node’s host doesn’t run this session.';
+    } else if (phase === 'failed') {
+      setText(heading, 'The terminal didn’t open');
+      words = control.state.message;
+    }
+    const drawn = control.drawn(shown);
+    placeholder.hidden = words === null;
+    if (words !== null) setText(says, words);
+    showChat.hidden = !chatFollowed || (words === null);
+    retry.hidden = phase !== 'failed';
+    // The screen stays up while it is this session's, even stale (a reconnect, a resync): the note says so.
+    screen.hidden = words !== null || !drawn;
+    const noting = words === null && (ended ? 'This session ended.'
+      : !drawn ? 'Opening the terminal…'
+        : phase === 'reconnecting' ? 'Reconnecting…' : null);
+    note.hidden = !noting;
+    if (noting) setText(note, noting);
+    el.classList.toggle('is-stale', words === null && drawn && (phase === 'reconnecting' || ended));
+    el.classList.toggle('is-waiting', words === null && !drawn);
+  }
+  control.onChange(() => { draw(); if (control.state.phase === 'live') refit(); });
+
+  function show(session) {
+    const value = store.state.sessions.get(session);
+    if (shown !== session) ended = false;
+    shown = session;
+    visible = true;
+    if (value?.ended) {
+      if (!ended) { ended = true; control.hide({ ended: true }); }
+      return draw();
+    }
+    if (value?.hosted === false || !control.available()) {
+      control.hide();
+      return draw();
+    }
+    make().then(() => {
+      if (shown !== session || !visible) return;
+      if (!control.drawn(session)) term.reset();
+      const size = clampSize(sizeNow());
+      if (size.cols !== term.cols || size.rows !== term.rows) term.resize(size.cols, size.rows);
+      control.show(session, size);
+      draw();
+    });
+    draw();
+  }
+
+  return {
+    el,
+    // The pane shows `session` (an id the store holds).
+    show,
+    // The pane is hidden, or its session is gone: the stream closed (`ended`: the node closed it already).
+    hide({ gone = false } = {}) {
+      visible = false;
+      if (control.state.session !== null || control.state.phase !== 'idle') control.hide({ ended: gone || ended });
+      if (gone) shown = null;
+    },
+    focus() { if (term && !screen.hidden) term.focus(); },
+  };
+}

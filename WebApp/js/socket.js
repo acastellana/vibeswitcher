@@ -17,6 +17,9 @@
 //   nothing lost, nothing twice. Older items come with `chat.page`, as the view scrolls up to them.
 // - Trust: every frame goes through the validators generated from the node's own encoders (wire/validators.js) before
 //   anything reads it; a frame that fails is dropped and said in the console.
+// - Terminals (the contract's §9): binary frames are handed to `onBinary`'s listeners as they come, once the socket is
+//   authenticated, and `sendBinary` sends one; `onLink` tells them when the connection is up (after each `hello`) and
+//   when it dropped, since a terminal's stream goes with its connection (js/terminal.js opens it again).
 // - Actions (the contract's §8): a request with an action id is sent again after a reconnect with the same id, and
 //   `reached(collection, seq)` tells the store when a subscription holds an ack's `applied`, so an overlay is dropped
 //   only once the stream shows what it stood for.
@@ -61,6 +64,10 @@ export function connectSocket(store, options) {
   const pending = new Map();
   // Who waits for a collection's subscription to reach a seq: { collection, seq, epoch, resolve }.
   let waiters = [];
+  // The terminals' listeners: binary frames, and the connection going up or down.
+  const binaryListeners = new Set();
+  const linkListeners = new Set();
+  const linked = (how) => { for (const fn of [...linkListeners]) fn(how); };
 
   // `#pair=CODE` read and taken off the address bar, so neither the history nor a bookmark keeps it.
   function takePair() {
@@ -89,11 +96,16 @@ export function connectSocket(store, options) {
     authed = false;
     const ws = new WebSocket(url);
     socket = ws;
+    ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       if (socket !== ws) return;
       send({ v: 1, id: '0', kind: 'auth', args: { ...credential, client: 'webapp', ...(mine ? { assets: mine } : {}) } });
     };
-    ws.onmessage = (event) => { if (socket === ws) receive(event.data); };
+    ws.onmessage = (event) => {
+      if (socket !== ws) return;
+      if (typeof event.data === 'string') return receive(event.data);
+      if (authed) for (const fn of [...binaryListeners]) fn(event.data);
+    };
     ws.onclose = () => { if (socket === ws) dropped(); };
     ws.onerror = () => {};
   }
@@ -101,7 +113,9 @@ export function connectSocket(store, options) {
   // The socket closed: the rows stay, the mark says so, and it tries again.
   function dropped() {
     socket = null;
+    const wasUp = authed;
     authed = false;
+    if (wasUp) linked('down');
     for (const [id, waiting] of pending) {
       if (!waiting.message.action) { pending.delete(id); waiting.resolve({ ok: false, error: { code: 'not-yet', message: 'The node isn’t answering.' } }); }
     }
@@ -144,6 +158,7 @@ export function connectSocket(store, options) {
     for (const waiting of [...pending.values()]) send(waiting.message);
     for (const [name, sub] of subs) if (sub.open !== false) subscribe(name, sub);
     settle();
+    linked('up');
   }
 
   function bye(message) {
@@ -328,6 +343,16 @@ export function connectSocket(store, options) {
     pageChat(session, before) {
       return request({ v: 1, id: 'sub-' + nextId++, kind: 'chat.page', args: { session, before, limit: 200 } });
     },
+    // A terminal's binary frame (an ArrayBuffer or a typed array), sent if the socket is up: whether it was.
+    sendBinary(bytes) {
+      if (!authed || !socket || socket.readyState !== 1) return false;
+      socket.send(bytes);
+      return true;
+    },
+    // Binary frames from the node, as ArrayBuffers: a function that stops them.
+    onBinary(fn) { binaryListeners.add(fn); return () => binaryListeners.delete(fn); },
+    // 'up' after each hello, 'down' when an authenticated connection dropped: a function that stops them.
+    onLink(fn) { linkListeners.add(fn); return () => linkListeners.delete(fn); },
     request(message) {
       if (!store.can(message.kind)) {
         return Promise.resolve({ ok: false, error: { code: 'unknown-kind', message: 'This page can’t do that yet: use `vibeswitcher` in a terminal.' } });

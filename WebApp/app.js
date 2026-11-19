@@ -37,6 +37,8 @@ if (['dark', 'light'].includes(params.get('theme'))) document.documentElement.da
 const app = {
   store,
   ui,
+  // The feed itself, for what goes past the store: a session's terminal (binary frames).
+  feed,
   // The sessions from top to bottom, as the list shows them.
   order: () => list.order(),
   commands,
@@ -119,6 +121,10 @@ function commands() {
 // in an installed window), so ⌥1–9 does the same everywhere. ⌥⌘0 is the inspector's, as on the Mac.
 
 addEventListener('keydown', (event) => {
+  // In a session's terminal the keyboard is the program's: Ctrl+K, Ctrl+J, Alt+F and the rest are its keys. A Mac's ⌘
+  // keys stay the page's (the terminal sends none), and so do Ctrl+Alt+1 2 (Terminal, Chat) elsewhere.
+  if (event.target?.closest?.('.terminal-screen') && !(MAC && event.metaKey)
+    && !(!MAC && event.ctrlKey && event.altKey && /^Digit[12]$/.test(event.code))) return;
   const mod = MAC ? event.metaKey : event.ctrlKey;
   const digit = /^Digit[1-9]$/.test(event.code) ? Number(event.code.slice(5)) : 0;
   if (mod && !event.altKey && event.code === 'KeyK') {

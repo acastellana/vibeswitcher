@@ -1,6 +1,6 @@
 // The selected session: its header (who, what state, where), then a lead's team strip and one pane of Chat or
-// Terminal, with the inspector beside them (the Mac's window: session | inspector). The terminal is a placeholder in
-// this slice.
+// Terminal, with the inspector beside them (the Mac's window: session | inspector). The terminal is the session's
+// screen where the node opens one (views/terminal.js), and says to use the session's own terminal elsewhere.
 
 import { h, setText, setClass, framed, motionOK } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
@@ -9,6 +9,7 @@ import { projectOf } from '../ui.js';
 import { chatView } from './chat.js';
 import { teamStrip } from './lead.js';
 import { inspector } from './inspector.js';
+import { terminalView } from './terminal.js';
 
 const PANES = [
   { id: 'terminal', label: 'Terminal', key: '1' },
@@ -43,10 +44,8 @@ export function sessionView(app) {
   const strip = teamStrip(app);
   const chat = chatView(app);
   const inspect = inspector(app);
-  const terminalSays = h('p', null, 'The live terminal comes to this page in a later build.');
-  const showChat = h('button', { class: 'button quiet', type: 'button', onclick: () => ui.setPane(ui.state.route.id, 'chat') }, 'Show Chat');
-  const terminal = h('div', { class: 'pane terminal-pane' },
-    h('div', { class: 'placeholder' }, icon('terminal', 22), h('h2', null, 'Terminal'), terminalSays, showChat));
+  const term = terminalView(app);
+  const terminal = term.el;
   const gone = h('div', { class: 'pane', hidden: true },
     h('div', { class: 'placeholder' }, h('h2', null, 'This session isn’t here any more'), h('p', null, 'It ended, or its link is from another node.'), h('a', { class: 'button quiet', href: '#/' }, 'Start Page')));
   const loading = h('div', { class: 'pane head-skeleton', hidden: true, 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }));
@@ -94,7 +93,11 @@ export function sessionView(app) {
     loading.hidden = !connecting;
     gone.hidden = connecting || !!session;
     for (const part of [head, body]) part.hidden = !session;
-    if (!session) return;
+    if (!session) {
+      // It ended and left the list (or the link is another node's): its stream went with it on the node.
+      if (!connecting) term.hide({ gone: true });
+      return;
+    }
 
     const word = stateOf(session);
     if (shownAgent !== session.agent) {
@@ -118,17 +121,14 @@ export function sessionView(app) {
     tabs.forEach((tab, index) => tab.setAttribute('aria-pressed', String(PANES[index].id === pane)));
     strip.el.hidden = !hasBoard;
     if (hasBoard) strip.update(session);
-    // Until the page follows a chat, the terminal's placeholder doesn't send you to one.
-    const chatFollowed = store.can('chat.page');
-    showChat.hidden = !chatFollowed;
-    setText(terminalSays, chatFollowed ? 'The live terminal comes to this page in a later build. Until then, the session’s conversation is in Chat.'
-      : 'The live terminal comes to this page in a later build.');
     chat.el.hidden = pane !== 'chat';
     terminal.hidden = pane !== 'terminal';
     chat.show(id);
+    if (pane === 'terminal') term.show(id); else term.hide();
     if (shownPane !== id + pane) {
       shownPane = id + pane;
       if (pane === 'chat') chat.reveal();
+      else term.focus();
     }
     setClass(el, 'is-lead', isLead);
 

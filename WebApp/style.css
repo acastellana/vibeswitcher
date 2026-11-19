@@ -231,6 +231,18 @@ code, pre, kbd { font-family: var(--mono); }
 .placeholder .button { margin-top: 8px; }
 .pane-empty { padding: 40px 0; color: var(--ink-2); text-align: center; }
 
+/* ---- The terminal: the session's screen, edge to edge in its pane, on the page's own background ---- */
+/* The screen carries no padding: the fit reads its box as the room the cells have. */
+
+.terminal-pane { position: relative; display: flex; flex-direction: column; overflow: hidden; padding: 10px 4px 4px 14px; }
+.terminal-pane:has(> .placeholder:not([hidden])) { padding: 0; overflow-y: auto; }
+.terminal-screen { position: relative; flex: 1; min-height: 0; overflow: hidden; transition: opacity 0.16s var(--ease); }
+.terminal-screen .xterm { height: 100%; }
+.terminal-screen .xterm-viewport { background: transparent !important; }
+.terminal-pane.is-stale .terminal-screen { opacity: 0.55; }
+.terminal-note { position: absolute; top: 10px; right: 18px; z-index: 5; margin: 0; padding: 2px 8px; border-radius: 6px; background: var(--fill-2); color: var(--ink-2); font-size: var(--small); }
+.terminal-pane.is-waiting .terminal-note { position: static; align-self: center; margin-top: 14vh; background: none; font-size: var(--text); }
+
 /* ---- Chat ---- */
 
 .chat { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
