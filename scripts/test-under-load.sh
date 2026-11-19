@@ -49,9 +49,10 @@
 # look) and TEST_UNDER_LOAD_TICK (seconds between looks, 5) taken.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-# The runs and a COMMAND start from the umask and the environment scripts/test.sh gives its own (it says why).
+# The runs and a COMMAND start from the umask and the environment scripts/test.sh gives its own tests (it says why):
+# the umask from here on, the team session's variables gone from each run's and COMMAND's environment below.
 source scripts/lib/test-environment.sh
-clean_test_environment
+known_umask
 source scripts/lib/scratch.sh
 source scripts/lib/module-cache.sh
 source scripts/lib/developer-dir.sh
@@ -589,7 +590,8 @@ started=$(date +%s)
 failed=0
 if [[ ${#command[@]} -gt 0 ]]; then
     # In the background so that a signal reaches the trap at once, not when the command is done.
-    "${command[@]}" 8>&- &
+    # Without the team session's variables, through env: COMMAND keeps the pid `$!` names.
+    env $(team_session_unsets) "${command[@]}" 8>&- &
     tests+=($!)
     echo $! >> "$scratch/pids"
     wait "${tests[0]}"
@@ -604,6 +606,8 @@ else
     # started while `stop` lists the run's processes would outlive it.
     run_bundles() {
         local run=$1 status=0 bundle name executable args log=$logs/run-$1.log before code
+        # This run's subshell alone (it is started in the background, below): its bundles' environment.
+        clean_test_environment
         for bundle in "${bundles[@]}"; do
             [[ -e $scratch/stopping || -e $scratch/disk-low || -e $scratch/memory-low ]] && return 130
             name=$(basename "$bundle" .xctest)
