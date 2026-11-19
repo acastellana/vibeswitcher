@@ -26,6 +26,9 @@ the stage 2 plan as revised by the security document (its Task 1 Step 4), and re
 - **Non-seam edits**: every edit to a file shared with main (`Sources/VibeCore`, `Sources/VibeHost`, the three
   executables) that isn't a call switched to `VibePlatform`, an import removed or a whole file or block moved, gets a
   line in [Non-seam edits](#non-seam-edits), with what it costs a merge.
+- **Merging** this file is by git's union driver (`.gitattributes`): rows two branches add at a table's end both
+  land. Two branches that edit one row each differently land both versions of it, and `PortMapLintTests` fails on
+  the two rows of one name until one is kept. A `|` in a cell is written `\|`.
 
 ## Files the engine replaces
 
