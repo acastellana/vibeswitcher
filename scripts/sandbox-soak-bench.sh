@@ -13,7 +13,7 @@
 #   simulated hours done so far.  CYCLES: cycles in a simulated hour (default 20).  --bound: prints the seconds a run
 #   with these options takes at most, its build aside (the soak's minutes and each of its waits run out), and runs
 #   nothing: SandboxSoakBenchTests guards the run past it. The soak takes about all its minutes (5 simulated hours of 20
-#   cycles: ~14.3 of 15 on 2026-11-19, ~7 cycles a minute), so a guard under the soak's own minutes ends a healthy run
+#   cycles took ~15 on 2026-11-19, ~7 cycles a minute), so a guard under the soak's own minutes ends a healthy run
 #   ("the soak bench hung", the app's first daily run).
 set -euo pipefail
 cd "$(dirname "$0")/.."

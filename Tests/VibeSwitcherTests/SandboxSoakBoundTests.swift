@@ -38,15 +38,15 @@ struct SandboxSoakBoundTests {
 
     @Test func theBoundCoversTheSoaksOwnMinutesAndItsWaits() throws {
         let dir = scratch.url("soak-dir")
-        // As SandboxSoakBenchTests runs it: 15 minutes at most for 5 simulated hours.
-        let bound = try Self.bound([Self.script, "--binary", "/nonexistent/VibeSwitcher", "--dir", dir.path, "--max-minutes", "15", "5"])
-        // The soak's 15 minutes, the script's 2 past them and its minute for the soak's end after a stop, and the
+        // As SandboxSoakBenchTests runs it: 18 minutes at most for 5 simulated hours.
+        let bound = try Self.bound([Self.script, "--binary", "/nonexistent/VibeSwitcher", "--dir", dir.path, "--max-minutes", "18", "5"])
+        // The soak's 18 minutes, the script's 2 past them and its minute for the soak's end after a stop, and the
         // sandbox's start: a guard at the bound or past it never ends a healthy run.
-        #expect(bound >= 15 * 60 + 120 + 60 + 120, "the bound \(bound) s is under the soak's own minutes and waits")
+        #expect(bound >= 18 * 60 + 120 + 60 + 120, "the bound \(bound) s is under the soak's own minutes and waits")
         // And it isn't a guard that never fires: under the app's 90-minute timeout with room for the build.
         #expect(bound < 45 * 60)
         // Fewer minutes, a smaller bound by as much: the soak's minutes are in it.
-        let shorter = try Self.bound([Self.script, "--binary", "/nonexistent/VibeSwitcher", "--dir", dir.path, "--max-minutes", "5", "5"])
+        let shorter = try Self.bound([Self.script, "--binary", "/nonexistent/VibeSwitcher", "--dir", dir.path, "--max-minutes", "8", "5"])
         #expect(bound - shorter == 10 * 60)
         // It ran nothing: no sandbox folder made.
         #expect(!FileManager.default.fileExists(atPath: dir.path))

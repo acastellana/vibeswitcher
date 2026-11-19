@@ -4,22 +4,23 @@ import Testing
 
 /// The app's footprint stays flat over a working day's churn (app-memory-grows-17): scripts/sandbox-soak-bench.sh runs
 /// the sandbox's soak (fake sessions started, chatted with and ended, wallet requests filed and sent or discarded with
-/// the desk's clock moving, the lead's Team tab and board updates) for 5 simulated hours (about 14 real minutes; fewer
-/// if the soak's own minutes run out first) in a sandboxed copy of this build, and the line through each simulated
+/// the desk's clock moving, the lead's Team tab and board updates) for 5 simulated hours (about 15 real minutes of
+/// `maxMinutes`; fewer if the soak's own minutes run out first) in a sandboxed copy of this build, and the line through each simulated
 /// hour's least footprint after the first (hours 2-5) may rise at most `limit` MB an hour. Its RESULT line is always
 /// printed. Judged only
 /// while the Mac's 1-minute load is under load_threshold, as FootprintBenchTests; over it the numbers are printed. A
 /// bench, run only by `scripts/test.sh --perf`. The run is guarded past the script's own bound (`--bound`: the soak's
-/// minutes and each of its waits), not a fixed time: the soak takes about all of its 15 minutes, and a 900 s guard ended
-/// every healthy run, the app's daily one (2026-11-19) and by hand alike, as "the soak bench hung".
+/// minutes and each of its waits), not a fixed time: the soak took about all of its 15 minutes, and a 900 s guard ended
+/// healthy runs, the app's daily one (2026-11-19) and by hand alike, as "the soak bench hung".
 struct SandboxSoakBenchTests {
     private let scratch = Scratch()
     /// MB per simulated hour (20 cycles): the soak's least footprint wanders by up to ~8 MB between hours (its window
     /// and layers redrawn: 7.9 over hours 2-3 on 11-01 with nothing growing), so only a growth well over the noise
     /// fails it. The user's 11-01 install grew ~15 MB a real hour, about 5 MB per 20 sessions churned.
     static let limit = 30.0
-    /// The soak's real minutes at most (the script's --max-minutes): 5 simulated hours take ~14.3 of them.
-    static let maxMinutes = 15
+    /// The soak's real minutes at most (the script's --max-minutes, its default 15): room for 5 simulated hours, which
+    /// took ~15 minutes on 2026-11-19 (an hour every ~3 minutes, hour 4 at 12.0), so at 15 the last one raced the end.
+    static let maxMinutes = 18
 
     @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func theFootprintIsFlatOverFiveSimulatedHours() async throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
