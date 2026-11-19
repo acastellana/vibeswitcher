@@ -114,7 +114,7 @@ struct SandboxPlannerBoxTests {
             attempt("memory new file", "printf 'planted\\n' > '\(memory)/x'"),
             attempt("memory subfolder", "mkdir '\(memory)/team'"),
             attempt("memory remove", "rm -rf '\(memory)' && test ! -e '\(memory)'"),
-            attempt("memory replace", "mkdir '\(transcripts)/planted' && printf 'planted\\n' > '\(transcripts)/planted/MEMORY.md' && mv '\(transcripts)/planted' '\(memory)'"),
+            attempt("memory replace", "mkdir '\(transcripts)/planted' && printf 'planted\\n' > '\(transcripts)/planted/MEMORY.md' && mv -T '\(transcripts)/planted' '\(memory)'"),
             attempt("memory mode", "chmod u+w '\(memory)' && printf x > '\(memory)/y'"),
             "echo \"memory holds: $(ls '\(memory)' | tr '\\n' ' ')\"",
             // The transcript beside it, as Claude Code writes one and a subagent's.
@@ -179,7 +179,6 @@ struct SandboxPlannerBoxTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: transcripts + "/memory") == [])
         #expect(try String(contentsOfFile: transcripts + "/0b1c.jsonl", encoding: .utf8) == "{\"type\":\"user\"}\n")
         #expect(FileManager.default.fileExists(atPath: transcripts + "/0b1c/subagents/agent-1.jsonl"))
-        #expect(!FileManager.default.fileExists(atPath: transcripts + "/planted/MEMORY.md") || !FileManager.default.fileExists(atPath: transcripts + "/memory/MEMORY.md"))
         let log = Git.run(["log", "-1", "--format=%s", "agent/w1/head"], in: world.root, env: ["GIT_ALTERNATE_OBJECT_DIRECTORIES": world.box + "/objects"])
         #expect(log.output == "in the box", "\(log.output) \(log.error)")
     }

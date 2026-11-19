@@ -133,6 +133,11 @@ public enum SandboxPlanner {
         /// empty folder in memory that the cover then hides), since only what is there can be bound. A link, or a
         /// folder where a file belongs, can't be covered (the shim follows no link, and git or the agent would read
         /// what the box put there): why there is no box then, else nil.
+        ///
+        /// A cover holds while nothing outside the box renames the real name away or renames something over it: the
+        /// kernel then lets go of the mount inside (measured), and the box finds the folder's own name again, writable.
+        /// git outside writes a config by such a rename, and `LeadLaunch.setAsideMemory` renames a worktree's memory:
+        /// neither is done to a live box's worktree by the node today but the second, at its verifier's start (SB6b).
         func cover(_ target: String, source: String, folder: Bool, what: String) -> SandboxRefusal? {
             switch (entry(source), folder) {
             case (.file, false), (.folder, true): break
