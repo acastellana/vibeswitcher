@@ -395,3 +395,7 @@ Whole-suite reruns cost about 35 h in the week (24 of 91 first runs failed; ever
 
 Eight finished tasks sat 7–11 h waiting on Fable's limit (resets Nov 24) while Codex had 86% of its week left. The follow-up Claude audit keeps a second-model check on the guard rails without blocking delivery.
 
+## 2026-11-19 08:23:23 While Claude's limits are spent (until Nov 24, 01:00), work that hasn't started goes to Codex, and finished work goes to an Opus review where the gate allows it (the user, 2026-11-19: "the ones that are running, if they have a lot of work done, then they can go through opus 5.5 if not, just kill them and do it through Codex"). Applied: audits-run-on-codex is moved to Codex; task-rows-say-when already runs there. All eight finished tasks have their work done, but their reviews are sensitive or security ones, which VibeSwitcher routes to Fable whatever verifier_model says (LeadWorkflow.auditModel's security route). The Opus fallback for those is unmerged work in sensitive-audits-fall, so the eight stay waiting for the reset. An audit retried on the-lead-s-records on Nov 19 at 08:2x launched on Fable and stopped at the limit, which confirms it.
+
+This follows the user's instruction. The review gate for sensitive paths is a guard rail the lead doesn't work around.
+

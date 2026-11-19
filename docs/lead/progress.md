@@ -4010,3 +4010,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 08:20 Planned audits-run-on-codex: Audits run on Codex when Claude's verifier model is out of quota (review audit, for security)
 - 2026-11-19 08:20 Started a worker on task-rows-say-when (auto → Codex: Claude seven day overage included reached; Codex 14%)
 - 2026-11-19 08:20 Automatically (auto_advance): Started a worker on task-rows-say-when (Task rows say when a review waits on a usage limit, not "In review"); its agent is auto, so it went to Codex: Claude seven day overage included reached; Codex 14%.
+- 2026-11-19 08:21 Sent task-rows-say-when's worker contract v2 (it had v1)
+- 2026-11-19 08:22 Released the-lead-s-records's worker (idle since its done report on 68e7f147) while its audit runs
+- 2026-11-19 08:23 Review of audits-run-on-codex: audit
+- 2026-11-19 08:23 Started a worker on audits-run-on-codex
+- 2026-11-19 08:23 Automatically (auto_advance): Started a worker on audits-run-on-codex (Audits run on Codex when Claude's verifier model is out of quota).
