@@ -210,6 +210,74 @@ struct MergeSealTests: LeadTeamFixture {
         #expect(prefixRuns.count == 1, "The passing prefix must not run again: \(fixture.ran())")
     }
 
+    /// The run that passed wrote each task's stats line when the seal held it. Asking again while it's held, and the
+    /// landing on the kept pass after Accept, run nothing: they add no second, ~0 s "passed" line per task.
+    @Test func aRetainedPassWritesItsStatsLinesOnce() throws {
+        let (root, _, lead) = try scene()
+        let stats = fixture.temp.url("stats")
+        lead.mergeStats = { stats }
+        #expect(merge(lead, batch: true).isError)
+        let held = try fixture.mergeLines(stats)
+        #expect(held.map(\.task).sorted() == ["add-x", "add-y"], "\(held)")
+        #expect(held.allSatisfy { $0.result == "passed" && $0.batchRuns == 1 }, "\(held)")
+        #expect(merge(lead, batch: true).isError)
+        _ = try vault.checkConfig(root: root)
+        let landed = merge(lead, batch: true)
+        #expect(!landed.isError, "\(landed.text)")
+        #expect(fixture.ran().count == 1)
+        #expect(fixture.board(root).task("add-y")?.merged != nil)
+        #expect(try fixture.mergeLines(stats) == held)
+    }
+
+    /// A split's passing prefix kept by the seal lands on retry, and the batch goes on with the rest: the rest's tasks
+    /// get their lines (from a run, or as conflicts found in stacking with no run at all); the prefix's tasks, whose
+    /// lines the held batch wrote, get none again.
+    @Test(arguments: [false, true])
+    func aRetainedPrefixsLandingRecordsOnlyTheRest(restConflicts: Bool) throws {
+        let config = book.configHome + "/.claude/CLAUDE.md"
+        try FileManager.default.createDirectory(atPath: (config as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try "before\n".write(toFile: config, atomically: true, encoding: .utf8)
+        let (root, runtime, lead) = try fixture.team(["max_workers": 8, "auto_advance": false], suite: """
+            #!/bin/bash
+            echo "run $* | $(ls *.txt | tr '\\n' ' ')" >> \(RecentProjects.shellQuote(fixture.runs))
+            if [[ -e break.txt ]]; then
+              printf '%s\\n' \(RecentProjects.shellQuote(MergeBatchTests.failure))
+              exit 1
+            fi
+            if [[ -e x.txt ]]; then echo after > \(RecentProjects.shellQuote(config)); fi
+            echo '✔ Test breaks() passed after 0.010 seconds.'
+            echo '✔ Test run with 2 tests passed after 0.020 seconds.'
+            """)
+        let stats = fixture.temp.url("stats")
+        lead.mergeStats = { stats }
+        for (slug, file) in [("add-x", "x.txt"), ("add-y", "y.txt"), ("break-it", "break.txt"), ("add-z", "z.txt")] {
+            try fixture.audited(lead, runtime, root: root, slug, [file: "\(slug)\n"], review: "none")
+        }
+        let slugs = ["add-x", "add-y", "break-it", "add-z"]
+        let held = try lead.mergeBatch(slugs)
+        #expect(held.stopped != nil && held.text.contains("kept"), "\(held.text)")
+        let first = try fixture.mergeLines(stats)
+        #expect(first.filter { ["add-x", "add-y"].contains($0.task) }.map(\.result) == ["passed", "passed"], "\(first)")
+        let ranBefore = fixture.ran().count
+        _ = try vault.checkConfig(root: root)
+        if restConflicts {
+            // Each of the rest now adds a file the kept prefix adds too.
+            for (slug, file) in [("break-it", "y.txt"), ("add-z", "x.txt")] {
+                try fixture.commit([file: "\(slug)'s own\n"], in: Worktrees.path(root: root, slug: slug), "\(slug) adds \(file)")
+                let reported = try seat("worker-\(slug)", runtime).call("report", doneReport("again"))
+                #expect(!reported.isError, "\(reported.text)")
+            }
+        }
+
+        let landed = try lead.mergeBatch(slugs)
+
+        #expect(fixture.board(root).task("add-y")?.merged?.batch == ["add-x", "add-y"], "\(landed.text)")
+        #expect((landed.runs == 0) == restConflicts && (fixture.ran().count == ranBefore) == restConflicts, "\(landed.text)")
+        let added = try fixture.mergeLines(stats).dropFirst(first.count)
+        let expected = restConflicts ? ["add-z": "conflict", "break-it": "conflict"] : ["add-z": "passed", "break-it": "failed"]
+        #expect(Dictionary(added.map { ($0.task, $0.result) }, uniquingKeysWith: { $0 + "," + $1 }) == expected, "\(Array(added))")
+    }
+
     @Test func aBisectedBatchDropsSupersededPassRefs() throws {
         let (root, runtime, lead) = try fixture.team(["max_workers": 10, "auto_advance": false])
         let tasks = [("add-x", "x.txt"), ("add-y", "y.txt"), ("add-z", "z.txt"), ("break-it", "break.txt"), ("add-w", "w.txt")]

@@ -464,6 +464,34 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(samples.allSatisfy { $0.result == "conflict" && $0.batchRuns == 0 && $0.firstRun == nil })
     }
 
+    /// Stacking stops on its first task, not on a conflict (a pre-rebase hook refuses the rebase), so no test runs:
+    /// each task still gets its stats line, undecided ("error"), as a batch that stopped after a run gives them.
+    @Test func aBatchStoppedInStackingBeforeItsFirstRunRecordsStats() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false])
+        let stats = temp.url("stats")
+        lead.mergeStats = { stats }
+        for (slug, file) in [("add-x", "x.txt"), ("add-y", "y.txt")] {
+            try audited(lead, runtime, root: root, slug, [file: "\(slug)\n"], review: "none")
+        }
+        // The base moves, so each task's commit is rebased (git runs pre-rebase only for a rebase that isn't a no-op).
+        try commit(["b.txt": "base\n"], in: root, "base moves")
+        try vault.setHead(Git.run(["rev-parse", "main"], in: root).output, root: root, branch: "main")
+        let hook = Git.run(["rev-parse", "--git-path", "hooks/pre-rebase"], in: root).output
+        let path = hook.hasPrefix("/") ? hook : (root as NSString).appendingPathComponent(hook)
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try "#!/bin/sh\necho 'no rebasing here' >&2\nexit 1\n".write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+
+        let result = try lead.mergeBatch(["add-x", "add-y"])
+
+        #expect(result.stopped?.contains("stacking add-x failed") == true, "\(result.text)")
+        #expect(result.runs == 0)
+        #expect(ran().isEmpty)
+        let samples = try mergeLines(stats)
+        #expect(samples.map(\.task).sorted() == ["add-x", "add-y"], "\(samples)")
+        #expect(samples.allSatisfy { $0.result == "error" && $0.batchRuns == 0 && $0.firstRun == nil }, "\(samples)")
+    }
+
     // MARK: Every guard, per task
 
     /// Each task is checked as merge checks it alone: kept, an open Important finding, a missing audit and a missing

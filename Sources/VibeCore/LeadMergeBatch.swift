@@ -628,14 +628,22 @@ extension LeadToolset {
             ends[gate.task.slug] = .untouched("The batch stopped before \(gate.task.slug) was decided (\(why)); it stays as it was.")
         }
 
-        // One stats line per task decided, including conflicts found before any tests ran.
-        if runs > 0 || !results.isEmpty, let folder = mergeStats() {
+        // One stats line per task decided, including conflicts found before any tests ran and the tasks of a batch that
+        // stopped before its first run. A kept pass's tasks have theirs from the batch whose run passed: its landing (or
+        // its seal holding again) writes none again, and with no run of its own neither do the tasks it left undecided.
+        let retained = Set(gates.prefix(kept?.tips.count ?? 0).map(\.task.slug))
+        let recorded = gates.filter { gate in
+            let slug = gate.task.slug
+            if case .refused = ends[slug]!, results[slug] == nil { return false }
+            if retained.contains(slug) { return false }
+            return kept == nil || runs > 0 || results[slug] != nil
+        }
+        if !recorded.isEmpty, let folder = mergeStats() {
             let start = begun?.at ?? called
             let id = LoadStats.stamp(start) + "-" + (gates.first?.task.slug ?? "")
             let kind = stopped.flatMap { text in ["hung", "cancelled"].first { text.contains($0) } } ?? "error"
-            for gate in gates {
+            for gate in recorded {
                 let slug = gate.task.slug
-                if case .refused = ends[slug]!, results[slug] == nil { continue }
                 let decided = results[slug] ?? (kind, Date(), nil)
                 var sample = MergeSample(t: LoadStats.stamp(start), project: (root as NSString).lastPathComponent, task: slug,
                                          load: (begun?.load ?? LoadRecorder.averages() ?? []).map { ($0 * 100).rounded() / 100 },
