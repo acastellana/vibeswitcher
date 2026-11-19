@@ -43,6 +43,10 @@ public enum WebAssets {
     /// The first load's budget (500 ms) wants small files (`WebAssetsTests.theEmbeddedFilesStaySmall`).
     public static let maxFileBytes = 256 * 1024
     public static let maxTotalBytes = 1024 * 1024
+    /// What the page vendors (`WebApp/vendor/`: xterm.js, slice 4) loads only with a terminal, never at the first load:
+    /// a file there may be up to 512 KiB (xterm.js 6.0.0 is 337 KiB). It still counts in `maxTotalBytes`.
+    public static let vendorFolder = "vendor/"
+    public static let maxVendoredFileBytes = 512 * 1024
 
     /// Where a build's files are kept for good: `/_/<build>/<path>`.
     public static let buildPrefix = "/_/"
