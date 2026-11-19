@@ -86,16 +86,12 @@ struct StatusLineBinaryTests {
     func gone(_ target: pid_t) -> Bool { kill(target, 0) == -1 && errno == ESRCH }
 
     /// What is left of process group `group`, for a failure's message: each member (pid, parent, name) and what a
-    /// signal 0 to the group says. A program alive there with launchd (1) as its parent is one the stop passed over.
+    /// signal 0 to the group says. A program alive there with launchd (1) as its parent is one the stop passed over (Linux:
+    /// init, or the nearest subreaper).
     func left(in group: pid_t) -> String {
-        var pids = [pid_t](repeating: 0, count: 256)
-        let bytes = proc_listpids(UInt32(PROC_PGRP_ONLY), UInt32(group), &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
-        let members = pids.prefix(max(0, Int(bytes)) / MemoryLayout<pid_t>.size).filter { $0 > 0 }.map { pid -> String in
-            var info = proc_bsdinfo()
-            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return "\(pid) (gone)" }
-            let name = withUnsafeBytes(of: info.pbi_comm) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-            return "\(pid) parent \(info.pbi_ppid) \(name)\(info.pbi_status == SZOMB ? " (zombie)" : "")"
+        let members = (Platform.Processes.allPids() ?? []).compactMap { pid -> String? in
+            guard case .brief(let info) = Platform.Processes.brief(pid), info.pgid == group else { return nil }
+            return "\(pid) parent \(info.ppid) \(info.name)\(info.state == .zombie ? " (zombie)" : "")"
         }
         let signalled = kill(-group, 0)
         let probe = signalled == 0 ? "signal 0 reaches it" : "signal 0: \(String(cString: strerror(errno)))"

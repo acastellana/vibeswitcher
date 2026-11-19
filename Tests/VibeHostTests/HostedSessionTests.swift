@@ -167,7 +167,11 @@ struct HostedSessionTests {
     @Test func spawnedProgramsGetDefaultSignals() async throws {
         // Put back whole (sigaction, not signal(), which would drop the SIGPIPE probe's SA_SIGINFO: EPipeProbe).
         var ignore = sigaction(), oldPipe = sigaction(), oldHup = sigaction()
+        #if canImport(Darwin)
         ignore.__sigaction_u.__sa_handler = SIG_IGN
+        #else
+        ignore.__sigaction_handler.sa_handler = SIG_IGN
+        #endif
         sigaction(SIGPIPE, &ignore, &oldPipe)
         sigaction(SIGHUP, &ignore, &oldHup)
         defer { sigaction(SIGPIPE, &oldPipe, nil); sigaction(SIGHUP, &oldHup, nil) }
@@ -317,12 +321,16 @@ extension HostedSessionTests {
             probe.attach(session)
             // Ended (not reaped: the session does that), or still waiting for the host to read it.
             let deadline = MacTime.real.awake() + 2
-            var ended = siginfo_t()
-            while MacTime.real.awake() < deadline {
-                ended.si_pid = 0
-                if waitid(P_PID, id_t(session.info.childPID), &ended, WEXITED | WNOWAIT | WNOHANG) == 0, ended.si_pid != 0 { break }
-                usleep(10_000)
+            // A zombie, or gone, by the process table (both systems' `Platform.Processes`; a waitid's si_pid is a
+            // union's field on Linux).
+            func ended() -> Bool {
+                switch Platform.Processes.brief(session.info.childPID) {
+                case .brief(let brief): return brief.state == .zombie
+                case .gone: return true
+                case .unreadable: return false
+                }
             }
+            while MacTime.real.awake() < deadline, !ended() { usleep(10_000) }
             return session
         }
         #expect(await eventually { probe.text.contains("Couldn't start fakesh: it should be at /no/such/bin/fakesh, and isn't (No such file or directory).") },

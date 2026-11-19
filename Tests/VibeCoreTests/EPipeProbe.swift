@@ -1,3 +1,4 @@
+#if canImport(Darwin)
 import Darwin
 import Darwin.Mach
 import Foundation
@@ -485,3 +486,4 @@ enum EPipeProbe {
         }
     }
 }
+#endif

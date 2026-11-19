@@ -481,8 +481,7 @@ struct HostCallTests {
             defer { close(fd) }
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
             // As the real host's (`UnixSocket.configure`): a reply to a client that has gone fails, not SIGPIPE.
-            var noSigPipe: Int32 = 1
-            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+            Platform.Sockets.noSigPipe(socket: fd)
             var decoder = HostFrameDecoder()
             var buffer = [UInt8](repeating: 0, count: 65_536)
             var welcomed = false, rested = false

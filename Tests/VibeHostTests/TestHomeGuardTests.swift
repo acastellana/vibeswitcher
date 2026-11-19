@@ -23,6 +23,12 @@ struct TestHomeGuardTests {
         var current = sigaction()
         sigaction(SIGPIPE, nil, &current)
         // Neither its default (0), which ends the run, nor a moment's ignoring by a test (HostedSessionTests) matters here.
-        #expect((current.__sigaction_u.__sa_handler.map { unsafeBitCast($0, to: Int.self) } ?? 0) != 0)
+        // On Linux the run ignores it (TestSupport.swift's `refuseTheAccountRootOnLinux`): SIG_IGN, not the default.
+        #if canImport(Darwin)
+        let handler = current.__sigaction_u.__sa_handler
+        #else
+        let handler = current.__sigaction_handler.sa_handler
+        #endif
+        #expect((handler.map { unsafeBitCast($0, to: Int.self) } ?? 0) != 0)
     }
 }
