@@ -4190,3 +4190,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 14:16 Automatically (auto_advance): Started a worker on codex-worked-tasks (Codex-worked tasks merged on a Codex verdict get the post-merge Claude re-audit too), its after tasks done (audits-run-on-codex).
 - 2026-11-19 14:16 Automatically (auto_advance): Cleaned up audits-run-on-codex (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-19 14:16 Update: Merged: reviews run on Codex when Claude is out of quota — **What you asked for** ("make sure that the reviews are happening through Codex especially when there's no quota"):
+- 2026-11-19 14:21 Audit of session-host-measure-the: complete, clean, round 1: 3 Nit open
+- 2026-11-19 14:34 Merged merge-stats-a-batch: Merge stats: a batch stopped before its first run, and a retained batch's landing, record the right lines (no audit: review none) (build 295fb14dedaa)
