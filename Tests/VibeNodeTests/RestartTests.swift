@@ -565,13 +565,15 @@ struct RestartTests {
         // The snapshot's seal is the old host's vault's: nothing is said to be the same, only not known to be (the
         // security follow-ups' item 18).
         #expect(!lines.contains { $0.contains("; the same as at your last accept") }, "\(held.output)")
-        // Short: a guard rail is its key and value; the word it shares with the others is said once, at the end.
+        // Short: a guard rail is its key and value, marked `?` where the word is "not known to be the same", the word
+        // said once, at the end, with the unsealed snapshot's warning.
         #expect(!lines.contains { $0.hasPrefix("    ") && $0.contains("not known to be the same as at your last accept") }, "\(held.output)")
         #expect(lines.filter { $0.contains("not known to be the same as at your last accept") }.count == 1, "\(held.output)")
-        #expect(lines.contains { $0.hasPrefix("  each held thing and guard rail above with no note: not known to be the same") }, "\(held.output)")
+        #expect(lines.contains { $0.hasPrefix("  ? marks a line that is not known to be the same") }, "\(held.output)")
+        #expect(held.output.contains("compared with your last accept"), "\(held.output)")
         #expect(lines.contains { $0.hasPrefix("    test_command: make test; changed since your last accept") && $0.contains("from “make check”") },
                 "\(held.output)")
-        #expect(lines.contains("    merge_policy: ask_all"), "\(held.output)")
+        #expect(lines.contains("    merge_policy: ask_all ?"), "\(held.output)")
 
         // `--long` says it on every line, as before.
         let long = try await node.run(["config", "held", repo.path, "--long"])

@@ -31,16 +31,29 @@ public enum CardText {
     /// The lines for `card` (`CardStore.Card.value`), short (`lines(_:long:)`).
     public static func lines(_ card: NodeWire.Value) -> [String] { lines(card, long: false) }
 
-    /// Whether a held thing's or guard rail's word on the last accept (`sinceAccept`) only says it's as it was: the
-    /// same (the vault sealed the snapshot), or not known to be (`AcceptedSnapshot.unvouched`). The short lines say it
-    /// once, after them, for every line it was on.
-    static func saysTheSame(_ since: String) -> Bool {
-        since.hasPrefix("the same as at your last accept") || since.hasPrefix(AcceptedSnapshot.unvouchedPrefix)
+    /// The mark a short line carries in place of its word on the last accept (`sinceAccept`) when that word only says
+    /// it's as it was: `*` the same (the vault sealed the snapshot), `?` not known to be (`AcceptedSnapshot.unvouched`).
+    /// Nil for any other word, which stays on its line. Each mark's word is said once, after the lines, for exactly
+    /// the lines that carry it.
+    static func sameMark(_ since: String) -> String? {
+        if since.hasPrefix("the same as at your last accept") { return "*" }
+        if since.hasPrefix(AcceptedSnapshot.unvouchedPrefix) { return "?" }
+        return nil
+    }
+
+    /// What a short line says of the last accept: a mark (its word kept in `legend` for the closing lines; a word that
+    /// differs from the one its mark stands for already stays on its line), the word itself, or, with none, that no
+    /// earlier accept is known for it.
+    static func shortSince(_ since: String?, legend: inout [String: String]) -> String {
+        guard let since else { return "; no earlier accept known" }
+        guard let mark = sameMark(since), legend[mark] == nil || legend[mark] == since else { return "; " + inert(since) }
+        legend[mark] = since
+        return " " + mark
     }
 
     /// The lines for `card`. A config card's are short unless `long`: each held thing and each guard rail on one line
     /// with its value or hash (all a card is bound to stays shown), what changed since the last accept on its line, and
-    /// a word that only says it's as it was (`saysTheSame`) once at the end, for the lines with no note; `long` puts
+    /// a word that only says it's as it was as a mark (`sameMark`), said once at the end for the lines marked; `long` puts
     /// that word on every line it applies to, as before (`config held --long`).
     public static func lines(_ card: NodeWire.Value, long: Bool) -> [String] {
         let id = inert(card["id"]?.string)
@@ -81,8 +94,8 @@ public enum CardText {
             for problem in approval["problems"]?.array?.compactMap(\.string) ?? [] { lines.append("  note: " + inert(problem)) }
         }
         if let config = card["config"], config != .null {
-            // The word the short lines leave off, said once after them.
-            var same: String?
+            // The words the short lines carry as marks, by mark, said once after them.
+            var legend: [String: String] = [:]
             let items = config["items"]?.array ?? []
             lines.append(items.isEmpty ? "  nothing held: accepting records what workflow.md proposes and ends a fresh vault's first look"
                                        : "  held (no worker, verifier or merge until accepted):")
@@ -93,9 +106,8 @@ public enum CardText {
                 line += ", hash " + inert(item["hash"]?.string)
                 if let change = item["change"]?.string { line += ": " + inert(change) }
                 if item["outside"]?.bool == true { line += " (changed outside a team session)" }
-                if let since = item["sinceAccept"]?.string {
-                    if long || !saysTheSame(since) { line += "; " + inert(since) } else { same = same ?? since }
-                }
+                if long { line += item["sinceAccept"]?.string.map { "; " + inert($0) } ?? "" }
+                else { line += shortSince(item["sinceAccept"]?.string, legend: &legend) }
                 lines.append(line)
                 for file in item["files"]?.array?.compactMap(\.string) ?? [] { lines.append("      " + inert(file)) }
             }
@@ -111,14 +123,14 @@ public enum CardText {
             if !rails.isEmpty { lines.append("  workflow.md's guard rails (read each value: the accept records them):") }
             for rail in rails {
                 var line = "    \(inert(rail["key"]?.string)): \(inert(rail["value"]?.string))"
-                if let since = rail["sinceAccept"]?.string {
-                    if long || !saysTheSame(since) { line += "; " + inert(since) } else { same = same ?? since }
-                }
+                if long { line += rail["sinceAccept"]?.string.map { "; " + inert($0) } ?? "" }
+                else { line += shortSince(rail["sinceAccept"]?.string, legend: &legend) }
                 lines.append(line)
             }
-            if let same {
-                lines.append("  each held thing and guard rail above with no note: " + inert(same))
-            } else if let at = config["lastAccept"]?.string {
+            for mark in ["*", "?"] {
+                if let word = legend[mark] { lines.append("  \(mark) marks a line that is " + inert(word)) }
+            }
+            if let at = config["lastAccept"]?.string {
                 lines.append("  compared with your last accept (\(inert(at))), from an unsealed snapshot a worker could rewrite: read the values")
             } else if config["items"]?.array?.isEmpty == false {
                 lines.append("  no earlier accept is known here: everything held is new to this card")
