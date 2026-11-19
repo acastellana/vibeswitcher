@@ -78,3 +78,7 @@
 - 2026-11-19 19:52 Audit of sb6-1-2-branch at 0e799cc5 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
 - 2026-11-19 19:52 Automatically (auto_advance): Started the audit of sb6-1-2-branch at 0e799cc5 (Its review is audit).
 - 2026-11-19 19:52 Pipeline held: sb3-the-launcher-builds, weblistener-slow-client, planner-a-worker-s ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-19 19:57 Audit of the-full-suite-passes: finder 2 of 2 submitted (incomplete, clean, 1 finding)
+- 2026-11-19 19:58 Audit of sb6-1-2-branch: finder 1 of 2 submitted (complete, clean, 2 findings)
+- 2026-11-19 19:59 Audit of sb6-1-2-branch: complete, clean, round 2: 2 Important closed, 5 Nit unconfirmed, 1 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-19 19:59 Automatically (auto_advance): Didn't merge sb6-1-2-branch: Not merged yet: the merge policy is ask_sensitive, so the user approves sb6-1-2-branch at 0e799cc5 first. It touches Sources/VibeCore/V2/BranchCodeSession.swift, Sources/VibeCore/V2/Sandbox/BranchRun.swift, Sources/VibeCore/Worktrees.swift, Sources/vibeswitcher-mcp/main.swift, Tests/VibePlatformTests/PlatformLintTests.swift. Ask once: ask_user(question: "Merge sb6-1-2-branch (SB6 (1/2): branch code runs in a box of its own (BranchRun)) at 0e799cc5? …what it changes and the risk…", options: ["Approve 0e799cc5a977395558dc89907412e199278b70ac", "Not yet"], priority: blocking, task: "sb6-1-2-branc…
