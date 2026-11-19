@@ -27,3 +27,7 @@
 - 2026-11-19 17:32 Automatically (auto_advance): Overlap for planner-a-worker-s's start (a warning only: nothing was refused or reordered). Package.swift: sb3-the-launcher-builds (running: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-1-2-branch (running: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
 - 2026-11-19 17:32 Planned branch-runs-get-the: Branch runs get the project's sandbox policy, so swift runs in a merge's box (review audit, for security)
 - 2026-11-19 17:45 Started a worker on weblistener-slow-client
+- 2026-11-19 18:09 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 18:09 Audit of sb6-1-2-branch at 6b399fd3 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 18:09 Released sb6-1-2-branch's worker (idle since its done report on 6b399fd3) while its audit runs
+- 2026-11-19 18:09 Automatically (auto_advance): Started the audit of sb6-1-2-branch at 6b399fd3 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
