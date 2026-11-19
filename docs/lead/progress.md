@@ -4200,3 +4200,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 14:53 Merged session-host-measure-the: Session host: measure the vault calls' stack use on its 512 KB queue threads (build 295fb14dedaa)
 - 2026-11-19 14:53 Automatically (auto_advance): Merged session-host-measure-the (Session host: measure the vault calls' stack use on its 512 KB queue threads) into main at 87dda5a3, on its passing audit and the full test run.
 - 2026-11-19 14:53 Automatically (auto_advance): Cleaned up session-host-measure-the (freed 3.4 GB of build output and temporary folders). It stays done.
+- 2026-11-19 15:08 Merged codex-worked-tasks: Codex-worked tasks merged on a Codex verdict get the post-merge Claude re-audit too (build 295fb14dedaa)
