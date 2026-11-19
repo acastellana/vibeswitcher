@@ -17,6 +17,7 @@ let usage = """
            vibeswitcher switch COMMIT | rollback
            vibeswitcher lead FOLDER [--goal TEXT] [--take-head] [--replace]
            vibeswitcher questions [FOLDER] [--all] [--json]
+           vibeswitcher board [FOLDER] [--json]
            vibeswitcher answer CARD [TEXT] | hold CARD
            vibeswitcher tell FOLDER TEXT
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD
@@ -41,6 +42,8 @@ case "lead":
     exit(LeadCommand.run(Array(words.dropFirst())))
 case "questions":
     exit(QuestionsCommand.run(Array(words.dropFirst())))
+case "board":
+    exit(BoardCommand.run(Array(words.dropFirst())))
 case "answer":
     exit(AnswerCommand.run(Array(words.dropFirst())))
 case "hold":

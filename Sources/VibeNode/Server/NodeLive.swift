@@ -7,7 +7,8 @@ import VibeCore
 /// `web.open` and `web.revoke`.
 ///
 /// - **Streams.** `node` (`NodeStatusStore`: `status` less its lists, with `web`), `sessions` (`Session.liveValue`, by
-///   terminal), `leads` (`status`'s lead values, by root) and `cards` (`CardStore.Card.value`, by `at`). A lead's value
+///   terminal), `leads` (`status`'s lead values, by root), `cards` (`CardStore.Card.value`, by `at`) and `boards`
+///   (`LiveBoards`' `BoardValue`, by project: each lead's board, read-only). A lead's value
 ///   says its open cards and the witness's looks, which `LeadStore` doesn't send, so the leads are looked at again on
 ///   each change of the leads or the cards and at each of the engine's refreshes; an equal value sends nothing.
 /// - **The web.** Off until a code or a token is alive (LW-D3): `follow()` at the start binds it only when
@@ -32,6 +33,8 @@ public final class NodeLive: @unchecked Sendable {
     public let assets: LiveAssets
     /// The sessions' chats; none for a server with no sessions store.
     public private(set) var chats: ChatStore?
+    /// The leads' boards (the `boards` stream, `vibeswitcher board`); none for a server with no engine.
+    public private(set) var boards: LiveBoards?
 
     private let requests: Requests
     private let sessions: NodeSessions?
@@ -144,6 +147,7 @@ public final class NodeLive: @unchecked Sendable {
         }
         lookLeads()
         hub.follow(leads, into: leadsStream) { $0 }
+        if let engine { startBoards(engine) }
         status.start(clock: clock)
         hub.follow(status.changes, into: nodeStream) { $0 }
         ticks.append(clock.every(NodeStatusStore.refreshEvery) { [weak self] in self?.lookLeads() })
@@ -151,6 +155,17 @@ public final class NodeLive: @unchecked Sendable {
         // After a restart, the web is bound again only when a token is alive (LW-D3).
         web.follow()
         if case .refused(let why) = web.state { note("the web isn't up: \(why)") }
+    }
+
+    /// The `boards` stream (the parity table's gap 4): each lead's board, read by `LiveBoards`, and `board`'s answer.
+    private func startBoards(_ engine: LeadEngine) {
+        let boards = LiveBoards(queue: queue, leads: engine.leads.changes, note: note)
+        let stream = LiveStream(collection: "boards", order: .field("project"))
+        hub.add(collection: stream.collection, stream)
+        boards.start(clock: clock)
+        hub.follow(boards.changes, into: stream) { $0 }
+        requests.boards = { [weak boards] in boards?.values ?? [:] }
+        self.boards = boards
     }
 
     /// Late codes dropped, pages whose token ran out closed, and the listener let go once nothing wants it.

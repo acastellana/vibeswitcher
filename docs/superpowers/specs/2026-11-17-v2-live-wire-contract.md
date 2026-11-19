@@ -350,8 +350,15 @@ shows them as text nodes only, never as markup, and the command line prints them
 | `questions` | `{open: int, blocking: int}` | its open question and approval cards |
 | `cards` | [string] | its open cards' ids |
 
-A lead's **board** (tasks, verdicts, the team) is not in the first slices: it is the `boards` collection of stage 5's
-Team slice, carried as `LeadBoard` encodes itself, and specified with that slice.
+A lead's **board** is the `boards` collection, keyed by project (`BoardValue`, `Sources/VibeNode/Live/BoardValue.swift`;
+the schema's `board` and `board.task`; the vectors `subscribe.boards`, `snapshot.boards`, `delta.board-task`, `board`):
+one value per project with a lead, its tasks as a person reads them (`group`: attention, running, waiting, done;
+`state` in the Mac's Team words; a dim `line`; a blocked task's `blocker`; its worker's session id; review, times,
+attempts, budget, last checkpoint, audit, merge), at most 150 tasks (`more` counts the rest), a finished one for a day.
+Not `LeadBoard` as it encodes itself: the board is the sessions' writing, so every string is inert and capped, no path
+is sent, and a board that can't be read is `unreadable` with no tasks. A change of the board file is a delta carrying
+the project's whole value. Read-only: no kind changes a board. `board` (anyone of the uid, args `folder?`) answers
+`{boards: [value]}`, `gone` for a folder with no lead.
 
 ### `cards`: id = the card's (`local:card:<uuid>`)
 

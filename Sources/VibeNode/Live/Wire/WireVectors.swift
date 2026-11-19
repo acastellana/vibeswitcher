@@ -366,7 +366,7 @@ public enum WireVectors {
         NodeWire.Hello(node: NodeIds.node, epoch: epoch,
                        server: .init(commit: "f62aef61", startedAt: "2026-11-17T09:12:44.031Z", pid: 41822),
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
-                       kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear"],
+                       kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -447,6 +447,70 @@ public enum WireVectors {
         ])
     }
 
+    // A lead's board (`BoardValue`, the `boards` collection), from a made-up board of the five ways a task reads.
+
+    static let boardWorker = UUID(uuidString: "8d1f0c2b-6e4a-4b3d-9c7e-5a2f1e0d9b84")!
+    static let boardNow = date("2026-11-17T09:30:00.000Z")
+
+    /// A made-up board at `now` (seconds): a task blocked on the user's call, one at work with a checkpoint, one in
+    /// review with an audit's findings, one queued after another, and one merged an hour ago; `worker` works the running
+    /// one. The sandbox shows it too.
+    static func sampleBoard(now: Double, worker: UUID = boardWorker, verifier: UUID? = nil) -> LeadBoard {
+        func task(_ slug: String, _ title: String, _ status: LeadTask.Status, since: Double, _ change: (inout LeadTask) -> Void = { _ in }) -> LeadTask {
+            var task = LeadTask(id: "t-" + slug, slug: slug, title: title, contract: LeadContract(goal: title, acceptance: [], boundaries: [], context: ""),
+                                status: status)
+            task.createdAt = now - 7200
+            task.since = now - since
+            task.startedAt = status == .planned ? nil : now - since - 600
+            task.branch = status == .planned ? nil : "agent/" + slug
+            change(&task)
+            return task
+        }
+        var board = LeadBoard()
+        board.baseBranch = "main"
+        board.tasks = [
+            task("pricing-copy", "Rewrite the pricing page's copy", .blocked, since: 1080) {
+                $0.blocker = "Which plan names do we launch with?\nThe draft says Starter / Team; the deck says Solo / Studio.\nI stopped before touching the table."
+                $0.attempts = 1
+            },
+            task("onboarding-steps", "Onboarding: the three first-run steps", .running, since: 252) {
+                $0.worker = worker.uuidString
+                $0.attempts = 2
+                $0.budgetMin = 60
+                $0.checkpoints = [LeadCheckpoint(text: "Step two's form validates on blur; writing its tests", at: now - 70)]
+            },
+            task("upload-retry", "Retry a failed upload once", .review, since: 118) {
+                $0.worker = UUID(uuidString: "2b7e4c1d-0a9f-4e3b-8d6c-1f5a2e9b7c40")!.uuidString
+                $0.verifier = verifier?.uuidString
+                $0.review = .audit
+                $0.audits = try? JSONDecoder().decode(LeadAuditLedger.self, from: Data(#"""
+                    {"findings":[{"id":"F1","severity":"Important","file":"upload.js","line":42,"evidence":"retries a POST that may have landed",
+                    "status":"open","raised":1}],"rounds":1,"failedRounds":1,"passed":false}
+                    """#.utf8))
+            },
+            task("sidebar-pass", "UI consistency pass over the sidebar", .planned, since: 1500) { $0.after = ["onboarding-steps"] },
+            task("cache-assets", "Cache the static assets", .done, since: 3600) {
+                $0.merged = LeadMergeRecord(commit: "8a3f1e2c", tested: true, at: now - 3600)
+            },
+        ]
+        return board
+    }
+
+    static var boardValue: NodeWire.Value {
+        BoardValue.value(project: NodeIds.project(root: root), root: root, board: sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow)
+    }
+
+    /// The board a minute on: the review passed and the blocked task's question was answered.
+    static var boardMoved: NodeWire.Value {
+        let now = boardNow.timeIntervalSince1970 + 60
+        var board = sampleBoard(now: boardNow.timeIntervalSince1970)
+        board.tasks[0].status = .running
+        board.tasks[0].blocker = nil
+        board.tasks[0].since = now
+        board.tasks[2].evidence = LeadEvidence(completion: .complete, integrity: .clean, summary: "Retries only an idempotent PUT", at: now)
+        return BoardValue.value(project: NodeIds.project(root: root), root: root, board: board, now: Date(timeIntervalSince1970: now))
+    }
+
     /// Every vector.
     public static var all: [Vector] {
         let resumeAsk = request(.init(id: "2", kind: "subscribe", args: [
@@ -463,6 +527,7 @@ public enum WireVectors {
             ("subscribe.sessions", [subscribe("2", "s1", "sessions")]),
             ("subscribe.leads", [subscribe("3", "s2", "leads")]),
             ("subscribe.cards", [subscribe("4", "s3", "cards")]),
+            ("subscribe.boards", [subscribe("7", "s4", "boards")]),
             ("reply.subscribe", [reply("reply.subscribe", .init(re: "2", result: .object(["sub": .string("s1"), "mode": .string("snapshot")])))]),
             ("snapshot.sessions", [snapshot("s1", "sessions", seq: 41,
                                             entries: [(leadSession, lead(status: "working", since: "2026-11-17T09:13:20.000Z")),
@@ -470,6 +535,11 @@ public enum WireVectors {
             ("snapshot.leads", [snapshot("s2", "leads", seq: 12, entries: [(NodeIds.project(root: root), leadValue)])]),
             ("snapshot.cards", [snapshot("s3", "cards", seq: 57, entries: [(card, questionCard)])]),
             ("snapshot.node", [snapshot("s0", "node", seq: 3, entries: [(NodeIds.node, node)])]),
+            ("snapshot.boards", [snapshot("s4", "boards", seq: 9, entries: [(NodeIds.project(root: root), boardValue)])]),
+            ("delta.board-task", [delta("s4", "boards", prev: 9, seq: 10, at: "2026-11-17T09:31:00.012Z",
+                                        changes: [(NodeIds.project(root: root), boardMoved)])]),
+            ("board", [request(.init(id: "8", kind: "board", args: ["folder": .string(root)])),
+                       reply("reply.board", .init(re: "8", result: .object(["boards": .array([boardValue])])))]),
             ("delta.session-status", [delta("s1", "sessions", prev: 41, seq: 42, at: "2026-11-17T09:14:05.482Z",
                                             changes: [(leadSession, lead(status: "done", since: "2026-11-17T09:14:05.470Z"))])]),
             ("delta.session-gone", [delta("s1", "sessions", prev: 42, seq: 45, at: "2026-11-17T09:20:11.019Z", changes: [(notesSession, .null)])]),

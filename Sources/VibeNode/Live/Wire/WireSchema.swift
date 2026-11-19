@@ -1,4 +1,5 @@
 import Foundation
+import VibeCore
 
 /// The live wire's shapes as data (the live plan's LW-D10 and E1, lane E's file): each entity and message the live wire
 /// contract (docs/superpowers/specs/2026-11-17-v2-live-wire-contract.md) specifies, field by field, with its type and
@@ -53,13 +54,14 @@ public enum WireSchema {
     // MARK: The table
 
     /// The entities: one per keyed collection's value, and a chat's item.
-    public static let entities = ["node", "session", "lead", "card", "chat.item"]
+    public static let entities = ["node", "session", "lead", "card", "chat.item", "board"]
     /// The messages: the envelopes, and each live kind's `args` and `result` (`<kind>.args`, `<kind>.result`).
     public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "auth.args",
                                   "subscribe.args", "subscribe.result", "unsubscribe.args", "chat.page.args", "chat.page.result",
-                                  "draft.args", "draft.result", "draft.clear.args"]
+                                  "draft.args", "draft.result", "draft.clear.args",
+                                  "board.args", "board.result"]
     /// A keyed collection's entity.
-    public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card"]
+    public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
     /// Every shape by name, the parts of entities and messages among them.
     public static let shapes: [String: Shape] = Dictionary(uniqueKeysWithValues: table.map { ($0.name, $0) })
@@ -105,7 +107,7 @@ public enum WireSchema {
         ]
 
         // The live protocol's events and kinds (the contract's §3, §4, §6 and §8).
-        let collection = Kind.words(["node", "sessions", "leads", "cards", "chat"])
+        let collection = Kind.words(["node", "sessions", "leads", "cards", "chat", "boards"])
         shapes += [
             shape("snapshot", from: contractLive, [
                 field("v", .int), field("kind", .words(["snapshot"])), field("sub", .string), field("collection", collection),
@@ -228,6 +230,31 @@ public enum WireSchema {
             shape("card.base.commit", from: "CardStore.Card.value", [field("sha", .string), field("subject", .string)]),
             shape("card.draft", from: "CardStore.Card.value", [field("text", .string), field("version", .int), field("at", .date),
                                                                     field("action", .string)]),
+        ]
+
+        // A lead's board (the `boards` collection, `board`'s result: the parity table's gap 4).
+        let taskStatus = Kind.words(LeadTask.Status.allCases.map(\.rawValue))
+        shapes += [
+            shape("board", from: "BoardValue.value", [
+                field("project", .string), field("root", .string), field("baseBranch", Kind.string.orNull),
+                field("tasks", .list(.shape("board.task"))), field("counts", .shape("board.counts")), field("more", .int),
+                field("unreadable", Kind.string.orNull)]),
+            shape("board.counts", from: "BoardValue.value", BoardValue.groups.map { field($0, .int) }),
+            shape("board.task", from: "BoardValue.task", [
+                field("id", .string), field("slug", .string), field("title", .string), field("status", taskStatus),
+                field("group", .words(BoardValue.groups)), field("state", .string), field("line", Kind.string.orNull),
+                field("blocker", Kind.string.orNull), field("worker", Kind.string.orNull), field("verifier", Kind.string.orNull),
+                field("review", .words(LeadTask.Review.allCases.map(\.rawValue))), field("position", .int), field("createdAt", Kind.date.orNull),
+                field("since", Kind.date.orNull), field("startedAt", Kind.date.orNull), field("attempts", .int),
+                field("budgetMin", Kind.int.orNull), field("overBudget", .bool), field("branch", Kind.string.orNull), field("after", strings),
+                field("checkpoint", Kind.shape("board.checkpoint").orNull), field("audit", Kind.shape("board.audit").orNull),
+                field("merged", Kind.shape("board.merged").orNull)]),
+            shape("board.checkpoint", from: "BoardValue.task", [field("text", .string), field("at", Kind.date.orNull)]),
+            shape("board.audit", from: "BoardValue.audit", [field("verdict", Kind.words(["passed", "failed"]).orNull), field("open", .int),
+                                                           field("findings", .int), field("rounds", .int)]),
+            shape("board.merged", from: "BoardValue.task", [field("commit", .string), field("at", Kind.date.orNull), field("tested", .bool)]),
+            shape("board.args", from: "Requests.board", [optional("folder", .string)]),
+            shape("board.result", from: "Requests.board", [field("boards", .list(.shape("board")))]),
         ]
 
         // A chat's items (the contract's §6).

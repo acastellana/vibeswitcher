@@ -82,6 +82,8 @@ public final class Requests: @unchecked Sendable {
     /// The `seq` a live stream is at, by collection (`LiveHub.seq(of:)`, set by `NodeLive`): a draft's `applied`. On
     /// `queue`.
     public var liveSeq: ((String) -> Int)?
+    /// Each lead's board value by project (`LiveBoards`, set by `NodeLive`): `board`'s answer. On `queue`.
+    public var boards: (() -> [String: NodeWire.Value])?
     /// A scratch server's `--test-web-pair`: `web.open` is taken from any process of the uid, its voice and typed code
     /// not asked (the sandbox's and the tests' scratch form). Never on the user's node (`ServerArguments` refuses it).
     public var openWebForAnyone = false
@@ -221,6 +223,7 @@ public final class Requests: @unchecked Sendable {
         case "stop": stop(request, reply: reply)
         case "lead": lead(request, reply: reply)
         case "questions": questions(request, reply: reply)
+        case "board": board(request, reply: reply)
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)
         case "tell": tell(request, reply: reply)
