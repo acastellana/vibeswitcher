@@ -47,7 +47,7 @@ public enum CodexInbox {
 
     /// Of `pending` (in the inbox's order), the messages the rollout recorded: a user message from `typedBefore` before
     /// it was posted on that holds all of the text typed for it (`LeadDelivery.typed`, whitespace aside: the box may
-    /// wrap it). Each time the text is recorded stands for one copy, so a second copy of the same text waits for a
+    /// wrap it), and nothing more after it but another typed message. Each time the text is recorded stands for one copy, so a second copy of the same text waits for a
     /// second record; a prompt typed for several (`LeadDelivery.flush`'s whole queue) records each of them.
     public static func taken(_ pending: [SteerMessage], recorded: [Recorded]) -> [SteerMessage] {
         let squeezed = recorded.map { squeeze($0.text) }
@@ -90,12 +90,16 @@ public enum CodexInbox {
 
     private static func squeeze(_ text: String) -> String { String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(Character.init)) }
 
+    /// How many times `needle` is all of a message in `haystack`: it ends where the record ends or the next message's
+    /// frame starts (each typed message not the user's starts with `LeadDelivery.prefix`), so a waiting "Merged." isn't
+    /// taken for a later "Merged. Next: …".
     private static func occurrences(of needle: String, in haystack: String) -> Int {
+        let frame = squeeze(LeadDelivery.prefix)
         var count = 0
         var range = haystack.startIndex..<haystack.endIndex
         while let found = haystack.range(of: needle, options: .literal, range: range) {
-            count += 1
-            range = found.upperBound..<haystack.endIndex
+            if found.upperBound == haystack.endIndex || haystack[found.upperBound...].hasPrefix(frame) { count += 1 }
+            range = haystack.index(after: found.lowerBound)..<haystack.endIndex
         }
         return count
     }

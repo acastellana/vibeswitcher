@@ -195,6 +195,12 @@ struct CodexMidTurnInboxTests {
         // The lead's text as the user's own words (no frame) isn't the lead's message, nor the reverse.
         #expect(CodexInbox.taken([fyi], recorded: [CodexInbox.Recorded(text: other, at: at + 100)]).isEmpty)
         #expect(CodexInbox.taken([user], recorded: [CodexInbox.Recorded(text: other, at: at + 100)]).map(\.id) == [user.id])
+        // A later, longer message that starts with its text isn't it.
+        let short = SteerMessage(text: "Merged.", from: sender, agentPid: agent.pid, at: at)
+        #expect(CodexInbox.taken([short], recorded: [CodexInbox.Recorded(text: LeadDelivery.typed("Merged. Next: the docs.", from: sender),
+                                                                         at: at + 100)]).isEmpty)
+        #expect(CodexInbox.taken([short], recorded: [CodexInbox.Recorded(text: LeadDelivery.typed("Merged.", from: sender) + "\n\n"
+                                                                         + LeadDelivery.typed("Next: the docs.", from: sender), at: at + 100)]).map(\.id) == [short.id])
         // Recorded long before it was posted: an earlier message of the same text.
         #expect(CodexInbox.taken([first], recorded: [CodexInbox.Recorded(text: LeadDelivery.typed(text, from: sender),
                                                                          at: at - CodexInbox.typedBefore - 1)]).isEmpty)
