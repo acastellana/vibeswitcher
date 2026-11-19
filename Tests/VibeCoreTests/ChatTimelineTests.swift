@@ -20,6 +20,7 @@ struct ChatTimelineTests {
             case .newMarker(let summary): return "new:\(summary)"
             case .allDone(let mark): return "all-done:\(mark.id)"
             case .question(let question, _): return "question:\(question.id)"
+            case .updates(let updates): return updates.id
             }
         }
     }

@@ -62,7 +62,7 @@ struct InspectorView: View {
                         Divider()
                     }
                     // Only what the board's rows read: another session's change leaves the pane as it is.
-                    let seen = leads.teamRows.seen(lead.root, board: lead.board, rows: model.allRows, now: Date())
+                    let seen = leads.teamRows.seen(lead.root, board: lead.board, rows: model.allRows, now: Date(), usageWaits: leads.rowUsageWaits[lead.root] ?? [:])
                     LeadTeamPane(root: lead.root, board: lead.board, decisions: leads.decisions[lead.root] ?? [], seen: seen.members,
                                  rows: leads.teamRows.rows(lead.root, board: lead.board, seen: seen), open: { session in
                         if let id = UUID(uuidString: session) { model.select(hostID: id) }

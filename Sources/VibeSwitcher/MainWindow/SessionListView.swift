@@ -152,7 +152,7 @@ struct SessionListView: View {
     private func teamSummary(_ row: WindowRow, team: [WindowRow]?) -> String? {
         guard let team, !team.isEmpty, let lead = leads.lead(for: row) else { return nil }
         let key = "sidebar|" + lead.root
-        let seen = leads.teamRows.seen(key, board: lead.board, rows: team, now: Date())
+        let seen = leads.teamRows.seen(key, board: lead.board, rows: team, now: Date(), usageWaits: leads.rowUsageWaits[lead.root] ?? [:])
         return TeamRows.summary(leads.teamRows.rows(key, board: lead.board, seen: seen))
     }
 

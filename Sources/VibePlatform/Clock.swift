@@ -17,6 +17,16 @@ extension Platform {
             #endif
         }
 
+        /// The name of the clock `awakeSeconds` reads, as C and Perl's Time::HiRes call it: for a program run in a test
+        /// to print the same clock (`clock_gettime(CLOCK_UPTIME_RAW)` on the Mac, `CLOCK_MONOTONIC` on Linux).
+        public static let awakeClockName: String = {
+            #if canImport(Darwin)
+            return "CLOCK_UPTIME_RAW"
+            #else
+            return "CLOCK_MONOTONIC"
+            #endif
+        }()
+
         /// The CPU time the calling thread has used so far, in nanoseconds (`CLOCK_THREAD_CPUTIME_ID`).
         public static func threadCPUNanoseconds() -> UInt64 {
             #if canImport(Darwin)

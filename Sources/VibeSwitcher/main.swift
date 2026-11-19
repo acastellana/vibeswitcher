@@ -42,6 +42,24 @@ if let index = arguments.firstIndex(of: "--board-bench") {
 if let index = arguments.firstIndex(of: "--ui-bench-write") {
     UIBench.write(arguments: Array(arguments[(index + 1)...]))
 }
+if let index = arguments.firstIndex(of: "--memory-bench-run"), arguments.indices.contains(index + 2) {
+    // One run of the memory benches now, as the app runs them once a day (see `MemoryBench`): ROOT's branch BASE in a
+    // scratch worktree under ~/.vibeswitcher/memory-bench, removed after; its line appended to
+    // ~/.vibeswitcher/stats/memory-bench.jsonl and printed. With this shell's PATH (swift and node).
+    let run = MemoryBench.Run(root: arguments[index + 1], base: arguments[index + 2],
+                              folder: VibePaths.root.appendingPathComponent(MemoryBench.folderName, isDirectory: true), stats: VibePaths.statsDir)
+    switch run.go() {
+    case .recorded(let record):
+        print((try? record.line()) ?? "\(record)")
+        exit(0)
+    case .gaveUp:
+        print("given up")
+        exit(1)
+    case .refused(let why):
+        print("not run: \(why)")
+        exit(1)
+    }
+}
 if arguments.contains("--install-hooks") {
     let problems = HookSetup.installAll()
     problems.forEach { print("problem: \($0)") }

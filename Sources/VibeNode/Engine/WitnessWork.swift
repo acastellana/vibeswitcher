@@ -15,6 +15,9 @@ struct WitnessWork {
     var endedForAdvance: [String] = []
     /// The workers auto_advance releases while their audits run, between turns now (`LeadWitness.releasableForAdvance`).
     var releasableForAdvance: [String] = []
+    /// The workers whose turn ended without a report for the first time, which auto_advance nudges
+    /// (`LeadWitness.stopsForAdvance`), when it runs.
+    var stopsForAdvance: [LeadWitness.StopForAdvance] = []
     /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
     var messages: [(keys: [String], text: @Sendable () -> String)] = []
     var sleepInterruptions: [LeadSleepRecovery.Interruption] = []
@@ -50,9 +53,11 @@ struct WitnessWork {
             advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: first)
             step?("releasableForAdvance")
             releasableForAdvance = LeadWitness.releasableForAdvance(board: board, seen: seen)
+            step?("stopsForAdvance")
+            stopsForAdvance = LeadWitness.stopsForAdvance(board: board, seen: seen, now: now)
         }
         step?("unbuiltMessages")
-        messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told)
+        messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, advancing: advancing, told: told)
         if let recoveryRoot {
             // This initializer runs on the boards' queue. Never lock/read the ledger or write a nudge on the engine's.
             let recovering = LeadSleepRecovery.enqueue(sleepInterruptions, root: recoveryRoot)

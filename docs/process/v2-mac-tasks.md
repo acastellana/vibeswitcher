@@ -246,6 +246,18 @@ it. Each is done once the Mac work begins.
   - `648d7bb1`: `vs-heavy`'s `give_width` reads the Mac's load in an `else` arm now; its words are the same.
   - The ten conflicts' resolutions (the port map's [Merges](v2-port-map.md#the-merge-of-2026-11-17)): the Mac's side
     is main's text in each, with `v2`'s hook lines beside it.
+- **The merge of main of 2026-11-19 (`66cf61ea` and its follow-ups), made and tested on Linux only**: to check on the
+  hosted Mac at the first push:
+  - `2a161663`, `891d3c47`: main's Mac code moved into `VibePlatform`, never compiled there since:
+    `Platform.killAll(group:)` after `PipeCommand+Darwin.swift`'s loop (`StatusLineBinaryTests`), and
+    `ExitWait+Darwin.swift`, main's `Shell.ExitWatch` kqueue (`ExitWaitTests`, `WorktreesTests`, any test running git).
+  - `3eae240b`: `ConfigSeal.walkCode` reads an entry's name as a C string, not by `d_namlen`, and `linkDigest`
+    through a `CChar` buffer (`ConfigSealModuleTests`).
+  - `3ff4742e`, `016aa6f1`: `TestSupport.swift`'s Mac-only SIGPIPE catch and `EPipeProbe` are main's text inside
+    `#if canImport(Darwin)` (`BrokenPipeProbeTests`, `BrokenPipeTests`); `StatusLineBinaryTests.left(in:)` lists a
+    group through `Platform.Processes`, not `proc_listpids`; `HostedSessionTests`' late-reading shell test waits by
+    `Platform.Processes.brief` (a zombie), not `waitid`; `ParserIsolationTests` prints
+    `Platform.Clock.awakeClockName` (`CLOCK_UPTIME_RAW` there, as main's).
 
 ## The runner's skips
 

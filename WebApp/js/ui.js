@@ -1,6 +1,6 @@
 // What this window shows, as opposed to what the node knows (store.js): the route, the list's grouping and filter,
-// which pane a session shows, which teams are unfolded. The route lives in the address (#/s/<session id>, #/node), so
-// the browser's back button works and a session can be linked to.
+// which pane a session shows, which teams are unfolded, the inspector. The route lives in the address
+// (#/s/<session id>, #/node), so the browser's back button works and a session can be linked to.
 
 import { ATTENTION, stateOf, lastPart, taskCount } from './words.js';
 
@@ -21,6 +21,25 @@ export function parseRoute(hash) {
 
 export const sessionHref = (id) => '#/s/' + encodeURIComponent(id);
 
+// The inspector is a column beside the chat from this width up; under it the chat would get cramped, so it is a sheet
+// over the chat, opened when asked and closed again by itself.
+const WIDE = '(min-width: 1180px)';
+const TABS = ['team', 'overview', 'activity'];
+
+// The inspector's tab for the one remembered (the Mac's `InspectorView.effectiveTab`): Team on a session with no team
+// is Overview there, and Team again back on a lead, so the remembered one stays.
+export function inspectorTab(stored, team) {
+  if (stored === 'team') return team ? 'team' : 'overview';
+  return stored === 'activity' ? 'activity' : 'overview';
+}
+
+// The project whose team a session is in (a lead's own; a worker's or a verifier's lead's), when the node has said
+// which and knows that lead or its board. Null: no Team to show.
+export function teamOf(store, session) {
+  const project = session?.role ? session.lead : null;
+  return project && (store.leads.has(project) || store.boards.has(project)) ? project : null;
+}
+
 export function createUI() {
   const state = {
     route: parseRoute(location.hash),
@@ -31,13 +50,28 @@ export function createUI() {
     // The leads whose team is unfolded in the list.
     teams: new Set(),
     palette: false,
+    // The inspector: `open` is the column's (remembered in this browser), `sheet` the sheet's (never remembered: it
+    // covers the chat), `tab` the one remembered (Team, Overview or Activity).
+    inspector: {
+      open: remembered('vs.inspector', 'open') !== 'closed',
+      sheet: false,
+      tab: TABS.includes(remembered('vs.inspector.tab', '')) ? remembered('vs.inspector.tab', '') : 'overview',
+    },
   };
   const listeners = new Set();
   const changed = (what) => { for (const fn of listeners) fn(what); };
+  const wide = typeof matchMedia === 'function' ? matchMedia(WIDE) : { matches: true, addEventListener() {} };
 
   addEventListener('hashchange', () => {
     state.route = parseRoute(location.hash);
+    // A sheet belongs to the session it was opened over.
+    if (state.route.name !== 'session') state.inspector.sheet = false;
     changed('route');
+  });
+  // The window crossed the width: a sheet doesn't become a column (the column has its own remembered state).
+  wide.addEventListener('change', () => {
+    state.inspector.sheet = false;
+    changed('inspector');
   });
 
   return {
@@ -66,6 +100,29 @@ export function createUI() {
       if (state.palette === open) return;
       state.palette = open;
       changed('palette');
+    },
+    // Whether the window has room for the inspector as a column; else it's a sheet.
+    inspectorWide: () => wide.matches,
+    inspectorShown: () => (wide.matches ? state.inspector.open : state.inspector.sheet),
+    setInspector(shown) {
+      if (this.inspectorShown() === shown) return;
+      if (wide.matches) {
+        state.inspector.open = shown;
+        remember('vs.inspector', shown ? 'open' : 'closed');
+      } else state.inspector.sheet = shown;
+      changed('inspector');
+    },
+    toggleInspector() { this.setInspector(!this.inspectorShown()); },
+    setInspectorTab(tab) {
+      if (!TABS.includes(tab) || state.inspector.tab === tab) return;
+      state.inspector.tab = tab;
+      remember('vs.inspector.tab', tab);
+      changed('inspector');
+    },
+    // The inspector on `tab`, opened if it wasn't (the Team strip's button, ⌥⌘3).
+    showInspector(tab) {
+      this.setInspectorTab(tab);
+      this.setInspector(true);
     },
   };
 }

@@ -39,12 +39,20 @@ struct SandboxSoakBenchTests {
         // The script bounds its own run (the soak's minutes); this only guards a script that never ends.
         if await offPool({ ended.wait(timeout: .now() + 3 * hangGuard) }) == .timedOut {
             process.terminate()
+            print(MemoryBench.Budget(name: "soak-hour-growth-mb", value: nil, limit: Self.limit, unit: "MB/h", pass: nil).line)
             Issue.record("the soak bench hung")
             return
         }
         let text = (try? String(contentsOf: output, encoding: .utf8)) ?? ""
         print(text)
         let loads = [loadBefore, MacLoad.oneMinute()].compactMap { $0 }
+        // Its budget's line, judged or not, for the app's daily run (`MemoryBench.Budget`, ~/.vibeswitcher/stats); "n/a"
+        // (fewer than 3 simulated hours) isn't judged.
+        let result = text.split(separator: "\n").first { $0.contains("RESULT soak-simulated-hour-growth-mb") }
+        let rose = result.flatMap { $0.components(separatedBy: "RESULT soak-simulated-hour-growth-mb ").last?.split(separator: " ").first }
+            .flatMap { Double($0) }
+        print(MemoryBench.Budget(name: "soak-hour-growth-mb", value: rose, limit: Self.limit, unit: "MB/h",
+                                 judged: rose != nil && loads.max().map { $0 < limitLoad } == true, within: { $0 < Self.limit }).line)
         guard let highest = loads.max(), highest < limitLoad else {
             print("soak not judged: the Mac's 1-minute load was \(loads.map { MacLoad.number($0) }), load_threshold \(MacLoad.number(limitLoad))")
             return

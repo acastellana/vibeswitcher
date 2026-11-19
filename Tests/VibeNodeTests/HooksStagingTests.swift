@@ -112,4 +112,103 @@ struct HooksStagingTests {
         #expect(!FileManager.default.fileExists(atPath: setup.bin + "/vibeswitcher-hook"))
         #expect(!FileManager.default.fileExists(atPath: setup.settings))
     }
+
+    // MARK: The configs
+
+    private func write(_ text: String, to path: String) throws {
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: URL(fileURLWithPath: path))
+    }
+
+    private func text(_ path: String) -> String? { (try? Data(contentsOf: URL(fileURLWithPath: path))).map { String(decoding: $0, as: UTF8.self) } }
+
+    /// The repro, from the first Linux node (2026-11-19): a settings.json with a hook of the user's own and a `true`
+    /// among its settings got the two programs and then "the hooks weren't all installed: The operation could not be
+    /// completed. (NSCocoaErrorDomain error 512.)", with no hook written.
+    @Test func aSettingsFileWithTheUsersOwnHookAndATrueTakesOurs() throws {
+        let setup = try setUp()
+        let head = "{\n  \"$schema\": \"https://json.schemastore.org/claude-code-settings.json\",\n  \"model\": \"fable\",\n  \"hooks\": "
+        let users = """
+        {"Stop": [{"hooks": [{"type": "command", "command": "\\"$HOME/bin/say\\" \\"✓ turn finished\\" || true", "async": true}]}]}
+        """
+        let tail = ",\n  \"alwaysThinkingEnabled\": true,\n  \"feedbackSurveyState\": {\"lastShownTime\": 1754063019868}\n}\n"
+        try write(head + users + tail, to: setup.settings)
+
+        let installed = setup.request.install(agents: [.claude])
+        #expect((try? installed.get()) != nil, "\(installed)")
+        let after = try #require(text(setup.settings))
+        #expect(after.hasPrefix(head + "{") && after.hasSuffix("}" + tail), "\(after)")
+        let config = try #require(try JSONSerialization.jsonObject(with: Data(after.utf8)) as? [String: Any])
+        #expect(HookInstaller.isComplete(in: config, agent: .claude))
+        let stop = (config["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]] ?? []
+        let handler = try #require((stop.first?["hooks"] as? [[String: Any]])?.first, "\(after)")
+        #expect(handler["command"] as? String == "\"$HOME/bin/say\" \"✓ turn finished\" || true")
+        #expect((handler["async"] as? NSNumber).map(Platform.isBoolean) == true && handler["async"] as? Bool == true, "\(handler)")
+        #expect(names(setup.bin) == HooksRequest.programs)
+
+        // Taken out again, the user's hook and every other byte stay.
+        let removed = setup.request.remove(agents: [.claude])
+        #expect((try? removed.get()) != nil, "\(removed)")
+        let left = try #require(text(setup.settings))
+        #expect(left.hasPrefix(head + "{") && left.hasSuffix("}" + tail), "\(left)")
+        let leftConfig = try #require(try JSONSerialization.jsonObject(with: Data(left.utf8)) as? [String: Any])
+        #expect(!HookInstaller.isInstalled(in: leftConfig))
+        #expect(left.filter { !$0.isWhitespace }.contains("\"async\":true"), "\(left)")
+    }
+
+    /// A config that can't take the hooks is found before a program is staged: the refusal names the file and why on
+    /// one line, and nothing is installed, written or sealed (the first Linux node was left with the programs and no
+    /// hooks).
+    @Test func aConfigThatCannotTakeTheHooksRefusesTheInstallWithNothingDone() throws {
+        let cases = [("{\"model\": ", "it isn't valid JSON"), ("[\"not an object\"]\n", "it isn't a JSON object")]
+        for (broken, why) in cases {
+            let setup = try setUp()
+            try write(broken, to: setup.settings)
+            let before = try setup.app.guardedRecord(root: setup.root)
+            var request = setup.request
+            var staged = false
+            request.beforeRenames = { _ in staged = true }
+            guard case .failure(let refusal) = request.install(agents: [.codex, .claude]) else {
+                Issue.record("installed into \(broken)")
+                continue
+            }
+            #expect(refusal.text.hasPrefix("\(setup.settings) can't take the hooks: \(why)"), "\(refusal.text)")
+            #expect(refusal.text.hasSuffix(": nothing was installed") && !refusal.text.contains("\n"), "\(refusal.text)")
+            #expect(!refusal.text.contains("NSCocoaErrorDomain") && !refusal.text.contains("could not be completed"), "\(refusal.text)")
+            #expect(!staged && names(setup.bin).isEmpty, "\(names(setup.bin))")
+            #expect(text(setup.settings) == broken)
+            // Codex's config, asked first and able to take them, wasn't written either.
+            #expect(!FileManager.default.fileExists(atPath: setup.home + "/.codex/hooks.json"))
+            #expect(names(setup.home + "/.claude") == ["settings.json"], "\(names(setup.home + "/.claude"))")
+            #expect(try setup.app.guardedRecord(root: setup.root) == before, "something was sealed")
+            #expect(!names(setup.home + "/.vibeswitcher").contains { $0.contains(".tmp") }, "\(names(setup.home + "/.vibeswitcher"))")
+        }
+    }
+
+    /// A config that fails after the check passed (here: rewritten between the check and its edit, as another
+    /// process of the user's could) is named with the reason and with what was done before it.
+    @Test func aConfigThatFailsAfterTheProgramsAreInIsNamedWithWhatWasDone() throws {
+        let setup = try setUp()
+        let codex = setup.home + "/.codex/hooks.json"
+        var request = setup.request
+        request.beforeRenames = { _ in try? write("[1]\n", to: codex) }
+        guard case .failure(let refusal) = request.install(agents: [.claude, .codex]) else {
+            Issue.record("installed into a config that isn't an object")
+            return
+        }
+        #expect(refusal.text == "\(codex) wasn't changed: it isn't a JSON object: the hooks' programs are in \(setup.bin), and \(setup.settings) has its hooks",
+                "\(refusal.text)")
+        #expect(names(setup.bin) == HooksRequest.programs)
+        #expect(text(codex) == "[1]\n")
+        let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: setup.settings))) as? [String: Any])
+        #expect(HookInstaller.isComplete(in: settings, agent: .claude))
+
+        // The same for a remove: the file named, the reason, and the config already done.
+        guard case .failure(let kept) = request.remove(agents: [.claude, .codex]) else {
+            Issue.record("removed from a config that isn't an object")
+            return
+        }
+        #expect(kept.text == "\(codex) wasn't changed: it isn't a JSON object: the hooks are out of \(setup.settings)", "\(kept.text)")
+        #expect(!HookInstaller.isInstalled(in: try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: setup.settings))) as? [String: Any])))
+    }
 }

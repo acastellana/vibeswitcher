@@ -124,7 +124,7 @@ public enum HookInstaller {
         let wanted = Dictionary(uniqueKeysWithValues: events.map { ($0, ourGroup(event: $0, agent: agent, hookBinary: hookBinary)) })
         let right = Set(events.filter { event in
             let ours = (hooks[event] as? [[String: Any]])?.filter(groupHasOurs) ?? []
-            return ours.count == 1 && NSDictionary(dictionary: ours[0]).isEqual(to: wanted[event]!)
+            return ours.count == 1 && Platform.sameJSON(ours[0], wanted[event]!)
         })
         for (event, value) in hooks where !right.contains(event) {
             guard let groups = value as? [[String: Any]], groups.contains(where: groupHasOurs) else { continue }
@@ -189,9 +189,9 @@ public enum HookInstaller {
             let data = stamp == nil ? Data() : try Data(contentsOf: target)
             let current = try parse(data, path: url.path)
             let changed = change(current)
-            if NSDictionary(dictionary: changed).isEqual(to: current) { return }
+            if Platform.sameJSON(changed, current) { return }
             let updated = try replacingHooks(in: data, with: changed["hooks"])
-            guard NSDictionary(dictionary: try parse(updated, path: url.path)).isEqual(to: changed) else {
+            guard Platform.sameJSON(try parse(updated, path: url.path), changed) else {
                 throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
             }
             if backup { try backupOnce(url) }

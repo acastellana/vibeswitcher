@@ -69,7 +69,12 @@ struct LeadAdvanceTests: LeadTeamFixture {
         init(_ lead: LeadToolset, run: ((@escaping () -> Void) -> Bool)? = nil) {
             self.lead = lead
             lead.startAdvancing(run: run ?? { work in
-                Thread.detachNewThread(work)
+                // A main thread's stack (8 MB), not a detached one's 512 KB: in a debug build a pass that starts a
+                // worker runs ~50 frames deep, each with copies of the board's tasks, and filled 512 KB (2026-11-18:
+                // a receipt field 14 bytes larger overflowed it in BoardStore.restore and ended the whole test run).
+                let thread = Thread(block: work)
+                thread.stackSize = 8 << 20
+                thread.start()
                 return true
             })
             lead.advancing?.passed = { [weak self] in self?.ended() }
@@ -185,7 +190,18 @@ struct LeadAdvanceTests: LeadTeamFixture {
                     return
                 }
                 runtime.onSessions = nil
-                replace()
+                // The lead's call on a thread of its own, as a real lead's runs, the start waiting for it: nested in the
+                // loop's start, its frames overflowed the loop thread's 512 KB stack in a debug build whenever LeadTask
+                // grew (2026-11-18, four branches). The fake's lock is let go meanwhile: the lead's call reads it too.
+                let done = DispatchSemaphore(value: 0)
+                runtime.calls.unlock()
+                Thread.detachNewThread {
+                    replace()
+                    done.signal()
+                }
+                let replaced = done.wait(timeout: .now() + hangGuard)
+                runtime.calls.lock()
+                #expect(replaced == .success)
             }
             runtime.calls.unlock()
         } else {

@@ -17,7 +17,7 @@ struct InputUnitTests {
         let folder = temp.url("units")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let out = folder.appendingPathComponent("out").path, ready = folder.appendingPathComponent("ready").path
-        let session = try await client.spawn("stty -echo && : > '\(ready)' && exec cat > '\(out)'")
+        let session = try await client.spawn("\(jobControlOff)stty -echo && : > '\(ready)' && exec cat > '\(out)'")
         #expect(await eventually { FileManager.default.fileExists(atPath: ready) })
         return (session, out)
     }
@@ -152,7 +152,7 @@ struct InputUnitTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let ready = folder.appendingPathComponent("ready").path, go = folder.appendingPathComponent("go").path
         // Reads nothing until `go` exists (its terminal raw: nothing of a paste is dropped unread), then everything.
-        let session = try await app.spawn("stty raw -echo && : > '\(ready)'; while [ ! -e '\(go)' ]; do sleep 0.05; done; exec cat > /dev/null")
+        let session = try await app.spawn("\(jobControlOff)stty raw -echo && : > '\(ready)'; while [ ! -e '\(go)' ]; do sleep 0.05; done; exec cat > /dev/null")
         #expect(await eventually { FileManager.default.fileExists(atPath: ready) })
         // The host's buffer for it full: the session itself refuses more until it drained.
         let big = Data(repeating: 0x61, count: 600 << 10)

@@ -114,6 +114,10 @@ public protocol LeadRuntime: AnyObject {
     /// What this Mac lacks to start a session with `command` (the agent's CLI, git, the Command Line Tools, the tool
     /// server): see `LaunchPreflight`. Blocks while the login shell answers.
     func preflight(command: String) -> LaunchPreflight.Problem?
+    /// The ids of the user's Claude Code plugins as `command`'s own `claude plugin list --json` lists them, run in a
+    /// folder of VibeSwitcher's own, never a worktree (by name only; see `LeadLaunch.listedPlugins`); nil when not
+    /// listed. Blocks while it runs.
+    func pluginIDs(command: String) -> [String]?
 }
 
 public extension LeadRuntime {
@@ -132,6 +136,9 @@ public extension LeadRuntime {
 
     /// Nothing looked at: a runtime that starts no real agent (the tests') lacks nothing.
     func preflight(command: String) -> LaunchPreflight.Problem? { nil }
+
+    /// Nothing listed: a runtime that starts no real agent (the tests') runs no Claude Code (see `HostRuntime`).
+    func pluginIDs(command: String) -> [String]? { nil }
 
     /// From the Claude command's own --model only; the app's runtime also reads Claude's settings (see `HostRuntime`).
     func workerModel(root: String) -> String? { LeadWorkflow.claudeModel(command: claudeCommand(root: root)) }
@@ -241,6 +248,10 @@ public final class LeadToolset: MCPToolset {
     /// look, or a pass after another, doesn't ask again.
     private var riskAnswers: [String: String?] = [:]
     private let riskLock = NSLock()
+    /// What Claude Code's plugin list gave at the last worker's or verifier's start (`listPlugins`): its ids, or nil
+    /// when it failed; nil before any start. Status and configure say it (`teamPluginsText`) without listing again.
+    private var pluginListing: [String]??
+    private let pluginListingLock = NSLock()
     /// Status said once that workflow.md's Mac-wide keys are ignored.
     private var toldIgnoredKeys = false
     private let tellingIgnoredKeys = NSLock()
@@ -568,9 +579,16 @@ public final class LeadToolset: MCPToolset {
     /// The workflow notes, with the lead's branch resolved and the review rules' floor the user set (`LeadReviewFloor`,
     /// from the vault: none when it can't be read, the rules as the file says, as before).
     var workflow: LeadWorkflow {
+        var workflow = workflowNotes
+        workflow.floor = floorRead()
+        return workflow
+    }
+
+    /// The workflow notes with the lead's branch resolved, and no floor: read without a round trip to the host, for
+    /// what never needs it (the remote poll's schedule, read at each tick).
+    var workflowNotes: LeadWorkflow {
         var workflow = LeadWorkflow.load(from: workflowPath)
         workflow.baseBranch = workflow.baseBranch ?? store.load().baseBranch ?? Worktrees.mainBranch(root: root)
-        workflow.floor = floorRead()
         return workflow
     }
 
@@ -820,6 +838,7 @@ public final class LeadToolset: MCPToolset {
                                          "lead_model": P(type: "string", description: "The lead's own model, from its next start (empty: fable, the model best at deciding what to do and judging what comes back; Opus in its place while Fable is held back)"),
                                          "lead_advisor": P(type: "string", description: "The lead's advisor while it runs on Opus: fable (the default), opus, or none"),
                                          "worker_advisor": P(type: "string", description: "Every worker's advisor when its task sets none: none (the default), fable or opus. Mark hard tasks with add_task's advisor: fable instead of setting it for all"),
+                                         "team_plugins": P(type: "string", description: "The user's Claude Code plugins that workers and verifiers load, comma-separated: plugin@marketplace, or a plugin's name alone (empty, the default: none). Every other plugin is off in their sessions only, from each one's next start; the lead and the user's own sessions keep theirs, and nothing in ~/.claude changes"),
                                          "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)"),
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
                                          "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
@@ -840,6 +859,8 @@ public final class LeadToolset: MCPToolset {
                                          "risk_model": P(type: "boolean", description: "Whether the risk check also asks headless Claude, from the diff's stat, the contract and the base branch's REVIEW.md (no code), to raise a review none task to audit (default true); it only raises, and a timeout or error leaves the deterministic triggers' result"),
                                          "audit_sample_percent": P(type: "integer", description: "The share of review none tasks, in percent (0 to 100), that auto_advance audits anyway when their worker reports done (default 10; 0: off): a seeded random draw, recorded on the task, so the unaudited path's escape rate is known, not assumed zero"),
                                          "small_task_min": P(type: "integer", description: "A review audit task whose worker reports done on its first round with fewer minutes of counted work than this, touching no sensitive_paths or strict_paths, not flagged by the risk check, not Codex's and not filed with an audit_reason, merges as review none that round: its tests, the risk check and the audit sample are its checks (default 30; 0: off)"),
+                                         "handover_idle_min": P(type: "integer", description: "You hand over to a fresh lead (a handover note, the board, decisions and your last turns) once you've been idle this many minutes with a context of at least handover_tokens, so your next wake doesn't carry or re-send the old context; never while your turn runs or a question to the user is under 10 minutes old (default 50, while your 1-hour prompt cache is warm; 0: off; else at least \(LeadRotation.minimumIdleMinutes))"),
+                                         "handover_tokens": P(type: "integer", description: "The context, in tokens, from which an idle lead hands over (default 150000; 0: off; else at least \(LeadRotation.minimumTokens), above a fresh lead's start)"),
                                          "watch_app_logs": P(type: "boolean", description: "Whether you get VibeSwitcher's own health digests (default false; only for the project that builds VibeSwitcher): its freezes, crashes and error lines as it logs them, and a daily trend, each as a witness report to turn into tasks where it's a real bug")]),
                 Self.leadPostTool,
             ]
@@ -918,7 +939,7 @@ public final class LeadToolset: MCPToolset {
             case "redact_record": return try redactRecord(arguments)
             case "sessions": return MCPToolResult(text: sessionsText())
             case "configure": return try configure(arguments)
-            case "report": return try report(arguments)
+            case "report": return try reporting(arguments)
             case "ask_lead": return try askLead(arguments)
             case "progress": return try progress(arguments)
             case "answer_findings": return try answerFindings(arguments)
@@ -2189,7 +2210,13 @@ public final class LeadToolset: MCPToolset {
                       var refusal = AccountUsage.fromRefusal(limit, model: sessionModel(info.id, board), now: now) else { return nil }
                 if refusal.account == nil {
                     if kept.contains(where: { $0.sameRefusal(refusal) }) { return nil }
-                    refusal.account = active
+                    // Scope correction must keep the account this untagged refusal was first recorded for,
+                    // even if /login has since moved to another account (or its old account wasn't known).
+                    if refusal.model != nil, let old = kept.first(where: { $0.model == nil && $0.sameRefusal(refusal, ignoringModel: true) }) {
+                        refusal.account = old.account
+                    } else {
+                        refusal.account = active
+                    }
                 }
                 return refusal
             }
@@ -2820,7 +2847,8 @@ public final class LeadToolset: MCPToolset {
                 : try LeadLaunch.prepare(role: role, root: root, task: slug, base: command, prompt: prompt,
                                          start: start, server: runtime.server, name: name, model: model, advisor: advisor, effort: effort, branch: branch,
                                          records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
-                                         cwd: folder, temporary: sessionTempRoot, home: claudeHome)
+                                         cwd: folder, temporary: sessionTempRoot, home: claudeHome, teamPlugins: workflow.teamPlugins,
+                                         listedPlugins: listPlugins(command: command, role: role))
             // The project's heavy_slots for its sessions' vs-heavy too.
             var environment = launch.environment
             if let slots = workflow.heavySlots { environment[TestLock.slotsVariable] = String(slots) }
@@ -2931,10 +2959,12 @@ public final class LeadToolset: MCPToolset {
         // A sensitive or security branch is audited on Fable (where the floor allows it).
         let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)
         let verifierModel = auditModel(workflow, task: task, security: security != nil)
+        let fallback = security != nil && !LeadReviewFloor.sameModel(verifierModel, LeadWorkflow.securityAuditModel)
+            ? fableFallback()?.fableHeldBack(now: usageClock()) : nil
+        let modelNotice = fallback.map { " on \(verifierModel) in Fable's place: Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0)))" } ?? ""
         // Near one of the account's usage limits on the audits' model: a verifier started now would stop mid-audit at it.
-        // verifier_model doesn't move a security audit (it runs on Fable where the floor allows), so that isn't offered.
         let instead = security == nil ? "audit on another model (configure verifier_model, e.g. opus)"
-            : "let it wait: a sensitive or security branch is audited on \(verifierModel) whatever verifier_model says"
+            : "let it wait: this sensitive or security audit runs on \(verifierModel) under the review floor"
         if !overrideUsage, let refusal = usageRefusal(model: verifierModel, sessions: sessions, not: "Not audited, no verifier started",
                                                       what: "audit(\(slug))", instead: instead) {
             throw Problem(text: refusal)
@@ -3039,11 +3069,11 @@ public final class LeadToolset: MCPToolset {
             + (stale.map { " Its passing audit at \(head.prefix(8)) \($0.text): this one judges " + ($0.changes == nil ? "the whole of v\($0.current) (v\($0.judged)'s text isn't on record)." : "only what changed since v\($0.judged).") } ?? "")
         let tested = merged.map { " One build and test run of its merged result \($0.commit.prefix(8)) came first, and the verifier reads its logs (\($0.run ?? "")): \($0.logs.joined(separator: ", "))." } ?? ""
         if let panel {
-            return MCPToolResult(text: noTools + putBack + behind + room + earlier + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
+            return MCPToolResult(text: noTools + putBack + behind + room + earlier + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8)))\(modelNotice): " + Self.focusesText(panel.focuses) + ". "
                                  + "One build and test run\(merged.map { " of its merged result \($0.commit.prefix(8))" } ?? "") came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
                                  + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)" + released)
         }
-        return MCPToolResult(text: noTools + putBack + behind + room + earlier + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)" + released)
+        return MCPToolResult(text: noTools + putBack + behind + room + earlier + "Verifier started on \(slug) (checking \(head.prefix(8)))\(modelNotice). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)" + released)
     }
 
     /// What audit's reply says of the task's audit still at work on its branch's head: the verifiers it waits on
@@ -3120,7 +3150,9 @@ public final class LeadToolset: MCPToolset {
     /// The model its current worker was started on counts as the workers' too (a worker run on Opus while Fable was
     /// held back is never audited on Opus under that floor, the reset passed or not).
     /// `security`: the branch touches sensitive_paths or is flagged for security (`securityReason`): Fable, where the
-    /// floor allows it (see `LeadWorkflow.auditModel`).
+    /// floor allows it (see `LeadWorkflow.auditModel`). While Fable is refused, sensitive and security audits follow
+    /// the same automatic fallback as other audits: the most capable other model the floor allows, even with no
+    /// verifier_model set. At the reset the ordinary Fable preference applies again.
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> String {
         let workers = runtime.workerModel(root: root)
         let launched = task.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }
@@ -5593,6 +5625,18 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "small_task_min must be a whole number of minutes, 0 (off) or more.") }
                 value = String(count)
+            case "handover_idle_min":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), count == 0 || count >= LeadRotation.minimumIdleMinutes else {
+                    throw Problem(text: "handover_idle_min must be a whole number of minutes: 0 (off) or \(LeadRotation.minimumIdleMinutes) or more.")
+                }
+                value = String(count)
+            case "handover_tokens":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), count == 0 || count >= LeadRotation.minimumTokens else {
+                    throw Problem(text: "handover_tokens must be a whole number of tokens: 0 (off) or \(LeadRotation.minimumTokens) or more.")
+                }
+                value = String(count)
             case "task_budget_min":
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "task_budget_min must be a whole number of minutes, 0 (no budget) or more.") }
@@ -5633,6 +5677,12 @@ public final class LeadToolset: MCPToolset {
                 value = policy.rawValue
             case "sensitive_paths", "strict_paths":
                 value = LeadWorkflow.globs(value)?.joined(separator: ", ") ?? ""
+            case "team_plugins":
+                let ids = LeadWorkflow.globs(value) ?? []
+                if let bad = ids.first(where: { !LeadLaunch.isPluginName($0) }) {
+                    throw Problem(text: "team_plugins is a comma-separated list of plugin ids as `claude plugin list` shows them (plugin@marketplace, or a plugin's name alone); \"\(bad)\" isn't one.")
+                }
+                value = ids.joined(separator: ", ")
             case "records_dir" where !value.isEmpty:
                 guard let folder = LeadWorkflow.recordsFolder(value) else {
                     throw Problem(text: "records_dir is a folder inside the repository (e.g. docs/lead), not in .git or .vibeswitcher; empty keeps the logs in .vibeswitcher.")
@@ -5672,7 +5722,7 @@ public final class LeadToolset: MCPToolset {
                                           "done_check_command": after.doneCheckCommand ?? "", "done_check_min": Self.gb(after.doneCheckMinutes),
                                           "base_branch": after.baseBranch ?? "", "remote": after.remote ?? "", "verifier_model": after.verifierModel ?? "",
                                           "lead_model": after.leadModel, "lead_advisor": after.leadAdvisor ?? "none",
-                                          "worker_advisor": after.workerAdvisor ?? "none",
+                                          "worker_advisor": after.workerAdvisor ?? "none", "team_plugins": after.teamPlugins.joined(separator: ", "),
                                           "max_workers": String(after.maxWorkers),
                                           "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
                                           "test_timeout_min": Self.gb(after.testTimeoutMinutes), "stall_min": Self.gb(after.stallMinutes),
@@ -5685,7 +5735,8 @@ public final class LeadToolset: MCPToolset {
                                           "merge_batching": after.mergeBatching.rawValue,
                                           "risk_lines": String(after.riskLines), "risk_model": String(after.riskModel),
                                           "audit_sample_percent": String(after.auditSamplePercent), "small_task_min": String(after.smallTaskMin),
-                                          "watch_app_logs": String(after.watchAppLogs), "agent_default": after.agentDefault.rawValue]
+                                          "watch_app_logs": String(after.watchAppLogs), "agent_default": after.agentDefault.rawValue,
+                                          "handover_idle_min": String(after.handoverIdleMinutes), "handover_tokens": String(after.handoverTokens)]
             // A limit cleared reads back as its default.
             let defaults = ["lead_model": LeadWorkflow.defaultLeadModel, "lead_advisor": LeadWorkflow.defaultLeadAdvisor, "worker_advisor": "none",
                             "disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
@@ -5697,7 +5748,8 @@ public final class LeadToolset: MCPToolset {
                             "merge_batching": LeadWorkflow().mergeBatching.rawValue,
                             "risk_lines": String(LeadWorkflow().riskLines), "risk_model": String(LeadWorkflow().riskModel),
                             "audit_sample_percent": String(LeadWorkflow().auditSamplePercent), "small_task_min": String(LeadWorkflow().smallTaskMin),
-                            "agent_default": LeadWorkflow().agentDefault.rawValue]
+                            "agent_default": LeadWorkflow().agentDefault.rawValue,
+                            "handover_idle_min": String(LeadWorkflow().handoverIdleMinutes), "handover_tokens": String(LeadWorkflow().handoverTokens)]
             for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
                 throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
             }
@@ -5766,6 +5818,20 @@ public final class LeadToolset: MCPToolset {
         }
         if !found.resealed.isEmpty {
             try? store.appendProgress("Agents' config changed while no worker or verifier ran (the user's), sealed as they are: \(ConfigSeal.list(found.resealed))")
+        }
+        // A round of Claude Code's skill sync the vault accepted by itself, at this look or another (the app's, a
+        // branch run's end): noted once in this team's log, by its time. Counts only: the log may be a public
+        // repository's, and a synced skill's name may be an organisation's own (the paths stay in the vault's record).
+        if let round = found.lastSyncRound {
+            let tag = "Claude Code's skill sync finished a round (\(String(round.at))) in ~/.claude/skills/synced, accepted by itself (nothing held): "
+            let logged = (try? String(contentsOfFile: store.recordPath("progress.md"), encoding: .utf8)) ?? ""
+            if !logged.contains(tag) {
+                let counts = ["changed", "added", "removed"].compactMap { word -> String? in
+                    let count = round.files.filter { $0.hasSuffix(" " + word) }.count
+                    return count > 0 ? "\(count) \(word)" : nil
+                }
+                try? store.appendProgress(tag + (counts.isEmpty ? "no paths" : counts.joined(separator: ", ")))
+            }
         }
         guard found.held.isEmpty else { throw Problem(text: ConfigSeal.refusal(found.held, outside: found.outside, not: not)) }
     }
@@ -5885,6 +5951,40 @@ public final class LeadToolset: MCPToolset {
 
     /// The report a worker gives at its task's time budget (see `LeadBudget`): not done, for the lead to decide on.
     static let overBudgetStatus = "over_budget"
+
+    /// report(), the call kept on the board while it runs (`LeadReportCall`: the witness and auto_advance say nothing
+    /// of its worker's stop meanwhile, its client having put a long call in the background), its refusal kept
+    /// (`LeadTask.reportRefused`), and a report that goes through clears both and the stop's nudge (`LeadStopNudge`):
+    /// a later stop is a first one again. A team member's report is its part's, kept on no task.
+    private func reporting(_ arguments: [String: Any]) throws -> MCPToolResult {
+        guard memberSeat() == nil, let slug = try? taskSlug(arguments) else { return try report(arguments) }
+        let start = Date().timeIntervalSince1970
+        let call = LeadReportCall(at: start, pid: getpid(),
+                                  until: start + LeadDoneCheck.callTimeout(limit: doneCheckLimit ?? workflow.doneCheckTimeout))
+        try? store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].reportCall = call
+        }
+        var refusal: LeadReportRefusal?
+        defer {
+            try? store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                if board.tasks[index].reportCall == call { board.tasks[index].reportCall = nil }
+                if let refusal {
+                    board.tasks[index].reportRefused = refusal
+                } else {
+                    board.tasks[index].reportRefused = nil
+                    board.tasks[index].stopNudge = nil
+                }
+            }
+        }
+        do {
+            return try report(arguments)
+        } catch {
+            refusal = LeadReportRefusal(at: Date().timeIntervalSince1970, text: Self.clip((error as? Problem)?.text ?? "\(error)", 600))
+            throw error
+        }
+    }
 
     private func report(_ arguments: [String: Any]) throws -> MCPToolResult {
         // A team member's report is its part's (`memberReport`), never the task's.
@@ -6648,6 +6748,8 @@ public final class LeadToolset: MCPToolset {
         if let line = records.statusLine { lines.append(line) }
         if let lag = gateLag(workflow) { lines.append(lag.text(base: workflow.base)) }
         if let line = pipelineLine() { lines.append(line) }
+        // The merge gate's error budget: while an objective is missed the lead plans test and flake fixes first.
+        if let folder = mergeStats(), let line = MergeObjectives.read(folder, project: (root as NSString).lastPathComponent).statusLine { lines.append(line) }
         if let red = board.mainRed { lines.append(red.text(base: workflow.base).replacingOccurrences(of: "\n", with: " ")) }
         if let line = archiveNudgeOnce() { lines.append(line) }
         if let line = progressNudgeOnce() { lines.append(line) }
@@ -6666,6 +6768,7 @@ public final class LeadToolset: MCPToolset {
         // One line, only where the floor holds a rule above workflow.md: status stays bounded on a big board;
         // configure() shows every rule.
         if let line = workflow.floor?.statusLine(workflow, workerModel: runtime.workerModel(root: root)) { lines.append(Self.clip(line, 600)) }
+        if let line = teamPluginsStatusLine(workflow) { lines.append(Self.clip(line, 600)) }
         if let line = heavyLockLine(board) { lines.append(line) }
         lines += usageLines(sessions: listing)
         lines += sessionRunLines(board, sessions, workflow: workflow)
@@ -7126,6 +7229,50 @@ public final class LeadToolset: MCPToolset {
             + floor.lines(workflow, auditModel: auditModel(workflow))
     }
 
+    /// Claude Code's own list of the user's plugins for a worker's or verifier's start (`LeadRuntime.pluginIDs`, run in
+    /// a folder of VibeSwitcher's own, never the worktree), kept for status and configure (`pluginListing`).
+    func listPlugins(command: String, role: LeadLaunch.Role) -> [String]? {
+        guard role != .lead else { return nil }
+        let ids = runtime.pluginIDs(command: command)
+        pluginListingLock.lock()
+        pluginListing = .some(ids)
+        pluginListingLock.unlock()
+        return ids
+    }
+
+    /// Which of the user's plugins team sessions load (team_plugins), as configure and status say it: one line. With
+    /// what the last team session's start listed (`pluginListing`): how many of the user's plugins that leaves off, or
+    /// that the listing failed and some may still load. Nothing is listed here: before a start, no count.
+    func teamPluginsText(_ workflow: LeadWorkflow) -> String {
+        let wanted = workflow.teamPlugins.isEmpty ? "none of the user's plugins (team_plugins empty)"
+            : workflow.teamPlugins.joined(separator: ", ") + " only"
+        let keep = "; the lead and the user's own sessions keep theirs"
+        pluginListingLock.lock()
+        let listing = pluginListing
+        pluginListingLock.unlock()
+        switch listing {
+        case .none:
+            return wanted + keep
+        case .some(.none):
+            return wanted + " wanted, but Claude Code's plugin list failed at the last team session's start: some of the "
+                + "user's plugins (those only it lists, such as ones synced from the account) may still load there" + keep
+        case .some(.some(let ids)):
+            let known = LeadLaunch.knownPlugins(home: claudeHome, cwd: root, listed: ids)
+            let off = LeadLaunch.pluginsOff(role: .worker, allowed: workflow.teamPlugins, known: known).count
+            return wanted + "; \(off) of the user's \(known.count) off in their sessions" + keep
+        }
+    }
+
+    /// Status's line on team sessions' plugins, only when it carries news: team_plugins names some, or the last
+    /// listing failed so some may still load. The default (none wanted, listing fine) says nothing: configure shows it.
+    func teamPluginsStatusLine(_ workflow: LeadWorkflow) -> String? {
+        pluginListingLock.lock()
+        let failed = pluginListing == .some(.none)
+        pluginListingLock.unlock()
+        guard !workflow.teamPlugins.isEmpty || failed else { return nil }
+        return "Team sessions' plugins (workers, verifiers): " + teamPluginsText(workflow)
+    }
+
     private func workflowText() -> String {
         let workflow = self.workflow
         let raw = LeadWorkflow.load(from: workflowPath)
@@ -7141,10 +7288,11 @@ public final class LeadToolset: MCPToolset {
                      "- base_branch: " + (raw.baseBranch ?? "not set: \(fallback) (the branch the lead first started on)"),
                      "- remote: " + (workflow.remote ?? "not set: \(LeadRemote.defaultRemote)") + " (fetch_remote and merge_remote sync the base branch with it; push_remote asks the user to push it there)",
                      "- verifier_model: " + (workflow.verifierModel ?? "not set: audits run on \(auditModel(workflow)), another model than the workers' (\(runtime.workerModel(root: root) ?? "Claude's default"))")
-                        + " (a sensitive or security audit runs on \(LeadWorkflow.securityAuditModel) where the floor allows)",
+                        + " (a sensitive or security audit runs on \(LeadWorkflow.securityAuditModel) where the floor allows; while Fable is refused at its limit, audits on it automatically fall back to the most capable other model the floor allows)",
                      "- lead_model: \(workflow.leadModel) (the lead's own, from its next start; Opus while Fable is held back)",
                      "- lead_advisor: \(workflow.leadAdvisor ?? "none") (while the lead runs on Opus)",
                      "- worker_advisor: \(workflow.workerAdvisor ?? "none") (for tasks that set no advisor; advisor: fable marks a task hard)",
+                     "- team_plugins: " + teamPluginsText(workflow),
                      "- max_workers: \(workflow.maxWorkers)",
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
                      "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)",
@@ -7171,6 +7319,10 @@ public final class LeadToolset: MCPToolset {
         lines.append("- small_task_min: " + (workflow.smallTaskMin > 0
             ? "\(workflow.smallTaskMin) (a review audit task done on its first round in fewer minutes of work, touching no sensitive or strict path and not flagged by the risk check, nor Codex's, nor filed with an audit_reason, merges as review none that round)"
             : "0 (off: review audit tasks are always audited)"))
+        lines.append("- handover_idle_min: \(workflow.handoverIdleMinutes), handover_tokens: \(workflow.handoverTokens) "
+            + (workflow.handoverIdleMinutes > 0 && workflow.handoverTokens > 0
+               ? "(idle that many minutes with that much context, you hand over to a fresh lead: a note, the board, decisions and your last turns; never while the user's Settings › Project lead says lead rotation never)"
+               : "(off: no handover at a long idle)"))
         if workflow.watchAppLogs {
             lines.append("- watch_app_logs: true (VibeSwitcher's own freezes, crashes, error lines and daily trend come to you as witness reports)")
         }

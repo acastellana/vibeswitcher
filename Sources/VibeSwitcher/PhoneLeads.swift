@@ -29,9 +29,9 @@ enum PhoneLeads {
             var summary: String?
             if let leadRow, let team = teams[leadRow.id], !team.isEmpty {
                 let key = "sidebar|" + root
-                summary = TeamRows.summary(controller.teamRows.rows(key, board: board, seen: controller.teamRows.seen(key, board: board, rows: team, now: now)))
+                summary = TeamRows.summary(controller.teamRows.rows(key, board: board, seen: controller.teamRows.seen(key, board: board, rows: team, now: now, usageWaits: controller.rowUsageWaits[root] ?? [:])))
             }
-            let seen = controller.teamRows.seen(root, board: board, rows: rows, now: now)
+            let seen = controller.teamRows.seen(root, board: board, rows: rows, now: now, usageWaits: controller.rowUsageWaits[root] ?? [:])
             return Lead(root: root, board: board, summary: summary, rows: controller.teamRows.rows(root, board: board, seen: seen))
         }
     }

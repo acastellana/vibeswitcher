@@ -6,7 +6,7 @@ import { createStore } from './js/store.js';
 import { createMock } from './js/mock.js';
 import { connectSocket } from './js/socket.js';
 import { validate } from './wire/validators.js';
-import { createUI, arrange } from './js/ui.js';
+import { createUI, arrange, teamOf } from './js/ui.js';
 import { h, setText } from './js/dom.js';
 import { since, until, stateOf, KEY, MAC } from './js/words.js';
 import { sidebar } from './js/views/sidebar.js';
@@ -97,11 +97,13 @@ function step(by) {
 
 function commands() {
   const selected = ui.state.route.name === 'session' ? store.state.sessions.get(ui.state.route.id) : null;
-  const pane = (id, title, key) => ({ title, keys: `${KEY.mod}${KEY.alt}${key}`, icon: id === 'team' ? 'team' : id, run: () => ui.setPane(selected.id, id) });
+  const pane = (id, title, key) => ({ title, keys: `${KEY.mod}${KEY.alt}${key}`, icon: id, run: () => ui.setPane(selected.id, id) });
   return [
     { title: 'Next Session Needing You', keys: `${KEY.mod}J`, icon: 'question', run: nextNeedingYou },
     ...(selected ? [pane('chat', 'Chat', '2'), pane('terminal', 'Terminal', '1')] : []),
-    ...(selected?.role === 'lead' && store.follows('boards') ? [pane('team', 'Team', '3')] : []),
+    // The inspector's, for a session: the Mac's View › Toggle Inspector, and its Team tab for a lead or its team.
+    ...(selected && teamOf(store.state, selected) ? [{ title: 'Team', about: 'The team’s tasks, in the inspector', keys: `${KEY.mod}${KEY.alt}3`, icon: 'team', run: () => ui.showInspector('team') }] : []),
+    ...(selected ? [{ title: 'Toggle Inspector', about: 'Team, Overview and Activity', keys: `${KEY.mod}${KEY.alt}0`, icon: 'inspector', run: () => ui.toggleInspector() }] : []),
     { title: 'Start Page', icon: 'home', run: () => ui.go('#/') },
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
     { title: 'Group by Attention', icon: 'filter', run: () => ui.setGrouping('attention') },
@@ -114,7 +116,7 @@ function commands() {
 
 // ---- Keys ----
 // The Mac app's where a browser lets a page have them. ⌘1–9 belongs to the browser's tabs (it reaches the page only
-// in an installed window), so ⌥1–9 does the same everywhere.
+// in an installed window), so ⌥1–9 does the same everywhere. ⌥⌘0 is the inspector's, as on the Mac.
 
 addEventListener('keydown', (event) => {
   const mod = MAC ? event.metaKey : event.ctrlKey;
@@ -124,9 +126,16 @@ addEventListener('keydown', (event) => {
     ui.setPalette(!ui.state.palette);
   } else if (ui.state.palette) {
     return;
+  } else if (event.code === 'Digit0' && event.altKey && !event.shiftKey && ui.state.route.name === 'session') {
+    // The Mac's ⌥⌘0 (Ctrl+Alt+0 elsewhere), and ⌥0 / Alt+0 where the browser or the system keeps that one. Never
+    // AltGr+0, which types a character on some keyboards.
+    if (event.getModifierState?.('AltGraph')) return;
+    event.preventDefault();
+    ui.toggleInspector();
   } else if (mod && event.altKey && digit >= 1 && digit <= 3 && ui.state.route.name === 'session') {
     event.preventDefault();
-    ui.setPane(ui.state.route.id, ['terminal', 'chat', 'team'][digit - 1]);
+    if (digit < 3) ui.setPane(ui.state.route.id, digit === 1 ? 'terminal' : 'chat');
+    else if (teamOf(store.state, store.state.sessions.get(ui.state.route.id))) ui.showInspector('team');
   } else if ((mod || event.altKey) && !(mod && event.altKey) && !event.shiftKey && digit) {
     const target = list.order()[digit - 1];
     if (target) { event.preventDefault(); ui.select(target.id); }

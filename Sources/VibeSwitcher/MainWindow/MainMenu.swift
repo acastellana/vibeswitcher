@@ -43,6 +43,7 @@ enum MainMenu {
         services.submenu = NSMenu(title: "Services")
         submenu("VibeSwitcher", [
             item("About VibeSwitcher", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+            item("Check for Updates…", #selector(AppDelegate.checkForUpdates(_:))),
             .separator(),
             item("Settings…", Selector(("showSettings:")), ","),
             item(restartHostTitle, #selector(AppDelegate.restartSessionHost(_:))),

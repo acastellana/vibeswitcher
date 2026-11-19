@@ -209,12 +209,13 @@ public enum HostHandover {
     /// How long the probe may take to answer. On a loaded Mac most of it is the system's check of the new build's first
     /// exec (amfid, one new binary at a time for the whole Mac), before any of its code runs: on 2026-10-19 amfid
     /// answered nothing for 108 s at load 200, and the 15 s once given here refused good builds. The sessions carry on
-    /// meanwhile (the probe runs off the server's queue); this only ends a build that hangs.
+    /// meanwhile (the probe runs off the server's queue); this only ends a build that hangs. Time awake: a Mac that
+    /// sleeps while the probe waits (2026-11-15: from the second a handover began) gave it no time to answer.
     static let probeLimit: TimeInterval = 180
 
     /// Runs `executable --handover-probe path` and waits (up to `timeout`) for it to say it can take over. Blocks: not on
     /// the server's queue.
-    static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit) throws {
+    static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit, time: MacTime = .real) throws {
         var pipe: [Int32] = [-1, -1]
         guard Sys.pipeClosedOnExec(&pipe) == 0 else { throw Failure.probe("no pipe") }
         defer { Sys.close(pipe[0]) }
@@ -237,9 +238,9 @@ public enum HostHandover {
         _ = fcntl(pipe[0], F_SETFL, fcntl(pipe[0], F_GETFL) | O_NONBLOCK)
         var output = Data()
         var status: Int32 = 0
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = time.awake() + timeout
         while waitpid(pid, &status, WNOHANG) == 0 {
-            guard Date() < deadline else {
+            guard time.awake() < deadline else {
                 kill(pid, SIGKILL)
                 waitpid(pid, &status, 0)
                 throw Failure.probe("it didn't answer")

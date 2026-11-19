@@ -137,4 +137,67 @@ struct LaunchPresetsTests {
         #expect(loaded.notice == nil && loaded.backup == nil && loaded.canSave)
         #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["presets.json"])
     }
+
+    /// A session started from a preset that sets variables gets them back when it's resumed, by each resume path: the
+    /// sidebar's Resume (from the host's session) and the restart card's (from its record).
+    enum ResumePath: CaseIterable { case sidebar, restartCard }
+
+    static let codeMode = LaunchPreset(name: "Code Mode", kind: .claude, command: "claude", env: ["FOO": "1"])
+
+    static var projectPresets: LaunchPresets {
+        var presets = LaunchPresets.builtIns()
+        presets.byProject["/p"] = [codeMode]
+        return presets
+    }
+
+    func resume(_ path: ResumePath, label: String, command: String? = "claude", agent: Agent = .claude,
+                presets: [LaunchPreset]) throws -> SpawnRequest {
+        switch path {
+        case .sidebar:
+            let host = HostSession(id: UUID(), tty: "ttys012", childPID: 4242, cwd: "/p", command: command, label: label,
+                                   agent: agent.rawValue, title: "", startedAt: Date(), cols: 120, rows: 36,
+                                   exit: .init(status: 0, at: Date()))
+            return LaunchPlan.resumeRequest(resuming: host, agent: agent, sessionID: "c-1", presets: presets)
+        case .restartCard:
+            let entry = RestartReopen.Entry(id: UUID(), folder: "/p", agent: agent, agentSessionID: "c-1", role: .user, project: "p",
+                                            name: "p", command: command, label: label, cols: 120, rows: 36)
+            return try #require(RestartReopen.spawnRequest(entry, presets: presets))
+        }
+    }
+
+    @Test(arguments: ResumePath.allCases)
+    func aResumeKeepsItsPresetsEnvironment(_ path: ResumePath) throws {
+        let request = try resume(path, label: "Code Mode", presets: Self.projectPresets.presets(for: "/p"))
+        #expect(request.env == ["FOO": "1"])
+        #expect(request.command == "claude --resume 'c-1'" && request.label == "Code Mode" && request.cwd == "/p")
+    }
+
+    /// No preset, a preset without variables, or one that's gone (deleted, renamed, or not this agent's): resumed as
+    /// before, with no variables of its own.
+    @Test(arguments: ResumePath.allCases, [
+        ("Claude", Agent.claude),          // the built-in: no environment
+        ("Lead · acme", .claude),          // not started from a preset
+        ("Old Name", .claude),             // its preset was renamed or deleted
+        ("Code Mode", .codex),             // a preset of that name, but for another agent
+    ])
+    func aResumeWithoutAPresetsEnvironmentIsAsBefore(_ path: ResumePath, _ session: (label: String, agent: Agent)) throws {
+        let presets = Self.projectPresets.presets(for: "/p")
+        let request = try resume(path, label: session.label, agent: session.agent, presets: presets)
+        let before = LaunchPlan.resumeRequest(cwd: "/p", base: "claude", agent: session.agent, sessionID: "c-1", cols: 120, rows: 36,
+                                              label: session.label, presets: [])
+        #expect(request == before)
+        #expect(request.env.isEmpty && !request.keepShell && request.agent == session.agent.rawValue)
+    }
+
+    /// Two presets with the session's name (the project's own and a global one): the one whose command it ran.
+    @Test func aNameSharedByTwoPresetsIsSettledByTheCommand() throws {
+        var presets = LaunchPresets.builtIns()
+        presets.byProject["/p"] = [LaunchPreset(name: "Claude", kind: .claude, command: "claude --model opus", env: ["MODEL": "opus"])]
+        let list = presets.presets(for: "/p")
+        #expect(try resume(.sidebar, label: "Claude", command: "claude", presets: list).env.isEmpty)
+        #expect(try resume(.sidebar, label: "Claude", command: "claude --model opus", presets: list).env == ["MODEL": "opus"])
+        // Resumed once already, its command carries the earlier `--resume`: still the preset it ran.
+        #expect(try resume(.sidebar, label: "Claude", command: "claude --resume 'c-0'", presets: list).env.isEmpty)
+        #expect(try resume(.sidebar, label: "Claude", command: "claude --model opus --resume 'c-0'", presets: list).env == ["MODEL": "opus"])
+    }
 }

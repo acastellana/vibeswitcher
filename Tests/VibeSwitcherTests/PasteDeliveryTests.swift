@@ -54,7 +54,7 @@ struct PasteDeliveryTests {
             let out = folder.appendingPathComponent("out").path, go = folder.appendingPathComponent("go").path
             let raw = folder.appendingPathComponent("raw").path
             var result: Result<HostSession, HostClientError>?
-            host.spawn(SpawnRequest(cwd: "/tmp", command: "stty raw -echo && : > \(raw); while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)",
+            host.spawn(SpawnRequest(cwd: "/tmp", command: "\(jobControlOff)stty raw -echo && : > \(raw); while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)",
                                     env: [:], cols: 80, rows: 24, keepShell: false, label: "Paste", agent: nil)) { result = $0 }
             #expect(await until { result != nil })
             let session = try #require(result).get()

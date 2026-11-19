@@ -301,6 +301,7 @@ public enum Shell {
         let cancel = ShellCancel.current
         var judge = watch.map { StallWatch.Judge(after: $0.after, loadLimit: $0.loadLimit, start: Date(timeIntervalSinceReferenceDate: now())) }
         var nextLook = now(), stall: StallWatch.Stall?
+        let exit = ExitWatch(pid)
         while process.isRunning, now() < deadline, cancel?.isCancelled != true {
             if let watch, now() >= nextLook {
                 let members = StallWatch.tree(of: pid, group: group)
@@ -318,7 +319,7 @@ public enum Shell {
                 }
                 nextLook = looked + watch.every
             }
-            usleep(20_000)
+            exit.wait(upTo: 0.02)
         }
         var timedOut = false, cancelled = false, quiet: TimeInterval?
         if process.isRunning {
@@ -365,6 +366,13 @@ public enum Shell {
 }
 
 extension Shell {
+    /// `run`'s pause between its looks at the program (its end, its time, a cancel, its stall watch): up to its 20 ms,
+    /// over at once when the program exits. A plain 20 ms sleep made every program at least 20 ms, and a git that takes
+    /// 13 ms half as long again (the tests' git, thousands of runs: a share of the full suite's time). The exit is
+    /// `Platform.ExitWait`'s (the Mac's kqueue NOTE_EXIT, Linux's pidfd), which reaps nothing (`Spawned.isRunning`
+    /// still does). Where the program can't be watched, it's the 20 ms sleep as before, so it never spins.
+    typealias ExitWatch = Platform.ExitWait
+
     /// A program `run` started, as it waits on it.
     protocol Running: AnyObject {
         var processIdentifier: Int32 { get }

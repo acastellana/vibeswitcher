@@ -22,4 +22,20 @@ extension Platform {
     public static func pipeCommand(_ command: String, input: Data, patience: TimeInterval, stopSignals: [Int32]) -> Data {
         runPiped(command, input: input, patience: patience, stopSignals: stopSignals)
     }
+
+    /// How long `killAll` goes on killing a stopped command's group: well inside the ~2 s Claude Code gives a status
+    /// line after its TERM, and the usage is kept only after it.
+    static let groupSweep: TimeInterval = 0.5
+
+    /// Kills `group` again and again until none of it is left (ESRCH), for at most `groupSweep`. One kill isn't enough:
+    /// XNU's kill of a group passes over a child its shell is still making (a pipeline's or a `&`'s fork under way), and
+    /// that child then runs on in the group with launchd as its parent (StatusLineBinaryTests, 2026-11-18: a `sleep` left
+    /// so). EPERM isn't "none left": the group still exists, though nothing in it took the signal (seen while it emptied).
+    /// Linux's kill of a group can race a fork the same way, so both arms sweep.
+    static func killAll(group: pid_t) {
+        let deadline = Clock.awakeSeconds() + groupSweep
+        while kill(-group, SIGKILL) == 0 || errno != ESRCH, Clock.awakeSeconds() < deadline {
+            usleep(2_000)
+        }
+    }
 }

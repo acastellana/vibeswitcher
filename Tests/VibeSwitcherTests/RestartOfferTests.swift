@@ -348,10 +348,14 @@ import Testing
         var calls: [String] = []
     }
 
-    func reopening(_ entries: [RestartReopen.Entry]) async throws -> (RestartOffer, Reopened) {
+    func reopening(_ entries: [RestartReopen.Entry], presets: LaunchPresets = .builtIns()) async throws -> (RestartOffer, Reopened) {
         let (offer, _) = try offer(entries)
         let reopened = Reopened()
-        offer.resumeSession = { request in reopened.calls.append("session \(request.cwd) \(request.command ?? "")") }
+        offer.resumeSession = { request in
+            let env = request.env.sorted { $0.key < $1.key }.map { " \($0.key)=\($0.value)" }.joined()
+            reopened.calls.append("session \(request.cwd) \(request.command ?? "")" + env)
+        }
+        offer.presets = { folder in presets.presets(for: folder) }
         offer.reopenLead = { root, conversation in reopened.calls.append("lead \(root) \(conversation)") }
         var closed = 0
         offer.close = { closed += 1 }
@@ -382,6 +386,30 @@ import Testing
         offer.chosen = [other.id]
         offer.reopenChosen()
         #expect(reopened.calls == ["session /g claude --resume 'c-4'"])
+    }
+
+    /// A session started from a preset that sets variables (Code Mode's CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1, say) is
+    /// reopened with them, by Reopen all and by Choose; one from a preset without any, or from none, as before.
+    @Test(arguments: [false, true])
+    func reopeningKeepsAPresetsEnvironment(choosing: Bool) async throws {
+        var presets = LaunchPresets.builtIns()
+        presets.byProject["/f"] = [LaunchPreset(name: "Code Mode", kind: .claude, command: "claude", env: ["FOO": "1"])]
+        var coded = entry("coded", conversation: "c-1", folder: "/f")
+        coded.label = "Code Mode"
+        let plain = entry("plain", conversation: "c-2", folder: "/f")
+        var renamed = entry("renamed", conversation: "c-3", folder: "/f")
+        renamed.label = "Code Mode (old)"
+        let (offer, reopened) = try await reopening([coded, plain, renamed], presets: presets)
+        if choosing {
+            offer.choosing = true
+            offer.chosen = [coded.id, renamed.id]
+            offer.reopenChosen()
+            #expect(reopened.calls == ["session /f claude --resume 'c-1' FOO=1", "session /f claude --resume 'c-3'"])
+        } else {
+            offer.reopenAll()
+            #expect(reopened.calls == ["session /f claude --resume 'c-1' FOO=1", "session /f claude --resume 'c-2'",
+                                       "session /f claude --resume 'c-3'"])
+        }
     }
 
     @Test func dismissingReopensNothing() async throws {

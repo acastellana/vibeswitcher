@@ -313,6 +313,10 @@ struct QualitySource {
     var leadDays: [String: (tokens: Int, cost: Double, unpriced: Bool)]? = nil
     /// When each merged task (by slug) was first seen installed (`SetupInstalls.firstInstalls`).
     var installedAt: [String: Double] = [:]
+    /// Its lead's updates (post_update: the board's and its archive's), title and time.
+    var updates: [(title: String, at: Double)] = []
+    /// Its lead's chat (`LeadChatTimeline`); nil when no transcript of it was found.
+    var chat: LeadChatTimeline? = nil
 }
 
 enum SetupQualityMath {
@@ -355,7 +359,8 @@ enum SetupQualityMath {
     /// The figures of `sources` for `window`; `merges` the recorder's lines by project name and task slug, oldest
     /// first (nil: no recorder file for those days); `weeks` the trend's.
     static func quality(_ sources: [QualitySource], window: SetupStatsCollector.Window, weeks: [DateInterval],
-                        mergeLines: [String: [String: [RecorderLine]]]?, calendar: Calendar = .current) -> SetupQuality {
+                        mergeLines: [String: [String: [RecorderLine]]]?, mergeSamples: [MergeSample]? = nil,
+                        calendar: Calendar = .current) -> SetupQuality {
         var merges: [Merge] = [], ended: [Ended] = [], sampled: [Sampled] = []
         // `untasked`: questions about no task asked in the range; `anyUntasked`: all of them, for the scorecard's two
         // weeks, which don't follow the range picked.
@@ -443,7 +448,7 @@ enum SetupQualityMath {
         days.dateFormat = "yyyy-MM-dd"
         let card = scorecard(sources, merges: merges, untasked: anyUntasked, questions: questions, weeks: weeks, now: window.now,
                              dayKey: { days.string(from: Date(timeIntervalSince1970: $0)) },
-                             dayStart: { days.date(from: $0)?.timeIntervalSince1970 })
+                             dayStart: { days.date(from: $0)?.timeIntervalSince1970 }, mergeSamples: mergeSamples)
         return SetupQuality(all: all, byAgent: byAgent, byModel: byModel, weeks: trend, scorecard: card)
     }
 

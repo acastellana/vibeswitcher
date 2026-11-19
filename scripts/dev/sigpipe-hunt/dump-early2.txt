@@ -1,0 +1,478 @@
+=== SIGPIPE at 2026-11-18 14:40:33 +0000 1795012833.634 (51 threads, 1 signals)
+--- (all) thread 0
+  mach_msg2_trap
+  mach_msg2_internal
+  mach_msg_overwrite
+  mach_msg
+  __CFRunLoopServiceMachPort
+  __CFRunLoopRun
+  _CFRunLoopRunSpecificWithOptions
+  CFRunLoopRun
+  CFMainExecutor.run()
+  protocol witness for RunLoopExecutor.run() in conformance DispatchMainExecutor
+  swift_task_asyncMainDrainQueueImpl
+  swift_task_asyncMainDrainQueue
+  main
+  10455088c
+  104550748
+  start
+--- (all) thread 1
+  __workq_kernreturn
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 2
+  __workq_kernreturn
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 3
+  __workq_kernreturn
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 4
+  __workq_kernreturn
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 5
+  __workq_kernreturn
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 6
+  protocol witness for static Equatable.== infix(_:_:) in conformance Character
+  partial apply for closure #1 in Collection<>.split(separator:maxSplits:omittingEmptySubsequences:)
+  partial apply for closure #1 in Collection<>.split(separator:maxSplits:omittingEmptySubsequences:)
+  Collection.split(maxSplits:omittingEmptySubsequences:whereSeparator:)
+  Collection<>.split(separator:maxSplits:omittingEmptySubsequences:)
+  LeadToolServerHandoverTests.Server.replies()
+  closure #2 in ToolServerStressTests.Rig.burst(_:)
+  eventually(timeout:time:isolation:_:)
+  _ZN5swift34runJobInEstablishedExecutorContextEPNS_3JobENS_17SerialExecutorRefENS_15TaskExecutorRefE
+  _ZL17swift_job_runImplPN5swift3JobENS_17SerialExecutorRefE
+--- (all) thread 7
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepForTimeInterval:]
+  eventuallyBlocking(timeout:time:_:)
+  TestClient.screen(_:)
+  closure #12 in HostServerTests.historyLargerThanAFrameIsTrimmedNotDropped()
+  eventually(timeout:time:isolation:_:)
+  _ZN5swift34runJobInEstablishedExecutorContextEPNS_3JobENS_17SerialExecutorRefENS_15TaskExecutorRefE
+  _ZL17swift_job_runImplPN5swift3JobENS_17SerialExecutorRefE
+--- (all) thread 8
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepForTimeInterval:]
+  eventuallyBlocking(timeout:time:_:)
+  TestClient.screen(_:)
+  closure #10 in HostServerTests.slowClientGetsResyncAndProgramKeepsRunning()
+  eventually(timeout:time:isolation:_:)
+  _ZN5swift34runJobInEstablishedExecutorContextEPNS_3JobENS_17SerialExecutorRefENS_15TaskExecutorRefE
+  _ZL17swift_job_runImplPN5swift3JobENS_17SerialExecutorRefE
+--- (all) thread 9
+  __workq_kernreturn
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 10
+  __workq_kernreturn
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 11
+  __workq_kernreturn
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 13
+  swift_getTupleTypeMetadata
+  swift_getTupleTypeMetadata
+  swift_getTupleTypeMetadata2
+  protocol witness for Collection.formIndex(after:) in conformance <> Range<A>
+  IndexingIterator.next()
+  OutputRing.append(_:)
+  HostedSession.drain(reads:pausing:)
+  closure #1 in HostedSession.start()
+  thunk for @escaping @callee_guaranteed () -> ()
+  _dispatch_client_callout
+  _dispatch_continuation_pop
+  _dispatch_source_latch_and_call
+  _dispatch_source_invoke
+  _dispatch_lane_serial_drain
+  _dispatch_lane_invoke
+  _dispatch_root_queue_drain_deferred_wlh
+  _dispatch_workloop_worker_thread
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 14
+  __workq_kernreturn
+  _pthread_wqthread
+  start_wqthread
+--- (all) thread 16
+  semaphore_timedwait_trap
+  _dispatch_sema4_timedwait
+  _dispatch_semaphore_wait_slow
+  OS_dispatch_semaphore.wait(wallTimeout:)
+  static HostCall.exchange(_:then:socket:timeout:expectsReply:requires:appKey:)
+  static HostCall.sessions(socket:appKey:timeout:)
+  closure #5 in ToolServerStressTests.manyCallsAtOnceLeaveTheServerAnsweringWithItsDescriptorsAsBefore()
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__block_start__
+  _pthread_start
+  thread_start
+--- (all) thread 17
+  semaphore_timedwait_trap
+  _dispatch_sema4_timedwait
+  _dispatch_semaphore_wait_slow
+  OS_dispatch_semaphore.wait(wallTimeout:)
+  static HostCall.exchange(_:then:socket:timeout:expectsReply:requires:appKey:)
+  static HostCall.sessions(socket:appKey:timeout:)
+  closure #5 in ToolServerStressTests.manyCallsAtOnceLeaveTheServerAnsweringWithItsDescriptorsAsBefore()
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__block_start__
+  _pthread_start
+  thread_start
+--- (all) thread 18
+  semaphore_timedwait_trap
+  _dispatch_sema4_timedwait
+  _dispatch_semaphore_wait_slow
+  OS_dispatch_semaphore.wait(wallTimeout:)
+  static HostCall.exchange(_:then:socket:timeout:expectsReply:requires:appKey:)
+  static HostCall.sessions(socket:appKey:timeout:)
+  closure #5 in ToolServerStressTests.manyCallsAtOnceLeaveTheServerAnsweringWithItsDescriptorsAsBefore()
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__block_start__
+  _pthread_start
+  thread_start
+--- (all) thread 19
+  semaphore_timedwait_trap
+  _dispatch_sema4_timedwait
+  _dispatch_semaphore_wait_slow
+  OS_dispatch_semaphore.wait(wallTimeout:)
+  static HostCall.exchange(_:then:socket:timeout:expectsReply:requires:appKey:)
+  static HostCall.sessions(socket:appKey:timeout:)
+  closure #5 in ToolServerStressTests.manyCallsAtOnceLeaveTheServerAnsweringWithItsDescriptorsAsBefore()
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__block_start__
+  _pthread_start
+  thread_start
+--- (all) thread 20
+  swift_endAccess
+  $defer #1 () in next #1 () in static ProcessTable.parse(procargs:)
+  $defer #1 () in next #1 () in static ProcessTable.parse(procargs:)
+  next #1 () in static ProcessTable.parse(procargs:)
+  static ProcessTable.parse(procargs:)
+  closure #1 in static ProcessTable.environment(pid:)
+  partial apply for closure #1 in static ProcessTable.environment(pid:)
+  Optional.map<A, B>(_:)
+  static ProcessTable.environment(pid:)
+  closure #1 in static SessionStrays.carrying(session:user:)
+  closure #1 in static SessionStrays.processes(user:matching:)
+  partial apply for closure #1 in static SessionStrays.processes(user:matching:)
+  Sequence._compactMap<A>(_:)
+  Sequence.compactMap<A>(_:)
+  static SessionStrays.processes(user:matching:)
+  static SessionStrays.carrying(session:user:)
+  static SessionStrays.of(session:started:user:)
+  mine #1 () in static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 21
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 22
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 23
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 24
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 25
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 26
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 27
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 28
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 29
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 30
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 31
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 32
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 33
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 34
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 35
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 36
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 37
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 38
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 39
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 40
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 41
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 42
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 43
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 44
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 45
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 46
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 47
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 48
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 49
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start
+--- (all) thread 50
+  __semwait_signal
+  nanosleep
+  +[NSThread sleepUntilDate:]
+  static SessionStrays.endNow(session:started:sparing:keeping:grace:)
+  closure #1 in static SessionStrays.end(session:started:sparing:keeping:grace:)
+  thunk for @escaping @callee_guaranteed @Sendable () -> ()
+  __NSThread__start__
+  _pthread_start
+  thread_start

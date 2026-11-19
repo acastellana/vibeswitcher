@@ -133,6 +133,19 @@ extension LeadEngine {
             let nudge = nudgeAdvance
             reads.async { _ in for _ in 0..<nudges { nudge(root) } }
         }
+        // A worker whose turn ended without a report for the first time: recorded on its task for its loop, which sends
+        // it the standard prompt once (`LeadStopNudge`); the board's write makes the loop look. The lead isn't told.
+        // Each look until it's on the board (a write that failed is tried again), written only when it isn't yet.
+        let stops = work.stopsForAdvance
+        if !stops.isEmpty {
+            let nudge = nudgeAdvance
+            reads.async { _ in
+                let store = BoardStore(root: root)
+                var board = store.load()
+                guard LeadWitness.handOver(stops, on: &board, now: now) else { return }
+                if (try? store.update { LeadWitness.handOver(stops, on: &$0, now: now) }) == true { nudge(root) }
+            }
+        }
         // Only the keys here: each text is built where it's posted, on `reads`. One a look before this told already (two
         // looks under way at once) isn't told again.
         for message in work.messages where !message.keys.allSatisfy({ told.contains("\(root)|\($0)") }) {

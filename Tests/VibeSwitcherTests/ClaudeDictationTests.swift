@@ -585,7 +585,10 @@ struct ClaudeDictationTests {
     @Test func escCancelsTheRecordingAndNothingLands() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        h.tell(["op": "voice", "mode": "hold"])
+        // A repeat late past FakeClaude's 120 ms gap (a merge's loaded Mac) ends its recording before the Esc: the
+        // transcript goes in and there's no recording left to cancel (2026-11-16: voiceCancels never came to 1).
+        // A wider gap keeps the one recording, as a held key does, whatever the load (as `heldTheTranscript…`).
+        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
         try await h.waitFor { h.agent["voice"] as? String == "hold" }
         let controller = dictation(h)
         controller.press(h.key, agent: .claude) { "" }
@@ -608,7 +611,10 @@ struct ClaudeDictationTests {
         let h = try await Harness.start(temp)
         defer { h.stop() }
         h.tell(["op": "work"])
-        h.tell(["op": "voice", "mode": "hold"])
+        // A wider gap than FakeClaude's 120 ms: a repeat late past it (a merge's loaded Mac) would end the held
+        // recording before the cancel, its transcript in (2026-11-16: "held .escape: voiceCancels 0, cancels 1", every
+        // phase after it one off). Let go, it's this long before Claude processes.
+        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
         try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["mode"] as? String == "working" }
         let controller = dictation(h)
         var cancels = 0

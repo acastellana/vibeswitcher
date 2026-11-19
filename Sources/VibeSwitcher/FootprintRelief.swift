@@ -20,6 +20,8 @@ final class FootprintRelief {
 
     private let footprint: () -> Double?
     private let relieve: () -> Void
+    /// What the footprint is made of (`split()`), read on the relief's queue just before each relief, never on main.
+    private let split: () -> AppHealth.Memory.Split?
     /// Whether you're using the app now (it's frontmost), read on the main thread at each look: then no relief.
     private let inUse: () -> Bool
     private let queue = DispatchQueue(label: "vibeswitcher.footprint-relief", qos: .utility)
@@ -38,9 +40,11 @@ final class FootprintRelief {
 
     init(footprint: @escaping () -> Double? = { AppHealthWatcher.ownFootprint()?.now },
          relieve: @escaping () -> Void = { malloc_zone_pressure_relief(nil, 0) },
-         inUse: @escaping () -> Bool = { (NSApp as NSApplication?)?.isActive ?? false }) {
+         inUse: @escaping () -> Bool = { (NSApp as NSApplication?)?.isActive ?? false },
+         split: @escaping () -> AppHealth.Memory.Split? = { FootprintRelief.split() }) {
         self.footprint = footprint
         self.relieve = relieve
+        self.split = split
         self.inUse = inUse
     }
 
@@ -60,17 +64,38 @@ final class FootprintRelief {
                 return
             }
             guard !busy else { return }
+            // What the footprint is made of, as it stands before the relief (2026-11-18: 262 → 713 MB overnight, and
+            // the footprint alone named nothing). How long the reading takes goes in the line too.
+            let reading = DispatchTime.now()
+            let parts = split()
+            let readIn = Double(DispatchTime.now().uptimeNanoseconds - reading.uptimeNanoseconds) / 1e6
             // It holds malloc's locks while it runs: how long, in the log, to see what it costs a big heap.
             let started = DispatchTime.now()
             relieve()
             let took = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1e6
             let after = footprint() ?? now
             // On macOS 27.2 it gives back nothing (see `AppHealth.keptForReuse`): the line says so.
-            Breadcrumbs.shared.note(AppHealth.reliefLine(before: now, after: after, took: took))
-            lastRelief = AppHealth.Memory.Relief(before: now, after: after)
+            Breadcrumbs.shared.note(AppHealth.reliefLine(before: now, after: after, took: took, split: parts, readIn: parts == nil ? nil : readIn))
+            lastRelief = AppHealth.Memory.Relief(before: now, after: after, split: parts)
             reliefs += 1
             longest = max(longest, took)
             self.floor = after
         }
+    }
+}
+
+extension FootprintRelief {
+    /// The app's own footprint split (`AppHealth.Memory.Split`): malloc's zones in use and allocated, the graphics and
+    /// compressed ledgers (`UIBench.memoryKinds`, this process's task_info), and its largest VM tags (`SoakMemory.byTag`,
+    /// a walk of its own regions). Names and numbers only; nil when task_info can't be read. Off the main thread: the
+    /// walk takes a few ms on a big heap.
+    static func split() -> AppHealth.Memory.Split? {
+        let kinds = UIBench.memoryKinds()
+        guard kinds["footprint"] != nil else { return nil }
+        let mb = { (bytes: Double) in bytes / 1_048_576 }
+        let total = { (suffix: String) in mb(kinds.filter { $0.key.hasPrefix("malloc ") && $0.key.hasSuffix(suffix) }.values.reduce(0, +)) }
+        let tags = SoakMemory.byTag().prefix(AppHealth.Memory.Split.shownTags).map { AppHealth.Memory.Split.Tag(name: SoakMemory.name($0.tag), mb: $0.mb) }
+        return AppHealth.Memory.Split(mallocInUse: total(" in use"), mallocAllocated: total(" allocated"), graphics: mb(kinds["graphics"] ?? 0),
+                                      compressed: mb(kinds["compressed"] ?? 0), tags: Array(tags))
     }
 }

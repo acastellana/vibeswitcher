@@ -59,6 +59,148 @@ struct TeamRowsTests {
         #expect(row(review).stateText(now: Self.now) == "In review")
     }
 
+    /// The real refresh -> cached Team rows -> phone path, with only fake sessions and scratch project files.
+    @MainActor private func observedRows(_ board: LeadBoard, team: TeamReading, check: ([TeamRow], LeadController) throws -> Void) throws {
+        let scratch = Scratch()
+        let folder = scratch.url("review-usage")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let root = folder.path
+        let host = HostClient(socketPath: folder.appendingPathComponent("no-host.sock").path)
+        let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { folder }, cwd: { _ in nil }, arguments: { _ in [] }))
+        let controller = LeadController(host: host, store: store,
+            vault: LeadVault(folder: folder.appendingPathComponent("vault"), ask: { _ in throw LeadVault.Refused("none") }),
+            inbox: folder, home: root) { _ in "true" }
+        controller.refreshed(roots: [root], fired: [:], loaded: [root: board], decisions: [:], teams: [root: team], refusals: [:])
+        let rows = PhoneLeads.leads(controller, sections: [], label: { _ in nil }, now: Self.now).first?.rows ?? []
+        try check(rows, controller)
+    }
+
+    private static var reviewLimit: UsageLimit {
+        // Next year's date keeps the pending-start hold current, while pinning the displayed month, day and time.
+        let year = Calendar.current.component(.year, from: Date()) + 1
+        let reset = Calendar.current.date(from: DateComponents(year: year, month: 11, day: 24, hour: 1))!
+        return UsageLimit(said: "You've hit your Fable limit · resets Nov 24 at 1am", resetsAt: reset.timeIntervalSince1970,
+                          at: Date().timeIntervalSince1970, kind: "seven_day")
+    }
+
+    private static func limitedTeam(verifier: String) -> TeamReading {
+        let hosted = HostSession(id: UUID(uuidString: verifier)!, tty: "ttys999", childPID: 1, cwd: "/r", command: "claude",
+            label: "Verifier: limited", agent: "claude", title: "Working", startedAt: now - 600, cols: 80, rows: 24, exit: nil)
+        var team = TeamReading(hosted: [verifier: hosted])
+        team.watched[verifier] = (.usageLimit(reviewLimit), nil, nil)
+        team.workflow.verifierModel = "fable"
+        return team
+    }
+
+    @MainActor @Test func aVerifierStoppedAtTheUsageLimitSaysWhenItResets() throws {
+        var task = Self.task("limited", .review)
+        task.review = .audit
+        task.verifier = UUID().uuidString
+        task.launchedModels = [task.verifier!: "fable"]
+        task.checkpoints = [LeadCheckpoint(text: "Worker finished", at: 0)]
+        var board = LeadBoard()
+        board.tasks = [task]
+        let team = Self.limitedTeam(verifier: task.verifier!)
+        try observedRows(board, team: team) { rows, _ in
+            let row = try #require(rows.first)
+            #expect(row.state == "Waits for Fable")
+            #expect(row.stateText(now: Self.now) == "Waits for Fable")
+            #expect(row.line(summary: "Old summary") == "Fable's limit resets Nov 24, 01:00")
+            #expect(row.since == nil && !row.isLive && row.summaryKey == nil)
+            let phone = PhoneLeads.task(row, now: Self.now)
+            #expect(phone["stateText"] as? String == "Waits for Fable")
+            #expect(phone["line"] as? String == "Fable's limit resets Nov 24, 01:00")
+        }
+    }
+
+    @MainActor @Test func anAuditHeldBeforeItsVerifierStartsShowsTheResetInsteadOfWorkerProgress() throws {
+        var stopped = Self.task("limited", .review)
+        stopped.verifier = UUID().uuidString
+        stopped.launchedModels = [stopped.verifier!: "fable"]
+        var audit = Self.task("pending", .review)
+        audit.review = .audit
+        audit.checkpoints = [LeadCheckpoint(text: "Worker finished", at: 0)]
+        var sensitive = Self.task("sensitive", .review)
+        sensitive.review = .none
+        sensitive.auditNeeded = "It touches sensitive_paths (Sources/Sensitive.swift), so it is audited."
+        sensitive.checkpoints = audit.checkpoints
+        var board = LeadBoard()
+        board.tasks = [stopped, audit, sensitive]
+        let team = Self.limitedTeam(verifier: stopped.verifier!)
+        try observedRows(board, team: team) { rows, controller in
+            for row in rows where row.id != stopped.id {
+                #expect(row.state == "Waits for Fable")
+                #expect(row.line(summary: "Old worker summary") == "Fable's limit resets Nov 24, 01:00")
+                #expect(row.since == nil)
+                #expect(PhoneLeads.task(row, now: Self.now)["line"] as? String == "Fable's limit resets Nov 24, 01:00")
+            }
+            #expect(rows.count == 3)
+            // The hold disappearing with the next observation invalidates the row cache, with no board change.
+            controller.refreshed(roots: [controller.boards.keys.first!], fired: [:], loaded: controller.boards,
+                                 decisions: [:], teams: [:], refusals: [:])
+            let released = PhoneLeads.leads(controller, sections: [], label: { _ in nil }, now: Self.now).first?.rows
+            #expect(released?.first { $0.id == audit.id }?.state == "In review")
+            #expect(released?.first { $0.id == sensitive.id }?.state == "Needs audit")
+        }
+    }
+
+    @MainActor @Test func aWorkingVerifierKeepsReviewingWhileNewAuditsAreHeld() throws {
+        var stopped = Self.task("limited", .review)
+        stopped.verifier = UUID().uuidString
+        stopped.launchedModels = [stopped.verifier!: "fable"]
+        var working = Self.task("active", .review)
+        working.verifier = UUID().uuidString
+        var board = LeadBoard()
+        board.tasks = [stopped, working]
+        var team = Self.limitedTeam(verifier: stopped.verifier!)
+        team.hosted[working.verifier!] = HostSession(id: UUID(uuidString: working.verifier!)!, tty: "ttys998", childPID: 1, cwd: "/r",
+            command: "claude", label: "Verifier: active", agent: "claude", title: "Working", startedAt: Self.now - 600,
+            cols: 80, rows: 24, exit: nil)
+        team.watched[working.verifier!] = (.working("Checking the work"), nil, nil)
+        try observedRows(board, team: team) { rows, _ in
+            #expect(rows.first { $0.id == working.id }?.state == "In review")
+        }
+    }
+
+    @MainActor @Test func aFableOnlyRefusalLeavesAnAuditThatCanStartOnOpusInReview() throws {
+        var stopped = Self.task("limited", .review)
+        stopped.verifier = UUID().uuidString
+        stopped.launchedModels = [stopped.verifier!: "fable"]
+        var pending = Self.task("pending", .review)
+        pending.review = .audit
+        var board = LeadBoard()
+        board.tasks = [stopped, pending]
+        var team = Self.limitedTeam(verifier: stopped.verifier!)
+        var limit = Self.reviewLimit
+        limit.kind = "seven_day_fable"
+        team.watched[stopped.verifier!] = (.usageLimit(limit), nil, nil)
+        try observedRows(board, team: team) { rows, _ in
+            #expect(rows.first { $0.id == stopped.id }?.state == "Waits for Fable")
+            #expect(rows.first { $0.id == pending.id }?.state == "In review")
+        }
+    }
+
+    @MainActor @Test func anOrdinaryAuditUsesItsConfiguredModelForUsageHolds() throws {
+        var stopped = Self.task("limited", .review)
+        stopped.verifier = UUID().uuidString
+        stopped.launchedModels = [stopped.verifier!: "sonnet"]
+        var pending = Self.task("pending", .review)
+        pending.review = .audit
+        pending.auditNeeded = "Its review is audit."
+        var board = LeadBoard()
+        board.tasks = [stopped, pending]
+        var team = Self.limitedTeam(verifier: stopped.verifier!)
+        team.workflow.verifierModel = "sonnet"
+        var limit = Self.reviewLimit
+        limit.kind = "seven_day_sonnet"
+        team.watched[stopped.verifier!] = (.usageLimit(limit), nil, nil)
+        try observedRows(board, team: team) { rows, _ in
+            let row = try #require(rows.first { $0.id == pending.id })
+            #expect(row.state == "Waits for Sonnet")
+            #expect(row.line(summary: "Old summary") == "Sonnet's limit resets Nov 24, 01:00")
+        }
+    }
+
     @Test func aFailedTaskWhoseWorkerWorksAgainIsReworkNotFailed() {
         var task = Self.task("fix", .failed, since: 22 * 60)
         task.setback = LeadSetback(stage: .review, reason: "The test still fails")

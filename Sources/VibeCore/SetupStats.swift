@@ -307,6 +307,8 @@ public final class SetupStatsCollector: @unchecked Sendable {
     /// Says whether a build holds a merge commit, for a project's root and the time its history is read from
     /// (`SetupInstalls.gitContains`; a test gives its own).
     var installsReader: @Sendable (String, Double) -> (String, String) -> Bool = { SetupInstalls.gitContains(root: $0, since: $1) }
+    /// Claude Code's projects folder, where the leads' chat transcripts are (`LeadTokenLedger`'s files name them).
+    var claudeProjects = URL(fileURLWithPath: VibePaths.home).appendingPathComponent(".claude/projects")
     /// The installed app's own build and when it was installed (`SetupInstalls.installedApp`); a test gives its own.
     var installedApp: @Sendable () -> (build: String, at: Double)? = { SetupInstalls.installedApp() }
     private let counter = NSLock()
@@ -409,6 +411,8 @@ public final class SetupStatsCollector: @unchecked Sendable {
                 var source = QualitySource(name: name, tasks: tasks, questions: board.questions,
                                            incidents: incidents(root: root), flakes: board.flakes?.map { ($0.task, $0.at) })
                 source.leadDays = lead?.days
+                source.updates = board.updates
+                source.chat = lead.flatMap { chat($0, since: weeks(ending: range.end).suffix(2).first?.start ?? range.start) }
                 source.installedAt = installs(root: root, tasks: tasks, since: weeks(ending: range.end).suffix(2).first?.start ?? range.start)
                 sources.append((root, source))
             }
@@ -421,8 +425,10 @@ public final class SetupStatsCollector: @unchecked Sendable {
         var stats = SetupStats(range: range, at: at, projects: projects, total: total, mac: mac)
         if !sources.isEmpty {
             sources.sort { $0.root < $1.root }
-            stats.quality = SetupQualityMath.quality(sources.map(\.source), window: window, weeks: weeks(ending: range.end),
-                                                     mergeLines: mergeLines(range), calendar: calendar)
+            let trend = weeks(ending: range.end)
+            let samples = MergeObjectives.samples(home.appendingPathComponent("stats"), from: trend.suffix(2).first?.start ?? range.start, to: range.end)
+            stats.quality = SetupQualityMath.quality(sources.map(\.source), window: window, weeks: trend,
+                                                     mergeLines: mergeLines(range), mergeSamples: samples, calendar: calendar)
             // A project with a board but no lead ledger for the range: its lead's spend isn't in the sum.
             let unledgered = projects.contains { $0.figures != nil && $0.figures?.leadTokens == nil }
             stats.quality?.all.lead = total?.leadTokens.map {
@@ -446,6 +452,22 @@ public final class SetupStatsCollector: @unchecked Sendable {
             + [installedApp()].compactMap { $0 }
         guard !wanted.isEmpty, !seen.isEmpty else { return [:] }
         return SetupInstalls.firstInstalls(merges: wanted, seen: seen, contains: installsReader(root, t0 - 2 * 86_400))
+    }
+
+    /// The lead's chat from its transcripts the ledger names (`LeadLedgerView.transcripts`), those changed since `since`;
+    /// nil when none is there.
+    private func chat(_ lead: LeadLedgerView, since: Date) -> LeadChatTimeline? {
+        var parts: [[LeadChatReader.Event]] = []
+        for key in lead.transcripts {
+            let path = claudeProjects.appendingPathComponent(key).path
+            var info = stat()
+            guard stat(path, &info) == 0, Double(Platform.Files.modified(info).tv_sec) >= since.timeIntervalSince1970 else { continue }
+            let events: [LeadChatReader.Event]? = cached(path) { path in
+                (try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped)).map(LeadChatReader.events)
+            }
+            if let events { parts.append(events) }
+        }
+        return parts.isEmpty ? nil : LeadChatTimeline.merged(parts)
     }
 
     /// The trend's 8 weeks, 7 days each, the last ending at `end`; oldest first.
@@ -940,6 +962,8 @@ struct BoardView {
     var flakes: [(test: String, task: String, at: Double?)]?
     /// The lead's questions to the user (those that don't decode left out).
     var questions: [LeadQuestion]
+    /// The lead's updates (post_update), the board's and its archive's, each once: title and time; not the server's.
+    var updates: [(title: String, at: Double)] = []
 
     init?(path: String) {
         var info = stat()
@@ -955,9 +979,18 @@ struct BoardView {
         // The closed questions the board's archive took (`BoardStore.archive`) count here too, each once.
         let archivePath = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent("board-archive.jsonl")
         var archived: [String: LeadQuestion] = [:]
+        var updateTimes: [String: (title: String, at: Double)] = [:]
+        func update(_ object: Any?) -> (id: String, title: String, at: Double)? {
+            guard let fields = object as? [String: Any], let id = fields["id"] as? String, let at = number(fields["at"]) else { return nil }
+            return (id, fields["title"] as? String ?? "", at)
+        }
         for line in SetupStatsCollector.jsonLines(archivePath) ?? [] {
             if let object = line["question"], let question = decoded(object) { archived[question.id] = question }
+            if let found = update(line["update"]) { updateTimes[found.id] = (found.title, found.at) }
         }
+        for found in (board["updates"] as? [Any] ?? []).compactMap(update) { updateTimes[found.id] = (found.title, found.at) }
+        // The lead's only: not the moves of the base the server or the app took and posted (`LeadMessages.isLeadsUpdate`).
+        updates = updateTimes.values.filter { LeadMessages.isLeadsUpdate($0.title) }.sorted { $0.at < $1.at }
         let onBoard = Set(questions.map(\.id))
         questions += archived.values.filter { !onBoard.contains($0.id) }
         flakes = (board["flakes"] as? [Any]).map { entries in
@@ -1008,6 +1041,8 @@ struct RecorderLine {
 struct LeadLedgerView {
     var since: Double?
     var days: [String: (tokens: Int, cost: Double, unpriced: Bool)]
+    /// The lead's own chat transcripts (not its subagents'), by their path under Claude's projects folder.
+    var transcripts: [String] = []
 
     init?(path: String) {
         guard let data = FileManager.default.contents(atPath: path),
@@ -1020,6 +1055,9 @@ struct LeadLedgerView {
             let unpriced = !((tally["unpriced"] as? [Any])?.isEmpty ?? true)
             days[day] = (tokens, number(tally["cost"]) ?? 0, unpriced)
         }
+        transcripts = (ledger["files"] as? [String: Any] ?? [:]).compactMap { key, mark in
+            (mark as? [String: Any])?["lead"] as? Bool == true && !key.contains("/subagents/") ? key : nil
+        }.sorted()
     }
 }
 

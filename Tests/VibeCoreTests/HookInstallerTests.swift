@@ -230,6 +230,109 @@ extension HookInstallerTests {
         }
     }
 
+    /// A hook of the user's own, as Claude Code's settings hold one: a group whose `hooks` array (the same name as the
+    /// top-level key) has a handler with a `true`, an integer, a float and a null beside its command.
+    private static let usersHooks = """
+    {
+        "Stop": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "\\"$HOME/bin/say\\" \\"✓ turn finished é\\" 2>/dev/null || true",
+                "async": true,
+                "once": false,
+                "timeout": 30,
+                "backoff": 0.5,
+                "shell": null
+              }
+            ]
+          }
+        ]
+      }
+    """
+
+    /// The user's handler in `config`'s Stop event, when every value in it is still what `usersHooks` wrote, of the
+    /// same kind: a `true` that came back as 1, or a 30 as 30.5, isn't.
+    private func usersHandlerIsIntact(_ config: [String: Any]) -> Bool {
+        let stop = (config["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]] ?? []
+        guard let handler = (stop.first?["hooks"] as? [[String: Any]])?.first, handler.count == 7,
+              let async = handler["async"] as? NSNumber, let once = handler["once"] as? NSNumber,
+              let timeout = handler["timeout"] as? NSNumber, let backoff = handler["backoff"] as? NSNumber
+        else { return false }
+        return handler["type"] as? String == "command"
+            && handler["command"] as? String == "\"$HOME/bin/say\" \"✓ turn finished é\" 2>/dev/null || true"
+            && Platform.isBoolean(async) && async.boolValue && Platform.isBoolean(once) && !once.boolValue
+            && !Platform.isBoolean(timeout) && timeout.stringValue == "30"
+            && !Platform.isBoolean(backoff) && backoff.doubleValue == 0.5
+            && handler["shell"] is NSNull
+    }
+
+    /// The repro, from the first Linux node (2026-11-19): `vibeswitcher hooks install` on a settings.json with a hook
+    /// of the user's own ended "NSCocoaErrorDomain error 512", the edit's own check that the file it is about to
+    /// write reads back as the config it meant, and no hook was written. Each kind of value is tried alone beside
+    /// the user's hooks, so a failure names the one that broke it.
+    @Test func aSettingsFileWithAnyKindOfValueTakesOurHooksAndGivesThemBack() throws {
+        let scratch = Scratch()
+        let folder = try folder(scratch)
+        let members = [
+            ("only the user's hooks", ""),
+            ("a true", "\"alwaysThinkingEnabled\": true,\n  "),
+            ("a false", "\"autoUpdate\": false,\n  "),
+            ("an integer", "\"lastShownTime\": 1754063019868,\n  "),
+            ("a float", "\"temperature\": 0.1,\n  "),
+            ("a null", "\"apiKeyHelper\": null,\n  "),
+            ("a unicode string", "\"greeting\": \"✓ é \\u00e9 \\ud83d\\ude00 a\\/b\",\n  "),
+            ("a $schema", "\"$schema\": \"https://json.schemastore.org/claude-code-settings.json\",\n  "),
+            ("a nested key of the same name", "\"env\": {\"hooks\": {\"hooks\": [true, 1, null]}},\n  "),
+            ("a true inside an object", "\"enabledPlugins\": {\"code-review@claude-code-plugins\": true, \"design@synced\": false},\n  "),
+        ]
+        for agent in Agent.allCases {
+            for (index, (name, member)) in members.enumerated() {
+                let url = folder.appendingPathComponent("\(agent.rawValue)-\(index).json")
+                let head = "{\n  \(member)\"hooks\": "
+                let tail = ",\n  \"statusLine\": {\"type\": \"command\", \"hooks\": [true], \"padding\": 0}\n}\n"
+                try Data((head + Self.usersHooks + tail).utf8).write(to: url)
+                do {
+                    try HookInstaller.install(agent: agent, at: url, hookBinary: Self.binary)
+                    let installed = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+                    // Outside the `hooks` value every byte is the user's.
+                    #expect(installed.hasPrefix(head + "{") && installed.hasSuffix("}" + tail), "\(agent) \(name)")
+                    let config = try HookInstaller.readConfigThrowing(url)
+                    #expect(HookInstaller.isComplete(in: config, agent: agent), "\(agent) \(name)")
+                    #expect(usersHandlerIsIntact(config), "\(agent) \(name): \(installed)")
+                    #expect(installed.filter { !$0.isWhitespace }.contains("\"async\":true,"), "\(agent) \(name)")
+
+                    // Installed again over a right install: nothing to do, and nothing written.
+                    let past = Date(timeIntervalSince1970: 1_700_000_000)
+                    try FileManager.default.setAttributes([.modificationDate: past], ofItemAtPath: url.path)
+                    try HookInstaller.install(agent: agent, at: url, hookBinary: Self.binary)
+                    #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date == past,
+                            "\(agent) \(name)")
+
+                    try HookInstaller.uninstall(agent: agent, at: url)
+                    let removed = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+                    #expect(removed.hasPrefix(head + "{") && removed.hasSuffix("}" + tail), "\(agent) \(name)")
+                    let left = try HookInstaller.readConfigThrowing(url)
+                    #expect(!HookInstaller.isInstalled(in: left) && usersHandlerIsIntact(left), "\(agent) \(name): \(removed)")
+                    #expect((left["hooks"] as? [String: Any])?.keys.sorted() == ["Stop"], "\(agent) \(name)")
+
+                    // The `hooks` value is now as the installer writes one. From here an install and an uninstall
+                    // give the whole file back, byte for byte, and an uninstall with nothing of ours writes nothing.
+                    try HookInstaller.install(agent: agent, at: url, hookBinary: Self.binary)
+                    try HookInstaller.uninstall(agent: agent, at: url)
+                    #expect(String(decoding: try Data(contentsOf: url), as: UTF8.self) == removed, "\(agent) \(name)")
+                    try FileManager.default.setAttributes([.modificationDate: past], ofItemAtPath: url.path)
+                    try HookInstaller.uninstall(agent: agent, at: url)
+                    #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date == past,
+                            "\(agent) \(name)")
+                } catch {
+                    Issue.record("\(agent), \(name): \(error)")
+                }
+            }
+        }
+    }
+
     /// The file is checked again just before the rename: a change made after it was read (Claude saving its
     /// settings) is not overwritten.
     @Test func aChangeMadeWhileEditingIsNotLost() throws {

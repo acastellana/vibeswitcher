@@ -58,6 +58,14 @@ export function clock(iso) {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
 }
 
+// 14:03 for a moment of today, "Nov 16, 14:03" for one of another day.
+export function moment(iso, now = Date.now()) {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  if (at.toDateString() === new Date(now).toDateString()) return clock(iso);
+  return `${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${clock(iso)}`;
+}
+
 // "in 8 min", "in 45 s", "now": how long a question's timer has left (the Mac's question card).
 export function until(iso, now = Date.now()) {
   const left = Math.ceil((Date.parse(iso) - now) / 1000);
@@ -104,6 +112,7 @@ export function lastPart(path) {
 }
 
 export const AGENTS = { claude: 'Claude', codex: 'Codex', shell: 'Shell' };
+export const ROLES = { lead: 'Lead', worker: 'Worker', verifier: 'Verifier' };
 
 // ⌘ on a Mac, Ctrl elsewhere; ⌥ on a Mac, Alt elsewhere.
 export const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');

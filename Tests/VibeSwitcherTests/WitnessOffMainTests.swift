@@ -186,14 +186,16 @@ struct WitnessOffMainTests {
         #expect(wall.allSatisfy { $0 < 50 })
 
         // Every computation ran, off the main thread; the looks are applied on it.
-        let look = ["withoutTools", "endedForAdvance", "leftToAdvance", "releasableForAdvance", "unbuiltMessages", "stuckPrompts", "working", "stalls"]
+        let look = ["withoutTools", "endedForAdvance", "leftToAdvance", "releasableForAdvance", "stopsForAdvance", "unbuiltMessages", "stuckPrompts", "working", "stalls"]
         #expect(steps.all.filter { $0.step != "applied" }.map(\.step) == look + look + look)
         #expect(steps.all.allSatisfy { $0.main == ($0.step == "applied") })
         // The stall is on the board, and told to the lead once.
         func told() -> [SteerMessage] { SteerInbox.pending(tty: leadTTY, root: inbox).filter { $0.text.contains("The worker on \(slug) is stalled:") } }
         #expect(await until { BoardStore(root: root).load().tasks.first?.stall?.reason == .idle })
         #expect(told().count == 1)
-        // As is that it stopped without calling report: two events, each told once.
-        #expect(SteerInbox.pending(tty: leadTTY, root: inbox).filter { $0.text.contains(slug) }.count == 2)
+        // That it stopped without calling report goes to auto_advance, its loop running: recorded on the board for it to
+        // nudge the worker once (`LeadStopNudge`), and not told to the lead.
+        #expect(await until { BoardStore(root: root).load().tasks.first?.stopNudge?.worker == id.uuidString })
+        #expect(SteerInbox.pending(tty: leadTTY, root: inbox).filter { $0.text.contains(slug) }.count == 1)
     }
 }

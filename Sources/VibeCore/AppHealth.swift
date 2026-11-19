@@ -36,8 +36,12 @@ public enum AppHealth {
     public static let keptForReuse = "macOS returned no pages (freed memory is kept for reuse)"
 
     /// A footprint relief's app.log line: the footprint before and after (MB) and how long it held malloc's locks.
-    public static func reliefLine(before: Double, after: Double, took: Double) -> String {
+    /// With `split`, what the footprint was made of just before (`Memory.Split`) and how long reading it took (ms):
+    /// a night's growth then says whether it's malloc's live blocks, its free pages, graphics or another VM tag
+    /// (2026-11-18: 262 → 713 MB overnight, and the footprint alone named nothing).
+    public static func reliefLine(before: Double, after: Double, took: Double, split: Memory.Split? = nil, readIn: Double? = nil) -> String {
         String(format: "footprint relief: %.0f → %.0f MB in %.0f ms", before, after, took) + (freedNothing(before: before, after: after) ? ": \(keptForReuse)" : "")
+            + (split.map { "; " + $0.text + (readIn.map { String(format: " (read in %.1f ms)", $0) } ?? "") } ?? "")
     }
 
     /// Less than 1 MB given back.
@@ -717,10 +721,56 @@ public enum AppHealth {
         public struct Relief: Equatable, Sendable {
             public var before: Double
             public var after: Double
+            /// What the footprint was made of when it ran; nil when it wasn't read.
+            public var split: Split?
 
-            public init(before: Double, after: Double) {
+            public init(before: Double, after: Double, split: Split? = nil) {
                 self.before = before
                 self.after = after
+                self.split = split
+            }
+        }
+
+        /// What the app's footprint is made of, from its own task_info, malloc's zones and a walk of its own VM regions
+        /// (never another process): numbers and VM tag names only (MB).
+        public struct Split: Equatable, Sendable {
+            /// Malloc's blocks in use, and what its zones hold in all (in use and free pages kept for reuse).
+            public var mallocInUse: Double
+            public var mallocAllocated: Double
+            /// The graphics ledger (IOSurfaces, Metal: what drawing takes) and what the system compressed.
+            public var graphics: Double
+            public var compressed: Double
+            /// The largest VM tags by private dirty and swapped memory, largest first (`shownTags` of them are told).
+            public var tags: [Tag]
+
+            public struct Tag: Equatable, Sendable {
+                public var name: String
+                public var mb: Double
+
+                public init(name: String, mb: Double) {
+                    self.name = name
+                    self.mb = mb
+                }
+            }
+
+            /// How many tags a line names.
+            public static let shownTags = 4
+
+            public init(mallocInUse: Double, mallocAllocated: Double, graphics: Double, compressed: Double, tags: [Tag]) {
+                self.mallocInUse = mallocInUse
+                self.mallocAllocated = mallocAllocated
+                self.graphics = graphics
+                self.compressed = compressed
+                self.tags = tags
+            }
+
+            /// "malloc 420 in use / 510 allocated (90 free), graphics 110, compressed 40, top tags: malloc small 300, IOSurface 50".
+            public var text: String {
+                let free = max(0, mallocAllocated - mallocInUse)
+                let top = tags.sorted { $0.mb > $1.mb }.prefix(Self.shownTags).map { String(format: "%@ %.0f", $0.name, $0.mb) }
+                return String(format: "malloc %.0f in use / %.0f allocated (%.0f free), graphics %.0f, compressed %.0f", mallocInUse,
+                              mallocAllocated, free, graphics, compressed)
+                    + (top.isEmpty ? "" : ", top tags: " + top.joined(separator: ", "))
             }
         }
 
@@ -810,6 +860,8 @@ public enum AppHealth {
         /// How many looks the day's trend waited for the app's sleep ledger to reach the day's end (see `look`); nil
         /// while it doesn't wait.
         public var sleepWaits: Int?
+        /// The memory benches' failing run last told (`MemoryBench.Record`'s day and commit), so each is told once.
+        public var benchTold: String?
 
         public struct Told: Codable, Equatable, Sendable {
             public var at: Double
@@ -877,7 +929,10 @@ public enum AppHealth {
         /// What's due now: the digest under way once `window` has passed since it opened, and a day's trend once a
         /// later day starts. Each goes into `pending`; `AppHealthWatcher` hands those to the lead. `sleep`: what the
         /// Mac's sleep paused (`SleepCost`), read for the trend.
-        public mutating func look(now: Date, folders: Folders, memory: Memory?, sleep: () -> SleepCost? = { nil }) {
+        /// `bench`: the memory benches' last run (`MemoryBench`), told once when a budget failed.
+        public mutating func look(now: Date, folders: Folders, memory: Memory?, sleep: () -> SleepCost? = { nil },
+                                  bench: () -> MemoryBench.Record? = { nil }) {
+            if let record = bench(), let report = benchReport(record) { pending.append(report) }
             if let opened, now.timeIntervalSince1970 >= opened + AppHealth.window {
                 if let digest = digest(now: now, folders: folders) { pending.append(digest) }
             }
@@ -992,6 +1047,32 @@ public enum AppHealth {
             return Redaction.secrets(in: parts.joined(separator: "\n"))
         }
 
+        /// The memory benches' run, when one of its budgets failed and it wasn't told yet: a line a failing budget,
+        /// naming it, its number and limit, and the subjects of the commits since the last run that passed.
+        mutating func benchReport(_ record: MemoryBench.Record) -> String? {
+            let key = "\(record.day) \(record.commit)"
+            let failing = record.failing
+            guard !failing.isEmpty, benchTold != key else { return nil }
+            benchTold = key
+            let commit = String(record.commit.prefix(8))
+            let since: String
+            if let last = record.lastPass {
+                let subjects = record.sincePass ?? []
+                since = subjects.isEmpty
+                    ? "no commits since the last pass (\(last.prefix(8))): the same code passed before"
+                    : "commits since the last pass (\(last.prefix(8))): " + subjects.map { "\"\($0)\"" }.joined(separator: "; ")
+                        + (subjects.count >= MemoryBench.sinceLimit ? " (the newest \(MemoryBench.sinceLimit))" : "")
+            } else {
+                since = "no run has passed yet to compare with"
+            }
+            var parts = ["VibeSwitcher's memory benches, run by VibeSwitcher itself (no model) on main at \(commit) on \(record.day), "
+                         + "failed \(failing.count == 1 ? "a budget" : "\(failing.count) budgets") (~/.vibeswitcher/stats/\(MemoryBench.statsName)):"]
+            parts += failing.map { "- memory budget failed: \($0.text); \(since)" }
+            parts.append("Turn what's a real bug into a task (one already on the board needs nothing); the run's whole output is in "
+                         + "~/.vibeswitcher/\(MemoryBench.folderName)/last-run.log until the next run.")
+            return Redaction.secrets(in: parts.joined(separator: "\n"))
+        }
+
         /// How long a freeze's sample is waited for before it's told without one.
         static let sampleWait: TimeInterval = 120
 
@@ -1061,6 +1142,8 @@ public enum AppHealth {
                     parts.append(String(format: "The last footprint relief freed nothing (%.0f → %.0f MB): %@.", relief.before, relief.after,
                                         AppHealth.keptForReuse))
                 }
+                // What the footprint was made of then: what a growth's cause is looked for in.
+                if let split = memory.relief?.split { parts.append("At the last relief: \(split.text).") }
             }
             if !repeats.isEmpty {
                 parts.append("Seen again since told, not told again: " + repeats.map { "\($0.key) ×\($0.value.repeats) (first \($0.value.first))" }.joined(separator: "; ") + ".")

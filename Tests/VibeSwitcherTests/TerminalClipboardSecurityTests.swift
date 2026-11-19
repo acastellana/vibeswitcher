@@ -83,7 +83,7 @@ struct TerminalClipboardSecurityTests {
             let replayed = Data("REPLAYED".utf8).base64EncodedString()
             var result: Result<HostSession, HostClientError>?
             host.spawn(SpawnRequest(cwd: scratchRoot.path,
-                                    command: "stty -echo; printf '\\033]52;c;\(replayed)\\007'; echo '\(name) ready'; "
+                                    command: "\(jobControlOff)stty -echo; printf '\\033]52;c;\(replayed)\\007'; echo '\(name) ready'; "
                                         + "while read b m; do printf '\\033]52;c;%s\\007%s\\n' \"$b\" \"$m\"; done",
                                     env: [:], cols: 100, rows: 30, keepShell: false, label: name, agent: nil)) { result = $0 }
             #expect(await until { result != nil })

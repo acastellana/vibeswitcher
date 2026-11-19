@@ -37,15 +37,35 @@ struct LeadReceiptTests: LeadTeamFixture {
     /// One transcript line of an API response, as Claude Code writes it (one per content block, the usage repeated).
     static func response(_ id: String, _ model: String, input: Int, output: Int, read: Int = 0, write: Int = 0, write1h: Int = 0,
                          at time: Double, session: String = "s", block: Int = 0) -> String {
-        let usage: [String: Any] = ["input_tokens": input, "output_tokens": output, "cache_read_input_tokens": read,
+        advisedResponse(id, model, input: input, output: output, read: read, write: write, write1h: write1h, at: time, session: session, block: block)
+    }
+
+    /// As `response`, with the advisor calls it made (each `advisor(…)`): its usage lists them in `iterations` after
+    /// the executor's own, as the API reports a response that consulted the advisor tool.
+    static func advisedResponse(_ id: String, _ model: String, input: Int, output: Int, read: Int = 0, write: Int = 0, write1h: Int = 0,
+                                at time: Double, session: String = "s", block: Int = 0, advisor: [[String: Any]] = []) -> String {
+        var usage: [String: Any] = ["input_tokens": input, "output_tokens": output, "cache_read_input_tokens": read,
                                     "cache_creation_input_tokens": write,
                                     "cache_creation": ["ephemeral_1h_input_tokens": write1h, "ephemeral_5m_input_tokens": write - write1h],
                                     "service_tier": "standard", "speed": "standard"]
+        if !advisor.isEmpty {
+            let own: [String: Any] = ["type": "message", "input_tokens": input, "output_tokens": output, "cache_read_input_tokens": read,
+                                      "cache_creation_input_tokens": write]
+            usage["iterations"] = [own] + advisor
+        }
         let line: [String: Any] = ["type": "assistant", "uuid": UUID().uuidString, "sessionId": session, "timestamp": stamp(time),
                                    "requestId": "req_\(id)", "apiBlockIndex": block,
                                    "message": ["id": id, "model": model, "role": "assistant", "type": "message",
                                                "content": [["type": "text", "text": "SECRET-TRANSCRIPT-TEXT"]], "usage": usage]]
         return String(decoding: try! JSONSerialization.data(withJSONObject: line, options: [.sortedKeys]), as: UTF8.self)
+    }
+
+    /// One advisor call in a response's `iterations` (no cache: Claude Code's advisor neither reads nor writes one).
+    static func advisor(_ model: String?, input: Int, output: Int, read: Int = 0) -> [String: Any] {
+        var step: [String: Any] = ["type": "advisor_message", "input_tokens": input, "output_tokens": output,
+                                   "cache_read_input_tokens": read, "cache_creation_input_tokens": 0]
+        if let model { step["model"] = model }
+        return step
     }
 
     static func named(_ name: String, session: String) -> [String] {
@@ -151,8 +171,101 @@ struct LeadReceiptTests: LeadTeamFixture {
         #expect(LeadReceiptTotals([task])?.text.contains("cost unknown") == true)
     }
 
+    @Test func fable52AndMythos52ArePricedWithCacheWritesAtTheTablesMultiples() throws {
+        for model in ["claude-fable-5-2", "claude-mythos-5-2", "claude-fable-5-2[1m]"] {
+            let price = try #require(LeadPrices.price(model), "\(model)")
+            #expect(price.input == 8 && price.output == 40 && price.cacheRead == 0.20, "\(model)")
+        }
+        let root = try repo()
+        let start = Date().timeIntervalSince1970
+        try transcript("w", Self.named("worker-five", session: "w") + [
+            Self.response("m1", "claude-fable-5-2", input: 100, output: 1000, read: 100_000, write: 4000, write1h: 2000, at: start + 1),
+        ], root: root, slug: "five")
+        let worker = try #require(LeadReceipts.usage(root: root, slug: "five", since: start, home: home).worker)
+        #expect(worker.unpriced == nil && worker.models == ["claude-fable-5-2"])
+        // 100 × $8 + 1000 × $40 + 100k × $0.20 + 2000 × $16 (1-hour writes, 2× input) + 2000 × $10 (5-minute, 1.25×), per million.
+        #expect(abs((worker.cost ?? -1) - 0.1128) < 1e-9, "\(String(describing: worker.cost))")
+    }
+
+    // MARK: Advisor calls
+
+    @Test func advisorCallsAreCountedByTheAdvisorsModelAndShownAsTheirOwnPart() throws {
+        let root = try repo()
+        let start = Date().timeIntervalSince1970
+        // An Opus worker that consulted a Fable 5.2 advisor once: the line written twice (two content blocks), the call once.
+        let consulted = Self.advisedResponse("m1", "claude-opus-5-5", input: 10, output: 100, read: 1000, at: start + 1,
+                                      advisor: [Self.advisor("claude-fable-5-2", input: 50_000, output: 2000)])
+        try transcript("w", Self.named("worker-adv", session: "w") + [
+            consulted, consulted.replacingOccurrences(of: "\"apiBlockIndex\":0", with: "\"apiBlockIndex\":1"),
+            Self.response("m2", "claude-opus-5-5", input: 5, output: 50, at: start + 2),
+        ], root: root, slug: "adv")
+        let usage = LeadReceipts.usage(root: root, slug: "adv", since: start, home: home)
+        let worker = try #require(usage.worker)
+        let advisor = try #require(worker.advisor)
+        #expect(advisor.calls == 1 && advisor.input == 50_000 && advisor.output == 2000 && advisor.cacheRead == 0 && advisor.cacheWrite == 0)
+        #expect(advisor.models == ["claude-fable-5-2"] && advisor.unpriced == nil)
+        // 50k × $8 + 2000 × $40, per million, at the advisor's model's prices.
+        #expect(abs((advisor.cost ?? -1) - 0.48) < 1e-9, "\(String(describing: advisor.cost))")
+        // In the role's tokens and cost; its models stay the ones its sessions ran on.
+        #expect(worker.input == 50_015 && worker.output == 2150 && worker.cacheRead == 1000 && worker.models == ["claude-opus-5-5"])
+        // The executor's: 15 × $4 + 150 × $20 + 1000 × $0.20.
+        #expect(abs((worker.cost ?? -1) - (0.48 + 0.00326)) < 1e-9, "\(String(describing: worker.cost))")
+
+        var task = LeadTask(slug: "adv", title: "Adv", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""))
+        task.startedAt = start
+        let receipt = LeadReceipt(task, ending: .merged, questions: [], usage: usage, now: start + 600)
+        #expect(abs((receipt.cost ?? -1) - 0.48326) < 1e-9)
+        #expect(receipt.line.contains("advisor (in those tokens): worker's 1 call, 52.0k tokens (in 50.0k, out 2.0k; claude-fable-5-2), est. $0.48"),
+                "\(receipt.line)")
+        // Stored and read back (receipts from before it decode with none).
+        let decoded = try JSONDecoder().decode(LeadReceipt.self, from: JSONEncoder().encode(receipt))
+        #expect(decoded == receipt && decoded.worker?.advisor?.calls == 1)
+        let old = try JSONDecoder().decode(LeadTokens.self, from: Data(#"{"input":1,"output":2,"cacheRead":0,"cacheWrite":0,"cacheWrite1h":0,"sessions":1,"models":[]}"#.utf8))
+        #expect(old.advisor == nil)
+        // A role with no advisor call shows no advisor part.
+        #expect(!LeadReceipt(task, ending: .merged, questions: [], usage: .init(worker: LeadTokens(input: 1, models: ["claude-opus-5-5"])), now: start + 600)
+            .line.contains("advisor"))
+    }
+
+    @Test func anAdvisorOnAModelWithNoPriceLeavesTheCostUnknownWithItsTokens() throws {
+        let root = try repo()
+        let start = Date().timeIntervalSince1970
+        try transcript("v", Self.named("verify-adv", session: "v") + [
+            Self.advisedResponse("m1", "claude-opus-5-5", input: 10, output: 100, at: start + 1,
+                                 advisor: [Self.advisor("claude-newadvisor-9", input: 3000, output: 300), Self.advisor(nil, input: 7000, output: 700)]),
+        ], root: root, slug: "adv")
+        let usage = LeadReceipts.usage(root: root, slug: "adv", since: start, home: home)
+        let verifier = try #require(usage.verifier)
+        let advisor = try #require(verifier.advisor)
+        #expect(advisor.calls == 2 && advisor.total == 11_000 && advisor.cost == nil, "\(advisor)")
+        #expect(advisor.unpriced == ["advisor", "claude-newadvisor-9"] && verifier.unpriced == ["advisor", "claude-newadvisor-9"])
+        #expect(verifier.cost == nil && verifier.total == 11_110)
+        var task = LeadTask(slug: "adv", title: "Adv", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""))
+        task.startedAt = start
+        let receipt = LeadReceipt(task, ending: .abandoned, questions: [], usage: usage, now: start + 600)
+        #expect(receipt.cost == nil)
+        #expect(receipt.line.contains("verifier's 2 calls, 11.0k tokens") && receipt.line.contains("cost unknown (no price for advisor, claude-newadvisor-9)"),
+                "\(receipt.line)")
+        #expect(!receipt.line.contains("$"), "\(receipt.line)")
+    }
+
+    @Test func aWorkersCodexAndClaudeSessionsCombinedKeepTheirAdvisorCalls() {
+        let advised = LeadTokens(input: 100, sessions: 1, models: ["claude-opus-5-5"], cost: 1,
+                                 advisor: LeadAdvisorTokens(calls: 2, input: 90, models: ["claude-fable-5-2"], cost: 0.5))
+        let other = LeadTokens(input: 10, sessions: 1, models: ["gpt-6.1-sol"], cost: 0.1, codex: 10)
+        let sum = LeadReceipts.combined(advised, other)
+        #expect(sum.advisor == advised.advisor && LeadReceipts.combined(other, advised).advisor == advised.advisor)
+        let twice = LeadReceipts.combined(advised, advised).advisor
+        #expect(twice?.calls == 4 && twice?.input == 180 && twice?.cost == 1.0)
+        let unknown = LeadReceipts.combined(advised, LeadTokens(input: 1, advisor: LeadAdvisorTokens(calls: 1, input: 1, cost: nil, unpriced: ["x"])))
+        #expect(unknown.advisor?.cost == nil && unknown.advisor?.unpriced == ["x"])
+    }
+
     @Test func pricesComeFromOneTableWithTheirDate() {
-        #expect(LeadPrices.asOf == "2026-10-06")
+        #expect(LeadPrices.asOf == "2026-11-18")
+        #expect(LeadPrices.price("claude-sonnet-5-5")?.cacheRead == 0.10)
+        #expect(LeadPrices.price("claude-haiku-5-5")?.input == 0.10 && LeadPrices.price("claude-haiku-5-5")?.output == 0.50)
+        #expect(LeadPrices.price("claude-fable-5-1")?.input == 10 && LeadPrices.price("claude-fable-5-1")?.output == 50)
         #expect(LeadPrices.price("claude-opus-5-5")?.input == 4)
         #expect(LeadPrices.price("claude-opus-5-5[1m]")?.output == 20)
         #expect(LeadPrices.price("claude-fable-5-1")?.cacheRead == 0.25)

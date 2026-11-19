@@ -754,6 +754,39 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(AppHealth.reliefLine(before: 232, after: 204, took: 21) == "footprint relief: 232 → 204 MB in 21 ms")
     }
 
+    /// 2026-11-18: 262 → 713 MB overnight, and the relief lines said only the footprint. Each now says what it was made of:
+    /// malloc's blocks in use and its free pages kept, graphics, compressed and the largest VM tags (numbers and names).
+    static let split = AppHealth.Memory.Split(mallocInUse: 420.4, mallocAllocated: 510.2, graphics: 110, compressed: 40.3, tags: [
+        .init(name: "IOSurface", mb: 50), .init(name: "malloc small", mb: 300.2), .init(name: "untagged (mmap)", mb: 20),
+        .init(name: "malloc tiny", mb: 60), .init(name: "stack", mb: 2),
+    ])
+
+    @Test func aReliefsLogLineSaysWhatTheFootprintIsMadeOf() {
+        #expect(AppHealth.reliefLine(before: 713, after: 713, took: 0, split: Self.split, readIn: 2.34)
+                == "footprint relief: 713 → 713 MB in 0 ms: macOS returned no pages (freed memory is kept for reuse); "
+                + "malloc 420 in use / 510 allocated (90 free), graphics 110, compressed 40, "
+                + "top tags: malloc small 300, malloc tiny 60, IOSurface 50, untagged (mmap) 20 (read in 2.3 ms)")
+        #expect(AppHealth.reliefLine(before: 232, after: 204, took: 21, split: AppHealth.Memory.Split(mallocInUse: 80, mallocAllocated: 70, graphics: 0,
+                                                                                                      compressed: 0, tags: []))
+                == "footprint relief: 232 → 204 MB in 21 ms; malloc 80 in use / 70 allocated (0 free), graphics 0, compressed 0")
+    }
+
+    /// The daily line keeps its words and adds what the footprint was made of at the last relief.
+    @Test func theDailyLineAddsTheLastReliefsSplit() throws {
+        let folders = try folders()
+        var watch = AppHealth.Watch()
+        watch.lookedOn = AppHealth.Watch.day(day(0))
+        let memory = AppHealth.Memory(footprint: 2000, peak: 2100, settled: .init(footprint: 249, at: day(0, hour: 1)), launched: day(0, hour: 0),
+                                      relief: .init(before: 559, after: 559, split: Self.split))
+        watch.look(now: day(1, hour: 0), folders: folders, memory: memory)
+        let trend = try #require(watch.pending.first)
+        #expect(trend.contains("Memory now: footprint 2000 MB, peak 2100 MB since launch 24 h ago, +76 MB an hour since it settled at 249 MB (growing: worth a look)."),
+                "\(trend)")
+        #expect(trend.contains("The last footprint relief freed nothing (559 → 559 MB): macOS returned no pages (freed memory is kept for reuse). "
+                               + "At the last relief: malloc 420 in use / 510 allocated (90 free), graphics 110, compressed 40, "
+                               + "top tags: malloc small 300, malloc tiny 60, IOSurface 50, untagged (mmap) 20."), "\(trend)")
+    }
+
     /// 10-30: launched at 18:30 with a 32 MB footprint (nothing loaded yet), settled at 149 MB once its window,
     /// sessions and chats were up, 186 MB at the digest past midnight: +28 MB an hour counted from launch, about 7
     /// from where it settled. A quiet day with that sends nothing.

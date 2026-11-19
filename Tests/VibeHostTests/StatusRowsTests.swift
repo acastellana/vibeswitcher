@@ -49,6 +49,10 @@ struct StatusRowsTests {
         var fds: [Int32] = [0, 0]
         try #require(socketpair(AF_UNIX, Platform.Sockets.stream, 0, &fds) == 0)
         let (ours, its) = (fds[0], fds[1])
+        // A parser's process ignores SIGPIPE (`runIfAsked`); here it runs in the test's, and may still be writing a
+        // reply or a frame as our end closes below: that write fails, as there, rather than raising SIGPIPE (on Linux,
+        // which has no such option, the run ignores SIGPIPE: TestSupport.swift).
+        for fd in [ours, its] { Platform.Sockets.noSigPipe(socket: fd) }
         // Ends when our end closes.
         Thread {
             SessionParser.run(fd: its, cols: cols, rows: rows, testHooks: false)

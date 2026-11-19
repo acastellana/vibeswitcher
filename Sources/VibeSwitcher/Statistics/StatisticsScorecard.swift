@@ -54,6 +54,8 @@ extension QualityPage {
             help: "From a task's creation to the first install that contained its merge: the installed app (installed when its copy is dated) "
                 + "or a build a later merge's receipt records as the one that ran it, each holding every commit before its own. A merge no "
                 + "recorded build holds yet is not installed yet. n: the merges installed."))
+        figures += mergeFigures(card)
+        figures += messageFigures(card)
         if !card.installs.isEmpty {
             let shown = card.installs.prefix(Self.installRows)
             var lines = shown.map { install in
@@ -66,6 +68,70 @@ extension QualityPage {
                                       + "its merge, or not installed yet."))
         }
         return Section(title: scorecardTitle, figures: figures)
+    }
+
+    /// Each project's merge objectives (`MergeObjectives`): the share of merge runs that passed only on a rerun and the
+    /// calm-Mac median, each with its n and the week before; the project named when there's more than one.
+    static func mergeFigures(_ card: SetupScorecard) -> [Figure] {
+        let w = card.week, p = card.previous
+        var figures: [Figure] = []
+        let named = w.merges.count > 1
+        for current in w.merges {
+            let now = current.objectives
+            let before = p.merges.first { $0.project == current.project }?.objectives ?? MergeObjectives(runs: 0, passedOnRerun: 0, calmRuns: 0, calmMedianS: nil)
+            let suffix = named ? " · \(current.project)" : ""
+            func share(_ o: MergeObjectives) -> String { o.rerunPercent.map(MergeObjectives.percent) ?? none }
+            func verdict(_ o: MergeObjectives) -> String {
+                o.runs == 0 ? "no runs" : !o.rerunsJudged ? "too few runs to judge" : o.rerunsMissed ? "missed" : "met"
+            }
+            figures.append(Figure(
+                label: "Merges passed only on a rerun" + suffix, value: share(now),
+                detail: "n = \(count(now.runs, "merge run")): \(now.passedOnRerun) passed only on a rerun; objective \(Int(MergeObjectives.rerunShare * 100))%: "
+                    + "\(verdict(now)) · the 7 days before: \(share(before)) (n = \(before.runs)), \(verdict(before)) · "
+                    + trend(now.rerunPercent, before.rerunPercent, n: now.runs, before: before.runs, what: "share passed on a rerun"),
+                help: "This project's merge runs that recorded a first test run (a conflict or an error ran none), from the Mac's merge "
+                    + "stats; the share whose first run failed and whose rerun passed: the noise. A run that failed twice is the gate "
+                    + "working, not counted here. Judged from \(MergeObjectives.minimumRuns) runs. n: the merge runs."))
+            func median(_ o: MergeObjectives) -> String { o.calmMedianS.map { "\(StatisticsPage.number($0 / 60)) min" } ?? none }
+            func calmVerdict(_ o: MergeObjectives) -> String { o.calmMedianS == nil ? "no calm-Mac run" : o.calmMissed ? "missed" : "met" }
+            figures.append(Figure(
+                label: "Median calm-Mac merge" + suffix, value: median(now),
+                detail: "n = \(count(now.calmRuns, "calm-Mac run")) of \(now.runs); objective \(Int(MergeObjectives.calmMedian / 60)) min: \(calmVerdict(now)) · "
+                    + "the 7 days before: \(median(before)) (n = \(before.calmRuns)), \(calmVerdict(before)) · "
+                    + trend(now.calmMedianS, before.calmMedianS, n: now.calmRuns, before: before.calmRuns, what: "median merge"),
+                help: "The median time of this project's merge runs that started on a calm Mac (a 1-minute load of at most "
+                    + "\(StatisticsPage.number(MergeObjectives.calmLoad, digits: 0))), from the Mac's merge stats. n: those runs."))
+        }
+        return figures
+    }
+
+    /// The leads' messages to you: per day, by reason, and the share you acted on (`ScorecardMessages`).
+    static func messageFigures(_ card: SetupScorecard) -> [Figure] {
+        let w = card.week.messages, p = card.previous.messages
+        guard w.kept || p.kept else { return [] }
+        func perDay(_ value: Double?) -> String { value.map { StatisticsPage.number($0) } ?? none }
+        func split(_ m: ScorecardMessages) -> String {
+            LeadMessageReason.allCases.map { "\(m.byReason[$0] ?? 0) \($0.label)" }.joined(separator: ", ")
+        }
+        let needing = w.total > 0 ? " · \(percent(Double(w.byReason[.mustAct] ?? 0) / Double(w.total))) needed you to act" : ""
+        let missing = w.chatKept ? "" : " · text replies and shell cards: \(StatisticsPage.notRecorded) (no lead transcript found)"
+        var figures: [Figure] = []
+        figures.append(Figure(
+            label: "Lead's messages to you per day", value: perDay(w.perDay),
+            detail: "n = \(count(w.total, "message")): \(split(w))\(needing)\(missing) · the 7 days before: \(perDay(p.perDay)) a day "
+                + "(n = \(p.total): \(split(p))) · " + trend(w.perDay, p.perDay, n: w.total, before: p.total, what: "messages per day"),
+            help: "What the project leads sent you, by the tool they used, never by what it says: you must act (ask_user, a vs-shell "
+                + "card), finished or a problem (post_update), the daily summary (post_update titled \"\(LeadMessages.dailyPrefix)\") and "
+                + "other (the lead's text replies in its chat, one per turn). Over the week's 7 days. n: the messages."))
+        func share(_ m: ScorecardMessages) -> String { m.actedShare.map(percent) ?? none }
+        figures.append(Figure(
+            label: "Lead's messages you acted on", value: share(w),
+            detail: "n = \(count(w.judged, "message")): \(w.acted) acted on within a day · the 7 days before: \(share(p)) (n = \(p.judged)) · "
+                + trend(w.actedShare, p.actedShare, n: w.judged, before: p.judged, what: "share acted on"),
+            help: "Of the leads' messages to you, those you acted on within a day: a question answered (not withdrawn or decided on its "
+                + "timer), a shell card you ran or declined, an update or a reply followed by your message in the lead's chat. A message "
+                + "less than a day old with nothing yet isn't counted. n: the messages counted."))
+        return figures
     }
 
     /// The per-task lines shown at most.

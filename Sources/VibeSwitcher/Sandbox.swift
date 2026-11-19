@@ -1010,7 +1010,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         do {
             // Its board makes the folders it's in.
             try BoardStore(root: root).update { board in
-                board.tasks = tasks.map { LeadTask(slug: $0.0, title: $0.1, contract: contract, status: $0.2) }
+                // In their states since before its conversation (`leadTurns` starts 10 minutes back).
+                board.tasks = tasks.map { item in
+                    var task = LeadTask(slug: item.0, title: item.1, contract: contract, status: item.2)
+                    task.createdAt = Date().timeIntervalSince1970 - 3_600
+                    return task
+                }
                 var question = LeadQuestion(text: "Should the sidebar keep its review badges?", options: ["Keep them", "Drop them"],
                                             at: withdrawnAt - 300)
                 question.withdrawnAt = withdrawnAt
@@ -1305,7 +1310,26 @@ private final class Driver: NSObject, NSApplicationDelegate {
         add("user", "[VibeSwitcher · worker ui-consistency-pass, not the user] The worker on ui-consistency-pass asks: "
             + "Should the unread badge show 99+ past 99, or the exact count?\nAnswer with message(ui-consistency-pass, …).")
         tool("mcp__vibeswitcher__message", ["task": "ui-consistency-pass", "text": "99+"], "Sent.")
-        add("assistant", [["type": "text", "text": "Told it 99+. Waiting on the two blocked tasks."]], usage: true)
+        say("Told it 99+. Waiting on the two blocked tasks.")
+        // A wake-up and a burst of six reports, with the lead's tool runs between them, as the user saw them fill the
+        // lead's chat (2026-11-17): the chat folds them into one line (`ChatUpdates`).
+        func card(_ about: String, _ text: String) { add("user", LeadDelivery.typed(text, from: .system(about))) }
+        card("reports", "6 new reports (auto_advance: Started the audit of git-guard; worker landing-copy done; verifier git-guard failed; 3 more). Call status.")
+        card(LeadAdvance.sender, "VibeSwitcher moved finished work on by itself (auto_advance):\n- Started the audit of git-guard\n"
+            + "The judgement calls stay yours: holds (update_task kept or blocked), re-plans, questions to the user, and post_update for a merge the user would notice.")
+        tool("mcp__vibeswitcher__status", [:], "6 reports.")
+        card("worker landing-copy", "The worker on landing-copy says it's done: the hero copy, the pricing table's footnotes and the FAQ are rewritten.\n"
+            + "Checks: LandingCopyTests 14/14, LintTests passed; sandbox shots in .build/sandbox-shots/landing-*.png.\nRoutine calls: kept the old anchors.")
+        card("verifier git-guard", "The audit of git-guard did not pass: F1 (Important) a commit with a staged secret goes through when the hook runs from a worktree.")
+        card(LeadAdvance.sender, "VibeSwitcher moved finished work on by itself (auto_advance):\n- Released the idle worker on stats-cache\n"
+            + "The judgement calls stay yours: holds (update_task kept or blocked), re-plans, questions to the user, and post_update for a merge the user would notice.")
+        tool("mcp__vibeswitcher__board", [:], "8 tasks.")
+        card(AppHealth.sender, "Crashes (reports in ~/Library/Logs/DiagnosticReports):\n- VibeSwitcher-2026-11-17-101500.ips: EXC_BAD_ACCESS in ChatSync.read\n"
+            + "Turn what's a real bug into a task.")
+        // Its one trouble still current: upload-test is blocked on the board (`task upload-test running` moves it on,
+        // and the line's red mark goes). git-guard isn't on the board any more, and the reply below settles the crash.
+        card("worker upload-test", "The worker on upload-test is blocked: the worker couldn't reproduce the flaky upload on a clean run.")
+        add("assistant", [["type": "text", "text": "Two need you: the git-guard audit failed on a staged secret, and the app crashed once in the chat's reader. I've sent the finding back and filed the crash; upload-test waits on a repro."]], usage: true)
         return (lines.joined(separator: "\n") + "\n", withdrawnAt)
     }
 
@@ -1419,6 +1443,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
         ("inspector team|overview|activity|hide|show", "the inspector on that tab, or collapsed or shown, as its segmented control and Toggle Inspector do"),
         ("board [N]", "adds N finished tasks (default 250) to the fake lead's board (start the lead first)"),
+        ("task SLUG STATUS", "moves a task on the fake lead's board to STATUS (running, blocked, done, abandoned, folded…), as its lead's tools would, and shows the change as a real one is (start the lead first)"),
         ("churn [N]", "changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is"),
         ("publish [N]", "has the lead controller publish N times (default 50), each laid out and drawn, and times them"),
         ("hangs [reset]", "the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait between two beats (reset: from now on)"),
@@ -1429,7 +1454,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("team named", "starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>, verify-<slug>) and moves the lead's agent into its .vibeswitcher/worktrees (start the lead first): its team still folds under it"),
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
-        ("rotation", "shows the scheduled rotation chat line in the selected fake session"),
+        ("rotation", "shows the scheduled rotation chat line in the selected fake session (`rotation idle`: the handover at a long idle)"),
         ("replaced [N]", "shows the selected window session as a lead another session replaced, with N characters (default 200000) typed into it: the header's one line it makes"),
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("leadmail", "writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private lead-mail record, one of them refused, and shows its Team tab: they're under Between leads"),
@@ -1546,6 +1571,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             offer.decide(hostSessions: nil)
             return AnyView(RestartCardView(offer: offer))
         }),
+        // The update card on a made-up version of eight changes, as the update check shows it (`UpdateDesk`): ready
+        // (this Mac's main holds it), with the summary on top; Install & Restart and Later are refused (nothing builds).
+        ("update-card", { driver in AnyView(UpdateCardView(desk: Driver.updateDesk(driver, ready: true))) }),
+        // The same version while GitHub's commits wait for the lead's merge_remote: Install & Restart off.
+        ("update-card-waiting", { driver in AnyView(UpdateCardView(desk: Driver.updateDesk(driver, ready: false))) }),
         ("new-project", { driver in
             AnyView(NewProjectSheet(model: NewProjectModel(location: driver.home + "/projects"),
                                     created: { [weak driver] folder, _ in driver?.refuse("starting a lead in \(folder)") },
@@ -2272,6 +2302,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
         (previous.costed, previous.cost) = (8, 96)
         (previous.leadSpread, previous.leadKept) = (18, true)
         previous.installTimes = [8, 20, 31, 6, 11, 9, 14, 22].map { $0 * 3600 }
+        // Merge objectives: this week 4 of 61 runs passed only on a rerun (missed) and a calm median of 8.4 min; the week
+        // before 16 of 89, 17 min.
+        week.merges = [ScorecardMerges(project: "vibeswitcher", objectives: MergeObjectives(runs: 61, passedOnRerun: 4, calmRuns: 14, calmMedianS: 504))]
+        previous.merges = [ScorecardMerges(project: "vibeswitcher", objectives: MergeObjectives(runs: 89, passedOnRerun: 16, calmRuns: 8, calmMedianS: 1020))]
+        // The leads' messages: 31 this week (12 needing the user, 19 of 29 acted on), 98 the week before.
+        week.messages.byReason = [.mustAct: 12, .finishedOrProblem: 8, .dailySummary: 6, .other: 5]
+        (week.messages.judged, week.messages.acted, week.messages.kept, week.messages.chatKept) = (29, 19, true, true)
+        previous.messages.byReason = [.mustAct: 14, .finishedOrProblem: 41, .dailySummary: 3, .other: 40]
+        (previous.messages.judged, previous.messages.acted, previous.messages.kept, previous.messages.chatKept) = (98, 22, true, true)
         let now = end.timeIntervalSince1970 - day / 2
         let titles = ["Paste images into the chat", "Clean up ended sessions' folders", "Price Codex tokens", "Scorecard in Statistics"]
         let installs = titles.enumerated().map { index, title in
@@ -2279,6 +2318,36 @@ private final class Driver: NSObject, NSApplicationDelegate {
                              installedAt: index == 0 ? nil : now - Double(index + 1) * day + Double(5 + index) * 3600)
         }
         return SetupScorecard(week: week, previous: previous, installs: installs)
+    }
+
+    /// The update card's model on a made-up version: eight changes in three areas since a made-up installed build, a
+    /// summary on top, the checkout in the sandbox's home; when not `ready`, the newest two only on GitHub. Its buttons
+    /// are refused (nothing builds, installs or snoozes).
+    static func updateDesk(_ driver: Driver, ready: Bool) -> UpdateDesk {
+        let subjects = ["Chat: images attached to a prompt load at the size they show, off the main thread",
+                        "Chat: thumbnails decode two at a time",
+                        "Lead: each merge names the build that ran it",
+                        "Statistics: the scorecard counts installs by day",
+                        "Chat: a reply that streams in keeps its place when you scroll up",
+                        "Lead: merge_remote tests GitHub's commits before main moves",
+                        "Settings: the battery limit steps by 5 %",
+                        "Fix the composer losing a draft when the window closes"]
+        let changes = subjects.enumerated().map { index, subject in
+            AppUpdate.Change(id: String(repeating: String(index, radix: 16), count: 40), subject: subject)
+        }
+        let offer = AppUpdate.Offer(installed: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", head: changes[ready ? 0 : 2].id,
+                                    tip: changes[0].id, newest: changes[0].id, changes: changes, waiting: ready ? 0 : 2,
+                                    summary: "Chats with lots of images open faster and use less memory, and a long reply keeps your place as it streams. The lead now names the build behind each merge and tests commits from your other Mac before they land.")
+        let desk = UpdateDesk()
+        desk.checkout = driver.home + "/projects/vibeswitcher"
+        desk.install = { [weak driver, weak desk] _ in
+            driver?.refuse("installing an update")
+            desk?.refused("The sandbox doesn't install.")
+        }
+        desk.later = { [weak driver] _ in driver?.refuse("snoozing an update") }
+        desk.close = { [weak driver] in driver?.closeSheet() }
+        desk.present(offer)
+        return desk
     }
 
     /// The wake notice `SleepWatch` gives after a made-up 2 h 10 min sleep with three tasks in flight in two made-up
@@ -2406,6 +2475,25 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             leads.refresh()
             settle { reply(true, "\(count) finished tasks added to the lead's board") }
+        case "task":
+            // A task of the fake lead's moved to another status: the board stamps the change, as for a real one.
+            let parts = rest.split(separator: " ").map(String.init)
+            guard parts.count == 2, let status = LeadTask.Status(rawValue: parts[1]) else {
+                return reply(false, "task SLUG STATUS, STATUS one of " + LeadTask.Status.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            let root = ((home as NSString).appendingPathComponent("projects/example-site") as NSString).standardizingPath
+            do {
+                let found = try BoardStore(root: root).update { board -> Bool in
+                    guard let index = board.taskIndex(parts[0]) else { return false }
+                    board.tasks[index].status = status
+                    return true
+                }
+                guard found else { return reply(false, "no task \(parts[0]) on the fake lead's board") }
+            } catch {
+                return reply(false, "couldn't write the lead's board: \(error)")
+            }
+            leads.refresh()
+            settle { reply(true, "\(parts[0]) is \(status.rawValue) now") }
         case "churn":
             // The fake lead's board changing N times, 0.15 s apart (a checkpoint each, as a busy team's do), each read
             // and shown the way a real change is (`LeadController.refresh`): `hangs` then says what it cost.
@@ -2609,8 +2697,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { reply(true, "\(row.title)'s team shown") }
         case "rotation":
             guard let id = model.selectedRow?.hostID else { return reply(false, "no fake session selected") }
-            leads.rotationNotices[id] = "Started a fresh lead session (the last one's context was 72% full)"
-            settle { reply(true, "scheduled rotation chat line shown in the fake session") }
+            // `rotation idle`: the handover at a long idle (handover_idle_min, handover_tokens) instead of the scheduled one.
+            leads.rotationNotices[id] = rest == "idle"
+                ? LeadRotation.notice(reason: "the last one had been idle 52 minutes with 238k tokens of context, past handover_idle_min 50 and handover_tokens 150k", at: Date())
+                : "Started a fresh lead session (the last one's context was 72% full)"
+            settle { reply(true, "\(rest == "idle" ? "idle handover" : "scheduled rotation") chat line shown in the fake session") }
         case "replaced":
             guard let row = model.selectedRow, let id = row.hostID, let tty = row.session?.tty else { return reply(false, "no window session selected") }
             var replaced = ReplacedLead(root: row.cwd ?? home, project: "example-site", tty: tty, live: nil)

@@ -720,7 +720,9 @@ enum UIBench {
             let mb = { (bytes: Double) in bytes / 1_048_576 }
             func census(_ label: String, then done: @escaping (HeapCensus.Result, [String: Double]) -> Void) {
                 DispatchQueue.global().async {
-                    let regions = UIBench.memoryKinds()
+                    var regions = UIBench.memoryKinds()
+                    // And by VM tag (private dirty and swapped, `SoakMemory.byTag`): what of the footprint isn't malloc's.
+                    for (tag, megabytes) in SoakMemory.byTag() { regions["vm " + SoakMemory.name(tag), default: 0] += megabytes * 1_048_576 }
                     let census = HeapCensus.take()
                     // `--soak-relief`: how much of the footprint is malloc's free pages it hasn't given back.
                     var relief = ""

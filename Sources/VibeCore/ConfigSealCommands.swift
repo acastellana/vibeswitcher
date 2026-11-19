@@ -8,6 +8,8 @@ import Foundation
 /// `sh -c` string's own commands; and any other argument that is a script by its extension, or a file with an execute
 /// bit. Not counted: redirect targets, and every other argument. What a variable left in the word, a glob or a
 /// substitution would compute can't be told, so it isn't named.
+///
+/// A plugin's hooks modules (`modules`) are code of another kind: listed here, hashed by `ConfigSeal.moduleParts`.
 extension ConfigSeal {
     /// How a settings or plugin file runs something.
     enum Invocation: Equatable {
@@ -36,6 +38,36 @@ extension ConfigSeal {
             for value in array { found += commands(in: value) }
         }
         return found
+    }
+
+    /// The hooks modules a plugin's hooks JSON lists: the paths under its `modules` (a Claude Code mod's
+    /// `{"modules": ["./register.js"]}`, each relative to that file), top-level or under an inline `hooks`. A module is
+    /// no command: it's JavaScript or TypeScript that Claude Code loads into every session with the plugin, where it
+    /// sees prompts and tool calls. nil when it lists none; an entry that isn't a path string lists none by name, and
+    /// still says the plugin has modules.
+    static func modules(in object: Any) -> [String]? {
+        guard let dictionary = object as? [String: Any] else { return nil }
+        var found: [String] = []
+        var any = false
+        for holder in [dictionary, dictionary["hooks"] as? [String: Any] ?? [:]] {
+            guard let listed = holder["modules"], !(listed is NSNull) else { continue }
+            let entries = listed as? [Any] ?? [listed]
+            any = any || !entries.isEmpty
+            found += entries.compactMap { $0 as? String }
+        }
+        return any ? found : nil
+    }
+
+    /// The files a hooks module can be, and can import from its plugin (Claude Code loads no file named otherwise),
+    /// and the WebAssembly it compiles from one.
+    static let moduleExtensions: Set<String> = ["js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts", "wasm"]
+
+    /// Where the module `entry` of the hooks JSON in `folder` is, absolute and with no `..` left: taken from `folder`
+    /// unless it's absolute, `${CLAUDE_PLUGIN_ROOT}` put in. Told from the text alone: nothing on disk is asked.
+    static func modulePath(_ entry: String, in folder: String, root: String) -> String {
+        var entry = entry
+        for name in ["${CLAUDE_PLUGIN_ROOT}", "$CLAUDE_PLUGIN_ROOT"] { entry = entry.replacingOccurrences(of: name, with: root) }
+        return absolute(entry.isEmpty ? "." : entry, in: folder) ?? folder
     }
 
     /// The code files `invocation` runs (`namedPaths` of a string), an argv's relative words against its `cwd`.

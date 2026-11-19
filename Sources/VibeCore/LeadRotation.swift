@@ -41,15 +41,128 @@ public enum LeadRotation {
     }
 
     private static func readLog(path: String) throws -> ChatLog {
+        var log = ChatLog()
+        log.append(ChatReader.read(try tailData(path: path), format: .claude).events)
+        return log
+    }
+
+    /// The transcript's last megabyte, from its first whole line.
+    private static func tailData(path: String) throws -> Data {
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
         defer { try? handle.close() }
         let size = try handle.seekToEnd(), start = size > 1024 * 1024 ? size - 1024 * 1024 : 0
         try handle.seek(toOffset: start)
         var data = try handle.readToEnd() ?? Data()
         if start > 0 { data = data.subdata(in: TranscriptReader.tailStart(data)..<data.count) }
-        var log = ChatLog()
-        log.append(ChatReader.read(data, format: .claude).events)
-        return log
+        return data
+    }
+
+    // MARK: Handover at a long idle
+
+    /// A lead idle this long (minutes) with a large context hands over (`handover_idle_min:`): measured over the 7 days to
+    /// 2026-11-18 (docs/process/reviews/cache-clock-and-mods.md), 50 minutes is while its 1-hour cache is still warm, so
+    /// the note costs a cache read, and before Claude Code's own idle compaction (about 54 minutes at 200k tokens).
+    public static let defaultIdleMinutes = 50
+    /// From this context (tokens) an idle lead hands over (`handover_tokens:`): 8 handovers that week, about 81M
+    /// cache-read tokens not carried after them.
+    public static let defaultTokens = 150_000
+    /// A setting under these reads as these: a shorter idle would cut into a conversation the user is still in, and a
+    /// fresh lead starts near 80k tokens, so a lower threshold would hand over every idle hour all night.
+    public static let minimumIdleMinutes = 10
+    public static let minimumTokens = 100_000
+    /// The lead's prompt cache lifetime (Claude Code writes its main sessions to the 1-hour bucket, measured). Past it,
+    /// asking the old lead for a note re-sends its whole context, so VibeSwitcher writes the note itself.
+    public static let cacheLifetime: TimeInterval = 60 * 60
+    /// The note is asked for only this long before the cache's lifetime ends: its reply may take up to a minute, and a
+    /// note that lands past the hour pays the whole re-send.
+    public static let noteMargin: TimeInterval = 5 * 60
+    /// How many times one idle stretch may ask a lead for its note (or hand over cold) before the rule gives up until
+    /// the user types to it again: each failed ask is a turn in the user's chat, and its reply restarts the idle.
+    public static let maxIdleAttempts = 2
+    /// A question to the user this recent, still open, keeps the lead: the conversation is never cut mid-exchange.
+    public static let recentQuestion: TimeInterval = 10 * 60
+
+    /// A `handover_idle_min:` value as in force: 0 (or less) is off, anything else at least `minimumIdleMinutes`.
+    public static func idleMinutes(_ value: Int) -> Int { value <= 0 ? 0 : max(value, minimumIdleMinutes) }
+    /// A `handover_tokens:` value as in force: 0 (or less) is off, anything else at least `minimumTokens`.
+    public static func tokens(_ value: Int) -> Int { value <= 0 ? 0 : max(value, minimumTokens) }
+
+    /// The lead's last response and the context it sent, from its transcript's tail.
+    public struct Tail: Equatable, Sendable {
+        public var lastResponse: Date
+        public var contextTokens: Int
+        /// Claude Code compacted the conversation after that response: the context is no longer what it says.
+        public var compacted: Bool
+        public init(lastResponse: Date, contextTokens: Int, compacted: Bool = false) {
+            self.lastResponse = lastResponse; self.contextTokens = contextTokens; self.compacted = compacted
+        }
+    }
+
+    private static let tails = UnchangedFiles<Tail?>()
+
+    /// The tail of the transcript at `path`, read again only when the file changed; nil when it has no response.
+    public static func tail(path: String) -> Tail? {
+        tails.value(at: path) { (try? tailData(path: path)).flatMap { tail($0) } }
+    }
+
+    /// Timestamps and token counts only: the main conversation's last response with usage, and whether a compaction
+    /// followed it. A subagent's lines (`isSidechain`) are its own.
+    static func tail(_ data: Data) -> Tail? {
+        var found: Tail?
+        for line in data.split(separator: 0x0A) {
+            let usage = line.range(of: Data("\"usage\"".utf8)) != nil
+            let compaction = line.range(of: Data("compact_boundary".utf8)) != nil
+            guard usage || compaction,
+                  let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+                  object["isSidechain"] as? Bool != true else { continue }
+            let type = object["type"] as? String
+            if type == "system", object["subtype"] as? String == "compact_boundary" {
+                found?.compacted = true
+            } else if type == "assistant", let message = object["message"] as? [String: Any],
+                      let usage = message["usage"] as? [String: Any], let at = ChatReader.date(object["timestamp"]) {
+                let context = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]
+                    .compactMap { usage[$0] as? Int }.reduce(0, +)
+                if context > 0 { found = Tail(lastResponse: at, contextTokens: context) }
+            }
+        }
+        return found
+    }
+
+    /// Whether the user's conversation with the lead is open: the lead's own question dialog waits for an answer, or a
+    /// question it asked on the board is under `recentQuestion` old and unanswered. A handover then waits.
+    public static func conversationOpen(openQuestionsAskedAt: [Double], asking: Bool, now: Date) -> Bool {
+        asking || openQuestionsAskedAt.contains { now.timeIntervalSince1970 - $0 < recentQuestion }
+    }
+
+    /// Why a lead idle since its last response, with `tail`'s context, hands over now; nil while it stays. `idleMinutes`
+    /// and `tokens` are the workflow's (0: off).
+    public static func idle(tail: Tail?, idleMinutes: Int, tokens: Int, now: Date) -> String? {
+        let minutes = Self.idleMinutes(idleMinutes), tokens = Self.tokens(tokens)
+        guard minutes > 0, tokens > 0, let tail, !tail.compacted, tail.contextTokens >= tokens else { return nil }
+        let idle = now.timeIntervalSince(tail.lastResponse)
+        guard idle >= Double(minutes) * 60 else { return nil }
+        return "the last one had been idle \(Int(idle / 60)) minutes with \(tail.contextTokens / 1000)k tokens of context"
+            + ", past handover_idle_min \(minutes) and handover_tokens \(tokens / 1000)k"
+    }
+
+    /// Whether the lead's cache has expired by `now`, or will before an asked note lands (`noteMargin`): the note is
+    /// then VibeSwitcher's (`coldNote`), not asked for.
+    public static func cold(tail: Tail?, now: Date) -> Bool {
+        tail.map { now.timeIntervalSince($0.lastResponse) > cacheLifetime - noteMargin } ?? false
+    }
+
+    /// The handover note when the old lead's cache had expired: asking it would have re-sent its whole context.
+    public static func coldNote(_ tail: Tail?, now: Date) -> String {
+        let idle = tail.map { " It had been idle \(Int(now.timeIntervalSince($0.lastResponse) / 60)) minutes with \($0.contextTokens / 1000)k tokens of context." } ?? ""
+        return "VibeSwitcher wrote this note: the last lead's prompt cache had expired, so asking it for a note would have re-sent its whole context." + idle
+            + " Continue from the board (its tasks and open questions), decisions.md and the last turns with the user: nothing there was changed by the handover."
+    }
+
+    /// The chat's status line for a handover: when, and why.
+    public static func notice(reason: String, at: Date) -> String {
+        let clock = DateFormatter()
+        clock.dateFormat = "HH:mm"
+        return "Started a fresh lead session at \(clock.string(from: at)) (\(reason))"
     }
 
     public static let request = "VibeSwitcher is preparing a scheduled rotation to a fresh lead session. In your final reply within one minute, write a short handover note: open threads, promises made to the user, and timers due. Do no new work; finish this turn after the note. The board and its unanswered questions stay in place."

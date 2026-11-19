@@ -125,6 +125,7 @@ extension Platform {
             kill(pid, SIGKILL)
         }
         while !wasCollected, waitpid(pid, &status, 0) < 0 && errno == EINTR {}
+        if !exited { killAll(group: pid) }
         return output
     }
 

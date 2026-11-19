@@ -121,21 +121,29 @@ struct LeadRotationTests {
             try transcript(note: false)
         }
 
-        func transcript(note: Bool, event: String = "Stop", tokens: Int = 144000, user: Bool = true) throws {
+        /// `age`: how long before `now` the last reply was (the lead's idle, on the injected clock); `window`: the status
+        /// line's context window (a 1M window keeps the scheduled 60% rule out of an idle test); `compacted`: Claude Code
+        /// compacted the conversation after that reply.
+        func transcript(note: Bool, event: String = "Stop", tokens: Int = 144000, user: Bool = true, age: TimeInterval = 10,
+                        window: Int = 200000, compacted: Bool = false) throws {
             func line(_ object: [String: Any]) throws -> String {
                 String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self) + "\n"
             }
-            let stamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(note ? 1 : -10))
+            let stamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(note ? 1 : -age))
             var text = user ? try line(["type": "user", "uuid": "u", "timestamp": stamp,
                                        "message": ["role": "user", "content": "keep my promise"]]) : ""
             text += try line(["type": "assistant", "uuid": note ? "note" : "reply", "timestamp": stamp,
                               "message": ["role": "assistant", "model": "claude-opus-4-6", "stop_reason": "end_turn",
                                           "usage": ["input_tokens": tokens],
                                           "content": [["type": "text", "text": note ? handoverMarker + "\nOpen threads: keep the promise; timer due tomorrow." : "I promised a result."]]]])
+            if compacted {
+                text += try line(["type": "system", "subtype": "compact_boundary", "timestamp": ISO8601DateFormatter().string(from: now),
+                                  "compactMetadata": ["trigger": "auto", "preTokens": tokens, "postTokens": 40000]])
+            }
             try text.write(to: path, atomically: true, encoding: .utf8)
             LeadContextStore(root: inbox, home: home).record([
                 "transcript_path": path.path,
-                "context_window": ["context_window_size": 200000, "used_percentage": Double(tokens) / 200000 * 100] as [String: Any]
+                "context_window": ["context_window_size": window, "used_percentage": Double(tokens) / Double(window) * 100] as [String: Any]
             ], now: now)
             _ = try #require(LeadContextStore(root: inbox, home: home).percent(transcript: path.path, started: old.startedAt),
                              "The fake status line must have recorded this session's context")
@@ -374,6 +382,148 @@ struct LeadRotationTests {
         #expect(world.requested == 0, "144k is small in a 1M window even when the model name is the same")
         #expect(context.percent(transcript: world.path.path, started: world.now.addingTimeInterval(1)) == nil)
         try world.transcript(note: false)
+        await world.tick()
+        #expect(world.requested == 1)
+    }
+
+    // MARK: Handover at a long idle (handover_idle_min, handover_tokens)
+
+    /// An idle lead of `tokens` whose last reply was `age` ago on the injected clock, in a 1M window so only the idle
+    /// rule can hand it over.
+    func idleWorld(tokens: Int = 238_000, age: TimeInterval) throws -> World {
+        let world = try World(temp)
+        try world.transcript(note: false, tokens: tokens, age: age, window: 1_000_000)
+        return world
+    }
+
+    @Test func aWakeBeforeTheIdleThresholdStaysWithTheLeadAndOneAfterGoesToAFreshLeadWithTheNote() async throws {
+        let world = try idleWorld(age: 49 * 60)
+        let store = BoardStore(root: world.root)
+        try store.update { board in
+            board.tasks = [LeadTask(slug: "running-task", title: "Still running",
+                                    contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))]
+        }
+        try store.appendDecision("Keep the board across handovers", why: "The fresh lead starts from it")
+        await world.tick()
+        #expect(world.requested == 0 && world.holder == world.old.id.uuidString, "49 minutes idle: the lead keeps its context")
+        world.now = world.now.addingTimeInterval(2 * 60)   // 51 minutes since its last reply, its cache still warm
+        await world.tick()
+        #expect(world.requested == 1, "Past the threshold, on a warm cache, the old lead is asked for its note")
+        try world.transcript(note: true, tokens: 238_000, window: 1_000_000)
+        await world.tick()
+        #expect(await until { world.controller.rotationNotices[world.fresh.id] != nil })
+        #expect(world.holder == world.fresh.id.uuidString)
+        let board = store.load()
+        #expect(board.leadSession == world.fresh.id.uuidString, "The next wake goes to the board's lead: the fresh one")
+        let notice = try #require(world.controller.rotationNotices[world.fresh.id])
+        #expect(notice.contains("idle 51 minutes") && notice.contains("238k tokens") && notice.contains("Started a fresh lead session at "))
+        let note = try String(contentsOfFile: world.root + "/.vibeswitcher/scheduled-lead-handover.md", encoding: .utf8)
+        #expect(note.contains("timer due tomorrow"))
+        let spawn = try #require(world.spawns.first)
+        #expect(spawn.command?.contains("scheduled-lead-handover.md") == true && spawn.command?.contains("decisions.md") == true)
+        // The lead's records carry over untouched: the board's tasks and open questions, the decisions.
+        #expect(board.tasks.map(\.slug) == ["running-task"])
+        #expect(board.openQuestions.map(\.id) == ["open"])
+        let decisions = try String(contentsOfFile: store.recordPath("decisions.md"), encoding: .utf8)
+        #expect(decisions.contains("Keep the board across handovers"))
+        let progress = try String(contentsOfFile: store.recordPath("progress.md"), encoding: .utf8)
+        #expect(progress.contains("Handed the lead over to a fresh session: the last one had been idle 51 minutes with 238k tokens of context"))
+    }
+
+    @Test func aSmallContextStaysWithTheLeadHoweverLongItIdles() async throws {
+        let world = try idleWorld(tokens: 120_000, age: 55 * 60)
+        await world.tick()
+        #expect(world.requested == 0 && world.spawns.isEmpty && world.holder == world.old.id.uuidString)
+    }
+
+    @Test func aQuestionJustAskedOrARunningTurnKeepsTheLead() async throws {
+        let world = try idleWorld(age: 51 * 60)
+        let store = BoardStore(root: world.root)
+        let now = world.now.timeIntervalSince1970
+        try store.update { board in
+            var question = LeadQuestion(id: "fresh", text: "Ship it?", options: ["yes", "no"])
+            question.askedAt = now - 5 * 60
+            board.questions = [question]
+        }
+        await world.tick()
+        #expect(world.requested == 0, "A question to the user 5 minutes old and unanswered: the conversation is open")
+        try store.update { board in board.questions[0].askedAt = now - 20 * 60 }
+        try world.transcript(note: false, event: "PreToolUse", tokens: 238_000, age: 51 * 60, window: 1_000_000)
+        await world.tick()
+        #expect(world.requested == 0, "The lead's turn is running")
+        try world.transcript(note: false, tokens: 238_000, age: 51 * 60, window: 1_000_000)
+        await world.tick()
+        #expect(world.requested == 1, "An older open question carries over on the board; it doesn't hold the handover")
+    }
+
+    @Test func pastTheCacheLifetimeVibeSwitcherWritesTheNoteInsteadOfReSendingTheContext() async throws {
+        let world = try idleWorld(age: 70 * 60)
+        await world.tick()
+        #expect(await until { world.controller.rotationNotices[world.fresh.id] != nil })
+        #expect(world.requested == 0, "Asking a lead whose cache expired for a note would re-send its whole context")
+        #expect(world.holder == world.fresh.id.uuidString)
+        let note = try String(contentsOfFile: world.root + "/.vibeswitcher/scheduled-lead-handover.md", encoding: .utf8)
+        #expect(note.contains("VibeSwitcher wrote this note") && note.contains("idle 70 minutes with 238k tokens"))
+        #expect(world.controller.rotationNotices[world.fresh.id]?.contains("prompt cache had expired") == true)
+        let turns = try String(contentsOfFile: LeadLaunch.turnsFile(root: world.root), encoding: .utf8)
+        #expect(turns.contains("keep my promise"), "The fresh lead still gets the last turns with the user")
+    }
+
+    @Test func aScheduledRotationPastTheCacheLifetimeStillAsksTheLeadForItsNote() async throws {
+        let world = try World(temp)
+        try world.transcript(note: false, age: 70 * 60)   // 72% of a 200k window: the context rule, not the idle one
+        await world.tick()
+        #expect(world.requested == 1 && world.spawns.isEmpty, "Only the idle handover writes its own note")
+    }
+
+    @Test func aNoteAskedThisCloseToTheHourIsVibeSwitchersOwn() async throws {
+        let world = try idleWorld(age: 56 * 60)
+        await world.tick()
+        #expect(await until { world.controller.rotationNotices[world.fresh.id] != nil })
+        #expect(world.requested == 0, "A note asked at minute 56 could land past the hour and pay the whole re-send")
+    }
+
+    @Test func failedIdleAsksStopAtTheCapUntilTheUserTypes() async throws {
+        let world = try idleWorld(age: 51 * 60)
+        for attempt in 1...LeadRotation.maxIdleAttempts {
+            // Each failed ask's reply restarted the idle: 51 minutes again on the injected clock, the cache still warm.
+            try world.transcript(note: false, tokens: 238_000, age: 51 * 60, window: 1_000_000)
+            await world.tick()
+            #expect(world.requested == attempt)
+            world.now = world.now.addingTimeInterval(61)    // no note: the ask times out
+            await world.tick()
+            #expect(world.cancelled == attempt)
+            world.now = world.now.addingTimeInterval(300)   // past the retry's wait
+        }
+        try world.transcript(note: false, tokens: 238_000, age: 51 * 60, window: 1_000_000)
+        await world.tick()
+        #expect(world.requested == LeadRotation.maxIdleAttempts, "No third turn typed into the lead in the same idle")
+        world.controller.noteLeadInput(world.old.id)
+        world.now = world.now.addingTimeInterval(121)
+        try world.transcript(note: false, tokens: 238_000, age: 51 * 60, window: 1_000_000)
+        await world.tick()
+        #expect(world.requested == LeadRotation.maxIdleAttempts + 1, "The user's typing starts a new idle stretch")
+    }
+
+    @Test func aLeadClaudeCodeAlreadyCompactedIsLeftAlone() async throws {
+        let world = try World(temp)
+        try world.transcript(note: false, tokens: 238_000, age: 56 * 60, window: 1_000_000, compacted: true)
+        await world.tick()
+        #expect(world.requested == 0 && world.spawns.isEmpty)
+    }
+
+    @Test func theIdleRuleIsOffWithTheSettingOrRotationNever() async throws {
+        let world = try idleWorld(age: 51 * 60)
+        let file = BoardStore(root: world.root).folder + "/workflow.md"
+        let off = LeadWorkflow.updating(try Data(contentsOf: URL(fileURLWithPath: file)), with: [("handover_idle_min", "0")])
+        try LeadWorkflow.write(off, to: file)
+        await world.tick()
+        #expect(world.requested == 0)
+        try LeadWorkflow.write(LeadWorkflow.updating(off, with: [("handover_idle_min", "50")]), to: file)
+        world.mode = .never
+        world.controller.rotateIfDue(root: world.root, session: world.old)
+        #expect(world.requested == 0)
+        world.mode = .context
         await world.tick()
         #expect(world.requested == 1)
     }

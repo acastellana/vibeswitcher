@@ -80,8 +80,11 @@ extension LeadAdvanceTests {
         // Only the existing room watch runs: no new interruption, enqueue, or manual advance trigger.
         #expect(roomWaits.look(mac: MacLoad.count([], load: 0), limits: lead.macLimits()).isEmpty)
         #expect(await advancing.until { toWorker("sleep-task", root, runtime) == [LeadSleepRecovery.message] })
-        #expect(try LeadSleepRecovery.Store(root: root).pending().isEmpty)
         await advancing.settle()
+        // Read once the loop is stopped: a pass under way holds the ledger's lock, and a read then is refused ("Sleep
+        // recovery is busy", 2026-11-13, a merge's run).
+        advancing.stop()
+        #expect(try LeadSleepRecovery.Store(root: root).pending().isEmpty)
         #expect(toWorker("sleep-task", root, runtime) == [LeadSleepRecovery.message])
     }
 
@@ -109,8 +112,11 @@ extension LeadAdvanceTests {
         // No new interruption or manual trigger: only the app's room watch nudges the server.
         _ = roomWaits.look(mac: MacLoad.count([], load: 0), limits: lead.macLimits())
         #expect(await advancing.until { toWorker("sleep-task", root, runtime) == [LeadSleepRecovery.message] })
-        #expect(try LeadSleepRecovery.Store(root: root).pending().isEmpty)
         await advancing.settle()
+        // Read once the loop is stopped: a pass under way holds the ledger's lock, and a read then is refused ("Sleep
+        // recovery is busy", 2026-11-13, a merge's run).
+        advancing.stop()
+        #expect(try LeadSleepRecovery.Store(root: root).pending().isEmpty)
         #expect(toWorker("sleep-task", root, runtime) == [LeadSleepRecovery.message])
     }
 

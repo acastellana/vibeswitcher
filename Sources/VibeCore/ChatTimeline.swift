@@ -15,6 +15,8 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
     /// One of the lead's questions closed here without your answer (withdrawn, or its timer ran out): its history,
     /// where it happened, and what became of an answer that came too late (see `ChatTimeline.placeQuestions`).
     case question(LeadQuestion, notice: String?)
+    /// A burst of VibeSwitcher's cards for the lead, folded into one line (see `ChatUpdates`, `ChatTimeline.foldUpdates`).
+    case updates(ChatUpdates)
 
     public static func toolsID(_ firstToolID: String) -> String { "tools:\(firstToolID)" }
 
@@ -25,6 +27,7 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
         case .newMarker: return "new-marker"
         case .allDone(let mark): return "all-done:\(mark.id)"
         case .question(let question, _): return "question:\(question.id)"
+        case .updates(let updates): return updates.id
         }
     }
 }
@@ -109,6 +112,7 @@ public enum ChatTimeline {
         // Placed ones by their own time, so what's placed after them goes in order with them.
         case .allDone(let mark): return mark.at
         case .question(let question, _): return closed(question)
+        case .updates(let updates): return updates.items.lazy.compactMap(time).first
         case .newMarker: return nil
         }
     }
@@ -185,6 +189,8 @@ public enum ChatSearch {
                 return false
             case .question(let question, let notice):
                 return ([question.text, question.withdrawReason ?? "", question.proposal ?? "", notice ?? ""]).contains { $0.localizedCaseInsensitiveContains(needle) }
+            case .updates(let updates):
+                return !matches(updates.items, query: needle).isEmpty
             case .allDone(let mark):
                 let summary = mark.summary.map { [$0.headline] + $0.bullets } ?? []
                 return (["All tasks finished"] + summary + mark.tasks.map(\.title)).contains { $0.localizedCaseInsensitiveContains(needle) }

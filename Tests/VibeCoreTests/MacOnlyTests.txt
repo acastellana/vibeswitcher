@@ -1,6 +1,8 @@
+BrokenPipeProbeTests.swift  the whole file: it tests the SIGPIPE probe (EPipeProbe.swift), the Mac's alone
 CookieJarTests.swift  the PreviewProxyTests extension (aDevServersLoginCookieStaysOnTheMacAndComesBack): the preview proxy is the Mac's (Network.framework)
 DevPreviewHardeningTests.swift  the PreviewProxyTests extension and its ResettingServer: the preview proxy is the Mac's (Network.framework)
 DevPreviewTests.swift  PreviewProxyTests and its helpers (FakeUpstream, exchange, exchangeDetailed, upgradeExchange, refusesConnections): the preview proxy is the Mac's (Network.framework)
+EPipeProbe.swift  the whole file: the SIGPIPE probe rebinds the bundle's write symbols through Mach-O's tables and snapshots threads through Mach; on Linux the run ignores SIGPIPE (TestSupport.swift) and a write to a gone reader is EPIPE in the test that made it
 ImageDiffTests.swift  the whole file: scripts/ui-journeys.sh's screenshot comparer reads and writes its PNGs through ImageIO, and compares the Mac app's shots (Sources/VibeCore/MacOnly/ImageDiff.swift)
 InstallRelaunchTests.swift  scripts/build-app.sh's install step replaces and relaunches the Mac app's bundle (pgrep -x, osascript, codesign); on Linux its script never ends, and the status read of it after the hang guard ends the whole run (Foundation traps)
 KeptImagesTests.swift  aLargeImageIsDownscaled: a smaller copy of an image is ImageIO's (Platform.Images.pngThumbnail is nil on Linux)

@@ -1,7 +1,7 @@
 // A lead's team, twice: the strip above its chat (one line of counts, the first line of the Mac's Team strip) and the
-// Team pane (every task with what it's doing, the Mac's Team tab). Both read the lead's board.
+// tasks of the inspector's Team tab (every task with what it's doing, the Mac's Team tab). Both read the lead's board.
 
-import { h, keyed, setText } from '../dom.js';
+import { h, keyed, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { TASKS, TASK_ORDER, FINISHED, taskCount, since, clock } from '../words.js';
 import { sessionHref } from '../ui.js';
@@ -14,16 +14,13 @@ const sessionOf = (task) => (task.status === 'review' && task.verifier) || task.
 
 export function teamStrip(app) {
   const counts = h('span', { class: 'strip-counts' });
-  const teamButton = h('button', { class: 'strip-team', type: 'button', title: 'Show the team' }, icon('team', 14), 'Team');
+  const teamButton = h('button', { class: 'strip-team', type: 'button', title: 'Show the team in the inspector', onclick: () => app.ui.showInspector('team') }, icon('team', 14), 'Team');
   const el = h('section', { class: 'strip', 'aria-label': 'Team' }, teamButton, counts);
-  let session = null;
   let drawn = '';
-  teamButton.addEventListener('click', () => app.ui.setPane(session, 'team'));
 
   return {
     el,
     update(lead) {
-      session = lead.id;
       const tasks = app.store.state.boards.get(lead.lead)?.tasks || [];
       const said = TASK_ORDER.map((status) => [status, tasks.filter((task) => task.status === status).length]).filter(([, count]) => count > 0);
       const now = JSON.stringify(said);
@@ -48,16 +45,19 @@ function dimLine(task, board) {
   return '';
 }
 
-export function teamPane(app) {
+// The board's tasks: what's moving first, the finished ones folded into one line ("Merged (2) · Reverted (1)"). A
+// task's row opens the session doing it; the one the selected session works on is marked.
+export function teamTasks(app) {
   const list = h('ul', { class: 'tasks' });
   const finishedList = h('ul', { class: 'tasks', hidden: true });
   const fold = h('button', { class: 'fold', type: 'button', 'aria-expanded': 'false' }, h('span', { class: 'fold-text' }), icon('chevron', 10));
-  const empty = h('p', { class: 'pane-empty', hidden: true }, 'Nothing on the board yet. Tell the lead what to build.');
-  const el = h('div', { class: 'pane team-pane' }, h('div', { class: 'team-column' }, h('h2', { class: 'section-title' }, 'Tasks'), empty, list, fold, finishedList));
+  const empty = h('p', { class: 'inspect-note', hidden: true }, 'Nothing on the board yet. Tell the lead what to build.');
+  const el = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, 'Tasks'), empty, list, fold, finishedList);
   const rows = new Map();
   const finishedRows = new Map();
   let open = false;
   let board = null;
+  let selected = null;
   fold.addEventListener('click', () => {
     open = !open;
     fold.setAttribute('aria-expanded', String(open));
@@ -71,8 +71,9 @@ export function teamPane(app) {
     const time = h('time');
     const dim = h('span', { class: 'task-dim' });
     const link = h('a', { class: 'task-link' }, h('span', { class: 'task-line' }, mark, title, h('span', { class: 'task-when' }, state, ' ', time)), dim);
+    const el = h('li', { class: 'task' }, link);
     return {
-      el: h('li', { class: 'task' }, link),
+      el,
       update(task) {
         const word = TASKS[task.status] || { label: task.status, tone: 'idle' };
         mark.className = `dot tone-${word.tone}`;
@@ -83,14 +84,17 @@ export function teamPane(app) {
         setText(dim, dimLine(task, board));
         const target = sessionOf(task);
         if (target && app.store.state.sessions.has(target)) link.setAttribute('href', sessionHref(target)); else link.removeAttribute('href');
+        setClass(el, 'current', !!selected && (task.worker === selected || task.verifier === selected));
       },
     };
   };
 
   return {
     el,
-    update(lead) {
-      board = app.store.state.boards.get(lead.lead);
+    // `session`: the selected one, a lead or a member of its team (its `lead` is the board's project).
+    update(session) {
+      board = app.store.state.boards.get(session.lead);
+      selected = session.role === 'lead' ? null : session.id;
       const tasks = [...(board?.tasks || [])].sort(byAttention);
       const current = tasks.filter((task) => !FINISHED.has(task.status));
       const finished = tasks.filter((task) => FINISHED.has(task.status));

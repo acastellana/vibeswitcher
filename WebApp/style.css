@@ -45,6 +45,7 @@
   --text: 13px;
   --large: 14.5px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --inspector: 320px;
 }
 :root[data-theme="dark"] { color-scheme: dark; }
 :root[data-theme="light"] { color-scheme: light; }
@@ -129,6 +130,7 @@ code, pre, kbd { font-family: var(--mono); }
 
 .icon-button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; color: var(--ink-2); }
 .icon-button:hover, .icon-button[aria-current] { background: var(--fill-2); color: var(--ink); }
+.icon-button[aria-expanded="true"] { color: var(--ink); }
 
 .button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 500; white-space: nowrap; transition: opacity 0.12s; }
 .button:hover { opacity: 0.9; }
@@ -383,20 +385,80 @@ code, pre, kbd { font-family: var(--mono); }
 .facts .files { margin-top: 2px; color: var(--ink-2); }
 .facts code { padding: 0; background: none; }
 
-/* ---- Team ---- */
+/* ---- The inspector ----
+   Over the session's right edge, under its header. Open as a column, the session's own column gives it the room in one
+   step (session.js glides what's centred there), so the inspector itself only fades and slides: opacity and transform.
+   Where the window has no room for a column it is a sheet over the chat instead. The list's rhythm inside: quiet
+   group heads, 18px sides, names dim and values plain, a value that changes on one line so nothing under it moves. */
 
-.team-column, .node-column { max-width: 680px; margin: 0 auto; padding: 24px 24px 48px; }
-.task-link { display: block; margin: 0 -10px; padding: 7px 10px; border-radius: 8px; transition: background-color 0.12s; }
-.task-link[href]:hover { background: var(--fill); }
-.task-line { display: flex; align-items: baseline; gap: 9px; }
+.session-body { position: relative; flex: 1; display: flex; min-height: 0; }
+.session-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.with-inspector .session-main { margin-right: var(--inspector); }
+.inspector {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 3; display: flex; flex-direction: column; width: var(--inspector);
+  border-left: 1px solid var(--line); background: var(--bg);
+  opacity: 0; transform: translateX(10px); visibility: hidden;
+  transition: opacity 0.16s var(--ease), transform 0.16s var(--ease), visibility 0s 0.16s;
+}
+.inspector.shown { opacity: 1; transform: none; visibility: visible; transition-delay: 0s; }
+.inspector-sheet .inspector { width: min(360px, 100%); border-left: 0; box-shadow: -1px 0 0 var(--line), -18px 0 40px var(--shadow); }
+.inspect-scrim { position: absolute; inset: 0; z-index: 2; background: rgb(0 0 0 / 0.16); opacity: 0; visibility: hidden; transition: opacity 0.16s ease-out, visibility 0s 0.16s; }
+.inspector-sheet .inspect-scrim { opacity: 1; visibility: visible; transition-delay: 0s; }
+
+.inspect-top { position: relative; flex: none; display: flex; justify-content: center; padding: 12px 12px 6px; }
+.inspect-close { position: absolute; top: 10px; right: 10px; display: none; }
+.inspector-sheet .inspect-close { display: inline-flex; }
+.inspect-scroll { flex: 1; min-height: 0; padding-bottom: 18px; overflow-y: auto; overscroll-behavior: contain; }
+
+.inspect-row { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; padding: 3px 18px; }
+.inspect-row dt { color: var(--ink-2); }
+.inspect-row dd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inspect-row dd.none { color: var(--ink-3); }
+.inspect-row.wraps dd { white-space: normal; overflow-wrap: anywhere; }
+.inspect-state { display: flex; align-items: center; gap: 5px; }
+.inspect-state.tone-text-needs-you { color: var(--needs-you); }
+.inspect-state time { color: var(--ink-2); }
+.inspect-state time::before { content: "· "; }
+/* As tall empty as said: a whole line (its 1.4 line and its 1px), so what follows never moves by a fraction. */
+.inspect-says { height: calc(1.4em + 1px); padding: 1px 18px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--small); }
+.inspect-link { color: var(--accent); }
+.inspect-link:hover { text-decoration: underline; }
+.inspect-note { padding: 12px 18px 0; color: var(--ink-2); }
+.inspect-notice { display: flex; align-items: flex-start; gap: 8px; padding: 12px 18px 0; color: var(--ink-2); font-size: var(--small); }
+.inspect-notice .icon { margin-top: 2px; color: var(--working); }
+.inspect-skeleton { display: grid; gap: 12px; padding: 18px 18px 0; }
+
+/* The Team tab's tasks. */
+.tasks { padding: 0 8px; }
+.task-link { display: block; padding: 6px 10px; border-radius: 8px; transition: background-color 0.12s; }
+.task-link[href]:hover, .task.current .task-link { background: var(--fill); }
+.task-line { display: flex; align-items: baseline; gap: 8px; }
 .task-line .dot { align-self: center; }
 .task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .task-when { flex: none; color: var(--ink-2); font-size: var(--small); }
-.task-dim { display: block; min-height: 16px; padding-left: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--small); }
-.team-pane .fold { margin-top: 8px; }
+.task-dim { display: block; min-height: 16px; padding-left: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--small); }
+.inspector .fold { margin: 6px 18px 2px; max-width: calc(100% - 36px); }
+.inspector .fold-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The Activity tab's ledger: a file with its counts, a command with its time. */
+.ledger { display: grid; gap: 9px; padding: 12px 18px 0; }
+.ledger-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.ledger-row > .icon { margin-top: 3px; color: var(--ink-3); }
+.ledger-row.failed > .icon, .ledger-row.failed .ledger-trail { color: var(--needs-you); }
+.ledger-text { flex: 1; display: grid; gap: 1px; min-width: 0; }
+.ledger-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ledger-line .running { align-self: center; }
+.ledger-path { flex: 1; display: flex; min-width: 0; font-family: var(--mono); font-size: var(--small); }
+.ledger-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.ledger-name { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-title.mono, .ledger-dim.mono { font-family: var(--mono); font-size: var(--small); }
+.ledger-trail { flex: none; color: var(--ink-3); font-size: var(--small); font-variant-numeric: tabular-nums; }
+.ledger-dim { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--small); }
 
 /* ---- This node ---- */
 
+.node-column { max-width: 680px; margin: 0 auto; padding: 24px 24px 48px; }
 .node-group { margin-bottom: 28px; }
 .fact { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px; padding: 4px 0; }
 .fact dt { color: var(--ink-2); }
@@ -473,7 +535,20 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .facts dd { margin-bottom: 6px; }
   .option { padding: 11px 12px; }
   .answer-input { padding: 9px 11px; font-size: 16px; }
-  .team-column, .node-column { padding: 18px 16px 40px; }
+  .node-column { padding: 18px 16px 40px; }
+  /* The inspector: a sheet from the foot of the screen, over everything, its tabs across its top. */
+  .inspector, .inspector-sheet .inspector {
+    position: fixed; top: auto; left: 0; z-index: 7; width: auto; height: min(78dvh, 640px); padding-bottom: env(safe-area-inset-bottom);
+    border-radius: 14px 14px 0 0; box-shadow: 0 0 0 1px var(--line), 0 -18px 40px var(--shadow); transform: translateY(14px);
+  }
+  .inspector.shown { transform: none; }
+  .inspect-scrim { position: fixed; z-index: 6; }
+  .inspect-top { justify-content: flex-start; padding: 12px 50px 6px 12px; }
+  .inspect-top .segmented { flex: 1; }
+  .inspect-top .segmented button { flex: 1; padding: 5px 8px; }
+  .inspect-row { grid-template-columns: 96px minmax(0, 1fr); padding: 5px 20px; }
+  .inspect-says, .inspect-note, .inspect-notice, .ledger { padding-left: 20px; padding-right: 20px; }
+  .task-link { padding: 9px 12px; }
   .fact { grid-template-columns: 130px minmax(0, 1fr); }
   .palette { padding-top: calc(10px + env(safe-area-inset-top)); }
 }

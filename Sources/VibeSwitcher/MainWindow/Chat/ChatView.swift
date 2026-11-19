@@ -48,6 +48,8 @@ struct ChatContainer: View {
     @State private var questionDrafts = LeadQuestionDrafts()
     /// Answers a lead's question from the chat's history, one closure for as long as the chat is up.
     @State private var leadAnswer = LeadAnswer()
+    /// The lead's tasks for the folded update lines' red marks, from the board the Team panel gets.
+    @StateObject private var taskStandings = ChatTaskStandings()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,10 +79,13 @@ struct ChatContainer: View {
                 .environment(\.chatFolder, model.selectedRow?.cwd)
                 .environment(\.chatRunner, chat.runner)
                 .environment(\.teamSummaries, leads.summaries)
+                .environment(\.chatTaskStandings, taskStandings)
                 .environment(\.leadQuestionDrafts, questionDrafts)
                 .environment(\.answerLeadQuestion, leadAnswer.answer)
                 // The lead's all-done cards, in its own conversation only.
                 .onChange(of: lead?.board.allDone ?? [], initial: true) { _, marks in chat.showAllDone(marks) }
+                // Its tasks as they stand: a folded update line's mark goes once the trouble it reported is dealt with.
+                .onChange(of: lead.flatMap { ChatTaskStanding.of($0.board) }, initial: true) { _, tasks in taskStandings.update(tasks) }
                 // Its questions that closed without your answer, where they closed (only open ones are pinned under it).
                 .onChange(of: lead?.board.questions ?? [], initial: true) { _, questions in chat.showQuestions(questions, notices: leads.answerNotices) }
                 .onChange(of: leads.answerNotices) { _, notices in chat.showQuestions(lead?.board.questions ?? [], notices: notices) }
@@ -675,6 +680,8 @@ struct ChatItemRow: View {
             }
         case .team(let entry, let message):
             TeamMessageCard(entry: entry, message: message, chat: chat, expanded: expanded).padding(.trailing, 40)
+        case .updates(let updates):
+            ChatUpdatesRow(updates: updates, chat: chat, expanded: expanded, openImage: openImage)
         case .allDone(let mark):
             AllDoneCard(mark: mark, chat: chat, expanded: expanded).padding(.trailing, 40)
         case .question(let question, let notice):
@@ -1401,17 +1408,20 @@ private struct FileThumbnail: View {
 }
 
 private extension ChatItem {
-    /// Tool groups, team messages and all-done cards open and close.
+    /// Tool groups, team messages, bursts of updates and all-done cards open and close.
     var opens: Bool {
         switch self {
-        case .tools, .team, .allDone: return true
+        case .tools, .team, .updates, .allDone: return true
         default: return false
         }
     }
 
+    /// A one-line row (a tool run, a burst of updates): less space around it.
     var isTools: Bool {
-        if case .tools = self { return true }
-        return false
+        switch self {
+        case .tools, .updates: return true
+        default: return false
+        }
     }
 }
 

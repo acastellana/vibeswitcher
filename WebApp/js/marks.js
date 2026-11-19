@@ -91,6 +91,8 @@ const ICONS = {
   warning: 'M8 2.5L14 13H2ZM8 6.5V9.5M8 11.3V11.4',
   plus: 'M8 3V13M3 8H13',
   check: 'M3.5 8.5L6.5 11.5L12.5 4.5',
+  // A window with its right column: the inspector's toggle (the Mac's sidebar.right).
+  inspector: 'M2.5 3.5H13.5V12.5H2.5ZM10 3.5V12.5',
 };
 
 export function icon(name, size = 16) {

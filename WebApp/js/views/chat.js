@@ -376,6 +376,8 @@ export function chatView(app) {
       shownQuestions = 0;
       stack = null;
       stackProject = null;
+      // The last session's questions leave with it (placeStack only draws when the project changes).
+      stackSlot.replaceChildren();
       placeStack(store.state.sessions.get(id));
       store.openChat(id);
       unsubscribe = store.subscribe('chat:' + id, onChat);
@@ -383,6 +385,12 @@ export function chatView(app) {
     },
     // Shown again after another pane had its place: back at the end.
     reveal() { jump = true; structural = true; render(); },
+    // Runs `work`, which changes the chat's width (its lines wrap again): at the end before, at the end after.
+    hold(work) {
+      const pinned = atEnd();
+      work();
+      if (pinned) toEnd(false);
+    },
     focus() { input.focus(); },
   };
 }

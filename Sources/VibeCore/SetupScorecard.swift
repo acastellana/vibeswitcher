@@ -13,6 +13,11 @@ import Foundation
 ///   builds receipts record (`LeadReceipt.build`: the build that ran a later merge was installed by then, and holds
 ///   every commit its source commit descends from) and the installed app's own record (its commit, installed when its
 ///   copy is dated: `SetupInstalls.installedApp`); a merge no recorded build contains is "not installed yet".
+/// - Merge objectives: each project's `MergeObjectives` over the week, from the Mac's merge stats (merges-<day>.jsonl),
+///   for the projects with a merge run in either week.
+/// - The leads' messages to the user per day, by reason, and the share the user acted on within a day
+///   (`ScorecardMessages`, `LeadMessages`): from the boards' questions and updates and the leads' chat transcripts, by
+///   kind and time only.
 ///
 /// A comparison between the weeks is said only when both have at least `trendFloor` (n); below it the figures are
 /// shown with their n and no trend.
@@ -55,6 +60,11 @@ public struct ScorecardWeek: Equatable, Sendable {
     /// Created → first install, seconds, of the week's merges a recorded build contains; and those none does.
     public var installTimes: [Double] = []
     public var notInstalled = 0
+    /// The merge objectives of each project with a merge run in either week (the same projects in both, by name); empty
+    /// when no merge stats are kept.
+    public var merges: [ScorecardMerges] = []
+    /// The leads' messages to the user.
+    public var messages = ScorecardMessages()
 
     public init(start: Date, end: Date) {
         self.start = start
@@ -70,6 +80,17 @@ public struct ScorecardWeek: Equatable, Sendable {
     /// Receipts' cost per costed merge plus the lead's per merge; nil when no merge's cost is known.
     public var costPerTask: Double? { receiptCostPerTask.map { $0 + (leadPerTask ?? 0) } }
     public var medianInstall: Double? { SetupStatsMath.median(installTimes) }
+}
+
+/// One project's merge objectives over a week.
+public struct ScorecardMerges: Equatable, Sendable {
+    public var project: String
+    public var objectives: MergeObjectives
+
+    public init(project: String, objectives: MergeObjectives) {
+        self.project = project
+        self.objectives = objectives
+    }
 }
 
 /// One merge's time to install.
@@ -157,14 +178,30 @@ extension SetupQualityMath {
     /// The scorecard of the two weeks ending at `weeks`' last two (see `SetupScorecard`). `dayKey` names a moment's
     /// local day as the lead ledger keys it ("2026-11-02"); `dayStart` the start of such a day (nil: not a day).
     static func scorecard(_ sources: [QualitySource], merges: [Merge], untasked: [LeadQuestion], questions: [LeadQuestion],
-                          weeks: [DateInterval], now: Double, dayKey: (Double) -> String, dayStart: (String) -> Double?) -> SetupScorecard? {
+                          weeks: [DateInterval], now: Double, dayKey: (Double) -> String, dayStart: (String) -> Double?,
+                          mergeSamples: [MergeSample]? = nil) -> SetupScorecard? {
         guard weeks.count >= 2 else { return nil }
+        let pair = weeks.suffix(2)
+        // The projects with a merge run in either week, each once.
+        var names: [String] = []
+        if let samples = mergeSamples {
+            for name in sources.map(\.name) where !names.contains(name) {
+                if pair.contains(where: { MergeObjectives(samples, project: name, after: $0.start, upTo: $0.end).runs > 0 }) { names.append(name) }
+            }
+        }
+        let sent = sources.flatMap { LeadMessages.messages(questions: $0.questions, updates: $0.updates, chat: $0.chat, now: now) }
+        let chats = sources.contains { $0.chat != nil }
         func week(_ span: DateInterval) -> ScorecardWeek {
             let t0 = span.start.timeIntervalSince1970, t1 = span.end.timeIntervalSince1970
             var w = ScorecardWeek(start: span.start, end: span.end)
             w.origins = LeadOrigins(sources.flatMap { $0.tasks.compactMap { view in view.createdAt.map { (createdAt: $0, origin: view.origin) } } },
                                     from: t0, to: t1)
             let mine = merges.filter { t0 <= $0.at && $0.at < t1 }
+            if let samples = mergeSamples {
+                w.merges = names.map { ScorecardMerges(project: $0, objectives: MergeObjectives(samples, project: $0, after: span.start, upTo: span.end)) }
+            }
+            w.messages = ScorecardMessages(sent, from: t0, to: t1, kept: !sources.isEmpty)
+            w.messages.chatKept = chats
             let slugs = Set(mine.map(\.task.slug))
             let asked = questions.filter { slugs.contains($0.task ?? "") } + untasked.filter { t0 <= $0.askedAt && $0.askedAt < t1 }
             let card = scorecard(mine.map(\.task), questions: asked, now: now)

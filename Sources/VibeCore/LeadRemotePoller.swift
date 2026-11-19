@@ -38,10 +38,12 @@ final class LeadRemotePoller: @unchecked Sendable {
     /// `state.next` is checked first of all: a tick that isn't due asks the session host nothing, however many a day.
     func tick(now: Date = Date()) {
         guard let lead, lead.role == .lead else { return }
-        let workflow = lead.workflow
+        // The notes alone: `workflow` asks the host for the review floor (every `floorFresh` seconds at most).
+        let notes = lead.workflowNotes
         let dueFile = lead.vault.scratch(root: lead.root, "remote-poll")
-            .appendingPathComponent(LeadVault.hash(workflow.remoteName + "\n" + workflow.base) + ".next")
+            .appendingPathComponent(LeadVault.hash(notes.remoteName + "\n" + notes.base) + ".next")
         if let next = (try? Data(contentsOf: dueFile)).flatMap({ try? JSONDecoder().decode(Date.self, from: $0) }), now < next { return }
+        let workflow = lead.workflow
         guard (try? lead.authenticate()) != nil,
                (try? lead.checkSettings(workflow, not: "Not fetched")) != nil,
               (try? lead.checkBattery(not: "Not fetched")) != nil,

@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s20 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s20 .left {
+          position: absolute;
+          left: 120px;
+          top: 260px;
+          width: 780px;
+        }
+        .s20 .left .label {
+          margin-bottom: 18px;
+        }
+        .s20 .it {
+          font-size: 27px;
+          line-height: 1.34;
+          padding: 16px 0 16px 22px;
+          border-left: 4px solid var(--go);
+          margin-bottom: 14px;
+        }
+        .s20 .it .mono {
+          display: block;
+          margin-top: 6px;
+          font-size: 21px;
+          color: var(--accent);
+        }
+        .s20 .it.red {
+          border-left-color: var(--stop);
+        }
+        .s20 .right {
+          position: absolute;
+          left: 1000px;
+          top: 260px;
+          width: 800px;
+        }
+        .s20 .right .label {
+          margin-bottom: 18px;
+        }
+        .s20 .rep {
+          border-color: var(--accent);
+          padding: 26px 32px;
+          min-height: 196px;
+        }
+        .s20 .rep .meta {
+          font-family: var(--mono);
+          font-size: 20px;
+          color: var(--muted);
+          margin-bottom: 12px;
+        }
+        .s20 .rep .tx {
+          font-family: var(--mono);
+          font-size: 24px;
+          line-height: 1.42;
+          color: var(--fg);
+        }
+        .s20 .causes {
+          margin-top: 24px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+        .s20 .causes .chip {
+          font-weight: 400;
+          font-size: 21px;
+        }
+        .s20 .causes .chip.hot {
+          border-color: var(--accent);
+          color: var(--accent);
+          font-weight: 700;
+        }
+        .s20 .note {
+          margin-top: 24px;
+          font-family: var(--mono);
+          font-size: 21px;
+          line-height: 1.45;
+          color: var(--muted);
+        }
+      </style>
+      <div id="root" data-composition-id="s20-flow" data-width="1920" data-height="1080">
+        <div class="stage s20">
+          <div class="kicker">09 / The merge gate</div>
+          <div class="head h2">Merges keep flowing.</div>
+          <div class="left">
+            <div class="label">faster runs</div>
+            <div class="it i1">A merge's test run takes the cores that are free, not only its slot's share.<span class="mono">VS_HEAVY_CORES, from the free cores when it starts</span></div>
+            <div class="it i2">Only the failing tests run again, by name.</div>
+            <div class="it i3 red">A test that's red on main too doesn't send the branch back: it merges, and a task to fix that test is filed.</div>
+            <div class="it i4 red">Main turns red: every running worker is told once, and again when it's green.</div>
+          </div>
+          <div class="right">
+            <div class="label">and when they stop, the lead hears why</div>
+            <div class="card rep">
+              <div class="meta">pipeline watch · to the lead · an example</div>
+              <div class="tx"></div>
+            </div>
+            <div class="causes">
+              <span class="chip hot">the battery hold</span>
+              <span class="chip">main red</span>
+              <span class="chip">the lead's records failing a check</span>
+              <span class="chip">every test slot held</span>
+              <span class="chip">the load hold</span>
+              <span class="chip">the gate not installed</span>
+              <span class="chip">a merge in progress</span>
+            </div>
+            <div class="note">after 20 min ready with no merge landing · at most every 30 min · minutes counted while the Mac is awake: a run it slept through is "paused by sleep"</div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s20");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 18);
+          K.rise(tl, ".s20 .head", 0.3);
+          K.rise(tl, ".s20 .left .label", 0.7, { y: 10 });
+          K.slide(tl, ".s20 .i1", 1.0, { x: -30 });
+          K.slide(tl, ".s20 .i2", 2.8, { x: -30 });
+          K.slide(tl, ".s20 .i3", 4.4, { x: -30 });
+          K.slide(tl, ".s20 .i4", 6.6, { x: -30 });
+          K.rise(tl, ".s20 .right .label", 8.2, { y: 10 });
+          K.rise(tl, ".s20 .rep", 8.5, { y: 30 });
+          K.type(
+            tl,
+            S.querySelector(".rep .tx"),
+            "Merges are held: task-a, task-b have been ready to merge for 24 min with no merge landing. Cause: the battery hold.",
+            8.9,
+            2.2,
+          );
+          K.pop(tl, ".s20 .causes .chip", 11.4, { stagger: 0.3, from: 0.8 });
+          tl.fromTo(".s20 .causes .chip.hot", { boxShadow: "0 0 0 0 rgba(240,166,58,0)" }, { boxShadow: "0 0 0 6px rgba(240,166,58,0.22)", duration: 0.5, yoyo: true, repeat: 1 }, 13.8);
+          K.rise(tl, ".s20 .note", 14.4, { y: 10 });
+          window.__timelines["s20-flow"] = K.fit(tl, 18, 28);
+        })();
+      </script>
+    </template>
+  </body>
+</html>

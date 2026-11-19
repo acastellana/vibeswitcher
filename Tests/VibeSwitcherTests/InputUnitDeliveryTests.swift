@@ -53,7 +53,7 @@ struct InputUnitDeliveryTests {
             #expect(await until { self.host.state == .connected })
             let out = folder.appendingPathComponent("out").path, ready = folder.appendingPathComponent("ready").path
             var result: Result<HostSession, HostClientError>?
-            host.spawn(SpawnRequest(cwd: folder.path, command: "stty -echo && : > '\(ready)' && exec cat > '\(out)'",
+            host.spawn(SpawnRequest(cwd: folder.path, command: "\(jobControlOff)stty -echo && : > '\(ready)' && exec cat > '\(out)'",
                                     env: [:], cols: 80, rows: 24, keepShell: false, label: "Lines", agent: nil)) { result = $0 }
             #expect(await until { result != nil })
             let session = try #require(result).get()

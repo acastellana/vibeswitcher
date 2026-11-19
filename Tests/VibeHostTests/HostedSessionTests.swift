@@ -26,8 +26,9 @@ final class SessionProbe {
     var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: buffer, as: UTF8.self) }
     var lastChange: HostSession? { lock.lock(); defer { lock.unlock() }; return changes.last }
 
-    /// What was going on in a session, for failure messages.
-    /// Blocking (a failure's message, which can't await): one short ps.
+    /// What was going on in a session, for failure messages: what it printed first, as a flake's log keeps only the
+    /// start of a long line (2026-11-12's cut this off after the info). Blocking (a failure's message, which can't
+    /// await): one short ps.
     func diagnosis(_ session: HostedSession) -> String {
         let info = queue.sync { session.info }
         let ps = Process()
@@ -37,11 +38,16 @@ final class SessionProbe {
         ps.standardOutput = pipe
         try? ps.run()
         waitForEnd(ps)
-        return "info=\(info) output=\(text.debugDescription) ps=\n\(String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))"
+        return "output=\(text.debugDescription) ps=\n\(String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))info=\(info)"
     }
 }
 
 struct HostedSessionTests {
+    /// Where a scratch program's `dd` says what went wrong (its stderr), for the failure's message.
+    let scratch = Scratch()
+
+    func errors(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)).map(\.debugDescription) ?? "none" }
+
     func start(_ command: String?, keepShell: Bool = false, cwd: String = "/tmp", shell: String = "/bin/sh",
                probe: SessionProbe) throws -> HostedSession {
         let request = SpawnRequest(cwd: cwd, command: command, env: ["PROBE": "yes"], cols: 80, rows: 24,
@@ -91,7 +97,7 @@ struct HostedSessionTests {
     /// the terminal: a 0×0 terminal made Codex's TUI draw nothing at all (task codex-s-tui-renders).
     @Test func theProgramStartsWithTheAskedWindowSize() async throws {
         let probe = SessionProbe()
-        let session = try start("stty size; exit 0", probe: probe)
+        let session = try start("\(jobControlOff)stty size; exit 0", probe: probe)
         #expect(await eventually { probe.lastChange?.exit != nil }, "\(probe.diagnosis(session))")
         #expect(probe.text.contains("24 80"), "\(probe.diagnosis(session))")
         probe.queue.sync { session.close() }
@@ -159,8 +165,16 @@ struct HostedSessionTests {
     /// The host ignores SIGPIPE/SIGHUP and runs on GCD threads (which block most signals); programs it starts
     /// must get neither: a blocked SIGWINCH means no redraw on resize, an ignored SIGHUP means End can't stop them.
     @Test func spawnedProgramsGetDefaultSignals() async throws {
-        let oldPipe = signal(SIGPIPE, SIG_IGN), oldHup = signal(SIGHUP, SIG_IGN)
-        defer { signal(SIGPIPE, oldPipe); signal(SIGHUP, oldHup) }
+        // Put back whole (sigaction, not signal(), which would drop the SIGPIPE probe's SA_SIGINFO: EPipeProbe).
+        var ignore = sigaction(), oldPipe = sigaction(), oldHup = sigaction()
+        #if canImport(Darwin)
+        ignore.__sigaction_u.__sa_handler = SIG_IGN
+        #else
+        ignore.__sigaction_handler.sa_handler = SIG_IGN
+        #endif
+        sigaction(SIGPIPE, &ignore, &oldPipe)
+        sigaction(SIGHUP, &ignore, &oldHup)
+        defer { sigaction(SIGPIPE, &oldPipe, nil); sigaction(SIGHUP, &oldHup, nil) }
         let probe = SessionProbe()
         // The words split by quotes: bash (Linux's session shell) reports a job a signal ended with its command line.
         let script = "echo mask=$(ps -o sigmask= -p $$ | tr -d ' '); sh -c 'kill -PIPE $$; echo pipe-\"ignored\"'; "
@@ -200,22 +214,24 @@ struct HostedSessionTests {
     @Test func headlessAnswersQueriesOnlyWhenNoClient() async throws {
         // A device-status query (ESC[6n) expects a cursor report (ESC[row;colR) on the program's input.
         let probe = SessionProbe()
-        let script = "stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 2>/dev/null | od -c | head -1; stty sane; \(keepRunning)"
+        let ddErrors = scratch.url("dd-errors").path
+        let script = "\(jobControlOff)stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 2>'\(ddErrors)' | od -c | head -1; stty sane; \(keepRunning)"
         let session = try start(script, probe: probe)
-        #expect(await eventually { probe.text.contains("033") }, "\(probe.diagnosis(session))")   // od printed the reply's ESC: answered
+        #expect(await eventually { probe.text.contains("033") }, "dd=\(errors(ddErrors)) \(probe.diagnosis(session))")   // od printed the reply's ESC: answered
         probe.queue.sync { session.terminate(); session.close() }
 
         // Asks once it's told to go (with a view attached by then), then reads one byte: the host's answer if it gave
         // one, else the Z typed after the question showed (the headless terminal answers as it takes the question in).
         let probe2 = SessionProbe()
-        let attached = try start("stty raw -echo; printf 'go?'; dd bs=1 count=1 2>/dev/null >/dev/null; printf '\\033[6n'; "
-            + "dd bs=1 count=1 2>/dev/null | od -c; stty sane; \(keepRunning)", probe: probe2)
+        let ddErrors2 = scratch.url("dd-errors").path
+        let attached = try start("\(jobControlOff)stty raw -echo; printf 'go?'; dd bs=1 count=1 2>>'\(ddErrors2)' >/dev/null; "
+            + "printf '\\033[6n'; dd bs=1 count=1 2>>'\(ddErrors2)' | od -c; stty sane; \(keepRunning)", probe: probe2)
         probe2.queue.sync { attached.clientsAttached = true }   // a view would answer; the host must not
-        #expect(await eventually { probe2.text.contains("go?") }, "\(probe2.diagnosis(attached))")
+        #expect(await eventually { probe2.text.contains("go?") }, "dd=\(errors(ddErrors2)) \(probe2.diagnosis(attached))")
         probe2.queue.sync { attached.write(Data("g".utf8)) }
-        #expect(await eventually { probe2.text.contains("\u{1B}[6n") }, "\(probe2.diagnosis(attached))")
+        #expect(await eventually { probe2.text.contains("\u{1B}[6n") }, "dd=\(errors(ddErrors2)) \(probe2.diagnosis(attached))")
         probe2.queue.sync { attached.write(Data("Z".utf8)) }
-        #expect(await eventually { probe2.text.contains("Z") }, "\(probe2.diagnosis(attached))")
+        #expect(await eventually { probe2.text.contains("Z") }, "dd=\(errors(ddErrors2)) \(probe2.diagnosis(attached))")
         #expect(!probe2.text.contains("033"))
         probe2.queue.sync { attached.terminate(); attached.close() }
     }
@@ -225,7 +241,7 @@ struct HostedSessionTests {
     @Test func answersProgramStatusQueriesAndKeepsTheStatus() async throws {
         let probe = SessionProbe()
         // It asks once the test says a view is attached (a byte), and runs until the test ends it.
-        let script = "stty raw -echo; echo ready; dd bs=1 count=1 >/dev/null 2>&1; "
+        let script = "\(jobControlOff)stty raw -echo; echo ready; dd bs=1 count=1 >/dev/null 2>&1; "
             + "printf '\\033]7501;?\\033\\\\'; dd bs=1 count=10 2>/dev/null | od -c | head -1; stty sane; "
             + "printf '\\033]7501;state=working:app=claude-code\\007'; "
             + "printf '\\033]7501;state=blocked:app=claude-code:kind=permission:msg=QmFzaA\\033\\\\'; "
@@ -285,6 +301,39 @@ extension HostedSessionTests {
     func aShellThatIsntThereIsNamedOnTheSessionsScreen() async throws {
         let probe = SessionProbe()
         let session = try start("true", shell: "/no/such/bin/fakesh", probe: probe)
+        #expect(await eventually { probe.text.contains("Couldn't start fakesh: it should be at /no/such/bin/fakesh, and isn't (No such file or directory).") },
+                "\(probe.diagnosis(session))")
+        #expect(await eventually { probe.lastChange?.exit?.status == 127 })
+        probe.end(session)
+    }
+
+    /// The same, with the host reading late (a loaded Mac's): its session queue held from the spawn until the launcher
+    /// has ended, or for 2 s once it's clear it waits to be read. macOS drops what the terminal's master hasn't read when
+    /// its session leader exits, so a launcher that exited right after writing left an empty screen (2026-11-18).
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "Linux's sessions run /bin/bash whatever SHELL names"))
+    func aShellThatIsntThereIsNamedEvenWhenTheHostReadsLate() async throws {
+        let probe = SessionProbe()
+        let request = SpawnRequest(cwd: NSHomeDirectory(), command: "true", env: ["PROBE": "yes"], cols: 80, rows: 24, keepShell: false,
+                                   label: "Test", agent: nil)
+        let session = try probe.queue.sync {
+            let session = try HostedSession.spawn(request, shell: "/no/such/bin/fakesh", launcher: hostLauncher,
+                                                  baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()],
+                                                  ringCapacity: 1 << 20, queue: probe.queue)
+            probe.attach(session)
+            // Ended (not reaped: the session does that), or still waiting for the host to read it.
+            let deadline = MacTime.real.awake() + 2
+            // A zombie, or gone, by the process table (both systems' `Platform.Processes`; a waitid's si_pid is a
+            // union's field on Linux).
+            func ended() -> Bool {
+                switch Platform.Processes.brief(session.info.childPID) {
+                case .brief(let brief): return brief.state == .zombie
+                case .gone: return true
+                case .unreadable: return false
+                }
+            }
+            while MacTime.real.awake() < deadline, !ended() { usleep(10_000) }
+            return session
+        }
         #expect(await eventually { probe.text.contains("Couldn't start fakesh: it should be at /no/such/bin/fakesh, and isn't (No such file or directory).") },
                 "\(probe.diagnosis(session))")
         #expect(await eventually { probe.lastChange?.exit?.status == 127 })

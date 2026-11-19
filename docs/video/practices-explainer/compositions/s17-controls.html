@@ -45,13 +45,17 @@
           line-height: 1.36;
           color: var(--muted);
         }
+        .s17 .key .d.sync {
+          margin-top: 10px;
+          color: var(--go);
+        }
         .s17 .key.wide {
           grid-column: span 2;
         }
       </style>
       <div id="root" data-composition-id="s17-controls" data-width="1920" data-height="1080">
         <div class="stage s17">
-          <div class="kicker">15 / You keep the keys</div>
+          <div class="kicker">16 / You keep the keys</div>
           <div class="head h2">What stays yours.</div>
           <div class="grid">
             <div class="key card">
@@ -83,6 +87,7 @@
               <div class="k">config seal</div>
               <div class="h3">Your config stays yours</div>
               <div class="d">If the agents' settings, hooks or shell files change while the team runs, nothing starts or merges until you Accept.</div>
+              <div class="d sync">One exception: a finished round of Claude Code's own skill sync, accepted by its shape.</div>
             </div>
             <div class="key card wide">
               <div class="k">phone · over tailscale</div>
@@ -99,12 +104,15 @@
           K.scene(tl, S.parentElement, 20);
           K.rise(tl, ".s17 .head", 0.3);
           const keys = S.querySelectorAll(".key");
+          // the phone key waits for its line, after the seal's skill-sync line (added 2026-11-17)
+          const ats = [0.9, 2.6, 4.3, 6.0, 7.7, 9.4, 16.5];
           keys.forEach((k, i) => {
-            const at = 0.9 + i * 1.7;
+            const at = ats[i];
             K.pop(tl, k, at, { from: 0.86 });
             tl.fromTo(k, { borderColor: "#f0a63a" }, { borderColor: "#3a352d", duration: 1.2 }, at + 0.3);
           });
-          window.__timelines["s17-controls"] = K.fit(tl, 20, 22.2);
+          K.rise(tl, ".s17 .key .d.sync", 11.0, { y: 10 });
+          window.__timelines["s17-controls"] = K.fit(tl, 20, 31.2);
         })();
       </script>
     </template>

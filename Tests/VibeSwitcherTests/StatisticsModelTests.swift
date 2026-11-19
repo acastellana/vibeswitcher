@@ -305,6 +305,60 @@ struct StatisticsModelTests {
         #expect(QualityPage(SetupQuality(all: QualityFigures(), byAgent: [], byModel: [], weeks: []), calendar: Self.utc).sections.first?.title == "Quality")
     }
 
+    /// The merge objectives and the leads' messages: both weeks with their n, the objective's verdict, and an empty
+    /// week before.
+    @Test func theScorecardShowsMergeObjectivesAndTheLeadsMessages() throws {
+        let start = Self.now.timeIntervalSince1970 - 7 * 86_400
+        var week = Self.scorecardWeek(start, merged: 4, costed: 3, cost: 9, lead: 2, installs: [], notInstalled: 4,
+                                      origins: LeadOrigins(), questions: 0, minutes: 0)
+        var before = Self.scorecardWeek(start - 7 * 86_400, merged: 0, costed: 0, cost: 0, lead: 0, installs: [], notInstalled: 0,
+                                        origins: LeadOrigins(), questions: 0, minutes: 0)
+        week.merges = [ScorecardMerges(project: "vs", objectives: MergeObjectives(runs: 55, passedOnRerun: 3, calmRuns: 12, calmMedianS: 504))]
+        before.merges = [ScorecardMerges(project: "vs", objectives: MergeObjectives(runs: 0, passedOnRerun: 0, calmRuns: 0, calmMedianS: nil))]
+        week.messages = ScorecardMessages([LeadMessage(reason: .mustAct, at: start + 10, acted: true), LeadMessage(reason: .mustAct, at: start + 20, acted: false),
+                                           LeadMessage(reason: .dailySummary, at: start + 30, acted: false), LeadMessage(reason: .other, at: start + 40, acted: nil)],
+                                          from: start, to: start + 7 * 86_400, kept: true)
+        week.messages.chatKept = true
+        before.messages = ScorecardMessages([], from: 0, to: 1, kept: true)
+        var quality = SetupQuality(all: QualityFigures(), byAgent: [], byModel: [], weeks: [])
+        quality.scorecard = SetupScorecard(week: week, previous: before, installs: [])
+        let section = try #require(QualityPage(quality, calendar: Self.utc).sections.first)
+        func figure(_ label: String) throws -> StatisticsPage.Figure { try #require(section.figures.first { $0.label == label }) }
+
+        let reruns = try figure("Merges passed only on a rerun")
+        #expect(reruns.value == "5.5%")
+        #expect(reruns.detail == "n = 55 merge runs: 3 passed only on a rerun; objective 5%: missed · the 7 days before: – (n = 0), no runs · "
+            + "n < 10 in a week: no trend", "\(reruns.detail ?? "")")
+        let calm = try figure("Median calm-Mac merge")
+        #expect(calm.value == "8.4 min")
+        #expect(calm.detail == "n = 12 calm-Mac runs of 55; objective 10 min: met · the 7 days before: – (n = 0), no calm-Mac run · "
+            + "n < 10 in a week: no trend", "\(calm.detail ?? "")")
+        let sent = try figure("Lead's messages to you per day")
+        #expect(sent.value == "0.6")
+        #expect(sent.detail == "n = 4 messages: 2 you must act, 0 finished or a problem, 1 daily summary, 1 other · 50% needed you to act · "
+            + "the 7 days before: 0 a day (n = 0: 0 you must act, 0 finished or a problem, 0 daily summary, 0 other) · n < 10 in a week: no trend",
+            "\(sent.detail ?? "")")
+        let acted = try figure("Lead's messages you acted on")
+        #expect(acted.value == "33%")
+        #expect(acted.detail == "n = 3 messages: 1 acted on within a day · the 7 days before: – (n = 0) · n < 10 in a week: no trend", "\(acted.detail ?? "")")
+        for line in [reruns, calm, sent, acted] { #expect(line.help?.isEmpty == false, "\(line.label)") }
+
+        // Two projects: each named; no lead transcript: said.
+        week.merges.append(ScorecardMerges(project: "wallet", objectives: MergeObjectives(runs: 1, passedOnRerun: 1, calmRuns: 1, calmMedianS: 60)))
+        week.messages.chatKept = false
+        quality.scorecard = SetupScorecard(week: week, previous: before, installs: [])
+        let two = try #require(QualityPage(quality, calendar: Self.utc).sections.first)
+        #expect(two.figures.contains { $0.label == "Merges passed only on a rerun · vs" })
+        let wallet = try #require(two.figures.first { $0.label == "Merges passed only on a rerun · wallet" })
+        #expect(wallet.value == "100%" && wallet.detail?.contains("too few runs to judge") == true)
+        #expect(two.figures.first { $0.label == "Lead's messages to you per day" }?.detail?.contains("text replies and shell cards: Not recorded") == true)
+        // Nothing kept: no message figures.
+        week.messages = ScorecardMessages()
+        before.messages = ScorecardMessages()
+        quality.scorecard = SetupScorecard(week: week, previous: before, installs: [])
+        #expect(!(try #require(QualityPage(quality, calendar: Self.utc).sections.first)).figures.contains { $0.label.hasPrefix("Lead's messages") })
+    }
+
     @Test func thePageShowsSampledAuditsWithTheirNAndAuditsSplitBySameModel() throws {
         var all = QualityFigures()
         all.merged = 20
