@@ -4185,3 +4185,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 13:56 Audit of audits-run-on-codex: complete, clean, round 4: 2 Important closed, 6 Nit (1 open), 1 Pre-existing open
 - 2026-11-19 13:56 Dismissed audits-run-on-codex:F8: Fixed on main by flaky-under-load (merged at 514453ea): the test now waits on its room wait with advancing.until; it passed 10 of 10 runs under load.
 - 2026-11-19 14:16 Merged audits-run-on-codex: Audits run on Codex when Claude's verifier model is out of quota (build 295fb14dedaa)
+- 2026-11-19 14:16 Automatically (auto_advance): Merged audits-run-on-codex (Audits run on Codex when Claude's verifier model is out of quota) into main at c46c61e4, on its passing audit and the full test run.
+- 2026-11-19 14:16 Started a worker on codex-worked-tasks
+- 2026-11-19 14:16 Automatically (auto_advance): Started a worker on codex-worked-tasks (Codex-worked tasks merged on a Codex verdict get the post-merge Claude re-audit too), its after tasks done (audits-run-on-codex).
+- 2026-11-19 14:16 Automatically (auto_advance): Cleaned up audits-run-on-codex (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-19 14:16 Update: Merged: reviews run on Codex when Claude is out of quota — **What you asked for** ("make sure that the reviews are happening through Codex especially when there's no quota"):
