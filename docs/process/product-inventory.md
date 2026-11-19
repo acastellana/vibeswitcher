@@ -225,6 +225,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - Usage limits: Ignore usage limits — `Sources/VibeSwitcher/MacLimitsSettings.swift`
 - Power: Keep the Mac awake while the team works — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Power: On battery, pause lead work below — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Power: Run the memory benches once a day — `Sources/VibeSwitcher/SettingsWindow.swift`
 
 ### Dictation & Briefing
 - Settings › Dictation & Briefing — `Sources/VibeSwitcher/SettingsCatalog.swift`
