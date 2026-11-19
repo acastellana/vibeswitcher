@@ -17,8 +17,12 @@ import VibeCore
 ///   process swapped or rewrote is refused (the security follow-ups' item 29), before anything is renamed for a swap,
 ///   and with the program taken out again for a rewrite, so what `appWrite` seals is never its bytes. Then each
 ///   agent's config (`HookInstaller.configURL(for:home:)`) gets the hooks, running
-///   `<home>/.vibeswitcher/bin/vibeswitcher-hook`.
-/// - Remove takes only VibeSwitcher's hooks out of each config (`HookInstaller.uninstall`); the programs stay.
+///   `<home>/.vibeswitcher/bin/vibeswitcher-hook`. Each config is asked first, before a program is staged, whether it
+///   can take them (`HookInstaller.checkInstall`: read, parsed, edited in memory, nothing written): one that can't
+///   refuses the install with nothing done, naming the file and why. A config that fails after that (changed or made
+///   unwritable since) is named the same way, with what was done: the programs in place, the configs before it edited.
+/// - Remove takes only VibeSwitcher's hooks out of each config (`HookInstaller.uninstall`); the programs stay. A
+///   config that can't be edited is named with the reason, and the configs done before it.
 /// - Every path is passed to `appWrite` as `ConfigSeal.homeWatched(home:)` spells it (`<home>/.vibeswitcher/bin/…`,
 ///   `<home>/.claude/settings.json`), never `VibePaths.binDir`: on a scratch node that is `<root>/bin`, reached through
 ///   the `<home>/.vibeswitcher` link, and would match no watched thing.
@@ -84,6 +88,15 @@ public struct HooksRequest {
         let targets = Self.programs.map { (binFolder as NSString).appendingPathComponent($0) }
         let configs = agents.map(configPath)
         let hook = (binFolder as NSString).appendingPathComponent("vibeswitcher-hook")
+        // Every config asked whether it can take the hooks before a program is written: one that can't (not JSON, not
+        // an object, not readable) would leave the programs in place with no hook to run them.
+        for agent in agents {
+            do {
+                try HookInstaller.checkInstall(agent: agent, at: URL(fileURLWithPath: configPath(agent)), hookBinary: hook)
+            } catch {
+                return .failure(StartRefusal("\(Self.shown(configPath(agent))) can't take the hooks: \(Self.why(error)): nothing was installed", exitCode: 1))
+            }
+        }
         let dot = URL(fileURLWithPath: home).appendingPathComponent(".vibeswitcher", isDirectory: true)
         // The programs' bytes written and flushed before `appWrite` takes its fingerprints, so only the renames and the
         // config edits fall between those and the ones it takes after (the S6 review: what changes in between is
@@ -106,10 +119,24 @@ public struct HooksRequest {
                     guard let program = staged[name] else { continue }
                     try program.place(at: (binFolder as NSString).appendingPathComponent(name))
                 }
-                for agent in agents { try HookInstaller.install(agent: agent, at: URL(fileURLWithPath: configPath(agent)), hookBinary: hook) }
+                var done: [String] = []
+                for agent in agents {
+                    do {
+                        try HookInstaller.install(agent: agent, at: URL(fileURLWithPath: configPath(agent)), hookBinary: hook)
+                    } catch {
+                        throw ConfigFailure(path: configPath(agent), error: error, done: done)
+                    }
+                    done.append(configPath(agent))
+                }
             }
-        } catch {
+        } catch let failure as ConfigFailure {
             // `appWrite` has asked the vault already for what changed; this waits for that ask.
+            vault.sealAppWrites()
+            // The programs are in place by now (the file passed `checkInstall` and changed, or couldn't be written,
+            // since): the line says what was done and what wasn't.
+            let others = failure.done.isEmpty ? "" : ", and \(failure.done.map(Self.shown).joined(separator: " and ")) has its hooks"
+            return .failure(StartRefusal("\(Self.shown(failure.path)) wasn't changed: \(Self.why(failure.error)): the hooks' programs are in \(Self.shown(binFolder))\(others)", exitCode: 1))
+        } catch {
             vault.sealAppWrites()
             return .failure(StartRefusal("the hooks weren't all installed: \(ConfigSeal.inert(Self.describe(error), limit: .max))", exitCode: 1))
         }
@@ -121,8 +148,20 @@ public struct HooksRequest {
         guard !agents.isEmpty else { return .failure(StartRefusal("no agent named")) }
         do {
             try vault.appWrite(agents.map(configPath), home: home) {
-                for agent in agents { try HookInstaller.uninstall(agent: agent, at: URL(fileURLWithPath: configPath(agent))) }
+                var done: [String] = []
+                for agent in agents {
+                    do {
+                        try HookInstaller.uninstall(agent: agent, at: URL(fileURLWithPath: configPath(agent)))
+                    } catch {
+                        throw ConfigFailure(path: configPath(agent), error: error, done: done)
+                    }
+                    done.append(configPath(agent))
+                }
             }
+        } catch let failure as ConfigFailure {
+            vault.sealAppWrites()
+            let others = failure.done.isEmpty ? "" : ": the hooks are out of \(failure.done.map(Self.shown).joined(separator: " and "))"
+            return .failure(StartRefusal("\(Self.shown(failure.path)) wasn't changed: \(Self.why(failure.error))\(others)", exitCode: 1))
         } catch {
             vault.sealAppWrites()
             return .failure(StartRefusal("the hooks weren't all removed: \(ConfigSeal.inert(Self.describe(error), limit: .max))", exitCode: 1))
@@ -263,4 +302,16 @@ public struct HooksRequest {
         if let errno = error as? Platform.Errno { return String(cString: strerror(errno.code)) }
         return error.localizedDescription
     }
+
+    /// A config whose edit failed, with the configs edited before it: thrown out of `appWrite`, so the refusal names
+    /// the file and the reason (the first Linux node's said "NSCocoaErrorDomain error 512" and no file).
+    struct ConfigFailure: Error {
+        let path: String
+        let error: Error
+        let done: [String]
+    }
+
+    /// A path, and why an edit of it failed (`HookInstaller.whyNot`), each for showing on the refusal's one line.
+    static func shown(_ path: String) -> String { ConfigSeal.inert(path, limit: .max) }
+    static func why(_ error: Error) -> String { ConfigSeal.inert(HookInstaller.whyNot(error), limit: .max) }
 }
