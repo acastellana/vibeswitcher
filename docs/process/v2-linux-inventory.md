@@ -510,6 +510,19 @@ node: like every `--test-*` flag it is refused, said in the log and dropped by a
 (`ServerArguments`). From a terminal, on a CI runner and on the Mac a scratch node gives no root, and its server reads
 the machine's own paths as before.
 
+**And under a branch code runner.** The merge gate and an audit's shared run start the test command under
+`BranchCode.wrapper` (`/bin/bash --noprofile --norc -p -c '"$@"; exit $?' vibeswitcher-branch-code …`, in a POSIX
+session of its own), and a verifier's shell runs every command under one, so each process of such a run has a runner
+among its ancestors. The voice rule's last line refuses a sender under a runner; it is judged after the cgroup, so
+the gate's run met it only once the cgroup passed (2026-11-19, at `41aa2b2c`: 136 issues in 11 suites, 171 lines "it
+runs under a branch code runner", and nothing else). A scratch node whose test runs under a runner gives its server
+`--server-arg --test-runner-above`: the scratch server reads its own ancestry once, at its start, and the runners in it
+(each by pid and start: `PeerFacts.runners(above:)`) aren't counted as a sender's, being above the whole scratch node,
+server and all. A runner anywhere else in a sender's ancestry counts as ever: a command a test starts under a wrapper
+of its own is still branch code to that server. The flag takes no value and names no process; `--node` refuses, says
+and drops it; and a scratch node gives it only when its own process reads a runner above itself, which a terminal, a
+worker's shell, CI and the Mac never do.
+
 **The M4 follow-up, done 2026-11-17** (Linux 5.15.167.4-microsoft-standard-WSL2):
 
 - **No new scope.** The Windows Terminal tab's shell, the `claude` started there and its Bash tool's child are all in
