@@ -70,3 +70,11 @@
 - 2026-11-19 19:39 Exception on the-full-suite-passes by lead of vibeswitcher-v2-lead: edits to scripts/test-under-load.sh, docs/process/v2-linux-inventory.md, Tests/Fixtures/sandbox/prototype.sh accepted. Reason: The under-load script must set the same umask and drop the same team-session variables as scripts/test.sh or the load check can't pass from a session; the fixture's own PATH gets /usr/sbin:/sbin for p…
 - 2026-11-19 19:39 Sent the-full-suite-passes's worker contract v2 (it had v1)
 - 2026-11-19 19:46 Automatically (auto_advance): Didn't audit the-full-suite-passes: Not audited: finder 1 of 2 couldn't start (Problem(text: "the-full-suite-passes\'s finder not started: ~/.claude/settings.json changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can…
+- 2026-11-19 19:52 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 19:52 Audit of the-full-suite-passes at 41aa2b2c by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 19:52 Automatically (auto_advance): Started the audit of the-full-suite-passes at 41aa2b2c (Its review is audit).
+- 2026-11-19 19:52 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-19 19:52 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 19:52 Audit of sb6-1-2-branch at 0e799cc5 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 19:52 Automatically (auto_advance): Started the audit of sb6-1-2-branch at 0e799cc5 (Its review is audit).
+- 2026-11-19 19:52 Pipeline held: sb3-the-launcher-builds, weblistener-slow-client, planner-a-worker-s ready to merge with none landing; cause: nothing VibeSwitcher sees
