@@ -46,3 +46,5 @@
 - 2026-11-19 18:30 Automatically (auto_advance): Started a worker on the-full-suite-passes (The full suite passes when the node's own merge gate runs it).
 - 2026-11-19 18:30 Automatically (auto_advance): Overlap for the-full-suite-passes's start (a warning only: nothing was refused or reordered). Package.swift: branch-runs-get-the (planned: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-1-2-branch (running: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
 - 2026-11-19 18:34 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 18:35 Audit of weblistener-slow-client at 27a30b62 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 18:37 Audit of sb3-the-launcher-builds: finder 1 of 2 submitted (complete, clean, 2 findings)
