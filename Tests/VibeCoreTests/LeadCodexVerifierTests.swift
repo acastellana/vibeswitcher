@@ -163,8 +163,48 @@ struct LeadCodexVerifierTests: LeadTeamFixture {
         #expect(!merged.isError, "\(merged.text)")
         let task = try #require(BoardStore(root: root).load().task("fix"))
         #expect(task.status == .done && fields(task.merged)["agent"] as? String == "codex")
-        #expect((!followup(root).isEmpty) == sensitive)
+        // A sensitive merge, or Codex's own work, gets the post-merge Claude re-audit; a Claude-worked one doesn't.
+        #expect((!followup(root).isEmpty) == (sensitive || worker == "codex"))
         #expect(lead.call("status", [:]).text.contains("audited by Codex"))
+    }
+
+    /// From audits-run-on-codex's blind check: a Codex-worked task touching no sensitive_paths merged on a Codex verdict
+    /// with no later Claude re-audit, so Codex had the only say on its own work. It gets the same obligation, started
+    /// once the injected limit clears.
+    @Test func codexWorkedCodexMergesGetClaudeAfterReset() async throws {
+        let (root, runtime, lead) = try team(worker: "codex")
+        #expect(BoardStore(root: root).load().task("fix")?.workerAgent == .codex)
+        #expect(!lead.call("configure", ["auto_advance": false]).isError)
+        hold(lead)
+        #expect(!lead.call("audit", ["task": "fix"]).isError)
+        let audited = try #require(vault.current(.verifier, root: root, task: "fix")?.session)
+        #expect(runtime.agents[audited] == "codex")
+        #expect(!(try verifier(root, runtime)).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "Codex checked"]).isError)
+        #expect(!lead.call("merge", ["task": "fix"]).isError)
+        let merged = try #require(BoardStore(root: root).load().task("fix")?.merged)
+        #expect(fields(merged)["agent"] as? String == "codex")
+        #expect(!followup(root).isEmpty, "A Codex-worked merge on a Codex verdict records the Claude re-audit")
+        #expect(followup(root)["session"] == nil)
+        #expect(lead.call("cleanup", ["task": "fix"]).isError)
+        let status = lead.call("status", [:]).text
+        #expect(status.contains("Claude re-audit pending") && status.contains("Codex worked it"), "\(status)")
+        let armed = LeadAdvanceTests.Armed()
+        lead.usageWake = { date, work in armed.add(date, work) }
+        let advancing = LeadAdvanceTests.Advancing(lead)
+        defer { advancing.stop() }
+        #expect(await advancing.until { !armed.taken.isEmpty })
+        #expect(followup(root)["session"] == nil, "Nothing starts while Claude is held")
+        clearClaude(Self.now.timeIntervalSince1970 + 1)
+        armed.taken.first?.1()
+        #expect(await advancing.until { followup(root)["session"] != nil })
+        advancing.stop()
+        let session = try #require(followup(root)["session"] as? String)
+        #expect(runtime.agents[session] == "claude")
+        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "verify-fix").appendingPathComponent("prompt.md"), encoding: .utf8)
+        #expect(prompt.contains("Review the whole change against the pinned baseline") && prompt.contains("Codex worked"))
+        #expect(!(try verifier(root, runtime)).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "Claude checked"]).isError)
+        #expect(followup(root)["passed"] as? Bool == true)
+        #expect(!lead.call("cleanup", ["task": "fix"]).isError)
     }
 
     @Test(arguments: [false, true]) func autoAdvanceStartsCodexAuditsAtTheLimit(sensitive: Bool) async throws {
