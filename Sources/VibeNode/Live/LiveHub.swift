@@ -25,6 +25,9 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
     /// What a WebSocket's request of a kind that isn't the hub's (`subscribe`, `unsubscribe`) becomes: the integration's
     /// (I1: the rights, then `Requests`). It answers on the transport itself. None: `unknown-kind`. On `queue`.
     public var others: ((NodeWire.Request, LiveTransport, LiveRights) -> Void)?
+    /// A scratch server's terminals (slice 4, LW-D12): `term.open` and `term.close` are the hub's while it has one, and
+    /// so are the binary frames. None (the user's node): neither. Set on `queue`, before the listener starts.
+    public var terminals: TerminalRelay?
 
     private let now: @Sendable () -> Date
     private let onQueue = DispatchSpecificKey<ObjectIdentifier>()
@@ -109,6 +112,8 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         switch request.kind {
         case "subscribe": subscribe(request, on: transport, rights: rights)
         case "unsubscribe": unsubscribe(request, on: transport)
+        case "term.open" where terminals != nil: terminals?.open(request, on: transport, rights: rights)
+        case "term.close" where terminals != nil: terminals?.close(request, on: transport)
         default: return false
         }
         return true
@@ -167,7 +172,10 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         connections[key] = connection
         transport.onWritable = { [weak self, weak transport] in
             guard let self, let transport else { return }
-            self.perform { self.flush(ObjectIdentifier(transport)) }
+            self.perform {
+                self.flush(ObjectIdentifier(transport))
+                self.terminals?.drained(transport)
+            }
         }
         return connection
     }
@@ -230,12 +238,18 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         perform { self.take(message, on: transport) }
     }
 
-    /// The terminal's frames (slice 4); nothing yet.
-    public func binary(_ message: Data, on transport: LiveTransport) {}
+    /// The terminal's frames (slice 4): the relay's, on a server that has one; dropped otherwise.
+    public func binary(_ message: Data, on transport: LiveTransport) {
+        perform {
+            guard self.connections[ObjectIdentifier(transport)] != nil else { return }
+            self.terminals?.binary(message, on: transport)
+        }
+    }
 
     /// The connection is gone: its subscriptions with it.
     public func closed(_ transport: LiveTransport) {
         perform {
+            self.terminals?.closed(transport)
             guard let connection = self.connections.removeValue(forKey: ObjectIdentifier(transport)) else { return }
             connection.transport.onWritable = nil
         }
@@ -258,6 +272,7 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
     }
 
     private func refuse(_ transport: LiveTransport, code: String, reason: String) {
+        terminals?.closed(transport)
         connections[ObjectIdentifier(transport)]?.transport.onWritable = nil
         connections[ObjectIdentifier(transport)] = nil
         transport.close(code: code, reason: reason)

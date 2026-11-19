@@ -157,7 +157,7 @@ struct WebSecurityTests {
 
     /// Every kind the protocol names but the read and draft ones is refused on a WebSocket (`voice`), before the
     /// handler hears of it: `answer`, `hold`, `stop`, `lead`, `web.open` and every other the user's, the lead's tool
-    /// server's, the terminal's. A read kind reaches the handler (the control).
+    /// server's; the terminal's are `unknown-kind`. A read kind reaches the handler (the control).
     @Test func aWebConnectionChangesNothing() async throws {
         let rig = try WebSecurityRig(scratch)
         defer { rig.stop() }
@@ -178,7 +178,9 @@ struct WebSecurityTests {
                 action: UUID().uuidString.lowercased())).dropLast(), as: UTF8.self))
             let reply = try #require(try client.nextFrame()?.json, "\(kind): no reply")
             #expect(reply["re"]?.string == "k\(index)" && reply["ok"]?.bool == false, "\(kind): \(reply)")
-            #expect(reply["error"]?["code"]?.string == NodeWire.Code.voice.rawValue, "\(kind): \(reply)")
+            // A terminal's kinds are no kind this server takes (LW-D12: only a scratch server's terminals take them).
+            let code = NodeWire.kinds[kind] == .webTerminal ? NodeWire.Code.unknownKind : NodeWire.Code.voice
+            #expect(reply["error"]?["code"]?.string == code.rawValue, "\(kind): \(reply)")
         }
         // A second `auth`, and a kind nobody names, are no way past it either.
         try client.sendText(#"{"v":1,"id":"again","kind":"auth","args":{"pair":"\#(code)"}}"#)

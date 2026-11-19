@@ -44,9 +44,11 @@ public final class NodeLive: @unchecked Sendable {
     public static let sweepEvery = 30
 
     /// `port`: the web's (`NodeWeb.port` on the user's node; a scratch server's `--test-web-port=`, 0 for the kernel's
-    /// pick). `webRoot`: a scratch server's `--test-web-root=`. `clock`: the engine's.
+    /// pick). `webRoot`: a scratch server's `--test-web-root=`. `terminals`: a scratch server's `--test-web-terminal`
+    /// (`term.open` through a `TerminalRelay`, the live plan's I4; the user's node answers it `unknown-kind`). `clock`:
+    /// the engine's.
     public init(requests: Requests, sessions: NodeSessions?, engine: LeadEngine?, clock: NodeClock, port: UInt16 = NodeWeb.port,
-                webRoot: URL? = nil, note: @escaping @Sendable (String) -> Void = { _ in }) {
+                webRoot: URL? = nil, terminals: Bool = false, note: @escaping @Sendable (String) -> Void = { _ in }) {
         queue = requests.queue
         self.requests = requests
         self.sessions = sessions
@@ -54,14 +56,17 @@ public final class NodeLive: @unchecked Sendable {
         self.clock = clock
         self.note = note
         hub = LiveHub(queue: queue, epoch: requests.epoch)
+        if terminals { hub.terminals = TerminalRelay(link: requests.link, note: note) }
         access = WebAccess(tokens: WebTokens(root: requests.root), note: note)
         let bound = BoundPort()
         let assets = LiveAssets(folder: webRoot, port: { bound.port })
         self.assets = assets
-        web = NodeWebListener(port: port, assets: assets, gate: access, handler: WebRequestScreen(hub, note: note), queue: queue,
-                              clock: clock, hello: { [weak requests] admission in
+        web = NodeWebListener(port: port, assets: assets, gate: access, handler: WebRequestScreen(hub, terminals: terminals, note: note),
+                              queue: queue, clock: clock, hello: { [weak requests] admission in
                                   guard let requests else { return nil }
-                                  return NodeWire.message(requests.webHello(admission, assets: assets.build))
+                                  var hello = requests.webHello(admission, assets: assets.build)
+                                  if terminals, admission.rights.contains(.read) { hello.kinds += Self.terminalKinds }
+                                  return NodeWire.message(hello)
                               }, note: { note($0) })
         bound.web = web
         let said = SaidWeb()
@@ -91,6 +96,9 @@ public final class NodeLive: @unchecked Sendable {
         requests.webValue = { said.live?.webValue() ?? NodeStatusStore.webOff }
         said.live = self
     }
+
+    /// What a scratch server that opens terminals adds to a page's `hello.kinds`.
+    public static let terminalKinds = ["term.open", "term.close"]
 
     /// A web connection as `Requests` sees it: no process, no terminal, no cgroup. It is never the user's voice (the
     /// screen refuses those kinds before; this is the second lock), and nobody's tool server.
