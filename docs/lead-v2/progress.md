@@ -1,0 +1,14 @@
+# Progress
+
+- 2026-11-19 12:23 Planned weblistener-slow-client: WebListener slow-client test: find the race, make it deterministic (review audit)
+- 2026-11-19 12:23 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots, ~/.vibeswitcher/lead/git-hooks and ~/.vibeswitcher/lead/run
+- 2026-11-19 12:23 Automatically (auto_advance): Didn't start weblistener-slow-client: weblistener-slow-client's worker not started: ~/.claude/skills and ~/.local/share/claude/versions changed outside a team session: they carry code that runs (hooks, MCP servers, shell startup, git's commands), so only the user's Accept seals them, whoever made the change. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change, they accept it ther…
+- 2026-11-19 12:24 Planned sb3-the-launcher-builds: SB3: the launcher builds the box (SessionSandbox) (review audit, for security)
+- 2026-11-19 12:24 Started a worker on sb3-the-launcher-builds
+- 2026-11-19 12:24 Automatically (auto_advance): Started a worker on sb3-the-launcher-builds (SB3: the launcher builds the box (SessionSandbox)).
+- 2026-11-19 12:24 Planned sb6-1-2-branch: SB6 (1/2): branch code runs in a box of its own (BranchRun) (review audit, for security)
+- 2026-11-19 12:24 Started a worker on sb6-1-2-branch
+- 2026-11-19 12:24 Automatically (auto_advance): Started a worker on sb6-1-2-branch (SB6 (1/2): branch code runs in a box of its own (BranchRun)).
+- 2026-11-19 12:24 Automatically (auto_advance): Overlap for sb6-1-2-branch's start (a warning only: nothing was refused or reordered). Package.swift: sb3-the-launcher-builds (running: its boundaries name it).
+- 2026-11-19 12:25 Planned sb6-2-2-a: SB6 (2/2): a worker's branch in a ref folder of its own, and its objects checked at merge (review audit, for security)
+- 2026-11-19 12:25 Planned sb5-the-host-confines: SB5: the host confines what a lead starts (review audit, for security)
