@@ -4015,3 +4015,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 08:23 Review of audits-run-on-codex: audit
 - 2026-11-19 08:23 Started a worker on audits-run-on-codex
 - 2026-11-19 08:23 Automatically (auto_advance): Started a worker on audits-run-on-codex (Audits run on Codex when Claude's verifier model is out of quota).
+- 2026-11-19 08:59 Released task-rows-say-when's worker (idle since its done report on e905a233) while its audit runs
