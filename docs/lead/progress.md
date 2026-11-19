@@ -4184,3 +4184,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 13:56 Planned codex-worked-tasks: Codex-worked tasks merged on a Codex verdict get the post-merge Claude re-audit too (review audit, for security)
 - 2026-11-19 13:56 Audit of audits-run-on-codex: complete, clean, round 4: 2 Important closed, 6 Nit (1 open), 1 Pre-existing open
 - 2026-11-19 13:56 Dismissed audits-run-on-codex:F8: Fixed on main by flaky-under-load (merged at 514453ea): the test now waits on its room wait with advancing.until; it passed 10 of 10 runs under load.
+- 2026-11-19 14:16 Merged audits-run-on-codex: Audits run on Codex when Claude's verifier model is out of quota (build 295fb14dedaa)
