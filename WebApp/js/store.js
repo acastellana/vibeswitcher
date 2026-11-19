@@ -12,6 +12,8 @@
 //   store.chatOps(id, ops)       a chat delta's ops; 'gap' when they don't fit what it holds (nothing applied)
 //   store.chatPage(id, items, more)  older items, before the first held
 //   store.openChat(id), closeChat(id), pageChat(id)   what the chat view asks of the feed
+//   store.draft(card, text)      leaves an answer drafted on a card, shown at once (the contract's §8); null clears it
+//   store.draftOf(card)          the draft a card shows: this page's overlay over the node's, or null
 
 // The keyed collections, and the field each entry is keyed by (a lead and its board by their project's id).
 import { applyOps, reindex } from './chatops.js';
@@ -48,6 +50,12 @@ export function createStore() {
     chats: new Map(),
     // What this client did and the server hasn't confirmed yet, by card id: { kind, answer }, or { refused: reason }.
     acting: new Map(),
+    // A draft this page sent that the stream doesn't show yet (the contract's "Optimistic actions"), by card id:
+    // { text (null: cleared), action, sent: false until the node acked it }. Shown over the card's own `draft` until
+    // the cards stream reaches the ack's `applied`, so nothing flickers between the click, the ack and the delta.
+    drafts: new Map(),
+    // Why the node refused a card's last draft, by card id, until the next one.
+    draftRefused: new Map(),
   };
 
   const listeners = new Map();
@@ -132,6 +140,11 @@ export function createStore() {
     if (change.in === 'cards') {
       state.acting.delete(change.id);
       if (change.value === null) state.cardKeys.delete(change.id);
+      // A card that closed (or went) has nothing left to draft: what this page had pending on it is moot.
+      if (change.value === null || change.value.open === false) {
+        state.drafts.delete(change.id);
+        state.draftRefused.delete(change.id);
+      }
     }
     touch(touched, change.in, change);
   }
@@ -164,6 +177,8 @@ export function createStore() {
               state.cardKeys.set(card.id, state.cardKeys.get(old.id) || old.id);
               const acting = state.acting.get(old.id);
               if (acting) state.acting.set(card.id, acting);
+              const drafted = state.drafts.get(old.id);
+              if (drafted) state.drafts.set(card.id, drafted);
             }
           }
           if (card && !placed.has(card.id)) { next.set(card.id, card); placed.add(card.id); }
@@ -171,6 +186,8 @@ export function createStore() {
         for (const card of list) if (!placed.has(card.id)) next.set(card.id, card);
         for (const id of state.cardKeys.keys()) if (!next.has(id)) state.cardKeys.delete(id);
         for (const id of state.acting.keys()) if (!next.has(id)) state.acting.delete(id);
+        for (const id of state.drafts.keys()) if (!next.get(id)?.open) state.drafts.delete(id);
+        for (const id of state.draftRefused.keys()) if (!next.has(id)) state.draftRefused.delete(id);
       } else {
         for (const entry of list) next.set(entry[key], entry);
       }
@@ -258,8 +275,8 @@ export function createStore() {
 
   // An action (the design's "Actions"): it has an id, the server answers done or refused, and the change itself
   // arrives as a delta.
-  function request(kind, args = {}) {
-    const message = { v: 1, id: String(nextRequest++), kind, args, action: crypto.randomUUID() };
+  function request(kind, args = {}, action = crypto.randomUUID()) {
+    const message = { v: 1, id: String(nextRequest++), kind, args, action };
     if (!feed) return Promise.resolve({ ok: false, error: { code: 'not-yet', message: 'Not connected to the node yet.' } });
     return feed.request(message);
   }
@@ -276,6 +293,50 @@ export function createStore() {
       }
       return reply;
     });
+  }
+
+  const cardsTouched = (card) => emit(new Map([['cards', [{ in: 'cards', id: card, acting: true }]]]));
+
+  // An answer drafted on a card (the contract's §8): shown at once as an overlay keyed by its action id, sent as
+  // `draft` (or `draft.clear` for null), and kept over the card until the cards stream holds what the node acked
+  // (`applied`), so the card never shows the old draft in between. A refusal takes the overlay back and says why.
+  // Nothing is answered: the user confirms it with `vibeswitcher answer` in a terminal, the card's code typed.
+  function draft(card, text) {
+    const value = state.cards.get(card);
+    if (!value?.open || !value.question) return Promise.resolve({ ok: false, error: { code: 'gone', message: 'This card is closed.' } });
+    const action = crypto.randomUUID();
+    const clearing = text === null;
+    state.drafts.set(card, { text: clearing ? null : text, action, sent: false });
+    state.draftRefused.delete(card);
+    cardsTouched(card);
+    const args = clearing ? { card } : { card, text, version: value.question.version };
+    const mine = () => state.drafts.get(card)?.action === action;
+    return request(clearing ? 'draft.clear' : 'draft', args, action).then((reply) => {
+      if (!mine()) return reply;
+      if (!reply.ok) {
+        state.drafts.delete(card);
+        state.draftRefused.set(card, reply.error?.message || 'The node refused it.');
+        cardsTouched(card);
+        return reply;
+      }
+      state.drafts.get(card).sent = true;
+      cardsTouched(card);
+      const applied = reply.result?.applied?.cards;
+      const reached = typeof applied === 'number' && feed?.reached ? feed.reached('cards', applied) : Promise.resolve();
+      return reached.then(() => {
+        if (mine()) { state.drafts.delete(card); cardsTouched(card); }
+        return reply;
+      });
+    });
+  }
+
+  // The draft card `id` shows, `{ text, sending, mine }`, or null: this page's overlay while it has one (a cleared one
+  // shows none), else the node's own (left here, in another tab, on another device).
+  function draftOf(id) {
+    const overlay = state.drafts.get(id);
+    if (overlay) return overlay.text === null ? null : { text: overlay.text, sending: !overlay.sent, mine: true };
+    const card = state.cards.get(id);
+    return card?.open && card.draft ? { text: card.draft.text, sending: false, mine: false } : null;
   }
 
   // A message typed into a session, shown at once as a pending row; the transcript's own row replaces it.
@@ -298,6 +359,8 @@ export function createStore() {
     subscribe,
     request,
     act,
+    draft,
+    draftOf,
     send,
     openChat,
     closeChat,

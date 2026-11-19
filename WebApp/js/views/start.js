@@ -15,7 +15,7 @@ export function startView(app) {
     [`${KEY.alt}1–9`, 'Go to a session'],
     [`${KEY.alt}↓ ${KEY.alt}↑`, 'Next and previous session'],
     [`${KEY.alt}F`, 'Filter the list'],
-    ['1–9', 'Answer the focused question with that option'],
+    ['1–9', 'Pick that option on the focused question'],
   ];
   const el = h('section', { class: 'start', 'aria-label': 'Start page' },
     h('div', { class: 'start-column' }, title, sub,
