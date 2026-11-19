@@ -11,6 +11,45 @@ extension Platform {
         CFGetTypeID(number) == CFBooleanGetTypeID()
     }
 
+    /// Whether two JSON objects hold the same members: each as `JSONSerialization` read it, or built in the program
+    /// from dictionaries, arrays, strings, numbers, Bools and `NSNull`. The Mac: `NSDictionary`'s `isEqual(to:)`, as
+    /// the callers asked it before.
+    ///
+    /// On Linux that call says false for an object with a `true` or a `false` among its own members, compared with
+    /// itself too: swift-corelibs-foundation's `isEqual(to:)` reads its own value back as a Swift `Bool` and the
+    /// other dictionary's as the `__NSCFBoolean` the parser made, and `AnyHashable` calls those two different (a
+    /// boolean inside a nested array or object is compared another way, and is found equal). So Linux walks the two
+    /// values itself: objects by key, arrays in order, strings by their scalars, numbers by value. There a boolean
+    /// is never equal to a number (`true` isn't 1), which the Mac's call doesn't tell apart.
+    public static func sameJSON(_ one: [String: Any], _ other: [String: Any]) -> Bool {
+        #if canImport(Darwin)
+        return NSDictionary(dictionary: one).isEqual(to: other)
+        #else
+        return sameJSONValue(one, other)
+        #endif
+    }
+
+    #if !canImport(Darwin)
+    private static func sameJSONValue(_ one: Any, _ other: Any) -> Bool {
+        switch (one, other) {
+        case (let one as [String: Any], let other as [String: Any]):
+            return one.count == other.count && one.allSatisfy { key, value in
+                other[key].map { sameJSONValue(value, $0) } ?? false
+            }
+        case (let one as [Any], let other as [Any]):
+            return one.count == other.count && zip(one, other).allSatisfy(sameJSONValue)
+        case (let one as String, let other as String):
+            return one.unicodeScalars.elementsEqual(other.unicodeScalars)
+        case (let one as NSNumber, let other as NSNumber):
+            return isBoolean(one) == isBoolean(other) && one.isEqual(other)
+        case (is NSNull, is NSNull):
+            return true
+        default:
+            return false
+        }
+    }
+    #endif
+
     /// Whether the caller runs on the main thread, or as the main queue's work (the main actor's with it) wherever that
     /// runs. The Mac: `Thread.isMainThread`. On Linux a process in `dispatchMain()` (vibeswitcher-host, the test runner)
     /// has its first thread end there, and libdispatch runs the main queue on a thread of its own, where

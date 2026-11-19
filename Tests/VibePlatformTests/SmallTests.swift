@@ -35,6 +35,72 @@ struct SmallTests {
         #expect(!Platform.isBoolean(NSNumber(value: 1.0)))
     }
 
+    /// The repro, from the first Linux node (2026-11-19): a settings.json with `"alwaysThinkingEnabled": true` wasn't
+    /// equal to itself by `NSDictionary`'s `isEqual(to:)` on Linux, so the hook installer's check of its own edit
+    /// refused every file with a boolean among its top-level members.
+    @Test func aJSONObjectIsTheSameAsItselfWhateverItHolds() throws {
+        func object(_ text: String) throws -> [String: Any] {
+            try #require(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], "\(text)")
+        }
+        let texts = [
+            #"{"on": true}"#, #"{"off": false}"#, #"{"count": 3}"#, #"{"big": 1754063019868}"#, #"{"real": 0.1}"#,
+            #"{"nothing": null}"#, #"{"text": "✓ é \u00e9 a\/b"}"#, #"{"list": [true, false, 1, 0.5, null, "x", [], {}]}"#,
+            #"{"inner": {"on": true, "inner": {"off": false, "n": 1}}}"#, "{}",
+            #"{"on": true, "off": false, "count": 3, "real": 0.1, "nothing": null, "text": "x", "list": [true], "inner": {"on": true}}"#,
+        ]
+        for text in texts {
+            // Two readings of one text, and one reading against itself.
+            #expect(Platform.sameJSON(try object(text), try object(text)), "\(text)")
+            let once = try object(text)
+            #expect(Platform.sameJSON(once, once), "\(text)")
+            // Written out and read again, as the installer checks its edit.
+            let written = try JSONSerialization.data(withJSONObject: once, options: [.prettyPrinted, .sortedKeys])
+            #expect(Platform.sameJSON(try #require(try JSONSerialization.jsonObject(with: written) as? [String: Any]), once), "\(text)")
+        }
+        // Against values made in the program, as the installer's own handlers are.
+        let made: [String: Any] = ["on": true, "count": 3, "real": 0.5, "text": "x", "nothing": NSNull(),
+                                   "list": [["type": "command", "timeout": 5] as [String: Any]]]
+        let read = try object(#"{"on": true, "count": 3, "real": 0.5, "text": "x", "nothing": null, "list": [{"type": "command", "timeout": 5}]}"#)
+        #expect(Platform.sameJSON(read, made) && Platform.sameJSON(made, read))
+    }
+
+    @Test func aJSONObjectThatDiffersAnywhereIsNotTheSame() throws {
+        func same(_ one: String, _ other: String) throws -> Bool {
+            let one = try #require(try JSONSerialization.jsonObject(with: Data(one.utf8)) as? [String: Any])
+            let other = try #require(try JSONSerialization.jsonObject(with: Data(other.utf8)) as? [String: Any])
+            #expect(Platform.sameJSON(one, other) == Platform.sameJSON(other, one))
+            return Platform.sameJSON(one, other)
+        }
+        let different = [
+            (#"{"a": true}"#, #"{"a": false}"#), (#"{"a": 1}"#, #"{"a": 2}"#), (#"{"a": 0.1}"#, #"{"a": 0.2}"#),
+            (#"{"a": "x"}"#, #"{"a": "y"}"#), (#"{"a": null}"#, #"{"a": 0}"#), (#"{"a": null}"#, #"{"a": false}"#),
+            (#"{"a": 1}"#, #"{"b": 1}"#), (#"{"a": 1}"#, #"{"a": 1, "b": 1}"#), (#"{"a": 1}"#, #"{}"#),
+            (#"{"a": "1"}"#, #"{"a": 1}"#), (#"{"a": "true"}"#, #"{"a": true}"#), (#"{"a": []}"#, #"{"a": {}}"#),
+            (#"{"a": [1, 2]}"#, #"{"a": [2, 1]}"#), (#"{"a": [1]}"#, #"{"a": [1, 1]}"#),
+            (#"{"a": {"b": [{"c": true}]}}"#, #"{"a": {"b": [{"c": false}]}}"#),
+            (#"{"a": {"b": [{"c": "x"}]}}"#, #"{"a": {"b": [{"c": "x", "d": null}]}}"#),
+        ]
+        for (one, other) in different {
+            #expect(try !same(one, other), "\(one) and \(other)")
+        }
+        // Keys in another order, spacing and a number's spelling aren't differences.
+        #expect(try same(#"{"a": 1, "b": [1.0, 1e3]}"#, "{ \"b\" : [1, 1000],\n\"a\":1.0 }"))
+    }
+
+    /// Linux's own walk tells a boolean from a number, in a nested value too; the Mac's `isEqual(to:)` calls a `true`
+    /// and a 1 equal, as it always did (`sameJSON` there is the call the installer made before).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux: its own comparison"))
+    func onLinuxATrueIsNotAOne() throws {
+        func object(_ text: String) throws -> [String: Any] {
+            try #require(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        }
+        #expect(!Platform.sameJSON(try object(#"{"a": true}"#), try object(#"{"a": 1}"#)))
+        #expect(!Platform.sameJSON(try object(#"{"a": 0}"#), try object(#"{"a": false}"#)))
+        #expect(!Platform.sameJSON(try object(#"{"a": [{"b": true}]}"#), try object(#"{"a": [{"b": 1}]}"#)))
+        // Two spellings of one character are two strings: the installer's check is of bytes it is about to write.
+        #expect(!Platform.sameJSON(try object(#"{"a": "\u00e9"}"#), try object(#"{"a": "e\u0301"}"#)))
+    }
+
     /// The same words on both systems, from the Mac's Foundation and from Linux's own reader: each text here is one
     /// whose reading CommonMark leaves no doubt about (matched emphasis, a code span, a link with a plain address,
     /// an underscore inside a word, a star with a space on each side).
