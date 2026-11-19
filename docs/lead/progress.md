@@ -4166,3 +4166,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 13:08 the-config-seal-is back in review: no Important finding open, and its audit passed
 - 2026-11-19 13:16 Pipeline held: new-work-waits-when ready to merge with none landing; cause: a merge in progress
 - 2026-11-19 13:21 Merged new-work-waits-when: New work waits when the disk can't hold its load run: start_worker keeps room for the tasks in flight (in a batch, on a test run of its own) (build 295fb14dedaa)
+- 2026-11-19 13:21 Started a worker on audits-run-on-codex
+- 2026-11-19 13:21 Automatically (auto_advance): Merge of audits-run-on-codex failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
+- 2026-11-19 13:21 Automatically (auto_advance): Merged new-work-waits-when at daa42fe6 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-19 13:22 Automatically (auto_advance): Cleaned up new-work-waits-when (freed 1.8 GB of build output and temporary folders). It stays done.
