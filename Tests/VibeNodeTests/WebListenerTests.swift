@@ -598,6 +598,43 @@ struct WebListenerTests {
         #expect(world.listener.connectionCount == 1)
     }
 
+    /// The handler is told the client fell behind before it is told the queue drained, also when the write asked for
+    /// by the first message waits on the listener's queue ahead of that notice and then empties the queue in one go.
+    /// Here the queue is held while the messages are offered, and they are a few kilobytes in all, far less than a
+    /// new connection's socket takes at once: without the hold only a busy machine brings this order about. A handler
+    /// told `drained` first and `behind` after would wait for a `drained` that never comes.
+    @Test func aClientIsToldItFellBehindBeforeItsQueueDrained() throws {
+        var limits = WebLimits()
+        limits.maxQueuedBytes = 4 * 1_024
+        limits.overflow = .drop
+        let world = try WebWorld(limits)
+        let client = try world.socketClient()
+        let socket = try world.socket()
+        let size = 1_024
+        var taken = 0
+        try world.whileQueueIsHeld {
+            while socket.send(binary: Self.numbered(taken, count: size)) {
+                taken += 1
+                try #require(taken < 100, "the queue never filled")
+            }
+            #expect(socket.queuedBytes == taken * (size + 4), "nothing is written while the queue is held")
+        }
+        #expect(taken == 3, "three frames of 1028 bytes fit 4096, and nothing was written to make room for a fourth")
+        #expect(world.events.wait { $0.contains("behind") && $0.contains("drained") })
+        #expect(world.events.all.filter { $0 == "behind" || $0 == "drained" } == ["behind", "drained"])
+        #expect(socket.queuedBytes == 0)
+        // Every message taken, in order and whole; nothing more until the handler resumes, then what it sends.
+        for number in 0..<taken {
+            let frame = try #require(client.frame(), "the connection ended at message \(number) of \(taken)")
+            try #require(frame.opcode == WebTestClient.binary && Data(frame.payload) == Self.numbered(number, count: size), "message \(number)")
+        }
+        #expect(!socket.send(text: "before the handler resumed"))
+        socket.resume()
+        #expect(socket.send(text: "resync"))
+        #expect(client.frame()?.text == "resync")
+        #expect(world.events.all.filter { $0 == "behind" || $0 == "drained" } == ["behind", "drained"])
+    }
+
     /// Under the other policy the client that doesn't read is closed.
     @Test func aClientThatDoesntReadIsClosedWhenThePolicySaysSo() throws {
         var limits = WebLimits()

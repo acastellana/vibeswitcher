@@ -20,3 +20,7 @@ A verifier on planner-a-worker-s sat on a prompt with its audit nearly done; wai
 
 The user's message; the first merge of the-full-suite-passes failed on two flakes in code it doesn't touch.
 
+## 2026-11-19 22:09:16 the-full-suite-passes merged into v2 at a052f119 (2026-11-19; on its rerun: the first run failed on aListenerLetGoClosesItsSockets, a new flake in the ledger). The hold on the four approved tasks is over: weblistener-slow-client, planner-a-worker-s, sb3-the-launcher-builds and sb6-1-2-branch are set back from kept and merged one at a time, in that order.
+
+The reason for keeping them (the merge's test run failing on this node's environment) no longer holds.
+
