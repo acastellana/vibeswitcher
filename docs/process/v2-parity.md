@@ -130,7 +130,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Machine-wide limits: team sessions, load, test and build slots, memory | `MacLimitsSettings.swift`, `Sources/VibeCore/MacLoad.swift` | partly | enforced (`Engine/RoomWatch.swift`, the tool server), on defaults unless the JSON is edited | S | memory pressure and swap are read on Linux (`VibePlatform/Host+Linux.swift`) |
 | Boost | `BoostWatch.swift`, `MainWindow/BoostMark.swift` | missing | nothing writes `boost.json` on a node | M | the design says Automatic acts as Off on WSL |
 | Heavy-job slots (`vs-heavy`) | `Sources/VibeCore/TestLock.swift`, `HeavyJobs.swift` | has it | the command folder is on the sessions' PATH (`Sources/VibeHost/V2/HostImages.swift`) | | |
-| Battery hold, keep the machine awake, the sleep's cost | `KeepAwake.swift`, `PowerReading.swift`, `Sources/VibeCore/PowerSource.swift` | missing | nothing on the node writes the power state, so the battery hold never applies; keep-awake is owed | M | WSL has nothing to keep awake |
+| Battery hold, keep the machine awake, the sleep's cost | `KeepAwake.swift`, `PowerReading.swift`, `Sources/VibeCore/PowerSource.swift` | not needed | the battery hold: a node runs on a server or WSL on mains (no `/sys/class/power_supply` battery there), and has no battery limit setting; nothing writes `power.json` under its root, so the hold never applies, said in `Engine/Refresh.swift` (2026-11-19). Keep-awake is owed | M | WSL has nothing to keep awake; a Linux laptop node would need the reading, the limit and the watch's telling together (M) |
 | Memory benches, malloc relief, hang watchdog, UI benches | `MallocMode.swift`, `HangWatchdog.swift`, `UIBench.swift` | not needed | they measure the app's own process | | |
 
 ### Hooks, status line, config seal and git guards
@@ -228,7 +228,8 @@ doesn't yet confine anything.
 - ~~`small_task_min` never drops a review.~~ Closed 2026-11-19: the witness tells the vault what it sees at work.
 - The limits run on defaults (10 team sessions, test and build slots at a sixth of the cores) with no way to change
   them except by hand, and the defaults aren't shown.
-- The battery hold never applies on the node, because no one writes the power state.
+- ~~The battery hold never applies on the node, because no one writes the power state.~~ Now on purpose (2026-11-19):
+  not needed on a server or WSL on mains; recorded in the table and in `Engine/Refresh.swift`.
 - Running leads aren't told when `policy.md` changes.
 - `push_remote` tells the lead it recorded a request that only you can push, but no client offers the push.
 - The node's restart ends every session, and nothing records or reopens them.
