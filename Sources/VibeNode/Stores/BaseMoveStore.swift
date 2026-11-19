@@ -82,7 +82,7 @@ public final class BaseMoveStore: @unchecked Sendable {
     public private(set) var failures: [String: String] = [:]
 
     private let vault: LeadVault
-    private let reads: BoardReads
+    private let reads: LeadReads
     private let background: (@escaping () -> Void) -> Void
     private let main: (@escaping () -> Void) -> Void
     /// A move to ask about appeared.
@@ -106,11 +106,11 @@ public final class BaseMoveStore: @unchecked Sendable {
     public static let period: TimeInterval = 30
 
     struct Stamps: Equatable {
-        var reflog: BoardFiles.Stamp?
-        var workflow: BoardFiles.Stamp?
+        var reflog: LeadFiles.Stamp?
+        var workflow: LeadFiles.Stamp?
     }
 
-    public init(vault: LeadVault, reads: BoardReads,
+    public init(vault: LeadVault, reads: LeadReads,
                 background: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.global(qos: .utility).async(execute: $0) },
                 main: @escaping (@escaping () -> Void) -> Void) {
         self.vault = vault
@@ -253,7 +253,7 @@ public final class BaseMoveStore: @unchecked Sendable {
 
     private func stamps(root: String, branch: String) -> Stamps {
         stamped(root)
-        return Stamps(reflog: BoardFiles.Stamp(Self.reflog(root: root, branch: branch)), workflow: BoardFiles.Stamp(ConfigHoldStore.workflowPath(root: root)))
+        return Stamps(reflog: LeadFiles.Stamp(Self.reflog(root: root, branch: branch)), workflow: LeadFiles.Stamp(ConfigHoldStore.workflowPath(root: root)))
     }
 
     // MARK: base show

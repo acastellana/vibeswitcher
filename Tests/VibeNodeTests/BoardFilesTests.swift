@@ -3,7 +3,7 @@ import Testing
 import VibeCore
 import VibeNode
 
-/// The engine's look at the boards, on its reads queue (`BoardReads`), never its own (the app's `LeadFilesTests`, its
+/// The engine's look at the boards, on its reads queue (`LeadReads`), never its own (the app's `LeadFilesTests`, its
 /// six board cases, ported: "off the main thread" is "off the engine queue", EN-D1): a board is read again only when it
 /// changed, and what's read is handed to the engine's queue. Not `linuxOnly`: the Mac runs it.
 struct BoardFilesTests {
@@ -20,7 +20,7 @@ struct BoardFilesTests {
         let store = BoardStore(root: root)
         try store.update { $0.baseBranch = "main" }
         try store.appendDecision("Ship it", why: "It works.")
-        var files = BoardFiles()
+        var files = LeadFiles()
         #expect(files.board(root).baseBranch == "main")
         #expect(files.decisions(root).map(\.text) == ["Ship it"])
         #expect(files.fileReads == 2)
@@ -47,7 +47,7 @@ struct BoardFilesTests {
     }
 
     /// What `reads` hands the engine's queue, whether it read on that queue, and whether it was handed there.
-    private func read<T: Sendable>(_ reads: BoardReads, _ engine: EngineQueue, _ work: @escaping (inout BoardFiles) -> T) async
+    private func read<T: Sendable>(_ reads: LeadReads, _ engine: EngineQueue, _ work: @escaping (inout LeadFiles) -> T) async
         -> (value: T, onEngine: Bool, handedOnEngine: Bool)? {
         let result = Locked<(value: T, onEngine: Bool, handedOnEngine: Bool)?>(nil)
         reads.async({ files in (work(&files), engine.onIt) }) { value, onEngine in
@@ -62,7 +62,7 @@ struct BoardFilesTests {
         let store = BoardStore(root: root)
         try store.update { $0.baseBranch = "main" }
         let engine = EngineQueue()
-        let reads = BoardReads(handTo: engine.queue)
+        let reads = LeadReads(handTo: engine.queue)
         let first = try #require(await read(reads, engine) { $0.board(root) })
         #expect(first.value.baseBranch == "main")
         #expect(!first.onEngine && first.handedOnEngine)
@@ -78,7 +78,7 @@ struct BoardFilesTests {
         try Data("{ not a board".utf8).write(to: URL(fileURLWithPath: (store.folder as NSString).appendingPathComponent("board.json")))
         #expect(throws: BoardError.self) { try store.read() }
         let engine = EngineQueue()
-        let shown = try #require(await read(BoardReads(handTo: engine.queue), engine) { $0.board(root) })
+        let shown = try #require(await read(LeadReads(handTo: engine.queue), engine) { $0.board(root) })
         #expect(shown.value == LeadBoard())
         #expect(shown.handedOnEngine)
     }
@@ -95,7 +95,7 @@ struct BoardFilesTests {
             board.baseBranch = "main"
             board.reports = [LeadReport(about: "worker a", text: String(repeating: "report ", count: 2000))]
         }
-        var names = BoardNames()
+        var names = LeadNames()
         let named = names.board(root)
         #expect(LeadHandover.named(named) == LeadHandover.named(store.load()))
         #expect(named.leadSession == "S1" && named.baseBranch == nil && named.reports == nil)
@@ -112,13 +112,13 @@ struct BoardFilesTests {
         try FileManager.default.createDirectory(atPath: store.folder, withIntermediateDirectories: true)
         try Data("{ \"leadPid\": 1, not a board".utf8).write(to: URL(fileURLWithPath: (store.folder as NSString).appendingPathComponent("board.json")))
         #expect(store.loadLead() == LeadBoard())
-        var names = BoardNames()
+        var names = LeadNames()
         #expect(LeadHandover.named(names.board(root)) == nil)
     }
 
     @Test func aMissingBoardIsAnEmptyOneAndIsLookedForAgain() throws {
         let root = try newRoot()
-        var files = BoardFiles()
+        var files = LeadFiles()
         #expect(files.board(root) == LeadBoard())
         try BoardStore(root: root).update { $0.baseBranch = "main" }
         #expect(files.board(root).baseBranch == "main")

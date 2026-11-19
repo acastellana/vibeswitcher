@@ -24,25 +24,12 @@ struct JoinedStart {
 /// are refusals. The lead's program is `claude` as `NodePreflight` finds it (EN-D13), its tool server
 /// `<node-root>/bin/vibeswitcher-mcp` (S9); no review floor is seeded (EN-D7: `config accept` records it).
 extension LeadEngine {
-    /// What a start does with the lead that may be running already (the app's `StartPlan`, copied).
-    public enum StartPlan: Equatable, Sendable {
-        /// The host hasn't said yet which sessions run (the link isn't welcomed): decided once it has.
-        case wait
-        /// No lead runs for the project.
-        case start
-        /// The lead runs (and holds its role, or nothing here may replace it): shown, never replaced.
-        case show(UUID)
-        /// The lead runs without its role (the vault binds it to no session, or another): replaced only when asked.
-        case askToReplace(UUID)
-    }
+    /// What a start does with the lead that may be running already (`LeadStartPlan`, shared with the app).
+    public typealias StartPlan = LeadStartPlan
 
-    /// `running`: the project's live lead session, if any; `holdsRole`: whether the vault binds the lead's role to it
-    /// (nil: the vault couldn't be asked); `fromUser`: the user asked (the app's `plan(hostState:…)`, copied, on the
-    /// link's state).
+    /// `LeadStartPlan.plan` on the link's state: not welcomed yet is `.connecting`.
     public static func plan(hostState: HostLink.State, running: UUID?, holdsRole: Bool?, fromUser: Bool) -> StartPlan {
-        if hostState == .connecting { return .wait }
-        guard let running else { return .start }
-        return holdsRole == false && fromUser ? .askToReplace(running) : .show(running)
+        LeadStartPlan.plan(hostState: hostState == .connecting ? .connecting : .other, running: running, holdsRole: holdsRole, fromUser: fromUser)
     }
 
     /// What the lead's start prompt says of the goal it was given (the app's `commandLineNote`, for this node).

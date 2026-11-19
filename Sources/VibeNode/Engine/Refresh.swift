@@ -59,6 +59,7 @@ extension LeadEngine {
             for root in roots { read.named[root] = files.names.board(root).leadSession.flatMap(UUID.init(uuidString:)) }
             read.refusals = Dictionary(uniqueKeysWithValues: roots.compactMap { root in LeadVault.BaseMoveRefusal.load(root: root).map { (root, $0) } })
             files.keep(roots.union(timerRoots))
+            files.names.keep(roots.union(timerRoots))
             read.teams = Dictionary(uniqueKeysWithValues: read.loaded.map { root, board in
                 (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: scanned, observer: observer, inbox: inbox, lock: lock))
             })
@@ -171,7 +172,7 @@ extension LeadEngine {
         }, tell: { [weak self] text in
             guard let engine = self else { return }
             engine.queue.async { engine.tellStranded(text) }
-        })
+        }, queue: DispatchQueue(label: "vibenode.role-sweep", qos: .utility))
         sweep.note = note
         sweep.submitted = { [weak self] submitted in
             guard let engine = self else { return }

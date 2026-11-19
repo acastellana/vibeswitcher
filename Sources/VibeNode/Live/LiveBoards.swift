@@ -10,7 +10,7 @@ import VibeCore
 /// - **When it is read.** At once when the board's folder changes (`Platform.FolderWatch`: a board is written whole and
 ///   renamed into place, so its folder's entries change), and at each of the clock's looks (every `lookEvery` s): for a
 ///   folder made after the lead, a change the watch missed, and a finished task that is a day old. A read whose file is
-///   unchanged (its `BoardFiles.Stamp`) decodes nothing; a value equal to the last sends nothing (`Changes`). Reads are
+///   unchanged (its `LeadFiles.Stamp`) decodes nothing; a value equal to the last sends nothing (`Changes`). Reads are
 ///   off the engine's queue (`reads`), one at a time a board; a change during one reads again after it.
 /// - **No timer between a write and its delta** but the read itself: the watch's change, the read, the value, the hub's
 ///   frame, each on the next turn of its queue.
@@ -149,7 +149,7 @@ public final class LiveBoards: @unchecked Sendable {
 /// One board's file as last read: decoded again only when its stamp changed. On `LiveBoards`' reads queue only.
 final class BoardFile: @unchecked Sendable {
     let path: String
-    private var stamp: BoardFiles.Stamp?
+    private var stamp: LeadFiles.Stamp?
     private var kept: (board: LeadBoard?, refusal: String?)?
 
     init(path: String) { self.path = path }
@@ -157,7 +157,7 @@ final class BoardFile: @unchecked Sendable {
     /// The board (an empty one when there is no file yet), or why it can't be read; `fresh` when this read decoded it
     /// (not the copy kept from the last).
     func load() -> (board: LeadBoard?, refusal: String?, fresh: Bool) {
-        let now = BoardFiles.Stamp(path)
+        let now = LeadFiles.Stamp(path)
         if let kept, now != nil, now == stamp { return (kept.board, kept.refusal, false) }
         let read = Self.read(path)
         stamp = now

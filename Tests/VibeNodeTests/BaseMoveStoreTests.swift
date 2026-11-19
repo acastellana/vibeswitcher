@@ -13,7 +13,7 @@ final class BaseMoveStoreTests {
     let app: LeadVault
     let root: String
     /// The engine's reads queue (the boards' and the notes' writes): read through it, a read sees what was written before.
-    let reads = BoardReads(handTo: DispatchQueue(label: "base-move-tests.handed"))
+    let reads = LeadReads(handTo: DispatchQueue(label: "base-move-tests.handed"))
     var asked: [String] = []
     var taken: [(to: String, byYou: Bool)] = []
     var logged: [String] = []

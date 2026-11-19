@@ -1,17 +1,6 @@
 import Foundation
 import VibeCore
 
-/// What became of a message for a session's agent (`LeadEngine.tell`; the app's `SessionDelivery`,
-/// `LeadController.swift` 2287-2295, copied: the port map's "Copied from the app").
-public enum SessionDelivery: Equatable, Sendable {
-    /// In its steer inbox: its hook hands it over at the agent's next step.
-    case delivered
-    /// Not now, but it may go later: the session host hasn't welcomed the engine yet (or is gone), or the post failed.
-    case notYet
-    /// The session host, welcomed, says its session ended or doesn't run it: no agent there will read it.
-    case ended
-}
-
 /// Delivering to a project's lead (the engine plan's E5; the app's `LeadController.deliver`, `next` and `hold`,
 /// `LeadController.swift` 1203-1251, and `tell`, 1984-2013). A message goes to the session the vault binds the project's
 /// lead role to (EN-D14), on the terminal the session host runs that session on, when the board names that session on

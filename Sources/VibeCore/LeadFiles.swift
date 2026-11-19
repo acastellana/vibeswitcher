@@ -14,9 +14,9 @@ public struct LeadFiles {
         public init?(_ path: String) {
             var info = stat()
             guard stat(path, &info) == 0 else { return nil }
-            inode = info.st_ino
-            size = info.st_size
-            modified = info.st_mtimespec
+            inode = Platform.Files.inode(info)
+            size = Platform.Files.byteSize(info)
+            modified = Platform.Files.modified(info)
         }
 
         public static func == (a: Stamp, b: Stamp) -> Bool {

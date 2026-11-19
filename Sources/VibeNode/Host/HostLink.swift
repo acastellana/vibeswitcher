@@ -850,3 +850,6 @@ public final class HostLink: @unchecked Sendable {
         }
     }
 }
+
+/// The lead's code in VibeCore drives the host through the link (`PromptDecline`): its `screen` and `type` as they are.
+extension HostLink: LeadSessionHost {}

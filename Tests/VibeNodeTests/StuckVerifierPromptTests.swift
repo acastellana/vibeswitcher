@@ -7,7 +7,7 @@ import VibeCore
 /// permission prompt the user couldn't see or reach, and the lead could only start the audit again, the finders' work
 /// lost. Here a fake Claude Code (`FakeClaude`, on a scratch host's session through `NodeHarness`: never a real session)
 /// is the verifier, waiting on a permission prompt; the witness's look (`WitnessWork`, as the engine's) at an injected
-/// time, and the engine's decline (`PromptDecline.handle`, rebuilt on `HostLink`) through a link to the scratch host. The
+/// time, and the engine's decline (`PromptDecline.handle`, VibeCore's, on `HostLink`) through a link to the scratch host. The
 /// app's `StuckVerifierPromptTests`, all five cases, their assertions kept (the port map's test table).
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(5)))
 struct StuckVerifierPromptTests {
@@ -92,7 +92,7 @@ struct StuckVerifierPromptTests {
         #expect(work.messages.isEmpty)
         #expect(work.stuckPrompts.count == 1)
         for stuck in work.stuckPrompts where told.insert(stuck.key).inserted {
-            PromptDecline.handle(stuck, link: h.link) { text in reports.append(text()) }
+            PromptDecline.handle(stuck, host: h.link, queue: h.link.queue) { text in reports.append(text()) }
         }
         // The verifier gets the reason as the prompt's No, and its turn goes on (one read of its state holds both).
         try await h.waitFor {
@@ -164,7 +164,7 @@ struct StuckVerifierPromptTests {
         let work = look(board, LeadWitness.promptWait + 1)
         #expect(work.stuckPrompts.count == 1 && work.messages.isEmpty)
         for stuck in work.stuckPrompts where told.insert(stuck.key).inserted {
-            PromptDecline.handle(stuck, link: h.link) { text in reports.append(text()) }
+            PromptDecline.handle(stuck, host: h.link, queue: h.link.queue) { text in reports.append(text()) }
         }
         try await h.waitFor {
             let agent = h.agent
@@ -198,7 +198,7 @@ struct StuckVerifierPromptTests {
         let stuck = LeadWitness.StuckPrompt(key: "\(h.session.id.uuidString)|input-1", session: h.session.id.uuidString, slug: "audit-me",
                                             prompt: PendingPrompt(text: "Run: " + command, since: since.timeIntervalSince1970))
         let reports = Reports()
-        PromptDecline.handle(stuck, link: h.link) { text in reports.append(text()) }
+        PromptDecline.handle(stuck, host: h.link, queue: h.link.queue) { text in reports.append(text()) }
         try await h.waitFor { !reports.isEmpty }
         #expect(reports.count == 1 && reports.first?.contains("with Esc") == true && reports.first?.contains(command) == true, "\(reports.all)")
         // Declined without a reason: its turn over, in one read of its state (idle alone is its state before the prompt too).
@@ -222,7 +222,7 @@ struct StuckVerifierPromptTests {
         let stuck = LeadWitness.StuckPrompt(key: "\(h.session.id.uuidString)|input-1", session: h.session.id.uuidString, slug: "audit-me",
                                             prompt: PendingPrompt(text: "Run: " + command, since: since.timeIntervalSince1970))
         let reports = Reports()
-        PromptDecline.handle(stuck, link: h.link) { text in reports.append(text()) }
+        PromptDecline.handle(stuck, host: h.link, queue: h.link.queue) { text in reports.append(text()) }
         try await h.waitFor { !reports.isEmpty }
         #expect(reports.count == 1 && reports.first?.contains("with Esc") == true, "\(reports.all)")
         try await h.waitFor {

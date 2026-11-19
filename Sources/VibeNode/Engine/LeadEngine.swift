@@ -3,7 +3,7 @@ import VibeCore
 
 /// The node's lead engine (the engine plan's E4 on; rebuilt from the non-UI duties of the app's `LeadController`): its
 /// queues, its stores and their wiring. It runs on one serial queue (`queue`, the link's: EN-D1) and does its blocking
-/// reads (boards, git, the vault) elsewhere: the boards on `reads` (`BoardReads`, in the order asked, as the app's
+/// reads (boards, git, the vault) elsewhere: the boards on `reads` (`LeadReads`, in the order asked, as the app's
 /// `LeadReads`), git and the vault's calls on a utility queue. Every root it takes is a parameter, never this process's
 /// `VibePaths.root` (one root per test).
 ///
@@ -62,7 +62,7 @@ public final class LeadEngine: @unchecked Sendable {
     /// The engine's queue: the link's.
     public let queue: DispatchQueue
     /// Where the boards are read and written, in order.
-    public let reads: BoardReads
+    public let reads: LeadReads
     /// Where git and the vault are asked: never `queue`.
     let work = DispatchQueue(label: "vibenode.lead-engine.work", qos: .userInitiated, attributes: .concurrent)
     public let leads = LeadStore()
@@ -264,7 +264,7 @@ public final class LeadEngine: @unchecked Sendable {
         self.options = options
         self.note = note
         queue = link.queue
-        reads = BoardReads(handTo: link.queue)
+        reads = LeadReads(handTo: link.queue)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
         let states = root.appendingPathComponent("state", isDirectory: true)
         observer = LeadObserver(home: options.home ?? VibePaths.home, stateFile: { states.appendingPathComponent("\($0).json") })

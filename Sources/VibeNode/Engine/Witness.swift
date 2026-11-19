@@ -51,7 +51,7 @@ extension LeadEngine {
                                         agentQuit: quit, apiError: apiError?.text,
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
-                                        shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
+                                        shells: shells, heldSince: held?.at, heldFrom: held.map { TeamReading.sender($0.from) },
                                         started: info.startedAt.timeIntervalSince1970, submittedAt: submitted[id],
                                         boundAt: toolTimes[id]?.bound, toolsAt: toolTimes[id]?.tools, lockWait: team.lockWaits[id],
                                         backgroundTasks: watched?.tail?.background ?? [],
@@ -156,7 +156,7 @@ extension LeadEngine {
         // what was asked (or that it couldn't be declined), instead of the audit hanging until it's started again.
         for stuck in work.stuckPrompts where told.insert("\(root)|\(stuck.key)").inserted {
             note("witness: declining the prompt verifier \(stuck.session.prefix(8)) on \(ConfigSeal.inert(stuck.slug, limit: 80)) waits on")
-            PromptDecline.handle(stuck, link: link) { [weak self] text in self?.deliver(built: text, from: .system("witness"), root: root, action: nil) }
+            PromptDecline.handle(stuck, host: link, queue: link.queue) { [weak self] text in self?.deliver(built: text, from: .system("witness"), root: root, action: nil) }
         }
         // Low disk space, once per episode: the watch looks on `reads` (a statfs, its `disk-watch.json`), and what takes
         // the space is sized on `work`; only the message comes back to the engine's queue.
@@ -241,16 +241,6 @@ extension LeadEngine {
     /// The stranded role sessions, in every project: to each running lead, as the witness. On `queue`.
     func tellStranded(_ text: String) {
         for root in leadRoots.sorted() { deliver(built: { text }, from: .system("witness"), root: root, action: nil) }
-    }
-
-    /// Who a waiting message is from, in words (the app's `sender(_:)`, `LeadController.swift` 2015-2022, copied).
-    static func sender(_ sender: SteerMessage.Sender) -> String {
-        switch sender {
-        case .user: return "the user"
-        case .lead(let name): return name
-        case .system(let about): return "VibeSwitcher (\(about))"
-        case .teammate(let member, let task): return "teammate \(member) on \(task)"
-        }
     }
 }
 
