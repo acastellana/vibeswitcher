@@ -156,10 +156,10 @@ struct PassageContractTests {
         let passage = bin.appendingPathComponent("passage")
         let script = try String(contentsOf: passage, encoding: .utf8)
         // Both never answer: the 1 s limit ends only a binary that doesn't, never one a loaded Mac starts late.
-        try script.replacingOccurrences(of: "version) echo", with: "version) exec sleep 600; echo")
-            .replacingOccurrences(of: "help) cat", with: "help) exec sleep 600; cat")
-            .write(to: passage, atomically: true, encoding: .utf8)
-        chmod(passage.path, 0o755)
+        // Through `installScript`, as `fake` writes it: a script this process wrote can be held open by another test's
+        // child, and Linux won't run it then (ETXTBSY: the full run's `exited 127`).
+        try installScript(script.replacingOccurrences(of: "version) echo", with: "version) exec sleep 600; echo")
+            .replacingOccurrences(of: "help) cat", with: "help) exec sleep 600; cat"), at: passage)
         let ran = try check(bin: bin, timeLimit: 1)
         #expect(ran.status == 1, "\(ran.out)")
         let drifts = driftLines(ran.out)
