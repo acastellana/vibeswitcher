@@ -116,6 +116,7 @@ extension Platform {
         }
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
+        if !exited { killAll(group: pid) }
         return output
     }
 }
