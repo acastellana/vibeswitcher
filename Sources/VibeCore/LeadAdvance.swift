@@ -319,7 +319,11 @@ public final class LeadAdvance: @unchecked Sendable {
 
     private func tell(_ report: [String]) {
         // While Fable is held back, every report says so (the switch's own line says it already).
-        let held = lead.fableFallback()?.fableHeldBack(now: lead.usageClock()).map(AccountUsage.fallbackText)
+        let held = lead.fableFallback()?.fableHeldBack(now: lead.usageClock()).map { limit in
+            let text = AccountUsage.fallbackText(limit)
+            return lead.codexWorkers && lead.workflow.codexVerifier == .fallback
+                ? text.replacingOccurrences(of: "workers and audits on Opus", with: "workers on Opus; audits try eligible Claude models first, then Codex when it has room") : text
+        }
         let fable = held.flatMap { line in report.contains { $0.hasPrefix(line) } ? nil : "\n" + line + "." } ?? ""
         let text = "VibeSwitcher moved finished work on by itself (auto_advance):\n" + report.map { "- " + $0 }.joined(separator: "\n") + fable
             + "\nThe judgement calls stay yours: holds (update_task kept or blocked), re-plans, questions to the user, and post_update for a merge the user would notice."
@@ -358,6 +362,86 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     // MARK: A pass
+
+    /// Sensitive Codex merges owe Claude an independent review, even when ordinary auto_advance is off.
+    /// Arm the existing reset wake and retry lost verifiers; a failed verdict stays listed for the lead.
+    /// Bounded as the ordinary audit's retry is (`auditAgain`): a verifier stopped at Claude's usage limit waits for that
+    /// limit's reset (`LeadClaudeReaudit.limitedUntil`), and isn't an ending; one gone or ended without a verdict is, and
+    /// at `LeadClaudeReaudit.maxEndings` nothing restarts it by itself: the lead is told once, and it stays listed.
+    private func followClaudeReaudits() {
+        let pending = lead.store.load().tasks.filter { $0.claudeReaudit?.pending == true && $0.claudeReaudit?.evidence == nil && $0.claudeReaudit?.stopped != true }
+        guard !pending.isEmpty else { return }
+        // Merged tasks get no review-task death notification from the witness. Keep looking even if the host is
+        // temporarily unreadable or a battery/usage hold outlasts this pass; the injected scheduler drives tests.
+        let key = "claude-reaudit-watch"
+        lock.lock()
+        let arm = wakes.insert(key).inserted
+        lock.unlock()
+        if arm {
+            let root = lead.root
+            lead.usageWake(Date().addingTimeInterval(60)) { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                self.wakes.remove(key)
+                self.lock.unlock()
+                LeadAdvance.nudge(root: root)
+            }
+        }
+        guard !(lead.power().map { $0.onBattery && $0.heldUnder != nil } ?? false),
+              let sessions = try? lead.advanceSessions() else { return }
+        _ = lead.accountUsage(sessions: sessions)
+        let now = lead.usageClock().timeIntervalSince1970
+        for task in pending {
+            guard var followup = task.claudeReaudit, followup.pending, followup.evidence == nil, !followup.stopped,
+                  task.auditHeld == nil else { continue }
+            if let session = followup.session {
+                let info = sessions.first(where: { $0.id == session })
+                if let info, info.live, info.usageLimit == nil, lead.runtime.agentEnding(info) == nil { continue }
+                if let limit = info?.usageLimit, followup.limitedUntil == nil {
+                    // Stopped at Claude's limit: wait for its reset, whatever a newer reading of the account says.
+                    let until = limit.resetsAt ?? (limit.at ?? now) + AccountUsage.untimed
+                    followup.limitedUntil = until
+                    try? lead.store.update { board in
+                        guard let index = board.taskIndex(task.slug), board.tasks[index].claudeReaudit?.session == session else { return }
+                        board.tasks[index].claudeReaudit?.limitedUntil = until
+                    }
+                }
+                if let until = followup.limitedUntil {
+                    if until > now { resetWake(task.slug, until); continue }
+                } else if !(followup.endings ?? []).contains(where: { $0.session == session }) {
+                    let how = info.map { lead.runtime.agentEnding($0) ?? "its session ended" }
+                        ?? "its session is gone (the session host was replaced, or it was removed)"
+                    followup.endings = (followup.endings ?? []) + [LeadClaudeReauditEnding(session: session, how: how)]
+                    let endings = followup.endings ?? []
+                    try? lead.store.update { board in
+                        guard let index = board.taskIndex(task.slug), board.tasks[index].claudeReaudit?.session == session else { return }
+                        board.tasks[index].claudeReaudit?.endings = endings
+                    }
+                    if followup.stopped {
+                        if info?.live == true { try? lead.runtime.kill(session) }
+                        did("The post-merge Claude re-audit of \(task.slug) ended without a verdict \(endings.count) times at \(followup.head.prefix(8)), "
+                            + "so it doesn't start again by itself: " + endings.enumerated().map { "\($0.offset + 1): \($0.element.how)" }.joined(separator: "; ")
+                            + ". It stays listed as pending and its branch stays. Decide: read_session(\(task.slug), who: verifier) to see why, then audit(\(task.slug)) to start it again, or tell the user.")
+                        continue
+                    }
+                }
+            }
+            if usageHeld(model: followup.model) { continue }
+            guard hasRoom(task.slug, need: 1) else { roomWait("audit(\(task.slug))", need: 1); continue }
+            step("claude-reaudit|\(task.slug)|\(followup.head)") { try lead.startClaudeReaudit(task.slug).text }
+        }
+    }
+
+    /// A pass just after `until`, when the post-merge re-audit of `slug` stopped at Claude's limit may start again.
+    private func resetWake(_ slug: String, _ until: Double) {
+        let key = "claude-reaudit-reset|\(slug)|\(Int(until))"
+        lock.lock()
+        let arm = wakes.insert(key).inserted
+        lock.unlock()
+        guard arm else { return }
+        let root = lead.root
+        lead.usageWake(Date(timeIntervalSince1970: until + 1)) { LeadAdvance.nudge(root: root) }
+    }
 
     /// The workflow's switch as the lead set it: on, and workflow.md says what the vault recorded (a configure under
     /// way finishes first). Read again before each step: one that lands during another's merge counts.
@@ -399,6 +483,7 @@ public final class LeadAdvance: @unchecked Sendable {
         lead.deliverWalls()
         // Members' done parts, to their integrators, once each (moves nothing: the integrator takes them).
         lead.deliverParts()
+        followClaudeReaudits()
         guard workflow.autoAdvance else { return }
         // Off as the lead set it, whatever a worker wrote into workflow.md since.
         if let changed, changed.contains(where: { $0.key == "auto_advance" }) {
@@ -562,7 +647,12 @@ public final class LeadAdvance: @unchecked Sendable {
             }
         }
         if (try? fallback.switched(to: held.map(AccountUsage.ends))) == true {
-            did(held.map { AccountUsage.fallbackText($0) + ". Claude refused Fable at its usage limit, so new workers and audits that would run on Fable start on Opus "
+            did(held.map {
+                if lead.codexWorkers && lead.workflow.codexVerifier == .fallback {
+                    return "Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0))): workers on Opus; audits try eligible Claude models first, then Codex when it has room. "
+                        + "Sensitive tasks merged on Codex get a post-merge Claude re-audit after reset. A worker Fable's refusal halted starts again on Opus in its worktree."
+                }
+                return AccountUsage.fallbackText($0) + ". Claude refused Fable at its usage limit, so new workers and audits that would run on Fable start on Opus "
                     + "(audits under a floor that keeps them off the workers' model, on the next one down), and a worker Fable's refusal halted "
                     + "starts again on Opus in its worktree. At the reset they're back on Fable by themselves; nothing for you to set." }
                 ?? "Fable is back: its usage limit reset, so new workers and audits run on Fable again (sessions already on Opus go on there).")
@@ -647,6 +737,19 @@ public final class LeadAdvance: @unchecked Sendable {
         return true
     }
 
+    /// Arm Claude's reset wake even when Codex has no room, and explain both accounts' wait.
+    private func auditUsageHeld(_ slug: String, head: String) -> Bool {
+        let workflow = lead.workflow
+        let task = lead.store.load().task(slug)
+        guard !lead.codexVerifierFallback(workflow, task: task, head: head, sessions: try? lead.advanceSessions()),
+              usageHeld(model: lead.auditModel(workflow, task: task, head: head)) else { return false }
+        if workflow.codexVerifier == .fallback, lead.codexWorkers {
+            let codex = UsageRouting.codex(lead.codexUsage.read(now: lead.usageClock()), now: lead.usageClock())
+            once("audit-codex-usage|\(slug)|\(codex.text)", "Codex audit fallback for \(slug) is waiting too: \(codex.text).")
+        }
+        return true
+    }
+
     /// Starts `slug`'s audit at `head` (`why`: what sends it there) once the Mac has room for its finders.
     private func audit(_ slug: String, head: String, busy: Bool, why needed: String, key: String? = nil) {
         if auditHeld(slug, head: head) { return }
@@ -658,7 +761,7 @@ public final class LeadAdvance: @unchecked Sendable {
             }
             return roomWait("audit(\(slug))", need: finders)
         }
-        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug), head: head)) { return }
+        if auditUsageHeld(slug, head: head) { return }
         step(key ?? "audit|\(slug)|\(head)") {
             guard let before = due(slug, [.review]) else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
@@ -816,7 +919,8 @@ public final class LeadAdvance: @unchecked Sendable {
         guard let task = due(slug, [.review]), task.evidence == nil, let ended = endedVerifier(task) else { return }
         // The retry's own verifier ended too; any other (the lead audited again since, or an older commit's retry) is a
         // first ending.
-        if let retry = task.verifierRetry, retry.commit == head, retry.verifiers.contains(ended.session) {
+        let quotaFallback = ended.ending == "Claude stopped at its usage limit"
+        if let retry = task.verifierRetry, retry.commit == head, retry.verifiers.contains(ended.session), !quotaFallback {
             guard retry.second == nil else { return }
             try? lead.store.update { board in
                 guard let index = board.taskIndex(slug) else { return }
@@ -832,7 +936,7 @@ public final class LeadAdvance: @unchecked Sendable {
         }
         let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
-        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug), head: head)) { return }
+        if auditUsageHeld(slug, head: head) { return }
         step("audit|\(slug)|\(head)|again") {
             guard let task = due(slug, [.review]), task.evidence == nil, endedVerifier(task)?.session == ended.session else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
@@ -856,6 +960,10 @@ public final class LeadAdvance: @unchecked Sendable {
         for verifier in task.awaitedVerifiers where !submitted.contains(verifier) {
             guard let info = sessions.first(where: { $0.id == verifier }) else {
                 return Ended(session: verifier, ending: "its session is gone (the session host was replaced, or it was removed)", live: false)
+            }
+            if info.usageLimit != nil, let head = lead.advanceHead(task.slug),
+               lead.limitedVerifierCanRestart(task, head: head, sessions: sessions) {
+                return Ended(session: verifier, ending: "Claude stopped at its usage limit", live: info.live)
             }
             if let ending = lead.runtime.agentEnding(info) { return Ended(session: verifier, ending: ending, live: info.live) }
         }
@@ -1165,7 +1273,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// (`LeadTask.strayKept`), said once, while what's there is still kept (`Worktrees.strayFolder`): once it's gone,
     /// only .DS_Store, or a real worktree again, cleanup goes on as before.
     private func cleanup(_ slug: String) {
-        guard let task = due(slug, [.done, .reverted]), task.merged != nil,
+        guard let task = due(slug, [.done, .reverted]), task.merged != nil, task.claudeReaudit?.pending != true,
               task.worktree != nil || lead.advanceHead(slug) != nil, !beingMerged(slug) else { return }
         if task.strayKept != nil, case .kept? = Worktrees.strayFolder(root: lead.root, slug: slug) { return }
         step("cleanup|\(slug)") {
@@ -1263,7 +1371,7 @@ public final class LeadAdvance: @unchecked Sendable {
              "The account's usage is near a limit: \(limit.text). " + LeadToolset.usageBackoff(limit, model: model)
                 + " Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway"
                 + (limit.model == nil ? "." : ", and a task can run on another model (update_task model, configure verifier_model).")
-                + (lead.codexWorkers ? " A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide." : ""))
+                + (lead.codexWorkers ? " A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier, or by Codex while Claude is at its limit); you decide." : ""))
         return true
     }
 

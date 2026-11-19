@@ -86,5 +86,5 @@ public enum RecordLint {
     /// The tools whose text goes into the lead's records (decisions.md, progress.md, incidents.md) or the board the
     /// records quote: each refuses text the lints fail on (`refusal`).
     public static let recordingTools: Set<String> = ["record_decision", "dismiss_finding", "record_incident", "add_task", "update_task",
-                                                     "post_update", "progress"]
+                                                     "post_update", "progress", "cleanup"]
 }

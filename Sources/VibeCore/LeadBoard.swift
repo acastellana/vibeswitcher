@@ -91,14 +91,17 @@ public struct LeadEvidence: Codable, Equatable, Sendable {
     /// The version of the task's contract its verifiers judged (see `LeadTask.contractVersion`); nil on verdicts from
     /// before contracts had versions.
     public var contract: Int?
+    /// Who gave this verdict; nil on older Claude evidence.
+    public var agent: Agent?
 
-    public init(completion: Completion, integrity: Integrity, summary: String, commit: String? = nil, contract: Int? = nil,
+    public init(completion: Completion, integrity: Integrity, summary: String, commit: String? = nil, contract: Int? = nil, agent: Agent? = nil,
                 at: Double = Date().timeIntervalSince1970) {
         self.completion = completion
         self.integrity = integrity
         self.summary = summary
         self.commit = commit
         self.contract = contract
+        self.agent = agent
         self.at = at
     }
 
@@ -355,9 +358,11 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     /// The task's branch head the merge took, before it was rebased and stamped (`commit` is the copy that landed, with
     /// another hash): what's on the branch past this didn't merge (`Worktrees.unmerged`). Nil on older records.
     public var branchHead: String?
+    /// The agent whose verdict let this merge land (nil on older Claude merges).
+    public var agent: Agent?
 
     public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, audited: Bool? = nil, batch: [String]? = nil,
-                branchHead: String? = nil, at: Double = Date().timeIntervalSince1970) {
+                branchHead: String? = nil, agent: Agent? = nil, at: Double = Date().timeIntervalSince1970) {
         self.commit = commit
         self.tested = tested
         self.onto = onto
@@ -365,6 +370,7 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
         self.audited = audited
         self.batch = batch
         self.branchHead = branchHead
+        self.agent = agent
         self.at = at
     }
 
@@ -524,6 +530,8 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     public var passed: Bool?
     /// How the last audit's finders voted, when it ran more than one (optional: one verifier gives none).
     public var vote: LeadAuditVote.Outcome?
+    /// Agent of the last audit, from its verifier grant.
+    public var agent: Agent?
 
     /// Failed rounds after which the task is re-rolled (or re-planned), not sent back for a third: fixes past the
     /// second attempt rarely land, and a fresh start from what the rounds learned does better.
@@ -782,6 +790,51 @@ public struct LeadVerifierRetry: Codable, Equatable, Sendable {
     }
 }
 
+/// A sensitive task merged on Codex is reviewed independently by Claude after its quota reset.
+/// Its original branch and baseline stay until this passes; it never moves the merged task back to work.
+public struct LeadClaudeReaudit: Codable, Equatable, Sendable {
+    public var head: String
+    public var base: String
+    public var model: String
+    public var sensitive: [String]
+    public var session: String?
+    public var evidence: LeadEvidence?
+    public var passed: Bool?
+    /// How its verifiers ended without a verdict (gone, or ended; a stop at Claude's usage limit isn't one), as the
+    /// ordinary audit's retry counts them: at `LeadClaudeReaudit.maxEndings` nothing restarts it by itself until the
+    /// lead does (audit), and the lead is told once.
+    public var endings: [LeadClaudeReauditEnding]?
+    /// Its verifier (`session`) stopped at Claude's usage limit, which resets then (epoch seconds; one with no reset time
+    /// counts for `AccountUsage.untimed`): nothing restarts it before, whatever newer readings say, and that stop isn't
+    /// an ending. Cleared when the next verifier starts.
+    public var limitedUntil: Double?
+    /// The lead closed it after its verdict, every Important finding of it dismissed (or moved to a task): the reason.
+    public var closed: String?
+
+    public static let maxEndings = 2
+
+    public var pending: Bool { passed != true }
+    /// Its verifiers ended without a verdict `maxEndings` times: it waits for the lead.
+    public var stopped: Bool { passed != true && evidence == nil && (endings?.count ?? 0) >= Self.maxEndings }
+    public var text: String {
+        "Claude re-audit " + (closed != nil ? "closed by the lead (\(closed ?? ""))" : passed == true ? "passed" : evidence != nil ? "needs the lead's attention"
+            : stopped ? "stopped: its verifier ended without a verdict \(Self.maxEndings) times; audit to start it again"
+            : session != nil ? "started" : "pending after Claude's usage limit resets")
+            + " (post-merge, sensitive_paths: " + sensitive.joined(separator: ", ") + ")"
+    }
+}
+
+/// One post-merge re-audit verifier that ended without a verdict, and how.
+public struct LeadClaudeReauditEnding: Codable, Equatable, Sendable {
+    public var session: String
+    public var how: String
+
+    public init(session: String, how: String) {
+        self.session = session
+        self.how = how
+    }
+}
+
 public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public enum Status: String, Codable, Sendable, CaseIterable {
         /// On the board, no worker yet.
@@ -999,16 +1052,19 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// `AccountUsage.fromRefusal`), whatever the task's model or verifier_model says since.
     public var launchedModels: [String: String]?
     /// The agent its worker runs (add_task's and update_task's `agent`); nil: Claude, as before. Codex implements a
-    /// bounded task only: leads and verifiers stay Claude, and a Codex task is always audited (see `codexWorked`).
+    /// bounded task; leads stay Claude, and a Codex task is always audited (see `codexWorked`).
     public var agent: WorkerAgent?
     /// Why its current worker runs the agent it does, when its agent is auto (`UsageRouting.Route.why`: "Codex: Claude
     /// weekly 64%, 12 points ahead of pace; Codex 40%"); nil for a task pinned to an agent.
     public var routed: String?
-    /// A Codex worker was started on it once: its merge needs a Claude verifier's passing audit from then on, whatever
-    /// its review or agent says since (its branch holds Codex's commits).
+    /// A Codex worker was started on it once: its merge needs a passing audit from then on, whatever its review or agent
+    /// says since (its branch holds Codex's commits): a Claude verifier's, or Codex's under the quota fallback
+    /// (`codex_verifier`), recorded as audited by Codex.
     public var codexWorked: Bool?
+    /// Follow-up required for a sensitive task merged on a Codex verdict.
+    public var claudeReaudit: LeadClaudeReaudit?
 
-    /// Who runs a task's worker. Only workers: Codex never plans, reviews or audits. `auto`: chosen at each start from
+    /// Who runs a task's worker. Codex also verifies only while Claude is held at a usage limit. `auto`: chosen at each start from
     /// both accounts' usage (`UsageRouting.route`): Codex when Claude's runs ahead of pace and Codex has room, else Claude.
     public enum WorkerAgent: String, Codable, Sendable, CaseIterable {
         case claude, codex, auto
@@ -1040,8 +1096,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Its merge needs a Claude verifier's passing audit because Codex works (or worked) on it; nil when not.
     public var codexAudit: String? {
         guard workerAgent == .codex || codexWorked == true else { return nil }
-        return workerAgent == .codex ? "Its worker is Codex, so a Claude verifier audits it whatever its review says."
-            : "A Codex worker worked on it, so a Claude verifier audits it whatever its review says."
+        return (workerAgent == .codex ? "Its worker is Codex, so a Claude verifier audits it whatever its review says."
+            : "A Codex worker worked on it, so a Claude verifier audits it whatever its review says.")
+            + " At Claude's usage limit Codex verifies instead; a sensitive merge then gets a post-merge Claude re-audit."
     }
 
     /// Notes that `sessions` were started on `model` (nil: Claude's default), keeping only its members' entries.

@@ -34,6 +34,8 @@ public struct LeadVault: Sendable {
         /// connected): nil from a host that predates them (see `RosterEntry.boundAt`).
         public var boundAt: Double? = nil
         public var toolsAt: Double? = nil
+        /// The agent the lead launched; nil on older Claude grants.
+        public var agent: Agent? = nil
     }
 
     /// One of an audit's finders: its findings and verdict go in as its ballot, and once every finder of its panel
@@ -130,6 +132,8 @@ public struct LeadVault: Sendable {
         /// The files outside the boundaries that are this verdict's only integrity concern, as its verifier named them
         /// (nil: it named none, and the verdict is handled as any other).
         public var outsideBoundaries: [String]? = nil
+        /// Taken from the verifier grant, never from its submission.
+        public var agent: Agent? = nil
 
         public var passes: Bool { completion == .complete && integrity == .clean }
     }
@@ -150,7 +154,7 @@ public struct LeadVault: Sendable {
         /// task's verdict.
         /// `finder`: a verifier that's one of an audit's finders; it replaces only the task's verifiers from other
         /// audits (and the same finder of its own).
-        case issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String?, finder: Finder? = nil)
+        case issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String?, finder: Finder? = nil, agent: Agent? = nil)
         case rotateLead(root: String, expected: String, session: String, restoring: Member? = nil)
         case bind(grant: String, root: String, session: String)
         case revoke(grant: String, root: String)
@@ -298,8 +302,8 @@ public struct LeadVault: Sendable {
 
     // MARK: Grants
 
-    public func issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String? = nil, finder: Finder? = nil) throws -> String {
-        guard case .grant(let grant) = try call(.issue(role: role, root: root, task: task, auditing: auditing, finder: finder)) else { throw Self.unexpected }
+    public func issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String? = nil, finder: Finder? = nil, agent: Agent? = nil) throws -> String {
+        guard case .grant(let grant) = try call(.issue(role: role, root: root, task: task, auditing: auditing, finder: finder, agent: agent)) else { throw Self.unexpected }
         return grant
     }
 
@@ -839,7 +843,7 @@ extension LeadVault {
         private func answer(_ request: Request, from caller: Caller, userOpened: Bool, agentSession: String?, liveSessions: Set<String>?,
                             config: [String: String]? = nil, changed: inout Bool) -> Reply {
             switch request {
-            case .issue(let role, let root, let task, let auditing, let finder):
+            case .issue(let role, let root, let task, let auditing, let finder, let agent):
                 if role == .lead {
                     guard caller == .app else { return .refused("Only VibeSwitcher starts a project lead.") }
                 } else {
@@ -851,7 +855,7 @@ extension LeadVault {
                     return .refused("A finder is one of 2 or more, numbered from 1.")
                 }
                 let member = Member(id: UUID().uuidString, role: role, task: role == .lead ? nil : task, session: nil,
-                                    auditing: auditing, finder: finder, issuedAt: Date().timeIntervalSince1970, issuer: caller)
+                                    auditing: auditing, finder: finder, issuedAt: Date().timeIntervalSince1970, issuer: caller, agent: agent)
                 change(root, &changed) { team in
                     // A finder replaces the verifiers of other audits and its own earlier self, not its panel's others.
                     team.remove { other in
@@ -954,10 +958,10 @@ extension LeadVault {
                     return reply
                 }
                 let verdict = Verdict(task: task, completion: completion, integrity: integrity, summary: summary, commit: commit,
-                                      verifier: member.id, session: session, at: Date().timeIntervalSince1970, tests: tests, outsideBoundaries: outsideBoundaries)
+                                      verifier: member.id, session: session, at: Date().timeIntervalSince1970, tests: tests, outsideBoundaries: outsideBoundaries, agent: member.agent)
                 // The findings go with the verdict or neither does.
                 var ledger = team(root)?.audits?[task] ?? LeadAuditLedger()
-                do { try ledger.record(findings ?? [], commit: commit, passes: verdict.passes) } catch { return .refused("\(error)") }
+                do { try ledger.record(findings ?? [], commit: commit, passes: verdict.passes); ledger.agent = member.agent } catch { return .refused("\(error)") }
                 change(root, &changed) { team in
                     team.verdicts[task] = verdict
                     team.audits = (team.audits ?? [:]).merging([task: ledger]) { $1 }
@@ -1223,7 +1227,8 @@ extension LeadVault {
             let first = team(root)?.members.first { $0.role == .verifier && $0.task == task }
             let verdict = Verdict(task: task, completion: vote.completion, integrity: vote.integrity, summary: vote.summary, commit: commit,
                                   verifier: first?.id ?? "", session: first?.session ?? session, at: Date().timeIntervalSince1970, tests: vote.tests,
-                                  outsideBoundaries: vote.outsideBoundaries)
+                                  outsideBoundaries: vote.outsideBoundaries, agent: first?.agent)
+            ledger.agent = first?.agent
             ballots.voted = true
             change(root, &changed) { team in
                 team.verdicts[task] = verdict

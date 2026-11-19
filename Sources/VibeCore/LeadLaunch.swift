@@ -847,6 +847,7 @@ public enum LeadLaunch {
 
     static func toml(_ list: [String]) -> String { "[" + list.map { toml($0) }.joined(separator: ", ") + "]" }
 
+    /// A verifier uses the read-only sandbox; workers use workspace-write.
     /// How a Codex task's worker is started: the project's Codex command (its sandbox-loosening flags dropped) in the
     /// worktree, with the worker's brief as Codex's developer instructions, the VibeSwitcher tool server as its one MCP
     /// server (scoped to the role and the repository as a Claude worker's is), the workspace-write sandbox (writes in
@@ -858,7 +859,7 @@ public enum LeadLaunch {
     /// configuration given on the command line as JSON, for reading back.
     public static func prepareCodex(root: String, task: String, base: String, prompt: String, start: String, server: String,
                                     name: String, model: String? = nil, effort: String? = nil, folder: URL? = nil, cwd: String? = nil,
-                                    temporary: URL = SessionTemp.root,
+                                    role: Role = .worker, temporary: URL = SessionTemp.root,
                                     toolTimeout: TimeInterval = LeadDoneCheck.callTimeout(limit: LeadDoneCheck.defaultMinutes * 60)) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
@@ -867,8 +868,8 @@ public enum LeadLaunch {
         try LeadVault.writePrivate(Data(prompt.utf8), to: URL(fileURLWithPath: promptFile))
         let cwd = cwd ?? Worktrees.path(root: root, slug: task)
         let temporaryFolder = SessionTemp.make(cwd: cwd, name: name, in: temporary)
-        let writable = codexWritableRoots(cwd: cwd, slug: task, temporary: temporaryFolder?.path, root: root)
-        let args = [MCPKeeper.flag, "--role", Role.worker.rawValue, "--root", root, "--task", task]
+        let writable = role == .verifier ? [] : codexWritableRoots(cwd: cwd, slug: task, temporary: temporaryFolder?.path, root: root)
+        let args = [MCPKeeper.flag, "--role", role.rawValue, "--root", root, "--task", task]
         // In order; each is one `-c key=value`.
         var config: [(key: String, value: String)] = [
             ("sandbox_workspace_write.writable_roots", toml(writable)),
@@ -906,13 +907,13 @@ public enum LeadLaunch {
         let trimmed = base.trimmingCharacters(in: .whitespaces)
         var command = withoutCodexFlags(trimmed.isEmpty ? "codex" : trimmed)
         if model != nil { command = withoutModel(command, short: true) }
-        var parts = [command.isEmpty ? "codex" : command, "--no-daemon", "--cd \(quote(cwd))", "--sandbox workspace-write", "--ask-for-approval never"]
+        var parts = [command.isEmpty ? "codex" : command, "--no-daemon", "--cd \(quote(cwd))", "--sandbox \(role == .verifier ? "read-only" : "workspace-write")", "--ask-for-approval never"]
         parts += config.map { "-c \(quote("\($0.key)=\($0.value)"))" }
         if let model { parts.append("--model \(quote(model))") }
         parts.append("-- \(quote(start))")
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: configFile, settingsFile: configFile)
-        prepared.environment[SessionNote.roleVariable] = Role.worker.rawValue
-        prepared.environment.merge(environment(.worker)) { $1 }
+        prepared.environment[SessionNote.roleVariable] = role.rawValue
+        prepared.environment.merge(environment(role)) { $1 }
         if let temporaryFolder { prepared.environment["TMPDIR"] = temporaryFolder.path + "/" }
         return prepared
     }

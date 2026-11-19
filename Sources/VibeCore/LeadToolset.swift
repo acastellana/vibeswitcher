@@ -784,7 +784,8 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "merge_remote", description: "Merge the remote-tracking branch fetch_remote fetched into the base: in a scratch worktree, a fast-forward when the base has nothing of its own, else a true merge commit (so the remote's tip stays an ancestor and a later push is a fast-forward); the lead's records merge by union. The test command runs on the result, and the base fast-forwards to it only when it passes and the base hasn't moved; the main checkout's uncommitted files stay as they are. A conflict outside the records stops it with the files named; it never picks a side. The remote's commits count as the user's work."),
                 MCPToolInfo(name: "push_remote", description: "Ask the user to push the base branch to the project's remote (workflow.md's remote): it records a push request of the base's head now, with the commits it's ahead of what fetch_remote fetched, and pushes nothing. Only the user's click on Push in VibeSwitcher pushes it (Decline doesn't): that very commit, as a fast-forward of the remote's branch, never forced, even if the base moves on meanwhile. It never waits: the outcome (pushed, rejected, an auth or network error) comes as a VibeSwitcher message. Refused before fetch_remote, when the remote has commits the base lacks (merge_remote first), or when nothing is ahead. A newer request replaces an open one. It takes no arguments: the remote, its URL and the branch come from workflow.md and the URL fetch_remote took, never from the call."),
                 MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it). A merged task whose branch has commits that didn't merge is refused, and keeps them; force drops them.",
-                            properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
+                            properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work"),
+                                         "reason": P(type: "string", description: "With force, on a task whose post-merge Claude re-audit is pending and can't be audited (its branch is gone, its verifier keeps ending, a verdict with nothing left to dismiss): your decision to close it, citing something that can be checked, as dismiss_finding's reason does")], required: ["task"]),
                 MCPToolInfo(name: "accept_git_hooks", description: "Let the tool server's git (merges, cleanups, start_worker, auto_advance) run the repository's git hooks as they are now. It runs only hooks you accepted, from a copy, never the hooks folder a worker can write: status, merge and the rest tell you when that folder isn't as you accepted it. Read each hook first; accept only the user's own.",
                             properties: ["hooks": P(type: "array", description: "The hooks to run, by name (e.g. commit-msg); empty or left out: all that are there now", items: "string")]),
                 MCPToolInfo(name: "ask_user", description: "Ask the user something. It doesn't block: keep working; the answer arrives as a message. Your open questions are a queue the user answers in any order: revise one when you learn something (revise_question), withdraw one that no longer applies (withdraw_question). For a reversible choice, prefer proposing your answer with a timer (proposal, decide_in): the user can pick another option or hold it, and if no answer comes in time you get a message to go ahead with your proposal, recorded as your decision. Never a timer on a blocking question, on merging a sensitive path, on deleting or discarding work, or on anything outward-facing (publishing, pushing, sending): those are refused.",
@@ -837,6 +838,7 @@ public final class LeadToolset: MCPToolset {
                                          "done_check_command": P(type: "string", description: "What a worker's done report runs first, in its worktree, holding a test and build slot: a failure refuses the report with its output, so the worker fixes it. off: nothing. Empty: test_command filtered to the lint tests and the suites of the files the branch changes, when the project has lint tests (Tests/*LintTests.swift); a task's own done_check comes first"),
                                          "done_check_min": P(type: "number", description: "Minutes that check may run; past it, or when it can't start, the report goes through, saying so (default 5)"),
                                          "base_branch": P(type: "string", description: "The branch workers start from and verified work is merged into (an existing local branch)"),
+                                         "codex_verifier": P(type: "string", description: "fallback (default): audits use Codex while Claude is held at a usage limit; off: wait for Claude", options: ["fallback", "off"]),
                                          "remote": P(type: "string", description: "The git remote, by its name, that fetch_remote fetches the base branch from and merge_remote merges it in from (empty: origin)"),
                                          "verifier_model": P(type: "string", description: "The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as capable (fable; opus when the workers run fable)"),
                                          "lead_model": P(type: "string", description: "The lead's own model, from its next start (empty: fable, the model best at deciding what to do and judging what comes back; Opus in its place while Fable is held back)"),
@@ -931,7 +933,8 @@ public final class LeadToolset: MCPToolset {
                 records.flush(base: base)
                 return withGitNotice(merged)
             case "push_remote": return withGitNotice(try pushRemote())
-            case "cleanup": return withGitNotice(try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false))
+            case "cleanup": return withGitNotice(try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false,
+                                                             reason: (arguments["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)))
             case "accept_git_hooks": return try acceptGitHooks(arguments)
             case "ask_user": return try askUser(arguments)
             case "revise_question": return try reviseQuestion(arguments)
@@ -1067,7 +1070,7 @@ public final class LeadToolset: MCPToolset {
 
     /// add_task's and update_task's agent for the task's worker.
     static var agentProperty: MCPToolInfo.Property {
-        MCPToolInfo.Property(type: "string", description: "Who runs its worker: claude, codex or auto (not given: workflow.md's agent_default, claude unless set). Codex only for a bounded, mechanical task with a tight contract (it spreads usage to the Codex account when Claude's limits run low); its work is always audited by a Claude verifier (review audit, which can't be lowered while it's Codex's), and Codex never plans, reviews or audits. auto: each start picks Codex when Claude's usage is tight (a limit at \(Int(UsageRouting.claudeTightPercent))% or more, or a weekly one more than \(Int(UsageRouting.claudeWeeklyAheadPoints)) points ahead of pace) and Codex has room, else Claude (unknown usage: Claude); a start that lands on Codex is audited by a Claude verifier, and its model, Claude's, isn't passed to Codex. Pin design-heavy or security work to claude. From its next worker" + (LeadLaunch.codexWorkersUsable ? "" : ". " + LeadLaunch.codexUnusable + " start_worker refuses a codex task until then (an auto one starts on Claude)"),
+        MCPToolInfo.Property(type: "string", description: "Who runs its worker: claude, codex or auto (not given: workflow.md's agent_default, claude unless set). Codex only for a bounded, mechanical task with a tight contract (it spreads usage to the Codex account when Claude's limits run low); its work is always audited (normally by Claude, by Codex as a quota fallback; review audit can't be lowered while it's Codex's), and Codex audits only as a fallback while Claude is held at a usage limit. auto: each start picks Codex when Claude's usage is tight (a limit at \(Int(UsageRouting.claudeTightPercent))% or more, or a weekly one more than \(Int(UsageRouting.claudeWeeklyAheadPoints)) points ahead of pace) and Codex has room, else Claude (unknown usage: Claude); a start that lands on Codex is audited by a Claude verifier (by Codex only as the quota fallback), and its model, Claude's, isn't passed to Codex. Pin design-heavy or security work to claude. From its next worker" + (LeadLaunch.codexWorkersUsable ? "" : ". " + LeadLaunch.codexUnusable + " start_worker refuses a codex task until then (an auto one starts on Claude)"),
                              options: LeadTask.WorkerAgent.allCases.map(\.rawValue))
     }
 
@@ -1204,9 +1207,9 @@ public final class LeadToolset: MCPToolset {
         let doneCheck = try doneCheckArgument(arguments).flatMap { $0.isEmpty ? nil : $0 }
         // Not given: workflow.md's agent_default (claude or auto, never codex).
         let agent = try agentArgument(arguments) ?? workflow.agentDefault
-        // A Codex task is audited by a Claude verifier: review none isn't taken for it.
+        // A Codex task is always audited (by a Claude verifier; by Codex only as the usage-limit fallback): review none isn't taken for it.
         if agent == .codex, givenReview == LeadTask.Review.none {
-            throw Problem(text: "Not added: a Codex task is always audited by a Claude verifier, so its review can't be none. Leave review out (it's audit) or run it on Claude.")
+            throw Problem(text: "Not added: a Codex task is always audited (by a Claude verifier; by Codex only while Claude is at its usage limit), so its review can't be none. Leave review out (it's audit) or run it on Claude.")
         }
         let auditReason = try Self.auditReasonArgument(arguments, review: givenReview) ?? nil
         let review: LeadTask.Review? = agent == .codex || auditReason != nil ? .audit : givenReview
@@ -1245,12 +1248,13 @@ public final class LeadToolset: MCPToolset {
                 let ledger = try vault.dismissFinding(root: root, task: origin.slug, id: origin.finding.id, reason: "moved to task \(task.slug)", followUp: task.slug)
                 mirror(ledger, on: origin.slug)
                 closed = " \(origin.slug):\(origin.finding.id) is closed on \(origin.slug) as moved to it."
+                    + closeReaudit(origin.slug, ledger, reason: "\(origin.finding.id) moved to task \(task.slug)")
                 if let why = backToReview(origin.slug, ledger) { closed += " No Important finding is open on \(origin.slug) now and \(why): it's back in review; merge(\(origin.slug)) when you're ready." }
             } catch {
                 closed = " \(origin.slug):\(origin.finding.id) couldn't be closed on \(origin.slug) (\(error)): dismiss_finding it."
             }
         }
-        let runsOn = (agent == .codex ? " Its worker is Codex (a Claude verifier audits it before merge)." : "")
+        let runsOn = (agent == .codex ? " Its worker is Codex (a Claude verifier audits it before merge; Codex does only while Claude is at its usage limit)." : "")
             + (agent == .auto ? " Its agent is auto: " + Self.autoNote + " Now: \(workerRoute(for: task, sessions: nil).why)." : "")
             + (model.map { " Its worker runs on \($0)" + (agent == .auto ? " when it's Claude." : ".") } ?? "")
             + (task.hard ? " It's marked hard (advisor fable): its Claude worker consults Fable, at effort \(task.effort ?? LeadLaunch.hardEffort)"
@@ -1385,7 +1389,27 @@ public final class LeadToolset: MCPToolset {
         let hold = self.hold(slug, ledger)
         let left = hold.findings
         let mergeable = backToReview(slug, ledger).map { " No Important finding is open now and \($0): \(slug) is back in review; merge(\(slug)) when you're ready." } ?? ""
-        return MCPToolResult(text: "Dismissed \(slug):\(id).\(left.isEmpty ? "" : " Still open and holding the merge back: \(left.map(\.label).joined(separator: ", "))\(hold.why.isEmpty ? "" : " (\(hold.why))").")\(mergeable)")
+        return MCPToolResult(text: "Dismissed \(slug):\(id).\(left.isEmpty ? "" : " Still open and holding the merge back: \(left.map(\.label).joined(separator: ", "))\(hold.why.isEmpty ? "" : " (\(hold.why))").")\(mergeable)"
+            + closeReaudit(slug, ledger, reason: "\(id) dismissed: \(reason)"))
+    }
+
+    /// A post-merge Claude re-audit whose verdict is in, closed once the lead has dismissed (or moved to a task) the
+    /// Important findings of that verdict and none is left holding it: the lead's ruling on them, as dismissing one
+    /// before a merge is. Never one without a Claude verdict (its verifier ended or never ran): that one is audited.
+    /// " Its post-merge Claude re-audit is closed…" when it closed; "" when not.
+    func closeReaudit(_ slug: String, _ ledger: LeadAuditLedger?, reason: String) -> String {
+        guard let ledger, let task = store.load().task(slug), task.merged != nil, let followup = task.claudeReaudit, followup.pending,
+              let evidence = followup.evidence, evidence.integrity == .clean, evidence.commit == ledger.commit,
+              ledger.findings.contains(where: { $0.severity == .important && $0.status == .dismissed && $0.closedBy == "lead" && $0.closed == ledger.rounds }),
+              hold(slug, ledger, head: followup.head).isEmpty else { return "" }
+        try? store.update { board in
+            guard let index = board.taskIndex(slug), board.tasks[index].claudeReaudit?.evidence == evidence else { return }
+            board.tasks[index].claudeReaudit?.passed = true
+            board.tasks[index].claudeReaudit?.closed = LeadToolset.clip(reason, 200)
+        }
+        guard store.load().task(slug)?.claudeReaudit?.pending == false else { return "" }
+        try? store.appendProgress("Post-merge Claude re-audit of \(slug) closed by the lead: \(reason)")
+        return " Its post-merge Claude re-audit is closed with it (no Important finding of it is open): \(slug)'s branch can be cleaned up now."
     }
 
     /// Whether a dismissal's reason names something that can be checked. The format only: it doesn't look the citation up.
@@ -1438,7 +1462,8 @@ public final class LeadToolset: MCPToolset {
         guard let ledger else { return Hold() }
         let workflow = self.workflow
         guard workflow.strictGlobs != nil, !ledger.unconfirmedImportant.isEmpty else { return Hold(findings: ledger.blocking) }
-        let diff = Self.changedFiles("\(workflow.base)...\(head ?? Worktrees.branch(slug))", root: root)
+        let baseline = store.load().task(slug)?.claudeReaudit?.base ?? workflow.base
+        let diff = Self.changedFiles("\(baseline)...\(head ?? Worktrees.branch(slug))", root: root)
         guard diff.ok else {
             let error = diff.error.trimmingCharacters(in: .whitespacesAndNewlines)
             return Hold(findings: ledger.holding(strict: true), unread: Self.clip(error.isEmpty ? "git diff failed" : error, 120))
@@ -1703,7 +1728,7 @@ public final class LeadToolset: MCPToolset {
             if let agent, agent != board.tasks[index].workerAgent {
                 let before = board.tasks[index].workerAgent
                 board.tasks[index].agent = agent == .claude ? nil : agent
-                changed.append(agent == .codex ? "agent codex (from its next worker; review audit, by a Claude verifier)"
+                changed.append(agent == .codex ? "agent codex (from its next worker; review audit, by a Claude verifier, or Codex at Claude's usage limit)"
                                : agent == .auto ? "agent auto (from its next worker: \(Self.autoNote))" : "agent claude (from its next worker)")
                 // A model is one agent's (sonnet is Claude's, gpt-5.5 Codex's): the other's CLI would refuse it at its
                 // first request. Cleared, unless this call gives one. An auto task's is Claude's.
@@ -2238,7 +2263,10 @@ public final class LeadToolset: MCPToolset {
         let now = now ?? usageClock()
         var lines: [String] = []
         let claude = accountUsage(sessions: sessions, now: now)
-        if let line = claude.statusText(now: now, ignored: macLimits().ignoreUsageLimits) { lines.append(line) }
+        if let line = claude.statusText(now: now, ignored: macLimits().ignoreUsageLimits) {
+            lines.append(codexWorkers && workflow.codexVerifier == .fallback
+                ? line.replacingOccurrences(of: "workers and audits on Opus", with: "workers on Opus; audits fall back to Codex while their Claude model is held") : line)
+        }
         let codex = codexUsage.read(now: now)
         let tasks = store.load().tasks
         let auto = workflow.agentDefault == .auto || tasks.contains { $0.workerAgent == .auto && !Self.finishedStates.contains($0.status) }
@@ -2296,7 +2324,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// What a usage refusal offers instead of waiting for a start: another model, or Codex for a bounded mechanical
-    /// task (another account's limits; always audited by a Claude verifier). The lead decides.
+    /// task (another account's limits; always audited: by a Claude verifier, or Codex at Claude's limit). The lead decides.
     /// The same without Codex, while Codex workers can't be started.
     static func modelInstead(_ slug: String) -> String { "run it on another model (update_task(\(slug), model: sonnet) for a mechanical task)" }
 
@@ -2306,7 +2334,7 @@ public final class LeadToolset: MCPToolset {
 
     static func codexInstead(_ slug: String) -> String {
         "on Codex if it's a bounded, mechanical task with a tight contract (update_task(\(slug), agent: codex): Codex's account, "
-            + "and a Claude verifier always audits it)"
+            + "and it's always audited: by a Claude verifier, or by Codex while Claude is at its limit)"
     }
 
     /// What a Codex worker's session is noted as having started on (`LeadTask.launchedModels`): never a Claude model's
@@ -2341,12 +2369,12 @@ public final class LeadToolset: MCPToolset {
     static var autoNote: String {
         "each start picks Codex when Claude's usage is tight (a limit at \(Int(UsageRouting.claudeTightPercent))% or more, or a weekly one more than "
             + "\(Int(UsageRouting.claudeWeeklyAheadPoints)) points ahead of pace) and Codex has room (its limits under \(Int(UsageRouting.codexRoomPercent))%, "
-            + "or under 100% with credits), else Claude; a start on Codex is audited by a Claude verifier"
+            + "or under 100% with credits), else Claude; a start on Codex is audited by a Claude verifier (Codex at Claude's usage limit, codex_verifier: fallback)"
     }
 
     /// start_worker's word on a Codex worker: always audited, and what its sandbox can't hold.
     static var codexStartNote: String {
-        "Codex implements it; a Claude verifier audits it before merge whatever its review says. Its sandbox writes only "
+        "Codex implements it; a Claude verifier audits it before merge whatever its review says. At Claude's usage limit, Codex verifies instead (codex_verifier: fallback); sensitive merges get a Claude re-audit after reset. Its sandbox writes only "
             + "in its worktree, its git folders and TMPDIR, with no network; what Codex can't be made to refuse ("
             + LeadLaunch.codexUnenforced.map(\.rule).joined(separator: "; ") + ") the audit's integrity check and merge's checks cover."
             + " Read its work critically."
@@ -2835,8 +2863,8 @@ public final class LeadToolset: MCPToolset {
                         prompt: String, start: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
                         branch: String? = nil, auditing: String? = nil,
                         finder: LeadVault.Finder? = nil, agent: LeadTask.WorkerAgent = .claude) throws -> String {
-        // Codex runs workers only: a lead or a verifier is always Claude.
-        let codex = agent == .codex && role == .worker
+        // Codex implements tasks and, at Claude's quota limit, verifies them. Leads stay Claude.
+        let codex = agent == .codex && role != .lead
         // Before a grant or a session: one started without its agent's CLI (or git) would only end, or wait out
         // `toolsWait` for tools that never connect, and say nothing of why.
         let command = codex ? runtime.codexCommand(root: root) : runtime.claudeCommand(root: root)
@@ -2846,12 +2874,12 @@ public final class LeadToolset: MCPToolset {
         // What the session would load from outside its worktree, as sealed: a worker's shell may have written it.
         try checkConfig(not: "\(role == .worker ? "\(slug)'s worker" : "\(slug)'s \(finder == nil ? "verifier" : "finder")") not started")
         let grant: String
-        do { grant = try vault.issue(role: role, root: root, task: slug, auditing: auditing, finder: finder) } catch { throw Problem(text: "\(error)") }
+        do { grant = try vault.issue(role: role, root: root, task: slug, auditing: auditing, finder: finder, agent: codex ? .codex : nil) } catch { throw Problem(text: "\(error)") }
         do {
             let launch = codex
                 ? try LeadLaunch.prepareCodex(root: root, task: slug, base: command, prompt: prompt, start: start, server: runtime.server,
                                               name: name, model: model, effort: effort, folder: vault.runFolder(root: root, name: name), cwd: folder,
-                                              temporary: sessionTempRoot, toolTimeout: LeadDoneCheck.callTimeout(limit: workflow.doneCheckTimeout))
+                                              role: role, temporary: sessionTempRoot, toolTimeout: LeadDoneCheck.callTimeout(limit: workflow.doneCheckTimeout))
                 : try LeadLaunch.prepare(role: role, root: root, task: slug, base: command, prompt: prompt,
                                          start: start, server: runtime.server, name: name, model: model, advisor: advisor, effort: effort, branch: branch,
                                          records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
@@ -2913,6 +2941,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func audit(_ slug: String, restart: Bool = false, overrideUsage: Bool = false, expectedHead: String? = nil) throws -> MCPToolResult {
+        if store.load().task(slug)?.claudeReaudit?.pending == true { return try startClaudeReaudit(slug) }
         if let task = store.load().task(slug), Self.settledStates.contains(task.status) { throw Self.settledRefusal(task, "Not audited") }
         // A verifier already at work on the branch's head is left to it: another would end it and throw its work away
         // (2026-10-27: audit(land-pr-1-host) ended the one auto_advance had started on that very head).
@@ -2954,10 +2983,13 @@ public final class LeadToolset: MCPToolset {
         let mac = try macLoad(sessions, load: runtime.steadyLoad(), except: Worktrees.path(root: root, slug: slug),
                               refused: "whether the Mac has room for a verifier isn't known; no verifier was started")
         // The finders' number and their Nits' cap as the lead set them, not as a worker rewrote them.
-        try checkSettings(workflow, not: "Not audited, no verifier started", keys: ["audit_finders", "audit_nit_cap"])
+        try checkSettings(workflow, not: "Not audited, no verifier started", keys: ["audit_finders", "audit_nit_cap", "codex_verifier"])
+        _ = accountUsage(sessions: sessions)
+        let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)
+        let codex = !overrideUsage && codexVerifierFallback(workflow, task: task, security: security != nil, sessions: sessions)
         // Several finders, or a merged result to test: the audit itself runs init_command and test_command as the lead
         // first (a scratch home is no boundary), so every guard rail must be the lead's, as for merge.
-        if workflow.findersInForce > 1 || upToDate.merged != nil {
+        if codex || workflow.findersInForce > 1 || upToDate.merged != nil {
             try checkSettings(workflow, not: "Not audited, nothing built or tested, no " + (workflow.findersInForce > 1 ? "finder" : "verifier") + " started")
         }
         let finders = workflow.findersInForce
@@ -2965,7 +2997,6 @@ public final class LeadToolset: MCPToolset {
         // The team's refusals kept first: one at the Fable limit moves the audit to another model (`auditModel`).
         _ = accountUsage(sessions: sessions)
         // A sensitive or security branch is audited on Fable (where the floor allows it).
-        let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)
         let verifierModel = auditModel(workflow, task: task, security: security != nil)
         let fallback = security != nil && !LeadReviewFloor.sameModel(verifierModel, LeadWorkflow.securityAuditModel)
             ? fableFallback()?.fableHeldBack(now: usageClock()) : nil
@@ -2973,9 +3004,11 @@ public final class LeadToolset: MCPToolset {
         // Near one of the account's usage limits on the audits' model: a verifier started now would stop mid-audit at it.
         let instead = security == nil ? "audit on another model (configure verifier_model, e.g. opus)"
             : "let it wait: this sensitive or security audit runs on \(verifierModel) under the review floor"
-        if !overrideUsage, let refusal = usageRefusal(model: verifierModel, sessions: sessions, not: "Not audited, no verifier started",
+        if !codex, !overrideUsage, let refusal = usageRefusal(model: verifierModel, sessions: sessions, not: "Not audited, no verifier started",
                                                       what: "audit(\(slug))", instead: instead) {
-            throw Problem(text: refusal)
+            let codexWait = workflow.codexVerifier == .fallback && codexWorkers
+                ? " Codex fallback is waiting too: " + UsageRouting.codex(codexUsage.read(now: usageClock()), now: usageClock()).text + "." : ""
+            throw Problem(text: refusal + codexWait)
         }
         // Each finder is a session of its own: the Mac must have room for all of them.
         let limits = macLimits()
@@ -3014,13 +3047,14 @@ public final class LeadToolset: MCPToolset {
         defer { if !launched { closeOpening(slug, since: auditStart) } }
         if finders > 1 {
             let started = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, amended: amendedScope,
-                                           trust: config.isEmpty, expectedHead: expectedHead, model: verifierModel)
+                                           trust: config.isEmpty, expectedHead: expectedHead, model: verifierModel, codex: codex)
             (panel, earlier) = (started.0, started.1)
             session = started.0.sessions[0]
         } else {
+            let hostRun = codex ? try auditRun(slug, commit: merged?.commit ?? head, workflow: workflow, not: "no verifier started") : nil
             // Behind the base where it matters: its tests run once on the merged result, which the verifier reads.
             if let commit = merged?.commit {
-                let run = try auditRun(slug, commit: commit, workflow: workflow, not: "no verifier started")
+                let run = try hostRun ?? auditRun(slug, commit: commit, workflow: workflow, not: "no verifier started")
                 merged?.logs = run.logs
                 merged?.run = run.outcome.text
                 try? store.appendProgress("Audit of \(slug) at \(head.prefix(8)) tested its merged result \(commit.prefix(8)) onto \(workflow.base): \(run.outcome.text)")
@@ -3036,8 +3070,9 @@ public final class LeadToolset: MCPToolset {
                                  prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, amended: amendedScope, merged: merged,
                                                               notes: leadNotes(opened), report: doneReport(task, head: head),
                                                               guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
-                                                              security: security),
-                                 start: "Verify the task now, then call submit_audit.", model: verifierModel, auditing: head)
+                                                              security: security, codexRun: hostRun),
+                                 start: "Verify the task now, then call submit_audit.", model: codex ? nil : verifierModel, auditing: head,
+                                 agent: codex ? .codex : .claude)
         }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -3045,7 +3080,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].panel = panel
             // The contract their brief was written from: an update_task from here on is sent to them (sendContractChange).
             board.tasks[index].auditBrief = LeadAuditBrief(version: task.contractRevision, contract: task.contract)
-            board.tasks[index].launched(panel?.sessions ?? [session], on: verifierModel)
+            board.tasks[index].launched(panel?.sessions ?? [session], on: codex ? Self.codexMarker(nil) : verifierModel)
             board.tasks[index].noteWaits { $0.auditStarted(at: auditStart, sessions: panel?.sessions.count ?? 1) }
             // A kept task stays kept through a new audit: what holds it back hasn't changed.
             if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .review }
@@ -3081,7 +3116,7 @@ public final class LeadToolset: MCPToolset {
                                  + "One build and test run\(merged.map { " of its merged result \($0.commit.prefix(8))" } ?? "") came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
                                  + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)" + released)
         }
-        return MCPToolResult(text: noTools + putBack + behind + room + earlier + "Verifier started on \(slug) (checking \(head.prefix(8)))\(modelNotice). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)" + released)
+        return MCPToolResult(text: noTools + putBack + behind + room + earlier + "\(codex ? "Codex verifier" : "Verifier") started on \(slug) (checking \(head.prefix(8)))\(codex ? "" : modelNotice). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)" + released)
     }
 
     /// What audit's reply says of the task's audit still at work on its branch's head: the verifiers it waits on
@@ -3099,6 +3134,8 @@ public final class LeadToolset: MCPToolset {
         let sessions = try hostSessions("whether \(slug)'s verifier is still auditing isn't known; no verifier was started or ended")
         let roster = (try? vault.roster(root: root)) ?? []
         let submitted = Set(roster.filter { $0.submittedAt != nil }.map(\.session))
+        if sessions.contains(where: { waiting.contains($0.id) && $0.usageLimit != nil }),
+           limitedVerifierCanRestart(task, head: head, sessions: sessions) { return nil }
         for verifier in waiting {
             guard !submitted.contains(verifier), let info = sessions.first(where: { $0.id == verifier }), info.live,
                   runtime.agentEnding(info) == nil else { return nil }
@@ -3167,12 +3204,21 @@ public final class LeadToolset: MCPToolset {
             .flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
         // A re-rolled task's Fable counts as its own model (`LeadTask.intendedModel`).
         let taskModel = task?.intendedModel
-        guard let usage = fableFallback() else {
-            return workflow.auditModel(workerModel: workers, taskModel: taskModel, launchedModel: launched, security: security)
-        }
+        let usage = fableFallback()
         let now = usageClock()
-        return workflow.auditModel(workerModel: usage.startModel(workers, now: now), taskModel: usage.startModel(taskModel, now: now),
-                                   launchedModel: launched, heldBack: AccountUsage.heldBackFamily, security: security)
+        let effectiveWorkers = usage?.startModel(workers, now: now) ?? workers
+        let effectiveTask = usage?.startModel(taskModel, now: now) ?? taskModel
+        let chosen = workflow.auditModel(workerModel: effectiveWorkers, taskModel: effectiveTask,
+                                         launchedModel: launched, heldBack: usage == nil ? nil : AccountUsage.heldBackFamily, security: security)
+        guard workflow.codexVerifier == .fallback, usageHold(model: chosen, sessions: nil) != nil else { return chosen }
+        // Preserve verifier_model while it has room. At a limit, try the remaining Claude models in capability
+        // order before Codex, keeping the same worker-model exclusions as the existing Fable fallback.
+        let different = workflow.floor?.verifierDifferent == true
+        return ["fable", "opus", "sonnet"].first { model in
+            (!different || (![LeadReviewFloor.workersModel(effectiveWorkers), effectiveTask, launched].contains {
+                LeadReviewFloor.sameModel(model, $0)
+            })) && usageHold(model: model, sessions: nil) == nil
+        } ?? chosen
     }
 
     /// The model `task`'s audit at `head` runs on, as `audit` picks it: Fable for a sensitive or security branch where
@@ -3180,6 +3226,102 @@ public final class LeadToolset: MCPToolset {
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask?, head: String) -> String {
         let security = task.map { Self.securityReason(root: root, head: head, workflow: workflow, raised: $0.riskRaised) != nil } ?? false
         return auditModel(workflow, task: task, security: security)
+    }
+
+    /// Codex is the last fallback: no eligible Claude verifier model has room, and Codex's own account does.
+    func codexVerifierFallback(_ workflow: LeadWorkflow, task: LeadTask?, security: Bool, sessions: [LeadSessionInfo]? = nil) -> Bool {
+        guard workflow.codexVerifier == .fallback, codexWorkers else { return false }
+        _ = accountUsage(sessions: sessions)
+        return usageHold(model: auditModel(workflow, task: task, security: security), sessions: nil) != nil
+            && UsageRouting.codex(codexUsage.read(now: usageClock()), now: usageClock()).room
+    }
+
+    /// A halted Claude verifier can be replaced once either another eligible Claude model or Codex has room.
+    func limitedVerifierCanRestart(_ task: LeadTask, head: String, sessions: [LeadSessionInfo]) -> Bool {
+        _ = accountUsage(sessions: sessions)
+        let model = auditModel(workflow, task: task, head: head)
+        return usageHold(model: model, sessions: nil) == nil
+            || codexVerifierFallback(workflow, task: task, head: head, sessions: sessions)
+    }
+
+    func codexVerifierFallback(_ workflow: LeadWorkflow, task: LeadTask?, head: String, sessions: [LeadSessionInfo]? = nil) -> Bool {
+        let security = task.map { Self.securityReason(root: root, head: head, workflow: workflow, raised: $0.riskRaised) != nil } ?? false
+        return codexVerifierFallback(workflow, task: task, security: security, sessions: sessions)
+    }
+
+    /// The trusted verdict's agent survives cleanup. Sensitive Codex merges also retain a Claude review obligation.
+    func noteCodexMerge(_ task: inout LeadTask, head: String, onto: String, workflow: LeadWorkflow, auditor: Agent?) {
+        guard auditor == .codex else { return }
+        task.merged?.agent = .codex
+        var before = workflow
+        before.baseBranch = onto
+        let sensitive = Self.sensitiveChanges(root: root, head: head, workflow: before)
+        guard !sensitive.isEmpty else { return }
+        let baseline = Git.run(["merge-base", onto, head], in: root)
+        // Both are known commits of a successfully tested merge. An unreadable baseline keeps the obligation.
+        let launched = task.worker.flatMap { task.launchedModels?[$0] }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
+        task.claudeReaudit = LeadClaudeReaudit(head: head, base: baseline.ok ? baseline.output : onto,
+                                             model: workflow.auditModel(workerModel: runtime.workerModel(root: root), taskModel: task.intendedModel,
+                                                                        launchedModel: launched, security: true), sensitive: sensitive)
+    }
+
+    /// A post-merge Claude check is independent of auto_advance and never reopens or re-merges the task.
+    /// Its pinned baseline is from before merge: diffing against today's base would hide the code already landed.
+    func startClaudeReaudit(_ slug: String) throws -> MCPToolResult {
+        try exclusively("claude-reaudit-\(slug)") {
+            guard let task = store.load().task(slug), let followup = task.claudeReaudit, followup.pending, task.merged != nil else {
+                throw Problem(text: "No pending post-merge Claude re-audit on \(slug).")
+            }
+            try checkBattery(not: "No post-merge Claude verifier started")
+            let workflow = self.workflow
+            try checkSettings(workflow, not: "No post-merge Claude verifier started")
+            let sessions = try hostSessions("whether the Mac has room for a Claude re-audit isn't known")
+            if let session = followup.session, followup.evidence == nil,
+               let info = sessions.first(where: { $0.id == session }), info.live, info.usageLimit == nil, runtime.agentEnding(info) == nil {
+                return MCPToolResult(text: "Post-merge Claude re-audit of \(slug) is already running (session \(session)).")
+            }
+            if let refusal = usageRefusal(model: followup.model, sessions: sessions, not: "No post-merge Claude verifier started",
+                                          what: "audit(\(slug))", instead: "wait for Claude's reset") { throw Problem(text: refusal) }
+            let mac = try macLoad(sessions, load: runtime.steadyLoad(), except: Worktrees.path(root: root, slug: slug))
+            if let refusal = macRefusal(mac, not: "No post-merge Claude verifier started", what: "audit(\(slug))", need: 1) { throw Problem(text: refusal) }
+            guard branchHead(Worktrees.branch(slug)) == followup.head, Worktrees.isWorktree(root: root, slug: slug) else {
+                throw Problem(text: "Post-merge Claude re-audit of \(slug) needs its retained branch at \(followup.head.prefix(8)); it moved or its worktree is gone.")
+            }
+            let opened = try openAudit(slug, head: followup.head, not: "No post-merge Claude verifier started")
+            _ = try endEarlierVerifiers(task, not: "No post-merge Claude verifier started")
+            var pinned = workflow
+            pinned.baseBranch = followup.base
+            let ledger = vault.audits(root: root, task: slug)
+            let known = ledger.map { ledger in
+                "\nEarlier findings (give every open one its id and status in submit_audit; closed ones stay closed):\n"
+                    + ledger.findings.map { "- \($0.id) [\($0.severity.rawValue), \($0.status.rawValue)] \($0.place): \($0.evidence)" }.joined(separator: "\n")
+            } ?? ""
+            let prompt = LeadPrompts.verifier(task: task, root: root, workflow: pinned, notes: leadNotes(opened),
+                                              report: doneReport(task, head: followup.head), guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
+                                              security: "it merged over sensitive_paths: " + followup.sensitive.joined(separator: ", "))
+                + "\nThis is the independent post-merge Claude re-audit required after a Codex fallback verdict. Review the whole change against the pinned baseline "
+                + followup.base + ", not only the earlier findings. It is already merged: report Important findings to the lead through submit_audit; don't merge or change it." + known
+            let session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
+                                     label: "Verifier: \(task.title) (post-merge Claude re-audit)",
+                                     trust: Worktrees.committedAgentConfig(root: root, slug: slug, base: followup.base).isEmpty
+                                        && Worktrees.localAgentConfig(root: root, slug: slug).isEmpty,
+                                     prompt: prompt, start: "Audit the merged task independently now, then call submit_audit.", model: followup.model, auditing: followup.head)
+            try store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                board.tasks[index].verifier = session
+                board.tasks[index].panel = nil
+                board.tasks[index].auditBrief = LeadAuditBrief(version: task.contractRevision, contract: task.contract)
+                board.tasks[index].claudeReaudit?.session = session
+                board.tasks[index].claudeReaudit?.evidence = nil
+                board.tasks[index].claudeReaudit?.limitedUntil = nil
+                // Only the lead starts one that stopped after its endings (auto_advance leaves it): its count starts over.
+                if followup.stopped { board.tasks[index].claudeReaudit?.endings = nil }
+                board.tasks[index].launched([session], on: followup.model)
+            }
+            // auto_advance stopped watching it at its endings: it looks again (merged tasks get no verifier-death notice).
+            if followup.stopped { LeadAdvance.nudge(root: root) }
+            return MCPToolResult(text: "Started post-merge Claude re-audit of \(slug) at \(followup.head.prefix(8)). It stays merged; its verdict and Important findings go to the lead.")
+        }
     }
 
     /// Codex's own model and effort for a session given none (config.toml's), for showing.
@@ -3255,7 +3397,7 @@ public final class LeadToolset: MCPToolset {
     /// A branch behind the base where it matters is tested as it would land: `merged`'s commit, not `head`.
     private func startFinders(_ count: Int, task: LeadTask, head: String, merged: LeadPrompts.Merged?, workflow: LeadWorkflow,
                               recheck: LeadPrompts.Reaudit?, amended: LeadPrompts.ContractReaudit? = nil, trust: Bool,
-                              expectedHead: String? = nil, model: String) throws -> (LeadAuditPanel, String) {
+                              expectedHead: String? = nil, model: String, codex: Bool = false) throws -> (LeadAuditPanel, String) {
         let slug = task.slug
         let tested = merged?.commit ?? head
         let run = try auditRun(slug, commit: tested, workflow: workflow, not: "no finder started")
@@ -3282,9 +3424,9 @@ public final class LeadToolset: MCPToolset {
                                            in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
                                            trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, amended: amended, finder: finder,
                                                                                       merged: merged, notes: notes, report: report, guide: guide,
-                                                                                      security: security),
-                                           start: "Look for findings in your focus now, then call submit_audit.", model: model, auditing: head,
-                                           finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap)))
+                                                                                      security: security, codexRun: codex ? run : nil),
+                                           start: "Look for findings in your focus now, then call submit_audit.", model: codex ? nil : model, auditing: head,
+                                           finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap), agent: codex ? .codex : .claude))
             } catch {
                 for started in sessions { try? runtime.kill(started) }
                 throw Problem(text: "Not audited: finder \(index) of \(count) couldn't start (\(error))" + (sessions.isEmpty ? "." : "; the \(sessions.count) started before it were ended."))
@@ -3685,6 +3827,8 @@ public final class LeadToolset: MCPToolset {
         let commit: String
         let audited: Bool
         let dismissed: [LeadFinding]
+        /// Captured with the accepted verdict, before a long test run can replace it.
+        var auditor: Agent? = nil
         var staleAccepted: (stale: StaleVerdict, reason: String)? = nil
         /// The lead's exception that settles a suspect verdict held up only by edits outside the boundaries.
         var accepted: LeadException? = nil
@@ -3749,6 +3893,7 @@ public final class LeadToolset: MCPToolset {
         var dismissed: [LeadFinding] = []
         var staleAccepted: (stale: StaleVerdict, reason: String)?
         var accepted: LeadException?
+        var auditor: Agent?
         // The verdict as the verifier's own tool server recorded it in the vault (the board's copy is for showing):
         // from the verifier VibeSwitcher started last for this task, on the commit it was started on.
         if let verdict = vault.verdict(root: root, task: slug) {
@@ -3774,6 +3919,7 @@ public final class LeadToolset: MCPToolset {
                 throw Problem(text: "agent/\(slug) has commits the verifier didn't see (audited \(verdict.commit.prefix(8)), now \(head.prefix(8))). Run audit again.")
             }
             (commit, audited) = (verdict.commit, true)
+            auditor = verdict.agent
             // The contract changed after its verifiers last heard: the verdict doesn't cover what changed, so it
             // doesn't merge on it unless the lead says why it holds for the current version.
             if let stale = Self.staleVerdict(task) {
@@ -3806,7 +3952,7 @@ public final class LeadToolset: MCPToolset {
         }
         try checkMergePolicy(task, commit: commit)
         try checkRemoteCarried(slug, commit: commit, fetched: fetched)
-        return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed, staleAccepted: staleAccepted, accepted: accepted)
+        return MergeGate(task: task, commit: commit, audited: audited, dismissed: dismissed, auditor: auditor, staleAccepted: staleAccepted, accepted: accepted)
     }
 
     private func merge(_ slug: String, acceptStale: String? = nil, locked: (() -> Void)? = nil) throws -> MCPToolResult {
@@ -4064,6 +4210,7 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil, onto: current,
                                                              regression: workflow.regressionCommand.map { _ in true }, audited: audited ? nil : false,
                                                              branchHead: commit)
+                noteCodexMerge(&board.tasks[index], head: commit, onto: current, workflow: workflow, auditor: gate.auditor)
                 board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: .merged, questions: board.questions, usage: usage,
                                                          tests: workflow.testCommand == nil ? nil : testCount, mergeReruns: flaked == nil && redOnBase == nil ? 0 : 1,
                                                          commits: brought)
@@ -5014,9 +5161,24 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
-    private func cleanup(_ slug: String, force: Bool) throws -> MCPToolResult {
+    private func cleanup(_ slug: String, force: Bool, reason: String? = nil) throws -> MCPToolResult {
         let board = store.load()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
+        if task.claudeReaudit?.pending == true {
+            // The lead's explicit decision only (force, and a reason that cites something checkable): a re-audit that
+            // can't be audited would otherwise hold the branch forever.
+            guard force, let reason, !reason.isEmpty, Self.citesEvidence(reason) else {
+                throw Problem(text: "Not cleaned up: \(slug)'s post-merge Claude re-audit is pending. Its branch and worktree stay until it passes; audit(\(slug)) retries it. "
+                    + "If it can't be audited, cleanup(\(slug), force: true, reason: …) closes it as your decision; the reason must cite something that can be checked: "
+                    + "a file and line (path/File.swift:123), a decision's timestamp as decisions.md has it (2026-11-07 20:08:15), or the question id of the user's answer.")
+            }
+            try store.update { board in
+                guard let index = board.taskIndex(slug), board.tasks[index].claudeReaudit?.pending == true else { return }
+                board.tasks[index].claudeReaudit?.passed = true
+                board.tasks[index].claudeReaudit?.closed = LeadToolset.clip("cleanup: " + reason, 200)
+            }
+            try? store.appendProgress("Post-merge Claude re-audit of \(slug) closed by the lead without its verdict (cleanup): \(reason)")
+        }
         // Folded (another task carries its work) or abandoned by the lead: it goes without force.
         guard [.done, .folded, .abandoned, .reverted].contains(task.status) || force else {
             throw Problem(text: "\(slug) isn't merged. Use force: true to abandon its work.")
@@ -5731,6 +5893,11 @@ public final class LeadToolset: MCPToolset {
                                   + "never codex: pin a task to Codex with add_task's agent.")
                 }
                 value = agent.rawValue
+            case "codex_verifier" where !value.isEmpty:
+                guard LeadWorkflow.CodexVerifier(rawValue: value.lowercased()) != nil else {
+                    throw Problem(text: "codex_verifier is fallback or off.")
+                }
+                value = value.lowercased()
             case "merge_batching" where !value.isEmpty:
                 guard let batching = LeadWorkflow.MergeBatching(text: value) else {
                     throw Problem(text: "merge_batching is one of \(LeadWorkflow.MergeBatching.allCases.map(\.rawValue).joined(separator: ", ")).")
@@ -5787,6 +5954,7 @@ public final class LeadToolset: MCPToolset {
                                           "init_command": after.initCommand ?? "",
                                           "done_check_command": after.doneCheckCommand ?? "", "done_check_min": Self.gb(after.doneCheckMinutes),
                                           "base_branch": after.baseBranch ?? "", "remote": after.remote ?? "", "verifier_model": after.verifierModel ?? "",
+                                          "codex_verifier": after.codexVerifier.rawValue,
                                           "lead_model": after.leadModel, "lead_advisor": after.leadAdvisor ?? "none",
                                           "worker_advisor": after.workerAdvisor ?? "none", "team_plugins": after.teamPlugins.joined(separator: ", "),
                                           "max_workers": String(after.maxWorkers),
@@ -5816,7 +5984,7 @@ public final class LeadToolset: MCPToolset {
                             "merge_batching": LeadWorkflow().mergeBatching.rawValue,
                             "risk_lines": String(LeadWorkflow().riskLines), "risk_model": String(LeadWorkflow().riskModel),
                             "audit_sample_percent": String(LeadWorkflow().auditSamplePercent), "small_task_min": String(LeadWorkflow().smallTaskMin),
-                            "agent_default": LeadWorkflow().agentDefault.rawValue,
+                            "agent_default": LeadWorkflow().agentDefault.rawValue, "codex_verifier": LeadWorkflow().codexVerifier.rawValue,
                             "handover_idle_min": String(LeadWorkflow().handoverIdleMinutes), "handover_tokens": String(LeadWorkflow().handoverTokens)]
             for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
                 throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
@@ -6391,8 +6559,16 @@ public final class LeadToolset: MCPToolset {
         if let audited = member.auditing {
             var trial = earlier
             do {
-                try trial.record(reports, commit: audited, passes: completion == .complete && integrity == .clean,
-                                 changed: earlier.commit.flatMap { reauditFiles(since: $0, head: audited) })
+                let followup = store.load().task(slug)?.claudeReaudit
+                let changed: Set<String>?
+                if let followup, followup.session == member.session {
+                    let diff = Self.changedFiles("\(followup.base)...\(audited)", root: root)
+                    guard diff.ok else { throw Problem(text: "Cannot read the pinned post-merge audit diff: \(diff.error)") }
+                    changed = Set(diff.output.split(whereSeparator: \.isNewline).map(String.init))
+                } else {
+                    changed = earlier.commit.flatMap { reauditFiles(since: $0, head: audited) }
+                }
+                try trial.record(reports, commit: audited, passes: completion == .complete && integrity == .clean, changed: changed)
             } catch { throw Problem(text: "Not recorded: \(error) Nothing was recorded; call submit_audit again.") }
         }
         // Before the vault has its verdict: the merge gate and auto_advance read the version judged from here until
@@ -6426,10 +6602,25 @@ public final class LeadToolset: MCPToolset {
         let ledger = vault.audits(root: root, task: slug)
         let audited = verdict.commit
         let evidence = LeadEvidence(completion: verdict.completion, integrity: verdict.integrity, summary: verdict.summary, commit: audited,
-                                    contract: store.load().task(slug)?.auditBrief.map(Self.judgedVersion))
+                                    contract: store.load().task(slug)?.auditBrief.map(Self.judgedVersion), agent: verdict.agent)
         // On a branch touching strict_paths, the unconfirmed Important ones hold it too.
         let hold = self.hold(slug, ledger, head: audited)
         let blocking = hold.findings
+        if let task = store.load().task(slug), task.claudeReaudit?.session == member.session, task.merged != nil {
+            try store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                board.tasks[index].audits = ledger
+                board.tasks[index].claudeReaudit?.evidence = evidence
+                board.tasks[index].claudeReaudit?.passed = evidence.passes && blocking.isEmpty
+            }
+            let passed = evidence.passes && blocking.isEmpty
+            let text = "Post-merge Claude re-audit of \(slug) \(passed ? "passed" : "needs your attention"): \(evidence.summary). "
+                + (ledger.map { Self.findingsText($0, of: slug) } ?? "")
+                + (passed ? " Its branch can now be cleaned up." : " It stays merged; resolve the Important findings through the lead, then audit(\(slug)) again.")
+            try? store.appendProgress(text)
+            _ = try tellLead(text, about: "verifier \(slug)")
+            return MCPToolResult(text: "Verdict recorded. You're done; the lead takes it from here.")
+        }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].evidence = evidence
@@ -6448,6 +6639,7 @@ public final class LeadToolset: MCPToolset {
             }
         }
         try? store.appendProgress("Audit of \(slug): \(evidence.completion.rawValue), \(evidence.integrity.rawValue)"
+            + (evidence.agent == .codex ? " (audited by Codex)" : "")
             + (ledger.map { $0.findings.isEmpty ? "" : ", round \($0.rounds): \(Self.findingsTally($0))" } ?? "")
             + (ledger?.vote.map { " (\($0.text))" } ?? ""))
         let head = branchHead(Worktrees.branch(slug))
@@ -6494,8 +6686,9 @@ public final class LeadToolset: MCPToolset {
                 text += (text.hasSuffix("\n") ? "" : "\n") + LeadAdvance.sendsBackItself
             }
         }
+        if evidence.agent == .codex { text += "\nThis task was audited by Codex (Claude quota fallback)." }
         let told = try tellLead(text.trimmingCharacters(in: .whitespacesAndNewlines), about: "verifier \(slug)")
-        let recorded = submission.of > 1 ? "Your findings are in, the last of \(submission.of): the vote is done and its verdict recorded." : "Verdict recorded."
+        let recorded = submission.of > 1 ? "Your findings are in, the last of \(submission.of): the vote is done and its verdict recorded." : evidence.agent == .codex ? "Verdict recorded (audited by Codex)." : "Verdict recorded."
         return MCPToolResult(text: recorded + demotedText + " You're done; the lead takes it from here." + (told ? "" : Self.noLead))
     }
 
@@ -6843,6 +7036,11 @@ public final class LeadToolset: MCPToolset {
         if let line = teamPluginsStatusLine(workflow) { lines.append(Self.clip(line, 600)) }
         if let line = heavyLockLine(board) { lines.append(line) }
         lines += usageLines(sessions: listing)
+        let reaudits = board.tasks.filter { $0.claudeReaudit?.pending == true }
+        if !reaudits.isEmpty {
+            lines.append("Post-merge Claude re-audits (\(reaudits.count)):")
+            lines += reaudits.map { "- \($0.slug): " + ($0.claudeReaudit?.text ?? "") + "; audited by Codex" }
+        }
         lines += sessionRunLines(board, sessions, workflow: workflow)
         if sessions == nil {
             lines.append("The session host can't be read right now: what the workers are doing isn't known; the states below are the board's.")
@@ -7012,7 +7210,7 @@ public final class LeadToolset: MCPToolset {
         guard !done.isEmpty || !folded.isEmpty || !older.isEmpty else { return nil }
         let allFolded = folded.count + older.filter { $0.status == .folded }.count
         let count = "\(done.count + folded.count + older.count)" + (allFolded == 0 ? "" : ", \(allFolded) folded")
-        var names = done.map { $0.slug + ($0.merged?.unaudited == true ? " (unaudited)" : "") }.joined(separator: ", ")
+        var names = done.map { $0.slug + ($0.merged?.unaudited == true ? " (unaudited)" : $0.merged?.agent == .codex ? " (audited by Codex)" : "") }.joined(separator: ", ")
         if !folded.isEmpty {
             names += (done.isEmpty ? "" : "; ") + "folded: " + folded.map { "\($0.slug) → \($0.foldedInto ?? "?")" }.joined(separator: ", ")
         }
@@ -7083,6 +7281,7 @@ public final class LeadToolset: MCPToolset {
             line += " — worker \(info.live ? info.state(prompt: 40) : task.stopped == worker ? "stopped" : "ended")"
         }
         if let evidence = task.evidence ?? task.outdatedEvidence { line += " — " + auditText(evidence, of: task) }
+        if let followup = task.claudeReaudit { line += " — " + followup.text }
         if let panel = task.panel, task.evidence == nil, task.status == .review, panel.reported.count < panel.size { line += " — audit by \(panel.progress)" }
         else if let vote = task.audits?.vote, task.evidence != nil, task.status != .done { line += " — \(vote.text)" }
         if task.rework > 0 { line += " — rework \(task.rework)" }
@@ -7096,7 +7295,7 @@ public final class LeadToolset: MCPToolset {
     /// "audit clean at <commit>" while the branch is still there; ", branch now at <head>" once it moved on, so the
     /// verdict no longer covers what would be merged.
     private func auditText(_ evidence: LeadEvidence, of task: LeadTask) -> String {
-        var text = "audit " + (evidence.passes ? "clean" : "\(evidence.completion.rawValue)/\(evidence.integrity.rawValue)")
+        var text = (evidence.agent == .codex ? "audited by Codex; " : "") + "audit " + (evidence.passes ? "clean" : "\(evidence.completion.rawValue)/\(evidence.integrity.rawValue)")
             + (task.staleContract.map { " (\($0))" } ?? "")
         guard let commit = evidence.commit else { return text }
         text += " at \(commit.prefix(8))"
@@ -7381,6 +7580,7 @@ public final class LeadToolset: MCPToolset {
         if let strict = workflow.strictPaths {
             lines.append("- strict_paths: \(strict.joined(separator: ", ")) (on a branch touching one, an Important finding the vote left unconfirmed holds the merge too, until you rule on it)")
         }
+        lines.append("- codex_verifier: " + workflow.codexVerifier.rawValue)
         lines.append("- auto_advance: " + (workflow.autoAdvance ? "true (finished work moves on by itself: merged, audited, sent back, cleaned up; planned tasks start once their after tasks are done)"
             : "false (you start, audit, merge and clean up each task yourself)"))
         lines.append("- merge_batching: \(workflow.mergeBatching.rawValue) (\(workflow.mergeBatching.meaning))")
@@ -7441,6 +7641,8 @@ public final class LeadToolset: MCPToolset {
                 + (task.waitsForContract ? " (record_incident's generic brief: it doesn't start by itself until update_task changes its contract, or auto_advance: true or start_worker sets it going)" : ""))
             lines.append("Worker: \(Self.agentText(task))" + (task.codexAudit.map { " (\($0))" } ?? ""))
             if let wall = wallText(task) { lines.append(wall) }
+            if let evidence = task.evidence { lines.append("Audit: " + auditText(evidence, of: task)) }
+            if let followup = task.claudeReaudit { lines.append(followup.text) }
             lines.append("Review: \(task.reviewLevel.rawValue)" + (task.merged.map { $0.unaudited ? " (merged with no audit)" : "" } ?? "")
                 + (task.riskRaised.map { " (audited: \($0.reason), raised by the risk check at \($0.commit.prefix(8)))" } ?? "")
                 + (task.auditReason.map { " (audit_reason \($0.rawValue): small_task_min never drops it)" } ?? "")

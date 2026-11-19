@@ -108,9 +108,12 @@ failed before compiling, and the lead had to hand its worker `--disable-sandbox`
 The on-demand `CodexRealRunTests/theProjectsChecksRunInARealCodexWorkersSandbox` runs these checks in a real Codex
 worker's sandbox.
 
-A Codex task is always audited by a Claude verifier: its review is audit and can't be lowered while its worker is
-Codex, or once a Codex worker worked on it; merge refuses it without a passing audit whatever the board or the vault
-says. Status and board say `worker: Codex` on it (and `worker: Claude` on the other open tasks beside it), and the
+A Codex task is always audited: by a Claude verifier, or, while no Claude verifier model the review floor allows has
+room under its usage limit and Codex's account has, by a read-only Codex verifier (workflow.md's `codex_verifier:
+fallback`, the default; `off` waits for Claude's reset). A merge over `sensitive_paths` on a Codex verdict then gets a
+post-merge Claude re-audit after the reset, listed in status until it passes. Its review is audit and can't be lowered
+while its worker is Codex, or once a Codex worker worked on it; merge refuses it without a passing audit whatever the
+board or the vault says. Status and board say `worker: Codex` on it (and `worker: Claude` on the other open tasks beside it), and the
 Mac-wide session limit counts it like any worker.
 
 What Codex can't be made to refuse (it has no per-session deny rules: its `.rules` files load only from its own home,
@@ -153,8 +156,8 @@ at the start, not when the task is planned:
 - **Claude** otherwise, and whenever either side's usage isn't known. Unknown is never room.
 
 So where Claude's 80% hold would refuse or hold an auto task, it starts on Codex while Codex has room. A task pinned to
-`claude` holds as before. A start that lands on Codex is a Codex task from then on (`codexWorked`): a Claude verifier
-audits it before merge whatever its review says. Its `model` is Claude's, so a start on Codex runs Codex's own. The
+`claude` holds as before. A start that lands on Codex is a Codex task from then on (`codexWorked`): a verifier (Claude's,
+or Codex's at Claude's limit) audits it before merge whatever its review says. Its `model` is Claude's, so a start on Codex runs Codex's own. The
 start's reply and its progress line say where it went and why, e.g. `auto → Codex: Claude weekly 64%, 12 points ahead
 of pace; Codex 40%`. Status shows Claude's limits and Codex's, each with its pace, and `Next auto task → codex|claude
 (why)`. Board says `worker: auto (now Codex)` while it runs.

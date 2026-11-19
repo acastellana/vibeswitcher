@@ -398,6 +398,7 @@ extension LeadToolset {
                                                              regression: workflow.regressionCommand.map { _ in true },
                                                              audited: gate.audited ? nil : false, batch: order.count > 1 ? order : nil,
                                                              branchHead: gate.commit)
+                    noteCodexMerge(&board.tasks[at], head: gate.commit, onto: under[gate.task.slug] ?? onto, workflow: workflow, auditor: gate.auditor)
                     board.tasks[at].receipt = LeadReceipt(board.tasks[at], ending: .merged, questions: board.questions,
                                                           usage: usage[gate.task.slug] ?? LeadReceipts.Usage(),
                                                           tests: passing.tests, mergeReruns: flaked == nil && redOnBase == nil ? 0 : 1, commits: brought[gate.task.slug] ?? nil)

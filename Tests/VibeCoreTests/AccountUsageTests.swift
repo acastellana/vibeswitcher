@@ -389,6 +389,8 @@ struct AccountUsageTests: LeadTeamFixture {
         runtime.usageLimits[verifier] = refusal
         let status = call(lead, "status").text
         #expect(status.contains("the fable limit (seven_day_overage_included): reached (Claude refused a request at it)"), "\(status)")
+        // With Codex fallback disabled, the existing Claude-to-Claude model routing still works.
+        #expect(!call(lead, "configure", ["codex_verifier": "off"]).isError)
         // Fable held back: no audit starts on it; the next one starts on Opus instead (`LeadUsageFallback`).
         #expect(lead.usageHold(model: "fable", sessions: try runtime.sessions()) != nil)
         let moved = call(lead, "audit", ["task": "two"])

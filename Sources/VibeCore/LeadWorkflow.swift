@@ -23,6 +23,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The verifier's model (`verifier_model:`); when it's empty, audits run on another model than the workers' (see
     /// `auditModel`), a second opinion.
     public var verifierModel: String?
+    /// Use Codex for audits while Claude's verifier model is held at a usage limit.
+    public enum CodexVerifier: String, Sendable { case fallback, off }
+    public var codexVerifier: CodexVerifier = .fallback
     /// The lead's model (`lead_model:`; empty: fable): the session that decides what to do and judges what comes back
     /// runs on the model best at that (the user, 2026-11-12), Opus in its place while Fable is held back.
     public var leadModel = LeadWorkflow.defaultLeadModel
@@ -167,6 +170,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
                 case "agent_default": workflow.agentDefault = present.flatMap(LeadTask.WorkerAgent.init(text:)).flatMap { $0 == .codex ? nil : $0 } ?? .claude
                 case "verifier_model": workflow.verifierModel = present
+                case "codex_verifier": workflow.codexVerifier = CodexVerifier(rawValue: value.lowercased()) ?? .fallback
                 case "lead_model": workflow.leadModel = present ?? defaultLeadModel
                 case "lead_advisor": workflow.leadAdvisor = advisorValue(present ?? defaultLeadAdvisor)
                 case "worker_advisor": workflow.workerAdvisor = present.flatMap(advisorValue)
@@ -529,7 +533,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         return model
     }
 
-    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "lead_model", "lead_advisor", "worker_advisor", "team_plugins", "max_workers",
+    public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "codex_verifier", "lead_model", "lead_advisor", "worker_advisor", "team_plugins", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "disk_headroom_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                       "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "watch_app_logs", "agent_default",
@@ -658,11 +662,15 @@ public struct LeadWorkflow: Equatable, Sendable {
     # Who works: claude (Codex support comes later).
     worker_agent: claude
     # The agent of a new task that names none: claude, or auto (each start picks Codex when Claude's usage runs ahead
-    # of pace and Codex has room, else Claude; a task that lands on Codex is audited by a Claude verifier).
+    # of pace and Codex has room, else Claude; a task that lands on Codex is audited by a Claude verifier, or by Codex
+    # under codex_verifier: fallback while Claude is at its usage limit).
     agent_default: claude
     # The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as
     # capable (fable; opus when the workers run fable).
     verifier_model:
+    # While Claude's verifier model is held at a usage limit: fallback runs the audit on Codex; off waits for Claude.
+    # Sensitive-path tasks merged on Codex get a post-merge Claude audit once its limit clears.
+    codex_verifier: fallback
     # The lead's own model (empty: fable, best at deciding what to do and judging what comes back; Opus in its place
     # while Fable is held back), and its advisor while it runs on Opus (fable, opus or none; empty: fable).
     lead_model: fable
@@ -1350,7 +1358,7 @@ public enum LeadPrompts {
         report blocked. Run the focused tests, the lints and the load runs the brief names exactly as written: they work \
         in your sandbox with no extra flags. The full suite doesn't (its session-host tests need Unix sockets, which your \
         sandbox refuses): where the brief asks for one, say in your report that you couldn't; the merge runs it. \
-        These rules aren't refused for you, but they're the same rules, and a Claude verifier checks \
+        These rules aren't refused for you, but they're the same rules, and a verifier checks \
         your branch for them before it merges: \(LeadLaunch.codexUnenforced.map(\.rule).joined(separator: "; ")). \
         Commit only on your branch, never amend, and never touch another agent/ branch. Keep to the contract: \
         nothing outside its boundaries, no refactors it doesn't ask for. Blind check: if you can't start a fresh \
@@ -1492,7 +1500,7 @@ public enum LeadPrompts {
 
     /// The verifier's part of its prompt about a merged result: what it is, what to read in it, and (a single
     /// verifier) the audit's run of it in place of a run of its own.
-    static func merged(_ merged: Merged) -> String {
+    static func merged(_ merged: Merged, codex: Bool = false) -> String {
         let files = merged.files.prefix(12).joined(separator: " ") + (merged.files.count > 12 ? " …" : "")
         var text = """
         The base moved in files this branch changes too: \(merged.base)'s commits since the branch last took it in \
@@ -1513,8 +1521,7 @@ public enum LeadPrompts {
             under a scratch home, before starting you: \(run). Its logs:
             \(logs)
             Read them (grep for what you need; they're long). Don't build the whole project or run the whole suite \
-            again on HEAD: the logs are the tests' run, and submit_audit's tests is how it went. Run only focused \
-            tests (one test or a filter) for what you need to see yourself.
+            again on HEAD: the logs are the tests' run, and submit_audit's tests is how it went. \(codex ? "" : "Run only focused tests (one test or a filter) for what you need to see yourself.")
             """
         }
         return text
@@ -1522,7 +1529,7 @@ public enum LeadPrompts {
 
     /// A finder's part of the verifier's prompt: its focus, the shared run's logs instead of a run of its own, and
     /// the vote its findings go to.
-    static func finding(_ finder: Finder) -> String {
+    static func finding(_ finder: Finder, codex: Bool = false) -> String {
         let logs = finder.logs.isEmpty ? "(no log was written)" : finder.logs.map { "- \($0)" }.joined(separator: "\n")
         return """
         You are finder \(finder.index) of \(finder.size) in this audit. Your focus: \(finder.focus.brief(sensitive: finder.sensitive))
@@ -1530,7 +1537,7 @@ public enum LeadPrompts {
         before starting its finders: \(finder.run). Its logs, for every finder:
         \(logs)
         Read them (grep for what you need; they're long). Don't build the whole project or run the whole suite again: \
-        the logs are that run. Run only focused tests (one test or a filter) for what you need to see yourself.
+        the logs are that run. \(codex ? "" : "Run only focused tests (one test or a filter) for what you need to see yourself.")
         The other finders check the same branch with other focuses, and a vote decides: a finding most finders raise \
         (the same file, severity and line, give or take \(LeadAuditVote.lineTolerance)) stays open; one fewer raise is \
         kept as unconfirmed, which doesn't hold the merge back\(strictHold(finder.strict)). So give each finding its exact \
@@ -1649,33 +1656,33 @@ public enum LeadPrompts {
 
     public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, amended: ContractReaudit? = nil, finder: Finder? = nil,
                                 merged: Merged? = nil, notes: Notes = Notes(), report: String? = nil, policy: String = WorkingPolicy.load(),
-                                guide: String? = nil, security: String? = nil) -> String {
+                                guide: String? = nil, security: String? = nil, codexRun: Worktrees.AuditRun? = nil) -> String {
         // A finder, or a single verifier of a merged result, reads the audit's own run of the whole suite instead.
-        let sharedRun = finder != nil || merged?.run != nil
+        let sharedRun = codexRun != nil || finder != nil || merged?.run != nil
         return """
         You are the verifier for a task of the project lead of \(root). You are read-only: don't edit, fix, commit or \
         stage anything. Check the branch agent/\(task.slug) in this worktree against its contract, independently of \
         what the worker said.
 
         \(WorkingPolicy.section(policy))
-        \(finder.map { "\n" + finding($0) + "\n" } ?? "")
-        \(merged.map { Self.merged($0) + "\n" } ?? "")
+        \(finder.map { "\n" + finding($0, codex: codexRun != nil) + "\n" } ?? "")
+        \(merged.map { Self.merged($0, codex: codexRun != nil) + "\n" } ?? "")
         \(reaudit.map { recheck($0, amended: amended != nil) } ?? """
-        Check: run every acceptance check\(sharedRun ? "" : ", " + Policy.verifierTests(Policy.lintTests(in: root), test: workflow.testCommand)); read the whole change \
+        Check: \(codexRun != nil ? "check every acceptance check against the code and the audit's logs" : "run every acceptance check")\(sharedRun ? "" : ", " + Policy.verifierTests(Policy.lintTests(in: root), test: workflow.testCommand)); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
         tests, hard-coded results, leftovers and anything that only looks done. \(invariantWalk) \(unrequested)\(sharedRun ? "" : " " + Policy.verifierSuite(test: workflow.testCommand))
         """)
         \(amended.map { "\n" + contractReaudit($0) + "\n" } ?? "")
         \(notesRule)
         \(routineCallsRule)
-        \(loadTests) Reproduce at the contract's load and stop there.\((finder?.index ?? 1) == 1 ? " " + newTestsChecked : "")
+        \(codexRun == nil ? loadTests + " Reproduce at the contract's load and stop there." + ((finder?.index ?? 1) == 1 ? " " + newTestsChecked : "") : "")
         \(heavyWork)
         \(scratchFiles)
         \(debuggers)
         Then call submit_audit with: completion complete / incomplete / blocked; integrity clean, suspect (you're not \
         sure) or violation (edits outside the boundaries that neither the lead's notes nor the worker's listed routine \
         calls accept, tests weakened, results faked, files you changed); tests passed, failed or not_run (how the tests \
-        went\(finder != nil ? " in the audit's shared run" : merged?.run != nil ? " in the audit's run of the merged result" : " when you ran them")); a \
+        went\(codexRun != nil || finder != nil ? " in the audit's shared run" : merged?.run != nil ? " in the audit's run of the merged result" : " when you ran them")); a \
         summary with the evidence (commands run and their results); and findings, one for each problem you found, \
         minor ones included: {severity, file, line, evidence, failure_scenario, status}. severity: Important only for \
         a concrete problem that blocks the merge (an acceptance check that fails, a bug, a weakened test, an edit \
@@ -1697,7 +1704,21 @@ public enum LeadPrompts {
 
         \(guideSection(guide, base: workflow.base))\(securitySection(security))\(reportSection(report))
 
-        \(notesSection(notes))
+        \(codexRun.map { Self.codexVerifierRun($0) + "\n\n" } ?? "")\(notesSection(notes))
+        """
+    }
+
+    /// Codex cannot bind the host tests' sockets. The audit runs them before launch, outside its sandbox.
+    static func codexVerifierRun(_ run: Worktrees.AuditRun) -> String {
+        """
+        You are auditing as Codex because Claude's verifier model is held at a usage limit. The audit's own build and
+        test run completed outside your sandbox before you started: \(run.outcome.text).
+        Its logs (read every log before judging the checks):
+        \(run.logs.map { "- " + $0 }.joined(separator: "\n"))
+        Your sandbox cannot bind sockets. Do not run host tests, builds, full suites or load tests yourself, even if
+        repository instructions ask a verifier to do so. Read these logs and the code; submit_audit's tests describes
+        this shared run. A check those logs and the code cannot establish stays unverified in your verdict's evidence.
+        You are read-only: don't edit, fix, stage or commit. The verdict and its findings follow the same rules as Claude's.
         """
     }
 
