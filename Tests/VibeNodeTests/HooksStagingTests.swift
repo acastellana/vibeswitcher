@@ -113,6 +113,51 @@ struct HooksStagingTests {
         #expect(!FileManager.default.fileExists(atPath: setup.settings))
     }
 
+    // MARK: A build switch not finished
+
+    /// `hooks install` right after `switch` (2026-11-19): the host runs the new build, whose `binaries` it names, while
+    /// this server (its build folder the node root) is still the old build's until it restarts once idle. The programs
+    /// differ, and the refusal says the switch isn't finished and to try again, with nothing installed; with the host
+    /// and the server on one build, the same mismatch is the bytes differing, as before.
+    @Test func aMismatchWhileTheNodeSwitchesBuildsSaysToTryAgain() throws {
+        let setup = try setUp()
+        let before = try setup.app.guardedRecord(root: setup.root)
+        let (old, new) = (String(repeating: "a", count: 40), String(repeating: "b", count: 40))
+        var request = HooksRequest(nodeRoot: setup.request.nodeRoot, home: setup.home,
+                                   binaries: setup.request.binaries?.mapValues { _ in String(repeating: "0", count: 64) }, vault: setup.app)
+        (request.hostBuild, request.serverBuild) = (new, old)
+        guard case .failure(let switching) = request.install(agents: [.claude]) else {
+            Issue.record("installed programs that aren't the host's build-info's: \(names(setup.bin))")
+            return
+        }
+        #expect(switching.text.contains("the node is finishing a build switch"), "\(switching.text)")
+        #expect(switching.text.contains("its host runs bbbbbbbbbbbb and this server is still aaaaaaaaaaaa"), "\(switching.text)")
+        #expect(switching.text.contains("try again in a moment: nothing was installed"), "\(switching.text)")
+        #expect(names(setup.bin).isEmpty, "\(names(setup.bin))")
+        #expect(!FileManager.default.fileExists(atPath: setup.settings))
+        #expect(try setup.app.guardedRecord(root: setup.root) == before, "something was sealed")
+
+        for (host, server) in [(new, new), (nil, old), (new, nil)] as [(String?, String?)] {
+            (request.hostBuild, request.serverBuild) = (host, server)
+            guard case .failure(let refusal) = request.install(agents: [.claude]) else {
+                Issue.record("installed with \(String(describing: host)), \(String(describing: server))")
+                return
+            }
+            #expect(refusal.text.contains("SHA-256 differs") && !refusal.text.contains("build switch"), "\(refusal.text)")
+        }
+        #expect(names(setup.bin).isEmpty, "\(names(setup.bin))")
+    }
+
+    /// The bytes being the host's, a server not yet on the host's build installs them as ever.
+    @Test func theHostsBytesGoInWhileTheServerIsStillTheOldBuild() throws {
+        let setup = try setUp()
+        var request = setup.request
+        (request.hostBuild, request.serverBuild) = (String(repeating: "b", count: 40), String(repeating: "a", count: 40))
+        let installed = request.install(agents: [.claude])
+        #expect((try? installed.get()) != nil, "\(installed)")
+        #expect(names(setup.bin) == HooksRequest.programs)
+    }
+
     // MARK: The configs
 
     private func write(_ text: String, to path: String) throws {
