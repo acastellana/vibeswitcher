@@ -136,3 +136,11 @@
 - 2026-11-19 23:07 Audit of sb3-the-launcher-builds: finder 2 of 2 submitted (complete, clean, 1 finding)
 - 2026-11-19 23:09 Audit of sb3-the-launcher-builds: complete, clean, round 2: 1 Nit open, 2 Pre-existing (1 open, 1 unconfirmed) (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
 - 2026-11-19 23:14 Sent sb6-1-2-branch's worker contract v5 (it had v4)
+- 2026-11-19 23:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 23:16 Audit of the-merge-s-test at b86c8e9c by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-19 23:16 Sent the-merge-s-test's audit contract v2 (it had v1)
+- 2026-11-19 23:16 Automatically (auto_advance): Started the audit of the-merge-s-test at b86c8e9c (Its review is audit).
+- 2026-11-19 23:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-19 23:16 Started a worker on port-map-rows-from
+- 2026-11-19 23:16 Automatically (auto_advance): Started a worker on port-map-rows-from (Port map rows from two branches merge without a conflict).
+- 2026-11-19 23:16 Automatically (auto_advance): Didn't audit leadadvancetests-battery: An audit of leadadvancetests-battery is already making its build and test run; its verdict comes as a report.
