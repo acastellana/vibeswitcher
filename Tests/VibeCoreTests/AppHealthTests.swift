@@ -463,28 +463,33 @@ struct AppHealthTests: LeadTeamFixture {
         return lines.joined(separator: "\n")
     }()
 
+    /// A big sample (2 MB) is read as it was: its start, the main thread's busiest path and spread.
+    @Test func readingABigSampleFindsItsStartPathAndSpread() throws {
+        let sample = Self.bigSample
+        #expect(sample.utf8.count > 1_800_000 && sample.utf8.count < 2_600_000, "\(sample.utf8.count) bytes")
+        #expect(AppHealth.sampleStart(sample) == Date(timeIntervalSince1970: 1_793_403_552.345))
+        let path = AppHealth.busiestPath(sample: sample)
+        #expect(path.count == 110 && path.first?.name == "Spine100.frame0()" && path.last?.name == "_platform_memmove", "\(path.map(\.name))")
+        #expect(path.count > 60 && path[60].name == "closure #0 in Chain0.step0(_:)" && path[60].image == "VibeSwitcher")
+        let spread = try #require(AppHealth.spread(sample: sample))
+        #expect(spread == AppHealth.Spread(samples: 2500, pcs: 51, top: "_platform_memmove", topShare: 1420.0 / 2500, waiting: 0), "\(spread)")
+    }
+
     /// Reading a hang's sample (its start, the main thread's busiest path and spread) costs tens of milliseconds of CPU,
     /// not seconds: 2026-10-31, hang-20261031-003909's sample of 2 MB cost the watchdog 2.3 s of CPU (a user-interactive
     /// thread splitting it into lines with `components(separatedBy:)`) on a Mac already starving the app. Measured as
-    /// this thread's CPU time (a busy Mac keeping it waiting doesn't add to it), the best of three.
-    @Test func readingABigSampleCostsMillisecondsOfCPU() throws {
+    /// this thread's CPU time, the best of three. A bench: a loaded runner's contended cores still slow a thread's own
+    /// CPU time (93 ms on the v2 linux CI, run 44540219351), so only `--perf` judges it.
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly))
+    func readingABigSampleCostsMillisecondsOfCPU() throws {
         let sample = Self.bigSample
-        #expect(sample.utf8.count > 1_800_000 && sample.utf8.count < 2_600_000, "\(sample.utf8.count) bytes")
         var best = TimeInterval.infinity
-        var read: (start: Date?, path: [(name: String, image: String)], spread: AppHealth.Spread?)?
         for _ in 0..<3 {
             let start = Platform.Clock.threadCPUNanoseconds()
-            read = (AppHealth.sampleStart(sample), AppHealth.busiestPath(sample: sample), AppHealth.spread(sample: sample))
+            _ = (AppHealth.sampleStart(sample), AppHealth.busiestPath(sample: sample), AppHealth.spread(sample: sample))
             best = min(best, TimeInterval(Platform.Clock.threadCPUNanoseconds() - start) / 1e9)
         }
         print("SampleReadCost \(sample.utf8.count) bytes: \(String(format: "%.1f", best * 1000)) ms of CPU")
-        // What it reads is what it read before.
-        let result = try #require(read)
-        #expect(result.start == Date(timeIntervalSince1970: 1_793_403_552.345))
-        #expect(result.path.count == 110 && result.path.first?.name == "Spine100.frame0()" && result.path.last?.name == "_platform_memmove", "\(result.path.map(\.name))")
-        #expect(result.path[60].name == "closure #0 in Chain0.step0(_:)" && result.path[60].image == "VibeSwitcher")
-        let spread = try #require(result.spread)
-        #expect(spread == AppHealth.Spread(samples: 2500, pcs: 51, top: "_platform_memmove", topShare: 1420.0 / 2500, waiting: 0), "\(spread)")
         // 24 ms in a debug build on 2026-10-31's Mac; 250 ms split by `components(separatedBy:)`.
         #expect(best < 0.08, "\(Int(best * 1000)) ms of CPU to read a \(sample.utf8.count)-byte sample")
     }

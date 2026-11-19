@@ -139,6 +139,7 @@ run_web_tests() {
 # The benches, as `swift test --filter` patterns: the tests tagged `.perf` (Tag.perf in
 # Tests/VibeSwitcherTests/TestSupport.swift and Tests/VibeCoreTests/PerfTag.swift), no more and no fewer (PerfRunTests checks).
 perf_tests=(
+    AppHealthTests/readingABigSampleCostsMillisecondsOfCPU
     ChatBenchTests/theChatSettlesWithoutAStall
     ChatBenchTests/aReopenSettlesAtTheFirstOpensHeight
     ChatBenchSettleScriptTests
