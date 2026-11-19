@@ -166,7 +166,7 @@ struct WitnessOffEngineQueueTests {
         #expect(wall.allSatisfy { $0 < 50 }, "\(wall)")
 
         // Every computation ran, off the engine's queue; the looks are applied on it.
-        let look = ["withoutTools", "endedForAdvance", "leftToAdvance", "releasableForAdvance", "unbuiltMessages", "stuckPrompts", "working", "stalls"]
+        let look = ["withoutTools", "endedForAdvance", "leftToAdvance", "releasableForAdvance", "stopsForAdvance", "unbuiltMessages", "stuckPrompts", "working", "stalls"]
         #expect(steps.all.filter { $0.step != "applied" }.map(\.step) == look + look + look)
         #expect(steps.all.allSatisfy { $0.onEngine == ($0.step == "applied") })
         // The stall is on the board, and told to the lead once.
@@ -175,8 +175,10 @@ struct WitnessOffEngineQueueTests {
         #expect(await eventually(timeout: 60) { told().count == 1 })
         await world.drained()
         #expect(told().count == 1)
-        // As is that it stopped without calling report: two events, each told once.
-        #expect(world.pending(lead).filter { $0.text.contains(slug) }.count == 2, "\(world.pending(lead).map(\.text))")
+        // That it stopped without calling report goes to auto_advance, its loop running: recorded on the board for it to
+        // nudge the worker once (`LeadStopNudge`), and not told to the lead (main's 3516b53c).
+        #expect(await eventually(timeout: 60) { BoardStore(root: root).load().task(slug)?.stopNudge?.worker == id.uuidString })
+        #expect(world.pending(lead).filter { $0.text.contains(slug) }.count == 1, "\(world.pending(lead).map(\.text))")
     }
 
     /// ReplacedLeadRoutingTests' refresh case (hang-20261027-175604: the 3 s refresh marked the replaced leads with a

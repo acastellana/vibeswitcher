@@ -53,7 +53,7 @@ struct TeamReading {
             team.lockWaits = lock.waits(for: Dictionary(folders, uniquingKeysWith: { first, _ in first }))
         }
         team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
-        team.advancing = team.workflow.autoAdvance && board.tasks.contains { $0.status == .review } && LeadAdvance.running(BoardStore(root: root))
+        team.advancing = team.workflow.autoAdvance && board.tasks.contains { [.review, .running].contains($0.status) } && LeadAdvance.running(BoardStore(root: root))
         // The table is read only when the scan lacks a member's agent (rare), here off the engine's queue.
         let unseen = board.tasks.flatMap(\.watched).compactMap { id in
             hosted[id].flatMap { $0.isLive && sessions[id] == nil ? (id: id, session: $0) : nil }
