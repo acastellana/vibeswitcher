@@ -79,10 +79,11 @@ final class LivePage {
         guard status == 101 else { throw RawClient.Failure("the upgrade was answered \(status)") }
     }
 
-    func send(_ kind: String, _ args: [String: NodeWire.Value]) throws -> String {
+    /// `kind` with `args` (and an `action` id, for an action such as a draft): the request's id.
+    func send(_ kind: String, _ args: [String: NodeWire.Value], action: String? = nil) throws -> String {
         counter += 1
         let id = String(counter)
-        try client.sendText(String(decoding: NodeWire.message(NodeWire.Request(id: id, kind: kind, args: args)), as: UTF8.self))
+        try client.sendText(String(decoding: NodeWire.message(NodeWire.Request(id: id, kind: kind, args: args, action: action)), as: UTF8.self))
         return id
     }
 

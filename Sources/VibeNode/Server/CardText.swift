@@ -111,6 +111,10 @@ public enum CardText {
             }
         }
         if let notice = card["notice"]?.string { lines.append("  notice: " + inert(notice)) }
+        // The user's own words from a web page, never sent until `answer` takes them with the code: whole.
+        if let draft = card["draft"], draft != .null, let text = draft["text"]?.string {
+            lines.append("  drafted on a web page (not sent; `vibeswitcher answer \(id)` sends it, for version \(draft["version"]?.int ?? 0)): " + inert(text))
+        }
         return lines
     }
 }
