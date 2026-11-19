@@ -304,6 +304,9 @@ public final class LeadToolset: MCPToolset {
     var mailClock: () -> Double = { Date().timeIntervalSince1970 }
     /// Where merge appends its line of the Mac's merge stats (`MergeSample`, merges-<day>.jsonl); nil: none.
     public var mergeStats: () -> URL? = { VibePaths.statsDir }
+    /// Successful runs held for the config seal: process-local, never loaded from a receipt on disk.
+    let mergePassLock = NSLock()
+    var mergePasses: [String: KeptMerge] = [:]
     /// The build of the tool server running now (`ServerBuild.running`): each merge's receipt and progress line name
     /// it, and status says when the base holds merge-gate code it lacks (`gateLag`). Faked in tests.
     var runningBuild: () -> ServerBuild? = { ServerBuild.running }
@@ -417,6 +420,7 @@ public final class LeadToolset: MCPToolset {
         role = refusal == nil ? member?.role : nil
         taskID = refusal == nil ? member?.task : nil
         if role == .lead, (try? authenticate()) != nil {
+            clearOrphanedMergePassRefs()
             introduceLead()
             // An existing project's board is moved over the first time a server with the archive starts on it.
             archiveFinished(force: true)
@@ -958,7 +962,7 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
-    struct Problem: Error { var text: String }
+    struct Problem: Error { var text: String; var sealHeld = false }
 
     /// `result`, and what the tool server's git doesn't run in this repository (`GitGuard.notice`) when there's any.
     private func withGitNotice(_ result: MCPToolResult) -> MCPToolResult {
@@ -3806,6 +3810,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func merge(_ slug: String, acceptStale: String? = nil, locked: (() -> Void)? = nil) throws -> MCPToolResult {
+        try checkConfig(not: "Not merged (nothing was tested)")
         // The remote's tip, read once: what the gate checks the branch against, what it lands as and whose records are
         // taken after are the same answer, and no answer stops it here, before anything is tested.
         let fetched = try fetchedTip(self.workflow, not: "Not merged (nothing was tested)")
@@ -3835,10 +3840,11 @@ public final class LeadToolset: MCPToolset {
         locked?()
         // Timing-sensitive tests fail on a Mac every project's team is loading: the tests wait (a bounded time) for
         // the load to drop.
-        let waited = try waitForLoad(workflow, slug: slug)
+        let kept = keptMerge([gate], onto: found, fetched: fetched, workflow: workflow)
+        let waited = try kept == nil ? waitForLoad(workflow, slug: slug) : nil
         // The lead's records not committed yet go in first, under this merge's lock, and it rebases onto them: it
         // never fails on the records' own lines. Past the gate and the waits, so a merge refused there moves nothing.
-        let current = commitRecordsFirst(not: slug, holdingBaseLock: true) ?? found
+        let current = kept == nil ? (commitRecordsFirst(not: slug, holdingBaseLock: true) ?? found) : found
         // Exactly the audited commit, rebased and tested where no agent works. A failing test command runs once more
         // (`MergeRerun`): what failed, then the rerun that passed, when that's how it passed.
         let tested: String
@@ -3858,9 +3864,11 @@ public final class LeadToolset: MCPToolset {
         // doesn't run.
         let mark = try markBranchRun(not: "Not merged (nothing was tested)")
         defer { endBranchRun(mark) }
+        // Check again after waiting and before executing setup or tests.
+        try checkConfig(not: "Not merged (nothing was tested)")
         // The failing tests' one run on the base after a rerun: record only (`MergeRerun.baseline`).
         let pairing = MergeRerun.Pairing()
-        let checked = Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
+        let checked = kept?.check ?? Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                               scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
                                               timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir,
                                               remote: fetched, trailers: provenance(gate), prepareRerun: { output, run in
@@ -3879,10 +3887,15 @@ public final class LeadToolset: MCPToolset {
                                               }, baseline: baseline(on: current, plan: { rerun }, pairing: pairing),
                                               tested: { testCount = LeadReceipt.testCount($0); testedCores = MergeSample.cores(in: $0) },
                                               begun: { begun = ($0, LoadRecorder.averages() ?? []) })
+        if let kept {
+            testCount = kept.tests
+            testedCores = kept.cores
+            rerun = kept.failed.flatMap { MergeRerun.plan(after: $0, workflow: workflow) }
+        }
         // Which of the lead's records its failure named, for the next merge (`LeadRecords.commitBeforeMerge`).
-        if let failing = checked.failingOutputs { records.noteMergeRun(failing: failing) }
-        noteMainGreen(checked, rerun: rerun)
-        if let folder = mergeStats() {
+        if kept == nil, let failing = checked.failingOutputs { records.noteMergeRun(failing: failing) }
+        if kept == nil { noteMainGreen(checked, rerun: rerun) }
+        if kept == nil, let folder = mergeStats() {
             let start = begun?.at ?? called
             var sample = MergeSample(check: checked, rerun: rerun, project: (root as NSString).lastPathComponent, task: slug,
                                      started: start, load: begun?.load ?? LoadRecorder.averages() ?? [], waited: waited?.after ?? 0,
@@ -3891,13 +3904,15 @@ public final class LeadToolset: MCPToolset {
             try? sample.append(in: folder, at: start)
         }
         // Its waits for the load and a slot, and its run's time, for the task's receipt (`LeadWaits`).
-        let ranUntil = Date()
-        try? store.update { board in
-            guard let index = board.taskIndex(slug) else { return }
-            board.tasks[index].noteMergeRun(loadWait: waited?.after ?? 0, called: called, begun: begun?.at, ended: ranUntil)
+        let ranUntil = kept?.ended ?? Date()
+        if kept == nil {
+            try? store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                board.tasks[index].noteMergeRun(loadWait: waited?.after ?? 0, called: called, begun: begun?.at, ended: ranUntil)
+            }
         }
         // A run that went to a rerun, in the flake ledger with its paired base run: record only.
-        if let plan = rerun {
+        if kept == nil, let plan = rerun {
             switch checked {
             case .passedOnRerun(_, _, let again):
                 recordRerun(plan, task: slug, commit: commit, base: current, passed: MergeRerun.unshown(plan, rerun: again).isEmpty,
@@ -3909,11 +3924,6 @@ public final class LeadToolset: MCPToolset {
                 recordRerun(plan, task: slug, commit: commit, base: current, passed: false, load: begun?.load.first, pairing: pairing)
             default: break
             }
-        }
-        // What its tests wrote outside the worktree (the agents' config) holds the merge, whatever they said.
-        switch checked {
-        case .passed, .passedOnRerun, .passedRedOnBase: try checkConfig(not: "Not merged: \(slug)'s tests passed, and after them")
-        default: break
         }
         switch checked {
         case .passed(let commit): tested = commit
@@ -4020,10 +4030,18 @@ public final class LeadToolset: MCPToolset {
         if let changed = changedMeanwhile(slug, since: task, tests: "passed") { throw changed }
         if let amended = amendedMeanwhile(slug, since: task, tests: "passed") { throw amended }
         if let moved = movedMeanwhile(slug, since: task, tested: commit, tests: "passed") { throw moved }
+        // Keep only a validated pass, before the seal can refuse it. Neither a pending Accept nor an unavailable
+        // host permits landing. A retry still enters through mergeGate and checks the base before taking this pass.
+        if let saved = KeptMerge(context: mergeSealContext([gate], onto: current, fetched: fetched, workflow: workflow),
+                                  tips: [tested], check: checked, tests: testCount, cores: testedCores, ended: ranUntil) {
+            try keepMerge(saved, gates: [gate])
+        }
+        try checkConfig(not: "Not merged: \(slug)'s passing result at \(tested.prefix(8)) on \(current.prefix(8)) is kept; after its tests")
         let carried = try carriedRemote(fetched, branch: commit, onto: current)
         switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current,
                                                             landing: landingCheck("merge(\(slug))", carried: carried, workflow: workflow)) }) {
         case .merged:
+            forgetKeptMerge([gate])
             // A head the vault didn't take doesn't stop the board's record: the merge has happened, and a merge run
             // again on a board that doesn't say so would record an empty one. Said when it's done, below.
             let unrecorded = recordLanding(base: base, from: current, to: tested, with: slug)
@@ -5864,7 +5882,7 @@ public final class LeadToolset: MCPToolset {
     func checkConfig(not: String) throws {
         let found: LeadVault.ConfigCheck
         do { found = try vault.checkConfig(root: root) } catch {
-            throw Problem(text: "\(not): the session host couldn't say whether the agents' config is as sealed (\(error)).")
+            throw Problem(text: "\(not): the session host couldn't say whether the agents' config is as sealed (\(error)).", sealHeld: true)
         }
         if !found.resealed.isEmpty {
             try? store.appendProgress("Agents' config changed while no worker or verifier ran (the user's), sealed as they are: \(ConfigSeal.list(found.resealed))")
@@ -5883,7 +5901,7 @@ public final class LeadToolset: MCPToolset {
                 try? store.appendProgress(tag + (counts.isEmpty ? "no paths" : counts.joined(separator: ", ")))
             }
         }
-        guard found.held.isEmpty else { throw Problem(text: ConfigSeal.refusal(found.held, outside: found.outside, not: not)) }
+        guard found.held.isEmpty else { throw Problem(text: ConfigSeal.refusal(found.held, outside: found.outside, not: not), sealHeld: true) }
     }
 
     /// Tells the vault a branch's code is about to run outside any session (`ConfigSeal`): a change it makes isn't
@@ -5899,12 +5917,6 @@ public final class LeadToolset: MCPToolset {
     /// The branch run `id` (`markBranchRun`'s) ended. Not told, the vault counts it as running for a day: never quiet.
     func endBranchRun(_ id: String) {
         try? vault.endBranchRun(id, root: root)
-    }
-
-    /// `checkConfig`'s refusal after a batch's tests passed, as the batch's stop text; nil when nothing is held.
-    func heldConfig() -> String? {
-        do { try checkConfig(not: "the stack's tests passed, and after them") } catch let problem as Problem { return problem.text } catch { return "\(error)" }
-        return nil
     }
 
     /// A merge's test run takes minutes, in which update_task answers as ever: the lead may hold the task (kept,

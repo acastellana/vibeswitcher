@@ -447,6 +447,23 @@ struct MergeBatchTests: LeadTeamFixture {
         #expect(left.status == .failed && left.setback?.reason == "Conflicts with main: the branch needs bringing up to date.")
     }
 
+    @Test func anEntirelyConflictingBatchStillRecordsStats() throws {
+        let (root, runtime, lead) = try team(["auto_advance": false])
+        let stats = temp.url("stats")
+        lead.mergeStats = { stats }
+        for slug in ["edit-c", "edit-c-too"] {
+            try audited(lead, runtime, root: root, slug, ["c.txt": "\(slug)\n"], review: "none")
+        }
+        try commit(["c.txt": "main changes\n"], in: root, "base moves")
+        try vault.setHead(Git.run(["rev-parse", "main"], in: root).output, root: root, branch: "main")
+        let result = try lead.mergeBatch(["edit-c", "edit-c-too"])
+        #expect(result.runs == 0)
+        #expect(ran().isEmpty)
+        let samples = try mergeLines(stats)
+        #expect(samples.count == 2)
+        #expect(samples.allSatisfy { $0.result == "conflict" && $0.batchRuns == 0 && $0.firstRun == nil })
+    }
+
     // MARK: Every guard, per task
 
     /// Each task is checked as merge checks it alone: kept, an open Important finding, a missing audit and a missing

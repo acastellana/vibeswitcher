@@ -759,10 +759,12 @@ public final class LeadAdvance: @unchecked Sendable {
             do {
                 result = try lead.advanceMergeBatch(batch.map(\.slug), locked: locked)
             } catch {
-                // It couldn't start: one at a time from here, each with merge's own checks and refusals.
-                for task in batch { markUnbatched(task.key) }
+                // A seal hold keeps the group intact, so Accept can land its retained passing stack.
+                let sealHeld = (error as? LeadToolset.Problem)?.sealHeld == true
+                if !sealHeld { for task in batch { markUnbatched(task.key) } }
                 let text = (error as? LeadToolset.Problem)?.text ?? "\(error)"
-                did("Didn't merge \(names) as a batch: \(LeadToolset.clip(text, 400)) They merge one at a time from here.")
+                let line = "Didn't merge \(names) as a batch: \(LeadToolset.clip(text, 400))" + (sealHeld ? " The batch waits for the config seal." : " They merge one at a time from here.")
+                if sealHeld { once("merge-batch|\(names)|seal|\(text.prefix(60))", line) } else { did(line) }
                 return
             }
             var merged: [String] = []
@@ -776,7 +778,7 @@ public final class LeadAdvance: @unchecked Sendable {
                 case .refused(let text)?:
                     once("merge|\(task.slug)|\(task.head)|\(text.prefix(60))", "Didn't merge \(task.slug): \(LeadToolset.clip(text, 600))")
                 case .untouched?, nil:
-                    markUnbatched(task.key)
+                    if !result.sealHeld { markUnbatched(task.key) }
                 }
             }
             if !merged.isEmpty {
