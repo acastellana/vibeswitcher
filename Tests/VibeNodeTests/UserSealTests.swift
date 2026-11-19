@@ -82,14 +82,25 @@ struct UserSealTests {
     /// The E6 review: an answer that waits in the lead's inbox past its seal's life (the lead's tool call runs on, a
     /// merge's tests: no hook takes the inbox) is still the user's when the lead takes it, since the server renews the
     /// seal of each of the user's messages it still sees waiting.
+    ///
+    /// The life is 12 s, not 6: the vault renews a seal only while it lives and once a third of its life went
+    /// (`LeadVaultV2`'s `renewUserSeals`), and the server looks every 3 s. At 6 s one look a little over 3 s late (a full
+    /// run 22 tests wide, 2026-11-19) found the seal over and the answer came as unverified; at 12 s three looks in a
+    /// row have to miss it. And the take is asked again while it hands nothing: a take whose seals can't be checked at
+    /// that moment (the vault's answer late, the inbox locked) hands none and leaves the inbox as it was.
     @Test func anAnswerWaitingPastItsSealsLifeIsStillTheUsers() async throws {
-        let life = 6
+        let life = 12
         let node = try await ScratchNode(scratch, sealLife: life)
         defer { node.stop() }
         let (lead, message, _) = try await answered(node)
         // The event: twice the seal's life has gone by since it was sealed, the message untaken.
-        try #require(await eventually(timeout: 60) { Date().timeIntervalSince1970 > message.at + Double(2 * life) })
-        let taken = take(node, lead)
+        try #require(await eventually(timeout: 120) { Date().timeIntervalSince1970 > message.at + Double(2 * life) })
+        let handed = Locked<[SteerMessage]>([])
+        try #require(await eventually(timeout: 60) {
+            handed.value = take(node, lead)
+            return !handed.value.isEmpty
+        }, "nothing was handed over: \(node.said)")
+        let taken = handed.value
         let answer = try #require(taken.first { $0.id == message.id }, "\(taken) \(node.said)")
         #expect(answer.from == .user, "\(answer.from)")
     }
