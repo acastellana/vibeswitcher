@@ -132,8 +132,10 @@ struct LeadAdvanceTests: LeadTeamFixture {
         func until(_ condition: () -> Bool) async -> Bool {
             let deadline = MacTime.real.awake() + 60
             while true {
-                if condition() { return true }
+                // Counted before the look: a pass that ends between the look and the count would otherwise go unseen,
+                // and with nothing to start another one it waits out the deadline.
                 let seen = passes
+                if condition() { return true }
                 while passes == seen {
                     guard MacTime.real.awake() < deadline, !Task.isCancelled else { return false }
                     try? await Task.sleep(nanoseconds: 10_000_000)
