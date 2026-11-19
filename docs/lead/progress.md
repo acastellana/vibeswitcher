@@ -4212,3 +4212,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 15:51 Released auto-advance-staggers's worker (idle since its done report on 4a60fe6c) while its audit runs
 - 2026-11-19 15:51 Automatically (auto_advance): Released auto-advance-staggers's worker, idle since its done report on 4a60fe6c, while its audit runs (ended pid 57201 (Worker: auto_advance staggers audits: no more simultaneous audits than the Mac's heavy slots can test)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-19 15:55 Audit of auto-advance-staggers: complete, clean, round 1: 3 Nit open
+- 2026-11-19 16:14 Merged auto-advance-staggers: auto_advance staggers audits: no more simultaneous audits than the Mac's heavy slots can test (build bdffa6a19fd8)
