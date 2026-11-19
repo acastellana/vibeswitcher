@@ -168,7 +168,7 @@ struct WebSecurityTests {
         #expect(hello["auth"]?["rights"] == .array([.string("read"), .string("draft")]), "\(hello)")
         #expect(hello["peer"]?["voice"]?.string == "other", "\(hello)")
         let closed = NodeWire.kinds.filter { $0.value != .anyone && $0.value != .webDraft }.map(\.key).sorted()
-        for name in ["answer", "hold", "stop", "lead", "start", "web.open", "web.revoke", "hooks.install", "build.switch",
+        for name in ["answer", "hold", "tell", "stop", "lead", "start", "web.open", "web.revoke", "hooks.install", "build.switch",
                      "config.accept", "question.post", "term.open"] {
             #expect(closed.contains(name), "\(name)")
         }

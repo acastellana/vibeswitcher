@@ -273,7 +273,7 @@ public enum NodeWire {
     public static let kinds: [String: Voice] = [
         "status": .anyone, "questions": .anyone, "start": .user, "stop": .user, "lead": .user, "answer": .user, "hold": .user,
         "config.held": .user, "config.accept": .user, "base.show": .user, "base.accept": .user, "base.keep": .user,
-        "hooks.install": .user, "hooks.remove": .user, "build.switch": .user,
+        "hooks.install": .user, "hooks.remove": .user, "build.switch": .user, "tell": .user,
         "question.post": .leadToolServer, "question.revise": .leadToolServer, "question.withdraw": .leadToolServer,
         // The live protocol's (the live wire contract), taken from the integration task that wires each (I1 to I4).
         "subscribe": .anyone, "unsubscribe": .anyone, "chat.page": .anyone,
@@ -299,12 +299,13 @@ public enum NodeWire {
 
     /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6; the hooks
     /// from the start plan's S6; `build.switch` from its S8b; the live protocol's `subscribe`, `unsubscribe`, `web.open`
-    /// and `web.revoke` from the live plan's I1; `chat.page` from I2): every kind `kinds` names but the live protocol's
-    /// later ones (the drafts from I3, the terminal from I4).
+    /// and `web.revoke` from the live plan's I1; `chat.page` from I2; `tell` from the node frictions of 2026-11-19): every
+    /// kind `kinds` names but the live protocol's later ones (the drafts from I3, the terminal from I4).
     public static let taken = ["status", "start", "stop", "lead", "questions", "answer", "hold", "config.held", "config.accept",
                                "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
                                "hooks.install", "hooks.remove", "build.switch", "subscribe", "unsubscribe", "web.open", "web.revoke",
-                               "chat.page"]
+                               "chat.page",
+                               "tell"]
 
     // MARK: Lines
 

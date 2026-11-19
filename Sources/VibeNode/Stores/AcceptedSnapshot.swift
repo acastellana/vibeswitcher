@@ -149,7 +149,10 @@ public struct AcceptedSnapshot: Codable, Equatable, Sendable {
     /// What a held thing or rail the snapshot lists as it is now is said to be when the vault didn't seal the snapshot:
     /// nothing reassuring (the security follow-ups' item 18).
     static func unvouched(_ when: String) -> String {
-        "not known to be the same as at your last accept (\(when)): the snapshot that lists it isn't sealed by this host's vault "
+        unvouchedPrefix + " (\(when)): the snapshot that lists it isn't sealed by this host's vault "
             + "(a host restart since, or it was rewritten), so read it"
     }
+
+    /// How `unvouched`'s words begin: `CardText` says them once for every line they're on, not on each line.
+    public static let unvouchedPrefix = "not known to be the same as at your last accept"
 }

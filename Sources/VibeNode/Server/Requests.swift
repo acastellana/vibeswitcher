@@ -139,7 +139,7 @@ public final class Requests: @unchecked Sendable {
 
     /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
-                                               "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke"]
+                                               "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -214,6 +214,7 @@ public final class Requests: @unchecked Sendable {
         case "questions": questions(request, reply: reply)
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)
+        case "tell": tell(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)
         case "base.show": baseShow(request, reply: reply)
@@ -379,9 +380,12 @@ public final class Requests: @unchecked Sendable {
         guard !install || nodeRoot != nil else {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no build folder to install the hooks' programs from")))
         }
-        let (nodeRoot, home, vault) = (self.nodeRoot ?? "", self.home, link.vault)
-        let work = { (binaries: [String: String]?) -> NodeWire.Reply in
-            let hooks = HooksRequest(nodeRoot: nodeRoot, home: home, binaries: binaries, vault: vault)
+        let (nodeRoot, home, vault, commit) = (self.nodeRoot ?? "", self.home, link.vault, self.commit)
+        let work = { (binaries: [String: String]?, hostBuild: String?) -> NodeWire.Reply in
+            var hooks = HooksRequest(nodeRoot: nodeRoot, home: home, binaries: binaries, vault: vault)
+            // While the host runs another build than this server, a program that isn't its `binaries` entry is the
+            // build switch not finished yet (the server restarts onto it once idle), said so.
+            (hooks.hostBuild, hooks.serverBuild) = (hostBuild, commit == "unknown" ? nil : commit)
             let configs = NodeWire.Value.array(agents.map { .string(hooks.configPath($0)) })
             if install {
                 switch hooks.install(agents: agents) {
@@ -404,12 +408,12 @@ public final class Requests: @unchecked Sendable {
         // On `queue`: the notes as last asked.
         let run = { [weak self] in
             guard let self else { return }
-            let binaries = self.notes?.notes.binaries
+            let (binaries, hostBuild) = (self.notes?.notes.binaries, self.notes?.notes.build)
             if let engine = self.engine {
-                engine.reads.async({ _ in work(binaries) }, then: said)
+                engine.reads.async({ _ in work(binaries, hostBuild) }, then: said)
             } else {
                 DispatchQueue.global(qos: .userInitiated).async { [queue = self.queue] in
-                    let answer = work(binaries)
+                    let answer = work(binaries, hostBuild)
                     queue.async { said(answer) }
                 }
             }

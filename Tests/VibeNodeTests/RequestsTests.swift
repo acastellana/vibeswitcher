@@ -199,7 +199,7 @@ struct RequestsTests {
         // client's draft and terminal, and opening the web.
         let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "question.post", "question.revise", "question.withdraw",
                                   "subscribe", "unsubscribe", "chat.page"]
-        let changes: Set<String> = ["stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
+        let changes: Set<String> = ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
                                     "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
