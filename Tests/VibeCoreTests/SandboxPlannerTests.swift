@@ -435,8 +435,9 @@ struct SandboxPlannerTests {
             default: return false
             }
         }
+        let transcripts = config + "/projects/" + ClaudeFiles.projectFolder(cwd: world.worktree)
         #expect(Set(fromConfig.map(\.target)) == [config + "/settings.json", config + "/skills", config + "/.credentials.json",
-                                                   config + "/projects/" + ClaudeFiles.projectFolder(cwd: world.worktree)])
+                                                   transcripts, transcripts + "/memory"])
         for mount in fromConfig where !mount.target.contains("/projects/") {
             #expect(mount.kind == .readOnly(source: mount.target), "\(mount)")
         }
