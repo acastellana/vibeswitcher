@@ -15,6 +15,8 @@ final class AppHealthWatcher: @unchecked Sendable {
     private let memory: () -> AppHealth.Memory?
     /// What the Mac's sleep paused, for the day's trend (`SleepCost`, which the lead controller's `SleepWatch` keeps).
     private let sleepCost: () -> SleepCost?
+    /// The memory benches' last run (`MemoryBench`), whose failing budgets the report tells.
+    private let bench: () -> MemoryBench.Record?
     private let send: (String) -> Bool
     /// Whether it sets a timer for its next look (tests look themselves, with a clock of their own).
     private let timed: Bool
@@ -33,6 +35,7 @@ final class AppHealthWatcher: @unchecked Sendable {
          stateFile: URL = VibePaths.root.appendingPathComponent("app-health.json"),
          now: @escaping () -> Date = Date.init, memory: @escaping () -> AppHealth.Memory? = AppHealthWatcher.memoryReader(),
          sleepCost: @escaping () -> SleepCost? = { SleepCost.load() },
+         bench: @escaping () -> MemoryBench.Record? = { MemoryBench.Record.all(in: VibePaths.statsDir.appendingPathComponent(MemoryBench.statsName)).last },
          timed: Bool = true, send: @escaping (String) -> Bool) {
         self.folders = folders
         self.appLog = appLog
@@ -40,6 +43,7 @@ final class AppHealthWatcher: @unchecked Sendable {
         self.now = now
         self.memory = memory
         self.sleepCost = sleepCost
+        self.bench = bench
         self.timed = timed
         self.send = send
     }
@@ -177,7 +181,7 @@ final class AppHealthWatcher: @unchecked Sendable {
             scan()
         }
         if log == nil { openLog(fromEnd: false) }
-        watch.look(now: now(), folders: folders, memory: memory(), sleep: sleepCost)
+        watch.look(now: now(), folders: folders, memory: memory(), sleep: sleepCost, bench: bench)
         save()
         deliver()
         schedule()

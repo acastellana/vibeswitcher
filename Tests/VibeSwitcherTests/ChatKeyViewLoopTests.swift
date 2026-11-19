@@ -68,8 +68,12 @@ struct ChatKeyViewLoopTests {
         // ends on its event, with its own hang guard: in a full suite other main-actor tests hold the main thread for
         // minutes between these awaits, which used to run out one 20 s deadline shared by both waits.
         #expect(await until { chat.state == .ready && chat.staging == nil })
-        // Some tool runs opened: each of their tools is a row with its own disclosure.
-        for item in chat.items.suffix(40) { if case .tools(let id, _) = item { chat.expanded.insert(id) } }
+        // Some tool runs opened: each of their tools is a row with its own disclosure. The wake-ups fold into a line
+        // of updates each (`ChatUpdates`): some opened too, their cards' disclosures laid out under the line's own.
+        for item in chat.items.suffix(40) {
+            if case .tools(let id, _) = item { chat.expanded.insert(id) }
+            if case .updates(let updates) = item { chat.expanded.insert(updates.id) }
+        }
 
         let view = ChatView(chat: chat, row: nil, live: false, showTerminal: {}, choose: { _, _, _ in }, moveTab: { _ in }, resend: { _ in })
             .frame(width: 900, height: 1000)
@@ -86,7 +90,12 @@ struct ChatKeyViewLoopTests {
         // key-view loop is rebuilt in layout.
         let shown = ChatWindow.shown(chat.items, limit: chat.shownLimit, including: nil).items
         let tools = shown.filter { if case .tools = $0 { return true } else { return false } }.count
-        let teams = shown.filter { if case .team = $0 { return true } else { return false } }.count
+        let teams = shown.filter {
+            switch $0 {
+            case .team, .updates: return true
+            default: return false
+            }
+        }.count
         _ = await until {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()

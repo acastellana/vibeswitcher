@@ -47,8 +47,8 @@ struct LeadReceiptTeamTests {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let json = String(decoding: try encoder.encode(receipt), as: UTF8.self)
-        #expect(json == #"{"commit":"1234567890ab","commits":3,"endedAt":19000,"ending":"merged","mergeReruns":0,"onto":"abcdef123456","pricesAsOf":"2026-10-06","questions":0,"rerolls":0,"rounds":2,"startedAt":1000,"tests":9,"verifier":{"cacheRead":0,"cacheWrite":0,"cacheWrite1h":0,"cost":0.25,"input":10,"models":["claude-fable-5-1"],"output":20,"sameModel":false,"sessions":1},"waitingOnUser":0,"worked":10860,"worker":{"cacheRead":3,"cacheWrite":4,"cacheWrite1h":0,"cost":1.5,"input":1,"models":["claude-opus-5-5"],"output":2,"sessions":1}}"#, "\(json)")
-        #expect(receipt.line == "Receipt (merged; cost an estimate at prices of 2026-10-06): 3 h 1 min worked, 5 h wall · worker 10 tokens (in 1, out 2, "
+        #expect(json == #"{"commit":"1234567890ab","commits":3,"endedAt":19000,"ending":"merged","mergeReruns":0,"onto":"abcdef123456","pricesAsOf":"2026-11-18","questions":0,"rerolls":0,"rounds":2,"startedAt":1000,"tests":9,"verifier":{"cacheRead":0,"cacheWrite":0,"cacheWrite1h":0,"cost":0.25,"input":10,"models":["claude-fable-5-1"],"output":20,"sameModel":false,"sessions":1},"waitingOnUser":0,"worked":10860,"worker":{"cacheRead":3,"cacheWrite":4,"cacheWrite1h":0,"cost":1.5,"input":1,"models":["claude-opus-5-5"],"output":2,"sessions":1}}"#, "\(json)")
+        #expect(receipt.line == "Receipt (merged; cost an estimate at prices of 2026-11-18): 3 h 1 min worked, 5 h wall · worker 10 tokens (in 1, out 2, "
             + "cache read 3, cache write 4; claude-opus-5-5), verifier 30 tokens (in 10, out 20, cache read 0, cache write 0; claude-fable-5-1) · est. $1.75 · 2 audit rounds · 9 tests in the merge's run · 3 commits abcdef12..12345678; rollback point abcdef12", "\(receipt.line)")
     }
 

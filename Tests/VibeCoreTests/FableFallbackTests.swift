@@ -61,7 +61,7 @@ extension LeadAdvanceTests {
         #expect(task("pinned", root)?.model == "claude-fable-5-2")
         // status says so.
         let status = lead.call("status", [:]).text
-        #expect(status.contains("Fable held back until \(UsageLimit.resetText(Self.fableReset)): workers and audits on Opus"), "\(status)")
+        #expect(status.contains("Fable held back until \(UsageLimit.resetText(Self.fableReset)): workers on Opus; audits on another model under the review floor"), "\(status)")
         // At the reset, by the lead's clock: the same start is on Fable again, and status says nothing of it.
         lead.usageClock = { Date(timeIntervalSince1970: Self.fableReset) }
         let again = lead.call("start_worker", ["task": "later"])
@@ -101,6 +101,64 @@ extension LeadAdvanceTests {
         let one = try #require(task("one", root))
         #expect(one.launchedModels?[try #require(one.worker)] == "opus")
         #expect(lead.auditModel(lead.workflow, task: one) == "sonnet")
+    }
+
+    @Test(arguments: [nil, "opus", "sonnet"] as [String?], [false, true])
+    func sensitiveAuditUsesFallbackWhenVerifierReportsFableLimit(model: String?, overrideUsage: Bool) throws {
+        let (root, runtime, lead) = try fableTeam(model.map { ["verifier_model": $0] } ?? [:])
+        runtime.claude = "claude --model opus"
+        _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(!lead.call("start_worker", ["task": "touchy"]).isError)
+        let worktree = Worktrees.path(root: root, slug: "touchy")
+        try FileManager.default.createDirectory(atPath: worktree + "/.github", withIntermediateDirectories: true)
+        try commit(".github/ci.yml", "on: push\n", in: worktree)
+        // First attempt on Fable stops with the November 18 wording, not model_requires_usage_credits.
+        #expect(!lead.call("audit", ["task": "touchy"]).isError)
+        let first = try #require(task("touchy", root)?.verifier)
+        #expect(task("touchy", root)?.launchedModels?[first] == "fable")
+        runtime.usageLimits[first] = UsageLimit(said: "You've hit your Fable limit · resets Nov 24 at 1am",
+                                              resetsAt: Self.fableReset, at: Self.fableNow.timeIntervalSince1970,
+                                              kind: "seven_day_overage_included", apiError: "usage_limit_reached")
+        // A reading kept by the previous version must be corrected when the same verifier is read again.
+        usageStore.record([AccountUsage.Limit(name: "seven_day_overage_included", usedPercent: 100,
+                                              resetsAt: Self.fableReset, at: Self.fableNow.timeIntervalSince1970,
+                                              reached: true)], now: Self.fableNow)
+        let status = lead.call("status", [:]).text
+        #expect(status.contains("the fable limit") && !status.contains("seven day overage included (every model)"), "\(status)")
+        try runtime.kill(first)
+        #expect(lead.auditModel(lead.workflow, task: task("touchy", root), security: true) == "opus")
+        // Cover ordinary starts and an override retry, which previously launched straight into Fable's limit.
+        let audited = lead.call("audit", ["task": "touchy", "override_usage": overrideUsage])
+        #expect(!audited.isError, "\(audited.text)")
+        let verifier = try #require(runtime.spawned.last { $0.id != first && $0.command.contains("--name 'verify-touchy'") })
+        #expect(verifier.command.contains("--model 'opus'"), "\(verifier.command)")
+        #expect(audited.text.contains("on opus in Fable's place"), "\(audited.text)")
+        #expect(task("touchy", root)?.launchedModels?[verifier.id] == "opus")
+        try runtime.kill(verifier.id)
+        lead.usageClock = { Date(timeIntervalSince1970: Self.fableReset) }
+        let reset = lead.call("audit", ["task": "touchy"])
+        #expect(!reset.isError, "\(reset.text)")
+        #expect(task("touchy", root)?.launchedModels?[try #require(task("touchy", root)?.verifier)] == "fable")
+    }
+
+    @Test(arguments: ["opus", "sonnet"], [false, true])
+    func sensitiveAuditsFallBackAutomaticallyAndRespectTheFloor(workers: String, floor: Bool) throws {
+        let (root, runtime, lead) = try fableTeam()
+        runtime.claude = "claude --model \(workers)"
+        if floor { try vault.setReviewFloor(LeadReviewFloor(), root: root) }
+        _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(!lead.call("start_worker", ["task": "touchy"]).isError)
+        let worktree = Worktrees.path(root: root, slug: "touchy")
+        try FileManager.default.createDirectory(atPath: worktree + "/.github", withIntermediateDirectories: true)
+        try commit(".github/ci.yml", "on: push\n", in: worktree)
+        recordFableRefusal()
+        let expected = floor && workers == "opus" ? "sonnet" : "opus"
+        #expect(lead.auditModel(lead.workflow, task: task("touchy", root), security: true) == expected)
+        let audited = lead.call("audit", ["task": "touchy"])
+        #expect(!audited.isError, "\(audited.text)")
+        let verifier = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-touchy'") })
+        #expect(verifier.command.contains("--model '\(expected)'"), "\(verifier.command)")
+        #expect(task("touchy", root)?.launchedModels?[verifier.id] == expected)
     }
 
     @Test func autoAdvanceStartsAPlannedFableTaskOnOpusWhileFableIsHeldBack() throws {

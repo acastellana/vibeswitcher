@@ -26,7 +26,6 @@ struct ElapsedTimeLintTests {
         Allowed(file: "VibeHostTests/TestHostsTests.swift", text: "timeIntervalSince(gone) < 6", reason: "to move: a host's end after its last client"),
         Allowed(file: "VibeCoreTests/ProcessTableTests.swift", text: "timeIntervalSince(started) < 2", reason: "to move: a caller's wait at a stuck read's limit"),
         Allowed(file: "VibeCoreTests/ProcessTableTests.swift", text: "timeIntervalSince(behind) < 1", reason: "to move: the next caller told nil at once"),
-        Allowed(file: "VibeCoreTests/IndexLockTests.swift", text: "timeIntervalSince(started) < 2.5", reason: "to move: a search's time limit"),
         Allowed(file: "VibeCoreTests/MacLoadTests.swift", text: "timeIntervalSince(started) < 5", reason: "to move: a refused merge comes back at once"),
     ]
 

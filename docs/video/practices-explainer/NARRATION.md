@@ -13,11 +13,26 @@ ElevenLabs' own quickstart uses with `eleven_v4` (its voice-description pages we
 he reads at a measured pace, about 130 words a minute, with every word clear in transcription, which suits a technical
 walk-through. Whether the voice is as warm as wanted is for a human ear to judge. ElevenLabs' model guide recommends `eleven_v4` (or `eleven_multilingual_v2`) for video narration.
 
-**Characters used:** the 19 scene files hold 5,218 characters. In all, 6,661 were spent: 6,338 voicing scenes (s04,
-s08, s15 and s16 were voiced twice, after a review tightened their wording to the sources) and 323 on a probe, the
-opening sample and a speed test. The account's quota couldn't be read (`GET /v1/user/subscription` needs `user_read`),
-and no call was refused. **Voice length:** 6:21 of speech in a 6:54 film. The model ignores `voice_settings.speed`
-(1.0, 1.1 and 1.2 gave the same length), so the voice keeps its natural pace, about 130 words a minute.
+**Characters used:** the first cut (2026-11-12): the 19 scene files held 5,218 characters, and 6,661 were spent: 6,338
+voicing scenes (s04, s08, s15 and s16 were voiced twice, after a review tightened their wording to the sources) and 323
+on a probe, the opening sample and a speed test. The update of 2026-11-17 spent **1,854** more: s07 (354) and s15
+(445), re-voiced because their text changed, and the new s20 (362), s21 (403) and s22 (290). No other scene was
+re-voiced. A second update the same day spent **988** more: s17 (423) and s22 (565), re-voiced to add the config seal's
+skill-sync exception and the update check, once both had merged. That's 9,503 characters in all; the 22 scene files
+now hold 6,891. The account's quota couldn't be read
+(`GET /v1/user/subscription` needs `user_read`), and no call was refused. **Voice length:** 8:21 of speech in an 8:58
+film at its natural pace. The model ignores `voice_settings.speed` (1.0, 1.1 and 1.2 gave the same length), so the
+voice keeps its natural pace, about 130 words a minute, and the delivered MP4 is the whole film sped up 1.7× with the
+pitch kept (5:16.3; see `STORYBOARD.md`).
+
+The update's new and changed scenes were transcribed with whisper (`small.en`): "Fable", "Opus", "Codex", "UI
+journeys", "178 megabytes" and "/model" come through as written, and "macOS 27.2" as "Mac OS 27.2".
+
+The second update's s17 and s22 were transcribed the same way (whisper-cpp, `small.en`): "skill sync", "Claude Code's
+own", "by its shape", "every other change still waits for your click", "every six hours", "GitHub", "this Mac's main",
+"Install and restart", "signing password", "never stores it" and "merges it in and tests the result" come through as
+written, and "VibeSwitcher" as "vibe switcher". (A first pass without timestamps skipped the Install and Restart
+sentence; transcribed with timestamps, and on its own, it's all there.)
 
 The opening was sampled first and transcribed with whisper (`small.en` and `base.en`): "VibeSwitcher", "worktree" and
 "Codex" come through as written.
@@ -62,9 +77,10 @@ voice.
 
 ## s07 · Who gets audited
 
-> Not every change needs an audit. By default, the merge's full test run is the check. But sensitive paths, risky
-> changes and a random ten percent sample are raised to an audit, and nothing can lower one. So far, 271 of 495 merges
-> were audited.
+> Not every change needs an audit. By default, the merge's full test run is the check, and a small task, done in under
+> thirty minutes and touching nothing sensitive, merges on its tests too. But sensitive paths, risky changes and a
+> random ten percent sample are always raised to an audit, and nothing can lower that. So far, 271 of 495 merges were
+> audited.
 
 ## s08 · An independent verifier
 
@@ -90,6 +106,13 @@ voice.
 > flake. A run that goes silent is stopped, and the last test it started is named. 495 merges, every one tested at the
 > gate. Zero reverts.
 
+## s20 · Merges keep flowing
+
+> Merges got faster, too. A merge's test run takes whatever cores are free, and only the failing tests run again. A
+> test that's red on main as well doesn't send the branch back: it merges, and a task to fix that test is filed. And
+> when finished work stops landing, the lead is told why: main is red, the slots are full, or the Mac is loaded,
+> asleep, or on battery.
+
 ## s12 · It moves on its own
 
 > Between steps, the board moves on its own. A done report starts the audit or the merge, findings go back to the
@@ -102,6 +125,13 @@ voice.
 > hour, five times in two days. That became a rule: a run with no output, and next to no CPU, for ten minutes, is
 > stopped. All 21 incidents on record became check tasks.
 
+## s21 · The app checks itself
+
+> The app is held to the same standard. UI journeys drive the real app in a sandbox, and compare each screenshot with
+> its baseline. A health watcher groups the app's own freezes and errors by cause, and proposes a task when one keeps
+> coming back. And memory is measured: on macOS 27.2, freed memory now goes back at once, and an image-heavy chat adds
+> 178 megabytes at its peak, down from about a gigabyte.
+
 ## s14 · A shared Mac, a finite account
 
 > The Mac is shared, and the account is finite, so both are budgeted. Each task has a budget of working time. When it
@@ -111,9 +141,10 @@ voice.
 
 ## s15 · The right model for each role
 
-> Each role gets a model that suits it. By default, the verifier runs on a different model from the workers. In this
-> project, for now, both run on Opus. Codex takes bounded, mechanical tasks, and with agent set to auto, it's picked
-> when Claude's limits run tight. A Claude verifier always audits its work. The dashed roles are still being built.
+> Each role gets a model that suits it. Fable leads, advises on hard tasks, takes re-rolls, and audits anything
+> sensitive. In this project, Opus does the work and the routine audits. Codex takes bounded, mechanical tasks: with
+> agent set to auto, it's picked when Claude's limits run tight, and a Claude verifier always audits its work. And when
+> Fable reaches its usage limit, workers and audits move to Opus on their own, and go back at the reset.
 
 ## s16 · Memory that lives in the repo
 
@@ -124,8 +155,17 @@ voice.
 ## s17 · You keep the keys
 
 > And you keep the keys. You set the review floor, the sensitive paths and the merge policy, and an approval covers
-> one exact commit. Pushes, installs and wallet requests come to you as cards. A seal guards the configuration. And
-> your phone can follow along, with replies behind their own switch.
+> one exact commit. Pushes, installs and wallet requests come to you as cards. A seal guards the configuration: a
+> finished round of Claude Code's own skill sync is let through by its shape, and every other change still waits for
+> your click. And your phone can follow along, with replies behind their own switch.
+
+## s22 · Day to day
+
+> Day to day, it looks after you as well. After a Mac restart, one card offers to reopen the sessions you had open,
+> leads first, and nothing reopens until you click. The chat's model chip follows /model the moment you switch. A Run
+> card tells the session that asked how its command ended. And every six hours, the app checks GitHub and this Mac's
+> main for a newer VibeSwitcher, and says what changed in plain words. Install and Restart asks for the signing
+> password each time, and never stores it. If GitHub is ahead, the lead first merges it in and tests the result.
 
 ## s18 · What the system adds
 

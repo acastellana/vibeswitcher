@@ -18,6 +18,19 @@ struct MemberSeen: Equatable {
     var startedAt: Date?
 }
 
+/// A recorded stop or a hold on the model an audit would start on. No review clock runs while it waits.
+struct ReviewUsageWait: Equatable {
+    var model: String?
+    var resetsAt: Double?
+
+    var name: String { model.flatMap(AccountUsage.family).map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "the account" }
+    var state: String { model == nil ? "Waits for usage limit" : "Waits for \(name)" }
+    var line: String {
+        let whose = model == nil ? "The account's" : "\(name)'s"
+        return whose + " limit " + (resetsAt.map { "resets \(UsageLimit.resetText($0))" } ?? "reset time is not known")
+    }
+}
+
 /// A task as one line of the Team view: a status mark, its title, and its state in words with how long it's been in
 /// it ("Working 12m", "Rework 1 · 22m", "In review 3m", "Waits on lead", "Queued"), from the board and what its sessions
 /// are doing now.
@@ -78,7 +91,7 @@ struct TeamRow: Identifiable, Equatable {
     var foldedInto: LeadTask?
 
     /// It has an agent at work: the line under it says what that agent is doing.
-    var isLive: Bool { (group == .working || group == .review) && mark != .merge }
+    var isLive: Bool { (group == .working || group == .review) && mark != .merge && mark != .waits }
 
     /// "Folded into <title>": the dim line of a folded task, its target's title a link.
     var foldedText: String? {
@@ -124,6 +137,7 @@ struct TeamRow: Identifiable, Equatable {
 struct TeamSeen: Equatable {
     var members: [String: MemberSeen] = [:]
     var listed = false
+    var usageWaits: [String: ReviewUsageWait] = [:]
 }
 
 extension LeadBoard {
@@ -186,7 +200,7 @@ final class TeamRowsCache {
 
     /// What `board`'s rows read of the window's `rows` (`TeamRows.seen`), under `key`: only its members' rows are
     /// looked at, and whether the host's sessions are known at all.
-    func seen(_ key: String, board: LeadBoard, rows: [WindowRow], now: Date) -> TeamSeen {
+    func seen(_ key: String, board: LeadBoard, rows: [WindowRow], now: Date, usageWaits: [String: ReviewUsageWait] = [:]) -> TeamSeen {
         let ids: Set<String>
         if let kept = members[key], kept.board.isSame(as: board) {
             ids = kept.ids
@@ -195,7 +209,7 @@ final class TeamRowsCache {
             members[key] = (board, ids)
         }
         let theirs = rows.filter { row in row.hostID.map { ids.contains($0.uuidString) } ?? false }
-        return TeamSeen(members: TeamRows.seen(theirs, now: now), listed: rows.contains { $0.hostID != nil })
+        return TeamSeen(members: TeamRows.seen(theirs, now: now), listed: rows.contains { $0.hostID != nil }, usageWaits: usageWaits)
     }
 
     /// `board`'s rows (`TeamRows.rows`), made again only when it or `seen` changed since the last under `key`.
@@ -224,6 +238,76 @@ final class TeamRowsCache {
 }
 
 enum TeamRows {
+    /// Uses the witness's existing transcript observation and the account's recorded holds, off the draw path.
+    static func usageWaits(_ board: LeadBoard, team: TeamReading, now: Date, root: String? = nil) -> [String: ReviewUsageWait] {
+        var usage = team.usage
+        // Include this look's refusals, just as status does, before the tool server has kept them.
+        for task in board.tasks {
+            for id in task.members {
+                guard team.hosted[id]?.isLive == true, case .usageLimit(let limit)? = team.watched[id]?.activity,
+                      var reading = AccountUsage.fromRefusal(limit, model: task.launchedModels?[id], now: now) else { continue }
+                if reading.account == nil {
+                    // A refusal already recorded before /login belongs to that account, never the new one.
+                    if usage.limits.contains(where: {
+                        $0.reached && $0.name == reading.name && $0.model == reading.model
+                            && $0.resetsAt == reading.resetsAt && $0.at == reading.at
+                    }) { continue }
+                    reading.account = usage.account
+                }
+                usage.limits.append(reading)
+            }
+        }
+        var waits: [String: ReviewUsageWait] = [:]
+        for task in board.tasks where task.status == .review && task.evidence == nil {
+            let reviewing = task.awaitedVerifiers.contains { id in
+                if case .working? = team.watched[id]?.activity { return team.hosted[id]?.isLive == true }
+                return false
+            }
+            if reviewing { continue }
+            let stopped = task.awaitedVerifiers.first { id in
+                if case .usageLimit? = team.watched[id]?.activity { return team.hosted[id]?.isLive == true }
+                return false
+            }
+            if let id = stopped, case .usageLimit(let limit)? = team.watched[id]?.activity {
+                let model = task.launchedModels?[id].flatMap { $0.isEmpty ? nil : $0 }
+                    ?? AccountUsage.fromRefusal(limit, model: nil, now: now)?.model
+                waits[task.id] = ReviewUsageWait(model: model, resetsAt: limit.resetsAt)
+                continue
+            }
+            // An existing verifier can keep working even while new starts are held back.
+            guard task.verifier == nil, task.reviewLevel != .none || task.auditNeeded != nil || task.riskRaised != nil else { continue }
+            let fallback = usage.fableHeldBack(now: now) != nil
+            let workers = usage.startModel(team.workerModel, now: now)
+            func auditModel(security: Bool) -> String {
+                team.workflow.auditModel(workerModel: workers, taskModel: usage.startModel(task.intendedModel, now: now),
+                    launchedModel: task.worker.flatMap { task.launchedModels?[$0] }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 },
+                    heldBack: fallback ? AccountUsage.heldBackFamily : nil, security: security)
+            }
+            let ordinary = auditModel(security: false), secure = auditModel(security: true)
+            var model = ordinary
+            if ordinary != secure {
+                // Only inspect the branch when its security classification changes which held model it needs.
+                guard usage.hold(model: ordinary, now: now, ignoring: team.ignoreUsageLimits) != nil
+                    || usage.hold(model: secure, now: now, ignoring: team.ignoreUsageLimits) != nil else { continue }
+                let security: Bool
+                if let root, let branch = task.branch {
+                    // The audit's existing classifier, on the read queue, never as a row draws.
+                    security = LeadToolset.securityReason(root: root, head: branch, workflow: team.workflow, raised: task.riskRaised) != nil
+                } else {
+                    // auditNeeded also says "Its review is audit." for ordinary audits; only a security reason counts.
+                    security = task.auditNeeded?.hasPrefix("It touches sensitive_paths (") == true || task.riskRaised.map { raised in
+                        raised.byModel || LeadRisk.patterns.contains { $0.what != "adds locks or threads" && raised.reason.contains($0.what) }
+                    } == true
+                }
+                if security { model = secure }
+            }
+            if let limit = usage.hold(model: model, now: now, ignoring: team.ignoreUsageLimits) {
+                waits[task.id] = ReviewUsageWait(model: model, resetsAt: limit.resetsAt)
+            }
+        }
+        return waits
+    }
+
     /// What the team's sessions are doing, by host id (the board's `worker` and `verifier`).
     static func seen(_ rows: [WindowRow], now: Date) -> [String: MemberSeen] {
         var seen: [String: MemberSeen] = [:]
@@ -266,7 +350,7 @@ enum TeamRows {
     /// The other tasks' rows merged into `history` (of the same board), in the order shown: only the tasks under way
     /// are sorted, the finished ones were once a board (a sort of all 254 rows was most of a frozen refresh, 10-27).
     static func rows(_ board: LeadBoard, seen: TeamSeen, history: TeamHistory) -> [TeamRow] {
-        let open = sorted(board.tasks.filter { !readsBoardOnly($0) }.map { row($0, seen: seen.members, listed: seen.listed, board: board) },
+        let open = sorted(board.tasks.filter { !readsBoardOnly($0) }.map { row($0, seen: seen.members, listed: seen.listed, board: board, usageWait: seen.usageWaits[$0.id]) },
                           position: history.position)
         // Both in the order shown, and it's total (a task's place breaks every tie): merged, it's as if sorted together.
         var rows: [TeamRow] = []
@@ -340,7 +424,7 @@ enum TeamRows {
 
     /// One task's row. `listed`: `seen` holds every session the host has, so a worker or verifier missing from it is
     /// gone (false: nothing is known of the missing ones). `board`: where a folded task's target is found.
-    static func row(_ task: LeadTask, seen: [String: MemberSeen], listed: Bool = false, board: LeadBoard? = nil) -> TeamRow {
+    static func row(_ task: LeadTask, seen: [String: MemberSeen], listed: Bool = false, board: LeadBoard? = nil, usageWait: ReviewUsageWait? = nil) -> TeamRow {
         let worker = task.worker.flatMap { seen[$0] }
         // With several finders, the first that hasn't submitted (one that has may end while the others work).
         let awaited = task.awaitedVerifier { seen[$0].map { !$0.live } ?? listed }
@@ -364,7 +448,7 @@ enum TeamRows {
             row.agent = task.worker
             return row
         }
-        if task.status == .review, let verifier, verifier.needsYou {
+        if task.status == .review, usageWait == nil, let verifier, verifier.needsYou {
             red(.waits, LeadTeams.waitsOnLeadLabel, verifier.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The verifier is waiting for an answer.", since: nil)
             row.agent = task.verifier
             return row
@@ -436,6 +520,12 @@ enum TeamRows {
             if task.evidence?.passes == true {
                 row.mark = .merge
                 row.state = "Ready to merge"
+            } else if task.evidence == nil, let usageWait {
+                row.mark = .waits
+                row.state = usageWait.state
+                row.problem = usageWait.line
+                row.checkpoint = nil
+                row.since = nil
             } else if task.reviewLevel == .none, task.verifier == nil, task.evidence == nil, let why = task.auditNeeded {
                 // Review none, but its branch touches sensitive_paths (say): merge refuses it until an audit passes.
                 row.mark = .review

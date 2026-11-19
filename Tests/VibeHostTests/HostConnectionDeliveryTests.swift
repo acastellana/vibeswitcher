@@ -264,7 +264,7 @@ import Testing
         let host = try StandIn()
         let queue = callersQueue()
         let log = Log()
-        let ended = DispatchSemaphore(value: 0)
+        let ended = DispatchSemaphore(value: 0), closed = DispatchSemaphore(value: 0)
         let writeFailed = DispatchSemaphore(value: 0)
         let connection = try HostConnection(path: host.path, queue: queue, appKey: nil, write: { _, _, _ in
             writeFailed.signal()
@@ -273,7 +273,7 @@ import Testing
         }) { tap in
             if case .ended = tap { ended.signal() }
         }
-        watch(connection, on: queue, log: log)
+        watch(connection, on: queue, log: log, closed: closed)
         host.accept()
         let release = DispatchSemaphore(value: 0)
         await hold(queue, until: release)
@@ -283,9 +283,9 @@ import Testing
         host.hangUp()
         #expect(await offPool { ended.wait(timeout: .now() + hangGuard) } == .success, "the reader didn't see the end")
         release.signal()
-        // The reader says it saw the end before it hands the close to the queue, so a drain right after can come first
-        // (a full run under load: `[]`): the close is waited for; then the queue drained, a second one would be in.
-        #expect(await eventually { !log.items.isEmpty }, "no close")
+        // The reader hands its end to the caller's queue just after its tap says it saw it (on 2026-11-15 a `queue.sync`
+        // here came first, and found nothing called yet): wait for the close itself, then for anything queued after it.
+        #expect(await offPool { closed.wait(timeout: .now() + hangGuard) } == .success, "no close")
         queue.sync {}
         #expect(log.items == [.closed])
     }

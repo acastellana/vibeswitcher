@@ -105,3 +105,5 @@ allow: Tests/VibePlatformTests/FilesExclusiveTests.swift | #expect(root == "/pri
 allow: Tests/VibePlatformTests/SettingsTests.swift | store.set(URL(fileURLWithPath: "/tmp"), forKey: "place") | a URL, a value no property list holds, that the store must refuse; nothing is opened
 allow: Tests/VibePlatformTests/SocketsTests.swift | Platform.Sockets.unixAddress("/tmp/s") | builds an address and reads its bytes; no socket is made
 allow: Tests/VibePlatformTests/SocketsTests.swift | Array("/tmp/s".utf8) | the bytes that address holds; no socket is made
+# RefusedGitSpellings: the reported command line, which the guard parses; nothing runs it or opens the path.
+allow: Tests/VibeCoreTests/RefusedGitSpellingsTests.swift | git --git-dir=/tmp/x status | the contract's symptom, a command line the guard reads; nothing runs it

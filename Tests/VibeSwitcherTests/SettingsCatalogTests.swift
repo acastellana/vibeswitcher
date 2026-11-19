@@ -477,6 +477,7 @@ struct SettingsStoredKeysTests {
         ("walletPeerID", { $0.walletPeerID = "0a1b2c3d" }),
         ("walletPassagePath", { $0.walletPassagePath = "/bin/ls" }),
         ("letAgentsOpenShells", { $0.letAgentsOpenShells = true }),
+        ("memoryBenches", { $0.memoryBenches = false }),
     ]
 
     @Test func eachControlStillReadsAndWritesItsKey() throws {
@@ -504,6 +505,7 @@ struct SettingsStoredKeysTests {
         #expect(preferences.keepAwake == .onPower && preferences.leadRotation == .context && preferences.boostMode == .off)
         #expect(preferences.batteryHoldBelow == PowerWatch.defaultLimit && preferences.projectsFolder == ProjectCreation.defaultLocation)
         #expect(preferences.walletPeerID.isEmpty && preferences.walletPassagePath.isEmpty)
+        #expect(preferences.memoryBenches)
     }
 
     /// Phone access keeps its four keys; it writes them in the app's own defaults, so they're checked by name in the source.
@@ -599,6 +601,7 @@ private extension Preferences {
         case "walletPeerID": return walletPeerID
         case "walletPassagePath": return walletPassagePath
         case "letAgentsOpenShells": return letAgentsOpenShells
+        case "memoryBenches": return memoryBenches
         default: return ""
         }
     }

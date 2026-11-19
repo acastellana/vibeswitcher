@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private lazy var restartOffer: RestartOffer = {
         let offer = RestartOffer()
         offer.resumeSession = { [weak self] request in self?.resume(request) }
+        offer.presets = { [weak self] folder in self?.presets(for: folder) ?? [] }
         offer.reopenLead = { [weak self] root, conversation in self?.leadController.reopenLead(root: root, conversation: conversation) }
         offer.show = { [weak self] in
             guard let self else { return }
@@ -116,6 +117,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         return offer
     }()
     private var restartCard: RestartCardWindowController?
+    /// The update check, and its card: a newer VibeSwitcher on this Mac's main or on GitHub (see `UpdateChecks`).
+    private lazy var updateChecks: UpdateChecks = {
+        let checks = UpdateChecks()
+        checks.leadRoots = { [weak self] in self.map { Array($0.leadController.boards.keys) } ?? [] }
+        checks.batteryLimit = { [weak self] in self?.preferences.batteryHoldBelow ?? 0 }
+        checks.aiSummaries = { [weak self] in self?.preferences.aiSummaries ?? false }
+        checks.tellLead = { [weak self] root, text in self?.leadController.tellUpdate(text, root: root) }
+        checks.spawn = { [weak self] request, then in
+            guard let self else { return then("VibeSwitcher is quitting") }
+            // In the window's session host, as a vs-shell card's Run starts one.
+            hostClient.spawn(request) { [weak self] result in
+                switch result {
+                case .success(let session):
+                    self?.showMainWindow(select: session.id)
+                    then(nil)
+                case .failure(let error):
+                    then(error.message)
+                }
+            }
+        }
+        return checks
+    }()
     let windowModel = WindowModel()
     private var mainWindow: MainWindowController?
     private lazy var windowActions = WindowActions(
@@ -213,6 +236,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// The Mac's load, memory, team sessions and heavy slots, once a minute, to ~/.vibeswitcher/stats (`LoadRecorder`).
     private let loadRecorder = LoadRecorder()
     private var loadTimer: Heartbeat.Subscription?
+    /// The memory benches, once a day on a calm Mac (`MemoryBenchWatch`), looked at with the load recorder's minute.
+    private lazy var memoryBench = AppDelegate.memoryBenchWatch(appHealth: { [weak self] in self?.appHealth })
     /// Decides Boost mode for every project's leads (Settings › Project lead, see `BoostWatch`).
     private(set) lazy var boostWatch = BoostWatch(preferences: preferences)
     /// Gives malloc's free pages back as the footprint grows (see `FootprintRelief`).
@@ -225,6 +250,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// Stored by macOS as the distance from the right screen edge; set once so we start next to the
     /// clock, where an overflowing menu bar never hides items. ⌘-dragging the icon overrides it.
     private static let positionKey = "NSStatusItem Preferred Position VibeSwitcher"
+
+    /// VibeSwitcher › Check for Updates…: at once, and the card says what it found, nothing newer included.
+    @objc func checkForUpdates(_ sender: Any?) {
+        updateChecks.checkNow()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // First, so no window is ever drawn in the wrong look.
@@ -312,6 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             self?.leadController.tellAppHealth(text) ?? false
         }
         appHealth?.start()
+        updateChecks.start()
         if UserDefaults.standard.bool(forKey: "windowWasOpen") {
             // Cleared until the window has been up a while: if opening it crashes the app, the next launch
             // doesn't open it again (and crash again).
@@ -470,6 +501,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         loadTimer = Heartbeat.shared.every(60) { [weak self] in
             guard let self else { return }
             loadRecorder.record(census: HostCensus.count(hostClient.sessions.map { ($0.label, $0.cwd, $0.isLive) }))
+            memoryBench.tick(roots: Array(leadController.boards.keys))
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.memoryBench.sleeping()
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.memoryBench.woke(at: Date())
         }
         footprintRelief.start()
         boostWatch.currentFolder = { [weak self] in self?.store.sessions.first(where: \.isCurrent)?.cwd }
@@ -971,8 +1009,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private func resumeSession(_ row: WindowRow) {
         guard let id = row.hostID, let info = hostClient.sessions.first(where: { $0.id == id }),
               let agentSession = windowModel.agentSessions[id] else { return }
-        let request = LaunchPlan.resumeRequest(cwd: info.cwd, base: info.command, agent: agentSession.agent, sessionID: agentSession.sessionID,
-                                               cols: info.cols, rows: info.rows, label: info.label)
+        let request = LaunchPlan.resumeRequest(resuming: info, agent: agentSession.agent, sessionID: agentSession.sessionID,
+                                               presets: presets(for: info.cwd))
         resume(request) { [weak self] _ in
             self?.mainWindow?.pane.forget(id)
             self?.hostClient.remove(id)
@@ -993,8 +1031,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
     }
 
+    /// The memory benches' watch on this Mac: Settings' switch (read from the defaults, off the main thread), AC power,
+    /// the load, the heavy slots and merges' runs (the lock `vs-heavy` takes), VibeSwitcher's checkout among the leads'
+    /// projects (its workflow's base branch), and the login shell's PATH for the run (swift and node).
+    static func memoryBenchWatch(appHealth: @escaping () -> AppHealthWatcher?) -> MemoryBenchWatch {
+        let sources = MemoryBenchWatch.Sources(
+            enabled: { UserDefaults.standard.object(forKey: "memoryBenches") as? Bool ?? true },
+            conditions: {
+                let heavy = LoadRecorder.heavySlots()
+                let lock = TestLock(directory: ProcessInfo.processInfo.environment[TestLock.directoryVariable] ?? "/private/tmp/vibeswitcher-\(getuid())",
+                                    slots: heavy.slots)
+                return MemoryBench.Conditions(onAC: PowerSourceCache.shared.current()?.knownAC, load: LoadRecorder.averages(), awake: true,
+                                              slotFree: heavy.holders.count < heavy.slots,
+                                              merge: MemoryBench.merge(holders: heavy.holders, waiters: lock.waiters()))
+            },
+            plan: { roots in
+                guard let checkout = AppUpdateWatch.Checkout.find(among: roots, installed: ServerBuild.running) else { return nil }
+                var path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+                if case .found(let found) = LoginShellVariable.read("PATH") { path = found }
+                return MemoryBench.Run(root: checkout.root, base: checkout.base,
+                                       folder: VibePaths.root.appendingPathComponent(MemoryBench.folderName, isDirectory: true),
+                                       stats: VibePaths.statsDir, environment: ["PATH": path])
+            },
+            ended: { outcome in if case .recorded = outcome { appHealth()?.look() } },
+            log: { Breadcrumbs.shared.note($0) })
+        return MemoryBenchWatch(sources: sources, stateFile: VibePaths.root.appendingPathComponent(MemoryBench.folderName).appendingPathComponent("state.json"))
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         Breadcrumbs.shared.note("app: quitting")
+        memoryBench.stop()
         restartOffer.atQuit(yours: !terminatedBySignal)
         // Never leave the Mac silent behind a dictation that was recording (a device that doesn't answer in time: put
         // back at the next launch, from the marker).

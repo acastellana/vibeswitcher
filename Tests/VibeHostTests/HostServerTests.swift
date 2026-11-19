@@ -347,7 +347,7 @@ struct HostServerTests {
         // It reads nothing until the test says go (a file appears), however long sending 3 MB takes.
         let go = out + ".go"
         defer { unlink(go) }
-        let session = try await client.spawn("stty raw -echo; echo ready; while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)")
+        let session = try await client.spawn("\(jobControlOff)stty raw -echo; echo ready; while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)")
         await client.attach(session.id)
         #expect(await eventually { client.text(session.id).contains("ready") })
         let piece = 64 << 10
@@ -480,6 +480,9 @@ struct HostCallTests {
             guard fd >= 0 else { return }
             defer { close(fd) }
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
+            // As the real host's (`UnixSocket.configure`): a reply to a client that has gone fails, not SIGPIPE.
+            var noSigPipe: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
             var decoder = HostFrameDecoder()
             var buffer = [UInt8](repeating: 0, count: 65_536)
             var welcomed = false, rested = false
@@ -520,7 +523,7 @@ struct HostCallTests {
     @Test func refusedInputIsAnError() async throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try await client.spawn("stty raw -echo; echo ready; \(keepRunning)")
+        let session = try await client.spawn("\(jobControlOff)stty raw -echo; echo ready; \(keepRunning)")
         await client.attach(session.id)
         #expect(await eventually { client.text(session.id).contains("ready") })
         var refusal: String?
@@ -564,7 +567,7 @@ struct HostCallTests {
         let client = try TestClient(host)
         let out = scratchRoot.appendingPathComponent("typed-\(UUID().uuidString.prefix(8))").path
         defer { unlink(out) }
-        let session = try await client.spawn("stty raw -echo; echo ready; exec cat > \(out)")
+        let session = try await client.spawn("\(jobControlOff)stty raw -echo; echo ready; exec cat > \(out)")
         await client.attach(session.id)
         #expect(await eventually { client.text(session.id).contains("ready") })
         let brief = (0..<600).map { "Line \($0): " + String(repeating: "brief ", count: 8) }.joined(separator: "\n")

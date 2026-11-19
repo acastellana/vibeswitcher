@@ -15,7 +15,7 @@ struct ProgramStatusShownTests {
     let temp = Scratch()
 
     /// Reads a line, reports the status it names, until `q`. Base64: "Indexing", "Bash".
-    static let fakeProgram = #"stty -echo; while read cmd; do case "$cmd" in "#
+    static let fakeProgram = jobControlOff + #"stty -echo; while read cmd; do case "$cmd" in "#
         + #"w) printf '\033]7501;state=working:app=fake:title=SW5kZXhpbmc\007';; "#
         + #"b) printf '\033]7501;state=blocked:app=fake:kind=permission:msg=QmFzaA\033\\';; "#
         + #"d) printf '\033]7501;state=done:app=fake\007';; "#

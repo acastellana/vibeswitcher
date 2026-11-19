@@ -61,6 +61,20 @@ struct FootprintBenchTests {
         let results = Self.results(text)
         let number = { (name: String, index: Int) in results[name].flatMap { $0.indices.contains(index) ? Double($0[index]) : nil } }
         let loads = [loadBefore, loadAfter].compactMap { $0 }
+        let cores = Double(ProcessInfo.processInfo.activeProcessorCount)
+        // Each budget's line, judged or not, for the app's daily run (`MemoryBench.Budget`, ~/.vibeswitcher/stats).
+        let judged = loads.max().map { $0 < limit } ?? false
+        let views = results["live-terminal-views"] ?? []
+        let chats = results["live-chat-models"] ?? []
+        func left(_ pair: [String]) -> Double? { pair.count == 2 ? Double(pair[1]).flatMap { after in Double(pair[0]).map { after - $0 } } : nil }
+        for budget in [
+            MemoryBench.Budget(name: "footprint-window-closed-mb", value: number("footprint-window-closed-mb", 0), limit: 150, unit: "MB",
+                               judged: judged, within: { $0 < 150 }),
+            MemoryBench.Budget(name: "churn-growth-percent", value: number("churn-growth-percent", 0), limit: 10, unit: "%",
+                               judged: judged && loads.max().map { $0 < cores } == true, within: { $0 <= 10 }),
+            MemoryBench.Budget(name: "terminal-views-left", value: left(views), limit: 0, unit: "count", judged: judged, within: { $0 == 0 }),
+            MemoryBench.Budget(name: "chat-models-left", value: left(chats), limit: 0, unit: "count", judged: judged, within: { $0 == 0 }),
+        ] { print(budget.line) }
         guard let highest = loads.max(), highest < limit else {
             print("footprint not judged: the Mac's 1-minute load was \(loads.map { MacLoad.number($0) }), load_threshold \(MacLoad.number(limit))")
             return
@@ -69,9 +83,7 @@ struct FootprintBenchTests {
         let closed = number("footprint-window-closed-mb", 0)
         #expect(closed != nil && closed! < 150, "window closed: \(closed.map { "\($0)" } ?? "no number") MB, the target under 150")
         // A debug build counts them: none left behind by sessions ending or the window and chat closing.
-        let views = results["live-terminal-views"] ?? []
         #expect(views.count == 2 && views[0] == views[1] && Int(views[0]) != nil, "live terminal views before and after churn: \(views)")
-        let chats = results["live-chat-models"] ?? []
         #expect(chats.count == 2 && chats[0] == chats[1] && Int(chats[0]) != nil, "live chat models before and after churn: \(chats)")
         let growth = number("churn-growth-percent", 0)
         #expect(growth != nil, "no growth after churn in the bench's output")
@@ -84,7 +96,6 @@ struct FootprintBenchTests {
         // loaded Mac the renderer can take a second set of textures (owned unmapped 4.5 -> 8.7 MB, +11.6-11.7 % at load
         // 23-38 with malloc +1.2 MB): the warm-up is 4 cycles so a slow run is likelier to take it before the baseline,
         // and the growth is judged only with the 1-minute load under the cores before and after, recorded otherwise.
-        let cores = Double(ProcessInfo.processInfo.activeProcessorCount)
         guard highest < cores else {
             print("growth not judged: the Mac's 1-minute load was \(loads.map { MacLoad.number($0) }), not under its \(Int(cores)) cores")
             return

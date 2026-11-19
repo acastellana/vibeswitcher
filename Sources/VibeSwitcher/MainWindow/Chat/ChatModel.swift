@@ -186,7 +186,8 @@ final class ChatModel: ObservableObject {
 
     private func updateItems() {
         let timeline = ChatTimeline.items(log.entries, newAfter: markerAfter)
-        let new = ChatTimeline.placeQuestions(questions, notices: questionNotices, in: BatchSummary.place(allDone, in: timeline))
+        // Bursts of VibeSwitcher's cards for the lead folded last: a closed question or an all-done card ends one.
+        let new = ChatTimeline.foldUpdates(ChatTimeline.placeQuestions(questions, notices: questionNotices, in: BatchSummary.place(allDone, in: timeline)))
         guard new != items else { return }
         // Its indices are the old items': whatever was still to come is shown now.
         stopStaging()

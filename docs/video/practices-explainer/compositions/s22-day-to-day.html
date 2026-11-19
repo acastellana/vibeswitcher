@@ -1,0 +1,251 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        #root {
+          position: absolute;
+          inset: 0;
+        }
+        .s22 .head {
+          position: absolute;
+          left: 120px;
+          top: 130px;
+        }
+        .s22 .rc {
+          position: absolute;
+          left: 120px;
+          top: 260px;
+          width: 800px;
+          padding: 28px 34px;
+          border-color: var(--accent);
+        }
+        .s22 .rc .meta {
+          font-family: var(--mono);
+          font-size: 20px;
+          color: var(--muted);
+          margin-bottom: 10px;
+        }
+        .s22 .rc .h3 {
+          margin-bottom: 18px;
+        }
+        .s22 .rc .row {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 12px 0;
+          border-top: 2px solid var(--line);
+          font-family: var(--mono);
+          font-size: 24px;
+        }
+        .s22 .rc .row .tag {
+          font-size: 18px;
+          font-weight: 700;
+          padding: 2px 10px;
+          border-radius: 6px;
+          border: 2px solid var(--accent);
+          color: var(--accent);
+        }
+        .s22 .rc .row .tag.plain {
+          border-color: var(--line);
+          color: var(--muted);
+        }
+        .s22 .rc .say {
+          margin-top: 16px;
+          font-size: 24px;
+          line-height: 1.36;
+          color: var(--muted);
+        }
+        .s22 .rc .btns {
+          margin-top: 20px;
+          display: flex;
+          justify-content: flex-end;
+          gap: 14px;
+        }
+        .s22 .rc .btn,
+        .s22 .uc .btn {
+          font-family: var(--body);
+          font-weight: 700;
+          font-size: 22px;
+          padding: 8px 20px;
+          border-radius: 10px;
+          border: 2px solid var(--line);
+          color: var(--fg);
+        }
+        .s22 .rc .btn.go,
+        .s22 .uc .btn.go {
+          border-color: var(--go);
+          color: var(--bg);
+          background: var(--go);
+        }
+        .s22 .rc .foot2 {
+          margin-top: 18px;
+          font-family: var(--mono);
+          font-size: 20px;
+          color: var(--go);
+        }
+        .s22 .uc {
+          position: absolute;
+          left: 120px;
+          top: 780px;
+          width: 800px;
+          padding: 20px 34px 22px;
+        }
+        .s22 .uc .meta {
+          font-family: var(--mono);
+          font-size: 20px;
+          color: var(--muted);
+          margin-bottom: 8px;
+        }
+        .s22 .uc .top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 14px;
+        }
+        .s22 .uc .top .btns {
+          display: flex;
+          gap: 12px;
+          white-space: nowrap;
+        }
+        .s22 .uc .say {
+          margin-top: 12px;
+          font-size: 23px;
+          line-height: 1.36;
+          color: var(--muted);
+        }
+        .s22 .uc .foot2 {
+          margin-top: 10px;
+          font-family: var(--mono);
+          font-size: 20px;
+          color: var(--info);
+        }
+        .s22 .side {
+          position: absolute;
+          left: 1000px;
+          top: 260px;
+          width: 800px;
+        }
+        .s22 .it {
+          padding: 18px 0 22px;
+          border-top: 2px solid var(--line);
+        }
+        .s22 .it .k {
+          font-family: var(--mono);
+          font-weight: 700;
+          font-size: 24px;
+          margin-bottom: 10px;
+        }
+        .s22 .it .d {
+          font-size: 25px;
+          line-height: 1.36;
+        }
+        .s22 .it .d .mono {
+          font-size: 22px;
+          color: var(--accent);
+        }
+        .s22 .mc {
+          display: flex;
+          align-items: center;
+          gap: 18px;
+          margin-bottom: 12px;
+        }
+        .s22 .mc .cmd {
+          font-family: var(--mono);
+          font-size: 24px;
+          color: var(--fg);
+          min-width: 220px;
+        }
+        .s22 .mc .chipbox {
+          position: relative;
+          width: 150px;
+          height: 40px;
+        }
+        .s22 .mc .chipbox .chip {
+          position: absolute;
+          left: 0;
+          top: 0;
+          font-size: 21px;
+        }
+        .s22 .mc .chipbox .chip.f {
+          border-color: var(--accent);
+          color: var(--accent);
+        }
+      </style>
+      <div id="root" data-composition-id="s22-day-to-day" data-width="1920" data-height="1080">
+        <div class="stage s22">
+          <div class="kicker">17 / Day to day</div>
+          <div class="head h2">It looks after you, too.</div>
+          <div class="card rc">
+            <div class="meta">at launch, after a Mac restart</div>
+            <div class="h3">The Mac restarted</div>
+            <div class="row r1"><span class="tag">Lead</span>example-api</div>
+            <div class="row r2"><span class="tag">Lead</span>example-site</div>
+            <div class="row r3"><span class="tag plain">Claude</span>example-api · docs</div>
+            <div class="say">Leads reopen first, and each is told to restart its workers.</div>
+            <div class="btns"><span class="btn">Dismiss</span><span class="btn">Choose…</span><span class="btn go">Reopen all</span></div>
+            <div class="foot2">nothing reopens without your click</div>
+          </div>
+          <div class="card uc">
+            <div class="meta">every 6 hours · GitHub's main and this Mac's main</div>
+            <div class="top">
+              <div class="h3">A newer version</div>
+              <div class="btns"><span class="btn">Later</span><span class="btn go">Install &amp; Restart</span></div>
+            </div>
+            <div class="say">What changed, in plain words. Install &amp; Restart opens a shell card that asks for the signing password: never stored.</div>
+            <div class="foot2">GitHub ahead? The lead merges it in first, tested.</div>
+          </div>
+          <div class="side">
+            <div class="it i1">
+              <div class="k amber">The model chip</div>
+              <div class="mc">
+                <span class="cmd"></span>
+                <span class="chipbox"><span class="chip o">Opus</span><span class="chip f">Fable</span></span>
+              </div>
+              <div class="d">follows <span class="mono">/model</span> the moment you switch, and its menu offers Fable</div>
+            </div>
+            <div class="it i2">
+              <div class="k go">Run cards report back</div>
+              <div class="d">The session that asked hears how its command ended: the exit status and the last lines.</div>
+            </div>
+            <div class="it i3">
+              <div class="k info">A prompt-audit reminder</div>
+              <div class="d">Every 14 days, or when the model changes, a card offers <span class="mono">/doctor prompt-audit</span>. It runs only on your click.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          const S = document.querySelector(".s22");
+          const tl = gsap.timeline({ paused: true });
+          K.scene(tl, S.parentElement, 26);
+          K.rise(tl, ".s22 .head", 0.3);
+          K.rise(tl, ".s22 .rc", 0.8, { y: 36 });
+          K.slide(tl, ".s22 .rc .row", 1.6, { stagger: 0.35, x: -24 });
+          K.rise(tl, ".s22 .rc .say", 5.2, { y: 10 });
+          K.rise(tl, ".s22 .rc .btn", 5.9, { stagger: 0.2, y: 10 });
+          tl.fromTo(".s22 .rc .btn.go", { scale: 1 }, { scale: 1.08, duration: 0.25, yoyo: true, repeat: 1, ease: "power1.inOut" }, 7.1);
+          K.rise(tl, ".s22 .rc .foot2", 7.3, { y: 10 });
+          K.rise(tl, ".s22 .i1", 7.8, { y: 24 });
+          tl.set(".s22 .mc .chip.f", { opacity: 0 }, 0);
+          K.type(tl, S.querySelector(".s22 .mc .cmd"), "/model fable", 8.1, 0.6);
+          tl.to(".s22 .mc .chip.o", { opacity: 0, y: -10, duration: 0.25 }, 8.8);
+          tl.fromTo(".s22 .mc .chip.f", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.3, ease: "back.out(2)" }, 8.9);
+          K.rise(tl, ".s22 .i2", 10.4, { y: 24 });
+          K.rise(tl, ".s22 .i3", 11.9, { y: 24 });
+          // the update check (added 2026-11-17, after the s22 cut): its card rises with "every six hours"
+          K.rise(tl, ".s22 .uc", 13.0, { y: 36 });
+          K.rise(tl, ".s22 .uc .say", 17.0, { y: 10 });
+          K.rise(tl, ".s22 .uc .btn", 18.4, { stagger: 0.2, y: 10 });
+          tl.fromTo(".s22 .uc .btn.go", { scale: 1 }, { scale: 1.08, duration: 0.25, yoyo: true, repeat: 1, ease: "power1.inOut" }, 19.0);
+          K.rise(tl, ".s22 .uc .foot2", 22.0, { y: 10 });
+          window.__timelines["s22-day-to-day"] = K.fit(tl, 26, 41.2);
+        })();
+      </script>
+    </template>
+  </body>
+</html>

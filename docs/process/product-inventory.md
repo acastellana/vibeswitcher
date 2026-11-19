@@ -8,6 +8,7 @@ The main window's menus (`MainMenu.build`); standard items go to the first respo
 
 ### VibeSwitcher
 - VibeSwitcher › About VibeSwitcher — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
+- VibeSwitcher › Check for Updates… — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - VibeSwitcher › Settings… ⌘, — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - VibeSwitcher › Restart Session Host — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
 - VibeSwitcher › Hide VibeSwitcher ⌘H — `Sources/VibeSwitcher/MainWindow/MainMenu.swift`
@@ -224,6 +225,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - Usage limits: Ignore usage limits — `Sources/VibeSwitcher/MacLimitsSettings.swift`
 - Power: Keep the Mac awake while the team works — `Sources/VibeSwitcher/SettingsWindow.swift`
 - Power: On battery, pause lead work below — `Sources/VibeSwitcher/SettingsWindow.swift`
+- Power: Run the memory benches once a day — `Sources/VibeSwitcher/SettingsWindow.swift`
 
 ### Dictation & Briefing
 - Settings › Dictation & Briefing — `Sources/VibeSwitcher/SettingsCatalog.swift`
@@ -347,6 +349,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `size WxH` — resizes the main window's content (e.g. 1728x1015) — `Sources/VibeSwitcher/Sandbox.swift`
 - `inspector team|overview|activity|hide|show` — the inspector on that tab, or collapsed or shown, as its segmented control and Toggle Inspector do — `Sources/VibeSwitcher/Sandbox.swift`
 - `board [N]` — adds N finished tasks (default 250) to the fake lead's board (start the lead first) — `Sources/VibeSwitcher/Sandbox.swift`
+- `task SLUG STATUS` — moves a task on the fake lead's board to STATUS (running, blocked, done, abandoned, folded…), as its lead's… — `Sources/VibeSwitcher/Sandbox.swift`
 - `churn [N]` — changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is — `Sources/VibeSwitcher/Sandbox.swift`
 - `publish [N]` — has the lead controller publish N times (default 50), each laid out and drawn, and times them — `Sources/VibeSwitcher/Sandbox.swift`
 - `hangs [reset]` — the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -357,7 +360,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `team named` — starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>… — `Sources/VibeSwitcher/Sandbox.swift`
 - `ask [TEXT]` — puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its… — `Sources/VibeSwitcher/Sandbox.swift`
 - `unfold` — shows the selected lead's team under its row in the sidebar — `Sources/VibeSwitcher/Sandbox.swift`
-- `rotation` — shows the scheduled rotation chat line in the selected fake session — `Sources/VibeSwitcher/Sandbox.swift`
+- `rotation` — shows the scheduled rotation chat line in the selected fake session (`rotation idle`: the handover at a long… — `Sources/VibeSwitcher/Sandbox.swift`
 - `replaced [N]` — shows the selected window session as a lead another session replaced, with N characters (default 200000)… — `Sources/VibeSwitcher/Sandbox.swift`
 - `answer` — answers the fake lead's open questions: its row reads as its terminal does again — `Sources/VibeSwitcher/Sandbox.swift`
 - `leadmail` — writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -409,6 +412,8 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `sleep-notice` — SleepNoticeBanner — `Sources/VibeSwitcher/Sandbox.swift`
 - `toolchain-note` — ToolchainNoteView — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
 - `restart-card` — RestartCardView — `Sources/VibeSwitcher/RestartCard.swift`
+- `update-card` — UpdateCardView — `Sources/VibeSwitcher/UpdateCard.swift`
+- `update-card-waiting` — UpdateCardView — `Sources/VibeSwitcher/UpdateCard.swift`
 - `new-project` — NewProjectSheet — `Sources/VibeSwitcher/MainWindow/NewProject/NewProjectSheet.swift`
 - `menu-bar` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`
 - `menu-bar-dots` — MenuBarStrip — `Sources/VibeSwitcher/Sandbox.swift`

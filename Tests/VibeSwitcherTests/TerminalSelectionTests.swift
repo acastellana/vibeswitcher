@@ -56,7 +56,7 @@ struct TerminalSelectionTests {
             #expect(await until { scene.host.state == .connected })
         }
         var result: Result<HostSession, HostClientError>?
-        scene.host.spawn(SpawnRequest(cwd: scratchRoot.path, command: "stty -echo; echo '\(name) ready'; while IFS= read -r l; do echo \"$l\"; done",
+        scene.host.spawn(SpawnRequest(cwd: scratchRoot.path, command: "\(jobControlOff)stty -echo; echo '\(name) ready'; while IFS= read -r l; do echo \"$l\"; done",
                                       env: [:], cols: 100, rows: 30, keepShell: false, label: name, agent: nil)) { result = $0 }
         #expect(await until { result != nil })
         let id = try #require(result).get().id

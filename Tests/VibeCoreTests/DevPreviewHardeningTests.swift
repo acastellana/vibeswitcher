@@ -124,6 +124,9 @@ final class ResettingServer: @unchecked Sendable {
         Thread.detachNewThread {
             let client = accept(fd, nil, nil)
             guard client >= 0 else { return }
+            // Its reply to a client that has gone fails, not SIGPIPE.
+            var noSigPipe: Int32 = 1
+            setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
             var buffer = [UInt8](repeating: 0, count: 65536)
             var received = Data()
             while received.range(of: Data("\r\n\r\n".utf8)) == nil {

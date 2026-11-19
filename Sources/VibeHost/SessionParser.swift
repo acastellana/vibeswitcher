@@ -188,7 +188,7 @@ public struct ParserView: Codable, Equatable, Sendable {
 
 /// How the host runs its sessions' parsers.
 public struct ParserOptions: Sendable {
-    /// Busy this long with no progress, a parser is stalled: the watchdog ends it and starts another.
+    /// Busy this long awake with no progress, a parser is stalled: the watchdog ends it and starts another.
     public var stallLimit: TimeInterval = 10
     /// The parser listens on `SessionParser.testHookCode` (scratch hosts in tests only).
     public var testHooks = false
@@ -217,6 +217,9 @@ final class ParserLink {
 
     private let fd: Int32
     private let queue: DispatchQueue
+    /// What `stalledFor` measures with: its time awake. A Mac asleep stops the parser too, so a wall clock would find
+    /// any parser busy at a sleep stalled at the wake (2026-11-16: "stalled for 1072.2 s", 18 minutes asleep).
+    private let time: MacTime
     private let readQueue = DispatchQueue(label: "vibeswitcher.host.parser-link")
     private var readSource: DispatchSourceRead?
     /// Left once the read side is cancelled.
@@ -229,7 +232,8 @@ final class ParserLink {
     private let lock = NSLock()
     private var sent = 0
     private var parsed = 0
-    private var lastProgress = Date()
+    /// Seconds awake (`MacTime.awake`).
+    private var lastProgress: TimeInterval
     private var nextRequest: UInt32 = 0
     private enum Pending {
         case later((ParserView?) -> Void)
@@ -238,17 +242,19 @@ final class ParserLink {
     final class Box { var view: ParserView? }
     private var pending: [UInt32: Pending] = [:]
 
-    private init(pid: pid_t, fd: Int32, queue: DispatchQueue) {
+    private init(pid: pid_t, fd: Int32, queue: DispatchQueue, time: MacTime) {
         self.pid = pid
         self.fd = fd
         self.queue = queue
+        self.time = time
+        lastProgress = time.awake()
     }
 
     /// Starts `launcher --parse-session` on a terminal of `cols` × `rows` keeping `scrollback` lines above its screen,
     /// its descriptor 0 the link and 2 the host's standard error (where a trap says why), in a process group of its own,
     /// with default signals and nothing else of the host's (no PTY).
     static func start(launcher: String, cols: Int, rows: Int, scrollback: Int = SessionParser.scrollback, options: ParserOptions,
-                      queue: DispatchQueue) -> ParserLink? {
+                      queue: DispatchQueue, time: MacTime = .real) -> ParserLink? {
         guard let (ours, theirs) = Platform.Sockets.pair(type: Platform.Sockets.stream) else { return nil }
         Platform.Sockets.noSigPipe(socket: ours)
 
@@ -273,7 +279,7 @@ final class ParserLink {
             return nil
         }
         _ = fcntl(ours, F_SETFL, fcntl(ours, F_GETFL) | O_NONBLOCK)
-        let link = ParserLink(pid: pid, fd: ours, queue: queue)
+        let link = ParserLink(pid: pid, fd: ours, queue: queue, time: time)
         link.listen()
         return link
     }
@@ -306,7 +312,7 @@ final class ParserLink {
 
     /// On `readQueue`.
     private func received(_ kind: UInt8, _ payload: Data) {
-        locked { lastProgress = Date() }
+        locked { lastProgress = time.awake() }
         switch SessionParser.FromParser(rawValue: kind) {
         case .parsed?:
             let count = Int(SessionParser.Wire.uint64(payload))
@@ -345,8 +351,10 @@ final class ParserLink {
     /// Output handed to the parser that it hasn't parsed yet, in bytes.
     var unparsed: Int { locked { sent - parsed } }
 
-    /// Whether it has output or a request it hasn't answered, and when it last moved.
-    var busy: (Bool, since: Date) { locked { (sent > parsed || !pending.isEmpty, lastProgress) } }
+    /// How long it has had output or a request it hasn't answered with no progress; nil when it has none (any thread).
+    var stalledFor: TimeInterval? {
+        locked { sent > parsed || !pending.isEmpty ? time.awake() - lastProgress : nil }
+    }
 
     func feed(_ bytes: Data, quietly: Bool = false) {
         guard !bytes.isEmpty, !stopped else { return }
@@ -401,7 +409,7 @@ final class ParserLink {
     private func beginWork<T>(_ body: () -> T) -> T {
         let (result, idle) = locked { () -> (T, Bool) in
             let idle = sent == parsed && pending.isEmpty
-            if idle { lastProgress = Date() }
+            if idle { lastProgress = time.awake() }
             return (body(), idle)
         }
         if idle { queue.async { [weak self] in self?.onBusy?() } }

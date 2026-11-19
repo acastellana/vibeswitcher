@@ -26,8 +26,9 @@ public enum LeadLaunch {
     /// git with options before its command (`git -C . push`, `git -c alias.x=push x`), plumbing that moves refs, and
     /// git under another name: what prefix rules on `git <command>` don't see. Rules are a speed bump; `merge`
     /// checks the lead's branch itself.
-    static let gitAround = ["Bash(git -C:*)", "Bash(git -c:*)", "Bash(git --git-dir:*)", "Bash(git --work-tree:*)",
-                            "Bash(git --exec-path:*)", "Bash(git update-ref:*)", "Bash(git symbolic-ref:*)", "Bash(git config:*)",
+    /// The refused options (`RefusedGit`, whose parsed check each role's `PreToolUse` hook runs) are spelled out in
+    /// each form a rule can name: `git --git-dir=x` matches no `Bash(git --git-dir:*)` (2026-11-17).
+    static let gitAround = RefusedGit.rules + RefusedGit.spellingRules + ["Bash(git update-ref:*)", "Bash(git symbolic-ref:*)", "Bash(git config:*)",
                             "Bash(git fetch:*)", "Bash(git pull:*)", "Bash(git replace:*)", "Bash(git filter-branch:*)",
                             "Bash(env git:*)", "Bash(command git:*)", "Bash(/usr/bin/git:*)", "Bash(xcrun git:*)"]
     /// `git remote`'s subcommands that write (.git/config, which a worktree shares with the main checkout, or the
@@ -307,16 +308,25 @@ public enum LeadLaunch {
     /// The git commands `deny` refuses `role`, as its prompt lists them: each `Bash(...)` rule that runs git, without
     /// its `:*` ("git worktree", "git checkout * main", "env git"). Made from the rules, so the list never drifts from them.
     /// Not `outsideReads`: patterns of quotes, backticks and wildcards that read as noise in a brief (round 1's F8), for
-    /// reads no brief asks for.
+    /// reads no brief asks for. Nor `RefusedGit.spellingRules`: the same options as `git -C` and the rest, spelled again.
     public static func deniedGit(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         var seen = Set<String>()
-        let patterns = Set(outsideReads)
-        return deny(role, base: base, records: records).compactMap { rule -> String? in
-            guard rule.hasPrefix("Bash("), rule.hasSuffix(")"), !patterns.contains(rule) else { return nil }
+        return gitRules(role, base: base, records: records).compactMap { rule -> String? in
             var command = String(rule.dropFirst("Bash(".count).dropLast())
             if command.hasSuffix(":*") { command.removeLast(2) }
-            guard command.hasPrefix("git ") || command.hasSuffix(" git") || command.hasSuffix("/git") else { return nil }
             return seen.insert(command).inserted ? command : nil
+        }
+    }
+
+    /// The `Bash(...)` rules of `deny` that run git, as `deniedGit` lists them: the one list both the briefs and the
+    /// `PreToolUse` hook read (`RefusedGit.refusal(in:rules:)`, which refuses each also behind a global option).
+    public static func gitRules(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
+        let patterns = Set(outsideReads + RefusedGit.spellingRules)
+        return deny(role, base: base, records: records).filter { rule in
+            guard rule.hasPrefix("Bash("), rule.hasSuffix(")"), !patterns.contains(rule) else { return false }
+            var command = String(rule.dropFirst("Bash(".count).dropLast())
+            if command.hasSuffix(":*") { command.removeLast(2) }
+            return command.hasPrefix("git ") || command.hasSuffix(" git") || command.hasSuffix("/git")
         }
     }
 
@@ -364,11 +374,19 @@ public enum LeadLaunch {
     /// read-only git and grep (2026-10-31, 2026-11-01). Claude Code asks it only about what the deny rules let through
     /// (`outsideReads` stays a first layer); anything it doesn't allow prompts as an unlisted command does (and the
     /// witness declines a verifier's when no one answers it: `LeadWitness.stuckPrompts`). Loaded from `--settings`
-    /// whatever `--setting-sources` says.
-    public static func hooks(_ role: Role, server: String, root: String) -> [String: Any] {
+    /// whatever `--setting-sources` says. The same command is the role's `PreToolUse` hook, asked about every Bash call
+    /// in every permission mode (auto mode's included, where nothing reaches a prompt): it refuses git with a refused
+    /// option in a spelling no deny rule names, a refused git command behind a global option, and git's settings through
+    /// its environment (`RefusedGit`). A worker's names its `base` and `records`, which its git rules name (`gitRules`).
+    public static func hooks(_ role: Role, server: String, root: String, base: String? = nil, records: String? = nil) -> [String: Any] {
         var words = [RecentProjects.shellQuote(server), ReadOnlyCommand.hookArgument, ReadOnlyCommand.rootArgument, RecentProjects.shellQuote(root)]
-        if role == .worker { words.append(ReadOnlyCommand.workerArgument) }
-        return ["PermissionRequest": [["matcher": "Bash", "hooks": [["type": "command", "command": words.joined(separator: " "), "timeout": 10]]]]]
+        if role == .worker {
+            words.append(ReadOnlyCommand.workerArgument)
+            if let base { words += [ReadOnlyCommand.baseArgument, RecentProjects.shellQuote(base)] }
+            if let records { words += [ReadOnlyCommand.recordsArgument, RecentProjects.shellQuote(records)] }
+        }
+        let hook: [[String: Any]] = [["matcher": "Bash", "hooks": [["type": "command", "command": words.joined(separator: " "), "timeout": 10]]]]
+        return ["PermissionRequest": hook, "PreToolUse": hook]
     }
 
     /// The environment a role's session (and every command it runs) starts with. A worker's git never opens an
@@ -557,7 +575,8 @@ public enum LeadLaunch {
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
                                server: String, name: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
                                branch: String? = nil, records: String? = nil, folder: URL? = nil, cwd: String? = nil,
-                               temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil) throws -> Prepared {
+                               temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil,
+                               teamPlugins: [String] = [], listedPlugins: [String]? = nil) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -594,7 +613,10 @@ public enum LeadLaunch {
             setAsideMemory(cwd: cwd)
         }
         if !env.isEmpty { settings["env"] = env }
-        settings["hooks"] = hooks(role, server: server, root: cwd)
+        // Your plugins stay off in a worker's or verifier's session but those team_plugins names (`pluginsOff`).
+        let off = pluginsOff(role: role, allowed: teamPlugins, known: knownPlugins(home: home, cwd: cwd, listed: listedPlugins))
+        if !off.isEmpty { settings["enabledPlugins"] = off }
+        settings["hooks"] = hooks(role, server: server, root: cwd, base: branch, records: records)
         // The account's usage windows reach VibeSwitcher only through a status line's input: its own records them and
         // shows yours (see `UsageStatusLine`): for a verifier, only your user settings' (its project settings don't run).
         settings["statusLine"] = UsageStatusLine.settings(server: server, userOnly: role == .verifier)
@@ -639,6 +661,110 @@ public enum LeadLaunch {
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
         return try LinuxLaunch.inline(prepared, prompt: prompt, mcp: mcp, settings: settings, start: start)  // Files on the Mac (S10).
+    }
+
+    // MARK: Plugins
+
+    /// What a worker's or verifier's own settings (`--settings`) say of your Claude Code plugins: each one known
+    /// (`knownPlugins`) that `allowed` (workflow.md's team_plugins) doesn't name, off (`false`). Claude Code takes
+    /// `enabledPlugins` from the `--settings` file over your user and project settings, for that process alone
+    /// (2.1.326: the Code Mode trial, docs/experiments/code-mode-trial.md), so the session loads none of their skills,
+    /// hooks, agents or MCP servers, and your own sessions keep them. Empty for the lead: it keeps yours, as you do.
+    /// Why: every plugin costs tokens in every team session, and some plugins' instructions contradict the working
+    /// policy the lead gives workers (mandatory extra reviewers, brainstorming gates, full-suite runs).
+    public static func pluginsOff(role: Role, allowed: [String], known: [String]) -> [String: Bool] {
+        guard role != .lead else { return [:] }
+        var off: [String: Bool] = [:]
+        for id in known where !pluginAllowed(id, by: allowed) { off[id] = false }
+        return off
+    }
+
+    /// Whether team_plugins names the plugin `id` ("<plugin>@<marketplace>"): by that whole id, or by its plugin name
+    /// alone (any marketplace's), as `claude plugin list` shows it.
+    public static func pluginAllowed(_ id: String, by allowed: [String]) -> Bool {
+        let name = id.split(separator: "@", maxSplits: 1).first.map(String.init) ?? id
+        return allowed.contains { $0 == id || (!$0.contains("@") && $0 == name) }
+    }
+
+    /// Whether `text` reads as a plugin's id or name for team_plugins: "<plugin>@<marketplace>" or "<plugin>", each part
+    /// letters, digits, `.`, `_` and `-` (no spaces, commas, quotes or path characters).
+    public static func isPluginName(_ text: String) -> Bool {
+        let parts = text.split(separator: "@", omittingEmptySubsequences: false)
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        return (1...2).contains(parts.count)
+            && parts.allSatisfy { !$0.isEmpty && $0.unicodeScalars.allSatisfy(allowed.contains) }
+    }
+
+    /// The ids of the plugins a session started in `cwd` could load, by name only ("<plugin>@<marketplace>"): those
+    /// `listed` (Claude Code's own `claude plugin list --json`, `listedPlugins`: the only source of the ones synced from
+    /// the account, "<plugin>@synced", and of "<name>@skills-dir"), every one Claude Code's record of installed plugins
+    /// lists (`~/.claude/plugins/installed_plugins.json`, its keys alone: no install's path or contents is read), and
+    /// every one `cwd`'s own project settings enable (`.claude/settings.json`, `.claude/settings.local.json` in the
+    /// worktree). Nothing here is written. A record that can't be read adds none.
+    public static func knownPlugins(home: String, cwd: String, listed: [String]? = nil) -> [String] {
+        var ids = Set(listed ?? [])
+        let record = (home as NSString).appendingPathComponent(".claude/plugins/installed_plugins.json")
+        if let data = ConfigSeal.regularContents(record, limit: ConfigSeal.jsonLimit),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            ids.formUnion((object["plugins"] as? [String: Any] ?? [:]).keys)
+        }
+        for file in [".claude/settings.json", ".claude/settings.local.json"] {
+            let path = (cwd as NSString).appendingPathComponent(file)
+            guard let data = ConfigSeal.regularContents(path, limit: ConfigSeal.jsonLimit),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            ids.formUnion((object["enabledPlugins"] as? [String: Any] ?? [:]).keys)
+        }
+        return ids.filter { !$0.isEmpty }.sorted()
+    }
+
+    /// The ids `claude plugin list --json` gives (each entry's "id"), run as `command`'s program (`LaunchPreflight.program`,
+    /// else claude) by your login shell in `folder` (`pluginListFolder`: VibeSwitcher's own, empty; never a task's
+    /// worktree or the repository, whose project settings a worker may have written and a verifier never loads); nil
+    /// when the folder isn't private and empty, or the listing fails, prints no list or takes longer than `timeout`.
+    /// `plugin list` takes no `--setting-sources` (2.1.327), so the neutral folder is what keeps a project's settings out.
+    /// Only the ids are kept: never a plugin's path or contents.
+    public static func listedPlugins(command: String, folder: URL = pluginListFolder, timeout: TimeInterval = 20) -> [String]? {
+        guard neutral(folder) else { return nil }
+        let program = LaunchPreflight.program(in: command) ?? "claude"
+        let result = Shell.run(executable: "/bin/zsh", args: ["-lc", "exec \"$1\" plugin list --json", "zsh", program],
+                               in: folder.path, timeout: timeout, grace: 1)
+        guard result.ok else { return nil }
+        return pluginIDs(json: Data(result.output.utf8))
+    }
+
+    /// Where `listedPlugins` runs Claude Code's `plugin list`: a folder of VibeSwitcher's own under the sessions' temporary
+    /// root (`SessionTemp.root`: /private/tmp/vibeswitcher-<uid> for your own app, in no repository), named so the app's
+    /// sweep of ended sessions' folders leaves it.
+    public static var pluginListFolder: URL { SessionTemp.root.appendingPathComponent("plugins", isDirectory: true) }
+
+    /// Makes `folder` (0700) and says whether it and the root above it are real folders of yours, private, with nothing
+    /// in `folder`: no project settings (`.claude/`) for the listing to load.
+    static func neutral(_ folder: URL) -> Bool {
+        let top = folder.deletingLastPathComponent()
+        var info = stat()
+        if lstat(top.path, &info) == 0, info.st_uid != getuid() || (info.st_mode & S_IFMT) != S_IFDIR { return false }
+        guard (try? VibePaths.ensurePrivate(folder, within: top)) != nil, SessionTemp.isPrivate(top), SessionTemp.isPrivate(folder),
+              let entries = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return false }
+        return entries.isEmpty
+    }
+
+    /// The ids in `claude plugin list --json`'s output (an array of objects, each with its "id"): the first array that
+    /// parses from a line opening with `[` to a later line closing with `]` (a login shell's own lines before or after
+    /// it are skipped, even ones that start with `[`); nil when there's none.
+    static func pluginIDs(json: Data) -> [String]? {
+        let lines = String(decoding: json, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
+        let opens = lines.indices.filter { lines[$0].hasPrefix("[") }
+        // The array's own last line isn't indented ("]" or the whole array on one line); the lines inside it are.
+        let closes = lines.indices.filter { lines[$0].first.map { !$0.isWhitespace } == true
+            && lines[$0].trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("]") }
+        for open in opens.prefix(32) {
+            for close in closes.reversed().prefix(32) where close >= open {
+                let text = lines[open...close].joined(separator: "\n")
+                guard let list = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]] else { continue }
+                return list.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
+            }
+        }
+        return nil
     }
 
     /// A verifier isn't started when its tool server's path can't be its shell prefix (`BranchCode.prefixable`).

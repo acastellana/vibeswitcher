@@ -186,6 +186,31 @@ struct AccountSwitchTests: LeadTeamFixture {
         #expect(store.load().limits.filter(\.reached).map(\.account) == [Self.a], "\(store.load().limits)")
     }
 
+    @Test func correctingAnOldUntaggedRefusalAfterLoginPreservesItsOriginalAccount() throws {
+        try login(Self.a, email: "alice@example.com")
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        #expect(!call(lead, "start_worker", ["task": "one"]).isError)
+        #expect(!call(lead, "audit", ["task": "one"]).isError)
+        let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
+        runtime.usageLimits[verifier] = UsageLimit(said: "You've hit your Fable limit · resets Nov 24 at 1am",
+                                                   resetsAt: AccountUsageTests.tomorrow, at: Self.now.timeIntervalSince1970,
+                                                   kind: "seven_day_overage_included", apiError: "usage_limit_reached")
+        store.record([AccountUsage.Limit(name: "seven_day_overage_included", usedPercent: 100,
+                                        resetsAt: AccountUsageTests.tomorrow, at: Self.now.timeIntervalSince1970,
+                                        reached: true, account: Self.a)], now: Self.now)
+        try login(Self.b, email: "bob@corp.test")
+        #expect(lead.usageHold(model: "fable", sessions: try lead.advanceSessions()) == nil)
+        let limits = store.load().limits
+        #expect(limits.count == 1 && limits.first?.account == Self.a && limits.first?.model == "fable")
+        #expect(limits.first?.resetsAt == AccountUsageTests.tomorrow && limits.first?.reached == true)
+        try login(Self.a, email: "alice@example.com")
+        #expect(lead.usageHold(model: "fable", sessions: nil)?.reached == true)
+        #expect(lead.usageHold(model: "opus", sessions: nil) == nil)
+    }
+
     /// Readings kept before they named an account (the store as it was on 2026-11-07) hold nothing back once the active
     /// account is known: whose they were can't be told. With no account known (an API key), every reading holds as before.
     @Test func readingsOfNoKnownAccountHoldNothingBackOnceTheActiveOneIsKnown() throws {

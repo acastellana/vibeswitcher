@@ -50,8 +50,13 @@ enum ChatBench {
         // reads, steering), so every layout the chat asks for gets its chance to run.
         let updates = env["VIBESWITCHER_BENCH_UPDATES"] == "1"
         chat.runner.way = whole && !ticks ? .bang : nil
+        // VIBESWITCHER_BENCH_SUMMARIES=1: the cards' AI summaries on, as the window gives a lead's chat them, from a
+        // made-up model (never `claude -p`).
+        let summaries = env["VIBESWITCHER_BENCH_SUMMARIES"] == "1"
+            ? TeamSummaryModel(generate: { prompt in "A made-up summary of \(prompt.count) characters" }) : nil
         let view = BenchRoot(chat: chat, row: row, whole: whole,
-                             board: env["VIBESWITCHER_BENCH_BOARD"].map { BoardStore(root: $0).load() }, folder: env["VIBESWITCHER_BENCH_FOLDER"])
+                             board: env["VIBESWITCHER_BENCH_BOARD"].map { BoardStore(root: $0).load() }, folder: env["VIBESWITCHER_BENCH_FOLDER"],
+                             summaries: summaries)
         // VIBESWITCHER_BENCH_STACK=1: inside a VStack with a composer-like view below, as the window has it.
         let host = CountingHost(rootView: env["VIBESWITCHER_BENCH_STACK"] == "1"
             ? AnyView(VStack(spacing: 0) { view; Text("composer").frame(height: 60) })
@@ -90,7 +95,9 @@ enum ChatBench {
         let stall = env["VIBESWITCHER_BENCH_STALL"] == "1"
         let memory = env["VIBESWITCHER_BENCH_MEMORY"] == "1" ? MemoryProbe() : nil
         let census = env["VIBESWITCHER_BENCH_CENSUS"] == "1" ? StreamCensus() : nil
-        let stream = env["VIBESWITCHER_BENCH_STREAM"].flatMap(Int.init).flatMap { $0 > 0 ? Stream(path: path, perSecond: $0) : nil }
+        let stream = env["VIBESWITCHER_BENCH_STREAM"].flatMap(Int.init).flatMap {
+            $0 > 0 ? Stream(path: path, perSecond: $0, lead: env["VIBESWITCHER_BENCH_STREAM_LEAD"] == "1") : nil
+        }
         let rule = StallRule.fromEnvironment(env)
         let startLoad = rule.load()
         if !stall { print("  stall rule: \(rule.describe(load: startLoad))") }
@@ -631,8 +638,13 @@ enum ChatBench {
         let whole: Bool
         let board: LeadBoard?
         let folder: String?
+        let summaries: TeamSummaryModel?
 
         var body: some View {
+            content.environment(\.teamSummaries, summaries)
+        }
+
+        @ViewBuilder private var content: some View {
             if whole, let row {
                 VStack(spacing: 0) {
                     if let board { TeamStrip(board: board) { _ in } }

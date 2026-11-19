@@ -276,7 +276,7 @@ struct ClearDraftTests {
         """.write(toFile: script, atomically: true, encoding: .utf8)
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try await client.spawn("/bin/sh \(script)")
+        let session = try await client.spawn("\(jobControlOff)/bin/sh \(script)")
         let id = session.id
         let older = { () -> LeadDelivery.Screen? in
             if case .screenText(_, let text)? = try? HostCall.request(.screen(id: id), socket: host.socket, appKey: host.appKey) { return LeadDelivery.Screen(text: text) }
@@ -345,6 +345,9 @@ struct StyledScreenHostTests {
                     continue
                 }
                 _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
+                // As the real host's (`UnixSocket.configure`): a reply to a client that has gone fails, not SIGPIPE.
+                var noSigPipe: Int32 = 1
+                setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
                 func answer(_ seq: Int, _ event: HostEvent) {
                     guard let payload = try? HostCoding.encode(HostEventEnvelope(replyTo: seq, event: event)) else { return }
                     let frame = HostFrame.encode(.control, payload)

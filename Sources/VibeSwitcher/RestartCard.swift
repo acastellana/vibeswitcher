@@ -25,6 +25,8 @@ final class RestartOffer: ObservableObject {
     @Published private(set) var macRestarted = true
     /// Resumes one of your own sessions: the sidebar's Resume (`LaunchPlan.resumeRequest`).
     var resumeSession: (SpawnRequest) -> Void = { _ in }
+    /// The launch presets for a folder (`LaunchPresets.presets(for:)`): a resumed session gets its preset's environment.
+    var presets: (String) -> [LaunchPreset] = { _ in [] }
     /// Reopens a lead in its repository, carrying on its conversation (`LeadController.reopenLead`).
     var reopenLead: (_ root: String, _ conversation: String) -> Void = { _, _ in }
     /// The card has sessions to show, or none any more.
@@ -237,7 +239,7 @@ final class RestartOffer: ObservableObject {
             guard let conversation = entry.agentSessionID else { continue }
             switch entry.role {
             case .lead: reopenLead(entry.folder, conversation)
-            case .user: RestartReopen.spawnRequest(entry).map(resumeSession)
+            case .user: RestartReopen.spawnRequest(entry, presets: presets(entry.folder)).map(resumeSession)
             }
         }
         finish()

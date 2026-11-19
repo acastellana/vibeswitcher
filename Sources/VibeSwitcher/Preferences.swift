@@ -100,6 +100,8 @@ final class Preferences: ObservableObject {
             defaults.set(kept, forKey: "batteryHoldBelow")
         }
     }
+    /// Run the memory benches once a day on a calm Mac on AC power (`MemoryBenchWatch`); on by default.
+    @Published var memoryBenches: Bool { didSet { defaults.set(memoryBenches, forKey: "memoryBenches") } }
     /// The stepper's next limit: 5 at a time within 10–90, below 10 off (0) and up from off 10.
     static func batteryHoldStep(_ limit: Int, up: Bool) -> Int {
         let range = PowerWatch.limits
@@ -186,6 +188,7 @@ final class Preferences: ObservableObject {
         promptAuditDays = PromptAudit.intervalDays(defaults)
         keepAwake = KeepAwakeMode(rawValue: defaults.string(forKey: "keepAwake") ?? "") ?? .onPower
         batteryHoldBelow = PowerWatch.clamp(defaults.integer(forKey: "batteryHoldBelow"))
+        memoryBenches = defaults.object(forKey: "memoryBenches") as? Bool ?? true
         briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code
         projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
         walletPeerID = defaults.string(forKey: "walletPeerID") ?? ""

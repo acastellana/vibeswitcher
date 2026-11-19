@@ -25,16 +25,21 @@ final class FakeTimers {
     }
 
     let queue: DispatchQueue
+    /// The clock the session's parser watchdog measures with.
+    let time: MacTime
     private(set) var made: [Timer] = []
 
-    init(queue: DispatchQueue) { self.queue = queue }
+    init(queue: DispatchQueue, time: MacTime = .real) {
+        self.queue = queue
+        self.time = time
+    }
 
     var timers: SessionTimers {
-        SessionTimers { purpose, _, fire in
+        SessionTimers(make: { purpose, _, fire in
             let timer = Timer(purpose, fire: fire)
             self.made.append(timer)
             return timer
-        }
+        }, time: time)
     }
 
     /// Those made for `purpose`, oldest first. On the session's queue, as everything here.

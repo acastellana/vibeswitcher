@@ -65,7 +65,11 @@ enum SettingsNote: String, CaseIterable {
                         + "with the lid open, or with an external display connected. A closed lid sleeps whatever this setting says, "
                         + "and so does a battery that runs out.\n\n"
                         + "On waking from \(Int(SleepCost.noticeAfter / 60)) minutes of sleep or more with tasks in flight, you're told which ones "
-                        + "it paused. Each day's app-health digest and the lead's status say how many task-hours sleep paused.")
+                        + "it paused. Each day's app-health digest and the lead's status say how many task-hours sleep paused.\n\n"
+                        + "The memory benches build main in a scratch copy inside VibeSwitcher's own folder and run its memory tests there, "
+                        + "about half an hour, at most once a day: on AC power, the Mac awake and its load under \(Int(MemoryBench.calmLoad)), "
+                        + "and no merge testing. Unplugging, sleep or a merge stops them, and they try again later. A budget that fails is told "
+                        + "to the lead with the commits since the last pass.")
         case .dictation:
             return ("Dictation", "Your recording goes to OpenAI and the text lands in the box for you to check. Your key stays on this Mac, in your login Keychain.",
                     "Hold the mic in the composer, on the Mac or the phone, and speak; when you let go, the recording goes to OpenAI with this key. "

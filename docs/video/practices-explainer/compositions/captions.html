@@ -95,137 +95,198 @@
         <div class="cg" id="cg-51"><span class="tx">or the report is refused.</span></div>
         <div class="cg" id="cg-52"><span class="tx">Not every change needs an audit.</span></div>
         <div class="cg" id="cg-53"><span class="tx">By default, the merge&#x27;s</span></div>
-        <div class="cg" id="cg-54"><span class="tx">full test run is the check.</span></div>
-        <div class="cg" id="cg-55"><span class="tx">But sensitive paths,</span></div>
-        <div class="cg" id="cg-56"><span class="tx">risky changes and a random ten percent</span></div>
-        <div class="cg" id="cg-57"><span class="tx">sample are raised to an audit,</span></div>
-        <div class="cg" id="cg-58"><span class="tx">and nothing can lower one.</span></div>
-        <div class="cg" id="cg-59"><span class="tx">So far, <span class="n">271</span> of <span class="n">495</span> merges were audited.</span></div>
-        <div class="cg" id="cg-60"><span class="tx">The audit is independent.</span></div>
-        <div class="cg" id="cg-61"><span class="tx">A read-only verifier</span></div>
-        <div class="cg" id="cg-62"><span class="tx">works from the contract,</span></div>
-        <div class="cg" id="cg-63"><span class="tx">not the worker&#x27;s story,</span></div>
-        <div class="cg" id="cg-64"><span class="tx">and runs real commands to</span></div>
-        <div class="cg" id="cg-65"><span class="tx">try to break the change,</span></div>
-        <div class="cg" id="cg-66"><span class="tx">on a different model by default.</span></div>
-        <div class="cg" id="cg-67"><span class="tx">An audit can also use two or three finders,</span></div>
-        <div class="cg" id="cg-68"><span class="tx">sharing one build.</span></div>
-        <div class="cg" id="cg-69"><span class="tx">Then a finding stays open</span></div>
-        <div class="cg" id="cg-70"><span class="tx">when most of them raised it.</span></div>
-        <div class="cg" id="cg-71"><span class="tx">An Important finding blocks</span></div>
-        <div class="cg" id="cg-72"><span class="tx">the merge until it&#x27;s fixed,</span></div>
-        <div class="cg" id="cg-73"><span class="tx">or dismissed with a reason.</span></div>
-        <div class="cg" id="cg-74"><span class="tx">A nit never blocks.</span></div>
-        <div class="cg" id="cg-75"><span class="tx">Each fix gets a round that</span></div>
-        <div class="cg" id="cg-76"><span class="tx">checks only those findings.</span></div>
-        <div class="cg" id="cg-77"><span class="tx">After two failed rounds,</span></div>
-        <div class="cg" id="cg-78"><span class="tx">there&#x27;s no third:</span></div>
-        <div class="cg" id="cg-79"><span class="tx">the lead re-plans,</span></div>
-        <div class="cg" id="cg-80"><span class="tx">asks you, or re-rolls the</span></div>
-        <div class="cg" id="cg-81"><span class="tx">task with a fresh worker.</span></div>
-        <div class="cg" id="cg-82"><span class="tx">Then comes the merge gate.</span></div>
-        <div class="cg" id="cg-83"><span class="tx">It takes exactly the</span></div>
-        <div class="cg" id="cg-84"><span class="tx">commit that was checked,</span></div>
-        <div class="cg" id="cg-85"><span class="tx">rebases it where no agent is working,</span></div>
-        <div class="cg" id="cg-86"><span class="tx">runs the full suite,</span></div>
-        <div class="cg" id="cg-87"><span class="tx">and only then fast-forwards.</span></div>
-        <div class="cg" id="cg-88"><span class="tx">Never a merge commit,</span></div>
-        <div class="cg" id="cg-89"><span class="tx">and never forced,</span></div>
-        <div class="cg" id="cg-90"><span class="tx">so any merge can be undone with one revert.</span></div>
-        <div class="cg" id="cg-91"><span class="tx">Tests misbehave, so the gate plans for it.</span></div>
-        <div class="cg" id="cg-92"><span class="tx">A failing test gets one more run,</span></div>
-        <div class="cg" id="cg-93"><span class="tx">and if it passes,</span></div>
-        <div class="cg" id="cg-94"><span class="tx">it&#x27;s recorded as a flake.</span></div>
-        <div class="cg" id="cg-95"><span class="tx">A run that goes silent is stopped,</span></div>
-        <div class="cg" id="cg-96"><span class="tx">and the last test it started is named.</span></div>
-        <div class="cg" id="cg-97"><span class="tx"><span class="n">495</span> merges, every one tested at the gate.</span></div>
-        <div class="cg" id="cg-98"><span class="tx">Zero reverts.</span></div>
-        <div class="cg" id="cg-99"><span class="tx">Between steps, the board moves on its own.</span></div>
-        <div class="cg" id="cg-100"><span class="tx">A done report starts the audit or the merge,</span></div>
-        <div class="cg" id="cg-101"><span class="tx">findings go back to the worker,</span></div>
-        <div class="cg" id="cg-102"><span class="tx">and the next task in line begins.</span></div>
-        <div class="cg" id="cg-103"><span class="tx">It never moves a task the lead is holding.</span></div>
-        <div class="cg" id="cg-104"><span class="tx">And you choose the merge policy.</span></div>
-        <div class="cg" id="cg-105"><span class="tx">When something goes wrong,</span></div>
-        <div class="cg" id="cg-106"><span class="tx">it becomes a check.</span></div>
-        <div class="cg" id="cg-107"><span class="tx">In November, hung test runs held a</span></div>
-        <div class="cg" id="cg-108"><span class="tx">shared test slot for up to an hour,</span></div>
-        <div class="cg" id="cg-109"><span class="tx">five times in two days.</span></div>
-        <div class="cg" id="cg-110"><span class="tx">That became a rule:</span></div>
-        <div class="cg" id="cg-111"><span class="tx">a run with no output,</span></div>
-        <div class="cg" id="cg-112"><span class="tx">and next to no CPU,</span></div>
-        <div class="cg" id="cg-113"><span class="tx">for ten minutes, is stopped.</span></div>
-        <div class="cg" id="cg-114"><span class="tx">All <span class="n">21</span> incidents on record</span></div>
-        <div class="cg" id="cg-115"><span class="tx">became check tasks.</span></div>
-        <div class="cg" id="cg-116"><span class="tx">The Mac is shared,</span></div>
-        <div class="cg" id="cg-117"><span class="tx">and the account is finite,</span></div>
-        <div class="cg" id="cg-118"><span class="tx">so both are budgeted.</span></div>
-        <div class="cg" id="cg-119"><span class="tx">Each task has a budget of working time.</span></div>
-        <div class="cg" id="cg-120"><span class="tx">When it runs out,</span></div>
-        <div class="cg" id="cg-121"><span class="tx">nothing is killed:</span></div>
-        <div class="cg" id="cg-122"><span class="tx">the worker commits what works,</span></div>
-        <div class="cg" id="cg-123"><span class="tx">and proposes what&#x27;s next.</span></div>
-        <div class="cg" id="cg-124"><span class="tx">A witness tells the lead</span></div>
-        <div class="cg" id="cg-125"><span class="tx">when a session goes quiet.</span></div>
-        <div class="cg" id="cg-126"><span class="tx">Heavy jobs take turns in shared slots,</span></div>
-        <div class="cg" id="cg-127"><span class="tx">and new work holds off on low battery,</span></div>
-        <div class="cg" id="cg-128"><span class="tx">or near a usage limit.</span></div>
-        <div class="cg" id="cg-129"><span class="tx">Each role gets a model that suits it.</span></div>
-        <div class="cg" id="cg-130"><span class="tx">By default, the verifier runs on a</span></div>
-        <div class="cg" id="cg-131"><span class="tx">different model from the workers.</span></div>
-        <div class="cg" id="cg-132"><span class="tx">In this project, for now, both run on Opus.</span></div>
-        <div class="cg" id="cg-133"><span class="tx">Codex takes bounded,</span></div>
-        <div class="cg" id="cg-134"><span class="tx">mechanical tasks,</span></div>
-        <div class="cg" id="cg-135"><span class="tx">and with agent set to auto,</span></div>
-        <div class="cg" id="cg-136"><span class="tx">it&#x27;s picked when Claude&#x27;s limits run tight.</span></div>
-        <div class="cg" id="cg-137"><span class="tx">A Claude verifier always audits its work.</span></div>
-        <div class="cg" id="cg-138"><span class="tx">The dashed roles are still being built.</span></div>
-        <div class="cg" id="cg-139"><span class="tx">The project&#x27;s memory</span></div>
-        <div class="cg" id="cg-140"><span class="tx">lives in the repository:</span></div>
-        <div class="cg" id="cg-141"><span class="tx">decisions with their reasons,</span></div>
-        <div class="cg" id="cg-142"><span class="tx">progress, and incidents.</span></div>
-        <div class="cg" id="cg-143"><span class="tx">The tool server commits them,</span></div>
-        <div class="cg" id="cg-144"><span class="tx">and workers can&#x27;t edit them.</span></div>
-        <div class="cg" id="cg-145"><span class="tx">A new lead reads them first.</span></div>
-        <div class="cg" id="cg-146"><span class="tx">And every merge records its task,</span></div>
-        <div class="cg" id="cg-147"><span class="tx">its review, its models,</span></div>
-        <div class="cg" id="cg-148"><span class="tx">and its contract.</span></div>
-        <div class="cg" id="cg-149"><span class="tx">And you keep the keys.</span></div>
-        <div class="cg" id="cg-150"><span class="tx">You set the review floor,</span></div>
-        <div class="cg" id="cg-151"><span class="tx">the sensitive paths and the merge policy,</span></div>
-        <div class="cg" id="cg-152"><span class="tx">and an approval covers one exact commit.</span></div>
-        <div class="cg" id="cg-153"><span class="tx">Pushes, installs and wallet</span></div>
-        <div class="cg" id="cg-154"><span class="tx">requests come to you as cards.</span></div>
-        <div class="cg" id="cg-155"><span class="tx">A seal guards the configuration.</span></div>
-        <div class="cg" id="cg-156"><span class="tx">And your phone can follow along,</span></div>
-        <div class="cg" id="cg-157"><span class="tx">with replies behind their own switch.</span></div>
-        <div class="cg" id="cg-158"><span class="tx">So what does this add</span></div>
-        <div class="cg" id="cg-159"><span class="tx">to Claude Code by hand?</span></div>
-        <div class="cg" id="cg-160"><span class="tx">Planning becomes contracts on a board.</span></div>
-        <div class="cg" id="cg-161"><span class="tx">Parallel work gets a worktree per task.</span></div>
-        <div class="cg" id="cg-162"><span class="tx">Review gets an independent verifier,</span></div>
-        <div class="cg" id="cg-163"><span class="tx">merging gets a gate,</span></div>
-        <div class="cg" id="cg-164"><span class="tx">and mistakes become checks.</span></div>
-        <div class="cg" id="cg-165"><span class="tx">The Mac&#x27;s load and limits are watched,</span></div>
-        <div class="cg" id="cg-166"><span class="tx">and memory lives in git.</span></div>
-        <div class="cg" id="cg-167"><span class="tx">And you&#x27;re asked only</span></div>
-        <div class="cg" id="cg-168"><span class="tx">what&#x27;s yours to decide.</span></div>
-        <div class="cg" id="cg-169"><span class="tx">Underneath, it&#x27;s the same Claude Code.</span></div>
-        <div class="cg" id="cg-170"><span class="tx">Its permission rules,</span></div>
-        <div class="cg" id="cg-171"><span class="tx">hooks and status line are</span></div>
-        <div class="cg" id="cg-172"><span class="tx">how VibeSwitcher works.</span></div>
-        <div class="cg" id="cg-173"><span class="tx">In under four weeks on this repository,</span></div>
-        <div class="cg" id="cg-174"><span class="tx"><span class="n">495</span> tasks merged,</span></div>
-        <div class="cg" id="cg-175"><span class="tx">every one tested at the gate.</span></div>
-        <div class="cg" id="cg-176"><span class="tx"><span class="n">82</span> Important findings fixed before merge.</span></div>
-        <div class="cg" id="cg-177"><span class="tx">Zero reverts.</span></div>
-        <div class="cg" id="cg-178"><span class="tx">You decide what to build.</span></div>
-        <div class="cg" id="cg-179"><span class="tx">The system runs the process.</span></div>
+        <div class="cg" id="cg-54"><span class="tx">full test run is the check,</span></div>
+        <div class="cg" id="cg-55"><span class="tx">and a small task,</span></div>
+        <div class="cg" id="cg-56"><span class="tx">done in under thirty minutes</span></div>
+        <div class="cg" id="cg-57"><span class="tx">and touching nothing sensitive,</span></div>
+        <div class="cg" id="cg-58"><span class="tx">merges on its tests too.</span></div>
+        <div class="cg" id="cg-59"><span class="tx">But sensitive paths,</span></div>
+        <div class="cg" id="cg-60"><span class="tx">risky changes and a random ten percent</span></div>
+        <div class="cg" id="cg-61"><span class="tx">sample are always raised to an audit,</span></div>
+        <div class="cg" id="cg-62"><span class="tx">and nothing can lower that.</span></div>
+        <div class="cg" id="cg-63"><span class="tx">So far, <span class="n">271</span> of <span class="n">495</span> merges were audited.</span></div>
+        <div class="cg" id="cg-64"><span class="tx">The audit is independent.</span></div>
+        <div class="cg" id="cg-65"><span class="tx">A read-only verifier</span></div>
+        <div class="cg" id="cg-66"><span class="tx">works from the contract,</span></div>
+        <div class="cg" id="cg-67"><span class="tx">not the worker&#x27;s story,</span></div>
+        <div class="cg" id="cg-68"><span class="tx">and runs real commands to</span></div>
+        <div class="cg" id="cg-69"><span class="tx">try to break the change,</span></div>
+        <div class="cg" id="cg-70"><span class="tx">on a different model by default.</span></div>
+        <div class="cg" id="cg-71"><span class="tx">An audit can also use two or three finders,</span></div>
+        <div class="cg" id="cg-72"><span class="tx">sharing one build.</span></div>
+        <div class="cg" id="cg-73"><span class="tx">Then a finding stays open</span></div>
+        <div class="cg" id="cg-74"><span class="tx">when most of them raised it.</span></div>
+        <div class="cg" id="cg-75"><span class="tx">An Important finding blocks</span></div>
+        <div class="cg" id="cg-76"><span class="tx">the merge until it&#x27;s fixed,</span></div>
+        <div class="cg" id="cg-77"><span class="tx">or dismissed with a reason.</span></div>
+        <div class="cg" id="cg-78"><span class="tx">A nit never blocks.</span></div>
+        <div class="cg" id="cg-79"><span class="tx">Each fix gets a round that</span></div>
+        <div class="cg" id="cg-80"><span class="tx">checks only those findings.</span></div>
+        <div class="cg" id="cg-81"><span class="tx">After two failed rounds,</span></div>
+        <div class="cg" id="cg-82"><span class="tx">there&#x27;s no third:</span></div>
+        <div class="cg" id="cg-83"><span class="tx">the lead re-plans,</span></div>
+        <div class="cg" id="cg-84"><span class="tx">asks you, or re-rolls the</span></div>
+        <div class="cg" id="cg-85"><span class="tx">task with a fresh worker.</span></div>
+        <div class="cg" id="cg-86"><span class="tx">Then comes the merge gate.</span></div>
+        <div class="cg" id="cg-87"><span class="tx">It takes exactly the</span></div>
+        <div class="cg" id="cg-88"><span class="tx">commit that was checked,</span></div>
+        <div class="cg" id="cg-89"><span class="tx">rebases it where no agent is working,</span></div>
+        <div class="cg" id="cg-90"><span class="tx">runs the full suite,</span></div>
+        <div class="cg" id="cg-91"><span class="tx">and only then fast-forwards.</span></div>
+        <div class="cg" id="cg-92"><span class="tx">Never a merge commit,</span></div>
+        <div class="cg" id="cg-93"><span class="tx">and never forced,</span></div>
+        <div class="cg" id="cg-94"><span class="tx">so any merge can be undone with one revert.</span></div>
+        <div class="cg" id="cg-95"><span class="tx">Tests misbehave, so the gate plans for it.</span></div>
+        <div class="cg" id="cg-96"><span class="tx">A failing test gets one more run,</span></div>
+        <div class="cg" id="cg-97"><span class="tx">and if it passes,</span></div>
+        <div class="cg" id="cg-98"><span class="tx">it&#x27;s recorded as a flake.</span></div>
+        <div class="cg" id="cg-99"><span class="tx">A run that goes silent is stopped,</span></div>
+        <div class="cg" id="cg-100"><span class="tx">and the last test it started is named.</span></div>
+        <div class="cg" id="cg-101"><span class="tx"><span class="n">495</span> merges, every one tested at the gate.</span></div>
+        <div class="cg" id="cg-102"><span class="tx">Zero reverts.</span></div>
+        <div class="cg" id="cg-103"><span class="tx">Merges got faster, too.</span></div>
+        <div class="cg" id="cg-104"><span class="tx">A merge&#x27;s test run takes</span></div>
+        <div class="cg" id="cg-105"><span class="tx">whatever cores are free,</span></div>
+        <div class="cg" id="cg-106"><span class="tx">and only the failing tests run again.</span></div>
+        <div class="cg" id="cg-107"><span class="tx">A test that&#x27;s red on main as well</span></div>
+        <div class="cg" id="cg-108"><span class="tx">doesn&#x27;t send the branch back:</span></div>
+        <div class="cg" id="cg-109"><span class="tx">it merges, and a task to</span></div>
+        <div class="cg" id="cg-110"><span class="tx">fix that test is filed.</span></div>
+        <div class="cg" id="cg-111"><span class="tx">And when finished work stops landing,</span></div>
+        <div class="cg" id="cg-112"><span class="tx">the lead is told why:</span></div>
+        <div class="cg" id="cg-113"><span class="tx">main is red, the slots are full,</span></div>
+        <div class="cg" id="cg-114"><span class="tx">or the Mac is loaded,</span></div>
+        <div class="cg" id="cg-115"><span class="tx">asleep, or on battery.</span></div>
+        <div class="cg" id="cg-116"><span class="tx">Between steps, the board moves on its own.</span></div>
+        <div class="cg" id="cg-117"><span class="tx">A done report starts the audit or the merge,</span></div>
+        <div class="cg" id="cg-118"><span class="tx">findings go back to the worker,</span></div>
+        <div class="cg" id="cg-119"><span class="tx">and the next task in line begins.</span></div>
+        <div class="cg" id="cg-120"><span class="tx">It never moves a task the lead is holding.</span></div>
+        <div class="cg" id="cg-121"><span class="tx">And you choose the merge policy.</span></div>
+        <div class="cg" id="cg-122"><span class="tx">When something goes wrong,</span></div>
+        <div class="cg" id="cg-123"><span class="tx">it becomes a check.</span></div>
+        <div class="cg" id="cg-124"><span class="tx">In November, hung test runs held a</span></div>
+        <div class="cg" id="cg-125"><span class="tx">shared test slot for up to an hour,</span></div>
+        <div class="cg" id="cg-126"><span class="tx">five times in two days.</span></div>
+        <div class="cg" id="cg-127"><span class="tx">That became a rule:</span></div>
+        <div class="cg" id="cg-128"><span class="tx">a run with no output,</span></div>
+        <div class="cg" id="cg-129"><span class="tx">and next to no CPU,</span></div>
+        <div class="cg" id="cg-130"><span class="tx">for ten minutes, is stopped.</span></div>
+        <div class="cg" id="cg-131"><span class="tx">All <span class="n">21</span> incidents on record</span></div>
+        <div class="cg" id="cg-132"><span class="tx">became check tasks.</span></div>
+        <div class="cg" id="cg-133"><span class="tx">The app is held to the same standard.</span></div>
+        <div class="cg" id="cg-134"><span class="tx">UI journeys drive the real app in a sandbox,</span></div>
+        <div class="cg" id="cg-135"><span class="tx">and compare each screenshot</span></div>
+        <div class="cg" id="cg-136"><span class="tx">with its baseline.</span></div>
+        <div class="cg" id="cg-137"><span class="tx">A health watcher groups the app&#x27;s</span></div>
+        <div class="cg" id="cg-138"><span class="tx">own freezes and errors by cause,</span></div>
+        <div class="cg" id="cg-139"><span class="tx">and proposes a task when</span></div>
+        <div class="cg" id="cg-140"><span class="tx">one keeps coming back.</span></div>
+        <div class="cg" id="cg-141"><span class="tx">And memory is measured:</span></div>
+        <div class="cg" id="cg-142"><span class="tx">on macOS 27.2,</span></div>
+        <div class="cg" id="cg-143"><span class="tx">freed memory now goes back at once,</span></div>
+        <div class="cg" id="cg-144"><span class="tx">and an image-heavy chat adds</span></div>
+        <div class="cg" id="cg-145"><span class="tx"><span class="n">178</span> megabytes at its peak,</span></div>
+        <div class="cg" id="cg-146"><span class="tx">down from about a gigabyte.</span></div>
+        <div class="cg" id="cg-147"><span class="tx">The Mac is shared,</span></div>
+        <div class="cg" id="cg-148"><span class="tx">and the account is finite,</span></div>
+        <div class="cg" id="cg-149"><span class="tx">so both are budgeted.</span></div>
+        <div class="cg" id="cg-150"><span class="tx">Each task has a budget of working time.</span></div>
+        <div class="cg" id="cg-151"><span class="tx">When it runs out,</span></div>
+        <div class="cg" id="cg-152"><span class="tx">nothing is killed:</span></div>
+        <div class="cg" id="cg-153"><span class="tx">the worker commits what works,</span></div>
+        <div class="cg" id="cg-154"><span class="tx">and proposes what&#x27;s next.</span></div>
+        <div class="cg" id="cg-155"><span class="tx">A witness tells the lead</span></div>
+        <div class="cg" id="cg-156"><span class="tx">when a session goes quiet.</span></div>
+        <div class="cg" id="cg-157"><span class="tx">Heavy jobs take turns in shared slots,</span></div>
+        <div class="cg" id="cg-158"><span class="tx">and new work holds off on low battery,</span></div>
+        <div class="cg" id="cg-159"><span class="tx">or near a usage limit.</span></div>
+        <div class="cg" id="cg-160"><span class="tx">Each role gets a model that suits it.</span></div>
+        <div class="cg" id="cg-161"><span class="tx">Fable leads, advises on hard tasks,</span></div>
+        <div class="cg" id="cg-162"><span class="tx">takes re-rolls,</span></div>
+        <div class="cg" id="cg-163"><span class="tx">and audits anything sensitive.</span></div>
+        <div class="cg" id="cg-164"><span class="tx">In this project,</span></div>
+        <div class="cg" id="cg-165"><span class="tx">Opus does the work and the routine audits.</span></div>
+        <div class="cg" id="cg-166"><span class="tx">Codex takes bounded,</span></div>
+        <div class="cg" id="cg-167"><span class="tx">mechanical tasks:</span></div>
+        <div class="cg" id="cg-168"><span class="tx">with agent set to auto,</span></div>
+        <div class="cg" id="cg-169"><span class="tx">it&#x27;s picked when Claude&#x27;s limits run tight,</span></div>
+        <div class="cg" id="cg-170"><span class="tx">and a Claude verifier</span></div>
+        <div class="cg" id="cg-171"><span class="tx">always audits its work.</span></div>
+        <div class="cg" id="cg-172"><span class="tx">And when Fable reaches its usage limit,</span></div>
+        <div class="cg" id="cg-173"><span class="tx">workers and audits move</span></div>
+        <div class="cg" id="cg-174"><span class="tx">to Opus on their own,</span></div>
+        <div class="cg" id="cg-175"><span class="tx">and go back at the reset.</span></div>
+        <div class="cg" id="cg-176"><span class="tx">The project&#x27;s memory</span></div>
+        <div class="cg" id="cg-177"><span class="tx">lives in the repository:</span></div>
+        <div class="cg" id="cg-178"><span class="tx">decisions with their reasons,</span></div>
+        <div class="cg" id="cg-179"><span class="tx">progress, and incidents.</span></div>
+        <div class="cg" id="cg-180"><span class="tx">The tool server commits them,</span></div>
+        <div class="cg" id="cg-181"><span class="tx">and workers can&#x27;t edit them.</span></div>
+        <div class="cg" id="cg-182"><span class="tx">A new lead reads them first.</span></div>
+        <div class="cg" id="cg-183"><span class="tx">And every merge records its task,</span></div>
+        <div class="cg" id="cg-184"><span class="tx">its review, its models,</span></div>
+        <div class="cg" id="cg-185"><span class="tx">and its contract.</span></div>
+        <div class="cg" id="cg-186"><span class="tx">And you keep the keys.</span></div>
+        <div class="cg" id="cg-187"><span class="tx">You set the review floor,</span></div>
+        <div class="cg" id="cg-188"><span class="tx">the sensitive paths and the merge policy,</span></div>
+        <div class="cg" id="cg-189"><span class="tx">and an approval covers one exact commit.</span></div>
+        <div class="cg" id="cg-190"><span class="tx">Pushes, installs and wallet</span></div>
+        <div class="cg" id="cg-191"><span class="tx">requests come to you as cards.</span></div>
+        <div class="cg" id="cg-192"><span class="tx">A seal guards the configuration:</span></div>
+        <div class="cg" id="cg-193"><span class="tx">a finished round of Claude Code&#x27;s own</span></div>
+        <div class="cg" id="cg-194"><span class="tx">skill sync is let through by its shape,</span></div>
+        <div class="cg" id="cg-195"><span class="tx">and every other change</span></div>
+        <div class="cg" id="cg-196"><span class="tx">still waits for your click.</span></div>
+        <div class="cg" id="cg-197"><span class="tx">And your phone can follow along,</span></div>
+        <div class="cg" id="cg-198"><span class="tx">with replies behind their own switch.</span></div>
+        <div class="cg" id="cg-199"><span class="tx">Day to day, it looks after you as well.</span></div>
+        <div class="cg" id="cg-200"><span class="tx">After a Mac restart,</span></div>
+        <div class="cg" id="cg-201"><span class="tx">one card offers to reopen</span></div>
+        <div class="cg" id="cg-202"><span class="tx">the sessions you had open,</span></div>
+        <div class="cg" id="cg-203"><span class="tx">leads first, and nothing</span></div>
+        <div class="cg" id="cg-204"><span class="tx">reopens until you click.</span></div>
+        <div class="cg" id="cg-205"><span class="tx">The chat&#x27;s model chip follows</span></div>
+        <div class="cg" id="cg-206"><span class="tx">/model the moment you switch.</span></div>
+        <div class="cg" id="cg-207"><span class="tx">A Run card tells the session that</span></div>
+        <div class="cg" id="cg-208"><span class="tx">asked how its command ended.</span></div>
+        <div class="cg" id="cg-209"><span class="tx">And every six hours,</span></div>
+        <div class="cg" id="cg-210"><span class="tx">the app checks GitHub and this Mac&#x27;s</span></div>
+        <div class="cg" id="cg-211"><span class="tx">main for a newer VibeSwitcher,</span></div>
+        <div class="cg" id="cg-212"><span class="tx">and says what changed in plain words.</span></div>
+        <div class="cg" id="cg-213"><span class="tx">Install and Restart asks for</span></div>
+        <div class="cg" id="cg-214"><span class="tx">the signing password each time,</span></div>
+        <div class="cg" id="cg-215"><span class="tx">and never stores it.</span></div>
+        <div class="cg" id="cg-216"><span class="tx">If GitHub is ahead,</span></div>
+        <div class="cg" id="cg-217"><span class="tx">the lead first merges it</span></div>
+        <div class="cg" id="cg-218"><span class="tx">in and tests the result.</span></div>
+        <div class="cg" id="cg-219"><span class="tx">So what does this add</span></div>
+        <div class="cg" id="cg-220"><span class="tx">to Claude Code by hand?</span></div>
+        <div class="cg" id="cg-221"><span class="tx">Planning becomes contracts on a board.</span></div>
+        <div class="cg" id="cg-222"><span class="tx">Parallel work gets a worktree per task.</span></div>
+        <div class="cg" id="cg-223"><span class="tx">Review gets an independent verifier,</span></div>
+        <div class="cg" id="cg-224"><span class="tx">merging gets a gate,</span></div>
+        <div class="cg" id="cg-225"><span class="tx">and mistakes become checks.</span></div>
+        <div class="cg" id="cg-226"><span class="tx">The Mac&#x27;s load and limits are watched,</span></div>
+        <div class="cg" id="cg-227"><span class="tx">and memory lives in git.</span></div>
+        <div class="cg" id="cg-228"><span class="tx">And you&#x27;re asked only</span></div>
+        <div class="cg" id="cg-229"><span class="tx">what&#x27;s yours to decide.</span></div>
+        <div class="cg" id="cg-230"><span class="tx">Underneath, it&#x27;s the same Claude Code.</span></div>
+        <div class="cg" id="cg-231"><span class="tx">Its permission rules,</span></div>
+        <div class="cg" id="cg-232"><span class="tx">hooks and status line are</span></div>
+        <div class="cg" id="cg-233"><span class="tx">how VibeSwitcher works.</span></div>
+        <div class="cg" id="cg-234"><span class="tx">In under four weeks on this repository,</span></div>
+        <div class="cg" id="cg-235"><span class="tx"><span class="n">495</span> tasks merged,</span></div>
+        <div class="cg" id="cg-236"><span class="tx">every one tested at the gate.</span></div>
+        <div class="cg" id="cg-237"><span class="tx"><span class="n">82</span> Important findings fixed before merge.</span></div>
+        <div class="cg" id="cg-238"><span class="tx">Zero reverts.</span></div>
+        <div class="cg" id="cg-239"><span class="tx">You decide what to build.</span></div>
+        <div class="cg" id="cg-240"><span class="tx">The system runs the process.</span></div>
       </div>
       <script>
         (function () {
           // [start, end] of each phrase, in film time (this composition starts at 0).
-          const CUES = [[0.6,2.2],[2.2,4.92],[4.92,7.08],[7.08,9.82],[11.0,13.56],[13.56,15.72],[15.72,17.24],[17.24,20.12],[20.12,22.04],[22.04,24.2],[24.2,25.72],[25.72,27.32],[27.32,28.52],[28.52,30.92],[30.92,32.44],[32.44,34.54],[35.6,37.467],[37.467,40.0],[40.0,41.44],[41.44,42.8],[42.8,44.267],[44.267,45.6],[45.6,48.16],[48.16,50.32],[50.32,51.92],[51.92,54.6],[54.6,57.28],[57.28,58.8],[58.8,61.54],[62.6,65.36],[65.36,67.4],[67.4,69.24],[69.24,71.4],[71.4,73.56],[73.56,75.4],[75.4,78.62],[80.6,82.84],[82.84,85.4],[85.4,88.12],[88.12,91.56],[91.56,93.08],[93.08,95.267],[95.267,97.28],[97.28,100.62],[101.7,104.5],[104.5,106.34],[106.34,108.74],[108.74,110.26],[110.26,112.9],[112.9,114.26],[114.26,116.5],[116.5,119.24],[120.3,123.02],[123.02,124.54],[124.54,126.78],[126.78,128.3],[128.3,130.78],[130.78,133.26],[133.26,135.34],[135.34,141.2],[142.3,144.54],[144.54,146.06],[146.06,147.58],[147.58,149.26],[149.26,150.9],[150.9,152.38],[152.38,154.86],[154.86,157.9],[157.9,159.58],[159.58,161.26],[161.26,163.6],[164.7,166.38],[166.38,168.14],[168.14,170.22],[170.22,172.46],[172.46,174.14],[174.14,176.38],[176.38,178.06],[178.06,179.42],[179.42,180.86],[180.86,182.78],[182.78,185.2],[186.3,188.38],[188.38,189.7],[189.7,191.1],[191.1,193.74],[193.74,195.1],[195.1,197.66],[197.66,199.18],[199.18,200.46],[200.46,204.16],[205.2,208.8],[208.8,211.16],[211.16,212.32],[212.32,214.32],[214.32,216.587],[216.587,219.44],[219.44,224.04],[224.04,225.94],[227.0,230.36],[230.36,233.32],[233.32,235.24],[235.24,237.8],[237.8,240.92],[240.92,243.58],[244.6,246.2],[246.2,248.12],[248.12,250.52],[250.52,252.84],[252.84,255.2],[255.2,256.76],[256.76,258.28],[258.28,260.147],[260.147,262.28],[262.28,264.44],[264.44,266.86],[267.9,269.34],[269.34,271.14],[271.14,273.1],[273.1,275.9],[275.9,277.1],[277.1,278.46],[278.46,280.327],[280.327,282.34],[282.34,283.74],[283.74,285.82],[285.82,288.62],[288.62,291.1],[291.1,293.52],[294.6,297.427],[297.427,299.907],[299.907,301.72],[301.72,305.48],[305.48,306.84],[306.84,308.28],[308.28,310.36],[310.36,313.24],[313.24,316.6],[316.6,319.5],[320.6,321.8],[321.8,323.52],[323.52,325.52],[325.52,327.4],[327.4,329.16],[329.16,331.24],[331.24,333.72],[333.72,336.04],[336.04,337.8],[337.8,339.9],[341.0,343.0],[343.0,344.68],[344.68,347.48],[347.48,350.6],[350.6,352.68],[352.68,354.84],[354.84,357.267],[357.267,359.107],[359.107,362.14],[363.2,364.4],[364.4,366.64],[366.64,369.12],[369.12,372.24],[372.24,375.04],[375.04,376.667],[376.667,378.96],[378.96,381.28],[381.28,383.387],[383.387,384.48],[384.48,386.48],[386.48,389.12],[389.12,390.32],[390.32,392.12],[392.12,394.66],[395.7,398.34],[398.34,401.3],[401.3,403.54],[403.54,407.3],[407.3,408.9],[408.9,410.5],[410.5,413.16]];
+          const CUES = [[0.6,2.2],[2.2,4.92],[4.92,7.08],[7.08,9.82],[11.0,13.56],[13.56,15.72],[15.72,17.24],[17.24,20.12],[20.12,22.04],[22.04,24.2],[24.2,25.72],[25.72,27.32],[27.32,28.52],[28.52,30.92],[30.92,32.44],[32.44,34.54],[35.6,37.467],[37.467,40.0],[40.0,41.44],[41.44,42.8],[42.8,44.267],[44.267,45.6],[45.6,48.16],[48.16,50.32],[50.32,51.92],[51.92,54.6],[54.6,57.28],[57.28,58.8],[58.8,61.54],[62.6,65.36],[65.36,67.4],[67.4,69.24],[69.24,71.4],[71.4,73.56],[73.56,75.4],[75.4,78.62],[80.6,82.84],[82.84,85.4],[85.4,88.12],[88.12,91.56],[91.56,93.08],[93.08,95.267],[95.267,97.28],[97.28,100.62],[101.7,104.5],[104.5,106.34],[106.34,108.74],[108.74,110.26],[110.26,112.9],[112.9,114.26],[114.26,116.5],[116.5,119.24],[120.3,122.86],[122.86,124.38],[124.38,126.46],[126.46,127.78],[127.78,129.34],[129.34,131.18],[131.18,133.58],[133.58,134.94],[134.94,137.5],[137.5,140.3],[140.3,142.38],[142.38,148.24],[149.3,151.54],[151.54,153.06],[153.06,154.58],[154.58,156.26],[156.26,157.9],[157.9,159.38],[159.38,161.86],[161.86,164.9],[164.9,166.58],[166.58,168.26],[168.26,170.6],[171.7,173.38],[173.38,175.14],[175.14,177.22],[177.22,179.46],[179.46,181.14],[181.14,183.38],[183.38,185.06],[185.06,186.42],[186.42,187.86],[187.86,189.78],[189.78,192.2],[193.3,195.38],[195.38,196.7],[196.7,198.1],[198.1,200.74],[200.74,202.1],[202.1,204.66],[204.66,206.18],[206.18,207.46],[207.46,211.16],[212.2,215.8],[215.8,218.16],[218.16,219.32],[219.32,221.32],[221.32,223.587],[223.587,226.44],[226.44,231.04],[231.04,232.94],[234.0,236.32],[236.32,238.04],[238.04,239.44],[239.44,242.24],[242.24,244.48],[244.48,246.4],[246.4,248.36],[248.36,250.4],[250.4,252.72],[252.72,254.64],[254.64,257.04],[257.04,258.4],[258.4,260.9],[262.0,265.36],[265.36,268.32],[268.32,270.24],[270.24,272.8],[272.8,275.92],[275.92,278.58],[279.6,281.2],[281.2,283.12],[283.12,285.52],[285.52,287.84],[287.84,290.2],[290.2,291.76],[291.76,293.28],[293.28,295.147],[295.147,297.28],[297.28,299.44],[299.44,301.86],[302.9,305.7],[305.7,309.007],[309.007,310.5],[310.5,312.1],[312.1,313.86],[313.86,316.367],[316.367,317.86],[317.86,319.66],[319.66,321.46],[321.46,323.94],[323.94,326.42],[326.42,328.26],[328.26,331.06],[331.06,333.56],[334.6,336.04],[336.04,337.84],[337.84,339.8],[339.8,342.6],[342.6,343.8],[343.8,345.16],[345.16,347.027],[347.027,349.04],[349.04,350.44],[350.44,352.52],[352.52,355.32],[355.32,357.8],[357.8,360.22],[361.3,364.02],[364.02,367.22],[367.22,368.5],[368.5,370.66],[370.66,371.78],[371.78,374.98],[374.98,376.34],[376.34,377.94],[377.94,379.7],[379.7,382.26],[382.26,383.62],[383.62,385.62],[385.62,388.1],[388.1,389.62],[389.62,391.087],[391.087,393.48],[394.5,395.7],[395.7,397.42],[397.42,399.42],[399.42,401.3],[401.3,403.06],[403.06,405.14],[405.14,407.62],[407.62,409.94],[409.94,411.7],[411.7,413.8],[414.9,417.06],[417.06,418.687],[418.687,421.54],[421.54,424.82],[424.82,426.5],[426.5,429.22],[429.22,431.807],[431.807,433.86],[433.86,436.58],[436.58,437.86],[437.86,439.94],[439.94,441.86],[441.86,445.0],[446.1,449.06],[449.06,450.74],[450.74,452.42],[452.42,454.18],[454.18,455.78],[455.78,457.94],[457.94,459.86],[459.86,462.1],[462.1,464.02],[464.02,466.18],[466.18,467.7],[467.7,469.94],[469.94,472.18],[472.18,475.18],[475.18,477.06],[477.06,479.14],[479.14,480.74],[480.74,482.18],[482.18,483.7],[483.7,486.28],[487.3,488.5],[488.5,490.74],[490.74,493.22],[493.22,496.34],[496.34,499.14],[499.14,500.767],[500.767,503.06],[503.06,505.38],[505.38,507.487],[507.487,508.58],[508.58,510.58],[510.58,513.22],[513.22,514.42],[514.42,516.22],[516.22,518.76],[519.8,522.44],[522.44,525.4],[525.4,527.64],[527.64,531.4],[531.4,533.0],[533.0,534.6],[534.6,537.26]];
           const tl = gsap.timeline({ paused: true });
           CUES.forEach(([s, e], i) => {
             const el = document.getElementById("cg-" + i);
@@ -234,7 +295,7 @@
             tl.to(el, { opacity: 0, duration: 0.1, ease: "power1.in" }, Math.max(s + 0.1, e - 0.1));
             tl.set(el, { opacity: 0, visibility: "hidden" }, e);
           });
-          tl.set({}, {}, 413.6);
+          tl.set({}, {}, 537.7);
           window.__timelines["captions"] = tl;
         })();
       </script>

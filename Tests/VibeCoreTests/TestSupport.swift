@@ -95,6 +95,41 @@ enum SignalTestLock {
     }
 }
 
+#if canImport(Darwin)
+// The Mac's alone: Linux ignores SIGPIPE in the run instead (above), and the probe reads Mach-O and Mach threads.
+/// Runs as the test bundle loads too: SIGPIPE is caught, so a write to a pipe or socket whose reader has gone (without
+/// F_SETNOSIGPIPE or SO_NOSIGPIPE) fails with EPIPE instead of ending the whole run. On 2026-11-18 a full run's test
+/// process died of one 62 s in ("exited with unexpected signal code 13"), every test after it unrun and none named.
+/// Caught, not ignored, as in the app (which leaves it at its default): what a test starts gets SIGPIPE at its default,
+/// a caught signal being reset by exec where an ignored one is inherited. Every target's tests run in one process:
+/// each installs a handler, this one the SIGPIPE probe's (`EPipeProbe`, which names the writer), the others theirs only
+/// where none is yet, so whichever runs first the probe's is the one. The run still fails on one, naming it
+/// (`brokenPipesFailTheRun`, VibeCoreTests).
+@_used @_section("__DATA,__mod_init_func")
+private let catchBrokenPipes: @convention(c) () -> Void = { EPipeProbe.install() }
+
+/// Each SIGPIPE the run gets fails it, as an issue in no test, the run going on: the app leaves SIGPIPE at its default,
+/// so the write that raised it (one of the app's whose reader had gone, unguarded) would end the app. A kqueue's
+/// EVFILT_SIGNAL hears it however it's handled, ignored too. A pipe's SIGPIPE goes to the process, not the thread that
+/// wrote, and this runs after the writer has returned: the issue says what the probe's snapshot, taken in the handler,
+/// found writing (`EPipeProbe.snapshotLines`); the probe's write hook records the writer from its own thread too.
+@_used @_section("__DATA,__mod_init_func")
+private let failOnBrokenPipes: @convention(c) () -> Void = { _ = brokenPipesFailTheRun }
+
+private let brokenPipesFailTheRun: DispatchSourceSignal = {
+    let source = DispatchSource.makeSignalSource(signal: SIGPIPE, queue: DispatchQueue(label: "broken-pipes"))
+    source.setEventHandler {
+        let writer = EPipeProbe.snapshotLines()
+        Issue.record(Comment(rawValue: (["SIGPIPE: a write to a pipe or socket whose reader had gone, without F_SETNOSIGPIPE or "
+                             + "SO_NOSIGPIPE (\(source.data) since the last). The run caught it; the app, at SIGPIPE's default, "
+                             + "would have died of it. Give the writer F_SETNOSIGPIPE or SO_NOSIGPIPE."] + writer).joined(separator: "\n")))
+        EPipeProbe.counts.withLock { EPipeProbe.reported += 1 }
+    }
+    source.resume()
+    return source
+}()
+#endif
+
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
 /// This counts awake time through `MacTime`, so a sleep cannot exhaust a wait at the wake.
 /// This is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.

@@ -530,3 +530,125 @@ The F6 worker's blind check found all three by reading the code, and a re-audit 
 
 The app began as a session switcher and now runs a project lead with a team of agents, so its words and icon no longer describe it. The README rewrite (readme-and-guides) follows the pick so it carries the chosen tagline.
 
+# Archived 2026-11-18 09:07:55: 2026-11-18 tidy-up: one-off batches and plans now done (boost release, wallet pass, backlog and review batches, phone review, GitHub merge, team-mode build and experiment set-up); time-bound rules whose date has passed (Fable limit until Nov 12, the 80% usage push until Nov 11); and rules since superseded (reviews back to Fable, tasks get bigger, the interim sandbox UI rule, max_workers 4) or now done by VibeSwitcher itself (merge-pipeline watch, memory wait, Fable fallback, agent_default auto).
+
+## 2026-11-01 01:15:26 Wallet production-readiness pass (2026-11-01, user: "make sure this is production ready"). VibeSwitcher's wallet path gets four audited hardening tasks, run in this order because they share files: wallet-card-truth-the, wallet-card-can-t, wallet-outcomes-always, wallet-path-robustness. Alongside: spec-an-unparseable, strict-paths-an, the-app-s-host and wallet-e2e-real-testnet (one real testnet payment, user-approved). The Wallet Manager's lead is fixing its review's five concerns (approvals, audit holds, logs, the real path, local writers). Done means: all of it merged, the real-testnet run passing, and then the two-Mac run when the older MacBook is back.
+
+Independent read-only reviews of both projects found no way to sign or send without the user, but several states that could mislead the user into paying again, a token-approval drain risk on the browser path and the Wallet Manager's signing page, and missing production logs.
+
+## 2026-11-01 08:50:10 The boost release (2026-11-01), approved by the user in full, ships as 7 tasks in waves. Wave 1, in parallel: the load recorder, heavy jobs outside vs-heavy reported to their lead, and the usage-limit watch. Wave 2: release idle workers during audits, then batched merges (merge_batching off|boost|always, default off). Wave 3: Boost mode (Off/On/Automatic), with load_threshold 36, mac_max_sessions 18, max_workers 7 and heavy_slots 3; Automatic only when away AND on AC power, never on battery; fairness to the most recently active project, and a usage-watch veto. Then a release check tuned on the recorder's data. Always-on regardless of boost: the recorder, the heavy-job reports, releasing idle workers and the usage watch.
+
+The user wants more throughput when away. A 4-day load study found freezes and suite time bend at 24, throughput peaks around 36–48 and falls past 48, the worst spikes come from heavy jobs outside the lock, and two account limits stopped work on 2026-10-31/11-01. The user chose AC-only for automatic boost.
+
+## 2026-11-02 12:57:30 agent_default is auto from now on: codex-workers-can-run merged at 24716a2, so Codex workers can run the focused tests and lints.
+
+Decision 3 (2026-11-02) held auto back until Codex workers could run the checks. The audit and the full suite now show they can, except for socket tests and the full suite, which the merge's run covers.
+
+## 2026-11-02 22:59:59 Statistics grows from activity counts to "how well is it working", in three parts. (1) statistics-3-quality, from data already kept: first-audit pass rate, rounds, what happened to findings, merge first-try rate, escapes, autonomy (questions, user minutes, share of tasks that needed nobody), where time goes, cost split into implementation, verification and reruns. Each broken down by Claude vs Codex and by model, with an 8-week trend. (2) statistics-record-what records what's missing: lead tokens, Codex tokens, boost hours, waits by cause. (3) The comparison with working solo in Claude Code or Codex: a measured replay of past tasks if the user approves the spend (question AA210BD8), else an estimate labelled as one.
+
+The user (2026-11-02, about 21:30) asked for more information and for how well this setup does compared with working directly in Claude Code or Codex. Only a measured replay answers the counterfactual honestly. Everything else comes from the receipts and the board.
+
+## 2026-11-07 09:57:10 Past 80% of Claude's weekly limit, keep starting workers and audits (override_usage) until the limit itself, through the Nov 11 18:00 reset.
+
+The user's answer to FFC4FEF0 (2026-11-07): "Keep everything going past 80%, up to the limit", and "lets continue with all".
+
+## 2026-11-07 20:06:54 Two changes. (1) Reviews go back to Fable now: verifier_model is cleared, so audits run on another model than the workers'. This replaces the "back to Fable on Nov 11 18:00" timer. (2) The harness's own gate files are now sensitive paths, so any change to them is audited: LeadToolset, LeadWorkflow (the verifier prompt), LeadBoard (the flake ledger), LeadAuditVote, LeadWitness, ReadOnlyCommand, MCPServer, Sources/vibeswitcher-mcp/ and scripts/verifier-eval*. In two weeks (2026-11-21), the lead checks what share of tasks this sends to audit, and narrows the list if it's most of them. Moving the gate checks out of LeadToolset into a small file of their own is the structural fix.
+
+(1) The user chose it on 2026-11-07 (2F4161CC), after logging into a new account where Fable runs. Since Nov 1, 32% of audits had been Opus reviewing Opus. (2) A red-team review on 2026-11-07 found that the file deciding what counts as sensitive (LeadToolset.swift) wasn't sensitive itself. A small, pattern-free review-none edit to it could merge unaudited. The literature backs the risk: Auditing Harness Tampering found tampering in 63–85% of iterations of self-improving systems, and VS's own data shows 4 of ~9 gaming cases aimed at its guard rails.
+
+## 2026-11-08 00:08:13 First backlog batch, chosen by the user on 2026-11-08, after the lead reviewed each tier-A idea. In parallel: the log watcher (A3), freeze reduction plus a freeze metric (B3), and the product inventory plus a check-before-proposing rule in the lead's prompt (A5 + the cheap A4). In sequence, because they share the merge, board and receipt code: git provenance trailers (A2) → versioned contracts (A6) → the small scorecard (A1: exact data, no model classifier yet). A8 moves to tier B. The model-based question filter (full A4) and the message classifier wait until the scorecard shows they're needed.
+
+The user's goal: exactly what they want, without issues, safely, cheaply, fast, with only necessary questions. The lead's review judged A1–A6 and A9 worth doing (A1 and A4 in cheaper forms) and A8 lukewarm. B3 was added because 75–94 freezes a day hit the user directly. The user answered "yes".
+
+## 2026-11-08 07:28:55 Starts and audits also wait when the Mac is short of memory (task starts-and-audits-wait, audited). Until it lands, the lead watches status for a load above 100 and starts nothing by hand while it lasts.
+
+On 2026-11-08 from 03:40 to 06:00, load was 100–225 with idle CPU, 504 MB of RAM free and swap at 85%. The overload came from parallel full suites, 12 tests wide each, the old-host rebuild in every merge and audit, and up to 7 boosted sessions. The width cap and the old-host cache address the suites; nothing yet holds new sessions while the Mac pages.
+
+## 2026-11-08 14:15:49 The 2026-11-08 project review's material findings became 8 tasks (a-branch-that-moves, the-vault-s-no, host-reply-timers-belong, wallet-cards-trust-only, every-text-that-crosses, product-fixes-from-the, the-board-and-records, correctness-tests-stop). Tasks that share LeadToolset.swift are chained with `after`. The minor findings are left alone. The security review's phone, host-authentication and tool-boundary parts didn't run: Fable's safety filter stopped it, and whether to run them another way is the user's call.
+
+The user asked for a pass to find issues; their working policy is to fix material bugs and not to turn cosmetic observations into tasks. A filter stop isn't something for the lead to route around.
+
+## 2026-11-08 16:53:35 2026-11-08: GitHub's main (3b271e17, 226 commits from the other Mac) is merged into this Mac's main by a worker (task merge-github-s-main, auto_advance off) as a true merge with the two test conflicts resolved and the full suite passing. The user then fast-forwards main (`git merge --ff-only agent/merge-github-s-main`) and pushes, and the lead installs. merge(task) isn't used for it because the installed tool server rebases a branch onto main.
+
+The user asked to fetch the latest and install. The trial merge conflicts in WalletRobustnessTests and TerminalBridgeTests, which this Mac's handover-tests-stop and the other Mac's 204a442f both changed, so a hand merge by the user would need conflict resolution and testing. A rebase would rewrite 226 published commits.
+
+## 2026-11-09 09:14:34 The three 67js prototypes (prototypes/session-object, session-journey, session-team) are throwaways for the user to look at: never merge them. Each task has auto_advance false and goes to status kept once done; delete or keep is the user's call.
+
+The user asked to see what's possible and said they'll probably delete them. Local npm install with --ignore-scripts in the prototype or scratch folder only, by the user's request to use this library; its MCP server and Claude plugin stay out because they'd write agent config and trip the seal.
+
+## 2026-11-09 10:29:38 Which ideas from the four repository reviews should the team build? 1–6 are cheap fixes: don't score failed eval runs, give the eval REVIEW.md, make dismissing an Important finding cite evidence, start bug tasks by reproducing the symptom, record the Claude Code version on merges, and cap prompt size. 7–9 change the audit prompt and share one eval run of about $50: settle doubts instead of filing them as Nits, check crashed and in-flight states, and flag what a diff added that nobody asked for. 10–11 get tested on past data first. → Build 1–9, and test 10–11 on past data
+
+The lead proposed it with a 15 min timer and the user didn't answer in time, so it went ahead (question AC8DD1C8). Why it was asked: All four reviews are merged, and nothing starts until this is chosen.
+
+## 2026-11-09 10:39:43 From the four repository reviews, build ideas 1-9 and backtest 10-11 before building them (the lead's proposal, taken by timer on 2026-11-09 after the user asked "what about the ideas?"). The audit-prompt change waits for the fixed eval's baseline, and has auto_advance off so the lead compares its eval summary before its audit and merge.
+
+The reviews found the eval scores errored runs and runs without REVIEW.md, so verifier prompt changes can't be measured until that's fixed. Real audit quality gains (4 of 8 found bugs were Nit-only; 5 of 6 misses were unwalked states) depend on that measurement. Items resting on hypotheses get backtested first, in line with incident-first (2026-11-06 22:35).
+
+## 2026-11-09 13:43:32 The phone and Tailscale review and fix (the user's request, 2026-11-09) runs as three audited Claude tasks side by side: setup and pairing, day-to-day views and recovery, and input. They share PhoneAccess.swift in different functions, and only the input task changes the input path. Each fixes material bugs, and lists missing features rather than building them. No worker touches real Tailscale settings, a real phone or a real session. The dedicated security review of the phone stays out of these tasks, pending the user's answer on how to run it after Fable's filter stopped it on 2026-11-08.
+
+The three areas are independent enough to parallelize under the 2026-11-08 17:52 rule and the 2026-10-23 input-path rule. Tailscale serve and pairing are the user's real setup, so workers test through a fake CLI and the sandbox, and a real-phone pass stays with the user. The 2026-11-08 decision left routing around the filter to the user.
+
+## 2026-11-09 13:45:12 The security review of the phone, host authentication and tool boundaries, stopped by Fable's filter on 2026-11-08, runs on Opus after the three phone tasks (the user's answer to 0C15FEF1, 2026-11-09). Findings left unfixed stay out of the public repository, in the done report only.
+
+The 2026-11-08 decision left how to run it to the user, and they chose Opus. The repository is public, so committing an open weakness would publish it before the fix.
+
+## 2026-11-09 20:24:31 This account has hit its Fable limit until Nov 12, 12:00, and Fable runs the audits. Three tasks still need one: the merge failure message, the test run's false blame, and the audit prompt changes. None of them is urgent, and all the phone and security work is already merged. What should I do with those audits? → Wait for the reset on Nov 12
+
+The lead proposed it with a 30 min timer and the user didn't answer in time, so it went ahead (question E8B48BFD). Why it was asked: An audit has already stopped at the limit, and two more tasks are about to need one.
+
+## 2026-11-09 20:25:00 From the 2026-11-09 retrospective. (1) Audits and paid evals wait for the Fable limit's reset on Nov 12, 12:00 (the proposal on E8B48BFD, by timer); audit prompt changes then finish six unscored cases only. (2) Before a paid eval, the lead checks in status that the Fable limit has headroom for its full run and that the Mac is on AC or has enough battery; otherwise it waits. (3) What the lead tells the user about a cause carries its evidence, or says it's a guess: on 2026-11-09 three such statements needed correcting.
+
+Two paid evals were lost in part on 2026-11-09: about $12 when a session ended mid-run on battery, and six of twelve cases when the Fable limit ran out, with about $29 of that still usable. The lead also told the user the second merge flattening came from batching, that the size cap could run early, and that the user's app caused a merge failure, each without checking; the records said otherwise or couldn't confirm it.
+
+## 2026-11-09 21:46:02 Audits run on Opus until the Fable limit resets on Nov 12, 12:00 (the user's late answer to E8B48BFD, and they lowered the review floor in Settings to allow it). This replaces the wait for those audits. After the reset, the lead clears verifier_model so audits run on Fable again, and tells the user they can restore the floor. The audit prompt eval still waits for Fable, so it stays comparable with the baseline.
+
+The user preferred same-model audits to waiting. Two infrastructure audits can go ahead now, and the eval must keep the baseline's model to mean anything.
+
+## 2026-11-11 23:29:31 Until the-sandbox-app-builds merges, UI tasks with real layout changes go to a Claude worker (agent: claude), not auto. Text-only UI changes on Codex may waive screenshots when tests pin the text.
+
+Codex workers can't run scripts/sandbox-app.sh: the manifest compile writes ~/.cache/clang/ModuleCache, outside their sandbox. Screenshots were waived twice on 2026-11-11 (boost-release-7-7, a-blocked-task-s). The second time was a repeat, so it became a task instead of a third waiver.
+
+## 2026-11-12 09:00:36 Build an automatic Fable→Opus fallback for workers and audits when Claude has refused a request at the Fable limit, with a return to Fable at the recorded reset (task when-fable-s-limit or as named). Once it merges, the lead clears its hand-set verifier_model=opus.
+
+The user's answer to EE3A5F57, 2026-11-12. Switching by hand cost a halted worker (boost-release-7-7) and repeated lead attention during Fable limits.
+
+## 2026-11-12 09:23:57 Tasks get bigger: one outcome with verification points (acceptance checks that pass or fail, with their output quoted) rather than several small tasks, wherever the parts share files or one would just wait on another. Split only for independent work that runs in parallel, or where review levels differ.
+
+The Claude Code team's talk (2026-11-12): today's models run for hours and verify their own work, so give them tasks bigger than you normally would, with verification points along the way. Each VibeSwitcher task also pays a fixed overhead (worktree init, a ~1.5 GB build, a 9–14 min merge suite, an audit), so fewer, larger tasks speed up delivery.
+
+## 2026-11-12 10:56:35 Routine audits move to Opus, and security and sensitive-path audits stay on Fable. Sequence: verifier_model is fable now, only for audits-settle-their's six remaining eval cases. Once that run ends, the lead sets verifier_model=opus, and each-role-gets-the routes sensitive and security audits to Fable. The review floor already allows any verifier model (the user lowered it on 2026-11-11), so the user doesn't need to change anything.
+
+audit-eval-on-opus, 2026-11-12, on the same 14 cases, prompt and REVIEW.md as the Fable baseline. Opus found 7 of 14 by substance, 6 of them as Important, against Fable's 6 and 4, at $13.75 against $53 and in 93 min against 161. It missed only the symlink escape that needed a probe, which Fable had caught as a Nit. One run each, so the difference is within noise, but there's no sign Opus is worse for routine audits.
+
+## 2026-11-12 13:46:12 max_workers lowered from 5 to 4 (2026-11-12). Fewer tasks at once while merges are backed up; the lead raises it again once merges flow and the calm-Mac merge change is measured.
+
+With 7–10 sessions the Mac sat at load 50–100 for hours, all 3 test slots were held 45–55 min each, and full suites took twice as long. Running more at once made each task slower, not the batch faster.
+
+## 2026-11-12 13:47:49 The lead watches the merge pipeline itself on every wake, until merges-never-sit-blocked does it for them. If a task has been ready to merge for 20 minutes or more, find the cause at once (main red, a records check, slots, load, gate) and act: file the fix as the top task, correct a misblamed branch, tell the user what's needed from them in one line. Never just report that merges are waiting.
+
+The user, 2026-11-12: "you need to be more proactive in getting things through". Merges sat blocked for about 2 h 45 min while the lead kept describing the block instead of clearing it.
+
+## 2026-11-12 14:37:03 After the 2026-11-12 block cleared: tasks failed by the block (main's lint line, the flaky DevPreviewTests) get their workers to re-report done, so they rejoin the merge queue. prompts-and-agents-md's failure was real (AGENTS.md's new lint filter form broke ProjectMapTests) and went back to a worker.
+
+The batch split marked branches failed for problems on main. Only a fresh done report puts a review-none task back in the queue without redoing its work.
+
+## 2026-11-13 22:00:08 ¿Construyo el modo equipo (2 a 4 workers en una tarea, con un muro de mensajes) y hago el experimento? Son 13 tareas pequeñas, unas 3 horas en serie por los archivos delicados más el resto en paralelo. Después se construye la misma función del backlog (B2, recorridos de interfaz en el sandbox) de las dos maneras, lo que cuesta más o menos un B2 extra de trabajo. Se adopta solo si el equipo llega a "listo para mezclar" al menos un 25 % antes, con como mucho 1,5 veces los tokens y sin más hallazgos importantes, en 2 de 2 pruebas. → Sí: construir y hacer el experimento con B2 dos veces
+
+The lead proposed it with a 30 min timer and the user didn't answer in time, so it went ahead (question 6080384A). Why it was asked: El diseño está listo y el tablero está vacío; dijiste que vamos hacia swarms.
+
+## 2026-11-13 22:00:45 Build the team mode from docs/process/reviews/team-on-one-task-design.md (13 tasks, T1 to T13) and run its experiment: backlog B2 built both ways from one commit, adopted only if the team arm reaches merge-ready at least 25% sooner, on at most 1.5 times the tokens, with no more Important findings, on 2 of 2 instances. For team tasks the verifier is denied Read of the members' transcripts (T10); backlog B7, if built, must exclude team posts.
+
+The user said the project is going toward swarms. The 2026-11-13 measurement only covered tips between independent tasks and can't see the gain from teams on one larger task, so the lead proposed building it with a pre-set bar; the proposal's 30-minute timer passed with no other answer (question 6080384A). The transcript rule keeps the audit independent of what members told each other; it is the lead's call as architecture.
+
+## 2026-11-15 20:23:01 Team experiment instance 1 (B2, sandbox UI journeys) is set up. Arm A: ui-journeys-a1-the (runner and diff), then a2/a3/a4 (journeys) after it, all audited, on Claude. Arm B: ui-journeys-b-team, 4 members (core integrator, diff as test track, select-run, dictate), audited, budget 300 min across members, auto_advance off so it's never auto-merged: audit, then merge(dry_run), then kept. Both arms start at the same moment from the same main commit (A1 held blocked until B can start). Endpoint and bar as in team-on-one-task-design.md §5. Instance 2 is backlog A3 (log watcher), set up the same way once instance 1 ends.
+
+The design's pre-registered experiment. Starting both together controls for Mac load and main's state. B's lead-side steps (member starts, audit, dry run) wait on my turns, a small bias against B, which the readout will note.
+
+## 2026-11-15 22:26:29 Experiment readout rule: when the normal arm merges first, the team arm's branch conflicts with main by construction (same files). The time the team arm spends merging main and dropping the other arm's duplicate files is excluded from its merge-ready time, and so is any wait for memory or load that only one arm hit. For instance 2: audit the team arm before the normal arm's first merge lands, or keep the normal arm's merges held until the team arm's dry run is done.
+
+Instance 1: arm A's runner merged at about 21:45 and arm B's audit was then refused for conflicts in scripts/ui-journeys.sh and smoke.journey. Neither arm did anything wrong; the design (§5) didn't say how the same feature lands twice.
+
+## 2026-11-15 23:10:59 Experiment instance 1: the team arm's audit passed at 23:09 (round 2). Its dry run conflicts with main because the normal arm keeps merging the same files. Its merge-ready time is therefore counted as that audit pass plus the duration of one passing dry run's test run, taken once the normal arm has fully merged and the team's integrator has merged main once more (that merge's minutes are excluded).
+
+Every normal-arm merge (A2 at about 23:05, A3 and A4 next) re-breaks the team branch's merge onto main. Repeating the catch-up after each one would charge the team arm for the experiment's setup, not for its way of working.
+

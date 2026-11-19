@@ -72,7 +72,7 @@ enum TeamChurnBench {
     }
 
     /// The options that take a number (or a path) after them.
-    static let valued: Set<String> = ["--rows", "--main-blocks", "--transcript", "--tasks", "--decisions", "--questions", "--records", "--ax-heaviest"]
+    static let valued: Set<String> = ["--rows", "--main-blocks", "--transcript", "--tasks", "--decisions", "--questions", "--records", "--ax-heaviest", "--night", "--night-rate"]
 
     /// The lead's records the bench shows, grown or real.
     /// `--tasks N`: the board's tasks (220), all but `--rows` merged. `--decisions N`: decisions.md's entries (30).
@@ -116,8 +116,10 @@ enum TeamChurnBench {
             FileHandle.standardError.write(Data("team churn: can't read --transcript \(conversation)\n".utf8))
             exit(1)
         }
+        let night = value(after: "--night")
         let without = arguments.firstIndex(of: "--modal-without").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
-        let bench = Bench(seconds: seconds, onscreen: arguments.contains("--onscreen"), ax: arguments.contains("--ax"), modal: modal,
+        let bench = Bench(seconds: seconds, onscreen: arguments.contains("--onscreen"), ax: arguments.contains("--ax"), modal: modal, night: night,
+                          nightRate: value(after: "--night-rate") ?? 1,
                           modalWithout: Set((without ?? "").split(separator: ",").map(String.init)),
                           underWay: value(after: "--rows").map(Int.init) ?? 20, mainBlock: value(after: "--main-blocks").map { $0 / 1000 } ?? 0,
                           conversation: conversation,
@@ -194,6 +196,9 @@ enum TeamChurnBench {
         let modal: Double?
         /// `--modal-without boards,churn`: traffic left out of it, to narrow a growth down.
         let modalWithout: Set<String>
+        /// `--night SECONDS`: that phase alone (`nightPhase`), `--night-rate` cards a second.
+        let night: Double?
+        let nightRate: Double
         /// `--rows`: the board's tasks under way.
         let underWay: Int
         /// `--main-blocks`: how long each block posted to the main queue spins (s; 0: none), and the main thread's CPU in them.
@@ -225,9 +230,11 @@ enum TeamChurnBench {
         static let workers = 6, others = 4, period = 2.0
         var leadID: UUID?
 
-        init(seconds: Double, onscreen: Bool, ax: Bool, modal: Double?, modalWithout: Set<String>, underWay: Int, mainBlock: TimeInterval,
-             conversation: String? = nil, data: Grown = Grown()) {
+        init(seconds: Double, onscreen: Bool, ax: Bool, modal: Double?, night: Double? = nil, nightRate: Double = 1, modalWithout: Set<String>,
+             underWay: Int, mainBlock: TimeInterval, conversation: String? = nil, data: Grown = Grown()) {
             self.data = data
+            self.night = night
+            self.nightRate = nightRate
             self.seconds = seconds
             self.onscreen = onscreen
             self.ax = ax
@@ -462,6 +469,7 @@ enum TeamChurnBench {
                     // From the run loop as an event's handler is (End Session…'s alert ran from a menu's action), not
                     // from a block of the main queue: inside one the main queue would wait for it, as it never did there.
                     if let modal = self.modal { return RunLoop.main.perform(inModes: [.default]) { self.modalPhase(modal) } }
+                    if let night = self.night { return self.nightPhase(night) }
                     self.watchdog = BoardBench.Watchdog()
                     if self.mainBlock > 0 { print(String(format: "the main queue held: a block of %.0f ms every 100 ms", self.mainBlock * 1000)) }
                     self.holdMainQueue()
@@ -660,6 +668,86 @@ enum TeamChurnBench {
                              block.cpu * 1000, block.wall * 1000))
                 finish(nil)
             }
+        }
+
+        /// `--night SECONDS` (memory, 2026-11-18: 262 → 713 MB overnight while a lead's chat stayed shown): the lead's chat
+        /// left on screen as its team works, `nightRate` times a second a VibeSwitcher card typed into its conversation, its
+        /// status call, the call's result and its reply (`ChatBench.Stream.leadLine`), and a report on its board; the
+        /// sessions retitling. The footprint and malloc's blocks in use every 10 s, what grew by class over the second
+        /// half, and `RESULT team-churn night-…` lines.
+        private func nightPhase(_ duration: Double) {
+            let flag = (NSHomeDirectory() as NSString).appendingPathComponent("churn-on")
+            FileManager.default.createFile(atPath: flag, contents: nil)
+            let footprint = { (UIBench.memoryKinds()["footprint"] ?? 0) / 1_048_576 }
+            let before = footprint()
+            print(String(format: "night: the lead's chat shown for %.0f s, %.1f cards a second; footprint %.0f MB", duration, nightRate, before))
+            fflush(stdout)
+            let began = Date()
+            var cards = 0
+            var samples: [(at: Double, footprint: Double, inUse: Double)] = []
+            var census: HeapCensus.Result?
+            let root = root, transcript = transcript
+            func sample() {
+                let kinds = UIBench.memoryKinds()
+                let at = Date().timeIntervalSince(began)
+                let now = (kinds["footprint"] ?? 0) / 1_048_576, inUse = kinds.filter { $0.key.hasSuffix(" in use") }.values.reduce(0, +) / 1_048_576
+                samples.append((at, now, inUse))
+                let allocated = kinds.filter { $0.key.hasSuffix(" allocated") }.values.reduce(0, +) / 1_048_576
+                print(String(format: "  %4.0f s: footprint %.0f MB (graphics %.0f, purgeable %.0f, compressed %.0f), malloc's blocks in use %.0f MB "
+                             + "(allocated %.0f), %d cards, chat items %d", at, now, (kinds["graphics"] ?? 0) / 1_048_576,
+                             (kinds["purgeable, non-volatile"] ?? 0) / 1_048_576, (kinds["compressed"] ?? 0) / 1_048_576, inUse, allocated, cards,
+                             window?.chat.items.count ?? -1))
+                fflush(stdout)
+            }
+            // On main, as the app's own work arrives: a card each `1 / nightRate` s.
+            let tick = Timer(timeInterval: 1 / nightRate, repeats: true) { [self] _ in
+                autoreleasepool {
+                    if let handle = FileHandle(forWritingAtPath: transcript) {
+                        _ = try? handle.seekToEnd()
+                        for line in 0..<4 { try? handle.write(contentsOf: Data((ChatBench.Stream.leadLine(cards * 4 + line) + "\n").utf8)) }
+                        try? handle.close()
+                    }
+                    try? BoardStore(root: root).update { board in
+                        board.reports = ((board.reports ?? []) + [LeadReport(about: "worker task-\(cards)", text: "task-\(cards) is done (\(cards))")])
+                            .suffix(LeadBoard.keptReports)
+                        let index = cards % board.tasks.count
+                        board.tasks[index].checkpoints = ((board.tasks[index].checkpoints ?? [])
+                            + [LeadCheckpoint(text: "checkpoint \(cards): read the diff and ran the suite again")]).suffix(LeadTask.keptCheckpoints)
+                    }
+                }
+                cards += 1
+            }
+            RunLoop.main.add(tick, forMode: .common)
+            let every = Timer(timeInterval: 10, repeats: true) { [self] timer in
+                sample()
+                let at = Date().timeIntervalSince(began)
+                if census == nil, at >= duration / 2 { census = HeapCensus.take() }
+                guard at >= duration else { return }
+                timer.invalidate()
+                tick.invalidate()
+                try? FileManager.default.removeItem(atPath: flag)
+                if let census {
+                    let grown = HeapCensus.take()
+                    print("  grew over the second half, by class (malloc blocks), then blocks of no class by size:")
+                    var classed = census, unclassed = census, after = grown, afterRaw = grown
+                    classed.unclassed = [:]; after.unclassed = [:]; unclassed.classes = [:]; afterRaw.classes = [:]
+                    for row in HeapCensus.growth(from: classed, to: after, top: 20) + HeapCensus.growth(from: unclassed, to: afterRaw, top: 6) {
+                        print(String(format: "    %-60@ %+8.2f MB %+8ld blocks", String(row.name.prefix(60)) as NSString,
+                                     Double(row.after.bytes - row.before.bytes) / 1_048_576, row.after.blocks - row.before.blocks))
+                    }
+                }
+                // Over the second half: the first's warm-up (fonts, the first rows) left out.
+                let half = samples.first { $0.at >= duration / 2 }, last = samples.last
+                let minutes = half.flatMap { half in last.map { max(1, $0.at - half.at) / 60 } } ?? 1
+                let footprintSlope = half.flatMap { half in last.map { ($0.footprint - half.footprint) / minutes } } ?? 0
+                let mallocSlope = half.flatMap { half in last.map { ($0.inUse - half.inUse) / minutes } } ?? 0
+                print(String(format: "RESULT team-churn night-footprint-mb %.0f %.0f %.0f (before, halfway, end)", before, half?.footprint ?? 0,
+                             last?.footprint ?? 0))
+                print(String(format: "RESULT team-churn night-growth-mb-per-minute %.2f %.2f (footprint, malloc's blocks in use, over the second half; %d cards)",
+                             footprintSlope, mallocSlope, cards))
+                finish(nil)
+            }
+            RunLoop.main.add(every, forMode: .common)
         }
 
         private func wait(until condition: @escaping () -> Bool, then: @escaping () -> Void, else failure: String, tries: Int = 1500) {

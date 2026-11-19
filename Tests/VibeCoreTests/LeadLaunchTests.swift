@@ -486,7 +486,7 @@ struct LeadLaunchOutsideReadsTests {
         let role: LeadLaunch.Role
         let allow: [String], deny: [String]
         /// Nil when its settings have no hook (what runs unasked is then the allow rules' alone).
-        let hook: (root: String?, writes: Bool)?
+        let hook: ReadOnlyCommand.HookOptions?
 
         init(_ role: LeadLaunch.Role, root: String, temp: Scratch) throws {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "t", base: "claude", prompt: "p",

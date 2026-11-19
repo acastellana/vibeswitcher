@@ -61,8 +61,8 @@ public struct AccountUsage: Equatable, Sendable {
         public var key: String { (account.map { "\($0)|" } ?? "") + (model.map { "\(name)|\($0)" } ?? name) }
 
         /// The same refusal, whichever account it was kept for.
-        func sameRefusal(_ other: Limit) -> Bool {
-            reached && other.reached && name == other.name && model == other.model && resetsAt == other.resetsAt && at == other.at
+        func sameRefusal(_ other: Limit, ignoringModel: Bool = false) -> Bool {
+            reached && other.reached && name == other.name && (ignoringModel || model == other.model) && resetsAt == other.resetsAt && at == other.at
         }
 
         /// "the weekly limit", "the 5-hour limit", "the fable limit (seven_day_overage_included)".
@@ -145,9 +145,10 @@ public struct AccountUsage: Equatable, Sendable {
         }
     }
 
-    // MARK: Fable held back: workers and audits on Opus
+    // MARK: Fable held back: automatic model fallback
 
-    /// The model new workers and audits start on in Fable's place while Claude refuses Fable (`fableHeldBack`).
+    /// The model new workers start on in Fable's place while Claude refuses it (`fableHeldBack`); audits also respect
+    /// their review floor when choosing another model.
     public static let fallbackModel = "opus"
     /// The family the fallback replaces.
     public static let heldBackFamily = "fable"
@@ -170,9 +171,9 @@ public struct AccountUsage: Equatable, Sendable {
     /// When a held-back limit stops holding (its reset, or for one with no reset time, when it's no longer believed).
     public static func ends(_ limit: Limit) -> Double { limit.resetsAt ?? limit.at + untimed }
 
-    /// "Fable held back until Nov 13, 09:00: workers and audits on Opus", for status and auto_advance's reports.
+    /// "Fable held back until Nov 13, 09:00: workers on Opus; audits on another model under the review floor", for status and auto_advance's reports.
     public static func fallbackText(_ limit: Limit) -> String {
-        "Fable held back until \(UsageLimit.resetText(ends(limit))): workers and audits on Opus"
+        "Fable held back until \(UsageLimit.resetText(ends(limit))): workers on Opus; audits on another model under the review floor"
     }
 
     /// The model family a model name is of: fable, opus, sonnet or haiku when it names one ("claude-fable-5-1",
@@ -195,16 +196,27 @@ public struct AccountUsage: Equatable, Sendable {
     }
 
     /// A refusal at the account's usage limit (`UsageLimit`, from a transcript) in a session running `model`: that
-    /// limit at 100 % until its reset; for that model's family only when its type names a model, or the model needs
+    /// limit at 100 % until its reset; for that model's family when its type names one, a generic overage or unspecified
+    /// kind's limit sentence names one, or it needs
     /// usage credits (its weekly allowance is spent: `model_requires_usage_credits`), else for every model. Nil for a
-    /// model-only refusal whose model isn't known (Claude's default, a session no task names): unknown usage holds
+    /// model-only refusal whose model isn't known (Claude's default, a session no task names). Structured five_hour
+    /// and seven_day kinds always hold every model. Unknown usage holds
     /// nothing back, and kept for every model it would stop every start.
     public static func fromRefusal(_ limit: UsageLimit, model: String?, now: Date = Date()) -> Limit? {
         let kind = limit.kind ?? "usage"
         let named = ["fable", "opus", "sonnet", "haiku"].first { kind.lowercased().contains($0) }
         let modelOnly = limit.apiError == "model_requires_usage_credits"
-        let scoped = named ?? (modelOnly ? family(model) : nil)
-        if modelOnly, scoped == nil { return nil }
+        // Newer Claude refusals use usage_limit_reached and a generic overage kind even for Fable alone.
+        // Only an explicit model-limit sentence scopes an unspecified/overage kind; structured global kinds win.
+        // Mentioning a model elsewhere doesn't scope a refusal.
+        let words = limit.said.trimmingCharacters(in: .whitespacesAndNewlines)
+        let saidModel = ["fable", "opus", "sonnet", "haiku"].first {
+            words.range(of: "^you['’]ve (?:hit|reached) your \($0) limit\\b", options: [.regularExpression, .caseInsensitive]) != nil
+        }
+        let structuredGlobal = ["five_hour", "seven_day"].contains(kind.lowercased())
+        let sentenceAllowed = limit.kind == nil || kind.lowercased() == "seven_day_overage_included"
+        let scoped = structuredGlobal ? nil : named ?? (modelOnly ? family(model) : sentenceAllowed ? saidModel : nil)
+        if modelOnly, scoped == nil, !structuredGlobal { return nil }
         return Limit(name: kind, model: scoped, usedPercent: 100, resetsAt: limit.resetsAt, at: limit.at ?? now.timeIntervalSince1970, reached: true,
                      account: limit.account)
     }
@@ -234,8 +246,9 @@ public struct AccountUsage: Equatable, Sendable {
             }.joined(separator: " — ")
         }
         if let held = fableHeldBack(now: now) {
-            line += ". " + Self.fallbackText(held) + " (new workers and audits that would run on Fable start on Opus, a worker Fable's refusal halted "
-                + "starts again on Opus in its worktree; at the reset they're back on Fable)"
+            line += ". " + Self.fallbackText(held) + " (new workers meant for Fable start on Opus; audits that would run on Fable, including sensitive and security audits, "
+                + "automatically use the most capable other model their review floor allows; a worker Fable's refusal halted starts again on Opus in its worktree; "
+                + "at the reset they're back on Fable)"
         }
         return line
             + (ignored ? ". The user set Ignore usage limits in Settings › Performance: start_worker, audit and auto_advance start at any share of a limit, "
@@ -296,6 +309,14 @@ public struct AccountUsageStore: Sendable {
         if let active = activeAccount() { names[active.id] = active.name }
         var kept = Dictionary(before.map { ($0.key, $0) }, uniquingKeysWith: { $0.at >= $1.at ? $0 : $1 })
         for limit in limits {
+            // Re-reading an explicit model refusal corrects an older version's every-model classification.
+            // Replace only the identical refusal, retaining its model-scoped hold and original reset.
+            if limit.reached, limit.model != nil {
+                kept = kept.filter { _, old in
+                    !(old.reached && old.model == nil && old.name == limit.name && old.account == limit.account
+                      && old.at == limit.at && old.resetsAt == limit.resetsAt)
+                }
+            }
             guard let old = kept[limit.key] else { kept[limit.key] = limit; continue }
             // Newer only; the same reading again (a status line runs at every change of the session's screen) is
             // rewritten only once it's `refresh` old, so the file isn't written each time.

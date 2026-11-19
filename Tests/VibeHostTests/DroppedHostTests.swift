@@ -35,6 +35,9 @@ final class DroppingHost {
             while !done.isSet {
                 let fd = accept(listener, nil, nil)
                 guard fd >= 0 else { usleep(5_000); continue }
+                // As the real host's (`UnixSocket.configure`): a reply to a client that has gone fails, not SIGPIPE.
+                var noSigPipe: Int32 = 1
+                setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
                 _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
                 var timeout = timeval(tv_sec: 5, tv_usec: 0)
                 setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))

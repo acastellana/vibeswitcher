@@ -198,20 +198,29 @@ struct LeadRemoteTests: LeadTeamFixture {
         }
         let lead = LeadToolset(root: scene.root, runtime: runtime, vault: counted)
         lead.power = { nil }
+        // The lead's own clock (its review floor's reads stand `floorFresh` on it) moves with the ticks': a tick a
+        // minute on is a minute on for it too, whatever the time the Mac took between them. 2026-11-14: a merge's
+        // loaded Mac took over `floorFresh` between two ticks, and the tick not yet due asked the vault for the floor.
+        let clock = TestClock(0)
+        lead.floorClock = { clock.now }
         #expect(!lead.call("fetch_remote", [:]).isError) // The lead alone pins the URL.
         let start = Date(timeIntervalSince1970: 10_000)
         let poller = LeadRemotePoller(lead: lead)
-        poller.tick(now: start)
+        func tick(_ poller: LeadRemotePoller, after seconds: TimeInterval) {
+            clock.now = seconds
+            poller.tick(now: start.addingTimeInterval(seconds))
+        }
+        tick(poller, after: 0)
         let before = asked.count
         #expect(before > 0)
-        poller.tick(now: start.addingTimeInterval(60))
-        poller.tick(now: start.addingTimeInterval(LeadRemotePoller.interval - 1))
+        tick(poller, after: 60)
+        tick(poller, after: LeadRemotePoller.interval - 1)
         #expect(asked.count == before)
         // Restarted, the schedule is read the same.
-        LeadRemotePoller(lead: lead).tick(now: start.addingTimeInterval(LeadRemotePoller.interval - 1))
+        tick(LeadRemotePoller(lead: lead), after: LeadRemotePoller.interval - 1)
         #expect(asked.count == before)
         // Once it's due, it asks.
-        poller.tick(now: start.addingTimeInterval(LeadRemotePoller.interval))
+        tick(poller, after: LeadRemotePoller.interval)
         #expect(asked.count > before)
     }
 

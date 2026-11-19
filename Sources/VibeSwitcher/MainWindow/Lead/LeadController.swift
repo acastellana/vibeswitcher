@@ -250,8 +250,14 @@ struct TeamReading {
     /// The live workers with a run in line for the Mac-wide test and build lock (see `LeadWitness.Seen.lockWait`).
     var lockWaits: [String: TestLock.Wait] = [:]
     var workflow = LeadWorkflow()
+    var usage = AccountUsage()
+    var workerModel: String?
+    var ignoreUsageLimits = false
+    /// Made on the read queue: selecting a held audit model can need the existing branch security check.
+    var reviewUsageWaits: [String: ReviewUsageWait]?
     /// The lead's loop runs with workflow.md's auto_advance on: a verifier that ends without a verdict is its to
-    /// audit again (see `LeadWitness.leftToAdvance`). Looked at only while a task is in review.
+    /// audit again (see `LeadWitness.leftToAdvance`), a worker's first stop without a report its to nudge
+    /// (`LeadWitness.stopsForAdvance`). Looked at only while a task is in review or running.
     var advancing = false
     /// The live members with no agent in the scan whose agent's process has exited, by a process table read here (see
     /// `HostSession.agentRuns`): only these have quit. One whose agent waits on a background command runs on.
@@ -267,8 +273,11 @@ struct TeamReading {
     /// `LeadStall`), and a turn that ended on the account's usage limit reads as working (Claude Code fires no Stop hook
     /// on it; a verifier's audit sat there for hours, 2026-10-31): its transcript says so (see `UsageLimit`).
     static func read(root: String, board: LeadBoard, hosted: [String: HostSession], sessions: [String: Session],
-                     observer: LeadObserver) -> TeamReading {
+                     observer: LeadObserver, workerModel: String? = nil) -> TeamReading {
         var team = TeamReading(hosted: hosted, sessions: sessions)
+        team.usage = AccountUsageStore().load()
+        team.workerModel = workerModel
+        team.ignoreUsageLimits = MacLimits.load().ignoreUsageLimits
         let workers = workerSessions(board)
         for id in board.tasks.flatMap(\.watched) where team.watched[id] == nil {
             guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
@@ -282,7 +291,7 @@ struct TeamReading {
             team.lockWaits = lock.waits(for: Dictionary(folders, uniquingKeysWith: { first, _ in first }))
         }
         team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
-        team.advancing = team.workflow.autoAdvance && board.tasks.contains { $0.status == .review } && LeadAdvance.running(BoardStore(root: root))
+        team.advancing = team.workflow.autoAdvance && board.tasks.contains { [.review, .running].contains($0.status) } && LeadAdvance.running(BoardStore(root: root))
         // The table is read only when the scan lacks a member's agent (rare), here off the main thread.
         let unseen = board.tasks.flatMap(\.watched).compactMap { id in
             hosted[id].flatMap { $0.isLive && sessions[id] == nil ? (id: id, session: $0) : nil }
@@ -290,6 +299,7 @@ struct TeamReading {
         if !unseen.isEmpty, let table = ProcessTable.trySnapshot() {
             team.agentGone = Set(unseen.filter { !$0.session.agentRuns(in: table) }.map(\.id))
         }
+        team.reviewUsageWaits = TeamRows.usageWaits(board, team: team, now: Date(), root: root)
         return team
     }
 
@@ -311,6 +321,9 @@ struct WitnessWork {
     var endedForAdvance: [String] = []
     /// The workers auto_advance releases while their audits run, between turns now (`LeadWitness.releasableForAdvance`).
     var releasableForAdvance: [String] = []
+    /// The workers whose turn ended without a report for the first time, which auto_advance nudges
+    /// (`LeadWitness.stopsForAdvance`), when it runs.
+    var stopsForAdvance: [LeadWitness.StopForAdvance] = []
     /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
     var messages: [(keys: [String], text: @Sendable () -> String)] = []
     var sleepInterruptions: [LeadSleepRecovery.Interruption] = []
@@ -346,9 +359,11 @@ struct WitnessWork {
             advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: first)
             step?("releasableForAdvance")
             releasableForAdvance = LeadWitness.releasableForAdvance(board: board, seen: seen)
+            step?("stopsForAdvance")
+            stopsForAdvance = LeadWitness.stopsForAdvance(board: board, seen: seen, now: now)
         }
         step?("unbuiltMessages")
-        messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told)
+        messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, advancing: advancing, told: told)
         if let recoveryRoot {
             // This initializer runs on the boards' queue. Never lock/read the ledger or write a nudge on main.
             let recovering = LeadSleepRecovery.enqueue(sleepInterruptions, root: recoveryRoot)
@@ -422,6 +437,7 @@ final class LeadController: ObservableObject {
     @Published private(set) var mail: [String: LeadMailFeed] = [:]
     /// The Team rows as last made, for the Team tab and the sidebar (see `TeamRowsCache`).
     let teamRows = TeamRowsCache()
+    @Published private(set) var rowUsageWaits: [String: [String: ReviewUsageWait]] = [:]
     /// The Team view's plain-language lines.
     let summaries = TeamSummaryModel()
     /// The all-done cards: each board clearing after merges, its summary, and the user opening the lead.
@@ -571,10 +587,13 @@ final class LeadController: ObservableObject {
     private var rotationLooking: Set<String> = []
     private var rotationAsked: [String: (session: UUID, at: Date, reason: String, marker: String)] = [:]
     private var rotationRetry: [String: Date] = [:]
+    /// Idle handovers tried per lead session since the user last typed to it (`LeadRotation.maxIdleAttempts`).
+    private var idleAttempts: [UUID: Int] = [:]
     private let rotationLaunched = Date()
 
     func noteLeadInput(_ id: UUID) {
         rotationInput[id] = rotationNow()
+        idleAttempts[id] = nil
         rotationAsked = rotationAsked.filter { $0.value.session != id }
         rotationCommits[id]?.cancel()
         rotationGeneration[id, default: 0] += 1
@@ -1237,8 +1256,7 @@ final class LeadController: ObservableObject {
             switch result {
             case .success(let held):
                 self.answerNotices[question.id] = nil
-                self.deliver("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with ‘\(held.proposal ?? "")’; "
-                             + "wait for their answer.", from: .user, root: root)
+                self.deliver(LeadAnswerOutcome.holdMessage(held), from: .user, root: root)
             case .failure(let error):
                 self.answerNotices[question.id] = "\(error)"
             }
@@ -1554,6 +1572,8 @@ final class LeadController: ObservableObject {
         }
         refreshing = true
         let roots = leadRoots
+        let commands = Dictionary(uniqueKeysWithValues: roots.map { ($0, claudeCommand($0)) })
+        let home = home
         // The sessions as they are now, for the witness to read its teams' transcripts with (see `TeamReading`).
         let hosted = Dictionary(host.sessions.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
         let sessions = Dictionary(store.sessions.compactMap { session in session.hostID.map { ($0.uuidString, session) } },
@@ -1569,7 +1589,8 @@ final class LeadController: ObservableObject {
             let refusals = Dictionary(uniqueKeysWithValues: roots.compactMap { root in LeadVault.BaseMoveRefusal.load(root: root).map { (root, $0) } })
             files.keep(roots)
             let teams = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
-                (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer))
+                (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer,
+                                        workerModel: LeadWorkflow.claudeModel(command: commands[root] ?? "claude", home: home)))
             })
             let finished = Set(loaded.flatMap { root, board in LeadTeams.finished(Array(hosted.values), root: root, board: board) })
             return (fired, loaded, decisions, teams, records, refusals, finished, mail)
@@ -1595,6 +1616,10 @@ final class LeadController: ObservableObject {
         dispatchPrecondition(condition: .onQueue(.main))
         tell(timers: fired)
         let previous = boards
+        let waits = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
+            (root, teams[root]?.reviewUsageWaits ?? TeamRows.usageWaits(board, team: teams[root] ?? TeamReading(), now: Date()))
+        })
+        if waits != rowUsageWaits { rowUsageWaits = waits }
         if loaded != boards { boards = loaded }
         // A lead with a question for you open needs you, its terminal idle or not.
         store.leadsAsking = asking(loaded)
@@ -1862,6 +1887,19 @@ final class LeadController: ObservableObject {
         return !roots.isEmpty
     }
 
+    /// The update check's report (`AppUpdateWatch`): GitHub has commits for the app that `root`'s main lacks, and the
+    /// update card waits on the lead's merge_remote. To that project's lead's board, whether its lead runs or not.
+    func tellUpdate(_ text: String, root: String) {
+        deliver(built: {
+            let store = BoardStore(root: root)
+            try? store.update { board in
+                board.reports = ((board.reports ?? []) + [LeadReport(about: AppUpdateWatch.sender, text: text)]).suffix(LeadBoard.keptReports)
+            }
+            try? store.appendProgress("Update check: " + text)
+            return text
+        }, from: .system(AppUpdateWatch.sender), root: root)
+    }
+
     /// The projects among `roots` whose workflow.md (the main checkout's, not a worktree's) has watch_app_logs on.
     static func appHealthRoots(_ roots: Set<String>) -> [String] {
         roots.sorted().filter { root in
@@ -1981,6 +2019,18 @@ final class LeadController: ObservableObject {
             if advanceSeen[key] == nil {
                 advanceSeen[key] = now
                 LeadAdvance.nudge(root: root)
+            }
+        }
+        // A worker whose turn ended without a report for the first time: recorded on its task for its loop, which sends
+        // it the standard prompt once (`LeadStopNudge`); the board's write makes the loop look. The lead isn't told.
+        // Each look until it's on the board (a write that failed is tried again), written only when it isn't yet.
+        let stops = work.stopsForAdvance
+        if !stops.isEmpty {
+            reads.async { _ in
+                let store = BoardStore(root: root)
+                var board = store.load()
+                guard LeadWitness.handOver(stops, on: &board, now: now) else { return }
+                if (try? store.update { LeadWitness.handOver(stops, on: &$0, now: now) }) == true { LeadAdvance.nudge(root: root) }
             }
         }
         // Only the keys here: each text is built where it's posted, off the main thread. One a look before this told
@@ -2179,8 +2229,9 @@ final class LeadController: ObservableObject {
         let observer = rotationObserver ?? LeadObserver(home: home)
         let inbox = inbox, vault = vault
         let context = LeadContextStore(root: inbox, home: home)
-        reads.async({ _ -> (path: String, log: ChatLog, reason: String, gate: FileLock?)? in
-            let board = BoardStore(root: root).load()
+        let idleSpent = idleAttempts[session.id, default: 0] >= LeadRotation.maxIdleAttempts
+        reads.async({ _ -> (path: String, log: ChatLog, reason: String, idle: Bool, cold: Bool, tail: LeadRotation.Tail?, gate: FileLock?)? in
+            let store = BoardStore(root: root), board = store.load()
             guard board.leadSession == session.id.uuidString,
                   vault.current(.lead, root: root, task: nil)?.session == session.id.uuidString,
                   let agent = LeadHandover.named(board),
@@ -2189,10 +2240,21 @@ final class LeadController: ObservableObject {
                   LeadRotation.quiet(activity: observer.reading(session, agentPid: agent.pid).activity,
                                      queued: !SteerInbox.pending(tty: agent.tty, root: inbox).filter { $0.agentPid == agent.pid }.isEmpty,
                                      lastInput: lastInput, now: now),
-                  let reason = LeadRotation.reason(mode: mode, started: session.startedAt, percent: context.percent(transcript: path, started: session.startedAt), now: now)
+                  // The user's conversation is never cut mid-exchange: a question just asked waits for its answer.
+                  !LeadRotation.conversationOpen(openQuestionsAskedAt: board.openQuestions.map(\.askedAt),
+                                                 asking: log.pendingQuestions != nil, now: now)
             else { return nil }
+            let tail = LeadRotation.tail(path: path)
+            let workflow = LeadWorkflow.load(from: store.folder + "/workflow.md")
+            // Once the note is asked for, the reason stands: the note's own reply ends the idle the rule measured.
+            let scheduled = (asked?.session == session.id ? asked?.reason : nil)
+                ?? LeadRotation.reason(mode: mode, started: session.startedAt, percent: context.percent(transcript: path, started: session.startedAt), now: now)
+            let idle = scheduled == nil && !idleSpent ? LeadRotation.idle(tail: tail, idleMinutes: workflow.handoverIdleMinutes, tokens: workflow.handoverTokens, now: now) : nil
+            guard let reason = scheduled ?? idle else { return nil }
             guard let gate = FileLock.attempt(LeadRotation.gate(root)) else { return nil }
-            return (path, log, reason, gate)
+            // An idle handover past the cache's lifetime writes its own note: asking would re-send the whole old context.
+            // The scheduled rotations ask, as before.
+            return (path, log, reason, idle != nil, idle != nil && LeadRotation.cold(tail: tail, now: now), tail, gate)
         }) { [weak self] reading in
             guard let self else { reading?.gate?.release(); return }
             defer { self.rotationEvent("checked") }
@@ -2203,6 +2265,14 @@ final class LeadController: ObservableObject {
             }
             guard generation == self.rotationVersion(root: root, session: session.id), self.rotationMode() == mode, !self.rotationUserQueued(session.id),
                   self.held[root]?.isEmpty != false else { reading.gate?.release(); return }
+            if asked == nil, reading.idle { self.idleAttempts[session.id, default: 0] += 1 }
+            if asked == nil, reading.cold {
+                self.startingLeads.insert(root)
+                self.launchRotation(root: root, old: session, path: reading.path, note: LeadRotation.coldNote(reading.tail, now: now),
+                                    reason: reading.reason + "; its prompt cache had expired, so VibeSwitcher wrote the note",
+                                    gate: reading.gate!, generation: generation)
+                return
+            }
             guard let asked, asked.session == session.id else {
                 reading.gate?.release()
                 let marker = "VIBESWITCHER_HANDOVER_" + UUID().uuidString
@@ -2327,6 +2397,8 @@ final class LeadController: ObservableObject {
                             throw error
                         }
                         let waiting = LeadHandover.takeWaiting(for: agent, root: inbox)
+                        do { try store.appendProgress("Handed the lead over to a fresh session: \(reason)") }
+                        catch { Breadcrumbs.shared.note("lead handover progress line not written: \(error)") }
                         return (true, waiting, false)
                     } catch {
                         Breadcrumbs.shared.note("scheduled rotation cancelled: \(error)")
@@ -2355,7 +2427,7 @@ final class LeadController: ObservableObject {
                         self.replacing[old.id] = root; self.replacements += 1
                         self.holders[root] = fresh.id
                         self.markReplaced(holders: self.holders)
-                        let notice = "Started a fresh lead session (\(reason))"
+                        let notice = LeadRotation.notice(reason: reason, at: self.rotationNow())
                         self.rotationNotices[fresh.id] = notice
                         self.rotationNotices[old.id] = notice
                         if self.answersTrust { self.answerTrust(fresh.id, folder: root) }

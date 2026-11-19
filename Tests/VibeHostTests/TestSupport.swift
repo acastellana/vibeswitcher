@@ -62,6 +62,28 @@ final class Process: Foundation.Process, @unchecked Sendable {
 }
 #endif
 
+#if canImport(Darwin)
+// The Mac's alone: Linux ignores SIGPIPE in the run instead (above), and the probe reads Mach-O and Mach threads.
+/// Runs as the test bundle loads too: SIGPIPE is caught, so a write to a pipe or socket whose reader has gone (without
+/// F_SETNOSIGPIPE or SO_NOSIGPIPE) fails with EPIPE instead of ending the whole run. On 2026-11-18 a full run's test
+/// process died of one 62 s in ("exited with unexpected signal code 13"), every test after it unrun and none named.
+/// Caught, not ignored, as in the app (which leaves it at its default): what a test starts gets SIGPIPE at its default,
+/// a caught signal being reset by exec where an ignored one is inherited. Every target's tests run in one process:
+/// each installs a handler where none is yet: VibeCoreTests' is the SIGPIPE probe's (`EPipeProbe`, which names the
+/// writer), and whichever target's runs first, the probe's is the one left. The run still fails on one, naming it
+/// (`brokenPipesFailTheRun`, VibeCoreTests).
+@_used @_section("__DATA,__mod_init_func")
+private let catchBrokenPipes: @convention(c) () -> Void = {
+    var action = sigaction()
+    sigaction(SIGPIPE, nil, &action)
+    guard action.__sigaction_u.__sa_handler == nil else { return }
+    action.__sigaction_u.__sa_handler = { _ in }
+    sigemptyset(&action.sa_mask)
+    action.sa_flags = SA_RESTART
+    sigaction(SIGPIPE, &action, nil)
+}
+#endif
+
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
 /// This counts awake time through `MacTime`, so a sleep cannot exhaust a wait at the wake.
 /// This is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
@@ -76,6 +98,14 @@ let hostTestLimit: TimeLimitTrait = .timeLimit(.minutes(10))
 /// The tail of a scratch program that must still be running while the test looks at it: longer than any test
 /// waits, and ended by the test (or its host) when it's done.
 let keepRunning = "sleep 3600"
+
+/// The first words of a scratch program whose forked commands use the terminal themselves (`stty raw`, a `dd` reading
+/// it): job control off, so they run in the shell's own process group, the terminal's foreground one. With it on (the
+/// shell is interactive), macOS sometimes fails a child's `setpgid` ("sh: child setpgid (N to N): Operation not
+/// permitted") and that child's terminal calls then fail with EIO: an `stty raw` that didn't happen, so the host's
+/// answer waited unread in a cooked terminal, or a `dd` that read nothing (headlessAnswersQueriesOnlyWhenNoClient's
+/// flakes of 2026-11-12 and 2026-11-18). The host had answered; the shell's job control lost it.
+let jobControlOff = "set +m; "
 
 // Swift Testing runs each test as a task on Swift's cooperative pool, one thread a core. A test that blocks its thread
 // (a semaphore, a group, a sleep, a process's exit, a build) holds one of those few threads for as long as it waits,

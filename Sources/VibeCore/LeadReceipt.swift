@@ -173,6 +173,10 @@ public struct LeadReceipt: Codable, Equatable, Sendable {
         }
         parts.append(roles.isEmpty ? "tokens unknown (no transcripts of its sessions found)" : roles.joined(separator: ", "))
         if !roles.isEmpty { parts.append(cost.map { "est. \(Self.dollars($0))" } ?? "cost unknown" + Self.unpricedNote([worker, verifier])) }
+        // Advisor calls: in the roles' tokens and cost above, shown on their own.
+        let calls: [(String, LeadAdvisorTokens?)] = [("worker's", worker?.advisor), ("verifier's", verifier?.advisor)]
+        let advised = calls.compactMap { name, made in made.map { "\(name) \($0.text)" } }
+        if !advised.isEmpty { parts.append("advisor (in those tokens): " + advised.joined(separator: "; ")) }
         if let members, !members.isEmpty { parts.append("team of \(members.count): " + members.map(\.text).joined(separator: "; ")) }
         var runs = ["\(rounds) audit round\(rounds == 1 ? "" : "s")"]
         if rerolls > 0 { runs.append("\(rerolls) re-roll\(rerolls == 1 ? "" : "s")") }
@@ -261,9 +265,24 @@ public struct LeadTokens: Codable, Equatable, Sendable {
     /// The verifier's only: it ran on the worker's model (`LeadReceipt.sameModel`), an audit that wasn't independent;
     /// false, another model; nil: not known, or receipts from before it was stamped.
     public var sameModel: Bool?
+    /// Of its tokens and cost, its sessions' advisor calls' (`LeadAdvisorTokens`), priced at the advisor's model's
+    /// rates; nil when it made none, and for receipts from before they were read. Its models aren't in `models`.
+    public var advisor: LeadAdvisorTokens? {
+        get { advisorBox?.value }
+        set { advisorBox = newValue.map(LeadAdvisorTokens.Box.init) }
+    }
+    /// `advisor`, on the heap: a LeadTokens sits inline in every task's receipt, and the board's code copies tasks on
+    /// the stack (stored inline, the advisor's ~90 bytes overflowed a deep test thread's stack in `BoardStore.restore`).
+    private var advisorBox: LeadAdvisorTokens.Box?
+
+    private enum CodingKeys: String, CodingKey {
+        case input, output, cacheRead, cacheWrite, cacheWrite1h, sessions, models, cost, unpriced, codex, sameModel
+        case advisorBox = "advisor"
+    }
 
     public init(input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0, sessions: Int = 0,
-                models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil, codex: Int? = nil, sameModel: Bool? = nil) {
+                models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil, codex: Int? = nil, sameModel: Bool? = nil,
+                advisor: LeadAdvisorTokens? = nil) {
         self.input = input
         self.output = output
         self.cacheRead = cacheRead
@@ -275,6 +294,7 @@ public struct LeadTokens: Codable, Equatable, Sendable {
         self.unpriced = unpriced
         self.codex = codex
         self.sameModel = sameModel
+        self.advisor = advisor
     }
 
     public var total: Int { input + output + cacheRead + cacheWrite }
@@ -286,14 +306,122 @@ public struct LeadTokens: Codable, Equatable, Sendable {
             + "\(LeadReceipt.count(cacheRead)), cache write \(LeadReceipt.count(cacheWrite))" + (models.isEmpty ? "" : "; \(models.joined(separator: ", "))")
             + (codex.map { $0 > 0 ? "; \(LeadReceipt.count($0)) of them Codex's" : "" } ?? "") + ")"
     }
+
+    /// Adds one API response: to its tokens and cost, its model to `models` (with `byModel`, its tokens by model); an
+    /// advisor call's to `advisor` as well, its model there instead.
+    mutating func add(_ response: LeadReceipts.Response, byModel: inout [String: Int]) {
+        input += response.input
+        output += response.output
+        cacheRead += response.cacheRead
+        cacheWrite += response.cacheWrite
+        cacheWrite1h += response.cacheWrite1h
+        if let price = LeadPrices.price(response.model) {
+            cost = cost.map { $0 + LeadPrices.cost(response, price: price) }
+        } else {
+            cost = nil
+            unpriced = Array(Set((unpriced ?? []) + [response.model])).sorted()
+        }
+        if response.advisor {
+            var calls = advisor ?? LeadAdvisorTokens()
+            calls.add(response)
+            advisor = calls
+        } else {
+            byModel[response.model, default: 0] += response.input + response.output + response.cacheRead + response.cacheWrite
+        }
+    }
+}
+
+/// The advisor calls among a role's tokens (or a lead's day's): a session consults its advisor (Claude Code's advisor
+/// tool) mid-response, and the API lists each call in that response's `usage.iterations` as an `advisor_message`, with
+/// its own model and tokens, apart from the response's own usage. They're never cached (29 calls, 4.9M uncached input
+/// tokens in the week of 2026-11-11). Priced at the advisor's model's rates; one with no price leaves `cost` unknown.
+public struct LeadAdvisorTokens: Codable, Equatable, Sendable {
+    public var calls: Int
+    public var input: Int
+    public var output: Int
+    public var cacheRead: Int
+    public var cacheWrite: Int
+    public var cacheWrite1h: Int
+    /// The advisor's models, in the order they first answered ("advisor" when a call named none).
+    public var models: [String]
+    public var cost: Double?
+    public var unpriced: [String]?
+
+    public init(calls: Int = 0, input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0,
+                models: [String] = [], cost: Double? = 0, unpriced: [String]? = nil) {
+        self.calls = calls
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+        self.cacheWrite1h = cacheWrite1h
+        self.models = models
+        self.cost = cost
+        self.unpriced = unpriced
+    }
+
+    public var total: Int { input + output + cacheRead + cacheWrite }
+
+    /// An immutable heap copy (`LeadTokens.advisor`'s storage), coded and compared as its value.
+    final class Box: Codable, Equatable, Sendable {
+        let value: LeadAdvisorTokens
+        init(_ value: LeadAdvisorTokens) { self.value = value }
+        init(from decoder: Decoder) throws { value = try LeadAdvisorTokens(from: decoder) }
+        func encode(to encoder: Encoder) throws { try value.encode(to: encoder) }
+        static func == (a: Box, b: Box) -> Bool { a.value == b.value }
+    }
+
+    /// "1 call, 52.0k tokens (in 50.0k, out 2.0k; claude-fable-5-2), est. $0.48"; "…, cost unknown (no price for x)".
+    public var text: String {
+        "\(calls) call\(calls == 1 ? "" : "s"), \(LeadReceipt.count(total)) tokens (in \(LeadReceipt.count(input)), out \(LeadReceipt.count(output))"
+            + (cacheRead + cacheWrite > 0 ? ", cache read \(LeadReceipt.count(cacheRead)), cache write \(LeadReceipt.count(cacheWrite))" : "")
+            + (models.isEmpty ? "" : "; \(models.joined(separator: ", "))") + "), "
+            + (cost.map { "est. \(LeadReceipt.dollars($0))" } ?? "cost unknown" + (unpriced.map { " (no price for \($0.joined(separator: ", ")))" } ?? ""))
+    }
+
+    /// Adds one advisor call (`LeadReceipts.Response.advisor`).
+    mutating func add(_ response: LeadReceipts.Response) {
+        calls += 1
+        input += response.input
+        output += response.output
+        cacheRead += response.cacheRead
+        cacheWrite += response.cacheWrite
+        cacheWrite1h += response.cacheWrite1h
+        if !models.contains(response.model) { models.append(response.model) }
+        if let price = LeadPrices.price(response.model) {
+            cost = cost.map { $0 + LeadPrices.cost(response, price: price) }
+        } else {
+            cost = nil
+            unpriced = Array(Set((unpriced ?? []) + [response.model])).sorted()
+        }
+    }
+
+    /// `a` and `b` summed; nil when neither made a call. The cost is unknown when either's is.
+    static func sum(_ a: LeadAdvisorTokens?, _ b: LeadAdvisorTokens?) -> LeadAdvisorTokens? {
+        guard var sum = a else { return b }
+        guard let b else { return a }
+        sum.calls += b.calls
+        sum.input += b.input
+        sum.output += b.output
+        sum.cacheRead += b.cacheRead
+        sum.cacheWrite += b.cacheWrite
+        sum.cacheWrite1h += b.cacheWrite1h
+        sum.models += b.models.filter { !sum.models.contains($0) }
+        sum.cost = sum.cost.flatMap { mine in b.cost.map { mine + $0 } }
+        let unpriced = Set((sum.unpriced ?? []) + (b.unpriced ?? []))
+        sum.unpriced = unpriced.isEmpty ? nil : unpriced.sorted()
+        return sum
+    }
 }
 
 /// Per-model API prices, in US dollars per million tokens, for estimating what a task cost. One table, with the date
 /// its prices were taken: Anthropic's first-party rates as the claude-api skill's model table had them (cached
-/// 2026-10-06). Cache writes cost 1.25× input for the 5-minute duration and 2× for the 1-hour one; fast mode costs 2×.
+/// 2026-11-03), checked against the user's list of 2026-11-18 (Fable 5.2 added; Sonnet 5.5's cache reads $0.10, not
+/// $0.20). Cache writes cost 1.25× input for the 5-minute duration and 2× for the 1-hour one; fast mode costs 2×.
 /// A model not in the table has no price: its tokens show with "cost unknown", never a wrong number.
+/// scripts/cache-cold-cost.py parses this table and `asOf` from this file: keep each entry on one line.
 public enum LeadPrices {
-    public static let asOf = "2026-10-06"
+    public static let asOf = "2026-11-18"
 
     public struct Price: Equatable, Sendable {
         public var input: Double
@@ -315,6 +443,8 @@ public enum LeadPrices {
     }
 
     public static let table: [String: Price] = [
+        "claude-fable-5-2": Price(input: 8, output: 40, cacheRead: 0.20),
+        "claude-mythos-5-2": Price(input: 8, output: 40, cacheRead: 0.20),
         "claude-fable-5-1": Price(input: 10, output: 50, cacheRead: 0.25),
         "claude-mythos-5-1": Price(input: 10, output: 50, cacheRead: 0.25),
         "claude-fable-5": Price(input: 10, output: 50, cacheRead: 1),
@@ -324,7 +454,7 @@ public enum LeadPrices {
         "claude-opus-4-8": Price(input: 5, output: 25),
         "claude-opus-4-7": Price(input: 5, output: 25),
         "claude-opus-4-6": Price(input: 5, output: 25),
-        "claude-sonnet-5-5": Price(input: 2, output: 10, cacheRead: 0.20),
+        "claude-sonnet-5-5": Price(input: 2, output: 10, cacheRead: 0.10),
         "claude-sonnet-5": Price(input: 2, output: 10),
         "claude-sonnet-4-6": Price(input: 3, output: 15),
         "claude-haiku-5-5": Price(input: 0.10, output: 0.50, longOver: 100_000, longInput: 0.50, longOutput: 2.50),
@@ -392,6 +522,8 @@ public enum LeadReceipts {
         var model: String
         var input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cacheWrite1h = 0
         var fast = false
+        /// An advisor call (`LeadAdvisorTokens`): one of a response's `usage.iterations`, its `model` the advisor's.
+        var advisor = false
         /// When it was written (its line's timestamp), and its message id (else request id): for the leads' ledger.
         var at: Double?
         var id = ""
@@ -518,6 +650,7 @@ public enum LeadReceipts {
         let unpriced = Set((a!.unpriced ?? []) + (b.unpriced ?? []))
         sum.unpriced = unpriced.isEmpty ? nil : unpriced.sorted()
         sum.codex = a!.codex == nil && b.codex == nil ? nil : (a!.codex ?? 0) + (b.codex ?? 0)
+        sum.advisor = LeadAdvisorTokens.sum(a!.advisor, b.advisor)
         return sum
     }
 
@@ -672,20 +805,8 @@ public enum LeadReceipts {
             guard let tally = tallies[role] else { return nil }
             var tokens = LeadTokens(sessions: tally.sessions)
             var byModel: [String: Int] = [:]
-            var unpriced = Set<String>()
-            var cost = 0.0
-            for response in tally.responses {
-                tokens.input += response.input
-                tokens.output += response.output
-                tokens.cacheRead += response.cacheRead
-                tokens.cacheWrite += response.cacheWrite
-                tokens.cacheWrite1h += response.cacheWrite1h
-                byModel[response.model, default: 0] += response.input + response.output + response.cacheRead + response.cacheWrite
-                if let price = LeadPrices.price(response.model) { cost += LeadPrices.cost(response, price: price) } else { unpriced.insert(response.model) }
-            }
+            for response in tally.responses { tokens.add(response, byModel: &byModel) }
             tokens.models = byModel.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map(\.key)
-            tokens.cost = unpriced.isEmpty ? cost : nil
-            tokens.unpriced = unpriced.isEmpty ? nil : unpriced.sorted()
             return tokens
         }
         return Usage(worker: tokens(.worker), verifier: tokens(.verifier))
@@ -699,7 +820,10 @@ public enum LeadReceipts {
 
     /// The API responses in a transcript's lines (`"type":"assistant"` with a usage), from `since` on, each once:
     /// those whose message id (else request id) is in `seen` are left out, and the rest added to it. A response with
-    /// no tokens (Claude Code's own `<synthetic>` notes) isn't one.
+    /// no tokens (Claude Code's own `<synthetic>` notes) isn't one. Each advisor call a response made (an
+    /// `advisor_message` in its usage's `iterations`, apart from the response's own tokens) follows it as one more,
+    /// `advisor` set, its model the call's ("advisor" when it names none) and its id the response's with "#advisor<N>"
+    /// (never added to `seen`: it counts once with its response).
     static func responses(in data: Data, since: Double, seen: inout Set<String>) -> [Response] {
         var responses: [Response] = []
         let usageKey = Data("\"usage\"".utf8)
@@ -721,6 +845,18 @@ public enum LeadReceipts {
             response.at = at
             response.id = id
             responses.append(response)
+            let steps = (usage["iterations"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.filter { $0["type"] as? String == "advisor_message" }
+            for (index, step) in steps.enumerated() {
+                let count = { (key: String) in max(0, (step[key] as? NSNumber)?.intValue ?? 0) }
+                let model = (step["model"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "advisor"
+                let stepCreation = step["cache_creation"] as? [String: Any]
+                var call = Response(model: model, input: count("input_tokens"), output: count("output_tokens"),
+                                    cacheRead: count("cache_read_input_tokens"), cacheWrite: count("cache_creation_input_tokens"),
+                                    cacheWrite1h: (stepCreation?["ephemeral_1h_input_tokens"] as? NSNumber)?.intValue ?? 0,
+                                    fast: step["speed"] as? String == "fast", advisor: true, at: at, id: "\(id)#advisor\(index)")
+                call.cacheWrite1h = max(0, min(call.cacheWrite1h, call.cacheWrite))
+                if call.input + call.output + call.cacheRead + call.cacheWrite > 0 { responses.append(call) }
+            }
         }
         return responses
     }
