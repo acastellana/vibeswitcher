@@ -403,3 +403,7 @@ This follows the user's instruction. The review gate for sensitive paths is a gu
 
 A durable pass sealed with the lead's seal could be forged from the lead's shell to skip a merge's test run, a new way past the gate. Keeping it in memory meets the contract (it survives a seal hold) without adding anything forgeable, and a restart only costs a rerun.
 
+## 2026-11-19 13:02:39 audits-run-on-codex: the lead may close a pending post-merge Claude re-audit that can't be audited (branch gone, verifier keeps ending) only through cleanup(task, force: true, reason:). The reason must cite something checkable, it is screened by the record lints, and the close is recorded as "closed by the lead", never as passed. Not vetoed.
+
+Without it, an unauditable obligation would block cleanup forever. The change it tracks is already merged, so closing it removes no gate, and the waiver is explicit, has a reason and is visible on the record, like dismiss_finding.
+
