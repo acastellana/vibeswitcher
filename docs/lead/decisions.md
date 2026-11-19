@@ -391,3 +391,7 @@ Fable's weekly limit was spent while Opus still worked. The user allowed reviews
 
 Whole-suite reruns cost about 35 h in the week (24 of 91 first runs failed; every rerun re-ran everything, a median 39 min against 16 for a clean pass). Seal checks after the tests threw away three passing runs, and the lead's records failed 9 merges. Sleep is mostly the lid closed overnight; rework is spread thin with no single cause.
 
+## 2026-11-19 08:20:29 Codex reviews when Claude has no quota (the user, 2026-11-19: "Make sure that the reviews are happening through Codex especially when there's no quota"). When the verifier's Claude model is held back at a usage limit, audits run on Codex instead of waiting, sensitive ones included. The verdict is marked as Codex's, and each sensitive-path merge made on a Codex verdict gets a follow-up Claude audit after the reset. Task audits-run-on-codex (after sensitive-audits-fall). This supersedes "Codex never reviews", but only as a fallback: when Claude has quota, Claude reviews.
+
+Eight finished tasks sat 7–11 h waiting on Fable's limit (resets Nov 24) while Codex had 86% of its week left. The follow-up Claude audit keeps a second-model check on the guard rails without blocking delivery.
+
