@@ -12,8 +12,9 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **30 has it**, **15 partly**, **41 missing** (one of them, Codex workers, on purpose), **8 not needed on
-Linux**, **6 Linux-only new**, **1 unverified**.
+Of 101 features: **33 has it**, **15 partly**, **37 missing** (one of them, Codex workers, on purpose), **9 not needed on
+Linux**, **6 Linux-only new**, **1 unverified** (after the small accidental gaps closed on 2026-11-19: the lead's model,
+small_task_min, the seen mark, the battery hold, the push request told).
 
 The gaps that matter most for daily use, worst first:
 
