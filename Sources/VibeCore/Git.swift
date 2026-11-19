@@ -53,7 +53,8 @@ public enum Git {
 ///   repository's hooks folder: a hook planted there (post-merge, reference-transaction, post-checkout…) doesn't run.
 ///   The hooks a repository has when the guard first sees it are the baseline, accepted then (`baseline`), so the
 ///   user's own keep running (project-c's commit-msg) and the lead is told once which; a later change there runs only
-///   once the lead accepts it, and is told to the lead (`notice`) until it does.
+///   once the lead accepts it, and is told to the lead (`notice`) until it does. The baseline is the main checkout's,
+///   also when the guard first sees the repository in a linked worktree: never what a worktree's own config names.
 /// - runs without the fsmonitor, without any transport (`protocol.allow=never`: no lazy fetch, so no credential helper
 ///   or ssh command), with diff's external drivers and textconv off (`--no-ext-diff --no-textconv`), and without a git
 ///   of its own in any submodule (`submodule.recurse=false`, `--ignore-submodules=dirty`).
@@ -375,9 +376,26 @@ public enum GitGuard {
     /// Trust on first use: a repository the guard has nothing accepted for yet gets the hooks it has now as its
     /// baseline, before git runs, so the user's own hooks keep running in the lead's git. Told to the lead once (`notice`).
     /// One that fails (a hook changing as it's copied) is tried again at the next call, git meanwhile running no hooks.
+    /// Taken in the main checkout, wherever the guard first sees the repository (`baselineFolder`).
     static func baseline(in directory: String, commonDir: String) {
-        guard !FileManager.default.fileExists(atPath: store(commonDir: commonDir).appendingPathComponent("accepted.json").path) else { return }
-        _ = try? accept(root: directory, baseline: true)
+        guard !FileManager.default.fileExists(atPath: store(commonDir: commonDir).appendingPathComponent("accepted.json").path),
+              let folder = baselineFolder(for: directory) else { return }
+        _ = try? accept(root: folder, baseline: true)
+    }
+
+    /// Where the baseline of the repository `directory` is in is taken: `directory` itself in the checkout that holds
+    /// the common git folder; for a linked worktree, that main checkout, never the worktree. A worktree's hooks folder
+    /// is what its own config says (`config.worktree`'s core.hooksPath, or a relative one of the repository's, which
+    /// is then a folder of the worktree's files), and a worktree is a worker's to write: first seen there, the guard
+    /// took the worker's hooks as the repository's (2026-11-19). Nil for a linked worktree whose repository has no
+    /// main checkout (a bare one): no baseline is taken from there, so git runs no hooks until the lead accepts some.
+    static func baselineFolder(for directory: String) -> String? {
+        guard let dirs = gitDirs(of: directory) else { return nil }
+        guard dirs.git != dirs.common else { return directory }
+        let main = (dirs.common as NSString).deletingLastPathComponent
+        guard (dirs.common as NSString).lastPathComponent == ".git", let found = gitDirs(of: main),
+              found.git == dirs.common, found.common == dirs.common else { return nil }
+        return main
     }
 
     /// The hook git runs in place of the accepted copy at `hook`: that copy, as branch code (`BranchCode`), never the
