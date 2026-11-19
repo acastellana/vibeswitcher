@@ -790,13 +790,15 @@ public struct LeadVerifierRetry: Codable, Equatable, Sendable {
     }
 }
 
-/// A sensitive task merged on Codex is reviewed independently by Claude after its quota reset.
+/// A sensitive task, or one a Codex worker worked on, merged on Codex is reviewed independently by Claude after its quota reset.
 /// Its original branch and baseline stay until this passes; it never moves the merged task back to work.
 public struct LeadClaudeReaudit: Codable, Equatable, Sendable {
     public var head: String
     public var base: String
     public var model: String
     public var sensitive: [String]
+    /// A Codex worker worked on the task (`LeadTask.codexWorked`, or agent codex): Codex had the only say on its own work.
+    public var codexWorked: Bool?
     public var session: String?
     public var evidence: LeadEvidence?
     public var passed: Bool?
@@ -820,7 +822,8 @@ public struct LeadClaudeReaudit: Codable, Equatable, Sendable {
         "Claude re-audit " + (closed != nil ? "closed by the lead (\(closed ?? ""))" : passed == true ? "passed" : evidence != nil ? "needs the lead's attention"
             : stopped ? "stopped: its verifier ended without a verdict \(Self.maxEndings) times; audit to start it again"
             : session != nil ? "started" : "pending after Claude's usage limit resets")
-            + " (post-merge, sensitive_paths: " + sensitive.joined(separator: ", ") + ")"
+            + " (post-merge, " + ((codexWorked == true ? ["Codex worked it"] : [])
+                + (sensitive.isEmpty ? [] : ["sensitive_paths: " + sensitive.joined(separator: ", ")])).joined(separator: "; ") + ")"
     }
 }
 
@@ -1061,7 +1064,7 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// says since (its branch holds Codex's commits): a Claude verifier's, or Codex's under the quota fallback
     /// (`codex_verifier`), recorded as audited by Codex.
     public var codexWorked: Bool?
-    /// Follow-up required for a sensitive task merged on a Codex verdict.
+    /// Follow-up required for a sensitive or Codex-worked task merged on a Codex verdict.
     public var claudeReaudit: LeadClaudeReaudit?
 
     /// Who runs a task's worker. Codex also verifies only while Claude is held at a usage limit. `auto`: chosen at each start from
@@ -1098,7 +1101,7 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
         guard workerAgent == .codex || codexWorked == true else { return nil }
         return (workerAgent == .codex ? "Its worker is Codex, so a Claude verifier audits it whatever its review says."
             : "A Codex worker worked on it, so a Claude verifier audits it whatever its review says.")
-            + " At Claude's usage limit Codex verifies instead; a sensitive merge then gets a post-merge Claude re-audit."
+            + " At Claude's usage limit Codex verifies instead; its merge then gets a post-merge Claude re-audit."
     }
 
     /// Notes that `sessions` were started on `model` (nil: Claude's default), keeping only its members' entries.
