@@ -24,8 +24,9 @@ public final class WebSocketConnection: @unchecked Sendable {
     /// Under `WebLimits.Overflow.drop` every message from that one on is dropped until `resume()`; under `.close`
     /// the connection is closed right after this (`onClose`, 1006).
     public var onFellBehind: (() -> Void)?
-    /// Everything queued has been written. Called once each time the client fell behind (the moment to `resume()`
-    /// and send whatever brings the client up to date), and once for each `awaitDrain()`.
+    /// Everything queued has been written. Called once each time the client fell behind, after `onFellBehind` and
+    /// never before it (the moment to `resume()` and send whatever brings the client up to date), and once for each
+    /// `awaitDrain()`.
     public var onDrained: (() -> Void)?
     /// A last text message for a client the listener itself is about to close, given the close code: 1009 (a message
     /// too big), 1002 or 1007 (a frame the protocol forbids), 1001 (the listener is stopping). Nil, or a nil answer:
@@ -115,12 +116,15 @@ public final class WebSocketConnection: @unchecked Sendable {
     private func fellBehind() {
         guard !reported else { return }
         onFellBehind?()
+        // Only now may a write that finds nothing left tell `onDrained`: one asked for before the message was refused
+        // can run before this, and the handler is told it drained after it is told it fell behind, never before.
+        out.toldBehind()
         guard let connection else { return }
         if overflow == .close {
             listener?.drop(connection, code: WebSocketClose.abnormal, reason: "fell behind")
         } else {
-            // A message refused with nothing queued (one over the limit by itself): the queue is told to look, and
-            // finds it has drained.
+            // A message refused with nothing queued (one over the limit by itself), or all of it written before the
+            // handler was told: the queue is told to look, and finds it has drained.
             listener?.flush(connection)
         }
     }
@@ -178,6 +182,9 @@ final class WebOutbound: @unchecked Sendable {
     private var sealed = false
     /// A message was refused, and the caller hasn't resumed since: every message is refused.
     private var behind = false
+    /// The messages refused first (`.refused(first: true)`) whose handler hasn't been told yet (`toldBehind`): while
+    /// there is one, nothing is answered `drained` for having fallen behind.
+    private var untold = 0
     /// `.empty(drained: true)` has been answered since the client fell behind.
     private var toldDrained = false
     /// The caller asked to be told when nothing is left (`awaitDrain`).
@@ -207,6 +214,7 @@ final class WebOutbound: @unchecked Sendable {
         guard !behind else { return .refused(first: false) }
         guard queued + frame.count <= cap else {
             behind = true
+            untold += 1
             if overflow == .close {
                 sealed = true
                 dropUnstarted()
@@ -225,6 +233,14 @@ final class WebOutbound: @unchecked Sendable {
             guard !sealed else { return false }
             drainAwaited = true
             return kick()
+        }
+    }
+
+    /// The handler has been told of one message refused first (`onFellBehind`): the next time nothing is left may be
+    /// `.empty(drained: true)`. The caller asks the queue to look, as nothing may be left already.
+    func toldBehind() {
+        lock.withLock {
+            if untold > 0 { untold -= 1 }
         }
     }
 
@@ -326,9 +342,12 @@ final class WebOutbound: @unchecked Sendable {
                     }
                 } else {
                     kicked = false
-                    let drained = !sealed && (drainAwaited || (behind && !toldDrained))
+                    // Fallen behind, and the handler knows: told it drained, once. Before it knows, the write
+                    // that follows `toldBehind` is the one that tells.
+                    let caughtUp = behind && untold == 0 && !toldDrained
+                    let drained = !sealed && (drainAwaited || caughtUp)
                     drainAwaited = false
-                    if behind { toldDrained = true }
+                    if caughtUp { toldDrained = true }
                     return .empty(drained: drained)
                 }
                 gone = 0
