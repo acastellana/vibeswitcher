@@ -12,3 +12,17 @@
 - 2026-11-19 12:24 Automatically (auto_advance): Overlap for sb6-1-2-branch's start (a warning only: nothing was refused or reordered). Package.swift: sb3-the-launcher-builds (running: its boundaries name it).
 - 2026-11-19 12:25 Planned sb6-2-2-a: SB6 (2/2): a worker's branch in a ref folder of its own, and its objects checked at merge (review audit, for security)
 - 2026-11-19 12:25 Planned sb5-the-host-confines: SB5: the host confines what a lead starts (review audit, for security)
+- 2026-11-19 17:31 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 17:31 Started a worker on sb3-the-launcher-builds
+- 2026-11-19 17:31 Automatically (auto_advance): Started a worker on sb3-the-launcher-builds (SB3: the launcher builds the box (SessionSandbox)).
+- 2026-11-19 17:31 Automatically (auto_advance): Overlap for sb3-the-launcher-builds's start (a warning only: nothing was refused or reordered). Package.swift: sb5-the-host-confines (planned, set to start after this one: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
+- 2026-11-19 17:31 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 17:31 Started a worker on sb6-1-2-branch
+- 2026-11-19 17:31 Automatically (auto_advance): Started a worker on sb6-1-2-branch (SB6 (1/2): branch code runs in a box of its own (BranchRun)).
+- 2026-11-19 17:31 Automatically (auto_advance): Overlap for sb6-1-2-branch's start (a warning only: nothing was refused or reordered). Package.swift: sb3-the-launcher-builds (running: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-2-2-a (planned, set to start after this one: its boundaries name it); Sources/VibeCore/Worktrees.swift: sb6-2-2-a (planned, set to start after this one: its boundaries name it).
+- 2026-11-19 17:32 Planned planner-a-worker-s: Planner: a worker's box can't write config.worktree or the agent's memory (review audit, for security)
+- 2026-11-19 17:32 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 17:32 Started a worker on planner-a-worker-s
+- 2026-11-19 17:32 Automatically (auto_advance): Started a worker on planner-a-worker-s (Planner: a worker's box can't write config.worktree or the agent's memory).
+- 2026-11-19 17:32 Automatically (auto_advance): Overlap for planner-a-worker-s's start (a warning only: nothing was refused or reordered). Package.swift: sb3-the-launcher-builds (running: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-1-2-branch (running: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
+- 2026-11-19 17:32 Planned branch-runs-get-the: Branch runs get the project's sandbox policy, so swift runs in a merge's box (review audit, for security)
