@@ -101,3 +101,13 @@
 - 2026-11-19 21:32 Planned the-vault-s-look: The vault's look never catches the tool server halfway through writing its git-hooks copy (review audit, for security)
 - 2026-11-19 21:47 Started a worker on the-full-suite-passes
 - 2026-11-19 21:47 Automatically (auto_advance): Merge of the-full-suite-passes failed: Tests fail rebased onto v2: theAutomaticAuditEndsTheEarlierVerifierFirst(), aHostStartsOnlyOnTheLockItTookItselfFor(); the run stopped partway: 913 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running Sent its worker the output; it's back at work.
+- 2026-11-19 21:53 Started a worker on leadadvancetests-battery
+- 2026-11-19 21:53 Automatically (auto_advance): Started a worker on leadadvancetests-battery (LeadAdvanceTests: the settle() race and the earlier-verifier test).
+- 2026-11-19 21:53 Pipeline held: the-full-suite-passes ready to merge with none landing; cause: a merge in progress
+- 2026-11-19 21:53 Planned hosthardeningtests-lock: HostHardeningTests' lock test fails when another test forks at the wrong moment
+- 2026-11-19 21:55 Planned the-merge-s-test: The merge's test run retries only the tests that failed, once (review audit)
+- 2026-11-19 21:55 Started a worker on the-merge-s-test
+- 2026-11-19 21:55 Automatically (auto_advance): Started a worker on the-merge-s-test (The merge's test run retries only the tests that failed, once).
+- 2026-11-19 21:55 Automatically (auto_advance): Overlap for the-merge-s-test's start (a warning only: nothing was refused or reordered). scripts/test.sh: the-full-suite-passes (review: its branch changes it).
+- 2026-11-19 22:09 Merged the-full-suite-passes: The full suite passes when the node's own merge gate runs it (build 5b6eccd929ad)
+- 2026-11-19 22:09 Flaky in the-full-suite-passes's merge: aListenerLetGoClosesItsSockets(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun

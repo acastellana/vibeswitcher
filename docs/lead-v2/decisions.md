@@ -16,3 +16,7 @@ The user's message; and merging before the test-environment fix would only burn 
 
 A verifier on planner-a-worker-s sat on a prompt with its audit nearly done; waiting can't end, and the user said to restart rather than wait.
 
+## 2026-11-19 21:55:20 The user (2026-11-19, late): one flake must not block every merge. Ahead of the flake fixes, task the-merge-s-test-run makes the test command retry only the failed tests, once, in a fresh run, passing if they pass the second time and listing them as flaky in the merge's record; the lead then sets test_command to use it. The flake tasks (leadadvancetests-battery, hosthardeningtests-lock, the-vault-s-look) still get done. Then the gate fix (the-full-suite-passes, approved at 4ced9304a742600325c2b1efc27edc2c764cd63d, question 097DCACA) and the four approved merges land (weblistener-slow-client 27a30b62, planner-a-worker-s aa0bc2e3, sb3 ca9f2101, sb6-1-2-branch 0e799cc5 approved in question 850EF098); until the retry is in, a merge that fails only on a known load-sensitive test is simply merged again (the user's standing rule: push past known random failures).
+
+The user's message; the first merge of the-full-suite-passes failed on two flakes in code it doesn't touch.
+
