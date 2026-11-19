@@ -914,6 +914,16 @@ extension HostHardeningTests {
         #expect(HostImages.accountHome == VibePaths.accountHome)
         // And --node is refused without its node root and its own server, before anything is changed.
         #expect(HostImages.startAsNode(arguments: ["host"]) == nil)
+        // On the Mac --node is refused before anything is read or changed: the node's host isn't built there, and a
+        // host that ignored it would be the app's (the node on the Mac's design, 2026-11-19). Mac only: needs a real
+        // Mac run (docs/process/v2-mac-tasks.md).
+        if Platform.CodeIdentity.isAvailable {
+            let homeBefore = ProcessInfo.processInfo.environment["HOME"]
+            #expect(HostImages.startAsNode(arguments: ["host", "--node"]) == HostImages.macNodeRefusal)
+            #expect(HostImages.startAsNode(arguments: ["host", "--node", "--node-root", "/nonexistent/build", "--server", "/nonexistent/build/bin/vibeswitcher-server"])
+                == HostImages.macNodeRefusal)
+            #expect(ProcessInfo.processInfo.environment["HOME"] == homeBefore)
+        }
         if !Platform.CodeIdentity.isAvailable {
             #expect(HostImages.startAsNode(arguments: ["host", "--node"])?.contains("needs --node-root") == true)
             #expect(HostImages.startAsNode(arguments: ["host", "--node", "--node-root", "/nonexistent/build"])?.contains("needs --server") == true)
