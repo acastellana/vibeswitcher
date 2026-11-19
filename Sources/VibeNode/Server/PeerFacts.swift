@@ -60,8 +60,12 @@ public struct PeerFacts: Equatable, Sendable {
 
     /// The process `pid` as it reads now (Linux: `/proc`; the Mac reads no links, so every field there is unreadable
     /// and no peer is the user, which only Linux's server asks). `token`: the sender as the socket named it; when its
-    /// pid now names another process (it ended and its number was given again), nothing is readable.
-    public static func read(pid: pid_t, token: Platform.PeerToken? = nil) -> PeerFacts {
+    /// pid now names another process (it ended and its number was given again), nothing is readable. `cgroupRoot`: a
+    /// scratch server's test's (`ServerArguments.testCgroupRoot`), from which its cgroup lines are read (`rerooted`);
+    /// nil, as the user's node's server always has it: the lines as `/proc` gives them. `runnersAbove`: the runners a
+    /// scratch server's test runs under (`ServerArguments.testRunnerAbove`: the server's own, `runners(above:)`),
+    /// which aren't counted as this process's; none, as the user's node's server always has it: every runner counts.
+    public static func read(pid: pid_t, token: Platform.PeerToken? = nil, cgroupRoot: String? = nil, runnersAbove: [Ancestor] = []) -> PeerFacts {
         var uid: uid_t?
         if case .record(let record) = Platform.Processes.record(pid) { uid = record.uid }
         var ancestry: [Ancestor] = []
@@ -86,16 +90,58 @@ public struct PeerFacts: Equatable, Sendable {
             for ancestor in ancestry {
                 let arguments = Platform.Processes.arguments(ancestor.pid)
                 guard !arguments.isEmpty else { underRunner = nil; break }
-                if BranchCode.isRunner(arguments) { underRunner = true; break }
+                // Any runner but one above the whole scratch node: the same process, by its pid and its start.
+                if BranchCode.isRunner(arguments), !runnersAbove.contains(ancestor) { underRunner = true; break }
             }
         } else {
             underRunner = nil
         }
         let environment = Platform.Processes.environment(pid)
-        return PeerFacts(pid: pid, uid: uid, cgroup: Platform.Processes.cgroup(pid), ancestry: readable ? ancestry : nil,
+        let cgroup = Platform.Processes.cgroup(pid).map { lines in cgroupRoot.map { rerooted(lines, at: $0) } ?? lines }
+        return PeerFacts(pid: pid, uid: uid, cgroup: cgroup, ancestry: readable ? ancestry : nil,
                          terminal: readable ? terminal : .unreadable,
                          sessionMarker: environment.map { $0.contains { $0.hasPrefix(sessionMarkerName + "=") } },
                          underRunner: underRunner, commandLine: Platform.Processes.arguments(pid))
+    }
+
+    /// The branch code runners `pid` runs under (`BranchCode.isRunner`), nearest first, each by its pid and its start:
+    /// what a scratch server given `--test-runner-above` reads of itself, once, at its start. Its ancestors are read
+    /// as a sender's are (itself first, up to init); where a link can't be read the walk ends there, with the runners
+    /// found so far, and one whose arguments can't be read isn't one: fewer runners here is more senders refused.
+    public static func runners(above pid: pid_t) -> [Ancestor] {
+        var runners: [Ancestor] = []
+        var next = pid
+        var steps = 0
+        while next > 1, steps < deepest, let link = Platform.Processes.link(next) {
+            if BranchCode.isRunner(Platform.Processes.arguments(link.pid)) { runners.append(Ancestor(pid: link.pid, startTicks: link.startTicks)) }
+            next = link.parent
+            steps += 1
+        }
+        return runners
+    }
+
+    /// Whether `path` can be a test's cgroup root: a cgroup's path as the kernel writes one, below the hierarchy's root
+    /// (absolute, not `/` itself, no empty, `.` or `..` component, so no `/` at its end).
+    public static func isCgroupRoot(_ path: String) -> Bool {
+        guard path.hasPrefix("/"), path != "/" else { return false }
+        return path.dropFirst().split(separator: "/", omittingEmptySubsequences: false).allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+
+    /// `lines` (a `/proc/<pid>/cgroup`'s) as a process in a cgroup namespace rooted at `root` would read them: in each
+    /// hierarchy's line a path that is `root` reads `/`, and a path under it (by whole components: `root` and then a
+    /// `/`) reads from there. Every other path stays as it is, so a process outside `root` is where the machine says
+    /// it is, and a root that isn't one (`isCgroupRoot`) changes nothing. Only a scratch server's test gives a root
+    /// (`ServerArguments.testCgroupRoot`).
+    public static func rerooted(_ lines: [String], at root: String) -> [String] {
+        guard isCgroupRoot(root) else { return lines }
+        return lines.map { line in
+            let parts = line.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count == 3 else { return line }
+            let path = parts[2]
+            if path == root { return "\(parts[0]):\(parts[1]):/" }
+            if path.hasPrefix(root + "/") { return "\(parts[0]):\(parts[1]):\(path.dropFirst(root.count))" }
+            return line
+        }
     }
 
     /// The path of the unified hierarchy (`0::PATH`) in `lines`; nil without one.

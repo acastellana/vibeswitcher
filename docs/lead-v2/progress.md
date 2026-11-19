@@ -1,0 +1,113 @@
+# Progress
+
+- 2026-11-19 12:23 Planned weblistener-slow-client: WebListener slow-client test: find the race, make it deterministic (review audit)
+- 2026-11-19 12:23 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots, ~/.vibeswitcher/lead/git-hooks and ~/.vibeswitcher/lead/run
+- 2026-11-19 12:23 Automatically (auto_advance): Didn't start weblistener-slow-client: weblistener-slow-client's worker not started: ~/.claude/skills and ~/.local/share/claude/versions changed outside a team session: they carry code that runs (hooks, MCP servers, shell startup, git's commands), so only the user's Accept seals them, whoever made the change. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change, they accept it ther…
+- 2026-11-19 12:24 Planned sb3-the-launcher-builds: SB3: the launcher builds the box (SessionSandbox) (review audit, for security)
+- 2026-11-19 12:24 Started a worker on sb3-the-launcher-builds
+- 2026-11-19 12:24 Automatically (auto_advance): Started a worker on sb3-the-launcher-builds (SB3: the launcher builds the box (SessionSandbox)).
+- 2026-11-19 12:24 Planned sb6-1-2-branch: SB6 (1/2): branch code runs in a box of its own (BranchRun) (review audit, for security)
+- 2026-11-19 12:24 Started a worker on sb6-1-2-branch
+- 2026-11-19 12:24 Automatically (auto_advance): Started a worker on sb6-1-2-branch (SB6 (1/2): branch code runs in a box of its own (BranchRun)).
+- 2026-11-19 12:24 Automatically (auto_advance): Overlap for sb6-1-2-branch's start (a warning only: nothing was refused or reordered). Package.swift: sb3-the-launcher-builds (running: its boundaries name it).
+- 2026-11-19 12:25 Planned sb6-2-2-a: SB6 (2/2): a worker's branch in a ref folder of its own, and its objects checked at merge (review audit, for security)
+- 2026-11-19 12:25 Planned sb5-the-host-confines: SB5: the host confines what a lead starts (review audit, for security)
+- 2026-11-19 17:31 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 17:31 Started a worker on sb3-the-launcher-builds
+- 2026-11-19 17:31 Automatically (auto_advance): Started a worker on sb3-the-launcher-builds (SB3: the launcher builds the box (SessionSandbox)).
+- 2026-11-19 17:31 Automatically (auto_advance): Overlap for sb3-the-launcher-builds's start (a warning only: nothing was refused or reordered). Package.swift: sb5-the-host-confines (planned, set to start after this one: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
+- 2026-11-19 17:31 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 17:31 Started a worker on sb6-1-2-branch
+- 2026-11-19 17:31 Automatically (auto_advance): Started a worker on sb6-1-2-branch (SB6 (1/2): branch code runs in a box of its own (BranchRun)).
+- 2026-11-19 17:31 Automatically (auto_advance): Overlap for sb6-1-2-branch's start (a warning only: nothing was refused or reordered). Package.swift: sb3-the-launcher-builds (running: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-2-2-a (planned, set to start after this one: its boundaries name it); Sources/VibeCore/Worktrees.swift: sb6-2-2-a (planned, set to start after this one: its boundaries name it).
+- 2026-11-19 17:32 Planned planner-a-worker-s: Planner: a worker's box can't write config.worktree or the agent's memory (review audit, for security)
+- 2026-11-19 17:32 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 17:32 Started a worker on planner-a-worker-s
+- 2026-11-19 17:32 Automatically (auto_advance): Started a worker on planner-a-worker-s (Planner: a worker's box can't write config.worktree or the agent's memory).
+- 2026-11-19 17:32 Automatically (auto_advance): Overlap for planner-a-worker-s's start (a warning only: nothing was refused or reordered). Package.swift: sb3-the-launcher-builds (running: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-1-2-branch (running: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
+- 2026-11-19 17:32 Planned branch-runs-get-the: Branch runs get the project's sandbox policy, so swift runs in a merge's box (review audit, for security)
+- 2026-11-19 17:45 Started a worker on weblistener-slow-client
+- 2026-11-19 18:09 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 18:09 Audit of sb6-1-2-branch at 6b399fd3 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 18:09 Released sb6-1-2-branch's worker (idle since its done report on 6b399fd3) while its audit runs
+- 2026-11-19 18:09 Automatically (auto_advance): Started the audit of sb6-1-2-branch at 6b399fd3 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-19 18:22 Audit of sb6-1-2-branch: finder 2 of 2 submitted (complete, clean, 4 findings)
+- 2026-11-19 18:27 Audit of sb6-1-2-branch: incomplete, clean, round 1: 2 Important unconfirmed, 5 Nit unconfirmed, 1 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 8 unconfirmed)
+- 2026-11-19 18:28 Planned the-full-suite-passes: The full suite passes when the node's own merge gate runs it (review audit)
+- 2026-11-19 18:30 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 18:30 Audit of sb3-the-launcher-builds at ca9f2101 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 18:30 Automatically (auto_advance): Started the audit of sb3-the-launcher-builds at ca9f2101 (Its review is audit).
+- 2026-11-19 18:30 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-19 18:30 Started a worker on sb6-1-2-branch
+- 2026-11-19 18:30 Automatically (auto_advance): Started a worker on sb6-1-2-branch (SB6 (1/2): branch code runs in a box of its own (BranchRun)).
+- 2026-11-19 18:30 Automatically (auto_advance): Overlap for sb6-1-2-branch's start (a warning only: nothing was refused or reordered). Package.swift: branch-runs-get-the (planned, set to start after this one: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-2-2-a (planned, set to start after this one: its boundaries name it), the-full-suite-passes (planned: its boundaries name it); Sources/VibeCore/V2/Sandbox/BranchRun.swift: branch-runs-get-the (planned, set to start after this one: its boundaries name it); Sources/VibeCore/Worktrees.swift: sb6-2-2-a (planned, set to start after this one: its boundaries name it).
+- 2026-11-19 18:30 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 18:30 Started a worker on the-full-suite-passes
+- 2026-11-19 18:30 Automatically (auto_advance): Started a worker on the-full-suite-passes (The full suite passes when the node's own merge gate runs it).
+- 2026-11-19 18:30 Automatically (auto_advance): Overlap for the-full-suite-passes's start (a warning only: nothing was refused or reordered). Package.swift: branch-runs-get-the (planned: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-1-2-branch (running: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
+- 2026-11-19 18:34 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 18:35 Audit of weblistener-slow-client at 27a30b62 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 18:37 Audit of sb3-the-launcher-builds: finder 1 of 2 submitted (complete, clean, 2 findings)
+- 2026-11-19 18:40 Audit of sb3-the-launcher-builds: complete, clean, round 1: 1 Nit open, 2 Pre-existing (1 open, 1 unconfirmed) (2 finders voted: 2 new findings confirmed, 1 unconfirmed)
+- 2026-11-19 18:44 Audit of weblistener-slow-client: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-19 18:44 Audit of weblistener-slow-client: complete, clean, round 1: 1 Nit unconfirmed, 2 Pre-existing (1 open, 1 unconfirmed) (2 finders voted: 1 new finding confirmed, 2 unconfirmed)
+- 2026-11-19 18:46 Workflow: max_workers = `2`
+- 2026-11-19 18:51 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 18:51 Audit of planner-a-worker-s at aa0bc2e3 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 18:51 Automatically (auto_advance): Started the audit of planner-a-worker-s at aa0bc2e3 (Its review is audit).
+- 2026-11-19 18:59 Audit of planner-a-worker-s: finder 1 of 2 submitted (complete, clean, 4 findings)
+- 2026-11-19 18:59 Sent planner-a-worker-s's audit contract v2 (it had v1)
+- 2026-11-19 18:59 Sent planner-a-worker-s's worker contract v2 (it had v1)
+- 2026-11-19 18:59 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 19:00 Audit of planner-a-worker-s at aa0bc2e3 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 19:00 Pipeline held: sb3-the-launcher-builds ready to merge with none landing; cause: every test slot held
+- 2026-11-19 19:01 The worker on sb6-1-2-branch answered findings: sb6-1-2-branch:F1 fixed at 91cc0dcc: 63abcfdb: BranchRun.swift no longer uses standardizedFileURL anywhere. The PATH filter in plan(), the run's home from CFFIXED_USER_HOME/TMPDIR (home(_:account:)) and settled() all tidy by SandboxPolicy.lexical, 5b6eccd9's helper, so the launcher judges a PATH folder under the same spelling the planner shows it by. Checked the branch's tests and its other files for the same kind (standardizedFileURL, standardizingPath, resolvingSymlinksInPath): none in what th…
+- 2026-11-19 19:07 Audit of planner-a-worker-s: finder 1 of 2 submitted (complete, clean, 3 findings)
+- 2026-11-19 19:09 Audit of planner-a-worker-s: complete, clean, round 1: 4 Nit (2 open, 2 unconfirmed), 1 Pre-existing unconfirmed (2 finders voted: 2 new findings confirmed, 3 unconfirmed)
+- 2026-11-19 19:09 Automatically (auto_advance): Didn't merge planner-a-worker-s: Not merged yet: the merge policy is ask_sensitive, so the user approves planner-a-worker-s at aa0bc2e3 first. It touches Sources/VibeCore/Git.swift, Sources/VibeCore/V2/Sandbox/ClaudeFiles.swift, Sources/VibeCore/V2/Sandbox/GitRoots.swift, Sources/VibeCore/V2/Sandbox/SandboxPlanner.swift. Ask once: ask_user(question: "Merge planner-a-worker-s (Planner: a worker's box can't write config.worktree or the agent's memory) at aa0bc2e3? …what it changes and the risk…", options: ["Approve aa0bc2e37ebb05177bac3f61231e95ddacf7bc0d", "Not yet"], priority: blocking, task: "planner-a-worker-s"), with no ti…
+- 2026-11-19 19:18 Sent sb6-1-2-branch's worker contract v4 (it had v3)
+- 2026-11-19 19:33 Automatically (auto_advance): Didn't audit sb6-1-2-branch: Not audited: finder 1 of 2 couldn't start (Problem(text: "sb6-1-2-branch\'s finder not started: ~/.claude/settings.json changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can\'t. Te…
+- 2026-11-19 19:39 Exception on the-full-suite-passes by lead of vibeswitcher-v2-lead: edits to scripts/test-under-load.sh, docs/process/v2-linux-inventory.md, Tests/Fixtures/sandbox/prototype.sh accepted. Reason: The under-load script must set the same umask and drop the same team-session variables as scripts/test.sh or the load check can't pass from a session; the fixture's own PATH gets /usr/sbin:/sbin for p…
+- 2026-11-19 19:39 Sent the-full-suite-passes's worker contract v2 (it had v1)
+- 2026-11-19 19:46 Automatically (auto_advance): Didn't audit the-full-suite-passes: Not audited: finder 1 of 2 couldn't start (Problem(text: "the-full-suite-passes\'s finder not started: ~/.claude/settings.json changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can…
+- 2026-11-19 19:52 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 19:52 Audit of the-full-suite-passes at 41aa2b2c by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 19:52 Automatically (auto_advance): Started the audit of the-full-suite-passes at 41aa2b2c (Its review is audit).
+- 2026-11-19 19:52 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-19 19:52 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 19:52 Audit of sb6-1-2-branch at 0e799cc5 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 19:52 Automatically (auto_advance): Started the audit of sb6-1-2-branch at 0e799cc5 (Its review is audit).
+- 2026-11-19 19:52 Pipeline held: sb3-the-launcher-builds, weblistener-slow-client, planner-a-worker-s ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-19 19:57 Audit of the-full-suite-passes: finder 2 of 2 submitted (incomplete, clean, 1 finding)
+- 2026-11-19 19:58 Audit of sb6-1-2-branch: finder 1 of 2 submitted (complete, clean, 2 findings)
+- 2026-11-19 19:59 Audit of sb6-1-2-branch: complete, clean, round 2: 2 Important closed, 5 Nit unconfirmed, 1 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-19 19:59 Automatically (auto_advance): Didn't merge sb6-1-2-branch: Not merged yet: the merge policy is ask_sensitive, so the user approves sb6-1-2-branch at 0e799cc5 first. It touches Sources/VibeCore/V2/BranchCodeSession.swift, Sources/VibeCore/V2/Sandbox/BranchRun.swift, Sources/VibeCore/Worktrees.swift, Sources/vibeswitcher-mcp/main.swift, Tests/VibePlatformTests/PlatformLintTests.swift. Ask once: ask_user(question: "Merge sb6-1-2-branch (SB6 (1/2): branch code runs in a box of its own (BranchRun)) at 0e799cc5? …what it changes and the risk…", options: ["Approve 0e799cc5a977395558dc89907412e199278b70ac", "Not yet"], priority: blocking, task: "sb6-1-2-branc…
+- 2026-11-19 20:10 Audit of the-full-suite-passes: incomplete, clean, round 1: 1 Important open (2 finders voted: 1 new finding confirmed, 0 unconfirmed)
+- 2026-11-19 20:10 Automatically (auto_advance): Sent the-full-suite-passes's worker the open Important findings the-full-suite-passes:F1 from its audit at 41aa2b2c.
+- 2026-11-19 20:22 Pipeline held: sb3-the-launcher-builds, weblistener-slow-client, planner-a-worker-s, sb6-1-2-branch ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-19 20:22 Kept sb3-the-launcher-builds unmerged: Held by the lead until the-full-suite-passes has merged: the merge's test run fails on this node's environment before that. Approved by the user at ca9f2101; set back and merge then.
+- 2026-11-19 20:23 Kept weblistener-slow-client unmerged: Held by the lead until the-full-suite-passes has merged: the merge's test run fails on this node's environment before that. Approved by the user at 27a30b62; set back and merge then.
+- 2026-11-19 20:23 Kept planner-a-worker-s unmerged: Held by the lead until the-full-suite-passes has merged: the merge's test run fails on this node's environment before that. Approved by the user at aa0bc2e3; set back and merge then.
+- 2026-11-19 20:23 Kept sb6-1-2-branch unmerged: Held by the lead until the-full-suite-passes has merged (the merge's test run fails on this node's environment before that) and until the user approves 0e799cc5 (question 850EF098); set back and merge then.
+- 2026-11-19 20:56 The worker on the-full-suite-passes answered findings: the-full-suite-passes:F1 fixed at 4ced9304: Fixed in 620dbbc5 (docs 5ad97f94, one related test fix 4ced9304). Cause: the gate starts the test command under BranchCode.wrapper, so every test process has a runner among its ancestors and Voice.judge's last line refuses it; the cgroup line, judged first, had hidden it. Reproduced red from my session at 41aa2b2c under the wrapper's own command line (`setsid /bin/bash --noprofile --norc -p -c '"$@"; exit $?' vibeswitcher-branch-code /bin/bash -c "bash…
+- 2026-11-19 20:59 Planned leadadvancetests-battery: LeadAdvanceTests' battery-hold test races its settle() helper
+- 2026-11-19 21:06 Automatically (auto_advance): Didn't audit the-full-suite-passes: Not audited: finder 1 of 2 couldn't start (Problem(text: "the-full-suite-passes\'s finder not started: ~/.vibeswitcher/v2/builds changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you c…
+- 2026-11-19 21:21 Audit of the-full-suite-passes at 4ced9304 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 21:21 Released the-full-suite-passes's worker (idle since its done report on 4ced9304) while its audit runs
+- 2026-11-19 21:21 Automatically (auto_advance): Started the audit of the-full-suite-passes at 4ced9304 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-19 21:28 Audit of the-full-suite-passes: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-19 21:32 Audit of the-full-suite-passes: complete, clean, round 2: 1 Important closed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-19 21:32 Automatically (auto_advance): Didn't merge the-full-suite-passes: Not merged yet: the merge policy is ask_sensitive, so the user approves the-full-suite-passes at 4ced9304 first. It touches Sources/VibeNode/Server/NodeServer.swift, Sources/VibeNode/Server/PeerFacts.swift, Sources/VibeNode/Server/ServerArguments.swift, Sources/VibeNode/Server/ServerStart.swift, scripts/lib/test-environment.sh, scripts/test.sh. Ask once: ask_user(question: "Merge the-full-suite-passes (The full suite passes when the node's own merge gate runs it) at 4ced9304? …what it changes and the risk…", options: ["Approve 4ced9304a742600325c2b1efc27edc2c764cd63d", "Not yet"], priority: bl…
+- 2026-11-19 21:32 Planned the-vault-s-look: The vault's look never catches the tool server halfway through writing its git-hooks copy (review audit, for security)
+- 2026-11-19 21:47 Started a worker on the-full-suite-passes
+- 2026-11-19 21:47 Automatically (auto_advance): Merge of the-full-suite-passes failed: Tests fail rebased onto v2: theAutomaticAuditEndsTheEarlierVerifierFirst(), aHostStartsOnlyOnTheLockItTookItselfFor(); the run stopped partway: 913 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running Sent its worker the output; it's back at work.
+- 2026-11-19 21:53 Started a worker on leadadvancetests-battery
+- 2026-11-19 21:53 Automatically (auto_advance): Started a worker on leadadvancetests-battery (LeadAdvanceTests: the settle() race and the earlier-verifier test).
+- 2026-11-19 21:53 Pipeline held: the-full-suite-passes ready to merge with none landing; cause: a merge in progress
+- 2026-11-19 21:53 Planned hosthardeningtests-lock: HostHardeningTests' lock test fails when another test forks at the wrong moment
+- 2026-11-19 21:55 Planned the-merge-s-test: The merge's test run retries only the tests that failed, once (review audit)
+- 2026-11-19 21:55 Started a worker on the-merge-s-test
+- 2026-11-19 21:55 Automatically (auto_advance): Started a worker on the-merge-s-test (The merge's test run retries only the tests that failed, once).
+- 2026-11-19 21:55 Automatically (auto_advance): Overlap for the-merge-s-test's start (a warning only: nothing was refused or reordered). scripts/test.sh: the-full-suite-passes (review: its branch changes it).
+- 2026-11-19 22:09 Merged the-full-suite-passes: The full suite passes when the node's own merge gate runs it (build 5b6eccd929ad)
+- 2026-11-19 22:09 Flaky in the-full-suite-passes's merge: aListenerLetGoClosesItsSockets(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun

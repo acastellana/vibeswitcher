@@ -182,6 +182,236 @@ struct VoiceRuleTests {
         #expect(Self.refused(Self.judged(Self.peer(), rule: test)))
     }
 
+    // MARK: A scratch node's test's cgroup root
+
+    /// The test flag of a scratch node whose test runs inside the user's manager (the node's own merge gate):
+    /// `--test-cgroup-root=`. A server with `--node` refuses it, as it does every test flag (it says so at its start:
+    /// `refused`), and takes nothing from it; a scratch server takes a cgroup's path only.
+    @Test func theTestCgroupRootIsRefusedUnderNode() throws {
+        let base = ["vibeswitcher-server", "--host-connector", "3", "--host-socket", "/x/host.sock"]
+        let flag = ServerArguments.testCgroupRootFlag + Self.nodeUnit
+        let node = try ServerArguments.parse(base + ["--node", "--node-root", "/x/b", flag, ServerArguments.testUserScopesFlag + "/"]).get()
+        #expect(node.refused == [flag, ServerArguments.testUserScopesFlag + "/"], "\(node)")
+        #expect(node.testCgroupRoot == nil && node.testUserScopes == nil)
+        // With both dropped the user's server reads the sender where it is, by the rule its own cgroup gives: a peer in
+        // the node's unit (the test process such a flag would speak for) is refused by its cgroup, as ever.
+        let rule = VoiceRule.at(start: Self.hybrid(Self.nodeUnit), testScopes: node.testUserScopes, uid: Self.uid)
+        let lines = node.testCgroupRoot.map { PeerFacts.rerooted(Self.hybrid(Self.nodeUnit), at: $0) } ?? Self.hybrid(Self.nodeUnit)
+        #expect(Self.judged(Self.peer(cgroup: lines), rule: rule) == .notUser("its cgroup \(Self.nodeUnit) is the node's unit"))
+
+        let scratch = try ServerArguments.parse(base + ["--root", "/x", flag]).get()
+        #expect(scratch.refused.isEmpty && scratch.testCgroupRoot == Self.nodeUnit, "\(scratch)")
+        // Not a cgroup's path below the root: not taken (the server doesn't start).
+        for bad in ["", "/", "relative.scope", "/a/", "/a//b", "/a/../b", "/a/./b"] {
+            #expect(throws: ServerArguments.Usage.self, "\(bad)") { try ServerArguments.parse(base + ["--root", "/x", ServerArguments.testCgroupRootFlag + bad]).get() }
+            #expect(PeerFacts.rerooted(Self.hybrid("/a/b"), at: bad) == Self.hybrid("/a/b"), "\(bad)")
+        }
+    }
+
+    /// The root only says where a scratch node's test runs: a sender in that very cgroup reads `/`, which the test's
+    /// scope names, and nothing else gains by it. A path outside the root is left as the machine has it and is refused
+    /// as it would be without a root; a path under it is no scope of the test's; and the rule itself is the one every
+    /// server applies (`cgroupRefusal`), so a re-read path still has to be a scope the rule knows.
+    @Test func aCgroupRootRereadsOnlyWhatIsAtOrUnderItAndWidensNoScope() {
+        let root = Self.nodeUnit
+        let test = VoiceRule.at(start: Self.hybrid(root), testScopes: ["/"], uid: Self.uid)
+        func judged(_ lines: [String], rule: VoiceRule = test) -> Voice { Self.judged(Self.peer(cgroup: PeerFacts.rerooted(lines, at: root)), rule: rule) }
+        // The test's own cgroup, on the hybrid layout and the unified one alone: the user of a scratch node.
+        #expect(PeerFacts.rerooted(Self.hybrid(root), at: root) == Self.hybrid("/"))
+        #expect(judged(Self.hybrid(root)) == .user)
+        #expect(judged(["0::" + root]) == .user)
+        // Without the root the same test scope can't name it: the refusal a run in the node's unit met (2026-11-19).
+        #expect(Self.judged(Self.peer(cgroup: Self.hybrid(root)), rule: test) == .notUser("its cgroup \(root) is the node's unit"))
+
+        // Outside the root: as the machine has it, each refused for what it is.
+        let managed = "is in the user's systemd manager (a user unit, systemd-run, a service)", noScope = "is no terminal scope this node knows (/)"
+        let outside = ["/user.slice/user-1000.slice/user@1000.service/app.slice/run-u12.service": managed,
+                       "/user.slice/user-1000.slice/user@1000.service/app.slice": managed,
+                       "/user.slice/user-1000.slice/user@1000.service/init.scope": managed,
+                       // A sibling whose name only starts as the root's does: whole components count.
+                       root + "2": managed,
+                       "/system.slice/vibeswitcher-node.service": "is the node's unit",
+                       "/init.scope": noScope,
+                       "/user.slice/user-1000.slice/session-3.scope": noScope]
+        for (path, why) in outside {
+            #expect(PeerFacts.rerooted(Self.hybrid(path), at: root) == Self.hybrid(path), "\(path)")
+            #expect(judged(Self.hybrid(path)) == .notUser("its cgroup \(path) \(why)"), "\(path)")
+        }
+        // A hierarchy's line still outside (the systemd line in the root, the unified one elsewhere): refused by it.
+        #expect(Self.refused(judged(["15:name=systemd:" + root, "0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-u3.service"])))
+        // Under the root: read from there, and no scope of the test's.
+        #expect(PeerFacts.rerooted(["0::" + root + "/sub/leaf"], at: root) == ["0::/sub/leaf"])
+        #expect(judged(["0::" + root + "/sub"]) == .notUser("its cgroup /sub is no terminal scope this node knows (/)"))
+        // The other lines of a sender in the root still count: a session's marker, another user.
+        #expect(Self.refused(Self.judged(Self.peer(cgroup: PeerFacts.rerooted(Self.hybrid(root), at: root), marker: true), rule: test)))
+        #expect(Self.refused(Self.judged(Self.peer(cgroup: PeerFacts.rerooted(Self.hybrid(root), at: root), uid: 1001), rule: test)))
+        // And the root alone is no pass: by the node's own rule (no test scopes) `/` is no terminal's scope.
+        #expect(judged(Self.hybrid(root), rule: Self.systemd) == .notUser("its cgroup / is no terminal scope this node knows (/init.scope, /user.slice/user-{uid}.slice/session-*.scope)"))
+    }
+
+    /// A scratch node gives its server a root only where its test runs inside the user's manager or the node's unit;
+    /// from a terminal, on a CI runner and on the Mac (no cgroup) the server reads the machine's own paths.
+    @Test func aScratchNodeGivesARootOnlyInsideTheUsersManager() {
+        #expect(ScratchNode.cgroupRoot(own: Self.nodeUnit, uid: Self.uid) == Self.nodeUnit)
+        #expect(ScratchNode.cgroupRoot(own: Self.systemdRunUnit, uid: Self.uid) == Self.systemdRunUnit)
+        #expect(ScratchNode.cgroupRoot(own: "/system.slice/vibeswitcher-node.service", uid: Self.uid) == "/system.slice/vibeswitcher-node.service")
+        for elsewhere in ["/init.scope", "/user.slice/user-1000.slice/session-3.scope", "/system.slice/hosted-compute-agent.service",
+                          "/user.slice/user-1001.slice/user@1001.service/app.slice/run-u1.service", "/"] {
+            #expect(ScratchNode.cgroupRoot(own: elsewhere, uid: Self.uid) == nil, "\(elsewhere)")
+        }
+        #expect(ScratchNode.cgroupRoot(own: nil, uid: Self.uid) == nil)
+        // This run's own: a root exactly when its cgroup is one of those, and then its scope is `/`.
+        #expect(ScratchNode.cgroupRoot == ScratchNode.cgroupRoot(own: ScratchNode.ownCgroup, uid: getuid()))
+        #expect(ScratchNode.ownScope == (ScratchNode.cgroupRoot == nil ? ScratchNode.ownCgroup : "/"))
+    }
+
+    // MARK: A scratch node's test under a branch code runner
+
+    /// The other test flag of a scratch node whose test the merge gate runs: `--test-runner-above`, for a run under a
+    /// branch code runner. A server with `--node` refuses it, as it does every test flag (said at its start:
+    /// `refused`), and takes nothing from it; it takes no value, so it names no process.
+    @Test func theTestRunnerAboveIsRefusedUnderNode() throws {
+        let base = ["vibeswitcher-server", "--host-connector", "3", "--host-socket", "/x/host.sock"]
+        let node = try ServerArguments.parse(base + ["--node", "--node-root", "/x/b", ServerArguments.testRunnerAboveFlag]).get()
+        #expect(node.refused == [ServerArguments.testRunnerAboveFlag] && !node.testRunnerAbove, "\(node)")
+        let scratch = try ServerArguments.parse(base + ["--root", "/x", ServerArguments.testRunnerAboveFlag]).get()
+        #expect(scratch.refused.isEmpty && scratch.testRunnerAbove, "\(scratch)")
+        #expect(try !ServerArguments.parse(base + ["--root", "/x"]).get().testRunnerAbove)
+        // A value is another argument, which no server knows.
+        #expect(throws: ServerArguments.Usage.self) { try ServerArguments.parse(base + ["--root", "/x", ServerArguments.testRunnerAboveFlag + "=4000"]).get() }
+    }
+
+    /// Real processes, read from `/proc` as the server reads a sender: a runner R1, under it a process B standing for
+    /// a scratch server (its own runners: R1, and whatever this test run is under), and under B a second runner R2
+    /// with a command of its own.
+    ///
+    /// - The user's node (the flag dropped under `--node`: no runners left out): B and R2's command are both under a
+    ///   runner, and refused as branch code.
+    /// - A scratch server that has the flag leaves out the runners above itself, so a sender beside it (B) isn't under
+    ///   one: the test process of a run under the gate's runner.
+    /// - R2 is below the scratch node's root: its command is refused on that scratch server too, and so is anything
+    ///   under a runner the server doesn't run under.
+    @Test(NodeTraits.linuxOnly) func onlyTheRunnersAboveTheScratchServerItselfAreLeftOut() async throws {
+        let wrapper = Platform.Tools.branchShell + ["-c", "\"$@\"; exit $?", "vibeswitcher-branch-code"]
+        // R1 runs a shell that starts R2 (with its command) and becomes B.
+        let arguments = wrapper + ["/bin/bash", "-c", "\"$@\" & exec /bin/sleep 600", "inner"] + wrapper + ["/bin/sleep", "601"]
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: arguments[0])
+        process.arguments = Array(arguments.dropFirst())
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        try process.run()
+        let outer = process.processIdentifier
+        defer {
+            for link in ScratchNode.descendants(of: outer) { kill(link.pid, SIGKILL) }
+            process.terminate()
+        }
+        func child(of pid: pid_t, running wanted: ([String]) -> Bool) -> pid_t? {
+            Platform.Processes.children(pid).first { wanted(Platform.Processes.arguments($0)) }
+        }
+        let found = Locked<(server: pid_t, inner: pid_t, command: pid_t)?>(nil)
+        try #require(await eventually(timeout: 60) {
+            guard let server = child(of: outer, running: { $0 == ["/bin/sleep", "600"] }),
+                  let inner = child(of: server, running: BranchCode.isRunner),
+                  let command = child(of: inner, running: { $0 == ["/bin/sleep", "601"] }) else { return false }
+            found.value = (server, inner, command)
+            return true
+        }, "the runners' processes never showed")
+        let (server, inner, command) = try #require(found.value)
+
+        // What a scratch server there reads of itself: R1, nearest first, then this run's own runners; never R2.
+        let above = PeerFacts.runners(above: server)
+        #expect(above.first?.pid == outer, "\(above)")
+        #expect(!above.contains { $0.pid == inner })
+        #expect(Array(above.dropFirst()) == PeerFacts.runners(above: getpid()), "\(above)")
+
+        let rule = VoiceRule(mode: .weaker, scopes: [], uid: getuid(), says: "the test's")
+        func judged(_ pid: pid_t, leavingOut runners: [PeerFacts.Ancestor]) -> Voice {
+            Voice.judge(PeerFacts.read(pid: pid, runnersAbove: runners), live: LiveSessions(), rule: rule)
+        }
+        let branchCode = Voice.notUser("it runs under a branch code runner")
+        // No runners left out (the user's node, and a scratch one without the flag): both refused.
+        #expect(PeerFacts.read(pid: server).underRunner == true && PeerFacts.read(pid: command).underRunner == true)
+        #expect(judged(server, leavingOut: []) == branchCode)
+        #expect(judged(command, leavingOut: []) == branchCode)
+        // The scratch server's own left out: a sender beside it is the user, one under R2 still isn't.
+        #expect(PeerFacts.read(pid: server, runnersAbove: above).underRunner == false)
+        #expect(judged(server, leavingOut: above) == .user)
+        #expect(PeerFacts.read(pid: command, runnersAbove: above).underRunner == true)
+        #expect(judged(command, leavingOut: above) == branchCode)
+        // A runner is left out as that process only: its pid with another start is another process.
+        let reused = above.map { PeerFacts.Ancestor(pid: $0.pid, startTicks: $0.startTicks + 1) }
+        #expect(judged(server, leavingOut: reused) == branchCode)
+        // R2's command reads R2 and then R1 as its own runners, nearest first.
+        #expect(Array(PeerFacts.runners(above: command).map(\.pid).prefix(2)) == [inner, outer])
+    }
+
+    /// A scratch node tells its server so only where its test really runs under a runner: by the same reading of
+    /// `/proc` the server makes of a sender. From a terminal, a worker's shell, on CI and on the Mac it says nothing.
+    @Test func aScratchNodeSaysARunnerIsAboveOnlyWhenOneIs() {
+        #expect(ScratchNode.runnerAbove == !PeerFacts.runners(above: getpid()).isEmpty)
+        if !Platform.CodeIdentity.isAvailable {
+            // The server's own read of this process, nothing left out: under a runner exactly then (where every
+            // ancestor's arguments can be read at all: where one can't, no sender here is the user either way).
+            if let under = PeerFacts.read(pid: getpid()).underRunner {
+                #expect(under == ScratchNode.runnerAbove)
+                // With this process's runners left out, as its scratch server leaves them out: under none.
+                #expect(PeerFacts.read(pid: getpid(), runnersAbove: PeerFacts.runners(above: getpid())).underRunner == false)
+            }
+        } else {
+            #expect(!ScratchNode.runnerAbove)
+        }
+    }
+
+    /// The root and the runners reach the read of a sender from one place, the server's own arguments at its start:
+    /// `ServerStart` hands `parsed.testCgroupRoot` (nil under `--node`) and, only with `parsed.testRunnerAbove` (false
+    /// under `--node`), its own runners (`PeerFacts.runners(above: getpid())`) to the socket's server, which keeps
+    /// both as constants and is the only caller that reads a sender with either. No file, request or environment
+    /// variable names a root or a runner.
+    @Test func theCgroupRootAndTheRunnersComeOnlyFromTheServersOwnStart() throws {
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var files: [String: Set<String>] = [:]
+        var reads: [String] = []
+        for folder in ["Sources/VibeNode", "Sources/VibeCore", "Sources/VibeHost", "Sources/VibePlatform", "Sources/vibeswitcher-server",
+                       "Sources/vibeswitcher-cli", "Sources/vibeswitcher-host", "Sources/vibeswitcher-mcp", "Sources/vibeswitcher-hook"] {
+            let base = repo.appendingPathComponent(folder)
+            guard let walker = FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil) else { continue }
+            for case let file as URL in walker where file.pathExtension == "swift" {
+                let text = ServerLintTests.code(try String(contentsOf: file, encoding: .utf8))
+                for name in ["testCgroupRoot", "testCgroupRootFlag", "cgroupRoot", "rerooted(", "testRunnerAbove", "testRunnerAboveFlag",
+                             "runnersAbove", "runners(above:"] where text.contains(name) {
+                    files[name, default: []].insert(file.lastPathComponent)
+                }
+                for line in text.components(separatedBy: "\n")
+                where line.contains("PeerFacts.read(") || line.contains("cgroupRoot: parsed") || line.contains("runners(above:") && !line.contains("func ") {
+                    reads.append(file.lastPathComponent + ": " + line.trimmingCharacters(in: .whitespaces))
+                }
+            }
+        }
+        // The flags and what they were parsed to: the arguments, and the start that hands them on.
+        #expect(files["testCgroupRootFlag"] == ["ServerArguments.swift"], "\(files)")
+        #expect(files["testRunnerAboveFlag"] == ["ServerArguments.swift"], "\(files)")
+        #expect(files["testCgroupRoot"] == ["ServerArguments.swift", "ServerStart.swift"], "\(files)")
+        #expect(files["testRunnerAbove"] == ["ServerArguments.swift", "ServerStart.swift"], "\(files)")
+        // The root and the runners themselves: the start, the socket's server and the read. The re-read: the read alone.
+        #expect(files["cgroupRoot"] == ["ServerArguments.swift", "ServerStart.swift", "NodeServer.swift", "PeerFacts.swift"], "\(files)")
+        #expect(files["runnersAbove"] == ["ServerStart.swift", "NodeServer.swift", "PeerFacts.swift"], "\(files)")
+        #expect(files["rerooted("] == ["PeerFacts.swift"], "\(files)")
+        // The one call that reads runners: the start's, of the server itself (below).
+        #expect(files["runners(above:"] == ["ServerStart.swift"], "\(files)")
+        #expect(reads.sorted() == [
+            "NodeServer.swift: let facts = PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)",
+            "NodeServer.swift: let facts = PeerFacts.read(pid: token.pid, token: token, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)",
+            "ServerStart.swift: clock: clock, cgroupRoot: parsed.testCgroupRoot, runnersAbove: runnersAbove, note: say)",
+            // Of the server itself, and only with the flag.
+            "ServerStart.swift: let runnersAbove = parsed.testRunnerAbove ? PeerFacts.runners(above: getpid()) : []",
+        ], "\(reads)")
+        // The socket's server keeps both as constants.
+        let server = ServerLintTests.code(try String(contentsOf: repo.appendingPathComponent("Sources/VibeNode/Server/NodeServer.swift"), encoding: .utf8))
+        #expect(server.contains("private let cgroupRoot: String?") && !server.contains("var cgroupRoot"))
+        #expect(server.contains("private let runnersAbove: [PeerFacts.Ancestor]") && !server.contains("var runnersAbove"))
+    }
+
     /// The rule is fixed once, at the server's start, from the server's own cgroup (`/proc/self`'s, by its own pid) and
     /// its own arguments: nothing a peer sends, no file under the node's root or `/run/user/<uid>`, and no request
     /// changes it afterwards.

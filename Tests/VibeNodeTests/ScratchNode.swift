@@ -17,8 +17,12 @@ import VibeNode
 ///   `journalctl` (that record) and `systemctl` (how the unit last ended from `unit-state` when a test writes it, E8),
 ///   `claude` linked to `FakeClaude`'s launcher (EN-D13), and
 ///   `user-scopes`, the test's scopes for the command line's journal check.
-/// - `userScopes` (by default this process's own cgroup) goes to the server as `--server-arg --test-user-scopes=…`;
-///   nil leaves the server on the weaker rule. `housekeeping`: `--server-arg --test-housekeeping=…`. `testChild`:
+/// - `userScopes` (by default this process's own cgroup, `ownScope`) goes to the server as `--server-arg
+///   --test-user-scopes=…`; nil leaves the server on the weaker rule. When this process runs inside the user's systemd
+///   manager (`cgroupRoot`: a run a session of the node started, as its merge gate does), the server and the journal's
+///   stand-in read every cgroup from this process's own (`--server-arg --test-cgroup-root=…`), where `ownScope` is `/`.
+///   When it runs under a branch code runner (`runnerAbove`: a merge's or an audit's run of the tests), the server
+///   doesn't count the runners above itself as a sender's (`--server-arg --test-runner-above`). `housekeeping`: `--server-arg --test-housekeeping=…`. `testChild`:
 ///   `--server-arg --test-child=…`. `path`: the host's PATH. `holdFirstLook`: `--hold-first-look`, and
 ///   `--server-arg --test-first-look` so the server's engine knows (E4; `serverKnowsFirstLook: false` leaves that out, for
 ///   a case that shows the vault's own hold with the engine's gate away, E8). `socketName`: the
@@ -60,8 +64,35 @@ final class ScratchNode: @unchecked Sendable {
     private var stopped = false
     private let lockForStop = NSLock()
 
-    /// This process's own cgroup path (the unified hierarchy's, or systemd's v1 line's).
-    static let ownScope: String? = Platform.Processes.cgroup(getpid()).flatMap { PeerFacts.unifiedPath($0) ?? PeerFacts.systemdPath($0) }
+    /// This process's own cgroup path as the machine has it (the unified hierarchy's, or systemd's v1 line's).
+    static let ownCgroup: String? = Platform.Processes.cgroup(getpid()).flatMap { PeerFacts.unifiedPath($0) ?? PeerFacts.systemdPath($0) }
+
+    /// The root a scratch node of this run reads cgroups from (`ServerArguments.testCgroupRoot`): this process's own
+    /// cgroup when the run is inside the user's systemd manager or the node's unit, where the voice rule refuses every
+    /// path whatever scopes a test gives (`VoiceRule.cgroupRefusal`), so the test process could never speak as the
+    /// user. That is a run a session of the node started: its tool server's merge gate, a worker's shell. nil
+    /// everywhere else (a terminal's `/init.scope`, a CI runner, the Mac): there the real paths are read, as ever.
+    static let cgroupRoot: String? = cgroupRoot(own: ownCgroup, uid: getuid())
+
+    /// `cgroupRoot` for a process in `own`.
+    static func cgroupRoot(own: String?, uid: uid_t) -> String? {
+        guard let own, PeerFacts.isCgroupRoot(own) else { return nil }
+        let components = own.split(separator: "/").map(String.init)
+        return components.contains("user@\(uid).service") || components.contains(VoiceRule.nodeUnit) ? own : nil
+    }
+
+    /// Whether this process runs under a branch code runner (`BranchCode.wrapper`), as it does when the lead's tool
+    /// server runs the tests for a merge or an audit, or a verifier's shell does: every sender of this run is then
+    /// under that runner, which the voice rule refuses, so the test process could never speak as the user. A scratch
+    /// node of such a run tells its server (`ServerArguments.testRunnerAbove`), which then leaves out the runners
+    /// above itself and no other. Not from a terminal, a worker's shell, CI or the Mac: there every runner counts.
+    static let runnerAbove = !PeerFacts.runners(above: getpid()).isEmpty
+
+    /// This process's own cgroup as a scratch node of this run reads it: `/` from `cgroupRoot`, else the machine's path.
+    static let ownScope: String? = cgroupRoot == nil ? ownCgroup : "/"
+
+    /// `lines` as a scratch node of this run reads them: from `cgroupRoot`, when there is one.
+    static func scratchCgroup(_ lines: [String]) -> [String] { cgroupRoot.map { PeerFacts.rerooted(lines, at: $0) } ?? lines }
 
     init(_ scratch: Scratch, userScopes: [String]? = ScratchNode.ownScope.map { [$0] }, housekeeping: Int? = nil,
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
@@ -105,6 +136,10 @@ final class ScratchNode: @unchecked Sendable {
                          "--server", nodeRoot.appendingPathComponent("bin/vibeswitcher-server").path, "--node-root", nodeRoot.path,
                          "--exit-with", String(owner)]
         if let userScopes { arguments += ["--server-arg", ServerArguments.testUserScopesFlag + userScopes.joined(separator: ",")] }
+        // Inside the user's manager only: elsewhere the server reads each sender's cgroup as the machine has it.
+        if let root = Self.cgroupRoot { arguments += ["--server-arg", ServerArguments.testCgroupRootFlag + root] }
+        // Under a branch code runner only: elsewhere the server counts every runner in a sender's ancestry.
+        if Self.runnerAbove { arguments += ["--server-arg", ServerArguments.testRunnerAboveFlag] }
         if let housekeeping { arguments += ["--server-arg", ServerArguments.testHousekeepingFlag + String(housekeeping)] }
         if let testChild { arguments += ["--server-arg", ServerArguments.testChildFlag + testChild] }
         // The vault holds its first look, and the server knows it (its engine refuses `lead` until the accepts, S7).
@@ -427,7 +462,8 @@ enum ScratchBuilds {
 /// journald's stand-in on a scratch node: a datagram socket at `<folder>/journal.sock`, each entry (journald's native
 /// form, `Platform.Journal.decode`) recorded as one JSON line in `<folder>/journal.jsonl` with the fields journald
 /// stamps from the sender's credentials (`_UID`, `_PID`, `_SYSTEMD_CGROUP`, read as the datagram comes) and
-/// `__REALTIME_TIMESTAMP`, as `journalctl -o json` writes them.
+/// `__REALTIME_TIMESTAMP`, as `journalctl -o json` writes them. The cgroup is read as the node's server reads one
+/// (`ScratchNode.scratchCgroup`: from this run's own cgroup when it is inside the user's manager).
 ///
 /// `writersEnded`: while set, each entry is recorded as journald records one whose writer had ended before it read
 /// `/proc/<pid>` (measured on the node, the bootstrap path's M4, 2026-11-17: `logger`'s entry): the credentials'
@@ -475,7 +511,7 @@ final class JournalRecorder: @unchecked Sendable {
             if let sender {
                 entry["_PID"] = String(sender.pid)
                 if case .record(let record) = Platform.Processes.record(sender.pid), let uid = record.uid { entry["_UID"] = String(uid) }
-                if !writersEnded, let lines = Platform.Processes.cgroup(sender.pid),
+                if !writersEnded, let lines = Platform.Processes.cgroup(sender.pid).map(ScratchNode.scratchCgroup),
                    let cgroup = PeerFacts.unifiedPath(lines) ?? PeerFacts.systemdPath(lines) {
                     entry["_SYSTEMD_CGROUP"] = cgroup
                 }

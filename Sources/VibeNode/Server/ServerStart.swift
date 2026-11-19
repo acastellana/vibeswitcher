@@ -78,6 +78,13 @@ public enum ServerStart {
         let sessions = NodeSessions(root: root, home: VibePaths.home, queue: queue, link: link, clock: clock, note: say)
         let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes, usersNode: parsed.node)
         say("voice rule: \(rule.says)")
+        if let root = parsed.testCgroupRoot { say("a scratch node's test: each sender's cgroup is read from \(ConfigSeal.inert(root, limit: .max))") }
+        // Read once, here, of this process alone: no argument, file or request names a runner.
+        let runnersAbove = parsed.testRunnerAbove ? PeerFacts.runners(above: getpid()) : []
+        if parsed.testRunnerAbove {
+            let pids = runnersAbove.map { String($0.pid) }.joined(separator: ", ")
+            say("a scratch node's test: the branch code runners this server itself runs under (\(pids.isEmpty ? "none found" : "pid \(pids)")) aren't counted as a sender's")
+        }
         let commit = parsed.nodeRoot.flatMap { folder -> String? in
             if case .success(let info) = BuildInfo.read(buildFolder: folder) { return info.commit } else { return nil }
         } ?? "unknown"
@@ -99,7 +106,7 @@ public enum ServerStart {
         requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot
         engine.watchRoom()
         let server = NodeServer(root: root, requests: requests, housekeeping: parsed.testHousekeeping ?? ServerArguments.housekeeping,
-                                clock: clock, note: say)
+                                clock: clock, cgroupRoot: parsed.testCgroupRoot, runnersAbove: runnersAbove, note: say)
         // The live protocol and the web (the live plan's I1): the hub on the stores, the Unix socket's `subscribe`, and
         // the loopback listener, off until `vibeswitcher web` (or a live token at rest) wants it.
         let live = NodeLive(requests: requests, sessions: sessions, engine: engine, clock: clock, port: parsed.testWebPort ?? NodeWeb.port,

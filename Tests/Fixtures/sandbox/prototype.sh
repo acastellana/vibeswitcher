@@ -38,6 +38,11 @@ readonly CLAUDE_READ_ONLY=(settings.json settings.local.json CLAUDE.md skills ag
 
 say() { printf 'prototype.sh: %s\n' "$*" >&2; }
 
+# pivot_root(8) and ip(8) are in /usr/sbin, which a service's PATH leaves out (the node's systemd unit's is
+# /usr/local/bin:/usr/bin:/bin, and a run started under it failed on "pivot_root: command not found", 2026-11-19):
+# found where the system has them, after whatever the caller's PATH names. COMMAND's own PATH is set below, as before.
+PATH=$PATH:/usr/sbin:/sbin
+
 if [[ "${VIBE_PROTOTYPE_STAGE:-}" != inside ]]; then
     if [[ $# -lt 5 ]]; then
         say "usage: prototype.sh HOME WORKTREE CONFIG [options] -- COMMAND..."

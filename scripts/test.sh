@@ -2,7 +2,8 @@
 # `swift build && swift test "$@"` on a fresh scratch home, so nothing a test writes reaches your ~/.vibeswitcher,
 # ~/.claude or login Keychain. HOME, CFFIXED_USER_HOME (what NSHomeDirectory() follows; HOME alone doesn't move it),
 # VIBESWITCHER_HOME and TMPDIR all point into a folder this creates under /tmp and removes when it exits, Ctrl-C too
-# (scripts/lib/scratch.sh). In a worktree the lead made, both build against the worktrees' shared cache of the SDK's
+# (scripts/lib/scratch.sh). The run's umask is 022, and its test processes (swift's and node's) carry none of a team
+# session's variables, whatever the caller's are (scripts/lib/test-environment.sh). In a worktree the lead made, both build against the worktrees' shared cache of the SDK's
 # modules (scripts/lib/module-cache.sh); the main checkout and merge's own run build as ever.
 # A plain `swift test` on your own home refuses to start (see `VibePaths.testRefusal`).
 #
@@ -51,6 +52,11 @@
 #   ~/Library/Preferences, around COMMAND (PreferencesCheckTests).
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# Whoever started this script (a merge's and an audit's run come from the lead's tool server, with its umask and
+# environment): the umask from here on, and none of a team session's variables in what runs the tests, below
+# (`clean_test_environment`: it says what they cost, and why this script and its vs-heavy keep the session's marker).
+source scripts/lib/test-environment.sh
+known_umask
 
 # The live processes holding $1 in their environment or arguments, and every process under one of them (the programs a
 # scratch host runs: ps shows the environment of the app's own binaries, not of Apple's /bin/sh), as "pid command".
@@ -121,7 +127,8 @@ run_web_tests() {
             continue
         fi
         total=$((total + 1))
-        if node "$file"; then
+        # In a subshell: the variables go from node's environment, not from this script's.
+        if (clean_test_environment; node "$file"); then
             passed=$((passed + 1))
         else
             echo "WEB TEST FAILED: $file (exit $?)"
@@ -338,7 +345,8 @@ else
     # A test a core, then at most the run's width (`suite_width`, `slot_width` above).
     suite_width
     # Both on the width vs-heavy gives the run, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh), and so are the tests.
-    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
+    # The bash it runs drops the team session's variables first; vs-heavy and its supervisor keep them.
+    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
     status=$?
     check_preferences "$preferences_before" "$defaults_before" || status=1
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.
