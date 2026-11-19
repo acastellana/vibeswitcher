@@ -4059,3 +4059,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 10:04 Automatically (auto_advance): Overlap for flaky-under-load's start (a warning only: nothing was refused or reordered). Tests/VibeCoreTests/LeadAdvanceTests.swift: the-lead-s-records (review: its branch changes it), tool-server-threads-run (review: its branch changes it).
 - 2026-11-19 10:05 Merged memory-benches-run-by: Memory benches run by themselves once a day on a calm Mac (in a batch: memory-benches-run-by, sensitive-audits-fall landed on one test run) (build 31d37278312c)
 - 2026-11-19 10:05 Merged sensitive-audits-fall: Sensitive audits fall back to the verifier_model when Fable is refused at its limit (in a batch: memory-benches-run-by, sensitive-audits-fall landed on one test run) (build 31d37278312c)
+- 2026-11-19 10:05 Automatically (auto_advance): Merged memory-benches-run-by at 1f5207a9 (its passing audit), sensitive-audits-fall at 1740c2f8 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-19 10:05 Automatically (auto_advance): Cleaned up memory-benches-run-by (freed 2.3 GB of build output and temporary folders). It stays done.
+- 2026-11-19 10:05 Automatically (auto_advance): Cleaned up sensitive-audits-fall (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-19 10:05 Update: Merged: reviews fall back from Fable to Opus at its limit; daily memory benches — **What changed:**
