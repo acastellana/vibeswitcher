@@ -28,7 +28,7 @@ Two carriers, the same objects on both:
 | Carrier | Framing | Who | First message |
 | --- | --- | --- | --- |
 | The server's Unix socket, `<root>/v2/server.sock` (exists today) | JSON lines, at most `NodeWire.maxLine` (1 MiB) a line | the command line, the tests | the server's `hello`, unasked, as today |
-| A WebSocket on `ws://127.0.0.1:<port>/ws` (new) | one JSON object per **text** frame; **binary** frames are the terminal's only ([§9](#9-the-terminal-outline-slice-4)) | the web client | the client's `auth`; the server says nothing before it |
+| A WebSocket on `ws://127.0.0.1:<port>/ws` (new) | one JSON object per **text** frame; **binary** frames are the terminal's only ([§9](#9-the-terminal-slice-4)) | the web client | the client's `auth`; the server says nothing before it |
 
 Three kinds of message:
 
@@ -601,9 +601,10 @@ An `answer` sent from a page (`answer.from-a-page`):
 {"v":1,"re":"14","ok":false,"error":{"code":"voice","message":"not the user's voice: a web client drafts, and `vibeswitcher answer` confirms"}}
 ```
 
-## 9. The terminal, outline (slice 4)
+## 9. The terminal (slice 4)
 
-Provisional until the spike has measured it; the spike's task writes this section's final form.
+The spike's form (B6, D5, G3), measured on a scratch node. What opens a terminal on the user's node is still open
+(the last point).
 
 - `term.open` `{session, cols, rows}` replies `{stream: int}`; `term.close` `{stream}`.
 - Binary frames, both ways: one byte of type, four bytes of stream (big-endian), then the payload. Server to client:
@@ -612,6 +613,25 @@ Provisional until the spike has measured it; the spike's task writes this sectio
 - When the client falls behind, the server sends type 4 (`resync`) and starts the stream again from the host's
   replay, as the host does to its own clients.
 - Only the host's parser answers a program's terminal queries: the client's emulator's replies are never sent.
+- Sizes: columns 10 to 1,000, rows 5 to 300; a resize outside them is dropped. A client frame is at most 64 KiB, so the
+  page cuts input (a paste) into frames of 16 KiB. No frame says a session ended: the sessions stream does.
+- **The page** (`WebApp/js/terminal.js`, `js/views/terminal.js`): `term.open` only where `hello.kinds` has it, else
+  the pane's words and no emulator loaded. The replay is held until type 2 and drawn whole over a reset emulator; a
+  resync (type 4) or a reconnect keeps the old screen, dimmed, until the new replay is whole. After a reconnect the page
+  opens the session again (a new stream). `term.close` when the pane is left. The emulator is xterm.js 6.0.0 with its
+  DOM renderer (`WebApp/vendor/`, hashes in its README); the page swallows OSC 52, OSC 8 and the titles.
+- **Measured (G3), 2026-11-19**, on the sandbox (`scripts/sandbox-server.sh`, `--web-root`), a scratch `bash -i` as the
+  program (its echo is the line editor's: no program time to subtract), Chrome's headless shell 1228 on the same WSL2
+  machine (24 cores, load average 6 to 18 from other work), branch `v2-web-term-page` on 5b6eccd9:
+
+  | Measure | Budget | p50 | p95 | Notes |
+  | --- | --- | --- | --- | --- |
+  | a key to its echo in the page's screen (the `input` event's time to the echoed cell in the DOM, xterm.js's render frame) | 16 ms median, 33 ms p95 | 6.5 ms | 7.5 ms | 300 keys; an earlier run of 200, the first on a cold page: 6.3 ms, 52.6 ms (13 of them over 2 s and left out) |
+  | the same to the frame after (an upper bound on the paint) | | 22.6 ms | 23.6 ms | max 27.4 ms |
+  | a busy terminal: the page's frame interval while `yes` floods it for 5 s | | 16.7 ms | 16.8 ms | 300 frames (60 a second), longest 33.4 ms, no long task |
+
+  Inside the budget at the median in both runs and at p95 in the warm one; whether stage 5 builds on xterm.js is the
+  lead's call on these numbers. The cold run's tail is worth a look on the Mac and a phone first.
 - **Rights.** A token with `read` does not open a terminal: a session's screen is more than a process of the user's
   uid gets today, and input types into a session. The spike runs on a scratch node. What opens a terminal on the
   user's node is the lead's and the user's decision (the plan's LW-D12).
