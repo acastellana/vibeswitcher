@@ -155,6 +155,13 @@ The engine's own change to a `v2` test: `Tests/VibeNodeTests/StatusCommandTests.
 | 2026-11-17 | `8906e144` (the model chip follows `/model`) | `Tests/VibeSwitcherTests/FakeClaude.swift` (`/model ALIAS`, `model_alias`) | ported (`43152464`): the same 19 lines in `Tests/VibeNodeTests/FakeClaude.swift` |
 | 2026-11-17 | `ce72a400`, `a27af4a0`, `87ebb3e0`, `233acccc` | `AppDelegate.swift` outside `HookSetup` and `HookBinary` | not needed: the prompt-audit reminder, the dots panel's removal, the records' lint and the Run card's wiring are the app's |
 | 2026-11-17 | `0da7f902`, `b4ec58eb`, `87ebb3e0` | `SessionStoreTests` (a comment), `LeadStartsHostTests.aReopenedLeadCarriesOnItsConversationAndIsToldOnceOfTheRestart`, `BaseMovesTests` (the card's cases) | not needed (a comment); **owed** with the restart card; not needed until a client has Run cards |
+| 2026-11-19 | `3516b53c` (a worker that stops without reporting is nudged once by auto_advance) | `LeadController.swift` `TeamReading`, `WitnessWork`, `witnessed`'s hand-over; `WitnessOffMainTests` | ported (`06e50f24`): `TeamReading.swift` (auto_advance looked at while a task is in review or running), `WitnessWork.swift` (`stopsForAdvance`, `unbuiltMessages`' `advancing:`), `Witness.swift` (each stop handed over on the board on `reads`, the loop nudged); `WitnessOffEngineQueueTests` as the app's test changed |
+| 2026-11-19 | `a84d019b`, `cd7cbb1b` (review rows waiting on model usage limits) | `LeadController.swift` `TeamReading` (`usage`, `workerModel`, `ignoreUsageLimits`, `reviewUsageWaits`) | not needed: what the team pane's rows show (`TeamRows.usageWaits`, the app's); the node's copy reads none of it |
+| 2026-11-19 | `121ef5aa` (the hold's message is `LeadAnswerOutcome.holdMessage`) | `LeadController.swift` `hold` | ported (`33950a01`): `Answers.swift` calls the shared message (the same words), which the setup scorecard counts by |
+| 2026-11-19 | `26923f7c` (the lead handed over at a long idle with a large context) | `LeadController.swift` rotation; `LeadRotationTests` | **owed** with rotation, after the bootstrap ("what waits") |
+| 2026-11-19 | `63a67b85` (resume takes the folder's launch presets) | `LeadController.swift` `reopenLead`; `AppDelegate.swift`; `RestartOfferTests` | **owed** with the restart card, after the bootstrap |
+| 2026-11-19 | `279ed53b` (the update check), `5c085cef` (the memory benches) | `LeadController.swift` `tellUpdate`; `AppDelegate.swift` | not needed: the app's own update and benches (`AppUpdateWatch`, `MemoryBench` in `VibeCore`, shared, build on Linux) |
+| 2026-11-19 | `8d310226` (job control off in scratch programs), `93368f72`, `dbeb8bf8` (`HeartbeatTests`' run loop) | `InputUnitDeliveryTests`, `PasteDeliveryTests`, `HeartbeatTests` | not needed: the node's ports run their programs through `NodeHarness`'s fake and `NodeClockTests` on a driven clock, neither on a run loop or a job-control shell |
 
 ### The merge of 2026-11-17
 
@@ -210,6 +217,46 @@ What main added that didn't build or pass on Linux, each changed by the rules ab
 - `v2`'s own tests that main's changes moved: `LeadLaunchTests.theMacsDenyRulesAreTodays` (the four lists' hashes
   recorded again: `LeadLaunch.swift` differs from main's only by `v2`'s hook lines), `TestScriptLinuxTests`' two
   vs-heavy cases (vs-heavy now says the width on stderr).
+
+### The merge of 2026-11-19
+
+main at `cd6c4ae9` (231 commits past the merge base `d2277773`) merged into `v2` at `5d7ccfc3` as `66cf61ea`. Of the
+files the engine replaces or copies from, only `LeadController.swift` and `AppDelegate.swift` changed (the rows
+above); the line numbers stay those of `47636aaf`.
+
+Nine conflicts, each keeping main's change with `v2`'s portable form put back (`git rerere` holds them):
+
+- `Sources/VibeCore/AccountUsage.swift`: main's `runCommand` body (its kqueue loop, now with `killAll(group:)` after a
+  stop) stays `Platform.pipeCommand`; the group sweep moved into `VibePlatform` (`2a161663`, both arms).
+- `Sources/VibeCore/ConfigSeal.swift` `isHome`: main's `bookkeepingPrefix` with `v2`'s `/mnt/` and `/run/user/` homes.
+- `Sources/VibeCore/LeadVault.swift` `judge`: both `v2`'s `firstLook` and main's `at`; main's finished skill-sync
+  round is accepted only for what a held first look doesn't hold (the row below).
+- `Sources/VibeHost/SessionParser.swift`: main's `time: MacTime` on `ParserLink.start`, with `v2`'s
+  `Platform.Sockets` pair (kind 1).
+- `Sources/vibeswitcher-mcp/main.swift`: main's `--base` and `--records` for the read-only hook, with `v2`'s ignored
+  SIGPIPE and throwing write (the row below, unchanged).
+- `Tests/VibeCoreTests/TestSupport.swift`, `Tests/VibeHostTests/TestSupport.swift`: `v2`'s Linux initializers and
+  `Process`; main's SIGPIPE catch and run-failing source inside `#if canImport(Darwin)` (the probe is Mach-O's).
+- `Tests/VibeHostTests/HostConnectionDeliveryTests.swift`: main's wait on the close itself.
+- `scripts/temporary-folder-lint.txt`: both sides' allow lines.
+
+What main added that didn't build or pass on Linux, changed in `891d3c47`, `3eae240b`, `3ff4742e` and `016aa6f1`
+(kinds 1 to 3, so listed here):
+
+- `Sources/VibeCore/Worktrees.swift` `Shell.ExitWatch` (a kqueue's NOTE_EXIT): moved into `VibePlatform` as
+  `Platform.ExitWait` (the Mac's kqueue; Linux's `poll` on a pidfd, closed once it has told), `Shell.ExitWatch` a name
+  for it (`ExitWaitTests`).
+- `Sources/VibeCore/MemoryBench.swift`, `MemoryBenchRun.swift`: `import Darwin` removed. `SetupStats.swift`: the
+  transcript's time through `Platform.Files.modified`. `ConfigSeal.swift` `walkCode`, `linkDigest`: an entry's name
+  read as a C string (no `d_namlen` on Linux) and `readlinkat` into a `CChar` buffer.
+- Tests: `EPipeProbe.swift` and `BrokenPipeProbeTests.swift` wrapped whole and listed in `MacOnlyTests.txt`;
+  `BrokenPipeTests`, `TestHomeGuardTests` and `HostedSessionTests` read or set SIGPIPE's handler under glibc's name
+  too; `StatusLineBinaryTests` lists a group through `Platform.Processes`; `SO_NOSIGPIPE` through
+  `Platform.Sockets.noSigPipe(socket:)` in `StatusRowsTests`, `HostServerTests`, `DroppedHostTests`,
+  `StyledScreenTests`; `HostedSessionTests.aShellThatIsntThereIsNamedEvenWhenTheHostReadsLate` enabled where its twin
+  is; `ParserIsolationTests`' clock printed by its platform's name (`Platform.Clock.awakeClockName`, new);
+  `RefusedGitSpellingsTests` reads the settings through `LaunchArguments`, and with `RefusedGitCommandsTests` leaves
+  Linux's own deny rules (`LinuxLaunch.denyRules`) out of what holds on both systems.
 
 ## Non-seam edits
 
@@ -298,3 +345,4 @@ numbering (its Global Constraints); calls switched to `VibePlatform` (kind 1), t
 | `Sources/VibeCore/HostProtocol.swift` (`Capability.vaultV2` 30-32, `HostRequest.vaultV2` 304-306, `HostEvent.vaultV2` 336-337), `Sources/VibeHost/HostServer.swift` `capabilities` (153), `authorized` (442) and the request switch (486-487) (made, engine E6, 2026-11-15; kinds 7, 4) | `HostRequest.vaultV2(LeadVaultV2.Request)`, `HostEvent.vaultV2(LeadVaultV2.Reply)`, `HostProtocol.Capability.vaultV2` (listed only on Linux); app only; one hook line into `Sources/VibeHost/V2/VaultV2Handler.swift`, which refuses on the Mac | user actions and `.user` seals at rest in the vault (S3, T41; the engine plan's EN-D11) | low: a new case and its capability, as `hostNotes` |
 | `Sources/VibeCore/LeadVault.swift`, the book's saved state (`State.v2`, 636-638), `Book.v2(_:)` (747-756), `case .seal` (1054), `case .verify` (1056-1059) (made, engine E6, 2026-11-15; kinds 6, 4; the `.verify` hook's caller and members, the security follow-ups' item 17, 2026-11-16; the `.seal` hook's `agentSession`, item 19, 2026-11-16) | `v2: LeadVaultV2.Book?` (optional); one hook line in each case into `Sources/VibeCore/V2/LeadVaultV2.swift`, Linux only: a `.user` seal's id, time and recipient recorded (since item 19, 2026-11-16, the `.seal` line also passes `agentSession`, the session the host found the message's agent pid in, still one line); a retired or expired `.user` id verifies false (`.verify`'s map kept, its result passed through the hook). `Book.v2(_:)` is the hook `VaultV2Handler` answers `HostRequest.vaultV2` through: the record under the vault's lock, saved through `onChange` when it changed (the plan named no way for the host's handler to reach the book's private state; the smallest, eleven lines, 2026-11-15: outside the plan's kinds (it names only the field and the two hook lines), raised by the E6 review, and **approved by the lead, 2026-11-16: the eleven-line hook is smaller than a case in the book's busy handler**). `.verify`'s hook passes the record and `changed` (the first pass of a `.user` seal marked, so it is renewed no more: the E6 review's renewal), and since 2026-11-16 the caller and the teams' members (`state.teams.values.flatMap(\.members)`), in the same line: `LeadVaultV2.verified(_:_:book:changed:caller:members:)` decides whether the caller is the app or a session holding a lead's role, the only checks that mark a seal checked (the security follow-ups' item 17; since item 19, a lead's check marks only the seals recorded for its own session, each message alone; the close-out review moved that scan out of the hook, where item 17 had first put it as a line of its own); the Mac's vault records nothing (`LeadVaultV2.isOn` is false where `Platform.CodeIdentity.isAvailable`), so the Mac is unchanged | T41 narrowed to a seal's 15 minutes (the engine plan's EN-D11) | medium: the vault's handler is busy on main; a case added there on main is a textual conflict only |
 | `Sources/VibeCore/HookInstaller.swift` `addingOurs` (127), `edit` (192, 194) (made, the hooks fix of 2026-11-19; kind 1, listed because it changes what Linux answers) | the three `NSDictionary(dictionary: a).isEqual(to: b)` are `Platform.sameJSON(a, b)` (`Sources/VibePlatform/Small.swift`): on the Mac that same call, moved; on Linux a walk of the two values (objects by key, arrays in order, strings by scalars, numbers by value, a boolean never equal to a number). Beside it, with no edit to the shared file, `Sources/VibeCore/V2/HookInstallCheck.swift`: `HookInstaller.checkInstall` (`edit`'s steps up to its backup, nothing written, which `HooksRequest` asks of each config before it stages a program) and `whyNot` (an edit's error in words). `checkInstall` copies those steps of `edit`: `HookInstallCheckTests` holds the two to the same answer, and a merge that changes `edit` changes it too | the first Linux node's `hooks install` (2026-11-19) ended "NSCocoaErrorDomain error 512" with the programs copied and no hook written: swift-corelibs-foundation's `isEqual(to:)` reads its own `true` back as a Swift `Bool` and the other dictionary's as `__NSCFBoolean`, which `AnyHashable` calls different, so an object with a boolean among its own members (`"alwaysThinkingEnabled": true`) wasn't equal to itself and `edit`'s check of its own text refused every such file, an uninstall with nothing to take out too (`HookInstallerTests.aSettingsFileWithAnyKindOfValueTakesOurHooksAndGivesThemBack`, `SmallTests.aJSONObjectIsTheSameAsItselfWhateverItHolds`) | low: three calls, the Mac's unchanged; main editing `edit`'s first half means the same edit in `checkInstall` |
+| `Sources/VibeCore/LeadVault.swift` `judge`, main's finished skill-sync round (made, the merge of 2026-11-19, `66cf61ea`) | the round's loop skips what a held first look holds (`!firstLooked.contains(key)`), and `firstLooked` comes before it | a held first look waits for the user's accept; main's round, accepted at anyone's look, would otherwise seal a skill folder the first look holds | low: one condition in main's loop |
