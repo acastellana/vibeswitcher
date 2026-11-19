@@ -122,8 +122,13 @@ extension LeadEngine {
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
             handOverIfIdle(root: root)
         }
+        // A push the lead asked for (push_remote), which nothing on a node offers yet: in `status` while it's open.
+        for (root, request) in pushAsked where roots.contains(root) {
+            standing[root, default: []].append(Self.pushNotice(request, root: root))
+        }
         if standing != notices { notices = standing }
         noticed = keys
+        lookAtPushes(roots: roots)
         forgetFinished(finished)
         // A lead that ended, or another agent on its terminal now: its wake-ups and its waiting count go (the app's
         // `ReportsWaiting.keep`).

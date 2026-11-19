@@ -28,7 +28,8 @@ The gaps that matter most for daily use, worst first:
 6. **You can't answer a session's own prompt.** Permission prompts and Claude's own questions can't be answered. Only
    the lead's cards can.
 7. ~~**The lead ignores `lead_model` and `lead_advisor`**~~: closed 2026-11-19, the node starts its lead as the app does.
-8. **`push_remote` does nothing on a node.** The request is recorded, but no Push button or command acts on it.
+8. **`push_remote` does nothing on a node.** The request is recorded, but no Push button or command acts on it. Since
+   2026-11-19 the lead is told so and `status` lists the request.
 9. **No settings.** Limits, Ignore usage limits, the working policy, Boost and leads messaging each other can only be
    changed by editing files by hand. Running leads aren't told when the policy changes.
 10. **Restarts lose work.** Nothing records the open sessions or reopens a lead with `--resume` after the machine
@@ -108,7 +109,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | A server or host restart: the lead rebound, held messages kept | `LeadController.swift` | has it | `Engine/Restarts.swift`; `status` says how the host ended | | |
 | The config seal and Accept cards | `MainWindow/Lead/ConfigHolds.swift` | has it | `vibeswitcher config held [--diff]`, `config accept CARD`; `Stores/ConfigHoldStore.swift` | | |
 | Base moves (a base moved outside the lead) | `MainWindow/Lead/BaseMoves.swift` | has it | `vibeswitcher base show/accept/keep`; `Stores/BaseMoveStore.swift` | | V1's typed `!` lines wait for a composer |
-| Push to the remote (`push_remote`, then your Push click) | `MainWindow/Lead/PushRequests.swift` | missing | the tool records the request, but nothing on the node offers or does the push | M | owed in the port map |
+| Push to the remote (`push_remote`, then your Push click) | `MainWindow/Lead/PushRequests.swift` | partly | the tool records the request; `Engine/PushAsks.swift` tells the lead once that nothing on the node pushes it and no outcome will come, and `status` lists it while open (2026-11-19). Nothing offers or does the push | M | owed: a user's-voice `vibeswitcher push PROJECT` / `decline-push PROJECT` (typed code, recorded in the vault and journal like `answer`), settling through the vault (`settlePush`, which must take the node's server as the app) and running `LeadPush.settle` off the engine's queue, the outcome told to the lead as the app's `onSettled`; the web page shows the request and drafts the command, never pushes. The tool's own reply still says "click Push … in VibeSwitcher" (`LeadPush.swift`, shared with main): the engine's message corrects it right after |
 | Fetch from and merge the remote (`fetch_remote`, `merge_remote`) | `LeadToolset.swift` (shared) | unverified | shared tool, so it should work, but no node run has used it | | |
 | Leads messaging each other (`tell_lead`), and the "Between leads" view | `LeadToolset.swift`, `MainWindow/Lead/LeadMailViews.swift` | partly | the messages work (shared tool, delivered by `Engine/Delivery.swift`). There's no view, and no control to turn it off | S | |
 | The prompt-audit reminder | `MainWindow/Lead/PromptAuditDesk.swift` | missing | owed in the port map | S | |
@@ -231,7 +232,8 @@ doesn't yet confine anything.
 - ~~The battery hold never applies on the node, because no one writes the power state.~~ Now on purpose (2026-11-19):
   not needed on a server or WSL on mains; recorded in the table and in `Engine/Refresh.swift`.
 - Running leads aren't told when `policy.md` changes.
-- `push_remote` tells the lead it recorded a request that only you can push, but no client offers the push.
+- `push_remote` tells the lead it recorded a request that only you can push, but no client offers the push. Since
+  2026-11-19 the node tells the lead so and lists the request in `status`; the push itself is owed.
 - The node's restart ends every session, and nothing records or reopens them.
 
 ## Keeping it current
