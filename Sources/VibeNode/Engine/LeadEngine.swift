@@ -173,6 +173,12 @@ public final class LeadEngine: @unchecked Sendable {
     /// When the witness first saw each verifier that auto_advance audits again end without a verdict (by root and
     /// session; see `LeadWitness.leftToAdvance`), and each worker it released.
     var advanceSeen: [String: Date] = [:]
+    /// The sessions the witness last told the vault were at work (`LeadVault.noteWorking`), by root, and when.
+    var workingTold: [String: (sessions: Set<String>, at: Date)] = [:]
+    /// How often the same working sessions are told the vault again (the app's `LeadController.workingEvery`).
+    static let workingEvery: TimeInterval = 30
+    /// Where those are told, one after another: a later look's never overtakes an earlier one's (`work` is concurrent).
+    let workingNotes = DispatchQueue(label: "vibenode.lead-engine.working", qos: .utility)
     /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"
     /// on the engine's queue once a look is applied (`witnessed`); tests watch or slow them. Set on `queue`.
     var witnessStep: ((String) -> Void)?

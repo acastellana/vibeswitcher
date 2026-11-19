@@ -112,7 +112,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Fetch from and merge the remote (`fetch_remote`, `merge_remote`) | `LeadToolset.swift` (shared) | unverified | shared tool, so it should work, but no node run has used it | | |
 | Leads messaging each other (`tell_lead`), and the "Between leads" view | `LeadToolset.swift`, `MainWindow/Lead/LeadMailViews.swift` | partly | the messages work (shared tool, delivered by `Engine/Delivery.swift`). There's no view, and no control to turn it off | S | |
 | The prompt-audit reminder | `MainWindow/Lead/PromptAuditDesk.swift` | missing | owed in the port map | S | |
-| `small_task_min` drops a review for tiny work | `LeadController.swift` `noteWorking` | partly | the engine never tells the vault which sessions it saw working, so no review is ever dropped | S | the safe side; owed |
+| `small_task_min` drops a review for tiny work | `LeadController.swift` `noteWorking` | has it | `Engine/Witness.swift` `witnessed`: the vault is told the sessions seen at work (`LeadVault.noteWorking`), on change or every 30 s, as the app's | | closed 2026-11-19 |
 | Fable held back: halted workers restarted on Opus | `LeadController.swift` `WitnessWork` | has it | `Engine/WitnessWork.swift` | | |
 | AI summaries of what each agent is doing | `MainWindow/Lead/TeamSummaryModel.swift`, `Sources/VibeCore/TeamSummaries.swift` | missing | no caller | M | |
 | Records: progress, decisions, incidents, redaction, the board's archive | `LeadToolset.swift` (shared) | has it | the lead's tool server | | |
@@ -225,7 +225,7 @@ doesn't yet confine anything.
 
 - ~~The lead starts on Claude's default model, ignoring `lead_model` and `lead_advisor`.~~ Closed 2026-11-19.
 - A finished session stays `done` forever, because nothing marks it seen. The web page now shows it.
-- `small_task_min` never drops a review. The safe side, but not what workflow.md says.
+- ~~`small_task_min` never drops a review.~~ Closed 2026-11-19: the witness tells the vault what it sees at work.
 - The limits run on defaults (10 team sessions, test and build slots at a sixth of the cores) with no way to change
   them except by hand, and the defaults aren't shown.
 - The battery hold never applies on the node, because no one writes the power state.
