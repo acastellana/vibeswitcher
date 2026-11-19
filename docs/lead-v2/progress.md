@@ -55,3 +55,10 @@
 - 2026-11-19 18:51 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
 - 2026-11-19 18:51 Audit of planner-a-worker-s at aa0bc2e3 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
 - 2026-11-19 18:51 Automatically (auto_advance): Started the audit of planner-a-worker-s at aa0bc2e3 (Its review is audit).
+- 2026-11-19 18:59 Audit of planner-a-worker-s: finder 1 of 2 submitted (complete, clean, 4 findings)
+- 2026-11-19 18:59 Sent planner-a-worker-s's audit contract v2 (it had v1)
+- 2026-11-19 18:59 Sent planner-a-worker-s's worker contract v2 (it had v1)
+- 2026-11-19 18:59 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 19:00 Audit of planner-a-worker-s at aa0bc2e3 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 19:00 Pipeline held: sb3-the-launcher-builds ready to merge with none landing; cause: every test slot held
+- 2026-11-19 19:01 The worker on sb6-1-2-branch answered findings: sb6-1-2-branch:F1 fixed at 91cc0dcc: 63abcfdb: BranchRun.swift no longer uses standardizedFileURL anywhere. The PATH filter in plan(), the run's home from CFFIXED_USER_HOME/TMPDIR (home(_:account:)) and settled() all tidy by SandboxPolicy.lexical, 5b6eccd9's helper, so the launcher judges a PATH folder under the same spelling the planner shows it by. Checked the branch's tests and its other files for the same kind (standardizedFileURL, standardizingPath, resolvingSymlinksInPath): none in what th…

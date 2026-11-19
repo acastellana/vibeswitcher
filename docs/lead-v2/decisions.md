@@ -12,3 +12,7 @@ The user's goal for the fresh lead after the earlier lead ran deaf; a new lead m
 
 The user's message; and merging before the test-environment fix would only burn a full-suite run and fail.
 
+## 2026-11-19 18:59:55 On this node nobody can answer a worker's or verifier's own permission prompt yet (a known gap; the user, 2026-11-19, answer D547D0EC). So: every contract's context tells workers and verifiers to keep commands inside what their permissions allow and to judge by reading rather than run a command that would ask; and when a verifier or worker stalls on a prompt, the lead restarts it (audit(restart: true), or a fresh worker) at once instead of waiting or asking the user.
+
+A verifier on planner-a-worker-s sat on a prompt with its audit nearly done; waiting can't end, and the user said to restart rather than wait.
+
