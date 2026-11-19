@@ -60,6 +60,26 @@ struct AccountUsageTests: LeadTeamFixture {
         }
     }
 
+    @Test(arguments: ["five_hour", "seven_day"], ["usage_limit_reached", "model_requires_usage_credits"])
+    func structuredEveryModelKindWinsOverFableLimitSentence(kind: String, apiError: String) throws {
+        let limit = UsageLimit(said: "You've hit your Fable limit · resets Nov 24 at 1am",
+                               resetsAt: Self.tomorrow, at: Self.now.timeIntervalSince1970,
+                               kind: kind, apiError: apiError)
+        let held = try #require(refusal(limit, model: "fable"))
+        #expect(held.model == nil && held.reached && held.resetsAt == Self.tomorrow)
+        let usage = AccountUsage(limits: [held])
+        #expect(usage.hold(model: "opus", now: Self.now) != nil && usage.fableHeldBack(now: Self.now) == nil)
+    }
+
+    @Test(arguments: [nil, "seven_day_overage_included", "spend_limit", "other_limit"] as [String?])
+    func onlyUnspecifiedOrOverageKindsUseTheLimitSentence(kind: String?) throws {
+        let limit = UsageLimit(said: "You've hit your Fable limit · resets Nov 24 at 1am",
+                               resetsAt: Self.tomorrow, at: Self.now.timeIntervalSince1970,
+                               kind: kind, apiError: "usage_limit_reached")
+        let held = try #require(refusal(limit, model: "opus"))
+        #expect(held.model == (kind == nil || kind == "seven_day_overage_included" ? "fable" : nil))
+    }
+
     @Test func correctingAScopedRefusalKeepsItsResetAndOtherEveryModelHolds() throws {
         let old = AccountUsage.Limit(name: "seven_day_overage_included", usedPercent: 100,
                                      resetsAt: Self.tomorrow, at: Self.now.timeIntervalSince1970, reached: true)
