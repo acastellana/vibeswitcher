@@ -368,42 +368,10 @@ public enum Shell {
 extension Shell {
     /// `run`'s pause between its looks at the program (its end, its time, a cancel, its stall watch): up to its 20 ms,
     /// over at once when the program exits. A plain 20 ms sleep made every program at least 20 ms, and a git that takes
-    /// 13 ms half as long again (the tests' git, thousands of runs: a share of the full suite's time). The exit is a
-    /// kqueue's NOTE_EXIT, which reaps nothing (`Spawned.isRunning` still does). Where the kqueue can't be had, or the
-    /// program can't be watched, it's the 20 ms sleep as before, so it never spins.
-    final class ExitWatch {
-        private let queue: Int32
-
-        init(_ pid: pid_t) {
-            var queue = pid > 0 ? kqueue() : -1
-            if queue >= 0 {
-                var change = kevent(ident: UInt(pid), filter: Int16(EVFILT_PROC), flags: UInt16(EV_ADD | EV_ONESHOT),
-                                    fflags: UInt32(NOTE_EXIT), data: 0, udata: nil)
-                if kevent(queue, &change, 1, nil, 0, nil) != 0 {
-                    close(queue)
-                    queue = -1
-                }
-            }
-            self.queue = queue
-        }
-
-        deinit { if queue >= 0 { close(queue) } }
-
-        func wait(upTo seconds: TimeInterval) {
-            guard queue >= 0 else {
-                usleep(useconds_t(seconds * 1_000_000))
-                return
-            }
-            var event = kevent()
-            var timeout = timespec(tv_sec: 0, tv_nsec: Int(seconds * 1_000_000_000))
-            let began = DispatchTime.now().uptimeNanoseconds
-            // An interrupted wait sleeps out the rest: never a quicker look than the 20 ms but at the exit.
-            if kevent(queue, nil, 0, &event, 1, &timeout) < 0 {
-                let spent = Double(DispatchTime.now().uptimeNanoseconds - began) / 1e9
-                if spent < seconds { usleep(useconds_t((seconds - spent) * 1_000_000)) }
-            }
-        }
-    }
+    /// 13 ms half as long again (the tests' git, thousands of runs: a share of the full suite's time). The exit is
+    /// `Platform.ExitWait`'s (the Mac's kqueue NOTE_EXIT, Linux's pidfd), which reaps nothing (`Spawned.isRunning`
+    /// still does). Where the program can't be watched, it's the 20 ms sleep as before, so it never spins.
+    typealias ExitWatch = Platform.ExitWait
 
     /// A program `run` started, as it waits on it.
     protocol Running: AnyObject {
