@@ -115,3 +115,5 @@
 - 2026-11-19 22:09 Automatically (auto_advance): Cleaned up the-full-suite-passes; ended pid 2594513 (Worker: The full suite passes when the node's own merge gate runs it) (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-19 22:26 Merged weblistener-slow-client: WebListener slow-client test: find the race, make it deterministic (build 5b6eccd929ad)
 - 2026-11-19 22:26 Flaky in weblistener-slow-client's merge: aCodexWorkersCheckRunsInsideCodexsSandbox(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-19 22:48 Merged planner-a-worker-s: Planner: a worker's box can't write config.worktree or the agent's memory (build 5b6eccd929ad)
+- 2026-11-19 22:48 Flaky in planner-a-worker-s's merge: theAppsListingNeverRunsInTheWorktree(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
