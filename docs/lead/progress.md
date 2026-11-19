@@ -4192,3 +4192,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 14:16 Update: Merged: reviews run on Codex when Claude is out of quota — **What you asked for** ("make sure that the reviews are happening through Codex especially when there's no quota"):
 - 2026-11-19 14:21 Audit of session-host-measure-the: complete, clean, round 1: 3 Nit open
 - 2026-11-19 14:34 Merged merge-stats-a-batch: Merge stats: a batch stopped before its first run, and a retained batch's landing, record the right lines (no audit: review none) (build 295fb14dedaa)
+- 2026-11-19 14:34 Automatically (auto_advance): Merged merge-stats-a-batch (Merge stats: a batch stopped before its first run, and a retained batch's landing, record the right lines) into main at c9af03f5, review none: on its worker's done report on 7064c2e8 and the full test run.
+- 2026-11-19 14:34 Automatically (auto_advance): Cleaned up merge-stats-a-batch; ended pid 10294 (Worker: Merge stats: a batch stopped before its first run, and a retained batch's landing, record the right lines) (freed 1.8 GB of build output and temporary folders). It stays done.
