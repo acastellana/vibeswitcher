@@ -391,8 +391,8 @@ extension LeadEngine {
                 $0.question = held
                 $0.notice = nil
             }
-            tellAsUser("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with "
-                       + "‘\(held.proposal ?? "")’; wait for their answer.", root: root, action: action)
+            // The app's words (`LeadAnswerOutcome.holdMessage`, main's 121ef5aa), which the setup scorecard counts by.
+            tellAsUser(LeadAnswerOutcome.holdMessage(held), root: root, action: action)
             // Answered once the board has it too (the lead's record), as `answer` is.
             reads.async({ _ -> Void in
                 do { try BoardStore(root: root).update { board in _ = try board.hold(question.id) } } catch {
