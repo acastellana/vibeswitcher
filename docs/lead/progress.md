@@ -4032,3 +4032,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 09:17 Automatically (auto_advance): Started the audit of new-work-waits-when at 471b4f1b (It touches sensitive_paths (Sources/VibeCore/LeadAdvance.swift, Sources/VibeCore/LeadToolset.swift, Sources/VibeCore/LeadWitness.swift, Sources/VibeCore/LeadWorkflow.swift), so it's treated as audit whatever its review says).
 - 2026-11-19 09:25 Pipeline held: task-rows-say-when ready to merge with none landing; cause: the load hold
 - 2026-11-19 09:25 Merged task-rows-say-when: Task rows say when a review waits on a usage limit, not "In review" (build 31d37278312c)
+- 2026-11-19 09:25 Automatically (auto_advance): Merged task-rows-say-when (Task rows say when a review waits on a usage limit, not "In review") into main at cd7cbb1b, on its passing audit and the full test run.
+- 2026-11-19 09:25 Automatically (auto_advance): Cleaned up task-rows-say-when (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-19 09:26 Update: Merged: task rows say when a review waits on a usage limit — **What changed:** a review that can't run because of a usage limit no longer shows as "In review 11h" with stale progress. The row says, for example, **"Waits for Fable"** with **"Fable's limit resets…
