@@ -2,7 +2,8 @@
 # `swift build && swift test "$@"` on a fresh scratch home, so nothing a test writes reaches your ~/.vibeswitcher,
 # ~/.claude or login Keychain. HOME, CFFIXED_USER_HOME (what NSHomeDirectory() follows; HOME alone doesn't move it),
 # VIBESWITCHER_HOME and TMPDIR all point into a folder this creates under /tmp and removes when it exits, Ctrl-C too
-# (scripts/lib/scratch.sh). In a worktree the lead made, both build against the worktrees' shared cache of the SDK's
+# (scripts/lib/scratch.sh). The run's umask is 022 and it carries none of a team session's variables, whatever the
+# caller's are (scripts/lib/test-environment.sh). In a worktree the lead made, both build against the worktrees' shared cache of the SDK's
 # modules (scripts/lib/module-cache.sh); the main checkout and merge's own run build as ever.
 # A plain `swift test` on your own home refuses to start (see `VibePaths.testRefusal`).
 #
@@ -51,6 +52,10 @@
 #   ~/Library/Preferences, around COMMAND (PreferencesCheckTests).
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# Every mode below starts from the same umask and none of a team session's variables, whoever started this script: a
+# merge's and an audit's run come from the lead's tool server, with its umask and environment (it says what that cost).
+source scripts/lib/test-environment.sh
+clean_test_environment
 
 # The live processes holding $1 in their environment or arguments, and every process under one of them (the programs a
 # scratch host runs: ps shows the environment of the app's own binaries, not of Apple's /bin/sh), as "pid command".

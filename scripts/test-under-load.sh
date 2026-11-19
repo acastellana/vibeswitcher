@@ -49,6 +49,9 @@
 # look) and TEST_UNDER_LOAD_TICK (seconds between looks, 5) taken.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# The runs and a COMMAND start from the umask and the environment scripts/test.sh gives its own (it says why).
+source scripts/lib/test-environment.sh
+clean_test_environment
 source scripts/lib/scratch.sh
 source scripts/lib/module-cache.sh
 source scripts/lib/developer-dir.sh
