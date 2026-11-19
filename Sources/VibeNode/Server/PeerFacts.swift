@@ -60,8 +60,10 @@ public struct PeerFacts: Equatable, Sendable {
 
     /// The process `pid` as it reads now (Linux: `/proc`; the Mac reads no links, so every field there is unreadable
     /// and no peer is the user, which only Linux's server asks). `token`: the sender as the socket named it; when its
-    /// pid now names another process (it ended and its number was given again), nothing is readable.
-    public static func read(pid: pid_t, token: Platform.PeerToken? = nil) -> PeerFacts {
+    /// pid now names another process (it ended and its number was given again), nothing is readable. `cgroupRoot`: a
+    /// scratch server's test's (`ServerArguments.testCgroupRoot`), from which its cgroup lines are read (`rerooted`);
+    /// nil, as the user's node's server always has it: the lines as `/proc` gives them.
+    public static func read(pid: pid_t, token: Platform.PeerToken? = nil, cgroupRoot: String? = nil) -> PeerFacts {
         var uid: uid_t?
         if case .record(let record) = Platform.Processes.record(pid) { uid = record.uid }
         var ancestry: [Ancestor] = []
@@ -92,10 +94,35 @@ public struct PeerFacts: Equatable, Sendable {
             underRunner = nil
         }
         let environment = Platform.Processes.environment(pid)
-        return PeerFacts(pid: pid, uid: uid, cgroup: Platform.Processes.cgroup(pid), ancestry: readable ? ancestry : nil,
+        let cgroup = Platform.Processes.cgroup(pid).map { lines in cgroupRoot.map { rerooted(lines, at: $0) } ?? lines }
+        return PeerFacts(pid: pid, uid: uid, cgroup: cgroup, ancestry: readable ? ancestry : nil,
                          terminal: readable ? terminal : .unreadable,
                          sessionMarker: environment.map { $0.contains { $0.hasPrefix(sessionMarkerName + "=") } },
                          underRunner: underRunner, commandLine: Platform.Processes.arguments(pid))
+    }
+
+    /// Whether `path` can be a test's cgroup root: a cgroup's path as the kernel writes one, below the hierarchy's root
+    /// (absolute, not `/` itself, no empty, `.` or `..` component, so no `/` at its end).
+    public static func isCgroupRoot(_ path: String) -> Bool {
+        guard path.hasPrefix("/"), path != "/" else { return false }
+        return path.dropFirst().split(separator: "/", omittingEmptySubsequences: false).allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+
+    /// `lines` (a `/proc/<pid>/cgroup`'s) as a process in a cgroup namespace rooted at `root` would read them: in each
+    /// hierarchy's line a path that is `root` reads `/`, and a path under it (by whole components: `root` and then a
+    /// `/`) reads from there. Every other path stays as it is, so a process outside `root` is where the machine says
+    /// it is, and a root that isn't one (`isCgroupRoot`) changes nothing. Only a scratch server's test gives a root
+    /// (`ServerArguments.testCgroupRoot`).
+    public static func rerooted(_ lines: [String], at root: String) -> [String] {
+        guard isCgroupRoot(root) else { return lines }
+        return lines.map { line in
+            let parts = line.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count == 3 else { return line }
+            let path = parts[2]
+            if path == root { return "\(parts[0]):\(parts[1]):/" }
+            if path.hasPrefix(root + "/") { return "\(parts[0]):\(parts[1]):\(path.dropFirst(root.count))" }
+            return line
+        }
     }
 
     /// The path of the unified hierarchy (`0::PATH`) in `lines`; nil without one.

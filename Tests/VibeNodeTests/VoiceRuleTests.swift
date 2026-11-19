@@ -182,6 +182,124 @@ struct VoiceRuleTests {
         #expect(Self.refused(Self.judged(Self.peer(), rule: test)))
     }
 
+    // MARK: A scratch node's test's cgroup root
+
+    /// The test flag of a scratch node whose test runs inside the user's manager (the node's own merge gate):
+    /// `--test-cgroup-root=`. A server with `--node` refuses it, as it does every test flag (it says so at its start:
+    /// `refused`), and takes nothing from it; a scratch server takes a cgroup's path only.
+    @Test func theTestCgroupRootIsRefusedUnderNode() throws {
+        let base = ["vibeswitcher-server", "--host-connector", "3", "--host-socket", "/x/host.sock"]
+        let flag = ServerArguments.testCgroupRootFlag + Self.nodeUnit
+        let node = try ServerArguments.parse(base + ["--node", "--node-root", "/x/b", flag, ServerArguments.testUserScopesFlag + "/"]).get()
+        #expect(node.refused == [flag, ServerArguments.testUserScopesFlag + "/"], "\(node)")
+        #expect(node.testCgroupRoot == nil && node.testUserScopes == nil)
+        // With both dropped the user's server reads the sender where it is, by the rule its own cgroup gives: a peer in
+        // the node's unit (the test process such a flag would speak for) is refused by its cgroup, as ever.
+        let rule = VoiceRule.at(start: Self.hybrid(Self.nodeUnit), testScopes: node.testUserScopes, uid: Self.uid)
+        let lines = node.testCgroupRoot.map { PeerFacts.rerooted(Self.hybrid(Self.nodeUnit), at: $0) } ?? Self.hybrid(Self.nodeUnit)
+        #expect(Self.judged(Self.peer(cgroup: lines), rule: rule) == .notUser("its cgroup \(Self.nodeUnit) is the node's unit"))
+
+        let scratch = try ServerArguments.parse(base + ["--root", "/x", flag]).get()
+        #expect(scratch.refused.isEmpty && scratch.testCgroupRoot == Self.nodeUnit, "\(scratch)")
+        // Not a cgroup's path below the root: not taken (the server doesn't start).
+        for bad in ["", "/", "relative.scope", "/a/", "/a//b", "/a/../b", "/a/./b"] {
+            #expect(throws: ServerArguments.Usage.self, "\(bad)") { try ServerArguments.parse(base + ["--root", "/x", ServerArguments.testCgroupRootFlag + bad]).get() }
+            #expect(PeerFacts.rerooted(Self.hybrid("/a/b"), at: bad) == Self.hybrid("/a/b"), "\(bad)")
+        }
+    }
+
+    /// The root only says where a scratch node's test runs: a sender in that very cgroup reads `/`, which the test's
+    /// scope names, and nothing else gains by it. A path outside the root is left as the machine has it and is refused
+    /// as it would be without a root; a path under it is no scope of the test's; and the rule itself is the one every
+    /// server applies (`cgroupRefusal`), so a re-read path still has to be a scope the rule knows.
+    @Test func aCgroupRootRereadsOnlyWhatIsAtOrUnderItAndWidensNoScope() {
+        let root = Self.nodeUnit
+        let test = VoiceRule.at(start: Self.hybrid(root), testScopes: ["/"], uid: Self.uid)
+        func judged(_ lines: [String], rule: VoiceRule = test) -> Voice { Self.judged(Self.peer(cgroup: PeerFacts.rerooted(lines, at: root)), rule: rule) }
+        // The test's own cgroup, on the hybrid layout and the unified one alone: the user of a scratch node.
+        #expect(PeerFacts.rerooted(Self.hybrid(root), at: root) == Self.hybrid("/"))
+        #expect(judged(Self.hybrid(root)) == .user)
+        #expect(judged(["0::" + root]) == .user)
+        // Without the root the same test scope can't name it: the refusal a run in the node's unit met (2026-11-19).
+        #expect(Self.judged(Self.peer(cgroup: Self.hybrid(root)), rule: test) == .notUser("its cgroup \(root) is the node's unit"))
+
+        // Outside the root: as the machine has it, each refused for what it is.
+        let managed = "is in the user's systemd manager (a user unit, systemd-run, a service)", noScope = "is no terminal scope this node knows (/)"
+        let outside = ["/user.slice/user-1000.slice/user@1000.service/app.slice/run-u12.service": managed,
+                       "/user.slice/user-1000.slice/user@1000.service/app.slice": managed,
+                       "/user.slice/user-1000.slice/user@1000.service/init.scope": managed,
+                       // A sibling whose name only starts as the root's does: whole components count.
+                       root + "2": managed,
+                       "/system.slice/vibeswitcher-node.service": "is the node's unit",
+                       "/init.scope": noScope,
+                       "/user.slice/user-1000.slice/session-3.scope": noScope]
+        for (path, why) in outside {
+            #expect(PeerFacts.rerooted(Self.hybrid(path), at: root) == Self.hybrid(path), "\(path)")
+            #expect(judged(Self.hybrid(path)) == .notUser("its cgroup \(path) \(why)"), "\(path)")
+        }
+        // A hierarchy's line still outside (the systemd line in the root, the unified one elsewhere): refused by it.
+        #expect(Self.refused(judged(["15:name=systemd:" + root, "0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-u3.service"])))
+        // Under the root: read from there, and no scope of the test's.
+        #expect(PeerFacts.rerooted(["0::" + root + "/sub/leaf"], at: root) == ["0::/sub/leaf"])
+        #expect(judged(["0::" + root + "/sub"]) == .notUser("its cgroup /sub is no terminal scope this node knows (/)"))
+        // The other lines of a sender in the root still count: a session's marker, another user.
+        #expect(Self.refused(Self.judged(Self.peer(cgroup: PeerFacts.rerooted(Self.hybrid(root), at: root), marker: true), rule: test)))
+        #expect(Self.refused(Self.judged(Self.peer(cgroup: PeerFacts.rerooted(Self.hybrid(root), at: root), uid: 1001), rule: test)))
+        // And the root alone is no pass: by the node's own rule (no test scopes) `/` is no terminal's scope.
+        #expect(judged(Self.hybrid(root), rule: Self.systemd) == .notUser("its cgroup / is no terminal scope this node knows (/init.scope, /user.slice/user-{uid}.slice/session-*.scope)"))
+    }
+
+    /// A scratch node gives its server a root only where its test runs inside the user's manager or the node's unit;
+    /// from a terminal, on a CI runner and on the Mac (no cgroup) the server reads the machine's own paths.
+    @Test func aScratchNodeGivesARootOnlyInsideTheUsersManager() {
+        #expect(ScratchNode.cgroupRoot(own: Self.nodeUnit, uid: Self.uid) == Self.nodeUnit)
+        #expect(ScratchNode.cgroupRoot(own: Self.systemdRunUnit, uid: Self.uid) == Self.systemdRunUnit)
+        #expect(ScratchNode.cgroupRoot(own: "/system.slice/vibeswitcher-node.service", uid: Self.uid) == "/system.slice/vibeswitcher-node.service")
+        for elsewhere in ["/init.scope", "/user.slice/user-1000.slice/session-3.scope", "/system.slice/hosted-compute-agent.service",
+                          "/user.slice/user-1001.slice/user@1001.service/app.slice/run-u1.service", "/"] {
+            #expect(ScratchNode.cgroupRoot(own: elsewhere, uid: Self.uid) == nil, "\(elsewhere)")
+        }
+        #expect(ScratchNode.cgroupRoot(own: nil, uid: Self.uid) == nil)
+        // This run's own: a root exactly when its cgroup is one of those, and then its scope is `/`.
+        #expect(ScratchNode.cgroupRoot == ScratchNode.cgroupRoot(own: ScratchNode.ownCgroup, uid: getuid()))
+        #expect(ScratchNode.ownScope == (ScratchNode.cgroupRoot == nil ? ScratchNode.ownCgroup : "/"))
+    }
+
+    /// The root reaches the read of a sender from one place, the server's own arguments at its start: `ServerStart`
+    /// hands `parsed.testCgroupRoot` (nil under `--node`) to the socket's server, which keeps it as a constant and is
+    /// the only caller that reads a sender with one. No file, request or environment variable names a root.
+    @Test func theCgroupRootComesOnlyFromTheServersOwnArguments() throws {
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var files: [String: Set<String>] = [:]
+        var reads: [String] = []
+        for folder in ["Sources/VibeNode", "Sources/VibeCore", "Sources/VibeHost", "Sources/VibePlatform", "Sources/vibeswitcher-server",
+                       "Sources/vibeswitcher-cli", "Sources/vibeswitcher-host", "Sources/vibeswitcher-mcp", "Sources/vibeswitcher-hook"] {
+            let base = repo.appendingPathComponent(folder)
+            guard let walker = FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil) else { continue }
+            for case let file as URL in walker where file.pathExtension == "swift" {
+                let text = ServerLintTests.code(try String(contentsOf: file, encoding: .utf8))
+                for name in ["testCgroupRoot", "testCgroupRootFlag", "cgroupRoot", "rerooted("] where text.contains(name) {
+                    files[name, default: []].insert(file.lastPathComponent)
+                }
+                for line in text.components(separatedBy: "\n") where line.contains("PeerFacts.read(") || line.contains("cgroupRoot: parsed") {
+                    reads.append(file.lastPathComponent + ": " + line.trimmingCharacters(in: .whitespaces))
+                }
+            }
+        }
+        // The flag and what it was parsed to: the arguments, and the start that hands it on.
+        #expect(files["testCgroupRootFlag"] == ["ServerArguments.swift"], "\(files)")
+        #expect(files["testCgroupRoot"] == ["ServerArguments.swift", "ServerStart.swift"], "\(files)")
+        // The root itself: those, the socket's server and the read. The re-read: the read alone.
+        #expect(files["cgroupRoot"] == ["ServerArguments.swift", "ServerStart.swift", "NodeServer.swift", "PeerFacts.swift"], "\(files)")
+        #expect(files["rerooted("] == ["PeerFacts.swift"], "\(files)")
+        #expect(reads.sorted() == ["NodeServer.swift: let facts = PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot)",
+                                   "NodeServer.swift: let facts = PeerFacts.read(pid: token.pid, token: token, cgroupRoot: cgroupRoot)",
+                                   "ServerStart.swift: clock: clock, cgroupRoot: parsed.testCgroupRoot, note: say)"], "\(reads)")
+        // The socket's server keeps it as a constant.
+        let server = ServerLintTests.code(try String(contentsOf: repo.appendingPathComponent("Sources/VibeNode/Server/NodeServer.swift"), encoding: .utf8))
+        #expect(server.contains("private let cgroupRoot: String?") && !server.contains("var cgroupRoot"))
+    }
+
     /// The rule is fixed once, at the server's start, from the server's own cgroup (`/proc/self`'s, by its own pid) and
     /// its own arguments: nothing a peer sends, no file under the node's root or `/run/user/<uid>`, and no request
     /// changes it afterwards.

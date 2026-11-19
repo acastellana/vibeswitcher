@@ -4,7 +4,7 @@ import VibeCore
 /// What `vibeswitcher-server` is started with (the engine plan's E1, EN-D3): by the session host's `ServerChild`,
 /// `--host-connector N --host-socket PATH`, then `--node --node-root PATH` (the user's node) or `--root PATH
 /// --node-root PATH` (a scratch host's), then each `--server-arg X` a scratch host was given. The test flags
-/// (`--test-user-scopes=…`, `--test-housekeeping=…`, `--test-child=…`, `--test-first-look`,
+/// (`--test-user-scopes=…`, `--test-cgroup-root=…`, `--test-housekeeping=…`, `--test-child=…`, `--test-first-look`,
 /// `--test-install-root=…`, and the web's `--test-web-port=…`, `--test-web-root=…`, `--test-web-pair`, `--test-web-terminal`) come only that way; a server with `--node`
 /// refuses each, with a log line, and takes nothing from it.
 public struct ServerArguments: Equatable, Sendable {
@@ -20,6 +20,13 @@ public struct ServerArguments: Equatable, Sendable {
     public var nodeRoot: String?
     /// The scopes a scratch host's test gives the voice rule (`VoiceRule.at`).
     public var testUserScopes: [String]?
+    /// The cgroup a scratch host's test runs in, when that is inside the user's systemd manager (a test run a session
+    /// of the node started: the tool server's merge gate, a worker's shell). The server reads each sender's cgroup
+    /// from there (`PeerFacts.rerooted`, as a cgroup namespace rooted there shows it), so the test's own scope is `/`
+    /// and `--test-user-scopes=/` names it; without this no scope could, for `VoiceRule.cgroupRefusal` refuses every
+    /// path in the manager before it looks at a scope. It moves no path that isn't at or under it and changes
+    /// nothing of the rule. The user's node reads `/proc/<pid>/cgroup` as it is, never through this.
+    public var testCgroupRoot: String?
     /// A scratch host's test's housekeeping period, in seconds (30 otherwise).
     public var testHousekeeping: Int?
     /// A scratch host's test's program, started once at the server's start with every descriptor the server holds
@@ -49,6 +56,7 @@ public struct ServerArguments: Equatable, Sendable {
     public var refused: [String] = []
 
     public static let testUserScopesFlag = "--test-user-scopes="
+    public static let testCgroupRootFlag = "--test-cgroup-root="
     public static let testHousekeepingFlag = "--test-housekeeping="
     public static let testChildFlag = "--test-child="
     public static let testFirstLookFlag = "--test-first-look"
@@ -69,6 +77,7 @@ public struct ServerArguments: Equatable, Sendable {
         var root: String?
         var nodeRoot: String?
         var scopes: [String]?
+        var cgroupRoot: String?
         var housekeeping: Int?
         var child: String?
         var firstLook = false
@@ -106,6 +115,13 @@ public struct ServerArguments: Equatable, Sendable {
                 let given = word.dropFirst(testUserScopesFlag.count).split(separator: ",").map(String.init)
                 guard !given.isEmpty, given.allSatisfy({ $0.hasPrefix("/") }) else { return .failure(Usage("\(testUserScopesFlag) needs cgroup paths")) }
                 scopes = given
+            case _ where word.hasPrefix(testCgroupRootFlag):
+                tests.append(word)
+                let path = String(word.dropFirst(testCgroupRootFlag.count))
+                guard PeerFacts.isCgroupRoot(path) else {
+                    return .failure(Usage("\(testCgroupRootFlag) needs a cgroup's path under the root (/a/b, with no . or .. and no / at its end)"))
+                }
+                cgroupRoot = path
             case _ where word.hasPrefix(testHousekeepingFlag):
                 tests.append(word)
                 guard let seconds = Int(word.dropFirst(testHousekeepingFlag.count)), seconds > 0 else {
@@ -154,9 +170,11 @@ public struct ServerArguments: Equatable, Sendable {
                                      testUserScopes: scopes, testHousekeeping: housekeeping, testChild: child, testFirstLook: firstLook,
                                      testInstallRoot: installRoot, testWebPort: webPort, testWebRoot: webRoot, testWebPair: webPair)
         parsed.testWebTerminal = webTerminal
+        parsed.testCgroupRoot = cgroupRoot
         if node {
             parsed.refused = tests
             parsed.testUserScopes = nil
+            parsed.testCgroupRoot = nil
             parsed.testHousekeeping = nil
             parsed.testChild = nil
             parsed.testFirstLook = false

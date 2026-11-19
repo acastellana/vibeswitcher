@@ -20,6 +20,9 @@ public final class NodeServer: @unchecked Sendable {
     public let socketPath: String
     public let folder: URL
     private let housekeeping: Int
+    /// A scratch server's test's cgroup root (`ServerArguments.testCgroupRoot`), fixed at the start: every sender's
+    /// cgroup is read from there. nil on the user's node, always.
+    private let cgroupRoot: String?
     private let clock: NodeClock?
     private let note: (String) -> Void
 
@@ -37,10 +40,12 @@ public final class NodeServer: @unchecked Sendable {
     public var hub: LiveHub?
 
     /// `root`: the node's root (`<root>/v2/server.sock`). `housekeeping`: seconds between checks of the path (and asks
-    /// of the host's notes), on `clock` (none: only on the folder's changes). `note`: the server's log.
+    /// of the host's notes), on `clock` (none: only on the folder's changes). `note`: the server's log. `cgroupRoot`:
+    /// a scratch server's test's, or nil.
     public init(root: URL, requests: Requests, housekeeping: Int = ServerArguments.housekeeping, clock: NodeClock?,
-                note: @escaping (String) -> Void = { _ in }) {
+                cgroupRoot: String? = nil, note: @escaping (String) -> Void = { _ in }) {
         self.requests = requests
+        self.cgroupRoot = cgroupRoot
         queue = requests.queue
         folder = root.appendingPathComponent("v2", isDirectory: true)
         socketPath = folder.appendingPathComponent("server.sock").path
@@ -145,7 +150,7 @@ public final class NodeServer: @unchecked Sendable {
             connection.sources += 1
             connection.reading = read
             read.resume()
-            let facts = PeerFacts.read(pid: token.pid, token: token)
+            let facts = PeerFacts.read(pid: token.pid, token: token, cgroupRoot: cgroupRoot)
             send(NodeWire.line(requests.hello(peer: facts)), on: connection)
         }
     }
@@ -192,7 +197,7 @@ public final class NodeServer: @unchecked Sendable {
             _ = hub.handle(request, on: connection.transport(of: self), rights: .read)
             return
         }
-        let facts = PeerFacts.read(pid: sender.pid, token: sender)
+        let facts = PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot)
         // `Requests` answers on `queue`.
         requests.handle(request, from: facts) { [weak self, weak connection] reply in
             guard let self, let connection else { return }
