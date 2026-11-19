@@ -26,3 +26,4 @@
 - 2026-11-19 17:32 Automatically (auto_advance): Started a worker on planner-a-worker-s (Planner: a worker's box can't write config.worktree or the agent's memory).
 - 2026-11-19 17:32 Automatically (auto_advance): Overlap for planner-a-worker-s's start (a warning only: nothing was refused or reordered). Package.swift: sb3-the-launcher-builds (running: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-1-2-branch (running: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
 - 2026-11-19 17:32 Planned branch-runs-get-the: Branch runs get the project's sandbox policy, so swift runs in a merge's box (review audit, for security)
+- 2026-11-19 17:45 Started a worker on weblistener-slow-client
