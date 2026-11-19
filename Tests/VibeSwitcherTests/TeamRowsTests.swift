@@ -122,7 +122,7 @@ struct TeamRowsTests {
         audit.checkpoints = [LeadCheckpoint(text: "Worker finished", at: 0)]
         var sensitive = Self.task("sensitive", .review)
         sensitive.review = .none
-        sensitive.auditNeeded = "Touches sensitive paths"
+        sensitive.auditNeeded = "It touches sensitive_paths (Sources/Sensitive.swift), so it is audited."
         sensitive.checkpoints = audit.checkpoints
         var board = LeadBoard()
         board.tasks = [stopped, audit, sensitive]
@@ -177,6 +177,27 @@ struct TeamRowsTests {
         try observedRows(board, team: team) { rows, _ in
             #expect(rows.first { $0.id == stopped.id }?.state == "Waits for Fable")
             #expect(rows.first { $0.id == pending.id }?.state == "In review")
+        }
+    }
+
+    @MainActor @Test func anOrdinaryAuditUsesItsConfiguredModelForUsageHolds() throws {
+        var stopped = Self.task("limited", .review)
+        stopped.verifier = UUID().uuidString
+        stopped.launchedModels = [stopped.verifier!: "sonnet"]
+        var pending = Self.task("pending", .review)
+        pending.review = .audit
+        pending.auditNeeded = "Its review is audit."
+        var board = LeadBoard()
+        board.tasks = [stopped, pending]
+        var team = Self.limitedTeam(verifier: stopped.verifier!)
+        team.workflow.verifierModel = "sonnet"
+        var limit = Self.reviewLimit
+        limit.kind = "seven_day_sonnet"
+        team.watched[stopped.verifier!] = (.usageLimit(limit), nil, nil)
+        try observedRows(board, team: team) { rows, _ in
+            let row = try #require(rows.first { $0.id == pending.id })
+            #expect(row.state == "Waits for Sonnet")
+            #expect(row.line(summary: "Old summary") == "Sonnet's limit resets Nov 24, 01:00")
         }
     }
 

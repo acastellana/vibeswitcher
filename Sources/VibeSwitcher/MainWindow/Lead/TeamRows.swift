@@ -239,7 +239,7 @@ final class TeamRowsCache {
 
 enum TeamRows {
     /// Uses the witness's existing transcript observation and the account's recorded holds, off the draw path.
-    static func usageWaits(_ board: LeadBoard, team: TeamReading, now: Date) -> [String: ReviewUsageWait] {
+    static func usageWaits(_ board: LeadBoard, team: TeamReading, now: Date, root: String? = nil) -> [String: ReviewUsageWait] {
         var usage = team.usage
         // Include this look's refusals, just as status does, before the tool server has kept them.
         for task in board.tasks {
@@ -278,12 +278,29 @@ enum TeamRows {
             guard task.verifier == nil, task.reviewLevel != .none || task.auditNeeded != nil || task.riskRaised != nil else { continue }
             let fallback = usage.fableHeldBack(now: now) != nil
             let workers = usage.startModel(team.workerModel, now: now)
-            let security = task.auditNeeded != nil || task.riskRaised.map { raised in
-                raised.byModel || LeadRisk.patterns.contains { $0.what != "adds locks or threads" && raised.reason.contains($0.what) }
-            } == true
-            let model = team.workflow.auditModel(workerModel: workers, taskModel: usage.startModel(task.intendedModel, now: now),
-                launchedModel: task.worker.flatMap { task.launchedModels?[$0] }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 },
-                heldBack: fallback ? AccountUsage.heldBackFamily : nil, security: security)
+            func auditModel(security: Bool) -> String {
+                team.workflow.auditModel(workerModel: workers, taskModel: usage.startModel(task.intendedModel, now: now),
+                    launchedModel: task.worker.flatMap { task.launchedModels?[$0] }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 },
+                    heldBack: fallback ? AccountUsage.heldBackFamily : nil, security: security)
+            }
+            let ordinary = auditModel(security: false), secure = auditModel(security: true)
+            var model = ordinary
+            if ordinary != secure {
+                // Only inspect the branch when its security classification changes which held model it needs.
+                guard usage.hold(model: ordinary, now: now, ignoring: team.ignoreUsageLimits) != nil
+                    || usage.hold(model: secure, now: now, ignoring: team.ignoreUsageLimits) != nil else { continue }
+                let security: Bool
+                if let root, let branch = task.branch {
+                    // The audit's existing classifier, on the read queue, never as a row draws.
+                    security = LeadToolset.securityReason(root: root, head: branch, workflow: team.workflow, raised: task.riskRaised) != nil
+                } else {
+                    // auditNeeded also says "Its review is audit." for ordinary audits; only a security reason counts.
+                    security = task.auditNeeded?.hasPrefix("It touches sensitive_paths (") == true || task.riskRaised.map { raised in
+                        raised.byModel || LeadRisk.patterns.contains { $0.what != "adds locks or threads" && raised.reason.contains($0.what) }
+                    } == true
+                }
+                if security { model = secure }
+            }
             if let limit = usage.hold(model: model, now: now, ignoring: team.ignoreUsageLimits) {
                 waits[task.id] = ReviewUsageWait(model: model, resetsAt: limit.resetsAt)
             }

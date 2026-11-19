@@ -253,6 +253,8 @@ struct TeamReading {
     var usage = AccountUsage()
     var workerModel: String?
     var ignoreUsageLimits = false
+    /// Made on the read queue: selecting a held audit model can need the existing branch security check.
+    var reviewUsageWaits: [String: ReviewUsageWait]?
     /// The lead's loop runs with workflow.md's auto_advance on: a verifier that ends without a verdict is its to
     /// audit again (see `LeadWitness.leftToAdvance`), a worker's first stop without a report its to nudge
     /// (`LeadWitness.stopsForAdvance`). Looked at only while a task is in review or running.
@@ -297,6 +299,7 @@ struct TeamReading {
         if !unseen.isEmpty, let table = ProcessTable.trySnapshot() {
             team.agentGone = Set(unseen.filter { !$0.session.agentRuns(in: table) }.map(\.id))
         }
+        team.reviewUsageWaits = TeamRows.usageWaits(board, team: team, now: Date(), root: root)
         return team
     }
 
@@ -1614,7 +1617,7 @@ final class LeadController: ObservableObject {
         tell(timers: fired)
         let previous = boards
         let waits = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
-            (root, TeamRows.usageWaits(board, team: teams[root] ?? TeamReading(), now: Date()))
+            (root, teams[root]?.reviewUsageWaits ?? TeamRows.usageWaits(board, team: teams[root] ?? TeamReading(), now: Date()))
         })
         if waits != rowUsageWaits { rowUsageWaits = waits }
         if loaded != boards { boards = loaded }
