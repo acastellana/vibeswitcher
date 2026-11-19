@@ -19,111 +19,6 @@ final class ReportsWaiting: ObservableObject {
     }
 }
 
-/// Each lead's board and decisions as last read, kept while their files are unchanged. The lead controller looks
-/// every 3 s (off the main thread, see `LeadReads`), and a day's board is most of a MB of JSON (its decisions, dates
-/// to parse).
-struct LeadFiles {
-    /// A file's identity, size and modification time: while they're the same, so is what it says. A board is
-    /// written whole and renamed into place, so a new one is a new file.
-    struct Stamp: Equatable {
-        let inode: UInt64
-        let size: Int64
-        let modified: timespec
-
-        init?(_ path: String) {
-            var info = stat()
-            guard stat(path, &info) == 0 else { return nil }
-            inode = info.st_ino
-            size = info.st_size
-            modified = info.st_mtimespec
-        }
-
-        static func == (a: Stamp, b: Stamp) -> Bool {
-            a.inode == b.inode && a.size == b.size && a.modified.tv_sec == b.modified.tv_sec && a.modified.tv_nsec == b.modified.tv_nsec
-        }
-    }
-
-    private var boards: [String: (stamp: Stamp, board: LeadBoard)] = [:]
-    private var decisionLists: [String: (stamp: Stamp, decisions: [LeadDecision])] = [:]
-    private var workflows: [String: (stamp: Stamp, recordsDir: String?)] = [:]
-    private var mailLists: [String: (stamp: Stamp, mail: [LeadMail.Record])] = [:]
-    /// How many times a file was read (for tests).
-    private(set) var fileReads = 0
-    /// The lead each board names, for what the 3 s refresh needs of it (which lead sessions are replaced, which one
-    /// keeps the role): even a board's stamp is a stat, which waited 3 s on a busy disk (hang-20261027-175604).
-    var names = LeadNames()
-
-    mutating func board(_ root: String) -> LeadBoard {
-        let store = BoardStore(root: root)
-        let stamp = Stamp((store.folder as NSString).appendingPathComponent("board.json"))
-        if let stamp, let kept = boards[root], kept.stamp == stamp { return kept.board }
-        fileReads += 1
-        let board = store.load()
-        boards[root] = stamp.map { ($0, board) }
-        return board
-    }
-
-    mutating func decisions(_ root: String) -> [LeadDecision] {
-        let store = BoardStore(root: root)
-        let stamp = Stamp(store.recordPath("decisions.md"))
-        if let stamp, let kept = decisionLists[root], kept.stamp == stamp { return kept.decisions }
-        fileReads += 1
-        let decisions = store.decisions()
-        decisionLists[root] = stamp.map { ($0, decisions) }
-        return decisions
-    }
-
-    /// The project's lead mail (`LeadMail.load`, oldest first): read again only when its file changed.
-    mutating func mail(_ root: String) -> [LeadMail.Record] {
-        guard let stamp = Stamp(LeadMail.file(root: root).path) else {
-            mailLists[root] = nil
-            return []
-        }
-        if let kept = mailLists[root], kept.stamp == stamp { return kept.mail }
-        fileReads += 1
-        let mail = LeadMail.load(root: root)
-        mailLists[root] = (stamp, mail)
-        return mail
-    }
-
-    /// Where the lead's records are kept (`BoardStore.recordsDir`, from its workflow.md).
-    mutating func recordsDir(_ root: String) -> String? {
-        let store = BoardStore(root: root)
-        let stamp = Stamp((store.folder as NSString).appendingPathComponent("workflow.md"))
-        if let stamp, let kept = workflows[root], kept.stamp == stamp { return kept.recordsDir }
-        if stamp != nil { fileReads += 1 }
-        let dir = store.recordsDir
-        workflows[root] = stamp.map { ($0, dir) }
-        return dir
-    }
-
-    /// Only these roots still have a lead.
-    mutating func keep(_ roots: Set<String>) {
-        boards = boards.filter { roots.contains($0.key) }
-        decisionLists = decisionLists.filter { roots.contains($0.key) }
-        workflows = workflows.filter { roots.contains($0.key) }
-        mailLists = mailLists.filter { roots.contains($0.key) }
-    }
-}
-
-/// Where the lead controller reads and writes the boards, and reads its teams' transcripts and inboxes: a queue of its
-/// own, never the main thread (decoding a day's board there, most of a MB of JSON, froze the window for a second at a
-/// time, and so did thirty transcripts). One at a time, in the order asked, so a read after a write sees it; what's
-/// read is handed to the main thread.
-final class LeadReads: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "VibeSwitcher.lead-boards", qos: .userInitiated)
-    /// The boards and decisions as last read (only on `queue`): read again only when their files changed.
-    private var files = LeadFiles()
-
-    /// Runs `work` on the queue with the files read so far, then `then` with its result on the main thread.
-    func async<T>(_ work: @escaping (inout LeadFiles) -> T, then: @escaping (T) -> Void = { _ in }) {
-        queue.async {
-            let result = work(&self.files)
-            DispatchQueue.main.async { then(result) }
-        }
-    }
-}
-
 /// `LeadWitness.HeavySlots` and what it has told, looked at off the main thread (`LeadController.lookAtHeavySlots`),
 /// one look at a time.
 final class HeavySlotsWatch: @unchecked Sendable {
@@ -235,182 +130,21 @@ final class PowerLook: @unchecked Sendable {
     }
 }
 
-/// What the witness reads of a lead's team at each look, on `LeadReads`' queue: a team's transcripts are a few hundred
-/// KB each to parse (thirty of them froze the window when read on the main thread). The sessions as they were when the
-/// look began, what each member it watches is doing (`LeadObserver.watching`), the oldest message waiting for each
-/// worker, and the project's workflow.
-struct TeamReading {
-    typealias Watched = (activity: LeadActivity, tail: TranscriptTail?, progress: TranscriptProgress?)
-
-    /// The window's sessions, and the scan's agents in them, by host session id.
-    var hosted: [String: HostSession] = [:]
-    var sessions: [String: Session] = [:]
-    var watched: [String: Watched] = [:]
-    var held: [String: SteerMessage] = [:]
-    /// The live workers with a run in line for the Mac-wide test and build lock (see `LeadWitness.Seen.lockWait`).
-    var lockWaits: [String: TestLock.Wait] = [:]
-    var workflow = LeadWorkflow()
-    var usage = AccountUsage()
-    var workerModel: String?
-    var ignoreUsageLimits = false
-    /// Made on the read queue: selecting a held audit model can need the existing branch security check.
-    var reviewUsageWaits: [String: ReviewUsageWait]?
-    /// The lead's loop runs with workflow.md's auto_advance on: a verifier that ends without a verdict is its to
-    /// audit again (see `LeadWitness.leftToAdvance`), a worker's first stop without a report its to nudge
-    /// (`LeadWitness.stopsForAdvance`). Looked at only while a task is in review or running.
-    var advancing = false
-    /// The live members with no agent in the scan whose agent's process has exited, by a process table read here (see
-    /// `HostSession.agentRuns`): only these have quit. One whose agent waits on a background command runs on.
-    var agentGone: Set<String> = []
-
-    /// The member `id`'s agent quit, leaving its session's shell open: the scan has no agent on it a minute on
-    /// (`scanSaysQuit`, see `TableRead.agentQuit`), and its agent's own process has exited (`agentGone`).
-    func agentQuit(_ id: String, session: Session?, scanSaysQuit: Bool) -> Bool {
-        session == nil && scanSaysQuit && agentGone.contains(id)
-    }
-
-    /// Each live member's transcript is read whatever it shows: a worker's stall is one that reads as working too (see
-    /// `LeadStall`), and a turn that ended on the account's usage limit reads as working (Claude Code fires no Stop hook
-    /// on it; a verifier's audit sat there for hours, 2026-10-31): its transcript says so (see `UsageLimit`).
+extension TeamReading {
+    /// What the witness reads of a lead's team (`TeamReading.read` in VibeCore), on this app's steer inboxes and the
+    /// Mac-wide test lock, with what the team rows' usage waits need: the account's usage, `workerModel` and the
+    /// usage-limit setting.
     static func read(root: String, board: LeadBoard, hosted: [String: HostSession], sessions: [String: Session],
                      observer: LeadObserver, workerModel: String? = nil) -> TeamReading {
-        var team = TeamReading(hosted: hosted, sessions: sessions)
-        team.usage = AccountUsageStore().load()
+        let usage = AccountUsageStore().load()
+        let ignoreUsageLimits = MacLimits.load().ignoreUsageLimits
+        var team = read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer,
+                        inbox: VibePaths.root, lock: TestLock.standard())
+        team.usage = usage
         team.workerModel = workerModel
-        team.ignoreUsageLimits = MacLimits.load().ignoreUsageLimits
-        let workers = workerSessions(board)
-        for id in board.tasks.flatMap(\.watched) where team.watched[id] == nil {
-            guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
-            team.watched[id] = observer.watching(info, agentPid: session.pid)
-            if workers.contains(id) {
-                team.held[id] = SteerInbox.pending(tty: session.tty).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
-            }
-        }
-        let folders = workers.compactMap { id in hosted[id].flatMap { $0.isLive ? (id, $0.cwd) : nil } }
-        if !folders.isEmpty, let lock = TestLock.standard() {
-            team.lockWaits = lock.waits(for: Dictionary(folders, uniquingKeysWith: { first, _ in first }))
-        }
-        team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
-        team.advancing = team.workflow.autoAdvance && board.tasks.contains { [.review, .running].contains($0.status) } && LeadAdvance.running(BoardStore(root: root))
-        // The table is read only when the scan lacks a member's agent (rare), here off the main thread.
-        let unseen = board.tasks.flatMap(\.watched).compactMap { id in
-            hosted[id].flatMap { $0.isLive && sessions[id] == nil ? (id: id, session: $0) : nil }
-        }
-        if !unseen.isEmpty, let table = ProcessTable.trySnapshot() {
-            team.agentGone = Set(unseen.filter { !$0.session.agentRuns(in: table) }.map(\.id))
-        }
+        team.ignoreUsageLimits = ignoreUsageLimits
         team.reviewUsageWaits = TeamRows.usageWaits(board, team: team, now: Date(), root: root)
         return team
-    }
-
-    /// The sessions whose shells, held messages and test-lock waits are read: each task's worker and each team
-    /// member's (`LeadTask.memberSessions`), watched as the worker is.
-    static func workerSessions(_ board: LeadBoard) -> Set<String> {
-        Set(board.tasks.flatMap { task in [task.worker].compactMap { $0 } + task.memberSessions.map(\.session) })
-    }
-}
-
-/// What the witness works out of a lead's board and what it saw of the team (`LeadController.witness`), on `LeadReads`'
-/// queue: the sessions without tools, the verifiers auto_advance audits again, the messages to tell, the working time
-/// and the stalls. On the main thread at each refresh they held it for 7.1 s on a busy Mac (hang-20261028-195651);
-/// the main thread only applies what's worked out here.
-struct WitnessWork {
-    /// The live workers and verifiers that never got their tools (`LeadWitness.withoutTools`).
-    var withoutTools: [String] = []
-    /// The verifiers that ended without a verdict for auto_advance (`LeadWitness.endedForAdvance`), when it runs.
-    var endedForAdvance: [String] = []
-    /// The workers auto_advance releases while their audits run, between turns now (`LeadWitness.releasableForAdvance`).
-    var releasableForAdvance: [String] = []
-    /// The workers whose turn ended without a report for the first time, which auto_advance nudges
-    /// (`LeadWitness.stopsForAdvance`), when it runs.
-    var stopsForAdvance: [LeadWitness.StopForAdvance] = []
-    /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
-    var messages: [(keys: [String], text: @Sendable () -> String)] = []
-    var sleepInterruptions: [LeadSleepRecovery.Interruption] = []
-    /// The verifiers waiting on a prompt past its wait, not told yet (`LeadWitness.stuckPrompts`): declined, then told.
-    var stuckPrompts: [LeadWitness.StuckPrompt] = []
-    /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
-    var working: Set<String> = []
-    var notesWork = false
-    /// Every session the look saw at work (`LeadBudget.works`): the vault counts its workers' tasks' time from these.
-    var busySessions: Set<String> = []
-    /// The Mac's sleep as of the look: the count takes only time awake (`LeadBudget.awake`).
-    var sleep = MacSleepLog()
-    /// The stall to keep on each task (`LeadWitness.stalls`), and whether the board's change for it.
-    var stalls: [String: LeadStall] = [:]
-    var notesStalls = false
-
-    /// `firstSeen`: when the app first saw a verifier end for auto_advance (nil: not before now). `told`: whether an
-    /// event key was told already. `step` names each computation as it starts (tests watch or slow them).
-    init(board: LeadBoard, seen: [String: LeadWitness.Seen], now: Date, advancing: Bool, budgetMinutes: Int,
-         firstSeen: (String) -> Date?, told: (String) -> Bool, step: ((String) -> Void)? = nil, recoveryRoot: String? = nil,
-         sleep: MacSleepLog = MacSleepLog()) {
-        self.sleep = sleep
-        step?("withoutTools")
-        withoutTools = LeadWitness.withoutTools(board: board, seen: seen, now: now)
-        // Sleep recovery also owns running workers and works with auto_advance off.
-        sleepInterruptions = LeadSleepRecovery.interruptions(board: board, seen: seen, now: now)
-        var advanced: Set<String> = []
-        if advancing {
-            step?("endedForAdvance")
-            endedForAdvance = LeadWitness.endedForAdvance(board: board, seen: seen, now: now)
-            let first = Dictionary(endedForAdvance.map { ($0, firstSeen($0) ?? now) }, uniquingKeysWith: { first, _ in first })
-            step?("leftToAdvance")
-            advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: first)
-            step?("releasableForAdvance")
-            releasableForAdvance = LeadWitness.releasableForAdvance(board: board, seen: seen)
-            step?("stopsForAdvance")
-            stopsForAdvance = LeadWitness.stopsForAdvance(board: board, seen: seen, now: now)
-        }
-        step?("unbuiltMessages")
-        messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, advancing: advancing, told: told)
-        if let recoveryRoot {
-            // This initializer runs on the boards' queue. Never lock/read the ledger or write a nudge on main.
-            let recovering = LeadSleepRecovery.enqueue(sleepInterruptions, root: recoveryRoot)
-            // Workers Fable's refusal halted: the lead's loop starts each again on Opus; told by it, not here.
-            let moving = LeadUsageFallback.enqueue(LeadUsageFallback.halts(board: board, seen: seen), root: recoveryRoot)
-            messages = messages.filter { !$0.keys.contains(where: recovering.contains) && !$0.keys.contains(where: moving.contains) }
-        }
-        step?("stuckPrompts")
-        stuckPrompts = LeadWitness.stuckPrompts(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
-        step?("working")
-        working = LeadBudget.working(board: board, seen: seen)
-        busySessions = Set(seen.filter { LeadBudget.works($0.value) }.keys)
-        // The count not on board.json yet (`LeadBudgetClock`): a few bytes, read here off the main thread.
-        let clock = recoveryRoot.map { BoardStore(root: $0).budgetClock() } ?? LeadBudgetClock()
-        notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970, clock: clock, sleep: sleep)
-        step?("stalls")
-        stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
-        var noted = board
-        notesStalls = noted.noteStalls(stalls)
-    }
-}
-
-/// The lead each board names (its pid, terminal and session): whom a message goes to, whether a wake-up or a flush
-/// still goes to the same lead, which session is the live lead. Only those fields are decoded (`BoardStore.loadLead`,
-/// under a millisecond for a MB of board), and only when the board's file changed. Looked at on `LeadReads`' queue
-/// (`LeadFiles.names`): even the stat waited 3 s on a busy disk (hang-20261027-175604).
-struct LeadNames {
-    private var kept: [String: (stamp: LeadFiles.Stamp, board: LeadBoard)] = [:]
-    /// How many times a board's file was read (for tests).
-    private(set) var fileReads = 0
-    /// Each board looked at, on the thread that looks (for tests).
-    var looked: (String) -> Void = { _ in }
-
-    mutating func board(_ root: String) -> LeadBoard {
-        looked(root)
-        let store = BoardStore(root: root)
-        let stamp = LeadFiles.Stamp((store.folder as NSString).appendingPathComponent("board.json"))
-        if let stamp, let hit = kept[root], hit.stamp == stamp { return hit.board }
-        fileReads += 1
-        let board = store.loadLead()
-        kept[root] = stamp.map { ($0, board) }
-        return board
-    }
-
-    /// Only these roots still have a lead.
-    mutating func keep(_ roots: Set<String>) {
-        kept = kept.filter { roots.contains($0.key) }
     }
 }
 
@@ -929,25 +663,12 @@ final class LeadController: ObservableObject {
         }
     }
 
-    /// What a start does with the lead that may be running already.
-    enum StartPlan: Equatable {
-        /// The host hasn't said yet which sessions run (the app just relaunched): decided once it has.
-        case wait
-        /// No lead runs for the project.
-        case start
-        /// The lead runs (and holds its role, or nothing here may replace it): shown, never replaced.
-        case show(UUID)
-        /// The lead runs without its role (the vault binds it to no session, or another): you're asked first.
-        case askToReplace(UUID)
-    }
+    /// What a start does with the lead that may be running already (`LeadStartPlan`).
+    typealias StartPlan = LeadStartPlan
 
-    /// `running`: the project's live lead session, if any; `holdsRole`: whether the vault binds the lead's role to it
-    /// (nil: the vault couldn't be asked); `fromUser`: you asked in the app (not `vibeswitcher --lead`, which anything
-    /// can post).
+    /// `LeadStartPlan.plan` on the host client's state.
     static func plan(hostState: HostClient.State, running: UUID?, holdsRole: Bool?, fromUser: Bool) -> StartPlan {
-        if hostState == .connecting { return .wait }
-        guard let running else { return .start }
-        return holdsRole == false && fromUser ? .askToReplace(running) : .show(running)
+        LeadStartPlan.plan(hostState: hostState == .connecting ? .connecting : .other, running: running, holdsRole: holdsRole, fromUser: fromUser)
     }
 
     /// Reopens the lead of `root` after a Mac restart (the restart card, on your click): a lead start like any other (a
@@ -1966,7 +1687,7 @@ final class LeadController: ObservableObject {
                                         agentQuit: quit, apiError: apiError?.text,
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
-                                        shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
+                                        shells: shells, heldSince: held?.at, heldFrom: held.map { TeamReading.sender($0.from) },
                                         started: info.startedAt.timeIntervalSince1970, submittedAt: submitted[id],
                                         boundAt: toolTimes[id]?.bound, toolsAt: toolTimes[id]?.tools, lockWait: team.lockWaits[id],
                                         backgroundTasks: watched?.tail?.background ?? [],
@@ -2139,16 +1860,6 @@ final class LeadController: ObservableObject {
         }) { [weak self] went in
             if went { self?.flush(agent) }
             then(went ? .delivered : .notYet)
-        }
-    }
-
-    /// Who a waiting message is from, in words.
-    private static func sender(_ sender: SteerMessage.Sender) -> String {
-        switch sender {
-        case .user: return "the user"
-        case .lead(let name): return name
-        case .system(let about): return "VibeSwitcher (\(about))"
-        case .teammate(let member, let task): return "teammate \(member) on \(task)"
         }
     }
 
@@ -2443,14 +2154,4 @@ final class LeadController: ObservableObject {
 
     private enum RotationError: Error { case noTurns, changed }
 
-}
-
-/// What became of a message for a window session's agent (`LeadController.tell`).
-enum SessionDelivery: Equatable {
-    /// In its steer inbox: its hook hands it over at the agent's next step.
-    case delivered
-    /// Not now, but it may go later: the session host hasn't welcomed the app yet (or is gone), or the post failed.
-    case notYet
-    /// The session host, welcomed, says its session ended or doesn't run it: no agent there will read it.
-    case ended
 }

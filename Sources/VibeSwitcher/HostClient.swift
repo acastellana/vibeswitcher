@@ -1257,3 +1257,11 @@ final class HostClient: ObservableObject {
         }
     }
 }
+
+/// The lead's code in VibeCore drives the host through this client (`PromptDecline`).
+extension HostClient: LeadSessionHost {
+    func type(_ writes: [HostInput.Write], into id: UUID, gate: ((Int, @escaping (Bool) -> Void) -> Void)?,
+              confirmed: @escaping (Bool) -> Void) {
+        send(id, writes: writes, gate: gate, confirmed: confirmed)
+    }
+}
