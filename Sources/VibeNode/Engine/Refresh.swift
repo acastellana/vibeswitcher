@@ -10,8 +10,8 @@ import VibeCore
 /// looks at the two card stores, keeps the notices for `status` (`Requests.statusValue`), runs the witness for each
 /// lead, drops the finished tasks' ended sessions and the wakes and waiting counts of leads that ended. Nothing the refresh reads is read on the engine's queue.
 ///
-/// Not here, as the app has it: team activity and keep-awake (the Mac's, and after the bootstrap); `rotateIfDue` and
-/// the all-done watch (after the bootstrap); the account watch (after the bootstrap). `keepRunningLeads` (E8's) runs at
+/// Not here, as the app has it: team activity and keep-awake (the Mac's, and after the bootstrap); `rotateIfDue` but
+/// its idle handover (`handOverIfIdle`, `IdleHandover.swift`) and the all-done watch (after the bootstrap); the account watch (after the bootstrap). `keepRunningLeads` (E8's) runs at
 /// the server's start, and again here only when the vault couldn't be asked then. The board's questions aren't told
 /// from here (`AlertRules.look`): the user sees only the cards the lead's tool server posts (S3, E6), and the all-done
 /// mark is after the bootstrap. The host's notes are asked by the server's housekeeping and at each `status`
@@ -117,6 +117,7 @@ extension LeadEngine {
                 if !noticed.contains(key ?? title) { note("lead: \(said)") }
             }
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
+            handOverIfIdle(root: root)
         }
         if standing != notices { notices = standing }
         noticed = keys

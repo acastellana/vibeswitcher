@@ -412,7 +412,7 @@ extension LeadEngine {
 
     /// Answers Claude's trust question about `folder` in the new session, carefully (`TrustPrompt.answer`): the screen
     /// read and the keys typed as units through the link, off the engine's queue.
-    private func answerTrust(_ id: UUID, folder: String) {
+    func answerTrust(_ id: UUID, folder: String) {
         let link = self.link
         work.async {
             TrustPrompt.answer(folder: folder, readScreen: {
