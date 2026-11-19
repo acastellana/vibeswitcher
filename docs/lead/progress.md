@@ -3998,3 +3998,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 00:09 Exception on sigpipe-probe-always-on by lead of vibeswitcher: edits to Tests/**/*.swift, scripts/dev/sigpipe-hunt/** accepted. Reason: The lead accepts the worker's routine edits in tests: HostedSessionTests saving and restoring SIGPIPE with sigaction so the probe's SA_SIGINFO handler survives, the VibeHost and VibeSwitcher test targ…
 - 2026-11-19 00:09 Released sigpipe-probe-always-on's worker (idle since its done report on afd319e2) while its audit runs
 - 2026-11-19 00:38 Audit of sigpipe-probe-always-on: complete, clean, round 1: 1 Nit open
+- 2026-11-19 00:49 Exception on the-lead-s-records by lead of vibeswitcher: edits to Tests/**/*.swift accepted. Reason: The lead accepts the test edits the worker listed: existing tests that pin main or a merge's parent across a merge now flush the records first or check that only records commits landed (helper onlyRec…
+- 2026-11-19 00:59 Pipeline held: sigpipe-probe-always-on ready to merge with none landing; cause: a merge in progress
+- 2026-11-19 01:01 Merged sigpipe-probe-always-on: SIGPIPE probe always on: a test run that takes a SIGPIPE names the writer (build 31d37278312c)
