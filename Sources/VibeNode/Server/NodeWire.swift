@@ -277,6 +277,8 @@ public enum NodeWire {
         "question.post": .leadToolServer, "question.revise": .leadToolServer, "question.withdraw": .leadToolServer,
         // The live protocol's (the live wire contract), taken from the integration task that wires each (I1 to I4).
         "subscribe": .anyone, "unsubscribe": .anyone, "chat.page": .anyone,
+        // A finished session seen (the parity gaps of 2026-11-19): it changes nothing but the seen mark, so no voice.
+        "seen": .anyone,
         "draft": .webDraft, "draft.clear": .webDraft,
         "web.open": .user, "web.revoke": .user,
         "term.open": .webTerminal, "term.close": .webTerminal,
@@ -300,14 +302,14 @@ public enum NodeWire {
     /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6; the hooks
     /// from the start plan's S6; `build.switch` from its S8b; the live protocol's `subscribe`, `unsubscribe`, `web.open`
     /// and `web.revoke` from the live plan's I1; `chat.page` from I2; `draft` and `draft.clear` from I3, a web page's
-    /// only; `tell` from the node frictions of 2026-11-19; `board` from the board view's): every kind `kinds` names but the live protocol's later ones
-    /// (the terminal from I4).
+    /// only; `tell` from the node frictions of 2026-11-19; `board` from the board view's; `seen` from the parity gaps
+    /// of 2026-11-19): every kind `kinds` names but the live protocol's later ones (the terminal from I4).
     public static let taken = ["status", "start", "stop", "lead", "questions", "draft", "draft.clear", "answer", "hold", "config.held", "config.accept",
                                "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
                                "hooks.install", "hooks.remove", "build.switch", "subscribe", "unsubscribe", "web.open", "web.revoke",
                                "chat.page",
                                "tell",
-                               "board"]
+                               "board", "seen"]
 
     // MARK: Lines
 

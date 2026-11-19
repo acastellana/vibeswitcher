@@ -366,7 +366,7 @@ public enum WireVectors {
         NodeWire.Hello(node: NodeIds.node, epoch: epoch,
                        server: .init(commit: "f62aef61", startedAt: "2026-11-17T09:12:44.031Z", pid: 41822),
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
-                       kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board"],
+                       kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -566,6 +566,11 @@ public enum WireVectors {
                            reply("reply.chat.page", .init(re: "6", result: .object([
                                "items": .array([chatEarlier]),
                                "more": .bool(false)])))]),
+            // A finished session seen by a page that has it open: its status reads idle from then.
+            ("seen", [request(.init(id: "7", kind: "seen", args: ["session": .string(leadSession)])),
+                      reply(.init(re: "7", result: .object([:]))),
+                      delta("s1", "sessions", prev: 47, seq: 48, at: "2026-11-17T09:22:02.114Z",
+                            changes: [(leadSession, lead(status: "idle", since: "2026-11-17T09:21:58.300Z"))])]),
             // §8: a draft, acked; refused.
             ("draft.acked", [request(.init(id: "12", kind: "draft", args: ["card": .string(card), "text": .string("Yes, merge it"),
                                                                           "version": .int(2)], action: draftAction)),

@@ -283,24 +283,73 @@ struct NodeSessionsTests {
         #expect(session(nodes, "ttypts992")?.waitsOnLead == true)
     }
 
-    /// Nobody looks at a node, so nothing acknowledges a finished turn: a session whose turn ended before the node
-    /// started is `done`, not `idle` (the app counts a turn that ended before it launched as seen).
-    @Test func aSessionDoneBeforeTheNodeStartedStaysDone() async throws {
+    /// One finished session (ttypts975, its turn over at `endedAt`) on a store of its own, and its hooks' state file.
+    private func finishedStore(endedAt: Date, now: @escaping @Sendable () -> Date = { Date() }) throws -> (nodes: NodeSessions, state: URL, hook: HookState) {
         let (root, home) = try node()
         let state = root.appendingPathComponent("state")
-        let started = Date().addingTimeInterval(-7200)
-        var hook = HookState(agent: .claude, tty: "ttypts975", lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970 - 3600)
+        let started = endedAt.addingTimeInterval(-3600)
+        var hook = HookState(agent: .claude, tty: "ttypts975", lastEvent: "Stop", lastEventAt: endedAt.timeIntervalSince1970)
         hook.agentPid = 975
         hook.lastMessage = "All done."
         try hook.save(to: state.appendingPathComponent("ttypts975.json"))
         let table = [Int32(975): ProcInfo(pid: 975, ppid: 1, tty: "ttypts975", comm: "claude", startTime: started, agent: .claude)]
         let nodes = NodeSessions(root: root, home: home.path, queue: DispatchQueue(label: "engine"),
-                                 scanner: SessionScanner(processes: { table }, stateDir: { state }, cwd: { _ in "/r/x" }, arguments: { _ in [] }))
+                                 scanner: SessionScanner(processes: { table }, stateDir: { state }, cwd: { _ in "/r/x" }, arguments: { _ in [] }),
+                                 now: now)
+        return (nodes, state, hook)
+    }
+
+    /// The app's rule: a turn that ended before the store started counts as seen, `idle`, not `done`, its detail and
+    /// since kept.
+    @Test func aSessionDoneBeforeTheNodeStartedCountsAsSeen() async throws {
+        let (nodes, _, hook) = try finishedStore(endedAt: Date().addingTimeInterval(-3600))
+        nodes.start()
+        defer { nodes.stop() }
         try await refreshAndSettle(nodes)
-        try await refreshAndSettle(nodes)
-        #expect(session(nodes, "ttypts975")?.status == .done)
+        #expect(session(nodes, "ttypts975")?.status == .idle)
         #expect(session(nodes, "ttypts975")?.detail == "All done.")
         #expect(session(nodes, "ttypts975")?.statusSince == Date(timeIntervalSince1970: hook.lastEventAt))
+    }
+
+    /// The app's `acknowledge`: a turn that ended while the node ran is `done` until someone looks (`seen`), then
+    /// `idle` at once (on the change stream, before the next scan) and at every scan; the next turn's end is `done`
+    /// again. An id the store doesn't have is said so.
+    @Test func aFinishedSessionLookedAtCountsAsSeen() async throws {
+        let clock = Locked(Date())
+        let (nodes, state, _) = try finishedStore(endedAt: clock.value.addingTimeInterval(60), now: { clock.value })
+        nodes.start()
+        defer { nodes.stop() }
+        try await refreshAndSettle(nodes)
+        let found = try #require(session(nodes, "ttypts975"))
+        #expect(found.status == .done)
+        let id = NodeSessions.id(of: found)
+        let sent = Locked<[Session?]>([])
+        let subscription = nodes.changes.subscribe(on: nodes.queue) { change in sent.mutate { $0.append(contentsOf: change.map(\.value)) } }
+        defer { subscription.cancel() }
+        clock.value = clock.value.addingTimeInterval(120)
+        let answered = Locked<Bool?>(nil)
+        nodes.acknowledge(id) { answered.value = $0 }
+        #expect(await eventually { answered.value != nil })
+        #expect(answered.value == true)
+        #expect(session(nodes, "ttypts975")?.status == .idle)
+        #expect(await eventually { sent.value.contains { $0?.status == .idle } }, "\(sent.value)")
+        try await refreshAndSettle(nodes)
+        #expect(session(nodes, "ttypts975")?.status == .idle)
+        // The next turn: working, then over after the look: done again.
+        var next = HookState(agent: .claude, tty: "ttypts975", lastEvent: "UserPromptSubmit", lastEventAt: clock.value.timeIntervalSince1970)
+        next.agentPid = 975
+        try next.save(to: state.appendingPathComponent("ttypts975.json"))
+        clock.value = clock.value.addingTimeInterval(30)
+        #expect(try await scanned(nodes) { nodes.sessions.first { $0.tty == "ttypts975" }?.status == .working })
+        next.lastEvent = "Stop"
+        next.lastEventAt = clock.value.timeIntervalSince1970
+        try next.save(to: state.appendingPathComponent("ttypts975.json"))
+        clock.value = clock.value.addingTimeInterval(30)
+        #expect(try await scanned(nodes) { nodes.sessions.first { $0.tty == "ttypts975" }?.status == .done })
+        let missing = Locked<Bool?>(nil)
+        nodes.acknowledge("no-such-session") { missing.value = $0 }
+        #expect(await eventually { missing.value != nil })
+        #expect(missing.value == false)
     }
 
     // MARK: AgentQuitTests

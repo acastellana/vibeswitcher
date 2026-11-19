@@ -526,6 +526,7 @@ is done once (rule 8). What the first write actions need:
 | `draft` **new** | `card` (the whole id), `text`, `version` | refused, `voice`: a draft comes from a page | a token with `draft`, `action` |
 | `draft.clear` **new** | `card` | refused, `voice` | a token with `draft`, `action` |
 | `web.open`, `web.revoke` **new** | none | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice` |
+| `seen` **new** (2026-11-19) | `session` | anyone (it changes nothing but the session's seen mark: a finished turn reads `idle`, the app's rule) | a token with `read`; the page sends it after 1.5 s on a finished session (`views/session.js`) |
 
 **The user's-voice rule is unchanged (S3).** A browser is not a terminal in the user's scope and types no code, and a
 token is a secret in a file the user's processes can read (the security document's S11, item 31). So in the first

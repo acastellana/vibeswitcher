@@ -14,8 +14,9 @@ import VibeCore
 /// program reporting a new status: `HostLink.changes`); the state folder's watch (`Platform.FolderWatch`, which the
 /// hook's renames wake, coalesced 0.4 s); a quiet Claude session's screen read with something new in its footer
 /// (`HostLink.screen`, every 6 s at most). Not Terminal.app's tabs, Spaces, presence, attention, nudges, names, pauses
-/// or the ledger: those are the Mac's (the port map says so). Nobody looks at a node, so nothing acknowledges a finished
-/// turn: a session whose turn is over stays `done`.
+/// or the ledger: those are the Mac's (the port map says so). A finished turn counts as seen by the app's rule
+/// (`SessionStore`'s `acknowledged`): one that ended before this store started, or before someone looked at it since
+/// (`acknowledge`: a web page with the session open sends `seen`), reads `idle`, not `done`.
 ///
 /// Its state is on `queue` (the engine's, and its link's): read there, and its calls may be made from any thread. Each
 /// scan reads the process table and the state files on a serial queue of its own, never `queue` (the app's "off the
@@ -98,6 +99,11 @@ public final class NodeSessions: @unchecked Sendable {
     private var hosted: [String: HostSession] = [:]
     /// Each terminal's status and since when it holds.
     private var observed: [String: (status: SessionStatus, since: Date)] = [:]
+    /// When each terminal's session was last looked at (`acknowledge`, the app's `acknowledged`): a finished turn that
+    /// ended by then reads `idle`.
+    private var acknowledged: [String: Date] = [:]
+    /// When this store started (the app's `launchedAt`): a turn that had ended by then counts as seen.
+    private var launchedAt = Date.distantPast
     /// Hook-less sessions seen mid-turn: only those can be "done" off the title alone.
     private var turns = TurnWitness()
     /// Claude sessions whose turn looks finished; only their screens are read for background work.
@@ -145,6 +151,7 @@ public final class NodeSessions: @unchecked Sendable {
         perform { [self] in
             guard !started, !stopped else { return }
             started = true
+            launchedAt = now()
             refreshHookStatus()
             if let link {
                 hosted = Self.live(link.changes.values.values)
@@ -170,6 +177,25 @@ public final class NodeSessions: @unchecked Sendable {
             hostChanges = nil
             watch?.stop()
             watch = nil
+        }
+    }
+
+    /// The app's `SessionStore.acknowledge`: the session `id` (`id(of:)`) counts as seen now, so its finished turn reads
+    /// `idle` at once and at every scan (a turn that ends later is `done` again). `then`: whether the store has that
+    /// session, on `queue`. From any thread.
+    public func acknowledge(_ id: String, then: @escaping (Bool) -> Void = { _ in }) {
+        perform { [self] in
+            guard let found = sessions.first(where: { Self.id(of: $0) == id }) else { return then(false) }
+            let at = now()
+            acknowledged[found.tty] = at
+            let marked = sessions.map { session -> Session in
+                guard session.tty == found.tty, session.status == .done, session.statusSince <= at else { return session }
+                var seen = session
+                seen.status = .idle
+                return seen
+            }
+            if marked != sessions { publish(marked) }
+            then(true)
         }
     }
 
@@ -323,6 +349,9 @@ public final class NodeSessions: @unchecked Sendable {
                 since = now
             }
             observed[item.tty] = (status, since)
+            // The app's seen rule: a finished turn that ended before this store started, or before someone last looked
+            // at the session, reads idle.
+            if status == .done, since <= (acknowledged[item.tty] ?? launchedAt) { status = .idle }
 
             var waitingOn: String?
             if item.agent == .claude, status == .done || status == .idle {
@@ -359,6 +388,7 @@ public final class NodeSessions: @unchecked Sendable {
         }
         let live = Set(raw.map(\.tty))
         observed = observed.filter { live.contains($0.key) }
+        acknowledged = acknowledged.filter { live.contains($0.key) }
         turns.prune(liveTTYs: live)
         quietClaude = quiet
         let ordered = result.sorted { ($0.tty, $0.pid) < ($1.tty, $1.pid) }

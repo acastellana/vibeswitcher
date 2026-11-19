@@ -59,7 +59,7 @@ public enum WireSchema {
     public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "auth.args",
                                   "subscribe.args", "subscribe.result", "unsubscribe.args", "chat.page.args", "chat.page.result",
                                   "draft.args", "draft.result", "draft.clear.args",
-                                  "board.args", "board.result"]
+                                  "board.args", "board.result", "seen.args"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -138,6 +138,7 @@ public enum WireSchema {
             shape("draft.args", from: "the contract's §8", [field("card", .string), field("text", .string), field("version", .int)]),
             shape("draft.result", from: "Requests.draft", [field("applied", .map(.int)), field("card", .string)]),
             shape("draft.clear.args", from: "the contract's §8", [field("card", .string)]),
+            shape("seen.args", from: "Requests.seen (the parity gaps of 2026-11-19)", [field("session", .string)]),
         ]
 
         // The node (the contract's §5).

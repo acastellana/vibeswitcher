@@ -69,7 +69,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Command palette (⌘K) | `MainWindow/CommandPalette.swift` | partly | `WebApp/js/views/palette.js`: jumps to sessions and view commands. There's no "New … in …" or "Start Project Lead in …" | S | needs starting sessions first |
 | Start page: recent projects, ended sessions, Choose Folder | `MainWindow/StartPage.swift` | partly | `WebApp/js/views/start.js`: what needs you, and the keys. Nothing can be started from it | M | |
 | Inspector: Overview, Activity, Team | `MainWindow/InspectorView.swift` | partly | `WebApp/js/views/inspector.js`. Missing: branch, pid, command, size, exit status, tokens and cost, the Team tab's tasks | M | the fields are listed in `WebApp/README.md` |
-| A finished session counts as seen once you look at it | `SessionStore.swift` | missing | `Stores/NodeSessions.swift`: "nothing acknowledges a finished turn", so it stays `done` | S | made sense when nobody looked at a node; the web page does now |
+| A finished session counts as seen once you look at it | `SessionStore.swift` | has it | `Stores/NodeSessions.swift` `acknowledge` and the app's rule (a turn that ended before the node started, or before your last look, reads `idle`); the page sends `seen` after 1.5 s on a finished session (`WebApp/js/views/session.js`), a `read` kind (`Requests.seen`) | | closed 2026-11-19; no command-line way, as the app has none but looking |
 | Menu bar dots and popover | `PopoverView.swift`, `Sources/VibeCore/MenuBarDots.swift` | not needed | design non-goal | | |
 | Sidebar mode, auto-hide, Spaces, global hot key, `--toggle`, minimize on pause | `Sidebar.swift`, `Spaces.swift`, `HotKey.swift` | not needed | design non-goal (macOS only) | | |
 | Statistics window | `Statistics/` | missing | "later" in the design's parity table | L | the model is in VibeCore |
@@ -225,7 +225,8 @@ doesn't yet confine anything.
 **By accident** (candidates for bugs or owed work):
 
 - ~~The lead starts on Claude's default model, ignoring `lead_model` and `lead_advisor`.~~ Closed 2026-11-19.
-- A finished session stays `done` forever, because nothing marks it seen. The web page now shows it.
+- ~~A finished session stays `done` forever, because nothing marks it seen.~~ Closed 2026-11-19: the app's seen rule,
+  and the page's `seen`.
 - ~~`small_task_min` never drops a review.~~ Closed 2026-11-19: the witness tells the vault what it sees at work.
 - The limits run on defaults (10 team sessions, test and build slots at a sixth of the cores) with no way to change
   them except by hand, and the defaults aren't shown.
