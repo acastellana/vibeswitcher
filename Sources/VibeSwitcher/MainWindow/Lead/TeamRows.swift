@@ -18,19 +18,6 @@ struct MemberSeen: Equatable {
     var startedAt: Date?
 }
 
-/// A recorded stop or a hold on the model an audit would start on. No review clock runs while it waits.
-struct ReviewUsageWait: Equatable {
-    var model: String?
-    var resetsAt: Double?
-
-    var name: String { model.flatMap(AccountUsage.family).map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "the account" }
-    var state: String { model == nil ? "Waits for usage limit" : "Waits for \(name)" }
-    var line: String {
-        let whose = model == nil ? "The account's" : "\(name)'s"
-        return whose + " limit " + (resetsAt.map { "resets \(UsageLimit.resetText($0))" } ?? "reset time is not known")
-    }
-}
-
 /// A task as one line of the Team view: a status mark, its title, and its state in words with how long it's been in
 /// it ("Working 12m", "Rework 1 · 22m", "In review 3m", "Waits on lead", "Queued"), from the board and what its sessions
 /// are doing now.
