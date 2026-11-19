@@ -51,4 +51,18 @@ struct SandboxSoakBoundTests {
         // It ran nothing: no sandbox folder made.
         #expect(!FileManager.default.fileExists(atPath: dir.path))
     }
+
+    /// The bench guards its run past that bound: its arguments name the soak's minutes, its guard is the bound the
+    /// script gives for those very arguments, and the wait on the script's end is that guard, not a fixed time (the
+    /// 900 s of `3 * hangGuard` that ended the 2026-11-19 runs).
+    @Test func theBenchGuardsItsRunPastTheScriptsBound() throws {
+        let bench = try String(contentsOf: Self.repo.appendingPathComponent("Tests/VibeSwitcherTests/SandboxSoakBenchTests.swift"), encoding: .utf8)
+        #expect(bench.contains(#""--max-minutes", "\(Self.maxMinutes)""#), "the bench doesn't pass its soak's minutes to the script")
+        #expect(bench.contains("SandboxSoakBoundTests.bound(arguments)"), "the bench doesn't ask the script for its bound")
+        #expect(bench.contains("process.arguments = arguments"), "the bench runs other arguments than those it took the bound for")
+        let waits = bench.components(separatedBy: "\n").filter { $0.contains("ended.wait(timeout:") }
+        #expect(waits.count == 1 && waits.allSatisfy { $0.contains("guardTime") && !$0.contains("hangGuard") },
+                "the wait on the script's end isn't the bound's guard: \(waits)")
+        #expect(bench.contains("let guardTime = TimeInterval(bound) + hangGuard"), "the guard isn't past the script's bound")
+    }
 }
