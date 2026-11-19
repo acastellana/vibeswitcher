@@ -157,6 +157,8 @@ struct IdleHandoverTests {
         #expect(turns.contains("keep my promise"), "The fresh lead still gets the last turns with the user")
         let spawn = try #require(world.spawns.value.last)
         #expect(spawn.label == "Lead · \(world.name)" && spawn.command?.contains("scheduled-lead-handover.md") == true)
+        // On the run the app gives a lead (`LeadLaunch.leadRun`): workflow.md names none, so Fable.
+        #expect(spawn.command?.contains("--model 'fable'") == true, "\(spawn.command?.prefix(400) ?? "")")
         let said = try #require(world.queue.sync { world.engine.leads.leads[world.project]?.lastStart })
         #expect(said.contains("Started a fresh lead session at ") && said.contains("prompt cache had expired"))
         // The lead's records carry over untouched: the board's tasks and open questions, the decisions.

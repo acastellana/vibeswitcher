@@ -27,8 +27,7 @@ The gaps that matter most for daily use, worst first:
 5. **No notifications.** No banner, sound or reminder when a session needs you or finishes.
 6. **You can't answer a session's own prompt.** Permission prompts and Claude's own questions can't be answered. Only
    the lead's cards can.
-7. **The lead ignores `lead_model` and `lead_advisor`**, so it runs on Claude's default model (owed since the
-   2026-11-17 merge).
+7. ~~**The lead ignores `lead_model` and `lead_advisor`**~~: closed 2026-11-19, the node starts its lead as the app does.
 8. **`push_remote` does nothing on a node.** The request is recorded, but no Push button or command acts on it.
 9. **No settings.** Limits, Ignore usage limits, the working policy, Boost and leads messaging each other can only be
    changed by editing files by hand. Running leads aren't told when the policy changes.
@@ -103,7 +102,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | The board: tasks, decisions, scorecard, answered questions, files | `MainWindow/Lead/TeamViews.swift`, `TeamRows.swift` | missing | no command shows it. The web Team tab says "the board's tasks come in a later build" (`inspector.js`), and the node streams no `boards` collection (`Server/NodeLive.swift`) | M | |
 | Workers, verifiers, audits, the merge gate, the risk check, revert, provenance, auto_advance | `Sources/VibeCore/LeadToolset.swift` (shared) | has it | the lead's tool server `vibeswitcher-mcp` runs on the node (`Sources/VibeCore/V2/RoleProgram.swift`); proved by the full scratch team run (`docs/process/v2-linux-inventory.md`, S10) | | |
 | Codex workers, `agent: auto` routing to Codex | `LeadToolset.swift`, `docs/guide/project-lead.md` | missing | turned off with `VIBESWITCHER_CODEX_WORKERS=0` (`Engine/LeadStart.swift`) | | on purpose: security decision 15 |
-| The lead's own model (`lead_model`, `lead_advisor`) | `LeadController.swift` `leadRun` | missing | `LeadLaunch.prepare` is called with no model (`Engine/LeadStart.swift`) | S | owed in the port map since 2026-11-17 |
+| The lead's own model (`lead_model`, `lead_advisor`) | `LeadController.swift` `leadRun` | has it | `Engine/LeadStart.swift` `leadRun` (`LeadLaunch.leadRun`, the app's rule), for a start and the idle handover; Fable held back by the account usage kept under the node's root | | closed 2026-11-19 |
 | The witness: stalls, the room watch, the role sweep, declining stuck prompts, the disk watch | `LeadController.swift`, `RoleSweep.swift`, `PromptDecline.swift` | has it | `Engine/Witness.swift`, `RoomWatch.swift`, `RoleSweep.swift`, `PromptDecline.swift` (automatic) | | |
 | Rotation: a fresh lead when the context is large | `LeadController.swift`, `Sources/VibeCore/LeadRotation.swift` | partly | only the cold idle handover (`Engine/IdleHandover.swift`). Missing: asking a warm lead for its own note, and the "Start a fresh lead session" setting | M | |
 | A server or host restart: the lead rebound, held messages kept | `LeadController.swift` | has it | `Engine/Restarts.swift`; `status` says how the host ended | | |
@@ -224,7 +223,7 @@ doesn't yet confine anything.
 
 **By accident** (candidates for bugs or owed work):
 
-- The lead starts on Claude's default model, ignoring `lead_model` and `lead_advisor`.
+- ~~The lead starts on Claude's default model, ignoring `lead_model` and `lead_advisor`.~~ Closed 2026-11-19.
 - A finished session stays `done` forever, because nothing marks it seen. The web page now shows it.
 - `small_task_min` never drops a review. The safe side, but not what workflow.md says.
 - The limits run on defaults (10 team sessions, test and build slots at a sixth of the cores) with no way to change
