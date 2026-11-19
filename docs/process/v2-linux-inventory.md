@@ -495,6 +495,21 @@ process's scope too: a scratch node's tests give the server their own scope (`--
 process is refused by the other lines (its ancestry holds the host, its terminal is a session's, its environment
 carries `VIBESWITCHER_SESSION`).
 
+**A test run inside the node's unit, 2026-11-19.** A session the node itself started is not in `/init.scope`: its Bash
+tool, and the lead's tool server that runs a merge's and an audit's tests, are in
+`/user.slice/user-<uid>.slice/user@<uid>.service/app.slice/vibeswitcher-node.service` (read there with
+`cat /proc/self/cgroup`: the `0::` line and the `name=systemd` line both). A test's own scope can't name that cgroup:
+the rule refuses every path in the user's manager and every path naming the node's unit before it looks at a scope
+(`VoiceRule.cgroupRefusal`), so each scratch-node test that speaks as the user was refused there (171 lines "its cgroup
+… is the node's unit" in the merge gate's full run). A scratch node whose test runs inside the user's manager or the
+node's unit therefore gives its server one more test flag, `--server-arg --test-cgroup-root=<the test's own cgroup>`:
+the scratch server reads each sender's cgroup from that root, as a cgroup namespace rooted there would show it (the
+root itself reads `/`, a path under it reads from there, a path outside it stays as the machine has it), and the
+test's scope is `/` (`PeerFacts.rerooted`, `ScratchNode.cgroupRoot`). The rule is untouched, and so is the user's
+node: like every `--test-*` flag it is refused, said in the log and dropped by a server started with `--node`
+(`ServerArguments`). From a terminal, on a CI runner and on the Mac a scratch node gives no root, and its server reads
+the machine's own paths as before.
+
 **The M4 follow-up, done 2026-11-17** (Linux 5.15.167.4-microsoft-standard-WSL2):
 
 - **No new scope.** The Windows Terminal tab's shell, the `claude` started there and its Bash tool's child are all in
