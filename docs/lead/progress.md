@@ -4141,3 +4141,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 12:09 Automatically (auto_advance): Cleaned up merge-reruns-only-what (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-19 12:10 Automatically (auto_advance): Cleaned up flaky-under-load (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-19 12:10 Update: Merged: merge reruns only what failed (the merge-speed fix), and a flaky-test fix — **What changed:** when a merge's test run fails, it now reruns only the failing tests (or, for a run that stopped partway, only the suites that didn't finish), not the whole ~15-minute suite.
+- 2026-11-19 12:30 Pipeline held: codex-workers-a-message ready to merge with none landing; cause: every test slot held
+- 2026-11-19 12:38 Merged codex-workers-a-message: Codex workers: a message delivered into a running turn isn't reported as a stall (build 405c62896cf6)
