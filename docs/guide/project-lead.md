@@ -568,6 +568,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | `strict_paths` | none | `LeadWorkflow.swift` |
 | `records_dir` | `docs/lead` | `LeadWorkflow.swift` |
 | `disk_warning_gb`, `disk_floor_gb` | 10 GB, 3 GB | `LeadWorkflow.swift` |
+| `disk_headroom_gb` | 6 GB: new workers wait under scripts/test-under-load.sh's `floor_gb` plus this, so the tasks in flight can run their load check | `LeadWorkflow.swift`, `LoadRunDisk` |
 | `watch_app_logs` | false | `LeadWorkflow.swift` |
 | Audit round cap | 2 rounds | `LeadBoard.swift` |
 | Flake limit | 3 flakes of one test in 7 days | `LeadBoard.swift` |

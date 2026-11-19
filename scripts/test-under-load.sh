@@ -236,7 +236,9 @@ if [[ -z $memory || $memory -lt $memory_floor ]]; then
     exit "$busy_status"
 fi
 
-# Not on a nearly full disk: a full one stops every session on this Mac, not just these runs.
+# Not on a nearly full disk: a full one stops every session on this Mac, not just these runs. VibeSwitcher's
+# start_worker reads this line (LoadRunDisk.floorGB) to hold new workers while the tasks in flight need the room: keep
+# it one floor_gb=N line.
 floor_gb=15
 free_gb=${TEST_UNDER_LOAD_FAKE_DISK_GB:-$(($(df -k . | awk 'NR == 2 { print $4 }') / 1024 / 1024))}
 if [[ $free_gb -lt $floor_gb ]]; then

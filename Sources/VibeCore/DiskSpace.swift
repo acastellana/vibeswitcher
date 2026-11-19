@@ -74,6 +74,64 @@ public enum DiskSpace {
     static func bytes(_ gigabytes: Double) -> Int64 { Int64(gigabytes * Double(gigabyte)) }
 }
 
+/// The free disk a project's load runs need: scripts/test-under-load.sh doesn't start under its floor (`floor_gb=`,
+/// in GiB as its `df -k` reading counts them). Read from the project's own script, the one place it's set: on
+/// 2026-11-18 the disk sat at 11–14 GB free against it while new workers kept starting and taking more, and five
+/// finished workers waited one to three hours for their required load run. start_worker and auto_advance hold a new
+/// worker under this floor plus disk_headroom_gb (`LeadWorkflow.diskHeadroomGB`), so the tasks in flight can run theirs.
+public enum LoadRunDisk {
+    /// The script, from the project's root.
+    public static let script = "scripts/test-under-load.sh"
+    static let gibibyte: Int64 = 1 << 30
+
+    /// The script's floor in GB as it writes it (15), nil when the project has no load script or no `floor_gb=N` line.
+    public static func floorGB(root: String) -> Double? {
+        let path = (root as NSString).appendingPathComponent(script)
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        for line in text.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("floor_gb=") else { continue }
+            let value = trimmed.dropFirst("floor_gb=".count).prefix { !$0.isWhitespace && $0 != "#" && $0 != ";" }
+            guard let number = Double(value), number.isFinite, number >= 0 else { return nil }
+            return number
+        }
+        return nil
+    }
+
+    /// `gb` of the script's in bytes: it counts a GB as 1024 × 1024 KiB.
+    public static func bytes(_ gb: Double) -> Int64 { Int64(gb * Double(gibibyte)) }
+}
+
+/// The room a new worker waits for on the volume holding the worktrees: the load runs' floor plus disk_headroom_gb.
+public struct LoadRunRoom: Sendable, Equatable {
+    /// Bytes free on the volume.
+    public var free: Int64
+    /// The load script's floor, in its GB (`LoadRunDisk.floorGB`).
+    public var floorGB: Double
+    /// disk_headroom_gb.
+    public var headroomGB: Double
+
+    public init(free: Int64, floorGB: Double, headroomGB: Double) {
+        self.free = free
+        self.floorGB = floorGB
+        self.headroomGB = headroomGB
+    }
+
+    /// The bytes free a new worker waits for.
+    public var needed: Int64 { LoadRunDisk.bytes(floorGB) + DiskSpace.bytes(headroomGB) }
+    /// A new worker waits now.
+    public var held: Bool { free < needed }
+
+    /// "only 12.0 GB of disk free, under the 22.1 GB a new worker waits for: the load runs' floor (floor_gb=15 in
+    /// scripts/test-under-load.sh, in GiB: 16.1 GB) plus disk_headroom_gb (6 GB in workflow.md), the room the tasks in
+    /// flight still need to run their load check".
+    public var text: String {
+        "only \(DiskSpace.text(free)) of disk free, under the \(DiskSpace.text(needed)) a new worker waits for: the load runs' floor "
+            + "(floor_gb=\(LeadToolset.gb(floorGB)) in \(LoadRunDisk.script), in GiB: \(DiskSpace.text(LoadRunDisk.bytes(floorGB)))) plus "
+            + "disk_headroom_gb (\(LeadToolset.gb(headroomGB)) GB in workflow.md), the room the tasks in flight still need to run their load check"
+    }
+}
+
 /// The temporary folders Claude Code keeps for the sessions it runs in a folder: `/private/tmp/claude-<uid>/<the
 /// folder's path, each character that isn't a letter or digit made a dash>`, one subfolder per session (its
 /// scratchpad, its background commands' output). They outlive the sessions.

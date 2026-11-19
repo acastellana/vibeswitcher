@@ -842,6 +842,7 @@ public final class LeadToolset: MCPToolset {
                                          "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)"),
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
                                          "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
+                                         "disk_headroom_gb": P(type: "number", description: "Free space (GB) kept above scripts/test-under-load.sh's floor for the tasks in flight: below the two, start_worker and auto_advance hold new workers (default 6)"),
                                          "test_timeout_min": P(type: "number", description: "Minutes merge lets init_command and test_command run before it takes them as hung and stops them (default 45)"),
                                          "stall_min": P(type: "number", description: "Minutes merge and audits let init_command and test_command (and workers' vs-heavy runs) go with no new output and almost no CPU, the Mac under load_threshold, before they take them as hung and stop them (default 10; 0: only test_timeout_min)"),
                                          "task_budget_min": P(type: "integer", description: "A task's time budget when it sets none (add_task budget_min), in minutes of its worker's working time: at it the worker is told to stop and report over_budget, and you decide (default 120; 0: no budget)"),
@@ -2400,7 +2401,10 @@ public final class LeadToolset: MCPToolset {
         // task's worktree (an ended worker's earlier verifier) is the one this worker replaces.
         let mac = try macLoad(sessions, load: runtime.steadyLoad(), except: Worktrees.path(root: root, slug: slug),
                               refused: "whether the Mac has room for \(slug)'s worker isn't known; no worker was started")
-        if let refusal = macRefusal(mac, not: "Not started", what: "start_worker(\(slug))", need: 1) { throw Problem(text: refusal) }
+        // The disk the tasks in flight need only holds a worker that makes a new worktree: one restarted in its task's
+        // (sent back from an audit or a failed merge, replacing an ended one) takes no more, and is in flight itself.
+        let disk = newWorktree(slug) ? loadRunRoom(workflow) : nil
+        if let refusal = macRefusal(mac, not: "Not started", what: "start_worker(\(slug))", need: 1, disk: disk) { throw Problem(text: refusal) }
         // An auto task goes where both accounts' usage says, now (see `UsageRouting`): Codex when Claude's is tight
         // and Codex has room, so Claude's back-off below doesn't hold it while Codex has room; else Claude, as a
         // claude task. Its model is Claude's: on Codex, Codex's own.
@@ -5225,28 +5229,33 @@ public final class LeadToolset: MCPToolset {
 
     /// The Mac's load and every project's team sessions, against the Mac-wide limits, in one line, naming only the
     /// project `root` (see `MacLoad.sessionsText(for:)`: refusals and merge replies go into the repo's records).
-    private static func macText(_ mac: MacLoad, _ limits: MacLimits, root: String) -> String {
+    private static func macText(_ mac: MacLoad, _ limits: MacLimits, root: String, disk: LoadRunRoom? = nil) -> String {
         "load \(mac.loadText) (load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText))"
-            + (mac.memory.map { ", \($0.text)" } ?? "")
+            + (mac.memory.map { ", \($0.text)" } ?? "") + (disk.map { ", \(DiskSpace.text($0.free)) of disk free" } ?? "")
     }
 
     /// Why no worker or verifier may start now on the Mac as `mac` has it (`not`: what didn't happen); nil when one may.
     /// With `what`, a refusal is kept (see `LeadWitness.RoomWaits`) so this lead is woken once there's room for `need`
     /// more sessions. The limits are the user's, Mac-wide: the text never suggests changing them.
-    func macRefusal(_ mac: MacLoad, not: String, what: String? = nil, need: Int = 1) -> String? {
+    /// `disk`: a new worker's start (start_worker's, a team member's), which also waits for the room the tasks in flight
+    /// need for their load checks (`loadRunRoom`); audits and merges don't.
+    func macRefusal(_ mac: MacLoad, not: String, what: String? = nil, need: Int = 1, disk: LoadRunRoom? = nil) -> String? {
         let limits = macLimits()
         var over: [String] = []
         if mac.isBusy(threshold: limits.loadLimit) { over.append("its load (the greater of its 1- and 5-minute averages) is above load_threshold") }
         if let short = mac.memoryShortage(limits) { over.append("it's short of memory: \(short)") }
         if mac.isFull(max: limits.maxSessions) { over.append("the team sessions of all its projects are at mac_max_sessions") }
-        if over.isEmpty, roomWaits.heldFor(root: root, need: need, mac: mac, limits: limits) != nil {
+        let diskHeld = disk?.held == true
+        if let disk, diskHeld { over.append("it has \(disk.text)") }
+        if over.isEmpty, roomWaits.heldFor(root: root, need: need, mac: mac, limits: limits, freeSpace: freeSpace) != nil {
             over.append("while boosted, the room left is kept for the project the user last worked in, whose start waits for it")
         }
         guard !over.isEmpty else { return nil }
-        if let what { roomWaits.record(root: root, what: what, need: need, auto: LeadAdvance.isAutomatic) }
-        return "\(not): the Mac is shared by every project's team, and \(over.joined(separator: " and ")). Now: \(Self.macText(mac, limits, root: root)). "
+        if let what { roomWaits.record(root: root, what: what, need: need, auto: LeadAdvance.isAutomatic, disk: disk?.needed) }
+        return "\(not): the Mac is shared by every project's team, and \(over.joined(separator: " and ")). Now: \(Self.macText(mac, limits, root: root, disk: disk)). "
             + (what == nil ? "" : "VibeSwitcher sends you one message once there's room again. ") + LeadPrompts.retryWhenWoken + " "
-            + "Meanwhile merge and cleanup finished tasks (cleanup ends their sessions), plan, or answer the user."
+            + "Meanwhile merge and cleanup finished tasks (cleanup ends their sessions\(diskHeld ? " and frees their worktrees" : "")), plan, or answer the user."
+            + (diskHeld ? " Freeing other space on the disk is the user's call: tell them if it stays this full." : "")
     }
 
     /// The battery hold, as start_worker, audit and merge keep it (auto_advance's loop keeps it too, see `LeadAdvance`):
@@ -5357,6 +5366,16 @@ public final class LeadToolset: MCPToolset {
 
     /// Where the worktrees go (the volume they fill).
     var worktreesFolder: String { (root as NSString).appendingPathComponent(".vibeswitcher/worktrees") }
+
+    /// A worker started on `slug` now makes its worktree (none at its path yet), so it takes new disk.
+    func newWorktree(_ slug: String) -> Bool { !FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: slug)) }
+
+    /// The room a new worker waits for so the tasks in flight can run their load check (see `LoadRunDisk`): nil when
+    /// the project has no load script or the volume's free space can't be read.
+    func loadRunRoom(_ workflow: LeadWorkflow) -> LoadRunRoom? {
+        guard let floor = LoadRunDisk.floorGB(root: root), let free = freeSpace(worktreesFolder) else { return nil }
+        return LoadRunRoom(free: free, floorGB: floor, headroomGB: workflow.diskHeadroomGB)
+    }
 
     /// 10 → "10", 2.5 → "2.5".
     static func gb(_ value: Double) -> String { String(format: "%g", value) }
@@ -5622,7 +5641,7 @@ public final class LeadToolset: MCPToolset {
             case "max_workers":
                 guard let count = Int(value), count >= 1 else { throw Problem(text: "max_workers must be a whole number, at least 1.") }
                 value = String(count)
-            case "disk_warning_gb", "disk_floor_gb":
+            case "disk_warning_gb", "disk_floor_gb", "disk_headroom_gb":
                 guard !value.isEmpty else { break }
                 guard let size = LeadWorkflow.gigabytes(value) else { throw Problem(text: "\(key) must be a number of GB, 0 or more.") }
                 value = Self.gb(size)
@@ -5754,6 +5773,7 @@ public final class LeadToolset: MCPToolset {
                                           "worker_advisor": after.workerAdvisor ?? "none", "team_plugins": after.teamPlugins.joined(separator: ", "),
                                           "max_workers": String(after.maxWorkers),
                                           "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
+                                          "disk_headroom_gb": Self.gb(after.diskHeadroomGB),
                                           "test_timeout_min": Self.gb(after.testTimeoutMinutes), "stall_min": Self.gb(after.stallMinutes),
                                           "task_budget_min": String(after.taskBudgetMinutes),
                                           "heavy_slots": after.heavySlots.map(String.init) ?? "",
@@ -5769,6 +5789,7 @@ public final class LeadToolset: MCPToolset {
             // A limit cleared reads back as its default.
             let defaults = ["lead_model": LeadWorkflow.defaultLeadModel, "lead_advisor": LeadWorkflow.defaultLeadAdvisor, "worker_advisor": "none",
                             "disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
+                            "disk_headroom_gb": Self.gb(LeadWorkflow().diskHeadroomGB),
                             "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "stall_min": Self.gb(LeadWorkflow().stallMinutes),
                             "done_check_min": Self.gb(LeadWorkflow().doneCheckMinutes),
                             "task_budget_min": String(LeadWorkflow().taskBudgetMinutes),
@@ -6789,7 +6810,14 @@ public final class LeadToolset: MCPToolset {
             do {
                 let mac = try macLoad(listing, load: runtime.steadyLoad())
                 let full = macRefusal(mac, not: "") != nil
-                lines.append("Mac (every project's team): \(Self.macText(mac, macLimits(), root: root)).\(full ? " start_worker and audit refuse until it eases; merge waits for the load." : "")")
+                // Free disk too: under the load runs' floor plus disk_headroom_gb new workers wait (`loadRunRoom`).
+                // Said once it bears on starts (under twice that room, or disk_warning_gb): status stays bounded.
+                let room = loadRunRoom(workflow)
+                let free = room?.free ?? freeSpace(worktreesFolder)
+                let near = max(room.map { 2 * $0.needed } ?? 0, workflow.diskWarning)
+                let disk = free.flatMap { $0 < near ? ", \(DiskSpace.text($0)) of disk free" : nil } ?? ""
+                let held = room.flatMap { $0.held ? " New workers wait for disk (start_worker refuses, auto_advance holds them): \($0.text)." : nil } ?? ""
+                lines.append("Mac (every project's team): \(Self.macText(mac, macLimits(), root: root))\(disk).\(full ? " start_worker and audit refuse until it eases; merge waits for the load." : "")\(held)")
             } catch {
                 lines.append("Mac (every project's team): not known, the session host's count of their sessions can't be read (\(error)); start_worker and audit refuse until it can.")
             }
@@ -7328,6 +7356,7 @@ public final class LeadToolset: MCPToolset {
                      "- max_workers: \(workflow.maxWorkers)",
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
                      "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)",
+                     "- disk_headroom_gb: \(Self.gb(workflow.diskHeadroomGB)) (" + (LoadRunDisk.floorGB(root: root).map { "new workers wait under \(LoadRunDisk.script)'s floor_gb=\(Self.gb($0)) plus this, for the tasks in flight's load checks" } ?? "unused: this project has no \(LoadRunDisk.script)") + ")",
                      "- test_timeout_min: \(Self.gb(workflow.testTimeoutMinutes)) (merge stops init_command and test_command past it, as hung)",
                      "- stall_min: \(Self.gb(workflow.stallMinutes)) (merge, audits and vs-heavy stop a run with no new output and almost no CPU that long, the Mac under load_threshold, as hung\(workflow.stall == nil ? "; 0: off" : ""))",
                      "- task_budget_min: " + (workflow.taskBudgetMinutes > 0 ? "\(workflow.taskBudgetMinutes) (a task's time budget, in minutes of its worker's working time, unless it sets its own)" : "0 (no time budget unless a task sets its own)"),

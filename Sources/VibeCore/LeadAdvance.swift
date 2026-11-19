@@ -1155,7 +1155,7 @@ public final class LeadAdvance: @unchecked Sendable {
               let mac = try? lead.macLoad(sessions, load: lead.runtime.steadyLoad(), except: Worktrees.path(root: lead.root, slug: slug)) else { return false }
         let limits = lead.macLimits()
         return !mac.isBusy(threshold: limits.loadLimit) && mac.memoryShortage(limits) == nil && mac.sessions + need <= limits.maxSessions
-            && lead.roomWaits.heldFor(root: lead.root, need: need, mac: mac, limits: limits) == nil
+            && lead.roomWaits.heldFor(root: lead.root, need: need, mac: mac, limits: limits, freeSpace: lead.freeSpace) == nil
     }
 
     /// A merged task (a reverted one too: its work is out of the base, and it stays reverted) whose worktree or
@@ -1192,8 +1192,16 @@ public final class LeadAdvance: @unchecked Sendable {
             let live = board.tasks.contains(where: \.isTeam) ? Set(((try? lead.advanceSessions()) ?? []).filter(\.live).map(\.id)) : []
             let running = board.tasks.filter { $0.status == .running }.count + LeadTeam.memberWorkers(board, live: live)
             guard running < lead.maxWorkers(workflow) else { return }
-            // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge.
-            guard hasRoom(task.slug, need: 1) else { return roomWait("start_worker(\(task.slug))", need: 1) }
+            // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge. The disk too: the
+            // tasks in flight keep the room their load checks need (`LoadRunDisk`), said once while it holds.
+            let disk = lead.newWorktree(task.slug) ? lead.loadRunRoom(workflow) : nil
+            guard hasRoom(task.slug, need: 1) else { return roomWait("start_worker(\(task.slug))", need: 1, disk: disk?.needed) }
+            if let disk, disk.held {
+                once("hold|disk", "Planned tasks wait to start: the Mac has \(disk.text). They start by themselves once there's room again; "
+                     + "meanwhile merge and cleanup finished tasks (cleanup frees their worktrees). Freeing other space on the disk is the user's call: tell them if it stays this full.")
+                return roomWait("start_worker(\(task.slug))", need: 1, disk: disk.needed)
+            }
+            forget("hold|disk")
             // An auto task goes where both accounts' usage says (start_worker routes it again in its lock): on Codex,
             // Claude's back-off doesn't hold it.
             let route = task.workerAgent == .auto ? lead.workerRoute(for: task, sessions: try? lead.advanceSessions()) : nil
@@ -1258,10 +1266,11 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     /// The Mac has no room (or too much load) for `what`: the app nudges once it has.
-    private func roomWait(_ what: String, need: Int) {
+    /// `disk`: the bytes a start waits for free on the worktrees' volume (see `RoomWaits.Wait.disk`).
+    private func roomWait(_ what: String, need: Int, disk: Int64? = nil) {
         guard !waitingRoom else { return }
         waitingRoom = true
-        lead.roomWaits.record(root: lead.root, what: what, need: need, auto: true)
+        lead.roomWaits.record(root: lead.root, what: what, need: need, auto: true, disk: disk)
     }
 
     /// A step through a lead tool: done, said in the report; refused, said once (on this key).

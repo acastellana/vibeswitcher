@@ -45,6 +45,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// every session.
     public var diskWarningGB: Double = 10
     public var diskFloorGB: Double = 3
+    /// The room (GB) kept free above the project's load-run floor (`LoadRunDisk`) for the tasks in flight
+    /// (`disk_headroom_gb:`; about 1.5 worktrees' builds): start_worker and auto_advance hold a new worker while the
+    /// volume holding the worktrees has less than the floor plus this, so a finished worker can run its load check.
+    public var diskHeadroomGB: Double = 6
     /// How many minutes merge lets init_command and test_command run before they're taken as hung and stopped
     /// (`test_timeout_min:`).
     public var testTimeoutMinutes: Double = Worktrees.testTimeout / 60
@@ -171,6 +175,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "remote": workflow.remote = present
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
                 case "disk_floor_gb": workflow.diskFloorGB = gigabytes(value) ?? 3
+                case "disk_headroom_gb": workflow.diskHeadroomGB = gigabytes(value) ?? 6
                 case "test_timeout_min": workflow.testTimeoutMinutes = minutes(value) ?? Worktrees.testTimeout / 60
                 case "stall_min": workflow.stallMinutes = Double(value).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } ?? StallWatch.defaultMinutes
                 case "task_budget_min": workflow.taskBudgetMinutes = Int(value).map { max(0, $0) } ?? LeadBudget.defaultMinutes
@@ -525,7 +530,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     public static let configurable = ["test_command", "regression_command", "done_check_command", "done_check_min", "init_command", "base_branch", "remote", "verifier_model", "lead_model", "lead_advisor", "worker_advisor", "team_plugins", "max_workers",
-                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "stall_min", "task_budget_min",
+                                      "disk_warning_gb", "disk_floor_gb", "disk_headroom_gb", "test_timeout_min", "stall_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                       "auto_advance", "merge_batching", "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "watch_app_logs", "agent_default",
                                       "handover_idle_min", "handover_tokens"]
@@ -676,9 +681,12 @@ public struct LeadWorkflow: Equatable, Sendable {
     # merge_remote merges it in from, tested, as a true merge. Empty: origin.
     remote:
     # Free space (GB) on the volume holding the worktrees: below disk_warning_gb the lead is told (once, with the
-    # biggest task folders); below disk_floor_gb start_worker refuses.
+    # biggest task folders); below disk_floor_gb start_worker refuses. When the project has scripts/test-under-load.sh,
+    # new workers also wait (start_worker refuses, auto_advance holds them) under its floor_gb plus disk_headroom_gb,
+    # so the tasks in flight can still run their load check. Empty: 6 (about 1.5 worktrees' builds).
     disk_warning_gb: 10
     disk_floor_gb: 3
+    disk_headroom_gb: 6
     # A task's time budget, in minutes of its worker's working time (waiting on you or the lead, and audits, don't
     # count): at it the worker is told to stop, commit what works and report over_budget, and the lead decides whether
     # to extend it (update_task budget_min), re-plan or abandon. Nothing is stopped. 0: no budget. Empty: 120.
