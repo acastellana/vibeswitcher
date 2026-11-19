@@ -51,3 +51,7 @@
 - 2026-11-19 18:40 Audit of sb3-the-launcher-builds: complete, clean, round 1: 1 Nit open, 2 Pre-existing (1 open, 1 unconfirmed) (2 finders voted: 2 new findings confirmed, 1 unconfirmed)
 - 2026-11-19 18:44 Audit of weblistener-slow-client: finder 2 of 2 submitted (complete, clean, 1 finding)
 - 2026-11-19 18:44 Audit of weblistener-slow-client: complete, clean, round 1: 1 Nit unconfirmed, 2 Pre-existing (1 open, 1 unconfirmed) (2 finders voted: 1 new finding confirmed, 2 unconfirmed)
+- 2026-11-19 18:46 Workflow: max_workers = `2`
+- 2026-11-19 18:51 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 18:51 Audit of planner-a-worker-s at aa0bc2e3 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 18:51 Automatically (auto_advance): Started the audit of planner-a-worker-s at aa0bc2e3 (Its review is audit).
