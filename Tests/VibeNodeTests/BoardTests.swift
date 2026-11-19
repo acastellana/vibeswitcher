@@ -125,32 +125,106 @@ struct BoardTests {
         board.tasks.append(board.tasks[0])  // a slug twice: shown once
         let value = BoardValue.value(project: "p", root: "/r", board: board, now: WireVectors.boardNow)
         let tasks = try #require(value["tasks"]?.array)
-        #expect(tasks.count == BoardValue.mostTasks)
-        #expect(value["more"] == .int(400 - BoardValue.mostTasks))
+        #expect(tasks.count <= BoardValue.mostTasks && tasks.count > 0)
+        #expect(value["more"] == .int(400 - tasks.count))
         #expect(tasks.prefix(100).allSatisfy { $0["group"] == .string("attention") }, "what needs someone comes first")
         let title = try #require(tasks[0]["title"]?.string)
-        #expect(title.count <= 201)
+        #expect(title.utf8.count <= BoardValue.titleBytes + 3)
         let blocker = try #require(tasks[0]["blocker"]?.string)
-        #expect(blocker.split(separator: "\n").count <= BoardValue.blockerLines && blocker.count <= BoardValue.blockerLimit + 1)
+        #expect(blocker.split(separator: "\n").count <= BoardValue.blockerLines && blocker.utf8.count <= BoardValue.blockerLimit + 3)
         #expect(tasks[0]["after"]?.array?.count == 20)
-        #expect(NodeWire.message(value).count < 1 << 20, "a board's value fits a frame")
+        #expect(NodeWire.message(value).count <= BoardValue.mostBytes, "a board's value fits its budget")
+        // Small tasks: the count's cap, not the bytes', is what cuts.
+        var small = LeadBoard()
+        for index in 0..<400 {
+            var task = LeadTask(id: "s\(index)", slug: "s-\(index)", title: "Task \(index)", contract: LeadContract(goal: "", acceptance: [], boundaries: [], context: ""))
+            task.createdAt = WireVectors.boardNow.timeIntervalSince1970
+            small.tasks.append(task)
+        }
+        let few = BoardValue.value(project: "p", root: "/r", board: small, now: WireVectors.boardNow)
+        #expect(few["tasks"]?.array?.count == BoardValue.mostTasks && few["more"] == .int(400 - BoardValue.mostTasks))
     }
 
     /// A file over the most read, a link, and one that isn't a board are refused, saying why; none there is an empty board.
     @Test func aBoardThatCantBeReadIsRefused() throws {
-        let folder = scratch.url("board-file")
+        let root = scratch.url("board-file")
+        let folder = root.appendingPathComponent(".vibeswitcher")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let path = folder.appendingPathComponent("board.json").path
-        #expect(BoardFile.read(path).board == LeadBoard(), "no board yet: an empty one")
+        #expect(BoardFile.read(root: root.path).board == LeadBoard(), "no board yet: an empty one")
         try Data(String(repeating: " ", count: 2048).utf8).write(to: URL(fileURLWithPath: path))
-        #expect(BoardFile.read(path, mostBytes: 1024).refusal?.contains("more than") == true)
+        #expect(BoardFile.read(root: root.path, mostBytes: 1024).refusal?.contains("more than") == true)
         try Data("{\"tasks\": [{\"title\": 3}]}".utf8).write(to: URL(fileURLWithPath: path))
-        #expect(BoardFile.read(path).refusal == "the board isn't one this build reads")
-        try FileManager.default.removeItem(atPath: path)
-        let elsewhere = folder.appendingPathComponent("elsewhere.json")
-        try NodeWire.line(WireVectors.sampleBoard(now: 0)).write(to: elsewhere)
-        try FileManager.default.createSymbolicLink(atPath: path, withDestinationPath: elsewhere.path)
-        #expect(BoardFile.read(path).refusal == "the board isn't a regular file")
+        #expect(BoardFile.read(root: root.path).refusal == "the board isn't one this build reads")
+    }
+
+    /// A `board.json` that is a link, and a `.vibeswitcher` that is a link to a folder holding a good board: neither is
+    /// followed, each refused saying so.
+    @Test func aLinkedBoardOrFolderIsntFollowed() throws {
+        let root = scratch.url("board-link")
+        let folder = root.appendingPathComponent(".vibeswitcher")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let elsewhere = scratch.url("board-elsewhere")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        let good = elsewhere.appendingPathComponent("board.json")
+        try NodeWire.line(WireVectors.sampleBoard(now: 0)).write(to: good)
+
+        try FileManager.default.createSymbolicLink(atPath: folder.appendingPathComponent("board.json").path, withDestinationPath: good.path)
+        let linkedFile = BoardFile.read(root: root.path)
+        #expect(linkedFile.board == nil && linkedFile.refusal == "the board isn't read: board.json is a link", "\(linkedFile)")
+
+        try FileManager.default.removeItem(at: folder)
+        try FileManager.default.createSymbolicLink(atPath: folder.path, withDestinationPath: elsewhere.path)
+        let linkedFolder = BoardFile.read(root: root.path)
+        #expect(linkedFolder.board == nil && linkedFolder.refusal?.contains(".vibeswitcher isn't a folder") == true, "\(linkedFolder)")
+    }
+
+    /// A FIFO at the board's path (nobody writing it) is refused at once: the open doesn't wait for a writer.
+    @Test func aFIFOAtTheBoardsPathDoesntHang() async throws {
+        let root = scratch.url("board-fifo")
+        let folder = root.appendingPathComponent(".vibeswitcher")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try #require(mkfifo(folder.appendingPathComponent("board.json").path, 0o600) == 0, "mkfifo: \(errno)")
+        let done = Locked<(board: LeadBoard?, refusal: String?)?>(nil)
+        Thread { let read = BoardFile.read(root: root.path); done.mutate { $0 = read } }.start()
+        try #require(await eventually(timeout: 10) { done.value != nil }, "the read of a FIFO waited")
+        #expect(done.value?.refusal == "the board isn't read: board.json isn't a regular file", "\(String(describing: done.value))")
+    }
+
+    /// A title of a few characters each carrying thousands of combining marks: at most `marksKept` marks a character,
+    /// and the whole string capped in bytes, not characters.
+    @Test func combiningMarksAreBoundedAndStringsCappedInBytes() throws {
+        let zalgo = String(repeating: "Z" + String(repeating: "\u{0301}", count: 5_000), count: 3)
+        let title = BoardValue.text(zalgo, limit: BoardValue.titleBytes)
+        #expect(title.unicodeScalars.filter { $0.properties.generalCategory == .nonspacingMark }.count == 3 * BoardValue.marksKept, "\(title.unicodeScalars.count)")
+        #expect(Array(title.unicodeScalars.prefix(6)) == Array("Z\u{0301}\u{0301}\u{0301}\u{0301}Z".unicodeScalars))
+        // Four-byte scalars: the cap is bytes of UTF-8, cut between scalars.
+        let emoji = BoardValue.text(String(repeating: "😀", count: 1_000), limit: BoardValue.titleBytes)
+        #expect(emoji.dropLast().utf8.count <= BoardValue.titleBytes && emoji.hasSuffix("…"))
+        #expect(emoji.dropLast().unicodeScalars.allSatisfy { $0 == "😀" })
+        // One character of 5 000 marks is one Character, and still a few bytes.
+        let one = BoardValue.text("e" + String(repeating: "\u{0300}", count: 5_000), limit: 10_000)
+        #expect(one.utf8.count < 20, "\(one.utf8.count)")
+    }
+
+    /// A board whose tasks would take more than `mostBytes` encoded (150 tasks, each near its caps): the last ones go
+    /// to `more` until the value fits.
+    @Test func aBoardOverTheByteBudgetMovesTasksToMore() throws {
+        var board = LeadBoard()
+        for index in 0..<150 {
+            var task = LeadTask(id: "t\(index)", slug: "task-\(index)", title: String(repeating: "界", count: 1_000),
+                                contract: LeadContract(goal: "", acceptance: [], boundaries: [], context: ""), status: .blocked)
+            task.createdAt = WireVectors.boardNow.timeIntervalSince1970
+            task.blocker = String(repeating: "原因 ", count: 3_000)
+            task.after = (0..<20).map { String(repeating: "a", count: 200) + "\($0)" }
+            board.tasks.append(task)
+        }
+        let value = BoardValue.value(project: "p", root: "/r", board: board, now: WireVectors.boardNow)
+        let tasks = try #require(value["tasks"]?.array)
+        #expect(NodeWire.message(value).count <= BoardValue.mostBytes, "\(NodeWire.message(value).count)")
+        #expect(tasks.count < 150 && tasks.count > 0)
+        #expect(value["more"] == .int(150 - tasks.count))
+        #expect(tasks.last?["slug"] == .string("task-\(tasks.count - 1)"), "the first by group and place are kept")
     }
 
     /// A task merged an hour ago is sent; one merged 25 hours ago is the board's history.

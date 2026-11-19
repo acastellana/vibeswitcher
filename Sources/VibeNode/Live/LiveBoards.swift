@@ -5,13 +5,16 @@ import VibeCore
 /// has a lead (`LeadStore`), sent through `changes` as its board changes. Read-only: nothing here writes a board.
 ///
 /// - **Which file.** `<root>/.vibeswitcher/board.json`, the root the lead store holds (the node's own, never a path a
-///   board names). A link there, or a file over `mostBytes`, isn't read: the value says the board can't be read and
-///   carries no tasks. So does a file that isn't a board this build knows.
+///   board names), opened once below the root with no link followed (`Platform.Files.readRegular`): a `.vibeswitcher`
+///   or a `board.json` that is a link, a board that isn't a regular file (a FIFO opens without waiting and is refused),
+///   or one over `mostBytes` isn't read: the value says the board can't be read and carries no tasks. So does a file
+///   that isn't a board this build knows.
 /// - **When it is read.** At once when the board's folder changes (`Platform.FolderWatch`: a board is written whole and
 ///   renamed into place, so its folder's entries change), and at each of the clock's looks (every `lookEvery` s): for a
 ///   folder made after the lead, a change the watch missed, and a finished task that is a day old. A read whose file is
 ///   unchanged (its `BoardFiles.Stamp`) decodes nothing; a value equal to the last sends nothing (`Changes`). Reads are
-///   off the engine's queue (`reads`), one at a time a board; a change during one reads again after it.
+///   off the engine's queue, each board on a queue of its own (one stuck on its disk stalls no other board), one at a
+///   time a board; a change during one reads again after it.
 /// - **No timer between a write and its delta** but the read itself: the watch's change, the read, the value, the hub's
 ///   frame, each on the next turn of its queue.
 ///
@@ -28,16 +31,17 @@ public final class LiveBoards: @unchecked Sendable {
     private let leads: Changes<LeadStore.Lead>
     private let now: @Sendable () -> Date
     private let note: @Sendable (String) -> Void
-    private let reads = DispatchQueue(label: "vibenode.live.boards", qos: .utility)
     private var feeds: [String: Feed] = [:]
     private var watching: Subscription?
     private var ticks: [Subscription] = []
 
-    /// One project's board: its root, the watch on its folder, and the file as last read (touched on `reads` only).
+    /// One project's board: its root, the watch on its folder, the queue it is read on and the file as last read
+    /// (touched on `reads` only).
     private final class Feed {
         let project: String
         let root: String
         let file: BoardFile
+        let reads = DispatchQueue(label: "vibenode.live.board", qos: .utility)
         var watch: Platform.FolderWatch?
         var reading = false
         var again = false
@@ -45,7 +49,7 @@ public final class LiveBoards: @unchecked Sendable {
         init(project: String, root: String) {
             self.project = project
             self.root = root
-            file = BoardFile(path: (BoardStore(root: root).folder as NSString).appendingPathComponent("board.json"))
+            file = BoardFile(root: root)
         }
 
         var folder: String { (file.path as NSString).deletingLastPathComponent }
@@ -128,7 +132,7 @@ public final class LiveBoards: @unchecked Sendable {
         }
         feed.reading = true
         let now = self.now
-        reads.async { [weak self] in
+        feed.reads.async { [weak self] in
             let loaded = feed.file.load()
             let value = BoardValue.value(project: feed.project, root: feed.root, board: loaded.board, refusal: loaded.refusal, now: now())
             self?.queue.async { [weak self] in
@@ -146,39 +150,40 @@ public final class LiveBoards: @unchecked Sendable {
     }
 }
 
-/// One board's file as last read: decoded again only when its stamp changed. On `LiveBoards`' reads queue only.
+/// One board's file as last read: decoded again only when its stamp changed. On its feed's reads queue only.
 final class BoardFile: @unchecked Sendable {
+    /// Where the board is under its root.
+    static let components = [".vibeswitcher", "board.json"]
+    let root: String
     let path: String
     private var stamp: BoardFiles.Stamp?
     private var kept: (board: LeadBoard?, refusal: String?)?
 
-    init(path: String) { self.path = path }
+    init(root: String) {
+        self.root = root
+        path = ([root] + Self.components).joined(separator: "/")
+    }
 
     /// The board (an empty one when there is no file yet), or why it can't be read; `fresh` when this read decoded it
     /// (not the copy kept from the last).
     func load() -> (board: LeadBoard?, refusal: String?, fresh: Bool) {
         let now = BoardFiles.Stamp(path)
         if let kept, now != nil, now == stamp { return (kept.board, kept.refusal, false) }
-        let read = Self.read(path)
+        let read = Self.read(root: root)
         stamp = now
         kept = read
         return (read.board, read.refusal, true)
     }
 
-    /// The board at `path`: none there is an empty one; a link, a file over `LiveBoards.mostBytes`, one that can't be
-    /// opened or isn't a board this build knows is refused, saying why.
-    static func read(_ path: String, mostBytes: Int = LiveBoards.mostBytes) -> (board: LeadBoard?, refusal: String?) {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else { return (LeadBoard(), nil) }
-        guard attributes[.type] as? FileAttributeType == .typeRegular else { return (nil, "the board isn't a regular file") }
-        let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
-        guard size <= mostBytes else { return (nil, "the board is \(size >> 20) MB, more than the \(mostBytes >> 20) MB read") }
-        guard let handle = FileHandle(forReadingAtPath: path) else { return (nil, "the board couldn't be opened") }
-        defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: mostBytes + 1) ?? Data() else { return (nil, "the board couldn't be read") }
-        guard data.count <= mostBytes else { return (nil, "the board is more than the \(mostBytes >> 20) MB read") }
-        guard let board = try? JSONDecoder().decode(LeadBoard.self, from: data) else {
-            return (nil, "the board isn't one this build reads")
+    /// The board under `root`: none there is an empty one; a link on the way, a file that isn't regular or is over
+    /// `mostBytes`, one that can't be read or isn't a board this build knows is refused, saying why.
+    static func read(root: String, mostBytes: Int = LiveBoards.mostBytes) -> (board: LeadBoard?, refusal: String?) {
+        switch Platform.Files.readRegular(in: root, path: components, limit: mostBytes) {
+        case .absent: return (LeadBoard(), nil)
+        case .refused(let why): return (nil, "the board isn't read: \(why)")
+        case .data(let data):
+            guard let board = try? JSONDecoder().decode(LeadBoard.self, from: data) else { return (nil, "the board isn't one this build reads") }
+            return (board, nil)
         }
-        return (board, nil)
     }
 }
