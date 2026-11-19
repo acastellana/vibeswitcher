@@ -1143,6 +1143,8 @@ public enum ConfigSeal {
             return
         }
         for name in names.sorted() where name != ".DS_Store" {
+            // Claude Code's skill sync's empty staging folder carries nothing (`SkillSyncStaging`, V2/SkillSyncStaging.swift).
+            if SkillSyncStaging.leftOut(name, in: folder, relative: relative, watched: watchedName) { continue }
             count += 1
             guard count <= maxEntries else {
                 line(FolderLine(text: "cut"))

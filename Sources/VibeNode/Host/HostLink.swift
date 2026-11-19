@@ -128,6 +128,8 @@ public final class HostLink: @unchecked Sendable {
     public private(set) var welcomes = 0
     /// What waits for a welcome past a count (`welcomed(after:_:)`), told true at it or false once the link is gone.
     private var welcomeWaiters: [(after: Int, done: (Bool) -> Void)] = []
+    /// The sessions whose terminals the link carries (`attach`), by the host's id.
+    private var terminals: [UUID: Terminal] = [:]
 
     /// `root`: the node's root, whose `lead` folder the vault's launch files go in and whose sessions' TMPDIRs are swept
     /// (`SessionTemp`), never this process's `VibePaths.root` unless given. `clock`: the engine's, which sweeps every
@@ -202,6 +204,7 @@ public final class HostLink: @unchecked Sendable {
         connectionsMade += 1
         state = .connecting
         made.onEvent = { [weak self] in self?.handle($0) }
+        made.onOutput = { [weak self] id, bytes in self?.output(of: id, bytes) }
         made.onClose = { [weak self] in self?.connectionLost() }
         do { try made.send(.hello(protocolVersion: HostProtocol.version, app: "vibeswitcher-server")) } catch {
             note("host link: hello not sent: \(error)")
@@ -233,6 +236,8 @@ public final class HostLink: @unchecked Sendable {
         let pending = replies
         replies = [:]
         pending.values.forEach { $0(.error(Self.wentAway)) }
+        // A terminal's replay starts again at the next welcome; what the host sends meanwhile isn't its.
+        terminals.values.forEach { $0.phase = .waiting }
         // The sessions stay as they are until the host is really gone; requests asked meanwhile wait for the next.
         state = .connecting
         reconnect()
@@ -279,6 +284,9 @@ public final class HostLink: @unchecked Sendable {
         let waiters = welcomeWaiters
         welcomeWaiters = []
         waiters.forEach { $0.done(false) }
+        let carried = terminals
+        terminals = [:]
+        carried.values.forEach { $0.sink.ended(reason) }
         onGone?(reason)
     }
 
@@ -308,12 +316,19 @@ public final class HostLink: @unchecked Sendable {
             welcomeWaiters.removeAll { welcomes > $0.after }
             onWelcome?(startedAt, list)
             due.forEach { $0.done(true) }
+            replayTerminals(listed: kept)
             resendHeld()
         case .spawned(let session), .sessionChanged(let session):
             upsert(session)
         case .sessionRemoved(let id):
             sessions.removeAll { $0.id == id }
             changes.send(NodeIds.session(host: id), nil)
+            endTerminal(id, Self.terminalGone)
+        case .resync(let id) where envelope.replyTo == nil:
+            // The host dropped this link's stream of the session (it fell behind): it is attached again, from the replay.
+            guard let terminal = terminals[id], terminal.phase == .replaying || terminal.phase == .live else { return }
+            note("host link: terminal \(id.uuidString.prefix(8)) fell behind at the host: its replay again")
+            replay(id, terminal)
         default:
             break
         }
@@ -594,6 +609,169 @@ public final class HostLink: @unchecked Sendable {
         unit.confirmed(ok)
         guard !queued.isEmpty else { return }
         after(Self.unitGap, on: nil) { [weak self] in self?.runUnit(id) }
+    }
+
+    // MARK: Terminals (the live plan's B6)
+
+    /// One session's terminal as the link carries it (`attach`), told on `queue`, in this order each time: `restart`
+    /// (the host's replay comes next: what was shown before is stale), `output` (the replay's bytes), `attached` (the
+    /// replay is over), `output` (live), and again from `restart` whenever the replay starts over (the host dropped the
+    /// link's stream, the link connected again, `resync` was asked). `ended` once, last: why the link carries it no more.
+    public struct TerminalSink {
+        public var restart: () -> Void
+        public var output: (Data) -> Void
+        public var attached: () -> Void
+        public var ended: (String) -> Void
+
+        public init(restart: @escaping () -> Void, output: @escaping (Data) -> Void, attached: @escaping () -> Void,
+                    ended: @escaping (String) -> Void) {
+            self.restart = restart
+            self.output = output
+            self.attached = attached
+            self.ended = ended
+        }
+    }
+
+    /// Why a terminal ended when its session went.
+    public static let terminalGone = "The session is gone."
+
+    /// A session's terminal on the link: its sink, its size, and where its stream is.
+    private final class Terminal {
+        enum Phase: Equatable {
+            /// No request out (the connection is down): the next welcome starts the replay.
+            case waiting
+            /// A `detach` is out, for a replay from the start: the host's bytes until its reply aren't the replay's.
+            case detaching
+            /// An `attach` is out: the host's bytes are its replay, until `attached`.
+            case replaying
+            case live
+        }
+
+        let sink: TerminalSink
+        var cols: Int
+        var rows: Int
+        var phase = Phase.waiting
+        /// Bumped by each `attach` and `detach` sent: a reply speaks only for the last.
+        var generation = 0
+
+        init(sink: TerminalSink, cols: Int, rows: Int) {
+            self.sink = sink
+            self.cols = cols
+            self.rows = rows
+        }
+    }
+
+    /// Carries session `id`'s terminal to `sink`: the host's `attach` at `cols` × `rows` (the server is the app to the
+    /// host here), its replay and then its live output, attached again from the replay after every reconnect and every
+    /// resync, until `detach`, the session's end in the host's list, or the link's. One sink a session: a second
+    /// `attach` of the same session replaces the first, which is told it ended.
+    public func attach(_ id: UUID, cols: Int, rows: Int, sink: TerminalSink) {
+        perform { [self] in
+            if case .gone(let reason) = state { return sink.ended(reason) }
+            guard sessions.contains(where: { $0.id == id }) else { return sink.ended(Self.terminalGone) }
+            if let replaced = terminals.removeValue(forKey: id) { replaced.sink.ended("Attached again elsewhere.") }
+            let terminal = Terminal(sink: sink, cols: cols, rows: rows)
+            terminals[id] = terminal
+            note("host link: terminal \(id.uuidString.prefix(8)) attached at \(cols)×\(rows)")
+            if state == .connected { replay(id, terminal) }
+        }
+    }
+
+    /// Session `id`'s terminal from the host's replay again (a reader of it fell behind, or another came): `restart`,
+    /// the replay, `attached`. Nothing when a replay is on its way already (asked, or waiting for the next welcome).
+    public func resync(_ id: UUID) {
+        perform { [self] in
+            guard let terminal = terminals[id], terminal.phase == .replaying || terminal.phase == .live else { return }
+            terminal.phase = .detaching
+            terminal.generation += 1
+            let generation = terminal.generation
+            send(.detach(id: id)) { [weak self] event in
+                guard let self, self.terminals[id] === terminal, terminal.generation == generation else { return }
+                if case .error(let message) = event, message == Self.wentAway || message == Self.notConnected {
+                    terminal.phase = .waiting
+                    return
+                }
+                self.replay(id, terminal)
+            }
+        }
+    }
+
+    /// The link carries session `id`'s terminal no more: the host's `detach`. Its sink is told nothing more.
+    public func detach(_ id: UUID) {
+        perform { [self] in
+            guard terminals.removeValue(forKey: id) != nil else { return }
+            note("host link: terminal \(id.uuidString.prefix(8)) detached")
+            if state == .connected { send(.detach(id: id), holdable: false) }
+        }
+    }
+
+    /// Keys typed into session `id`'s terminal, as typed (`HostRequest.input`, not a reply to a query): only while the
+    /// link carries it and is connected; dropped otherwise.
+    public func input(_ id: UUID, bytes: Data) {
+        perform { [self] in
+            guard terminals[id] != nil, state == .connected, !bytes.isEmpty else { return }
+            send(.input(id: id, bytes: bytes, reply: false), holdable: false)
+        }
+    }
+
+    /// Session `id`'s terminal at `cols` × `rows`, kept for its next `attach` too.
+    public func resize(_ id: UUID, cols: Int, rows: Int) {
+        perform { [self] in
+            guard let terminal = terminals[id] else { return }
+            terminal.cols = cols
+            terminal.rows = rows
+            if state == .connected { send(.resize(id: id, cols: cols, rows: rows), holdable: false) }
+        }
+    }
+
+    /// The terminals the link carries (tests). On `queue`.
+    var terminalsCarried: [UUID] { terminals.keys.sorted { $0.uuidString < $1.uuidString } }
+
+    /// `attach` sent: its sink told the replay starts, and then each byte of it, and `attached`.
+    private func replay(_ id: UUID, _ terminal: Terminal) {
+        terminal.generation += 1
+        let generation = terminal.generation
+        terminal.phase = .replaying
+        terminal.sink.restart()
+        send(.attach(id: id, cols: terminal.cols, rows: terminal.rows), holdable: false) { [weak self] event in
+            guard let self, self.terminals[id] === terminal, terminal.generation == generation else { return }
+            switch event {
+            case .attached:
+                terminal.phase = .live
+                terminal.sink.attached()
+            case .resync:
+                // The replay didn't fit the host's queue for this link: again.
+                self.replay(id, terminal)
+            case .error(let message) where message == Self.wentAway || message == Self.notConnected:
+                terminal.phase = .waiting
+            case .error(let message):
+                self.endTerminal(id, message)
+            default:
+                self.endTerminal(id, "Unexpected reply from the session host.")
+            }
+        }
+    }
+
+    /// At a welcome: each terminal whose session the host still lists, from its replay; the others ended.
+    private func replayTerminals(listed: Set<UUID>) {
+        for (id, terminal) in terminals.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+            guard listed.contains(id) else {
+                endTerminal(id, Self.terminalGone)
+                continue
+            }
+            replay(id, terminal)
+        }
+    }
+
+    private func output(of id: UUID, _ bytes: Data) {
+        guard let terminal = terminals[id], terminal.phase == .replaying || terminal.phase == .live else { return }
+        terminal.sink.output(bytes)
+    }
+
+    private func endTerminal(_ id: UUID, _ why: String) {
+        guard let terminal = terminals.removeValue(forKey: id) else { return }
+        note("host link: terminal \(id.uuidString.prefix(8)) ended: \(why)")
+        terminal.sink.ended(why)
     }
 
     // MARK: The vault

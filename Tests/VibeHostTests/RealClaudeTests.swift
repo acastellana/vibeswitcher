@@ -10,7 +10,7 @@ import Testing
 /// can't be passed on). Gated as Task 12a is (`RealClaudeHostTests`): on demand only, with a throwaway Claude Code config
 /// folder the user logged in once, named on the run's command line (the user's decision 16):
 /// `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<that folder> bash scripts/test.sh --filter RealClaudeTests`. Each test sends
-/// one or two short prompts on sonnet (the snapshot's, once for each home in `homes`); bash's own rules behind the
+/// one or two short prompts on haiku (the snapshot's, once for each home in `homes`); bash's own rules behind the
 /// snapshot's record are measured ungated, with bash alone. The results are recorded in
 /// `docs/process/v2-linux-inventory.md`. The tests
 /// assert that the measurement was made, and, for the verifier's command, that no process of it is left cut off from
@@ -375,7 +375,7 @@ import Testing
             say("the host's log:\n" + String(host.log.suffix(3000)))
         }
 
-        /// Starts `claude --model sonnet --permission-mode manual` with `prompt`, its inline settings allowing exactly
+        /// Starts `claude --model haiku --permission-mode manual` with `prompt`, its inline settings allowing exactly
         /// `allowing` and setting `env`.
         func start(allowing: [String], env: [String: String] = [:], prompt: String) async throws -> HostSession {
             try RealClaudeHostTests.trust(resolvedProject, in: config, true)
@@ -383,7 +383,7 @@ import Testing
             let settings: [String: Any] = ["permissions": ["allow": allowing.map { "Bash(\($0))" }], "env": env]
             let json = String(decoding: try JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys]), as: UTF8.self)
             let quote = RecentProjects.shellQuote
-            let command = "exec \(quote(claude)) --model sonnet --permission-mode manual --settings \(quote(json)) \(quote(prompt))"
+            let command = "exec \(quote(claude)) --model haiku --permission-mode manual --settings \(quote(json)) \(quote(prompt))"
             let seq = client.send(.spawn(SpawnRequest(cwd: resolvedProject, command: command,
                                                       env: ["CLAUDE_CONFIG_DIR": config.path, "DISABLE_AUTOUPDATER": "1",
                                                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"],

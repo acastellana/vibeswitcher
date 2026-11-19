@@ -49,10 +49,12 @@ struct HookedAgent {
     }
 
     /// Its hook's state now says `event` (`PermissionRequest`: needs you; `UserPromptSubmit`: working; `Stop`: done).
-    func hook(_ node: ScratchNode, _ event: String) throws {
+    /// `transcript`: the transcript its hook names (a file in the node's `~/.claude/projects`), for its chat.
+    func hook(_ node: ScratchNode, _ event: String, transcript: URL? = nil) throws {
         var state = HookState(agent: .claude, tty: session.tty, lastEvent: event, lastEventAt: Date().timeIntervalSince1970)
         state.agentPid = pid
         state.cwd = folder.path
+        state.transcriptPath = transcript?.path
         let states = node.root.appendingPathComponent("state")
         try VibePaths.ensurePrivate(states)
         try state.save(to: states.appendingPathComponent("\(session.tty).json"))
@@ -77,10 +79,11 @@ final class LivePage {
         guard status == 101 else { throw RawClient.Failure("the upgrade was answered \(status)") }
     }
 
-    func send(_ kind: String, _ args: [String: NodeWire.Value]) throws -> String {
+    /// `kind` with `args` (and an `action` id, for an action such as a draft): the request's id.
+    func send(_ kind: String, _ args: [String: NodeWire.Value], action: String? = nil) throws -> String {
         counter += 1
         let id = String(counter)
-        try client.sendText(String(decoding: NodeWire.message(NodeWire.Request(id: id, kind: kind, args: args)), as: UTF8.self))
+        try client.sendText(String(decoding: NodeWire.message(NodeWire.Request(id: id, kind: kind, args: args, action: action)), as: UTF8.self))
         return id
     }
 

@@ -288,6 +288,52 @@ struct ConfigHoldStoreTests {
         #expect(said != nil && said?.hasPrefix("the same") == false, "\(String(describing: said))")
     }
 
+    /// `config held`'s lines (2026-11-19, and the security review's finding on them): short, every held thing and guard
+    /// rail on one line with its hash or value; a word only saying a line is as it was is a mark on exactly that line
+    /// (`*` the same, vouched; `?` not known to be), each mark's word said once after the lines; a word that says
+    /// something else stays on its line; a line with no word says no earlier accept is known for it, never a mark; the
+    /// unsealed snapshot's warning stays. `long` puts every word on its line, as before.
+    @Test func heldLinesMarkExactlyTheLinesTheirSharedWordCovers() throws {
+        let when = "2026-11-19T10:00:00Z"
+        let unknown = AcceptedSnapshot.unvouched(when)
+        let same = "the same as at your last accept (\(when))"
+        let changed = "changed since your last accept (\(when)), from “make check”"
+        var card = CardStore.Card(root: "/r", kind: .configHeld)
+        card.config = ConfigHoldStore.Shown(
+            items: [ConfigHoldStore.Item(name: "~/.claude/settings.json", hash: "abc123", change: "env", sinceAccept: unknown),
+                    ConfigHoldStore.Item(name: "~/.zshrc", hash: "def456", outside: true)],
+            guarded: [ConfigHoldStore.Rail(key: "merge_policy", value: "ask_all", sinceAccept: same),
+                      ConfigHoldStore.Rail(key: "max_workers", value: "3", sinceAccept: unknown),
+                      ConfigHoldStore.Rail(key: "test_command", value: "make test", sinceAccept: changed),
+                      ConfigHoldStore.Rail(key: "base_branch", value: "main")],
+            lastAccept: Date(timeIntervalSince1970: 1_790_000_000))
+        let short = CardText.lines(card.value)
+        #expect(short.contains("    ~/.claude/settings.json, hash abc123: env ?"), "\(short)")
+        #expect(short.contains("    ~/.zshrc, hash def456 (changed outside a team session); no earlier accept known"), "\(short)")
+        #expect(short.contains("    merge_policy: ask_all *"), "\(short)")
+        #expect(short.contains("    max_workers: 3 ?"), "\(short)")
+        #expect(short.contains("    test_command: make test; " + changed), "\(short)")
+        #expect(short.contains("    base_branch: main; no earlier accept known"), "\(short)")
+        #expect(short.contains("  * marks a line that is " + same), "\(short)")
+        #expect(short.contains("  ? marks a line that is " + unknown), "\(short)")
+        #expect(short.filter { $0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 1, "\(short)")
+        #expect(short.filter { $0.contains(same) && !$0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 1, "\(short)")
+        #expect(short.contains { $0.hasPrefix("  compared with your last accept") && $0.contains("unsealed snapshot") }, "\(short)")
+
+        let long = CardText.lines(card.value, long: true)
+        #expect(long.contains("    merge_policy: ask_all; " + same), "\(long)")
+        #expect(long.contains("    ~/.claude/settings.json, hash abc123: env; " + unknown), "\(long)")
+        #expect(long.filter { $0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 2, "\(long)")
+        #expect(!long.contains { $0.contains("marks a line") }, "\(long)")
+
+        // No line carries a mark: no closing word.
+        card.config?.items = []
+        card.config?.guarded = [ConfigHoldStore.Rail(key: "test_command", value: "make test", sinceAccept: changed)]
+        let plain = CardText.lines(card.value)
+        #expect(!plain.contains { $0.contains("marks a line") }, "\(plain)")
+        #expect(plain.contains { $0.hasPrefix("  compared with your last accept") }, "\(plain)")
+    }
+
     /// The app's `theCardDrawsChangedFileTextVerbatim`: what the card shows of a changed file (its name, what changed,
     /// its files) reaches the terminal with control and bidirectional characters stripped (`ConfigSeal.inert`).
     @Test func heldTextIsPrintedInert() throws {

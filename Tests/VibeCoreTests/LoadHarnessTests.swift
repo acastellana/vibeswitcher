@@ -23,11 +23,13 @@ import Testing
 
     /// The harness with `arguments`, not started; `fake` readings (load, memory, disk, owner name, burner, tick) go in
     /// its environment, `output` takes what it says.
+    /// `under`: a bash the harness runs beneath, its parent (one that runs it as a child and waits, no exec in its place).
     func process(_ arguments: [String], fake: [String: String] = [:], claudeCode: Bool = false, heldSlot: Bool = false,
-                 pathFirst: URL? = nil, repo: URL = Self.repo) -> Process {
+                 pathFirst: URL? = nil, repo: URL = Self.repo, under: URL? = nil) -> Process {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [repo.appendingPathComponent("scripts/test-under-load.sh").path] + arguments
+        let script = repo.appendingPathComponent("scripts/test-under-load.sh").path
+        process.executableURL = under ?? URL(fileURLWithPath: "/bin/bash")
+        process.arguments = under == nil ? [script] + arguments : ["-c", "/bin/bash \"$0\" \"$@\"; exit $?", script] + arguments
         var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("TEST_UNDER_LOAD_") }
         environment["CLAUDECODE"] = claudeCode ? "1" : nil
         // heldSlot: run under a holder of one of this folder's slots (`vs-heavy bash scripts/test-under-load.sh`, a
@@ -46,8 +48,8 @@ import Testing
 
     /// Runs the harness with `arguments` to its end.
     func harness(_ arguments: [String], fake: [String: String] = [:], claudeCode: Bool = false,
-                 pathFirst: URL? = nil, repo: URL = Self.repo) async throws -> (status: Int32, output: String) {
-        let process = process(arguments, fake: fake, claudeCode: claudeCode, pathFirst: pathFirst, repo: repo)
+                 pathFirst: URL? = nil, repo: URL = Self.repo, under: URL? = nil) async throws -> (status: Int32, output: String) {
+        let process = process(arguments, fake: fake, claudeCode: claudeCode, pathFirst: pathFirst, repo: repo, under: under)
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -182,6 +184,28 @@ import Testing
         let run = try await harness(["--check-only"], fake: idle.merging(["OWNER_NAME": "no-such-process"]) { $1 }, claudeCode: true)
         #expect(run.status != 0)
         #expect(run.output.contains("no live owner"), "\(run.output)")
+    }
+
+    /// Claude Code's native install started by its resolved path (the Linux node's roles, 2026-11-19): its comm is its
+    /// version (`2.1.328`), not claude, and the harness refused every run in such a session for "no live owner". An
+    /// ancestor whose executable is in `.local/share/<name>/versions/` owns the run: here a copy of bash there, named
+    /// as a version, with another program's name (one no ancestor of this test has).
+    @Test func aSessionOfClaudeCodesVersionedBinaryOwnsTheRun() async throws {
+        // `Scratch.url` names a folder of its own (its name and a suffix), the folders below it as named.
+        let versions = temp.url("home").appendingPathComponent(".local/share/fakeclaude/versions")
+        try FileManager.default.createDirectory(at: versions, withIntermediateDirectories: true)
+        let binary = versions.appendingPathComponent("9.9.328")
+        let copy = Process()
+        copy.executableURL = URL(fileURLWithPath: "/bin/cp")
+        copy.arguments = ["/bin/bash", binary.path]
+        try copy.run()
+        try #require(await offPool { waitForEnd(copy) } && copy.terminationStatus == 0, "bash wasn't copied")
+        let owned = try await harness(["--check-only"], fake: idle.merging(["OWNER_NAME": "fakeclaude"]) { $1 }, claudeCode: true, under: binary)
+        #expect(owned.status == 0, "\(owned.output)")
+        #expect(!owned.output.contains("no live owner"), "\(owned.output)")
+        // Another program's name, whose `versions` folder the copy isn't in: no owner.
+        let other = try await harness(["--check-only"], fake: idle.merging(["OWNER_NAME": "otherclaude"]) { $1 }, claudeCode: true, under: binary)
+        #expect(other.status != 0 && other.output.contains("no live owner"), "\(other.output)")
     }
 
     /// On 2026-10-31 a worker's run stopped after its build with "no macOS platform": xcode-select pointed at the

@@ -671,6 +671,24 @@ document (S11: the port while the server is down; the principals: a web client),
 - **Task E2 (lane E):** the chat's schema and vectors, `TeamMessage`'s fields among them.
 - **Task G2 (lane G):** `chat-10k-first-paint` and `scroll`, on the chat bench's made-up transcript.
 - **Task I2 (the integrator):** `chat` and `chat.page` taken; the files regenerated.
+- **As built (slice 2, branch `v2-web-chat`, 2026-11-19; G2 not done).** B4: `ChatStore` (`Live/ChatStore.swift`) holds
+  a `ChatStream` per session opened by a `chat` subscription or a `chat.page`, dropped 60 s after its last follower;
+  one `seq` an op; a new stream for a session starts after the last `seq` its dropped one reached, so no client's old
+  `seq` is read against another stream's ops. A transcript is appended to in place, which `Platform.FolderWatch`
+  never tells of (it reports a folder's entries), so the read is driven by a new `Platform.FileWatch` (inotify on the
+  file, a vnode source on the Mac; `Sources/VibePlatform/FileWatch*.swift`, `FileWatchTests`), by the session's own
+  changes and by the clock every 2 s as a net; each read takes the bytes after the last, off the engine's queue, and a
+  replaced or shortened file is read from its start. The hub (`LiveHub.chats`) writes a chat's reply once its stream is
+  read, then the first event (`resume`, `tail` or `snapshot`). Beside the plan's names: `aResumeInTheSameEpochGetsTheOpsSince`,
+  `aFoldedChatDeltaJoinsItsTextOps`, `aWriteReachesTheSubscriberWithNoClock`, `everyItemIsWhatTheSchemaSays`. E2: the
+  team item gains `title`, `task`, `part`, `sender.task`, the `teammate` sender and `teammatePost`; a question's
+  `descriptions` may hold null; the chat vectors are built from a transcript through the reader and `ChatValue`, with
+  `delta.chat-set` and `chat.page` added. I2: `chat.page` in `taken` (the Unix socket's too), `ScratchNodeTests.aPageFollowsASessionsChat`,
+  the files regenerated; the sandbox's first session has a transcript and takes a step every 8 s (`sandbox-server.sh chat`).
+  D3: `chat.js` draws the wire's items in a windowed list (two spacers at measured heights), pages older items in on
+  scroll with the row in view kept in place, patches a growing reply's blocks in place, and follows the end only when
+  it was there; `chatops.js` applies ops all or none; a text gap asks for a tail from its item (the contract's §6 says
+  so now). `socket.test.mjs` adds `aTextOpWhoseOffsetIsntMineIsAGap`, `aChatTailReplacesFromItsItemOn`.
 
 ### Slice 3: answering
 

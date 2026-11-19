@@ -234,7 +234,8 @@ code, pre, kbd { font-family: var(--mono); }
 /* ---- Chat ---- */
 
 .chat { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable both-edges; }
+.chat-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; scrollbar-gutter: stable both-edges; }
+.chat-spacer { flex: none; }
 .chat-column { max-width: 800px; margin: 0 auto; padding: 22px 24px 10px; }
 .earlier { padding-bottom: 12px; color: var(--ink-3); font-size: var(--small); text-align: center; }
 .chat-skeleton { display: grid; gap: 14px; padding: 6px 0 0 30px; }
@@ -306,6 +307,19 @@ code, pre, kbd { font-family: var(--mono); }
 .note-text { color: var(--ink-2); }
 .note-time { color: var(--ink-3); font-size: var(--small); }
 .ask-row { margin-left: 30px; }
+.row-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.image-note { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; background: var(--fill); color: var(--ink-3); font-size: var(--small); }
+.image-note .icon { color: var(--ink-3); }
+.prose.quiet { color: var(--ink-2); font-size: 12.5px; }
+.todos { display: grid; gap: 3px; font-size: 12.5px; }
+.todo { position: relative; padding-left: 16px; color: var(--ink-2); }
+.todo::before { content: ""; position: absolute; left: 2px; top: 0.5em; width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--ink-3); }
+.todo.active::before { background: var(--working); box-shadow: none; }
+.todo.done { color: var(--ink-3); text-decoration: line-through; }
+.todo.done::before { background: var(--done); box-shadow: none; }
+.fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; font-size: 12px; }
+.fields dt { color: var(--ink-3); }
+.fields dd { min-width: 0; overflow-wrap: anywhere; }
 
 .chat-live { display: flex; align-items: center; gap: 7px; min-height: 18px; margin-top: 14px; padding-left: 30px; color: var(--ink-2); font-size: 12px; visibility: hidden; }
 .chat-live.on { visibility: visible; }
@@ -384,6 +398,28 @@ code, pre, kbd { font-family: var(--mono); }
 .facts dd { overflow-wrap: anywhere; }
 .facts .files { margin-top: 2px; color: var(--ink-2); }
 .facts code { padding: 0; background: none; }
+
+/* A draft on the node's page: the pick marked, then the answer as it will be sent and the line that sends it. */
+.option.chosen { background: var(--accent-fill); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.option.chosen > .icon { flex: none; color: var(--accent); stroke-width: 2; }
+.option[aria-pressed] { transition: background-color 0.12s, box-shadow 0.12s; }
+.confirm { display: grid; gap: 7px; padding: 10px 12px 11px; border-radius: 10px; background: var(--fill); animation: enter 0.16s var(--ease); }
+.confirm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.confirm-label { color: var(--ink-2); font-size: var(--small); font-weight: 600; transition: color 0.16s; }
+.confirm.sending .confirm-label { color: var(--ink-3); }
+.confirm-clear { color: var(--ink-3); font-size: var(--small); }
+.confirm-clear:hover { color: var(--ink); }
+.confirm-text { font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.confirm-note { color: var(--ink-3); font-size: var(--small); }
+.copy-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 4px 4px 11px; border-radius: 8px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }
+.copy-prompt { flex: none; color: var(--ink-3); font-family: var(--mono); font-size: 12px; user-select: none; }
+.card .copy-line .copy-text { flex: 1; min-width: 0; padding: 0; overflow: hidden; background: none; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
+.copy-button { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 6px; color: var(--ink-2); font-size: var(--small); font-weight: 500; transition: background-color 0.12s, color 0.12s; }
+.copy-button:hover { background: var(--fill-2); color: var(--ink); }
+.copy-button.done { color: var(--done); }
+.confirm.sending .copy-line { opacity: 0.6; transition: opacity 0.16s; }
+.card-hold { display: grid; gap: 4px; }
+.card-hold-label { color: var(--ink-3); font-size: var(--small); }
 
 /* ---- The inspector ----
    Over the session's right edge, under its header. Open as a column, the session's own column gives it the room in one

@@ -57,6 +57,12 @@ public struct HooksRequest {
     public let home: String
     public let binaries: [String: String]?
     public let vault: LeadVault
+    /// The commit the host runs (`HostNotes.build`) and this server's own (`Requests.commit`): while they differ the
+    /// node is finishing a build switch (the host handed over; this server, whose build folder is `nodeRoot`, is
+    /// replaced by the new build's once idle), and a program that isn't the host's `binaries` entry is said to be
+    /// that, to try again in a moment. Nil: not known (either).
+    public var hostBuild: String?
+    public var serverBuild: String?
     /// Tests only: called inside `appWrite` with each staged program's path by name, just before the checks that
     /// precede the first rename (what another process of the user's could do to a staged file there, a test does).
     var beforeRenames: (([String: String]) -> Void)?
@@ -199,10 +205,21 @@ public struct HooksRequest {
         case .failure(let refusal): return .failure(StartRefusal("\(name) isn't installed: \(refusal.text)", exitCode: refusal.exitCode))
         case .success(let data):
             guard BuildInfo.sha256(of: data) == expected else {
+                if let switching = switchingRefusal() { return .failure(switching) }
                 return .failure(StartRefusal("\(shown) isn't the \(name) the host's build-info names (its SHA-256 differs): nothing was installed"))
             }
             return .success(data)
         }
+    }
+
+    /// What a mismatch says while the node is finishing a build switch (`hostBuild` known and not `serverBuild`): the
+    /// programs here are this server's build's, the host's `binaries` the new build's, and the server restarts onto the
+    /// host's build once it is idle (`ServerChild.idleLimit`). Nothing was installed.
+    func switchingRefusal() -> StartRefusal? {
+        guard let host = hostBuild, let server = serverBuild, host != server else { return nil }
+        let short = { (commit: String) in ConfigSeal.inert(String(commit.prefix(12)), limit: 40) }
+        return StartRefusal("the node is finishing a build switch: its host runs \(short(host)) and this server is still \(short(server)) "
+                            + "until it restarts onto the new build, once idle (about 30 seconds); try again in a moment: nothing was installed")
     }
 
     // MARK: The write

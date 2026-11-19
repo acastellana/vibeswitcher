@@ -73,7 +73,7 @@ public enum WireSchema {
 
     private static let contractNode = "the contract's §5 until B2's NodeStatusStore"
     private static let contractSession = "the contract's §5 until B2's Session.liveValue"
-    private static let contractChat = "the contract's §6 until B4's ChatValue (E2 checks it)"
+    private static let contractChat = "ChatValue"
     private static let contractLive = "the contract's §3 and §4 until B1's LiveStream"
 
     private static let table: [Shape] = {
@@ -134,7 +134,7 @@ public enum WireSchema {
             shape("chat.page.args", from: "the contract's §6", [field("session", .string), field("before", .string), optional("limit", .int)]),
             shape("chat.page.result", from: contractChat, [field("items", .list(.shape("chat.item"))), field("more", .bool)]),
             shape("draft.args", from: "the contract's §8", [field("card", .string), field("text", .string), field("version", .int)]),
-            shape("draft.result", from: "the contract's §8 until B5", [field("applied", .map(.int)), field("card", .string)]),
+            shape("draft.result", from: "Requests.draft", [field("applied", .map(.int)), field("card", .string)]),
             shape("draft.clear.args", from: "the contract's §8", [field("card", .string)]),
         ]
 
@@ -196,7 +196,7 @@ public enum WireSchema {
                 field("at", .date), field("blocking", .bool), optional("question", .shape("card.question")),
                 optional("approval", .shape("card.approval")), optional("config", .shape("card.config")),
                 optional("base", .shape("card.base")),
-                pending(optional("draft", Kind.shape("card.draft").orNull), "B5's draft, in CardStore.Card.value")]),
+                field("draft", Kind.shape("card.draft").orNull)]),
             shape("card.question", from: "CardStore.Card.value", [
                 field("id", .string), field("short", .string), field("text", .string), field("options", strings),
                 field("priority", .words(["blocking", "important", "whenever"])), field("whyNow", Kind.string.orNull),
@@ -226,7 +226,7 @@ public enum WireSchema {
                 field("branch", .string), field("from", Kind.string.orNull), field("fromIs", .words(["recorded", "given", "unverified", "none"])),
                 field("to", .string), field("reason", Kind.string.orNull), field("commits", .list(.shape("card.base.commit")))]),
             shape("card.base.commit", from: "CardStore.Card.value", [field("sha", .string), field("subject", .string)]),
-            shape("card.draft", from: "the contract's §5 until B5", [field("text", .string), field("version", .int), field("at", .date),
+            shape("card.draft", from: "CardStore.Card.value", [field("text", .string), field("version", .int), field("at", .date),
                                                                     field("action", .string)]),
         ]
 
@@ -244,9 +244,12 @@ public enum WireSchema {
             item("prompt", [field("text", .string), field("steered", .bool), field("fromLead", .bool), field("images", .list(.shape("chat.image")))]),
             item("reply", [field("text", .string)]),
             item("tools", [field("summary", .string), field("tools", .list(.shape("chat.tool")))]),
-            item("team", [field("text", .string), field("sender", .shape("chat.sender")),
-                          field("message", .words(["report", "audit", "witness", "userAnswer", "leadMessage", "notice"]))]),
-            shape("chat.sender", from: contractChat, [field("kind", .words(["user", "lead", "vibeSwitcher"])), field("name", Kind.string.orNull)]),
+            item("team", [field("text", .string), field("title", .string), field("sender", .shape("chat.sender")),
+                          field("message", .words(["report", "audit", "witness", "userAnswer", "leadMessage", "notice", "teammatePost"])),
+                          field("task", Kind.string.orNull), field("part", Kind.shape("chat.part").orNull)]),
+            shape("chat.sender", from: contractChat, [field("kind", .words(["user", "lead", "vibeSwitcher", "teammate"])),
+                                                      field("name", Kind.string.orNull), field("task", Kind.string.orNull)]),
+            shape("chat.part", from: contractChat, [field("index", .int), field("count", .int)]),
             shape("chat.image", from: contractChat, [field("id", .string), field("mediaType", .string), field("bytes", .int)]),
             shape("chat.tool", from: contractChat, [
                 field("id", .string), field("name", .string), field("title", .string), field("at", Kind.date.orNull),
@@ -267,7 +270,8 @@ public enum WireSchema {
             detail("patch", [field("text", .string)]),
             detail("questions", [field("questions", .list(.shape("chat.question")))]),
             shape("chat.question", from: contractChat, [
-                field("question", .string), field("options", strings), optional("header", .string), field("descriptions", strings),
+                field("question", .string), field("options", strings), optional("header", .string),
+                field("descriptions", .list(Kind.string.orNull)),
                 field("multiSelect", .bool)]),
             detail("agent", [field("description", .string), field("prompt", .string)]),
             detail("fields", [field("fields", .list(.shape("chat.field")))]),

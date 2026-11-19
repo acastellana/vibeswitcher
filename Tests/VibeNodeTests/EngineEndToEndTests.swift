@@ -12,7 +12,7 @@ import Testing
 /// writes what Claude Code's hooks would (`hook(_:_:pid:)`) and takes the lead's inbox as its prompt's hook does
 /// (`promptHookTakes`). `anAnswerBeforeTheTurnEndsIsTakenByTheLeadsHookAsTheUsers` is the other way an answer reaches a
 /// lead: mid-turn, handed over by its own hook. `aRealLeadOnSonnetAsksAndIsAnswered` shows both with a real Claude Code
-/// on Sonnet, gated on the user's throwaway config folder (the security document's decision 16).
+/// on haiku (the cheapest model; the test's name is older), gated on the user's throwaway config folder (the security document's decision 16).
 @Suite(NodeTraits.linuxOnly, .serialized, .timeLimit(.minutes(15)))
 struct EngineEndToEndTests {
     private let scratch = Scratch()
@@ -268,6 +268,49 @@ struct EngineEndToEndTests {
         #expect(leadsHookTakes(node, event: "Stop", tty: lead.session.tty, pid: lead.agentPid).messages.isEmpty)
     }
 
+    /// The first real node's deaf lead (2026-11-19): the node starts the lead, and its tool server the workers, by the
+    /// path `~/.local/bin/claude` resolves to (EN-D13), Claude Code's native installer's `~/.local/share/claude/versions/
+    /// 2.1.328`, so the process's `comm` and `argv[0]` are its version, never `claude`. The process table took it for no
+    /// agent: every answer the user gave was held ("no lead the vault binds runs there"), and each worker's `ask_lead`
+    /// was told there's no lead running. Here the fake runs by such a name: the answer reaches the lead's inbox as the
+    /// user's, and a worker's question reaches it too.
+    @Test func aLeadRunByClaudeCodesVersionedBinaryHearsTheUserAndItsWorkers() async throws {
+        let node = try await ScratchNode(scratch, claudeProgram: "share/claude/versions/2.1.328")
+        defer { node.stop() }
+        let lead = try await node.askingLead("Which name for the parser?", options: ["Parser", "Reader"])
+        let agent = try #require(ProcessTable.info(pid: lead.agentPid))
+        #expect(agent.comm == "2.1.328" && agent.tty == lead.session.tty, "the fake runs by its version: \(agent)")
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Reader"])
+        #expect(answered.status == 0 && answered.output.contains("answered: the lead is told"), "\(answered.output)\n\(node.said)")
+        let message = try await Self.usersMessage(node, card: lead.card)
+        let reached = await eventually(timeout: 60) {
+            node.inbox(lead.session.tty).contains { $0.from == .user && LeadVaultV2.digest($0.text) == message.digest }
+        }
+        #expect(reached, "the answer isn't in the lead's inbox: \(node.inbox(lead.session.tty))\n\(node.said)")
+        #expect(!node.said.contains("holding a message"), "\(node.said)")
+
+        // A worker it starts (by the same program, `VIBESWITCHER_CLAUDE`) asks it something: the question reaches it.
+        let tools = node.fake.files(terminal: lead.session.tty)
+        let before = tools.calls().count
+        try Self.limits(node, maxSessions: 10)
+        try tools.call("add_task", ["title": "Write the parser", "goal": "Write the parser.", "acceptance": ["it builds"], "auto_advance": false])
+        try #require(await eventually(timeout: 120) { tools.calls().count == before + 1 }, "\(tools.calls())")
+        try tools.call("start_worker", ["task": "write-the-parser"])
+        let worker = try await Self.connected(node, label: "Worker: Write the parser", calling: "progress",
+                                              ["task": "write-the-parser", "text": "starting"])
+        try #require(await eventually(timeout: 120) { tools.calls().count == before + 2 }, "\(tools.calls())")
+        #expect(tools.text(of: tools.calls()[before + 1]).contains("Worker started on write-the-parser"), "\(tools.calls()[before + 1])")
+        let workerTools = node.fake.files(terminal: worker.tty)
+        try workerTools.call("ask_lead", ["task": "write-the-parser", "question": "Which grammar?"])
+        try #require(await eventually(timeout: 120) { workerTools.calls().count == 2 }, "\(node.said)")
+        let asked = workerTools.text(of: workerTools.calls()[1])
+        #expect(!asked.contains("no lead running"), "\(asked)")
+        let handed = await eventually(timeout: 60) {
+            node.inbox(lead.session.tty).contains { $0.text.contains("Which grammar?") && $0.agentPid == lead.agentPid }
+        }
+        #expect(handed, "the question isn't in the lead's inbox: \(node.inbox(lead.session.tty))\n\(node.said)")
+    }
+
     // MARK: A real lead
 
     /// The user's throwaway Claude Code config folder, named on the run's command line only.
@@ -281,8 +324,8 @@ struct EngineEndToEndTests {
         + "two options, Lexer and Scanner, and end your turn. "
         + "3. Once that answer has come, say the two names the user chose in one line, and stop."
 
-    /// The same with a real Claude Code on Sonnet as the lead (the scratch node's `<root>/v2/test/claude` a script that
-    /// runs the account's `claude` with the config folder given and `--model sonnet`), both ways an answer reaches it:
+    /// The same with a real Claude Code on haiku as the lead (the scratch node's `<root>/v2/test/claude` a script that
+    /// runs the account's `claude` with the config folder given and `--model haiku`), both ways an answer reaches it:
     ///
     /// 1. It asks which of two names to use and ends its turn; `questions` lists the card. The user answers once the lead
     ///    is idle (its Stop hook said so: waited for, the realistic order), and the answer, recorded in the vault, is
@@ -324,14 +367,14 @@ struct EngineEndToEndTests {
         let version = try await run(URL(fileURLWithPath: claude), ["--version"],
                                     environment: RealClaudeStatusTests.agentEnvironment(node.root, config: config))
         print("E9: \(claude) --version: \(version.output.trimmingCharacters(in: .whitespacesAndNewlines))")
-        // The node's `claude`: a script running the account's, with the folder given, on Sonnet (its argv[0] stays a
+        // The node's `claude`: a script running the account's, with the folder given, on haiku (its argv[0] stays a
         // path ending in claude, so the process table sees it as Claude).
         let quote = FakeClaude.quoted
         let script = node.testFolder.appendingPathComponent("real-claude")
         try ScratchNode.script("""
             #!/bin/sh
             export CLAUDE_CONFIG_DIR=\(quote(config.path)) DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-            exec \(quote(claude)) --model sonnet "$@"
+            exec \(quote(claude)) --model haiku "$@"
 
             """, at: script)
         let link = node.testFolder.appendingPathComponent("claude")

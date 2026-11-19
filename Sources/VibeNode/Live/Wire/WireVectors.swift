@@ -7,9 +7,9 @@ import VibeCore
 ///
 /// The vectors are the live wire contract's frames, by the names its §11 gives them and §8's (`draft.acked`,
 /// `draft.refused`, `answer.from-a-page`), plus a few more a client's tests want. A card, a lead and every `NodeWire`
-/// message are their encoders' output; a session, the node, the snapshot and delta envelopes and the chat are written
-/// here as the contract gives them until the task that makes their encoder lands (B1, B2, B4), when they're built from
-/// it. Where an encoder writes other than the contract's example (a project id is a hash of the root; a question at
+/// message are their encoders' output, a chat's items and envelopes too (`ChatValue`, `NodeWire.chatSnapshot`,
+/// `chatDelta`); a session, the node and the keyed snapshot and delta envelopes are written here as the contract gives
+/// them until the task that makes their encoder lands (B1, B2), when they're built from it. Where an encoder writes other than the contract's example (a project id is a hash of the root; a question at
 /// version 2 has a revision note; a hello's absent host field isn't written as null), the vector is the encoder's.
 public enum WireVectors {
     /// One frame, and the kind `WireSchema.check` and `validate` check it as.
@@ -322,11 +322,10 @@ public enum WireVectors {
         return made.value
     }
 
-    /// The card with a draft on it (the contract's §8; B5 adds `draft` to `CardStore.Card.value`).
+    /// The card with a draft on it (the contract's §8), as `CardStore.Card.value` writes it.
     static var draftedCard: NodeWire.Value {
         guard case .object(var fields) = questionCard else { return questionCard }
-        fields["draft"] = .object(["text": .string("Yes, merge it"), "version": .int(2), "at": .string("2026-11-17T09:15:11.898Z"),
-                                   "action": .string(draftAction)])
+        fields["draft"] = CardStore.Card.draftValue(.init(text: "Yes, merge it", version: 2, at: date("2026-11-17T09:15:11.898Z"), action: draftAction))
         return .object(fields)
     }
 
@@ -375,47 +374,76 @@ public enum WireVectors {
                        assets: assets)
     }
 
-    // The chat, as the contract's §6 gives it (B4's `ChatValue` writes it after).
+    // The chat, as the reader makes it (`ChatReader`, `ChatTimeline.items`) from a Claude Code transcript and `ChatValue`
+    // writes it (B4), in the contract's §6's example. Item ids are the transcript's (a reply is its line's uuid and its
+    // block's index).
 
-    static func chatReply(_ id: String, at: String, _ text: String) -> NodeWire.Value {
-        .object(["id": .string(id), "type": .string("reply"), "at": .string(at), "text": .string(text)])
+    /// The transcript's lines: a reply before the prompt (what a page reads), the prompt, a reply, a tool and its result,
+    /// a reply, and a worker's report VibeSwitcher typed in.
+    static func chatLine(_ index: Int) -> [String: Any] {
+        func assistant(_ uuid: String, _ at: String, _ content: [[String: Any]]) -> [String: Any] {
+            ["type": "assistant", "uuid": uuid, "timestamp": at, "message": ["id": "msg-\(uuid)", "role": "assistant", "content": content]]
+        }
+        func user(_ uuid: String, _ at: String, _ content: Any) -> [String: Any] {
+            ["type": "user", "uuid": uuid, "timestamp": at, "message": ["role": "user", "content": content]]
+        }
+        switch index {
+        case 0: return assistant("m_00", "2026-11-17T09:09:41.020Z", [["type": "text", "text": "Ready when you are."]])
+        case 1: return user("m_01", "2026-11-17T09:10:00.000Z", "Fix the login test")
+        case 2: return assistant("m_02", "2026-11-17T09:10:04.210Z", [["type": "text", "text": "I'll start by reading the test."]])
+        case 3: return assistant("m_04", "2026-11-17T09:14:05.990Z", [["type": "tool_use", "id": "t_07", "name": "Read",
+                                                                     "input": ["file_path": "Tests/LoginTests.swift"]]])
+        case 4: return user("m_05", "2026-11-17T09:14:06.300Z", [["type": "tool_result", "tool_use_id": "t_07", "content": "import Testing\n…"]])
+        case 5: return assistant("m_03", "2026-11-17T09:14:20.100Z", [["type": "text", "text": "The header name was wrong. Fixed, and the test passes."]])
+        default: return user("m_09", "2026-11-17T09:16:30.000Z",
+                             "[VibeSwitcher · worker login-fix, not the user] The worker on login-fix says it's done: the header name was wrong; the test passes.")
+        }
     }
 
-    static func readTool(result: NodeWire.Value) -> NodeWire.Value {
-        .object(["id": .string("tools:t_07"), "type": .string("tools"), "at": .string("2026-11-17T09:14:05.990Z"),
-                 "summary": .string("Read 1 file"),
-                 "tools": .array([.object(["id": .string("t_07"), "name": .string("Read"), "title": .string("Read LoginTests.swift"),
-                                           "at": .string("2026-11-17T09:14:05.990Z"),
-                                           "detail": .object(["type": .string("read"), "path": .string("Tests/LoginTests.swift")]),
-                                           "result": result])])])
+    /// The wire's items, by id, of the transcript's first `lines` lines.
+    static func chatItems(_ lines: Int) -> [String: NodeWire.Value] {
+        var text = ""
+        for index in 0..<lines {
+            let data = (try? JSONSerialization.data(withJSONObject: chatLine(index), options: [.sortedKeys])) ?? Data()
+            text += String(decoding: data, as: UTF8.self) + "\n"
+        }
+        var log = ChatLog()
+        log.append(ChatReader.read(Data(text.utf8), format: .claude).events)
+        return Dictionary(ChatValue.values(ChatTimeline.items(log.entries, newAfter: nil)).map { ($0.id, $0.value) }) { $1 }
     }
 
-    static let chatSnapshot: NodeWire.Value = .object([
-        "v": .int(NodeWire.version), "kind": .string("snapshot"), "sub": .string("c1"), "collection": .string("chat"),
-        "key": .string(NodeIds.session(host: leadHost)), "epoch": .string(epoch), "seq": .int(318), "after": .null, "more": .bool(true),
-        "items": .array([
-            .object(["id": .string("m_01"), "type": .string("prompt"), "at": .string("2026-11-17T09:10:00.000Z"),
-                     "text": .string("Fix the login test"), "steered": .bool(false), "fromLead": .bool(false), "images": .array([])]),
-            chatReply("m_02", at: "2026-11-17T09:10:04.210Z", "I'll start by reading the test."),
-        ]),
-    ])
+    static var chatEarlier: NodeWire.Value { chatItems(1)["m_00.0"] ?? .null }
+    static var chatPrompt: NodeWire.Value { chatItems(2)["m_01"] ?? .null }
+    static var chatFirstReply: NodeWire.Value { chatItems(3)["m_02.0"] ?? .null }
+    /// The Read tool while it runs (no result yet), and once its result came.
+    static var readTool: NodeWire.Value { chatItems(4)["tools:t_07"] ?? .null }
+    static var readToolDone: NodeWire.Value { chatItems(5)["tools:t_07"] ?? .null }
+    static var chatLastReply: NodeWire.Value { chatItems(6)["m_03.0"] ?? .null }
+    /// A worker's report handed to its lead (`TeamMessage`), as the lead's chat shows it.
+    static var chatReport: NodeWire.Value { chatItems(7)["m_09"] ?? .null }
+
+    static var chatSnapshot: NodeWire.Value {
+        NodeWire.chatSnapshot(sub: "c1", key: leadSession, epoch: epoch, seq: 318, after: nil, more: true, items: [chatPrompt, chatFirstReply])
+    }
 
     static var chatDelta: NodeWire.Value {
-        .object(["v": .int(NodeWire.version), "kind": .string("delta"), "sub": .string("c1"), "prev": .int(318), "seq": .int(320),
-                 "at": .string("2026-11-17T09:14:06.004Z"),
-                 "ops": .array([.object(["op": .string("text"), "id": .string("m_02"), "at": .int(31),
-                                         "append": .string(" It reads the token from the wrong header.")]),
-                                .object(["op": .string("add"), "item": readTool(result: .null)])])])
+        NodeWire.chatDelta(sub: "c1", prev: 318, seq: 320, at: date("2026-11-17T09:14:06.004Z"), ops: [
+            .object(["op": .string("text"), "id": .string("m_02.0"), "at": .int(31), "append": .string(" It reads the token from the wrong header.")]),
+            .object(["op": .string("add"), "item": readTool]),
+        ])
     }
 
     static var chatTail: NodeWire.Value {
-        let result = NodeWire.Value.object(["output": .string("import Testing\n…"), "truncated": .bool(true), "failed": .bool(false),
-                                            "at": .string("2026-11-17T09:14:06.300Z"), "images": .array([])])
-        return .object([
-            "v": .int(NodeWire.version), "kind": .string("snapshot"), "sub": .string("c1"), "collection": .string("chat"),
-            "key": .string(leadSession), "epoch": .string(newEpoch), "seq": .int(2), "after": .string("tools:t_07"), "more": .bool(false),
-            "items": .array([readTool(result: result),
-                             chatReply("m_03", at: "2026-11-17T09:14:20.100Z", "The header name was wrong. Fixed, and the test passes.")]),
+        NodeWire.chatSnapshot(sub: "c1", key: leadSession, epoch: newEpoch, seq: 2, after: "tools:t_07", more: true,
+                              items: [readToolDone, chatLastReply])
+    }
+
+    /// A delta whose ops set an item whole (the tool's result came), remove one, and add a worker's report.
+    static var chatSetAndRemove: NodeWire.Value {
+        NodeWire.chatDelta(sub: "c1", prev: 320, seq: 323, at: date("2026-11-17T09:16:30.010Z"), ops: [
+            .object(["op": .string("set"), "item": readToolDone]),
+            .object(["op": .string("remove"), "id": .string("m_02.0")]),
+            .object(["op": .string("add"), "item": chatReport]),
         ])
     }
 
@@ -462,6 +490,12 @@ public enum WireVectors {
             // §6: the chat.
             ("snapshot.chat", [frame("snapshot", chatSnapshot)]),
             ("delta.chat", [frame("delta.chat", chatDelta)]),
+            ("delta.chat-set", [frame("delta.chat", chatSetAndRemove)]),
+            ("chat.page", [request(.init(id: "6", kind: "chat.page", args: ["session": .string(leadSession), "before": .string("m_01"),
+                                                                           "limit": .int(200)])),
+                           reply("reply.chat.page", .init(re: "6", result: .object([
+                               "items": .array([chatEarlier]),
+                               "more": .bool(false)])))]),
             // §8: a draft, acked; refused.
             ("draft.acked", [request(.init(id: "12", kind: "draft", args: ["card": .string(card), "text": .string("Yes, merge it"),
                                                                           "version": .int(2)], action: draftAction)),

@@ -10,7 +10,7 @@ import Foundation
 extension LeadVault {
     public static let guardedKeys = ["test_command", "regression_command", "init_command", "merge_policy", "sensitive_paths", "strict_paths", "records_dir",
                                      "max_workers", "heavy_slots", "audit_finders", "audit_nit_cap", "auto_advance",
-                                     "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "merge_batching", "remote"]
+                                     "risk_lines", "risk_model", "audit_sample_percent", "small_task_min", "merge_batching", "remote", "security_audit_model"]
         // The project's settings for its boxes (SandboxPolicy, the session sandbox plan's SB-D16): read as written.
         + SandboxPolicy.keys
 
@@ -38,6 +38,8 @@ extension LeadVault {
         case "records_dir": return workflow.recordsDir ?? ""
         // Left out: origin.
         case "remote": return workflow.remote ?? ""
+        // Left out: mythos.
+        case "security_audit_model": return workflow.securityAuditModel
         default: return workflow.settings[key] ?? ""
         }
     }

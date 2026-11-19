@@ -143,7 +143,7 @@ public enum SandboxPlanner {
         // build, the installed hook.
         var toolchain: [String] = []
         for folder in inputs.pathFolders + [inputs.build + "/bin", inputs.build + "/Resources/bin", inputs.accountHome + "/.vibeswitcher/bin"] {
-            let spelled = URL(fileURLWithPath: folder).standardizedFileURL.path
+            let spelled = SandboxPolicy.lexical(folder)
             guard folder.hasPrefix("/"), exists(spelled), !toolchain.contains(spelled),
                   !(system + ["/bin", "/sbin", "/lib", "/lib64"]).contains(where: { spelled == $0 || SandboxPolicy.isBelow(spelled, $0) }),
                   sourceRefusal(spelled, inputs) == nil else { continue }
@@ -244,7 +244,7 @@ public enum SandboxPlanner {
             let name = String(entry[..<equals])
             return allowed.contains(name) || allowedPrefixes.contains { name.hasPrefix($0) }
         }
-        environment += ["HOME=\(inputs.home)", "PATH=\((toolchain.filter { inputs.pathFolders.map { URL(fileURLWithPath: $0).standardizedFileURL.path }.contains($0) } + ["/usr/local/bin", "/usr/bin", "/bin"]).joined(separator: ":"))",
+        environment += ["HOME=\(inputs.home)", "PATH=\((toolchain.filter { inputs.pathFolders.map(SandboxPolicy.lexical).contains($0) } + ["/usr/local/bin", "/usr/bin", "/bin"]).joined(separator: ":"))",
                         "SHELL=/bin/bash", "TMPDIR=\(inputs.temporary)", "VIBESWITCHER_ROLE=\(role.rawValue)"]
         if agent {
             environment += ["\(DoorProtocol.variable)=\(door)", "DISABLE_AUTOUPDATER=1"]

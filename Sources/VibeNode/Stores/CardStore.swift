@@ -50,6 +50,26 @@ public final class CardStore: @unchecked Sendable {
         }
     }
 
+    /// An answer drafted in a web client (the live plan's LW-D6, B5): the user's words for the card, kept in the server's
+    /// memory and told to nobody. The lead hears nothing and the vault records nothing until the user takes it with
+    /// `vibeswitcher answer CARD` in a terminal and types the card's code; that request is the user's voice, as every
+    /// answer is. The last one wins.
+    public struct Draft: Equatable, Sendable {
+        public var text: String
+        /// The question's version the page showed when the draft was made.
+        public var version: Int
+        public var at: Date
+        /// The page's action id for it.
+        public var action: String
+
+        public init(text: String, version: Int, at: Date, action: String) {
+            self.text = text
+            self.version = version
+            self.at = at
+            self.action = action
+        }
+    }
+
     public struct Card: Equatable, Sendable {
         public var id: String
         public var code: String
@@ -68,6 +88,8 @@ public final class CardStore: @unchecked Sendable {
         /// Closed: answered, withdrawn, decided by its timer, accepted, kept refused, or gone.
         public var closed: String?
         public var at: Date
+        /// The answer a web page drafted (`Draft`), until the card closes or the lead revises the wording it was for.
+        public var draft: Draft?
 
         public init(id: String = NodeIds.card(), root: String, kind: Kind, at: Date = Date()) {
             self.id = id
@@ -95,7 +117,11 @@ public final class CardStore: @unchecked Sendable {
 
     public init() {}
 
+    /// `card` kept and sent. A draft doesn't outlive the card's question as it was drafted for: a card that closed (an
+    /// answer, a withdrawal, its timer) or whose question the lead revised since loses it.
     func put(_ card: Card) {
+        var card = card
+        if let draft = card.draft, !card.isOpen || card.question?.version != draft.version { card.draft = nil }
         cards[card.id] = card
         changes.send(card.id, card)
     }

@@ -132,12 +132,17 @@ starter=${TEST_UNDER_LOAD_INNER-} waited_until=${TEST_UNDER_LOAD_WAIT_UNTIL-} lo
 unset TEST_UNDER_LOAD_INNER TEST_UNDER_LOAD_WAIT_UNTIL TEST_UNDER_LOAD_LOCK_NOTE
 
 # Who this run belongs to: its parent, and the session's claude process when it runs in one. The load stops when
-# either is gone, so a session whose turn has no live owner can't start any.
+# either is gone, so a session whose turn has no live owner can't start any. Claude Code's native install runs as its
+# versioned binary (~/.local/share/claude/versions/2.1.328): started by that path, as the Linux node starts its roles,
+# its comm is the version, not claude, so an ancestor whose executable is in such a folder counts too (Linux reads it
+# from /proc/PID/exe; the Mac's comm is the executable's path already). The tests name another program.
 claude_ancestor() {
-    local pid=$PPID comm
+    local pid=$PPID comm executable name=${TEST_UNDER_LOAD_OWNER_NAME:-claude}
     while [[ $pid -gt 1 ]]; do
         comm=$(process_field comm "$pid") || return 1
-        [[ ${comm##*/} == "${TEST_UNDER_LOAD_OWNER_NAME:-claude}" ]] && { echo "$pid"; return 0; }
+        [[ ${comm##*/} == "$name" ]] && { echo "$pid"; return 0; }
+        executable=$(readlink "/proc/$pid/exe" 2> /dev/null) || executable=$comm
+        [[ $executable == */.local/share/"$name"/versions/* ]] && { echo "$pid"; return 0; }
         pid=$(process_field ppid "$pid" | tr -d ' ')
         [[ -n $pid ]] || return 1
     done

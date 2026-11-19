@@ -423,6 +423,13 @@ struct ProcessTableTests {
         #expect(ProcessTable.identify(pid: 7, start: 1, comm: "codex", tty: "ttys001", arguments: blind) == .unknown)
         #expect(ProcessTable.identify(pid: 7, start: 1, comm: "claude", tty: "ttys001", arguments: blind) == .agent(.claude))
         #expect(ProcessTable.identify(pid: 7, start: 1, comm: "2.1.302", tty: nil, arguments: blind) == ProcessTable.Identity.none)
+        // Started by its resolved path (the Linux node's lead and roles): argv[0] is the versioned binary itself.
+        let versioned = ArgumentCache { _ in ["/home/me/.local/share/claude/versions/2.1.328", "--permission-mode", "auto"] }
+        #expect(ProcessTable.identify(pid: 7, start: 1, comm: "2.1.328", tty: "ttypts4", arguments: versioned) == .agent(.claude))
+        for other in ["/home/me/.local/share/other/versions/2.1.328", "/home/me/claude/2.1.328", "versions/2.1.328", "/claude/versions/.."] {
+            #expect(ProcessTable.identify(pid: 7, start: 1, comm: "2.1.328", tty: "ttypts4", arguments: ArgumentCache { _ in [other] })
+                    == ProcessTable.Identity.none, "\(other)")
+        }
         // Another user's process: by its name alone.
         #expect(ProcessTable.identify(pid: 7, start: 1, comm: "login", tty: "ttys001", arguments: nil) == ProcessTable.Identity.none)
         #expect(ProcessTable.identify(pid: 7, start: 1, comm: "codex", tty: "ttys001", arguments: nil) == .agent(.codex))

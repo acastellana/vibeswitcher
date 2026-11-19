@@ -3,8 +3,10 @@
 The client for a VibeSwitcher 2 node (`docs/superpowers/specs/2026-11-12-vibeswitcher-2-design.md`, "The web client"
 and "Stage 5"). Served by the node itself (embedded in its server, `scripts/webapp-embed.sh`), it follows the node live
 over its WebSocket (`js/socket.js`, the wire contract `docs/superpowers/specs/2026-11-17-v2-live-wire-contract.md`):
-the node's status, the sessions as their status changes, the leads' questions. It reads only: an answer is given in a
-terminal, with the line the card shows. With `?mock` it runs on invented data instead and needs no server.
+the node's status, the sessions as their status changes, the leads' questions, and a session's conversation as it
+grows. It reads, and drafts: a pick on a card leaves a draft there, told to nobody, and the card shows the line that
+sends it from a terminal (`vibeswitcher answer CARD`, a click to copy), where the card's code is typed. No click here
+is the user's answer. With `?mock` it runs on invented data instead and needs no server.
 
 ```sh
 bash scripts/sandbox-server.sh run && bash scripts/sandbox-server.sh url   # a scratch node, and the page's address
@@ -19,7 +21,7 @@ bash scripts/test.sh --web WebApp/tests
 | `/?mock` | The mock node: a lead's team moves tasks across its board, a question arrives, sessions finish. |
 | `/?still` | The mock's snapshot with nothing happening after it (for screenshots). |
 | `/?empty` | A mock node with no sessions. |
-| `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat. |
+| `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat: its newest 200 first, the rest paged in as you scroll up. |
 | `/?theme=dark`, `/?theme=light` | The other look, whatever the system says. |
 
 Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
@@ -41,7 +43,8 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | --- | --- |
 | `index.html`, `style.css`, `app.js` | The page, its one stylesheet, and the entry: mounts the views, the keys, the clock. |
 | `js/store.js` | The state: a snapshot, then deltas. Knows nothing of the page or of where messages come from. |
-| `js/socket.js` | The node's live feed: pairing, the token, the four subscriptions, the contract's order rules, reconnecting. |
+| `js/socket.js` | The node's live feed: pairing, the token, the four subscriptions and each shown chat's, the contract's order rules, reconnecting. |
+| `js/chatops.js` | A chat's ops (`add`, `text`, `set`, `remove`), applied all or none; the mock makes them as the node does. |
 | `js/wire.js` | The node's values in the shapes the views read, inventing nothing (a field the node doesn't send stays empty). |
 | `js/mock.js` | Stands in for the node with `?mock`. |
 | `wire/` | The validators and vectors, generated from the node's encoders (`vibeswitcher wire-vectors`): don't edit them. |
@@ -93,6 +96,7 @@ end and ⌥⌘0 open and close it.
 | Overview › Agent: Agent, Terminal | `agent`, `terminal` |
 | Overview › Team: Role | `role` |
 | Team › Lead: Questions, Held, Reports, its notice | the lead's `questions`, `held`, `reportsWaiting`, `notice` |
+| Activity: files changed, commands run | the session's chat (the contract's §6): a tool's `detail` of type `edit`, `write` or `command`, and its `result` |
 
 **Asked of the node** for the rest (the mock sends all of it, so `?mock` shows the finished look):
 
@@ -102,7 +106,6 @@ end and ⌥⌘0 open and close it.
 | Overview › Agent: Session, Process, Command, Size | a session's `agentSession` (the agent's own session id), `pid`, `command`, `size: { cols, rows }` |
 | Overview › Team: Lead, Task; the Team tab for a worker or a verifier | a worker's or verifier's `lead` (the project's id) and its task's slug (the wire's `task` is what it works on, in words) |
 | Team › Tasks | the `boards` collection (below) |
-| Activity | the `chat` collection (the contract's §6): a tool's `detail` of type `edit` (`path`, `changes`), `write` (`path`, `content`) or `command`, and its `result` (`failed`, `at`) |
 | Folders as `~/…` | the node's `home` |
 
 The Mac's inspector also shows what no client field carries yet: a session's exit status and time, a command's exit
@@ -117,29 +120,36 @@ decisions, scorecard, answered questions and files.
 id, in one notification: a list is never emptied first) and `store.change(name, [{ id, value }])` for a delta, after
 it has run every frame through `wire/validators.js` and judged each subscription's order (`prev` and `seq`). Until
 `hello` says otherwise (`store.can(kind)`, from `hello.kinds`; `store.follows(collection)`), the views offer only what
-the connection may do: the node's page reads, so a card shows `vibeswitcher answer …` instead of its buttons, and the
-chat, the terminal and a lead's board say they come in a later build. `mock.js` keeps the older whole-state messages
-below, which the store still takes:
+the connection may do: the node's page reads and drafts (`draft`, not `answer`), so a card's options leave a draft
+(`store.draft`, an overlay kept until the cards stream reaches the ack's `applied`: `feed.reached`) and the card shows
+the line that confirms it; a page that only reads shows `vibeswitcher answer …` with the options as text; the
+terminal and a lead's board say they come in a later build, and the chat says so where `chat.page` isn't among the
+kinds. `mock.js` keeps the older whole-state messages below for the keyed collections, which the store still takes:
 
 ```js
-feed.start()                  // sends store.apply(snapshot), then deltas
-feed.resync()                 // the store saw a gap: send a snapshot again
-feed.subscribeChat(sessionId) // send that chat's rows, then its deltas
-feed.request(message)         // → Promise of { ok: true, result } or { ok: false, error: { code, message } }
+feed.start()                    // sends store.apply(snapshot), then deltas
+feed.resync()                   // the store saw a gap: send a snapshot again
+feed.subscribeChat(sessionId)   // follow a chat: store.chatSnapshot(id, { items, after, more }), then store.chatOps(id, ops)
+feed.unsubscribeChat(sessionId) // no longer shown: its items stay, and it resumes from them when shown again
+feed.pageChat(sessionId, before)  // → Promise of chat.page's reply: the items just before `before`
+feed.request(message)           // → Promise of { ok: true, result } or { ok: false, error: { code, message } }
 ```
+
+A chat is the wire's (the contract §6), in both feeds: items of `type` `prompt`, `reply`, `tools` (a run of tool calls,
+with the node's `summary`) and `team`, and deltas of ops. A `text` op whose `at` isn't the length the page holds is a
+gap: nothing of its delta is applied, and the chat asks for a tail from that item. The chat view draws only the rows
+near what you see (two spacers stand in for the rest, at their measured heights), pages older items in as you scroll
+up to them, keeps the row under your eyes where it is, and stays at the end only when it was there.
 
 Messages are the design's live protocol ("State as snapshot and deltas"), in `NodeWire`'s envelope (`v`, `kind`):
 
 ```js
 { v: 1, kind: 'snapshot', epoch, seq, state: { node, sessions: [], leads: [], cards: [], boards: [] } }
 { v: 1, kind: 'delta', seq, changes: [change, …] }       // seq is the last one + 1; anything else is a gap
-{ v: 1, kind: 'chat', session, items: [item, …] }        // a chat subscription's first answer
 
 // A change is a store's `Changes<T>.Delta` (id, and the value now or null for gone), with the store it's in:
 { in: 'sessions' | 'leads' | 'cards' | 'boards', id, value }   // value null: removed
 { in: 'node', id: 'local', value }
-{ in: 'chat', session, id, value }                             // a new or replaced row; null: removed
-{ in: 'chat', session, id, append: { text: ' more words' } }   // a streaming row's text grows
 
 // A request, as NodeWire.Request: `action` is a new UUID, sent again on a retry so it's done once.
 { v: 1, id, kind: 'answer' | 'hold' | 'send' | 'ask.answer' | 'seen', args, action }
@@ -237,19 +247,19 @@ isn't an inference.
   }] }
 ```
 
-### Chat item (asked of the node; the kinds are `ChatEntry.Kind`'s, `Sources/VibeCore/ChatTranscript.swift`)
+### Chat item (in the node: `ChatValue`, the contract §6)
 
 ```js
-{ id, kind: 'prompt', text, at, action }        // action: the id of the request that sent it, when this client did
-{ id, kind: 'reply', text, at, streaming }      // markdown; grows by `append` while streaming
-{ id, kind: 'tool', name: 'Bash', title, at,    // title as ToolActivity.describe writes it
-  detail: { type: 'command', command }          // or { type: 'read', path }, { type: 'edit', path, changes: [{ old, new }] }
-  result: { output, failed, at } }              // null while it runs
-{ id, kind: 'team', from: 'worker', title, text, at }           // a TeamMessage
-{ id, kind: 'ask', title, text, options: [], answer, at }       // the agent's own prompt on its screen
+{ id, type: 'prompt', at, text, steered, fromLead, images: [{ id, mediaType, bytes }] }   // an image: no bytes
+{ id, type: 'reply', at, text }                    // markdown, drawn to nodes by text.js
+{ id: 'tools:<first tool id>', type: 'tools', at, summary: 'Ran 3 commands · edited 2 files',
+  tools: [{ id, name, title, at, detail: { type: 'command', command } /* read, edit, write, thought, todos, … */,
+            result: { output, truncated, failed, at, images } /* null while it runs */ }] }
+{ id, type: 'team', at, text, title, sender: { kind, name, task }, message: 'report', task, part }   // a TeamMessage
 ```
 
-The client folds a run of `tool` items into one line ("Ran 2 commands · edited 1 file"), as `ChatTimeline` does.
+The mock adds `{ type: 'ask', title, text, options, answer }` (the agent's own prompt on its screen), `streaming` on a
+reply, and `action` on a prompt this page sent.
 
 ### The node (in the node today: `status`'s result and what `status --json` adds)
 

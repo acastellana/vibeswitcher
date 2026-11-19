@@ -60,36 +60,67 @@ test('a collection this client doesn’t know is ignored (rule 3)', () => {
   assert.equal(store.state.seq, 1);
 });
 
-test('a chat takes its rows, then appends, grows a streaming row’s text, replaces and removes', () => {
+const reply = (id, text) => ({ id, type: 'reply', at: null, text });
+
+test('a chat takes its snapshot, then ops: added, its text grown, set and removed', () => {
   const store = createStore();
   feed(store);
   store.apply(snapshot('e1', 0, [session('local:a')]));
   store.openChat('local:a');
-  store.apply({ v: 1, kind: 'chat', session: 'local:a', items: [{ id: 'm1', kind: 'prompt', text: 'Hi' }] });
+  store.chatSnapshot('local:a', { items: [{ id: 'm1', type: 'prompt', at: null, text: 'Hi', steered: false, fromLead: false, images: [] }], after: null, more: true });
+  const chat = store.state.chats.get('local:a');
+  assert.equal(chat.loaded, true);
+  assert.equal(chat.more, true);
   const seen = [];
   store.subscribe('chat:local:a', (changes) => seen.push(...changes.map((change) => change.type)));
-  store.apply({ v: 1, kind: 'delta', seq: 1, changes: [{ in: 'chat', session: 'local:a', id: 'm2', value: { id: 'm2', kind: 'reply', text: '', streaming: true } }] });
-  store.apply({ v: 1, kind: 'delta', seq: 2, changes: [{ in: 'chat', session: 'local:a', id: 'm2', append: { text: 'Hel' } }, { in: 'chat', session: 'local:a', id: 'm2', append: { text: 'lo' } }] });
-  const chat = store.state.chats.get('local:a');
+  assert.equal(store.chatOps('local:a', [{ op: 'add', item: reply('m2', 'Hel') }, { op: 'text', id: 'm2', at: 3, append: 'lo' }]), 'ok');
   assert.equal(chat.items[1].text, 'Hello');
-  store.apply({ v: 1, kind: 'delta', seq: 3, changes: [{ in: 'chat', session: 'local:a', id: 'm1', value: null }] });
-  assert.deepEqual(chat.items.map((item) => item.id), ['m2']);
+  assert.equal(store.chatOps('local:a', [{ op: 'set', item: reply('m2', 'Goodbye') }, { op: 'remove', id: 'm1' }]), 'ok');
+  assert.deepEqual(chat.items.map((item) => [item.id, item.text]), [['m2', 'Goodbye']]);
   assert.equal(chat.index.get('m2'), 0);
-  assert.deepEqual(seen, ['put', 'append', 'append', 'remove']);
+  assert.deepEqual(seen, ['add', 'text', 'set', 'remove']);
 });
 
-test('a message sent from here shows at once, and the transcript’s own row takes its place', () => {
+test('ops that don’t fit what the chat holds are a gap, and nothing of them is applied', () => {
+  const store = createStore();
+  store.chatSnapshot('local:a', { items: [reply('m1', 'Hello')] });
+  const chat = store.state.chats.get('local:a');
+  // An add first, then a text op at a length this client doesn't hold: neither is applied.
+  assert.equal(store.chatOps('local:a', [{ op: 'add', item: reply('m2', 'x') }, { op: 'text', id: 'm1', at: 9, append: '!' }]), 'gap');
+  assert.deepEqual(chat.items.map((item) => item.text), ['Hello']);
+  assert.equal(store.chatOps('local:a', [{ op: 'set', item: reply('nope', 'x') }]), 'gap');
+  assert.equal(store.chatOps('local:a', [{ op: 'text', id: 'm1', at: 5, append: ' 😀' }, { op: 'text', id: 'm1', at: 8, append: '!' }]), 'ok');
+  assert.equal(chat.items[0].text, 'Hello 😀!');
+});
+
+test('a tail keeps what came before its item and replaces the rest; older items page in before the first', () => {
+  const store = createStore();
+  store.chatSnapshot('local:a', { items: [reply('m1', 'One'), reply('m2', 'Tw'), reply('m3', 'Gone')], more: true });
+  const kinds = [];
+  store.subscribe('chat:local:a', (changes) => kinds.push(...changes.map((change) => change.type)));
+  store.chatSnapshot('local:a', { items: [reply('m2', 'Two'), reply('m4', 'Four')], after: 'm2', more: false });
+  const chat = store.state.chats.get('local:a');
+  assert.deepEqual(chat.items.map((item) => item.text), ['One', 'Two', 'Four']);
+  assert.equal(chat.more, true, 'the items before the tail are still this client’s, and so is what it knew of older ones');
+  store.chatPage('local:a', [reply('m0', 'Zero'), reply('m1', 'One again')], false);
+  assert.deepEqual(chat.items.map((item) => item.id), ['m0', 'm1', 'm2', 'm4']);
+  assert.equal(chat.index.get('m4'), 3);
+  assert.equal(chat.more, false);
+  assert.deepEqual(kinds, ['tail', 'page']);
+});
+
+test('a message sent from here shows at once, and the transcript’s own item takes its place', () => {
   const store = createStore();
   const calls = feed(store);
   store.apply(snapshot('e1', 0, [session('local:a')]));
   store.openChat('local:a');
-  store.apply({ v: 1, kind: 'chat', session: 'local:a', items: [] });
+  store.chatSnapshot('local:a', { items: [] });
   store.send('local:a', 'Run the tests');
   const chat = store.state.chats.get('local:a');
   assert.equal(chat.items.length, 1);
   assert.equal(chat.items[0].pending, true);
   const action = calls.requests[0].action;
-  store.apply({ v: 1, kind: 'delta', seq: 1, changes: [{ in: 'chat', session: 'local:a', id: 'm9', value: { id: 'm9', kind: 'prompt', text: 'Run the tests', action } }] });
+  store.chatOps('local:a', [{ op: 'add', item: { id: 'm9', type: 'prompt', at: null, text: 'Run the tests', steered: false, fromLead: false, images: [], action } }]);
   assert.deepEqual(chat.items.map((item) => item.id), ['m9']);
   assert.equal(chat.index.get('m9'), 0);
 });
@@ -118,5 +149,9 @@ test('a snapshot from another server start replaces everything and asks for the 
   store.apply(snapshot('e2', 0, [session('local:z')]));
   assert.equal(store.state.connection, 'live');
   assert.deepEqual([...store.state.sessions.keys()], ['local:z']);
+  assert.deepEqual(calls.chats, ['local:a', 'local:a']);
+  // A chat no longer shown isn't asked for again.
+  store.closeChat('local:a');
+  store.apply(snapshot('e3', 0, [session('local:z')]));
   assert.deepEqual(calls.chats, ['local:a', 'local:a']);
 });

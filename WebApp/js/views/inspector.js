@@ -249,7 +249,7 @@ function activityPane(app, scroller, again) {
 
   // Text growing in a reply changes nothing here; a row put, replaced or gone may.
   function onChat(changes) {
-    if (!changes.some((change) => change.type !== 'append')) return;
+    if (!changes.some((change) => change.type !== 'text')) return;
     stale = true;
     again();
   }
@@ -269,7 +269,7 @@ function activityPane(app, scroller, again) {
         fresh = true;
       }
       const chat = store.state.chats.get(session.id);
-      const following = store.can('chat');
+      const following = store.can('chat.page');
       const loaded = !!chat?.loaded;
       const home = store.state.node?.home || null;
       const now = [session.cwd, home, following, loaded].join('|');

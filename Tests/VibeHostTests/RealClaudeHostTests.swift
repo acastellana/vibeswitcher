@@ -82,7 +82,7 @@ import Testing
         let (first, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
         let quote = RecentProjects.shellQuote
         let seq = first.send(.spawn(SpawnRequest(cwd: projectPath,
-                                                 command: "exec \(quote(claude)) --model sonnet --permission-mode manual",
+                                                 command: "exec \(quote(claude)) --model haiku --permission-mode manual",
                                                  env: ["CLAUDE_CONFIG_DIR": config.path, "DISABLE_AUTOUPDATER": "1",
                                                        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"],
                                                  cols: 80, rows: 24, keepShell: false, label: "Claude", agent: "claude")))

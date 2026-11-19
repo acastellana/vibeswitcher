@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import VibeCore
+import VibePlatform
 
 /// A real Claude Code turn in the session sandbox's prototype box (`prototype.sh`, the session sandbox plan's SB0
 /// Step 3), to measure what the shim's box must give it: which entries of its config folder it writes, whether it
@@ -8,7 +9,7 @@ import VibeCore
 /// trust entry spares the trust question, and which hook events it sends. Each is printed as a line starting "SB0:",
 /// for the inventory's "The session sandbox, measured".
 ///
-/// On demand only: it spends a prompt of the account's usage, on Sonnet, and needs a Claude Code config folder the user
+/// On demand only: it spends a prompt of the account's usage, on haiku (the cheapest model), and needs a Claude Code config folder the user
 /// logged in once (an agent never logs in, and never reads or copies `.credentials.json`), named on the run's command
 /// line: `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR=<that folder> bash scripts/test.sh --filter RealClaudeSandboxTests`.
 ///
@@ -75,7 +76,7 @@ struct RealClaudeSandboxTests {
         let options = ["--ro", claude]
             + ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"].flatMap { ["--env", "\($0)=\(proxyURL)"] }
             + ["--env", "DISABLE_AUTOUPDATER=1", "--env", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"]
-        let program = [claude, "--model", "sonnet", "--debug", "--allowedTools", "Bash(touch made-in-the-box)",
+        let program = [claude, "--model", "haiku", "--debug", "--allowedTools", "Bash(touch made-in-the-box)",
                        "--settings", settingsText, Self.prompt]
         let boxCommand = ([PrototypeBox.script.path, home.path, worktree.path, config.path] + options + ["--"] + program)
             .map(Self.quoted).joined(separator: " ")
@@ -149,7 +150,8 @@ struct RealClaudeSandboxTests {
         for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] {
             var info = stat()
             guard lstat(folder.appendingPathComponent(name).path, &info) == 0 else { continue }
-            found[name] = "\(info.st_ino) \(info.st_ctim.tv_sec).\(info.st_ctim.tv_nsec) \(info.st_size)"
+            let changed = Platform.Files.changed(info)
+            found[name] = "\(info.st_ino) \(changed.tv_sec).\(changed.tv_nsec) \(info.st_size)"
         }
         return found
     }

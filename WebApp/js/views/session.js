@@ -119,7 +119,7 @@ export function sessionView(app) {
     strip.el.hidden = !hasBoard;
     if (hasBoard) strip.update(session);
     // Until the page follows a chat, the terminal's placeholder doesn't send you to one.
-    const chatFollowed = store.can('chat');
+    const chatFollowed = store.can('chat.page');
     showChat.hidden = !chatFollowed;
     setText(terminalSays, chatFollowed ? 'The live terminal comes to this page in a later build. Until then, the session’s conversation is in Chat.'
       : 'The live terminal comes to this page in a later build.');

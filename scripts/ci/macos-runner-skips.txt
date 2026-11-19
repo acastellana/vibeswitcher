@@ -9,5 +9,6 @@ LeadRemoteTests/automaticFetchAsksTheVaultNothingBeforeItsNextFetchIsDue  CAUSE 
 LoadReportScriptTests/itPrintsTheProfileAndFreezesPerLoadBucketForTheDays  scripts/load-report.sh's python3 on the runner refuses a date ending in Z (ValueError in fromisoformat)
 MCPHandoverTests/anUnsignedBuildLeavesTheOldOneServing  the runner has System Integrity Protection off and runs an unsigned build's probe; a Mac kills it (signal 9)
 SessionStraysTests/aProcessWhoseEnvironmentIsHiddenIsTheSessionsOnlyWhenItStartedIt  the runner has System Integrity Protection off and shows another process's environment, which a Mac hides
+TeamRowsTests/anAuditHeldBeforeItsVerifierStartsShowsTheResetInsteadOfWorkerProgress  pins main's Fable for a sensitive audit; v2's security_audit_model default is mythos (port map row 359); un-skip when main takes the setting and its test sets security_audit_model
 TestScriptWidthTests/aRunsSwiftTestGetsTheCoresFreeAtLeastItsSlotsShare  expects the width a heavy slot gives on a Mac with more cores than the runner's
 Tests/SecurityAudit/library-injection.test.mjs  the runner has System Integrity Protection off: an injected library loads into a Hardened Runtime binary, which a Mac refuses

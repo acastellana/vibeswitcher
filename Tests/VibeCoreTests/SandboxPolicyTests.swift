@@ -8,7 +8,11 @@ struct SandboxPolicyTests {
     let scratch = Scratch()
 
     func home() throws -> String {
-        let home = scratch.url("policy-home").resolvingSymlinksInPath().path
+        // Made, then resolved by realpath: the Mac's `resolvingSymlinksInPath` gives /private/tmp back as /tmp, which
+        // isn't the path the policy resolves to.
+        let made = scratch.url("policy-home").path
+        try FileManager.default.createDirectory(atPath: made, withIntermediateDirectories: true)
+        let home = SandboxPolicy.resolved(made)
         for folder in [".ssh", ".config/gh", ".gnupg", ".vibeswitcher/state", ".cache/sdk", "sdk", "projects/app", "projects/other"] {
             try FileManager.default.createDirectory(atPath: home + "/" + folder, withIntermediateDirectories: true)
         }
@@ -73,6 +77,14 @@ struct SandboxPolicyTests {
         // Past the limit, refused rather than passed.
         #expect(SandboxPolicy.repositories(home + "/work", nil, limit: 2) == .tooBig)
         #expect(SandboxPolicy.repositories(home + "/sdk", nil) == .none)
+    }
+
+    /// A path is tidied by its spelling alone: `.`, `..` and empty components out, `/private/…` kept as it is (the
+    /// Mac's `standardizedFileURL` drops `/private`, which no longer matches a home resolved by realpath).
+    @Test func aPathIsTidiedByItsSpellingAlone() {
+        #expect(SandboxPolicy.lexical("/private/var/a/./b//c/../d/") == "/private/var/a/b/d")
+        #expect(SandboxPolicy.lexical("/a/..") == "/" && SandboxPolicy.lexical("/..") == "/" && SandboxPolicy.lexical("/") == "/")
+        #expect(SandboxPolicy.lexical("relative/../x") == "relative/../x")
     }
 
     @Test func aLinkIsResolvedBeforeItIsJudged() throws {

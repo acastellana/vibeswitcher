@@ -5,7 +5,7 @@ import VibeCore
 /// `--host-connector N --host-socket PATH`, then `--node --node-root PATH` (the user's node) or `--root PATH
 /// --node-root PATH` (a scratch host's), then each `--server-arg X` a scratch host was given. The test flags
 /// (`--test-user-scopes=…`, `--test-housekeeping=…`, `--test-child=…`, `--test-first-look`,
-/// `--test-install-root=…`, and the web's `--test-web-port=…`, `--test-web-root=…`, `--test-web-pair`) come only that way; a server with `--node`
+/// `--test-install-root=…`, and the web's `--test-web-port=…`, `--test-web-root=…`, `--test-web-pair`, `--test-web-terminal`) come only that way; a server with `--node`
 /// refuses each, with a log line, and takes nothing from it.
 public struct ServerArguments: Equatable, Sendable {
     /// The connector's descriptor, inherited.
@@ -42,6 +42,9 @@ public struct ServerArguments: Equatable, Sendable {
     /// A scratch server takes `web.open` from any process of the uid, with no voice or typed code (the sandbox's and the
     /// tests' "scratch form"): the user's node never does.
     public var testWebPair = false
+    /// A scratch server opens a session's terminal to a page (`term.open`, the live plan's slice 4 and I4, LW-D12): the
+    /// user's node never does, and answers `unknown-kind`.
+    public var testWebTerminal = false
     /// The test flags a server with `--node` left out, each as given.
     public var refused: [String] = []
 
@@ -53,6 +56,7 @@ public struct ServerArguments: Equatable, Sendable {
     public static let testWebPortFlag = "--test-web-port="
     public static let testWebRootFlag = "--test-web-root="
     public static let testWebPairFlag = "--test-web-pair"
+    public static let testWebTerminalFlag = "--test-web-terminal"
 
     /// The housekeeping period without a test's: 30 s (S2).
     public static let housekeeping = 30
@@ -72,6 +76,7 @@ public struct ServerArguments: Equatable, Sendable {
         var webPort: UInt16?
         var webRoot: String?
         var webPair = false
+        var webTerminal = false
         var tests: [String] = []
         var index = 1
         func value() -> String? {
@@ -134,6 +139,9 @@ public struct ServerArguments: Equatable, Sendable {
             case testWebPairFlag:
                 tests.append(word)
                 webPair = true
+            case testWebTerminalFlag:
+                tests.append(word)
+                webTerminal = true
             default:
                 return .failure(Usage("unknown argument \(word)"))
             }
@@ -145,6 +153,7 @@ public struct ServerArguments: Equatable, Sendable {
         var parsed = ServerArguments(connector: connector, hostSocket: hostSocket, node: node, root: root, nodeRoot: nodeRoot,
                                      testUserScopes: scopes, testHousekeeping: housekeeping, testChild: child, testFirstLook: firstLook,
                                      testInstallRoot: installRoot, testWebPort: webPort, testWebRoot: webRoot, testWebPair: webPair)
+        parsed.testWebTerminal = webTerminal
         if node {
             parsed.refused = tests
             parsed.testUserScopes = nil
@@ -155,6 +164,7 @@ public struct ServerArguments: Equatable, Sendable {
             parsed.testWebPort = nil
             parsed.testWebRoot = nil
             parsed.testWebPair = false
+            parsed.testWebTerminal = false
         }
         return .success(parsed)
     }

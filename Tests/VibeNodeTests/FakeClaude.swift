@@ -36,15 +36,18 @@ enum FakeClaude {
     /// Writes the fake into `folder` (made if missing): `fake-bin/fake_claude.py`, `fake-bin/py/claude` (a symbolic link
     /// to `/usr/bin/python3`: exec'd by that name, the process's `comm` is `claude` and its `argv[0]` ends in `claude`,
     /// which `ProcessTable.identify` needs), the launcher `fake-bin/claude` (copied by `/bin/cp` from `claude.sh`), and
-    /// the sessions' folder `fake/`. From a thread that may block (it waits for the copy).
-    static func install(in folder: URL) throws -> Install {
+    /// the sessions' folder `fake/`. From a thread that may block (it waits for the copy). `program`: the link's path under
+    /// `fake-bin/py`, the name the fake runs by; `share/claude/versions/2.1.328` runs it as Claude Code's native installer
+    /// does when started by its resolved path (the user's node, EN-D13): `comm` and `argv[0]` its version, not `claude`.
+    static func install(in folder: URL, program: String = "claude") throws -> Install {
         let bin = folder.appendingPathComponent("fake-bin", isDirectory: true)
         let py = bin.appendingPathComponent("py", isDirectory: true)
+        let python = py.appendingPathComponent(program)
         let sessions = folder.appendingPathComponent("fake", isDirectory: true)
-        for made in [py, sessions] { try FileManager.default.createDirectory(at: made, withIntermediateDirectories: true) }
+        for made in [python.deletingLastPathComponent(), sessions] { try FileManager.default.createDirectory(at: made, withIntermediateDirectories: true) }
         let file = bin.appendingPathComponent("fake_claude.py")
         try script.write(to: file, atomically: true, encoding: .utf8)
-        try FileManager.default.createSymbolicLink(atPath: py.appendingPathComponent("claude").path, withDestinationPath: "/usr/bin/python3")
+        try FileManager.default.createSymbolicLink(atPath: python.path, withDestinationPath: "/usr/bin/python3")
         let launcher = bin.appendingPathComponent("claude")
         // Written here as data (`claude.sh`, never exec'd), and copied to the launcher by a child: this process never
         // holds the launcher open for writing, so no child it starts meanwhile (another test's session, a git) can
@@ -52,7 +55,7 @@ enum FakeClaude {
         let text = bin.appendingPathComponent("claude.sh")
         try """
         #!/bin/sh
-        exec \(quoted(py.appendingPathComponent("claude").path)) -I -u \(quoted(file.path)) --fake-folder \(quoted(sessions.path)) "$@"
+        exec \(quoted(python.path)) -I -u \(quoted(file.path)) --fake-folder \(quoted(sessions.path)) "$@"
 
         """.write(to: text, atomically: true, encoding: .utf8)
         guard try runToEnd("/bin/cp", [text.path, launcher.path]) == 0 else {

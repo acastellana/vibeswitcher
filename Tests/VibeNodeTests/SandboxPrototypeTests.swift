@@ -9,7 +9,9 @@ import VibeCore
 struct SandboxPrototypeTests {
     private let scratch = Scratch()
 
-    @Test func thePrototypeRefusesTheAccountsHome() async throws {
+    /// Linux only: the script is the Linux box's prototype (getent, GNU realpath -e, unshare), and the Mac has no box.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux only: the prototype is Linux's, and the Mac has no box"))
+    func thePrototypeRefusesTheAccountsHome() async throws {
         let account = try #require(getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) })
         let worktree = scratch.url("prototype-worktree")
         try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)

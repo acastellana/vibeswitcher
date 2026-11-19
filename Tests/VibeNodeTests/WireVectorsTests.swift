@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import VibeCore
+@testable import VibeCore
 @testable import VibeNode
 
 /// The wire's schema, its vectors and the web client's validators (the live plan's E1, LW-D10): `WireSchema` is what the
@@ -38,8 +38,11 @@ struct WireVectorsTests {
         for (index, bye) in Samples.byes.enumerated() { check(try Samples.value(bye), "bye", "bye sample \(index)") }
         for (index, request) in Samples.requests.enumerated() { check(try Samples.value(request), "request", "request sample \(index)") }
         for (index, reply) in Samples.replies.enumerated() { check(try Samples.value(reply), "reply", "reply sample \(index)") }
+        for (index, item) in Samples.chatItems.enumerated() {
+            check(try #require(ChatValue.value(item), "chat item \(index)"), "chat.item", "chat item sample \(index)")
+        }
 
-        let wanted = WireSchema.coverage(of: ["card", "lead", "hello", "bye", "request", "reply"])
+        let wanted = WireSchema.coverage(of: ["card", "lead", "hello", "bye", "request", "reply", "chat.item"])
         #expect(!wanted.isEmpty)
         let missed = wanted.subtracting(seen).sorted()
         #expect(missed.isEmpty, "never seen in the samples: \(missed.joined(separator: ", "))")
@@ -266,8 +269,8 @@ extension Array {
     fileprivate subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }
 
-/// What the encoders are checked on: each card kind, lead and message with every optional field set in one sample and
-/// unset in another.
+/// What the encoders are checked on: each card kind, lead, message and chat item with every optional field set in one
+/// sample and unset in another.
 enum Samples {
     static let at = Date(timeIntervalSince1970: 1_763_370_000.250)
     static let root = "/home/u/acme-site"
@@ -290,6 +293,8 @@ enum Samples {
         asked.notice = "taken late"
         var timed = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000002", root: root, kind: .question, at: at)
         timed.question = counting
+        // A draft a page left (B5), for the version it showed.
+        timed.draft = .init(text: "a", version: counting.version, at: at, action: "6f1d2a34-9b8c-4e7d-a1f0-3c5b7d9e2f46")
         var plain = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000003", root: root, kind: .question, at: at)
         plain.question = bare
 
@@ -359,6 +364,40 @@ enum Samples {
 
     static var replies: [NodeWire.Reply] {
         [NodeWire.Reply(re: "1", result: .object([:])), NodeWire.Reply(re: "2", error: .init(.voice, "not the user's voice"))]
+    }
+
+    /// One of each chat item and tool detail the reader makes, with optional fields set and unset.
+    static var chatItems: [ChatItem] {
+        let at = Date(timeIntervalSince1970: 1_763_370_000.25)
+        let image = ChatImage(id: "img", mediaType: "image/png", data: Data([1, 2, 3]))
+        let details: [ToolDetail] = [
+            .thought("hmm"), .todos([ChatTodo(text: "a", status: .pending), ChatTodo(text: "b", status: .active), ChatTodo(text: "c", status: .done)]),
+            .plan("plan"), .command("ls"), .edit(path: "a.swift", changes: [ChatEditChange(old: "a", new: "b")]),
+            .write(path: "b.swift", content: "x"), .read(path: "c.swift"), .patch("*** Begin Patch"),
+            .questions([ChatQuestion(question: "Which?", options: ["A", "B"], header: "Pick", descriptions: ["first", nil], multiSelect: true),
+                        ChatQuestion(question: "Sure?", options: ["Yes"])]),
+            .agent(description: "explore", prompt: "look"), .fields([ChatField(name: "subject", value: "Write c.txt")]),
+        ]
+        let tools = details.enumerated().map { index, detail in
+            ChatTool(id: "t\(index)", name: "Tool", title: "Tool \(index)", detail: detail, at: index == 0 ? nil : at,
+                     result: index % 2 == 0 ? nil : ChatResult(output: "out", truncated: index == 1, failed: index == 3, at: index == 1 ? nil : at,
+                                                               images: index == 1 ? [image] : []))
+        }
+        var items: [ChatItem] = [
+            .prompt(ChatEntry(id: "p1", at: at, kind: .prompt(text: "Hi", images: [image]))),
+            .prompt(ChatEntry(id: "p2", at: nil, kind: .steered(text: "Also this", fromLead: true))),
+            .reply(ChatEntry(id: "r1", at: at, kind: .reply("**Done**"))),
+            .reply(ChatEntry(id: "r2", at: nil, kind: .reply("More"))),
+            .tools(id: ChatItem.toolsID("t0"), tools),
+            .tools(id: ChatItem.toolsID("t1"), Array(tools.dropFirst())),
+        ]
+        let senders: [TeamMessage.Sender] = [.user, .lead("lead of acme"), .vibeSwitcher("worker login-fix"), .vibeSwitcher("witness"),
+                                             .teammate(member: "ana", task: "login-fix")]
+        for (index, sender) in senders.enumerated() {
+            let message = TeamMessage(sender: sender, body: "Body \(index)", part: index == 2 ? .init(index: 1, count: 2) : nil)
+            items.append(.team(ChatEntry(id: "m\(index)", at: index == 0 ? nil : at, kind: .steered(text: message.text, fromLead: message.fromLead), team: message), message))
+        }
+        return items
     }
 
     /// An encodable message as the value its JSON is.

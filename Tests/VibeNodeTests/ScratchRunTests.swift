@@ -6,14 +6,15 @@ import Testing
 /// The bootstrap path's step 9 (the start plan's S10, ST-D21): a whole team on a `ScratchNode`, never the user's node,
 /// driven through the built command line on a pty of its own (`script`) as the user drives it. A scratch repository with
 /// `src/`, a committed `check.sh` (the test command, which notes where it ran) and its `workflow.md` (`merge_policy:
-/// ask_sensitive` over `src/**`, one finder, the verifier on haiku); the host holds its fresh vault's first look, so the
+/// ask_sensitive` over `src/**`, one finder, the verifier on sonnet); the host holds its fresh vault's first look, so the
 /// lead starts only once the user accepted the config and recorded the base. The lead asks the user one question, starts
 /// two workers at once in their worktrees, audits one of them and merges it, the merge held for the user's approval of
 /// exactly the audited commit (`LeadWorkflow.approval(of:)`) and landing with `check.sh` run.
 ///
 /// `aScratchTeamOfFakesBuildsAuditsAndMerges` rehearses it with `FakeClaude` as every session (the test commits for the
 /// workers, and the verifier gives its verdict through its own tool server); `aScratchTeamPlansBuildsAuditsAndMerges`
-/// does it with a real Claude Code lead on Sonnet and the team it starts, gated on the user's throwaway config folder
+/// does it with a real Claude Code lead on haiku (the cheapest model; the verifier on sonnet, another model as the
+/// review floor wants) and the team it starts, gated on the user's throwaway config folder
 /// (the security document's decision 16), each run on the user's go-ahead.
 @Suite(NodeTraits.linuxOnly, .serialized, .timeLimit(.minutes(60)))
 struct ScratchRunTests {
@@ -140,9 +141,10 @@ struct ScratchRunTests {
         cli.assertEveryCallInScratchForm()
     }
 
-    /// The real-claude script the gated case runs as the node's `claude`: the config folder given, and `--model sonnet`
-    /// only when its arguments name no model (the verifier's `--model haiku` stays haiku, ST-D21).
-    @Test func theRealClaudeScriptAddsSonnetOnlyWhenNoModelIsGiven() async throws {
+    /// The real-claude script the gated case runs as the node's `claude`: the config folder given, and `--model haiku`
+    /// (the cheapest) only when its arguments name no model (the verifier's `--model sonnet` stays sonnet, ST-D21 with
+    /// the models swapped, 2026-11-19).
+    @Test func theRealClaudeScriptAddsHaikuOnlyWhenNoModelIsGiven() async throws {
         let folder = scratch.url("real-claude")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let standIn = folder.appendingPathComponent("stand-in-claude")
@@ -152,15 +154,16 @@ struct ScratchRunTests {
         #expect(try FileManager.default.destinationOfSymbolicLink(atPath: folder.appendingPathComponent("claude").path) == script.path)
         let environment = ["PATH": "/usr/bin:/bin"]
         let plain = try await run(script, ["-p", "say --model here"], environment: environment)
-        #expect(plain.output.split(separator: "\n").map(String.init) == [config.path, "--model", "sonnet", "-p", "say --model here"], "\(plain.output)\(plain.errors)")
-        for given in [["--model", "haiku", "-p", "hi"], ["--model=haiku", "-p", "hi"]] {
+        #expect(plain.output.split(separator: "\n").map(String.init) == [config.path, "--model", "haiku", "-p", "say --model here"], "\(plain.output)\(plain.errors)")
+        for given in [["--model", "sonnet", "-p", "hi"], ["--model=sonnet", "-p", "hi"]] {
             let ran = try await run(script, given, environment: environment)
             #expect(ran.output.split(separator: "\n").map(String.init) == [config.path] + given, "\(ran.output)\(ran.errors)")
         }
     }
 
-    /// The gated run's model check (ST-D21: workers on Sonnet, the verifier on haiku) reads what each role really ran on,
-    /// from the config folder's transcripts by the session's name, and holds the verifier's trailer to haiku: a model
+    /// The gated run's model check (ST-D21 with the models swapped: workers on haiku, the cheapest, the verifier on sonnet)
+    /// reads what each role really ran on, from the config folder's transcripts by the session's name, and holds the
+    /// verifier's trailer to sonnet: a model
     /// the run notes as "unknown", an alias beside a full id, or workers on Claude's default each fail it.
     @Test func theRunsModelsAreReadByRoleFromTheConfigFoldersTranscripts() throws {
         let config = scratch.url("config")
@@ -176,24 +179,24 @@ struct ScratchRunTests {
             let data = try lines.map { try JSONSerialization.data(withJSONObject: $0) }.reduce(Data()) { $0 + $1 + Data("\n".utf8) }
             try data.write(to: folder.appendingPathComponent(file))
         }
-        try transcript("worker-\(slug)", "a.jsonl", model: "claude-sonnet-4-5-20250929", id: "m1")
-        try transcript("verify-\(slug)", "b.jsonl", model: "claude-haiku-4-5-20251001", id: "m2")
+        try transcript("worker-\(slug)", "a.jsonl", model: "claude-haiku-4-5-20251001", id: "m1")
+        try transcript("verify-\(slug)", "b.jsonl", model: "claude-sonnet-4-5-20250929", id: "m2")
         try transcript(nil, "c.jsonl", model: "claude-opus-4-1", id: "m3")
         let ran = Self.sessionModels(config: config, root: root, slug: slug)
-        #expect(ran.workers == ["claude-sonnet-4-5-20250929"] && ran.verifiers == ["claude-haiku-4-5-20251001"], "\(ran)")
+        #expect(ran.workers == ["claude-haiku-4-5-20251001"] && ran.verifiers == ["claude-sonnet-4-5-20250929"], "\(ran)")
 
         let sonnet = ["claude-sonnet-4-5-20250929"], haiku = ["claude-haiku-4-5-20251001"]
-        #expect(Self.modelProblem(workers: sonnet, verifiers: haiku, verifierTrailer: "haiku") == nil)
-        // Workers on Claude's default (the script never added --model sonnet), or on haiku.
-        #expect(Self.modelProblem(workers: ["claude-opus-4-1"], verifiers: haiku, verifierTrailer: "haiku") != nil)
-        #expect(Self.modelProblem(workers: haiku, verifiers: haiku, verifierTrailer: "haiku") != nil)
+        #expect(Self.modelProblem(workers: haiku, verifiers: sonnet, verifierTrailer: "sonnet") == nil)
+        // Workers on Claude's default (the script never added --model haiku), or on sonnet.
+        #expect(Self.modelProblem(workers: ["claude-opus-4-1"], verifiers: sonnet, verifierTrailer: "sonnet") != nil)
+        #expect(Self.modelProblem(workers: sonnet, verifiers: sonnet, verifierTrailer: "sonnet") != nil)
         // No worker's transcript read (the trailer's "unknown"), or no verifier's.
-        #expect(Self.modelProblem(workers: [], verifiers: haiku, verifierTrailer: "haiku") != nil)
-        #expect(Self.modelProblem(workers: sonnet, verifiers: [], verifierTrailer: "haiku") != nil)
+        #expect(Self.modelProblem(workers: [], verifiers: sonnet, verifierTrailer: "sonnet") != nil)
+        #expect(Self.modelProblem(workers: haiku, verifiers: [], verifierTrailer: "sonnet") != nil)
         // A verifier on the workers' family under an alias beside their full id; a trailer that says nothing.
-        #expect(Self.modelProblem(workers: sonnet, verifiers: ["claude-sonnet-4-5-20250929"], verifierTrailer: "sonnet") != nil)
-        for trailer in [nil, "unknown", "none", "sonnet"] {
-            #expect(Self.modelProblem(workers: sonnet, verifiers: haiku, verifierTrailer: trailer) != nil, "\(trailer ?? "nil")")
+        #expect(Self.modelProblem(workers: haiku, verifiers: ["claude-haiku-4-5-20251001"], verifierTrailer: "haiku") != nil)
+        for trailer in [nil, "unknown", "none", "haiku"] {
+            #expect(Self.modelProblem(workers: haiku, verifiers: sonnet, verifierTrailer: trailer) != nil, "\(trailer ?? "nil")")
         }
     }
 
@@ -234,7 +237,7 @@ struct ScratchRunTests {
         #expect(found.branches == ["agent/busy", "agent/idle"] && found.withoutCommit == ["agent/idle"], "\(found)")
     }
 
-    // MARK: The gated run, a real lead on Sonnet
+    // MARK: The gated run, a real lead on haiku
 
     /// The user's throwaway Claude Code config folder, named on the run's command line only.
     static let configFolder = ProcessInfo.processInfo.environment["VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR"]
@@ -254,7 +257,7 @@ struct ScratchRunTests {
         """
 
     @Test(.enabled(if: configFolder != nil,
-                   "starts a real Claude Code team on Sonnet and spends the account's usage: set VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR to a Claude Code config folder you logged in once to run it"))
+                   "starts a real Claude Code team on haiku (the verifier on sonnet) and spends the account's usage: set VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR to a Claude Code config folder you logged in once to run it"))
     func aScratchTeamPlansBuildsAuditsAndMerges() async throws {
         let config = URL(fileURLWithPath: try #require(Self.configFolder))
         try #require(FileManager.default.fileExists(atPath: config.appendingPathComponent(".claude.json").path),
@@ -405,8 +408,8 @@ struct ScratchRunTests {
         if committed.count < 2 { await look("the second worker's commit never came") }
         #expect(committed.count == 2, "the agent/* branches with a worker's commit: \(committed.sorted()); now \(Self.workerBranches(repo, since: first))")
         step("both workers committed (\(committed.sorted()))")
-        // A verdict in the vault, from a verifier on a model other than the workers': the workers on Sonnet and the
-        // verifier on haiku, as their transcripts in the config folder say and the landed commit's verifier trailer.
+        // A verdict in the vault, from a verifier on a model other than the workers': the workers on haiku and the
+        // verifier on sonnet, as their transcripts in the config folder say and the landed commit's verifier trailer.
         let verdict = try #require(try await Self.verdict(node, repo, task: greeting), "the vault holds no verdict for \(greeting)")
         #expect(verdict.passes, "\(verdict)")
         let landed = try await Self.landed(repo, since: first).first { Self.trailer("VS-Task", in: $0) == greeting } ?? ""
@@ -459,7 +462,7 @@ struct ScratchRunTests {
             test_command: sh ./check.sh
             merge_policy: ask_sensitive
             sensitive_paths: src/**
-            verifier_model: haiku
+            verifier_model: sonnet
             audit_finders: 1
             ---
 
@@ -480,7 +483,7 @@ struct ScratchRunTests {
     }
 
     /// Writes the real-claude script into `root` (`real-claude`) and points `root/claude` at it: the account's `claude`
-    /// with the config folder given and the node's own update and traffic switches, and `--model sonnet` only when its
+    /// with the config folder given and the node's own update and traffic switches, and `--model haiku` only when its
     /// arguments carry no `--model` (ST-D21). Its argv[0] stays a path ending in `claude`.
     static func realClaudeScript(root: URL, config: URL, claude: String) throws -> URL {
         let quote = FakeClaude.quoted
@@ -493,7 +496,7 @@ struct ScratchRunTests {
                     --model|--model=*) exec \(quote(claude)) "$@" ;;
                 esac
             done
-            exec \(quote(claude)) --model sonnet "$@"
+            exec \(quote(claude)) --model haiku "$@"
 
             """, at: script)
         let link = root.appendingPathComponent("claude")
@@ -547,15 +550,15 @@ struct ScratchRunTests {
         return (usage.worker?.models ?? [], usage.verifier?.models ?? [])
     }
 
-    /// What's wrong with the run's models against ST-D21 (workers on Sonnet, the verifier on haiku, and the landed
-    /// commit's `VS-Verifier-Model` saying haiku); nil when nothing is.
+    /// What's wrong with the run's models against ST-D21 with the models swapped (workers on haiku, the verifier on
+    /// sonnet, and the landed commit's `VS-Verifier-Model` saying sonnet); nil when nothing is.
     static func modelProblem(workers: [String], verifiers: [String], verifierTrailer: String?) -> String? {
         if workers.isEmpty { return "no worker's transcript was read" }
-        if let off = workers.first(where: { !LeadReviewFloor.sameModel($0, "sonnet") }) { return "a worker ran on \(off), not sonnet" }
+        if let off = workers.first(where: { !LeadReviewFloor.sameModel($0, "haiku") }) { return "a worker ran on \(off), not haiku" }
         if verifiers.isEmpty { return "no verifier's transcript was read" }
-        if let off = verifiers.first(where: { !LeadReviewFloor.sameModel($0, "haiku") }) { return "the verifier ran on \(off), not haiku" }
-        guard let trailer = verifierTrailer, LeadReviewFloor.knownModel(trailer), LeadReviewFloor.sameModel(trailer, "haiku") else {
-            return "the landed commit's verifier model is \(verifierTrailer ?? "missing"), not haiku"
+        if let off = verifiers.first(where: { !LeadReviewFloor.sameModel($0, "sonnet") }) { return "the verifier ran on \(off), not sonnet" }
+        guard let trailer = verifierTrailer, LeadReviewFloor.knownModel(trailer), LeadReviewFloor.sameModel(trailer, "sonnet") else {
+            return "the landed commit's verifier model is \(verifierTrailer ?? "missing"), not sonnet"
         }
         return nil
     }

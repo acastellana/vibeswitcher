@@ -131,6 +131,12 @@ and its [attack review](reviews/v2-security-review-2026-11-13.md), fixed on Linu
 Work `v2` leaves undone because it is shared with main (a change to the Mac's behaviour), or because only a Mac runs
 it. Each is done once the Mac work begins.
 
+- **`TeamRowsTests.anAuditHeldBeforeItsVerifierStartsShowsTheResetInsteadOfWorkerProgress` (app), skipped on the
+  runner** (`scripts/ci/macos-runner-skips.txt`): it pins main's Fable for a sensitive audit, and v2's
+  `security_audit_model` defaults to mythos ([the port map's](v2-port-map.md) row for `securityAuditModel`), so the
+  sensitive row reads "Waits for Mythos" (v2 macos run 44540219244). When main adopts the key, the test needs
+  `team.workflow.securityAuditModel = "fable"` in `limitedTeam` (as `FableFallbackTests` sets
+  `security_audit_model: fable`) or a Mythos expectation for that row; then it comes off the skip list.
 - **Two waits on Foundation's `Process.waitUntilExit()` in VibeCore**: `Shell.run`'s, after a run is stopped or ends
   (`Sources/VibeCore/Worktrees.swift` ~337), and `PassageListener.stop(grace:)`'s (`Sources/VibeCore/PassageLink.swift`
   ~243). On the hosted Mac that wait never returned for a child that had ended and been collected (no zombie left,

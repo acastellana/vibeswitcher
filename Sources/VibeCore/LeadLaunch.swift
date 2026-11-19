@@ -1027,9 +1027,10 @@ public enum LeadLaunch {
     static func codexEffort(_ level: String) -> String { nearestEffort(level, in: codexEfforts) }
 
     /// A model family's rank for the advisor rule ("an advisor must rank at or above your session's main model",
-    /// code.claude.com/docs/en/advisor): fable above opus above sonnet above haiku; nil for one not known.
+    /// code.claude.com/docs/en/advisor): mythos above fable above opus above sonnet above haiku; nil for one not known.
     static func rank(_ model: String?) -> Int? {
         switch AccountUsage.family(model) {
+        case "mythos": return 5
         case "fable": return 4
         case "opus": return 3
         case "sonnet": return 2

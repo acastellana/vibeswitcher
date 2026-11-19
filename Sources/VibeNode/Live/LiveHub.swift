@@ -22,9 +22,16 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
     public let queue: DispatchQueue
     /// The server's epoch (`Requests.epoch`): every `seq` the hub writes is scoped by it.
     public let epoch: String
-    /// What a WebSocket's request of a kind that isn't the hub's (`subscribe`, `unsubscribe`) becomes: the integration's
-    /// (I1: the rights, then `Requests`). It answers on the transport itself. None: `unknown-kind`. On `queue`.
+    /// What a WebSocket's request of a kind that isn't the hub's (`subscribe`, `unsubscribe`, `chat.page`) becomes: the
+    /// integration's (I1: the rights, then `Requests`). It answers on the transport itself. None: `unknown-kind`. On
+    /// `queue`.
     public var others: ((NodeWire.Request, LiveTransport, LiveRights) -> Void)?
+    /// A scratch server's terminals (slice 4, LW-D12): `term.open` and `term.close` are the hub's while it has one, and
+    /// so are the binary frames. None (the user's node): neither. Set on `queue`, before the listener starts.
+    public var terminals: TerminalRelay?
+    /// The sessions' chats (slice 2, B4): a `chat` subscription's stream, opened for it, and `chat.page`. None: `chat`
+    /// is no collection here. On `queue`.
+    public var chats: ChatStore?
 
     private let now: @Sendable () -> Date
     private let onQueue = DispatchSpecificKey<ObjectIdentifier>()
@@ -44,11 +51,22 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         }
     }
 
-    /// One subscription: its stream, and the `seq` of the last event written for it.
+    /// One subscription: its stream, and the `seq` of the last event written for it. A chat's names its session
+    /// (`chat`), is `ready` once its first event was written (its stream is read first), and carries how many items a
+    /// snapshot of it holds.
     private struct Sub {
         var collection: String
         var sent: Int
+        var chat: String? = nil
+        var ready = true
+        var limit = ChatStream.snapshotItems
+        var serial = 0
     }
+
+    /// Tells one chat subscription from the one that replaced it under the same name.
+    private var serials = 0
+    /// The chat streams the hub was told of, by session: their changes reach their subscribers.
+    private var chatStreams: [String: ChatStream] = [:]
 
     /// `queue`: the engine's, where the stores send. `epoch`: the server's. `now`: when a change is taken (a delta's
     /// `at`); tests give a fixed one.
@@ -109,6 +127,9 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         switch request.kind {
         case "subscribe": subscribe(request, on: transport, rights: rights)
         case "unsubscribe": unsubscribe(request, on: transport)
+        case "term.open" where terminals != nil: terminals?.open(request, on: transport, rights: rights)
+        case "term.close" where terminals != nil: terminals?.close(request, on: transport)
+        case "chat.page": page(request, on: transport, rights: rights)
         default: return false
         }
         return true
@@ -123,10 +144,12 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         guard rights.contains(.read) else {
             return reply(.init(re: request.id, error: .init(.voice, "this connection may not read")), on: transport)
         }
+        if ask.collection == "chat", let chats { return subscribeChat(ask, request, on: transport, rights: rights, chats: chats) }
         guard let stream = streams[ask.collection] else {
             return reply(.init(re: request.id, error: .init(.badArgs, "no such collection: \(ask.collection)")), on: transport)
         }
         let connection = connection(for: transport, rights: rights)
+        release(connection.subs[ask.sub])
         // A resume (the contract's §4, B3): the same epoch, and the stream can still say what changed after the client's
         // `seq` (not ahead of it, not before a removal it forgot). Then no snapshot: one delta from that `seq`, or
         // nothing until a change when the client is current. Anything else is a snapshot, which the client reconciles.
@@ -147,8 +170,101 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         guard let sub = request.args?["sub"]?.string, LiveSubscribe.isSub(sub) else {
             return reply(.init(re: request.id, error: .init(.badArgs, "unsubscribe needs a sub")), on: transport)
         }
-        connections[ObjectIdentifier(transport)]?.subs[sub] = nil
+        release(connections[ObjectIdentifier(transport)]?.subs.removeValue(forKey: sub))
         transport.send(NodeWire.message(NodeWire.Reply(re: request.id, result: .object([:]))))
+    }
+
+    /// A subscription that ends (replaced, unsubscribed, its connection gone): a chat's follower leaves its stream.
+    private func release(_ sub: Sub?) {
+        if let session = sub?.chat { chats?.unfollow(session) }
+    }
+
+    // MARK: Chats
+
+    /// A `chat` subscription (the contract's §3, §4 and §6): the session's stream opened (or `gone`), followed, and once
+    /// it is read, the reply and the first event: a delta from the client's `seq` when the stream still has what changed
+    /// after it (`resume`), else the item `after` and what followed it (`tail`), else the newest items (`snapshot`).
+    private func subscribeChat(_ ask: LiveSubscribe, _ request: NodeWire.Request, on transport: LiveTransport, rights: LiveRights,
+                               chats: ChatStore) {
+        guard let session = ask.key else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "a chat subscription needs the session's id as its key")), on: transport)
+        }
+        let stream: ChatStream
+        switch chats.open(session) {
+        case .refused(let failure): return reply(.init(re: request.id, error: failure), on: transport)
+        case .opened(let opened): stream = opened
+        }
+        attach(stream)
+        let connection = connection(for: transport, rights: rights)
+        release(connection.subs[ask.sub])
+        chats.follow(session)
+        serials += 1
+        let serial = serials
+        let limit = min(max(ask.limit ?? ChatStream.snapshotItems, 1), ChatStream.mostItems)
+        connection.subs[ask.sub] = Sub(collection: "chat", sent: stream.seq, chat: session, ready: false, limit: limit, serial: serial)
+        let key = ObjectIdentifier(transport)
+        stream.whenLoaded { [weak self] in
+            guard let self, let connection = self.connections[key], var sub = connection.subs[ask.sub], sub.serial == serial else { return }
+            let resume = ask.since.flatMap { since in since.epoch == self.epoch ? stream.changes(since: since.seq) : nil }
+            let tail = resume == nil ? ask.after.flatMap { stream.tail(after: $0) } : nil
+            let mode = resume != nil ? "resume" : tail != nil ? "tail" : "snapshot"
+            transport.send(NodeWire.message(NodeWire.Reply(re: request.id, result: .object(["sub": .string(ask.sub), "mode": .string(mode)]))))
+            sub.ready = true
+            if let resume {
+                sub.sent = resume.prev
+                connection.subs[ask.sub] = sub
+                if transport.writable { self.push(ask.sub, of: connection) }
+                return
+            }
+            let shown = tail ?? stream.snapshot(limit: limit)
+            sub.sent = stream.seq
+            connection.subs[ask.sub] = sub
+            transport.send(NodeWire.message(NodeWire.chatSnapshot(sub: ask.sub, key: session, epoch: self.epoch, seq: stream.seq,
+                                                                  after: tail == nil ? nil : ask.after, more: shown.more, items: shown.items)))
+        }
+    }
+
+    /// The hub hears `stream`'s changes from now on (once a stream: the store hands the same one while it holds it).
+    private func attach(_ stream: ChatStream) {
+        guard chatStreams[stream.session] !== stream else { return }
+        chatStreams[stream.session]?.onChange = nil
+        chatStreams[stream.session] = stream
+        stream.onChange = { [weak self, weak stream] in
+            guard let self, let stream else { return }
+            self.changed(stream)
+        }
+    }
+
+    /// `chat.page` (the contract's §6): the items just before `before`, oldest first, and whether more exist before them;
+    /// a read with no place in the stream's sequence.
+    private func page(_ request: NodeWire.Request, on transport: LiveTransport, rights: LiveRights) {
+        guard rights.contains(.read) else {
+            return reply(.init(re: request.id, error: .init(.voice, "this connection may not read")), on: transport)
+        }
+        guard let chats else { return reply(.init(re: request.id, error: .init(.unknownKind, "this server has no chats")), on: transport) }
+        guard let session = request.args?["session"]?.string, let before = request.args?["before"]?.string else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "chat.page needs a session and an item to page before")), on: transport)
+        }
+        let limit = min(max(request.args?["limit"]?.int ?? ChatStream.snapshotItems, 1), ChatStream.mostItems)
+        chats.page(session, before: before, limit: limit) { [weak self] result in
+            switch result {
+            case .refused(let failure): self?.reply(.init(re: request.id, error: failure), on: transport)
+            case .page(let items, let more):
+                transport.send(NodeWire.message(NodeWire.Reply(re: request.id, result: .object([
+                    "items": .array(items), "more": .bool(more),
+                ]))))
+            }
+        }
+    }
+
+    /// A chat stream changed: every subscriber that can write gets its delta now; one that can't, when it drains.
+    private func changed(_ stream: ChatStream) {
+        for connection in connections.values where connection.transport.writable {
+            for (name, sub) in connection.subs where sub.chat == stream.session && sub.ready && sub.sent < stream.seq {
+                guard connection.transport.writable else { break }
+                push(name, of: connection)
+            }
+        }
     }
 
     private func reply(_ reply: NodeWire.Reply, on transport: LiveTransport) {
@@ -167,7 +283,10 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         connections[key] = connection
         transport.onWritable = { [weak self, weak transport] in
             guard let self, let transport else { return }
-            self.perform { self.flush(ObjectIdentifier(transport)) }
+            self.perform {
+                self.flush(ObjectIdentifier(transport))
+                self.terminals?.drained(transport)
+            }
         }
         return connection
     }
@@ -196,12 +315,29 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
     /// One event that brings subscription `name` to its stream's `seq`: a delta from the `seq` it was sent last, or a
     /// snapshot when the stream no longer remembers what changed after it. Nothing when it is current.
     private func push(_ name: String, of connection: Connection) {
+        if let session = connection.subs[name]?.chat { return pushChat(name, session: session, of: connection) }
         guard var sub = connection.subs[name], let stream = streams[sub.collection], sub.sent != stream.seq else { return }
         if let range = stream.changes(since: sub.sent) {
             connection.transport.send(NodeWire.message(NodeWire.Delta(sub: name, prev: range.prev, seq: range.seq,
                                                                       at: stream.changedAt ?? now(), changes: range.changes)))
         } else {
             connection.transport.send(snapshot(of: stream, sub: name))
+        }
+        sub.sent = stream.seq
+        connection.subs[name] = sub
+    }
+
+    /// The same for a chat: its ops from the `seq` it was sent last, or its newest items when the stream no longer
+    /// remembers what changed after it.
+    private func pushChat(_ name: String, session: String, of connection: Connection) {
+        guard var sub = connection.subs[name], sub.ready, let stream = chatStreams[session], sub.sent != stream.seq else { return }
+        if let range = stream.changes(since: sub.sent) {
+            connection.transport.send(NodeWire.message(NodeWire.chatDelta(sub: name, prev: range.prev, seq: range.seq,
+                                                                          at: stream.changedAt ?? now(), ops: range.ops)))
+        } else {
+            let shown = stream.snapshot(limit: sub.limit)
+            connection.transport.send(NodeWire.message(NodeWire.chatSnapshot(sub: name, key: session, epoch: epoch, seq: stream.seq,
+                                                                             after: nil, more: shown.more, items: shown.items)))
         }
         sub.sent = stream.seq
         connection.subs[name] = sub
@@ -230,14 +366,21 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         perform { self.take(message, on: transport) }
     }
 
-    /// The terminal's frames (slice 4); nothing yet.
-    public func binary(_ message: Data, on transport: LiveTransport) {}
+    /// The terminal's frames (slice 4): the relay's, on a server that has one; dropped otherwise.
+    public func binary(_ message: Data, on transport: LiveTransport) {
+        perform {
+            guard self.connections[ObjectIdentifier(transport)] != nil else { return }
+            self.terminals?.binary(message, on: transport)
+        }
+    }
 
     /// The connection is gone: its subscriptions with it.
     public func closed(_ transport: LiveTransport) {
         perform {
+            self.terminals?.closed(transport)
             guard let connection = self.connections.removeValue(forKey: ObjectIdentifier(transport)) else { return }
             connection.transport.onWritable = nil
+            connection.subs.values.forEach { self.release($0) }
         }
     }
 
@@ -258,6 +401,8 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
     }
 
     private func refuse(_ transport: LiveTransport, code: String, reason: String) {
+        terminals?.closed(transport)
+        connections[ObjectIdentifier(transport)]?.subs.values.forEach { release($0) }
         connections[ObjectIdentifier(transport)]?.transport.onWritable = nil
         connections[ObjectIdentifier(transport)] = nil
         transport.close(code: code, reason: reason)

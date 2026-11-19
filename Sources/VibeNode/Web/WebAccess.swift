@@ -227,9 +227,10 @@ public final class WebAccess: WebGate, @unchecked Sendable {
 
     /// Why a web connection with `rights` may not send `request` (nil: it may): a kind no server names is
     /// `unknown-kind`; a read kind needs `read` and a draft kind `draft`; every other kind is `voice`, whatever the
-    /// token: a web client is never the user's voice (LW-D6), nor the lead's tool server, and opens no terminal on the
-    /// user's node (LW-D12).
-    public static func refusal(for request: NodeWire.Request, rights: LiveRights) -> NodeWire.Reply? {
+    /// token: a web client is never the user's voice (LW-D6), nor the lead's tool server. A terminal's kinds are
+    /// `unknown-kind` but on a scratch server that takes them (`terminals`, LW-D12), where they need `read`: the
+    /// user's node opens no terminal.
+    public static func refusal(for request: NodeWire.Request, rights: LiveRights, terminals: Bool = false) -> NodeWire.Reply? {
         let kind = ConfigSeal.inert(request.kind, limit: 80)
         switch NodeWire.kinds[request.kind] {
         case nil:
@@ -243,7 +244,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
         case .leadToolServer?:
             return .init(re: request.id, error: .init(.voice, "\(kind) is the lead's tool server's alone"))
         case .webTerminal?:
-            return .init(re: request.id, error: .init(.voice, "a web page opens no terminal on this node"))
+            guard terminals else { return .init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(kind)")) }
+            return rights.contains(.read) ? nil : .init(re: request.id, error: .init(.voice, "this page's token doesn't read"))
         }
     }
 
@@ -259,11 +261,14 @@ public final class WebAccess: WebGate, @unchecked Sendable {
 public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
     private let inner: WebSocketHandler
     private let note: @Sendable (String) -> Void
+    /// A scratch server's: the terminal's kinds go on to the hub (LW-D12).
+    private let terminals: Bool
     private let lock = NSLock()
     private var rights: [ObjectIdentifier: LiveRights] = [:]
 
-    public init(_ inner: WebSocketHandler, note: @escaping @Sendable (String) -> Void = { _ in }) {
+    public init(_ inner: WebSocketHandler, terminals: Bool = false, note: @escaping @Sendable (String) -> Void = { _ in }) {
         self.inner = inner
+        self.terminals = terminals
         self.note = note
     }
 
@@ -275,7 +280,7 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
     public func text(_ message: Data, on transport: LiveTransport) {
         guard let request = NodeWire.decode(NodeWire.Request.self, message) else { return inner.text(message, on: transport) }
         let rights = lock.withLock { self.rights[ObjectIdentifier(transport)] } ?? []
-        guard let refused = WebAccess.refusal(for: request, rights: rights) else { return inner.text(message, on: transport) }
+        guard let refused = WebAccess.refusal(for: request, rights: rights, terminals: terminals) else { return inner.text(message, on: transport) }
         note("refused \(ConfigSeal.inert(request.kind, limit: 80)) from a web connection: \(refused.error?.code ?? "")")
         transport.send(Data(NodeWire.line(refused).dropLast()))
         if refused.error?.code == NodeWire.Code.unknownKind.rawValue, request.must == true {

@@ -14,9 +14,11 @@ import VibeCore
 ///   `web-tokens.json` holds a live token. `web.open` binds it (`WebAccess.listen`); a revoke closes every page
 ///   (`revoked`, 4403) and, with nothing alive, the listener. A sweep at each housekeeping drops late codes, closes a
 ///   page whose token ran out, and lets the listener go once nothing wants it.
+/// - **Chats** (slice 2): `ChatStore` on the sessions' transcripts, a session's stream opened by its first `chat`
+///   subscription and dropped a minute after its last; `chat.page` reads one. The hub takes both.
 /// - **A web connection** is screened first (`WebRequestScreen`: a token reads and drafts, never the user's voice),
-///   then the hub takes `subscribe` and `unsubscribe`, and what is left (`status`, `questions`) goes to `Requests` as a
-///   peer that is nobody's voice.
+///   then the hub takes `subscribe` and `unsubscribe`, a draft goes to `Requests.draft` (I3), and what is left
+///   (`status`, `questions`) goes to `Requests` as a peer that is nobody's voice.
 ///
 /// On the engine's queue (`queue`): the listener's sockets are served there too, so a store's change, the hub's delta
 /// and its frame are written in one turn, with no hop between (the plan's LW-D14).
@@ -28,6 +30,8 @@ public final class NodeLive: @unchecked Sendable {
     public let web: NodeWebListener
     /// The page's files: the embedded ones, or a scratch server's folder.
     public let assets: LiveAssets
+    /// The sessions' chats; none for a server with no sessions store.
+    public private(set) var chats: ChatStore?
 
     private let requests: Requests
     private let sessions: NodeSessions?
@@ -44,9 +48,11 @@ public final class NodeLive: @unchecked Sendable {
     public static let sweepEvery = 30
 
     /// `port`: the web's (`NodeWeb.port` on the user's node; a scratch server's `--test-web-port=`, 0 for the kernel's
-    /// pick). `webRoot`: a scratch server's `--test-web-root=`. `clock`: the engine's.
+    /// pick). `webRoot`: a scratch server's `--test-web-root=`. `terminals`: a scratch server's `--test-web-terminal`
+    /// (`term.open` through a `TerminalRelay`, the live plan's I4; the user's node answers it `unknown-kind`). `clock`:
+    /// the engine's.
     public init(requests: Requests, sessions: NodeSessions?, engine: LeadEngine?, clock: NodeClock, port: UInt16 = NodeWeb.port,
-                webRoot: URL? = nil, note: @escaping @Sendable (String) -> Void = { _ in }) {
+                webRoot: URL? = nil, terminals: Bool = false, note: @escaping @Sendable (String) -> Void = { _ in }) {
         queue = requests.queue
         self.requests = requests
         self.sessions = sessions
@@ -54,14 +60,17 @@ public final class NodeLive: @unchecked Sendable {
         self.clock = clock
         self.note = note
         hub = LiveHub(queue: queue, epoch: requests.epoch)
+        if terminals { hub.terminals = TerminalRelay(link: requests.link, note: note) }
         access = WebAccess(tokens: WebTokens(root: requests.root), note: note)
         let bound = BoundPort()
         let assets = LiveAssets(folder: webRoot, port: { bound.port })
         self.assets = assets
-        web = NodeWebListener(port: port, assets: assets, gate: access, handler: WebRequestScreen(hub, note: note), queue: queue,
-                              clock: clock, hello: { [weak requests] admission in
+        web = NodeWebListener(port: port, assets: assets, gate: access, handler: WebRequestScreen(hub, terminals: terminals, note: note),
+                              queue: queue, clock: clock, hello: { [weak requests] admission in
                                   guard let requests else { return nil }
-                                  return NodeWire.message(requests.webHello(admission, assets: assets.build))
+                                  var hello = requests.webHello(admission, assets: assets.build)
+                                  if terminals, admission.rights.contains(.read) { hello.kinds += Self.terminalKinds }
+                                  return NodeWire.message(hello)
                               }, note: { note($0) })
         bound.web = web
         let said = SaidWeb()
@@ -84,13 +93,25 @@ public final class NodeLive: @unchecked Sendable {
             }
         }
         access.onRevoke = { web.closeAll(code: "revoked", reason: "this page's access was revoked: run `vibeswitcher web` again") }
-        hub.others = { [weak requests] request, transport, _ in
-            requests?.handle(request, from: NodeLive.webPeer) { reply in transport.send(NodeWire.message(reply)) }
+        hub.others = { [weak requests] request, transport, rights in
+            guard let requests else { return }
+            let answer = { (reply: NodeWire.Reply) in transport.send(NodeWire.message(reply)) }
+            // A draft is a page's alone: its token's right judged again here (the screen judged it first), never `handle`.
+            if NodeWire.kinds[request.kind] == .webDraft {
+                guard rights.contains(.draft) else { return answer(.init(re: request.id, error: .init(.voice, "this page's token doesn't draft"))) }
+                return requests.draft(request, reply: answer)
+            }
+            requests.handle(request, from: NodeLive.webPeer, reply: answer)
         }
+        let hub = hub
+        requests.liveSeq = { [weak hub] in hub?.seq(of: $0) ?? 0 }
         requests.web = access
         requests.webValue = { said.live?.webValue() ?? NodeStatusStore.webOff }
         said.live = self
     }
+
+    /// What a scratch server that opens terminals adds to a page's `hello.kinds`.
+    public static let terminalKinds = ["term.open", "term.close"]
 
     /// A web connection as `Requests` sees it: no process, no terminal, no cgroup. It is never the user's voice (the
     /// screen refuses those kinds before; this is the second lock), and nobody's tool server.
@@ -108,6 +129,10 @@ public final class NodeLive: @unchecked Sendable {
         if let sessions {
             hub.follow(sessions.changes, into: sessionsStream) { $0.liveValue }
             status.watch(sessions.changes)
+            let chats = ChatStore(queue: queue, home: requests.home, sessions: sessions.changes, note: note)
+            chats.start(clock: clock)
+            hub.chats = chats
+            self.chats = chats
         }
         status.watch(requests.link.changes)
         if let engine {
