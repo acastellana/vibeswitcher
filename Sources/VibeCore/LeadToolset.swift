@@ -3859,9 +3859,19 @@ public final class LeadToolset: MCPToolset {
         let checked = Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                               scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
                                               timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir,
-                                              remote: fetched, trailers: provenance(gate), rerun: { output in
-                                                  rerun = MergeRerun.plan(after: output, workflow: workflow)
-                                                  return rerun?.command
+                                              remote: fetched, trailers: provenance(gate), prepareRerun: { output, run in
+                                                  rerun = MergeRerun.plan(after: output, workflow: workflow, suites: {
+                                                      workflow.testCommand.flatMap { MergeRerun.discoverTests(command: $0, run: run) }
+                                                  })
+                                                  if let plan = rerun {
+                                                      let date = Date()
+                                                      let log = String(MergeRerun.evidencePath(task: slug, commit: commit, at: date).dropLast(4)) + "-first-run.log"
+                                                      let saved = self.saveEvidence(MergeRerun.firstRunLog(task: slug, commit: commit, plan: plan, output: output), log: log)
+                                                      if let note = plan.note {
+                                                          rerun?.note = note + "\n" + (saved.map { "First-run evidence: " + $0 } ?? "First-run evidence could not be saved.")
+                                                      }
+                                                  }
+                                                  return rerun?.annotatedCommand
                                               }, baseline: baseline(on: current, plan: { rerun }, pairing: pairing),
                                               tested: { testCount = LeadReceipt.testCount($0); testedCores = MergeSample.cores(in: $0) },
                                               begun: { begun = ($0, LoadRecorder.averages() ?? []) })
@@ -4073,7 +4083,9 @@ public final class LeadToolset: MCPToolset {
             var flakeNote = ""
             if let flaked {
                 let names = flakes.joined(separator: ", ")
-                try? store.appendProgress("Flaky in \(slug)'s merge: \(Self.clip(names, 300)) failed the first test run and passed its rerun (\(flaked.plan.filtered ? "the failing tests only" : "the whole test command")); merged on the rerun")
+                let scope = flaked.plan.continuing ? "the unfinished and never-started suites" : flaked.plan.filtered ? "the failing tests only" : "the whole test command"
+                let selection = flaked.plan.note?.components(separatedBy: "\n").first.map { " " + $0 } ?? ""
+                try? store.appendProgress("Flaky in \(slug)'s merge: \(Self.clip(names, 300)) failed the first test run and passed its rerun (\(scope)); merged on the rerun" + selection)
                 for (test, fix, noted) in planned {
                     try? store.appendProgress((noted ? "Noted in \(fix)'s context (an open task naming it; no new task)" : "Planned \(fix)")
                                               + ": \(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days")
@@ -4082,7 +4094,8 @@ public final class LeadToolset: MCPToolset {
                     let what = noted ? "the open task \(fix) names it, so that's noted in its context and no new task was planned." : "planned \(fix) to fix it."
                     return "\(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days: " + what
                 }
-                flakeNote = " (Its first test run failed on \(Self.clip(names, 300)) and the rerun of \(flaked.plan.filtered ? "those tests" : "the whole test command") passed, so it merged on the rerun: recorded in the flake ledger, which status lists."
+                let what = flaked.plan.continuing ? "the unfinished and never-started suites" : flaked.plan.filtered ? "those tests" : "the whole test command"
+                flakeNote = " (Its first test run failed on \(Self.clip(names, 300)) and the rerun of \(what) passed, so it merged on the rerun: recorded in the flake ledger, which status lists."
                 let readable = flakeLog.map { " Each flaky test's failing lines, readable by its fixer: \(MergeRerun.evidenceFile(root: root, log: $0))." } ?? ""
                 flakeNote += readable
                     + (due.isEmpty ? "" : " " + due.joined(separator: " "))
@@ -4195,8 +4208,10 @@ public final class LeadToolset: MCPToolset {
     func recordRerun(_ plan: MergeRerun.Plan, task: String, commit: String, base: String, passed: Bool, load: Double?, pairing: MergeRerun.Pairing,
                      redOnBase: [String]? = nil) {
         let paired = pairing.result
+        let notes = [plan.note, paired?.note].compactMap { $0 }
         let record = LeadRerunRecord(task: task, commit: commit, at: Date().timeIntervalSince1970, tests: plan.tests, filtered: plan.filtered,
-                                     passed: passed, load: load, baseCommit: paired == nil ? nil : base, base: paired?.base, baseNote: paired?.note,
+                                     passed: passed, load: load, baseCommit: paired == nil ? nil : base, base: paired?.base,
+                                     baseNote: notes.isEmpty ? nil : notes.joined(separator: "\n"),
                                      redOnBase: redOnBase)
         try? flakeLedger.append(record)
     }

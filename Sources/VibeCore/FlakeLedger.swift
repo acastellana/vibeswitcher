@@ -44,7 +44,7 @@ public struct LeadRerunRecord: Codable, Equatable, Sendable {
     public var at: Double
     /// The failing tests, as the first run named them (empty when it named none).
     public var tests: [String]
-    /// The rerun ran only them (`--filter`); false: the whole test command.
+    /// The rerun selected a subset (named tests or unfinished suites); false: the whole test command.
     public var filtered: Bool
     /// The rerun passed (the merge then went ahead, unless the lead's word or a cancel meanwhile stopped it).
     public var passed: Bool
@@ -53,6 +53,7 @@ public struct LeadRerunRecord: Codable, Equatable, Sendable {
     /// The paired run on the base: its commit, how it went, and why it didn't run, when it didn't.
     public var baseCommit: String?
     public var base: Base?
+    /// Selection/fallback reasons and the base run's note, using the existing free-text field.
     public var baseNote: String?
     /// The tests its filtered rerun still failed that failed on the base too, the rest of its checks passing without
     /// them: the merge went ahead on them (`Worktrees.Check.passedRedOnBase`). Nil when it didn't.
@@ -170,15 +171,23 @@ public struct FlakeLedger: Equatable, Sendable {
             let passed = runs.filter(\.passed).count
             return "\(passed) of \(runs.count) passed (\(Int((Double(passed) / Double(runs.count) * 100).rounded()))%)"
         }
-        let filtered = recent.filter(\.filtered), whole = recent.filter { !$0.filtered }
+        let resumed = recent.filter { $0.filtered && $0.baseNote?.hasPrefix("Unfinished-suite rerun:") == true }
+        let filtered = recent.filter { $0.filtered && $0.baseNote?.hasPrefix("Unfinished-suite rerun:") != true }
+        let whole = recent.filter { !$0.filtered }
+        let reasons = Dictionary(grouping: whole.compactMap { run -> String? in
+            guard let note = run.baseNote?.components(separatedBy: "\n").first, note.hasPrefix("Whole rerun: ") else { return nil }
+            return String(note.dropFirst("Whole rerun: ".count)).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        }, by: { $0 }).map { "\($0.key) ×\($0.value.count)" }.sorted()
         let red = recent.filter { $0.base == .red }.count, green = recent.filter { $0.base == .green }.count
         let unpaired = recent.count - red - green
         let ahead = recent.filter { $0.redOnBase != nil }.count
         return "Merge reruns in the last \(Int(LeadBoard.flakeWindow / 86_400)) days: \(recent.count) merge\(recent.count == 1 ? "" : "s") went to a rerun, \(recent.filter(\.passed).count) passed it. "
             + "Filtered reruns (the failing tests only): \(rate(filtered)); whole reruns: \(rate(whole)). "
+            + (resumed.isEmpty ? "" : "Unfinished-suite reruns: \(rate(resumed)). ")
             + "The failing tests run once on the base: branch red/base green (the branch's) \(green), red on the base too \(red)"
             + (ahead > 0 ? " (\(ahead) merged on it, each such test given a task to fix it)" : "")
             + (unpaired > 0 ? ", not paired \(unpaired) (passed its rerun, skipped, hung, or tests the base lacks)" : "") + "."
+            + (reasons.isEmpty ? "" : " Whole rerun reasons: " + reasons.joined(separator: "; ") + ".")
     }
 }
 

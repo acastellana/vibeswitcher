@@ -886,7 +886,14 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(logs.count == 2 && Set(logs).count == 2, "\(logs)")
         let folder = root + "/.vibeswitcher/flakes"
         let files = try FileManager.default.contentsOfDirectory(atPath: folder).filter { $0.hasSuffix(".log") }
-        #expect(files.count == 2, "\(files)")
+        let firstRuns = files.filter { $0.hasSuffix("-first-run.log") }
+        #expect(files.count == 4 && firstRuns.count == 2, "two flake logs and two first-run tails: \(files)")
+        for name in firstRuns {
+            let path = folder + "/" + name
+            let text = try String(contentsOfFile: path, encoding: .utf8)
+            #expect(text.contains("First failing run in add-b's merge") && text.contains("Test flaky() failed after"))
+            #expect(try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int == 0o600)
+        }
         for (flake, log) in zip(flakes, logs) {
             #expect(log.hasSuffix("-add-b-\(flake.commit.prefix(8)).log"), "\(log)")
             #expect(MergeRerun.evidence(for: "flaky()", inLog: log)?.first?.hasPrefix("✘ Test flaky() recorded an issue") == true)

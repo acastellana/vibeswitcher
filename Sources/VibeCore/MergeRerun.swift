@@ -16,8 +16,10 @@ import Foundation
 ///
 /// What runs again: the failing tests only when the test command takes `swift test`'s options last (`filterable`:
 /// this repository's `bash scripts/test.sh`, or `swift test` itself), as `--filter` patterns; else (any other command,
-/// a failure naming no test, more than `filterLimit` of them, or a run that crashed or was stopped partway, so the rest
-/// of the suite never ran: `finished`) the whole test command. Then regression_command, as
+/// more than `filterLimit` of them, or an ambiguous selection) the whole test command. A run stopped partway skips
+/// only suites proved to have passed in full, by the module-qualified IDs discovery gives them (`continuation`);
+/// unfinished, never-started and unresolved suites still run, and a run that left processes or preferences behind
+/// reruns whole. Then regression_command, as
 /// merge always runs it: it's never skipped. No rerun after a build error (the output names errors and no test), nor
 /// after regression_command fails: the incidents' checks aren't retried.
 public enum MergeRerun {
@@ -28,24 +30,40 @@ public enum MergeRerun {
     public struct Plan: Equatable, Sendable {
         /// The failing tests, as the output named them (empty when none was).
         public var tests: [String]
-        /// The rerun runs only them (`--filter`); false: the whole test command.
+        /// The rerun selects a subset (named tests or unfinished suites); false: the whole test command.
         public var filtered: Bool
         /// The script to run in the failed one's place: the test command (filtered or not), then regression_command.
         public var command: String
         /// The filtered test command alone, run once on the base the branch was rebased onto to pair with the
         /// branch's failure (`MergeRerun.baseline`); nil for a whole rerun, which isn't run twice.
         public var baseCommand: String?
+        /// A continuation skips completed suites instead of selecting just the named failures. These are the
+        /// started suites it must show passing, and its selection note (also kept in the ledger's existing notes).
+        public var requiredSuites: [String] = []
+        public var note: String?
 
-        public init(tests: [String], filtered: Bool, command: String, baseCommand: String? = nil) {
+        public init(tests: [String], filtered: Bool, command: String, baseCommand: String? = nil,
+                    requiredSuites: [String] = [], note: String? = nil) {
             self.tests = tests
             self.filtered = filtered
             self.command = command
             self.baseCommand = baseCommand
+            self.requiredSuites = requiredSuites
+            self.note = note
+        }
+
+        public var continuing: Bool { note?.hasPrefix("Unfinished-suite rerun:") == true }
+
+        /// Included in the saved merge output, so a whole rerun explains itself even when it fails.
+        public var annotatedCommand: String {
+            guard let note else { return command }
+            return "printf '%s\\n' \(RecentProjects.shellQuote(note))\n" + command
         }
     }
 
-    /// The rerun after `workflow`'s merge checks failed with `output`; nil when there's none.
-    public static func plan(after output: String, workflow: LeadWorkflow) -> Plan? {
+    /// The rerun after `workflow`'s merge checks failed with `output`; nil when there's none. `suites`: the test IDs
+    /// discovery lists (`discoverTests`), asked only for a run that stopped partway.
+    public static func plan(after output: String, workflow: LeadWorkflow, suites discovered: () -> [String]? = { nil }) -> Plan? {
         guard let test = workflow.testCommand,
               !output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) else { return nil }
         let failures = TestFailures(output: output)
@@ -53,20 +71,147 @@ public enum MergeRerun {
         var tests = failures.tests
         if !ranToEnd { for name in failures.running where !tests.contains(name) { tests.append(name) } }
         // A build that failed fails again. (A crash that left tests unfinished isn't one, named or not.)
-        if tests.isEmpty, failures.unfinished.isEmpty, !failures.errors.isEmpty { return nil }
+        if tests.isEmpty, failures.unfinished.isEmpty, !failures.errors.isEmpty,
+           output.range(of: #"(?m)^\S{1,2} Test run started\.$"#, options: .regularExpression) == nil,
+           suiteEvents(output).isEmpty { return nil }
         var again = workflow
         let patterns = tests.map(pattern)
-        // A run that crashed or was stopped (tests started and never ended, and the run never said it was over) never
-        // ran the rest of the suite: it all runs again, so nothing merges that only part of the suite checked. One
-        // that ran to its end and named its failing tests reruns just them, whatever start lines its output left open.
-        let filtered = filterable(test) && !tests.isEmpty && tests.count <= filterLimit && !patterns.contains(nil) && ranToEnd
-        if filtered {
-            again.testCommand = test.trimmingCharacters(in: .whitespacesAndNewlines) + " --filter "
-                + RecentProjects.shellQuote(patterns.compactMap { $0 }.joined(separator: "|"))
+        let named = !tests.isEmpty && tests.count <= filterLimit && !patterns.contains(nil)
+        let baseCommand = named && filterable(test) ? test.trimmingCharacters(in: .whitespacesAndNewlines) + " --filter "
+            + RecentProjects.shellQuote(patterns.compactMap { $0 }.joined(separator: "|")) : nil
+        var filtered = false, required: [String] = [], note: String?
+        if !filterable(test) {
+            note = "Whole rerun: the test command cannot safely take Swift test filters."
+        } else if ranToEnd, let baseCommand {
+            filtered = true
+            again.testCommand = baseCommand
+        } else if !ranToEnd {
+            let selection = continuation(output, command: test, discovered: discovered)
+            if let skip = selection.skip {
+                filtered = true
+                again.testCommand = test.trimmingCharacters(in: .whitespacesAndNewlines) + " --skip " + RecentProjects.shellQuote(skip)
+                required = selection.required
+                note = "Unfinished-suite rerun: skipped \(selection.count) completed passing suites; unfinished and never-started suites still run."
+            } else {
+                note = "Whole rerun: " + selection.why + "."
+            }
+        } else {
+            note = "Whole rerun: " + (tests.isEmpty ? "the failure named no test" : tests.count > filterLimit
+                ? "more than \(filterLimit) tests failed" : "a failing test has no unambiguous filter") + "."
         }
         guard let command = again.mergeChecks else { return nil }
-        return Plan(tests: tests, filtered: filtered, command: command, baseCommand: filtered ? again.testCommand : nil)
+        return Plan(tests: tests, filtered: filtered, command: command, baseCommand: filtered ? baseCommand : nil,
+                    requiredSuites: required, note: note)
     }
+
+    private static let suiteEvent = try! NSRegularExpression(pattern: #"^\S{1,2} Suite (.+) (started\.|passed after .+|failed after .+)$"#)
+
+    private static func suiteEvents(_ output: String) -> [(name: String, event: String)] {
+        output.components(separatedBy: "\n").compactMap { raw in
+            let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+            guard let match = suiteEvent.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+                  let name = Range(match.range(at: 1), in: line), let event = Range(match.range(at: 2), in: line) else { return nil }
+            return (String(line[name]), String(line[event]))
+        }
+    }
+
+    /// Discovery is through the merge's runner: the same scratch home, branch-code wrapper and held heavy slot.
+    /// A failed discovery never supplies a partial inventory. `--skip-build` lists the tests just built by the run:
+    /// each test's ID, `Module.Suite/test()` or, in a nested suite, `Module.Outer/Inner/test()`.
+    static func discoverTests(command: String, run: (String) -> Git.Result) -> [String]? {
+        let listed = run(command + " --skip-build --list-tests")
+        guard listed.ok else { return nil }
+        let ids = listed.output.components(separatedBy: "\n").filter {
+            $0.range(of: #"^[^\s/]+\.[^\s/]+(/[^\s/]+)+$"#, options: .regularExpression) != nil
+        }
+        return ids.isEmpty ? nil : Array(Set(ids)).sorted()
+    }
+
+    /// The label Swift Testing prints for a suite ID: a top-level suite's type (`Module.Suite` prints `Suite`), a nested
+    /// one's last part (`Module.Outer/Inner` prints `Inner`).
+    static func label(of suite: String) -> String {
+        guard let last = suite.components(separatedBy: "/").last else { return suite }
+        return suite.contains("/") ? last : String(last.drop { $0 != "." }.dropFirst())
+    }
+
+    /// Output gives short suite labels, while filters take module-qualified IDs. A label skips its suites only when
+    /// discovery holds as many suite IDs of that label (nested suites included) as the output started, and each of
+    /// them passed in full: two `TestHomeGuardTests`, one in each of two modules, that both passed are both skipped.
+    /// Each test under a skipped suite must also show its own pass. A label that doesn't resolve that way (a display
+    /// name, a suite of that label that hadn't started, one that failed or never ended) is simply not skipped: it runs
+    /// again. Missing discovery, nothing provably complete or nothing left to resume costs a whole rerun.
+    private static func continuation(_ output: String, command: String, discovered: () -> [String]?)
+        -> (skip: String?, required: [String], count: Int, why: String) {
+        func whole(_ why: String) -> (String?, [String], Int, String) { (nil, [], 0, why) }
+        // Discovery must describe this exact build/selection. Other options may select another configuration,
+        // package or scratch path, or skip tests: support those only once discovery can reproduce them exactly.
+        guard ["bash scripts/test.sh", "sh scripts/test.sh", "scripts/test.sh", "./scripts/test.sh", "swift test", "swift build && swift test"]
+            .contains(command.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return whole("the stopped run's command has options discovery cannot reproduce")
+        }
+        // scripts/test.sh says so after all the Swift tests, naming no suite: any passed suite may have left them, and
+        // a rerun that skipped it would see nothing left (each run compares its own before and after).
+        guard !suiteMarkers.contains(where: output.contains) else {
+            return whole("the stopped run left processes or preferences behind, which no suite can be told from")
+        }
+        var starts: [String: Int] = [:], passes: [String: Int] = [:], failed: Set<String> = []
+        var order: [String] = []
+        for (name, event) in suiteEvents(output) {
+            if event == "started." {
+                if starts[name] == nil { order.append(name) }
+                starts[name, default: 0] += 1
+            } else if event.hasPrefix("passed after ") { passes[name, default: 0] += 1 }
+            else { failed.insert(name) }
+        }
+        let complete = order.filter { passes[$0] == starts[$0] && !failed.contains($0) }
+        guard !complete.isEmpty else { return whole("the run stopped partway without proving any complete passing suite") }
+        guard let ids = discovered(), !ids.isEmpty else { return whole("suite discovery was unavailable or failed") }
+        // Every suite a test ID names (each prefix of its path), with the tests under it at any depth.
+        var under: [String: [String]] = [:]
+        for id in ids {
+            // A test whose name repeats elsewhere is listed with its source location: `…/test()/File.swift:8:6`.
+            var parts = id.components(separatedBy: "/")
+            if parts.count > 2, parts[parts.count - 1].range(of: #"\.swift:\d+:\d+$"#, options: .regularExpression) != nil { parts.removeLast() }
+            for depth in 1..<parts.count { under[parts[..<depth].joined(separator: "/"), default: []].append(parts[parts.count - 1]) }
+        }
+        let byLabel = Dictionary(grouping: under.keys.sorted(), by: label(of:))
+        // How many times each test's own pass line shows ("✔ Test x() passed after", a parameterized one's
+        // "… with 2 test cases passed after", a known issue's "━ … passed after").
+        var shown: [String: Int] = [:]
+        for raw in output.components(separatedBy: "\n") {
+            let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+            guard let match = testPass.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+                  let name = Range(match.range(at: 1), in: line) else { continue }
+            shown[String(line[name]), default: 0] += 1
+        }
+        var skipped: [String] = [], needed: [String: Int] = [:]
+        for name in complete {
+            guard let suites = byLabel[name], suites.count == starts[name] else { continue }
+            for suite in suites where !skipped.contains(where: { suite == $0 || suite.hasPrefix($0 + "/") }) {
+                var wants = needed
+                for test in under[suite] ?? [] { wants[test, default: 0] += 1 }
+                // Outer suites skipped after their nested ones cover them: count their tests once.
+                for inner in skipped where inner.hasPrefix(suite + "/") { for test in under[inner] ?? [] { wants[test, default: 0] -= 1 } }
+                guard wants.allSatisfy({ shown[$0.key, default: 0] >= $0.value }) else { continue }
+                needed = wants
+                skipped = skipped.filter { !$0.hasPrefix(suite + "/") } + [suite]
+            }
+        }
+        guard !skipped.isEmpty else { return whole("no completed suite's ID could be told from discovery") }
+        func covered(_ id: String) -> Bool { skipped.contains { id == $0 || id.hasPrefix($0 + "/") } }
+        guard ids.contains(where: { !covered($0) }) else { return whole("discovery shows no remaining suite to resume") }
+        let pattern = skipped.sorted().map { "^" + NSRegularExpression.escapedPattern(for: $0) + "(/|$)" }.joined(separator: "|")
+        guard pattern.utf8.count <= 65_536 else { return whole("the completed-suite filter is too large") }
+        // Each label the rerun runs must show passing as often as the first run started it.
+        var required: [String] = []
+        for name in order {
+            let skippedHere = (byLabel[name] ?? []).filter(covered).count
+            required += Array(repeating: name, count: max(0, starts[name, default: 0] - skippedHere))
+        }
+        return (pattern, required, skipped.count, "")
+    }
+
+    private static let testPass = try! NSRegularExpression(pattern: #"^\S{1,2} Test (.+?\))(?: with \d+ test cases?)? passed after "#)
 
     /// Whether `command` ends in `swift test`'s options, so `--filter` can be added to it: one line, `swift test` (after
     /// `swift build &&` at most) or `[bash ]scripts/test.sh`, with no shell syntax that would put the option elsewhere.
@@ -82,7 +227,10 @@ public enum MergeRerun {
     /// `Suite.testName` (`Module.Suite/testName`). Nil for a display name (`"Some words"`), which no filter matches.
     /// A Swift Testing ID ends in its source location (`…/name()/File.swift:46:6`), hence `(/|$)`, not `$`: with `$`
     /// the filter matched nothing and `swift test` passed with 0 tests run.
+    /// A parameterized test's end names its cases ("✘ Test f(hook:) with 2 test cases failed after …"), so `TestFailures`
+    /// names it both ways: the filter is its function's (on 2026-11-16 the case count's name sent a rerun whole).
     static func pattern(_ test: String) -> String? {
+        let test = test.replacingOccurrences(of: #"\) with \d+ test cases?$"#, with: ")", options: .regularExpression)
         guard !test.hasPrefix("\""), !test.isEmpty else { return nil }
         if test.hasSuffix(")") { return "/" + NSRegularExpression.escapedPattern(for: test) + "(/|$)" }
         let parts = test.split(separator: ".")
@@ -98,13 +246,28 @@ public enum MergeRerun {
         let lines = output.components(separatedBy: "\n").map {
             $0.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
         }
-        return plan.tests.filter { test in
-            !lines.contains { line in
-                ["✔", "􁁛"].contains { line.hasPrefix("\($0) Test \(test) passed after") }
-                    || TestFailures.passedWithKnownIssues(line) == test
+        var missing = plan.tests.filter { test in
+            // Its function's own passing line, or its cases' ("✔ Test f(hook:) with 2 test cases passed after"); a
+            // known issue's mark ("━ Test f() passed after 1.0 seconds with 1 known issue.") passed too.
+            let function = test.replacingOccurrences(of: #"\) with \d+ test cases?$"#, with: ")", options: .regularExpression)
+            let passed = #"^\S{1,2} Test "# + NSRegularExpression.escapedPattern(for: function) + #"( with \d+ test cases?)? passed after "#
+            return !lines.contains { line in
+                line.range(of: passed, options: .regularExpression) != nil
                     || (line.hasPrefix("Test Case '") && line.contains(test.replacingOccurrences(of: ".", with: " ") + "]' passed"))
             }
         }
+        if plan.continuing {
+            var passed: [String: Int] = [:]
+            for event in suiteEvents(output) where event.event.hasPrefix("passed after ") { passed[event.name, default: 0] += 1 }
+            for name in plan.requiredSuites {
+                if passed[name, default: 0] > 0 { passed[name, default: 0] -= 1 } else { missing.append("suite \(name)") }
+            }
+            // Zero matches, or a process that exited 0 without finishing, isn't a continuation's pass.
+            if !finished(output) || !lines.contains(where: { $0.range(of: #"^\S{1,2} Test run with [1-9]\d* tests?\b.* passed after "#, options: .regularExpression) != nil }) {
+                missing.append("a completed nonempty test run")
+            }
+        }
+        return missing
     }
 
     // MARK: Ran to its end
@@ -112,29 +275,49 @@ public enum MergeRerun {
     /// Swift Testing's closing line: "✘ Test run with 547 tests in 80 suites failed after 190.1 seconds with 1 issue."
     private static let runEnd = try! NSRegularExpression(pattern: #"^\S{1,2} Test run with \d+ tests?\b.* (passed|failed) after "#)
 
-    /// Whether a failed run's `output` ran to its end: no test it started was left unfinished, or Swift Testing's
+    /// Whether a failed run's `output` ran to its end: each explicit run start has its own closing summary, and either
+    /// no test it started was left unfinished, or Swift Testing's
     /// closing line came after the last test started, with no fatal error after it, and its output shows as many issue
-    /// lines as that line counts (one glued to a test's own output would leave a failure unnamed). A crash or a stop
-    /// ends the output with tests started and no closing line: the rest of the suite never ran (`plan` reruns it all).
+    /// lines as that line counts (one glued to a test's own output would leave a failure unnamed), less its known
+    /// issues: "with 5 issues (including 4 known issues)" is one failure, and a known issue's lines carry a mark of their
+    /// own ("━ Test x() recorded a known issue"). Counting them all against the ✘ lines judged every whole run of this
+    /// repository (4 tests pass with known issues) not finished: none of the 29 merge reruns of 2026-11-08..18 ran
+    /// filtered, cache-aware-vibeswitcher's for one named test included. A crash or a stop
+    /// ends the output with tests started and no closing line: the rest of the suite never ran (`plan` resumes it).
     /// A run that ended and named its failing tests reruns just them, whatever start lines its output left open: a
     /// parameterized test's cases print their start ("◇ Test case passing 2 arguments … started.") and no end when they
     /// pass, so a whole suite's run leaves hundreds open.
     public static func finished(_ output: String) -> Bool {
-        guard !TestFailures(output: output).unfinished.isEmpty else { return true }
-        var ended = false, counted = 0, issues = 0
+        let unfinished = !TestFailures(output: output).unfinished.isEmpty
+        var ended = false, counted = 0, issues = 0, pendingRun = false, interruptedRun = false, sawRun = false
         for raw in output.components(separatedBy: "\n") {
             let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
-            if runEnd.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
+            if line.range(of: #"^\S{1,2} Test run started\.$"#, options: .regularExpression) != nil {
+                if sawRun && (pendingRun || !ended || issues < counted) { interruptedRun = true }
+                pendingRun = true
+                sawRun = true
+                ended = false
+                issues = 0
+                counted = 0
+            } else if runEnd.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
                 ended = true
-                counted = line.range(of: #" with (\d+) issues?\b"#, options: .regularExpression)
-                    .flatMap { Int(line[$0].split(separator: " ")[1]) } ?? 0
+                pendingRun = false
+                counted = max(0, number(#" with (\d+) issues?\b"#, in: line) - number(#"including (\d+) known issues?\b"#, in: line))
             } else if TestFailures.swiftTesting(line, " started.", marks: ["◇"]) != nil || line.contains("Fatal error: ") {
                 ended = false
-            } else if TestFailures.swiftTesting(line, " recorded an issue") != nil || TestFailures.swiftTesting(line, " recorded a known issue") != nil {
+            } else if TestFailures.swiftTesting(line, " recorded an issue") != nil {
                 issues += 1
             }
         }
-        return ended && issues >= counted
+        if interruptedRun || pendingRun { return false }
+        return !unfinished && !sawRun ? true : ended && issues >= counted
+    }
+
+    /// The first group of `pattern` in `line` as a number; 0 when it isn't there.
+    private static func number(_ pattern: String, in line: String) -> Int {
+        guard let match = try? NSRegularExpression(pattern: pattern).firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let found = Range(match.range(at: 1), in: line) else { return 0 }
+        return Int(line[found]) ?? 0
     }
 
     // MARK: Red on the branch, then on the base
@@ -150,7 +333,7 @@ public enum MergeRerun {
     /// the `first` run says the Swift tests left processes or preferences behind (`suiteMarkers`). Nil otherwise (a
     /// whole rerun, a crash, a filter that matched nothing, a regression_command that failed): the failure stands.
     public static func redOnBranch(_ plan: Plan, first: String, rerun output: String) -> [String]? {
-        guard plan.filtered, !output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker), finished(output),
+        guard plan.filtered, !plan.continuing, !output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker), finished(output),
               !suiteMarkers.contains(where: { first.contains($0) || output.contains($0) }) else { return nil }
         let failures = TestFailures(output: output)
         guard !failures.tests.isEmpty, failures.errors.isEmpty, failures.tests.allSatisfy(plan.tests.contains) else { return nil }
@@ -254,7 +437,7 @@ public enum MergeRerun {
         }, command: { _ in
             guard let plan = plan() else { return nil }
             guard let command = plan.baseCommand else {
-                pairing.note(.skipped, "a whole rerun isn't run on the base")
+                pairing.note(.skipped, plan.filtered ? "the stopped run named no tests to pair" : "a whole rerun isn't run on the base")
                 return nil
             }
             // Not skipped over load_threshold: it decides the merge now, and it's a few tests.
@@ -281,7 +464,10 @@ public enum MergeRerun {
             return failed.contains(where: plan.tests.contains) ? (.red, nil)
                 : (.skipped, "the base's run failed naming none of the failing tests")
         }
-        return unshown(plan, rerun: output).count == plan.tests.count ? (.absent, nil) : (.green, nil)
+        var named = plan
+        named.note = nil
+        named.requiredSuites = []
+        return unshown(named, rerun: output).count == plan.tests.count ? (.absent, nil) : (.green, nil)
     }
 
     /// What a flake is recorded under when the failed run named no test.
@@ -380,6 +566,19 @@ public enum MergeRerun {
             text += "\n" + test + "\n" + lines.map { "    " + $0 }.joined(separator: "\n") + "\n"
         }
         return text
+    }
+
+    /// Unstructured evidence of the first failure survives merge-worktree cleanup beside the flake log. Mask the
+    /// whole output before cutting it, so a tail beginning inside a secret is safe too. At most 200 lines of 1,000
+    /// characters: a stopped run may have printed every queued test and megabytes of compiler diagnostics.
+    static func firstRunLog(task: String, commit: String, plan: Plan, output: String) -> String {
+        let tail = Redaction.secrets(in: output).components(separatedBy: "\n").suffix(200).map {
+            $0.count > 1000 ? String($0.prefix(999)) + "…" : $0
+        }
+        return "First failing run in \(task)'s merge (\(commit.prefix(12))).\n"
+            + (plan.note ?? "Filtered rerun: the named failing tests only.") + "\n"
+            + "First run's last \(tail.count) lines (secrets masked; 1,000 characters a line):\n"
+            + tail.joined(separator: "\n") + "\n"
     }
 
     // MARK: A hung run
