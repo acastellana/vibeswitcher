@@ -9,7 +9,7 @@ import Testing
 /// both rows. These tests take the real file into a scratch repository with this repository's .gitattributes, land one
 /// branch's row and then the other's, both through plain git and through the merge queue's own landing
 /// (`Worktrees.rebaseAndTest`: rebased, or squashed when the branch holds a merge), and show what a union does to two
-/// edits of one row (`PortMapLintTests` finds it).
+/// edits of one row (DocLinksLint's port map check finds it).
 @Suite struct PortMapMergeTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     static let file = "docs/process/v2-port-map.md"
@@ -78,7 +78,7 @@ import Testing
         // branch, its own first (the union driver puts the merge's own side first).
         #expect(text.hasSuffix(Self.first + "\n" + Self.second + "\n") || text.hasSuffix(Self.second + "\n" + Self.first + "\n"),
                 "\(text.suffix(600))")
-        #expect(PortMapLintTests.problems(in: text).isEmpty, "\(PortMapLintTests.problems(in: text))")
+        #expect(DocLinksLintTests.tableProblems(in: text).isEmpty, "\(DocLinksLintTests.tableProblems(in: text))")
     }
 
     func head(_ ref: String, in root: String) -> String { git(["rev-parse", ref], in: root).output }
@@ -149,12 +149,12 @@ import Testing
     // MARK: two edits of one row
 
     /// Two branches that edit the same row each differently don't conflict either: the union keeps both versions of
-    /// the row, one after the other. The port map's lint (`PortMapLintTests`) finds the two rows with one first cell,
+    /// the row, one after the other. DocLinksLint's port map check (`DocLinksLintTests.tableProblems`) finds the two rows with one first cell,
     /// so a merge that lands it fails its lint run instead of leaving the table wrong unseen.
     @Test func twoEditsOfOneRowLeaveBothVersionsAndTheLintFindsThem() throws {
         let original = try String(contentsOf: Self.repo.appendingPathComponent(Self.file), encoding: .utf8)
         let last = try #require(original.components(separatedBy: "\n").last { !$0.isEmpty })
-        let cells = PortMapLintTests.cells(last)
+        let cells = DocLinksLintTests.tableCells(last)
         try #require(cells.count == 4)
         let edited = { (cost: String) in "| " + cells[0] + " | " + cells[1] + " | " + cells[2] + " | " + cost + " |" }
         let (root, file) = try landedFirst(first: { try replaceLast(with: edited("low: edited by the first"), in: $0) },
@@ -163,7 +163,7 @@ import Testing
         #expect(merge.status == 0, "git merge said: \(merge.output) \(merge.error)")
         let text = try String(contentsOfFile: file, encoding: .utf8)
         #expect(text.hasSuffix(edited("low: edited by the first") + "\n" + edited("low: edited by the second") + "\n"), "\(text.suffix(600))")
-        let problems = PortMapLintTests.problems(in: text)
+        let problems = DocLinksLintTests.tableProblems(in: text)
         #expect(problems.count == 1 && problems.first?.contains("the same row name") == true, "\(problems)")
     }
 }

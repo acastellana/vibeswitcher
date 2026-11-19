@@ -5,5 +5,5 @@ docs/lead/decisions.md merge=union
 # Workers that edit a file shared with main each add a row at the end of the v2 port map's Non-seam edits table; two
 # such branches conflicted there alone, and each then needed a new commit, audit and approval (three times on
 # 2026-11-19). The union driver keeps both rows. It keeps both versions of a row two branches edit differently too:
-# PortMapLintTests finds those (two rows with one name), a row left outside its table and a short row.
+# DocLinksLintTests (its port map check) finds those (two rows with one name), a row left outside its table and a short row.
 docs/process/v2-port-map.md merge=union
