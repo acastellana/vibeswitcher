@@ -7,6 +7,7 @@ import Testing
 /// made-up board written where its tools write it; `vibeswitcher board FOLDER` prints it grouped, `--json` gives the
 /// server's values, a folder with no lead is refused politely; and a page subscribed to `boards` gets the board in its
 /// snapshot, then the next change of the file as a delta.
+@Suite(NodeTraits.linuxOnly)
 struct BoardNodeTests {
     private let scratch = Scratch()
 
