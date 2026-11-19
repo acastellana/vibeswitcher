@@ -403,6 +403,21 @@ final class WebWorld: @unchecked Sendable {
         _ = listener.connectionCount
     }
 
+    /// Runs `body` with the listener's queue held: nothing asked of the queue meanwhile has run when `body` returns,
+    /// and all of it runs after, in the order it was asked. For an order of events that otherwise only a busy machine
+    /// brings about. `body` asks the listener nothing that waits for its queue (its counts, `settle`).
+    func whileQueueIsHeld(_ body: () throws -> Void) throws {
+        let held = DispatchSemaphore(value: 0)
+        let released = DispatchSemaphore(value: 0)
+        queue.async {
+            held.signal()
+            released.wait()
+        }
+        defer { released.signal() }
+        try #require(held.wait(timeout: .now() + hangGuard) == .success, "the listener's queue never ran")
+        try body()
+    }
+
     /// Looks every few milliseconds until `holds`; false at the hang guard. For what the listener says of itself
     /// (its counts), which no event tells.
     func until(_ holds: () -> Bool) -> Bool {
