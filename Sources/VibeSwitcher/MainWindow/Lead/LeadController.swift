@@ -250,6 +250,9 @@ struct TeamReading {
     /// The live workers with a run in line for the Mac-wide test and build lock (see `LeadWitness.Seen.lockWait`).
     var lockWaits: [String: TestLock.Wait] = [:]
     var workflow = LeadWorkflow()
+    var usage = AccountUsage()
+    var workerModel: String?
+    var ignoreUsageLimits = false
     /// The lead's loop runs with workflow.md's auto_advance on: a verifier that ends without a verdict is its to
     /// audit again (see `LeadWitness.leftToAdvance`), a worker's first stop without a report its to nudge
     /// (`LeadWitness.stopsForAdvance`). Looked at only while a task is in review or running.
@@ -268,8 +271,11 @@ struct TeamReading {
     /// `LeadStall`), and a turn that ended on the account's usage limit reads as working (Claude Code fires no Stop hook
     /// on it; a verifier's audit sat there for hours, 2026-10-31): its transcript says so (see `UsageLimit`).
     static func read(root: String, board: LeadBoard, hosted: [String: HostSession], sessions: [String: Session],
-                     observer: LeadObserver) -> TeamReading {
+                     observer: LeadObserver, workerModel: String? = nil) -> TeamReading {
         var team = TeamReading(hosted: hosted, sessions: sessions)
+        team.usage = AccountUsageStore().load()
+        team.workerModel = workerModel
+        team.ignoreUsageLimits = MacLimits.load().ignoreUsageLimits
         let workers = workerSessions(board)
         for id in board.tasks.flatMap(\.watched) where team.watched[id] == nil {
             guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
@@ -428,6 +434,7 @@ final class LeadController: ObservableObject {
     @Published private(set) var mail: [String: LeadMailFeed] = [:]
     /// The Team rows as last made, for the Team tab and the sidebar (see `TeamRowsCache`).
     let teamRows = TeamRowsCache()
+    @Published private(set) var rowUsageWaits: [String: [String: ReviewUsageWait]] = [:]
     /// The Team view's plain-language lines.
     let summaries = TeamSummaryModel()
     /// The all-done cards: each board clearing after merges, its summary, and the user opening the lead.
@@ -1562,6 +1569,8 @@ final class LeadController: ObservableObject {
         }
         refreshing = true
         let roots = leadRoots
+        let commands = Dictionary(uniqueKeysWithValues: roots.map { ($0, claudeCommand($0)) })
+        let home = home
         // The sessions as they are now, for the witness to read its teams' transcripts with (see `TeamReading`).
         let hosted = Dictionary(host.sessions.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
         let sessions = Dictionary(store.sessions.compactMap { session in session.hostID.map { ($0.uuidString, session) } },
@@ -1577,7 +1586,8 @@ final class LeadController: ObservableObject {
             let refusals = Dictionary(uniqueKeysWithValues: roots.compactMap { root in LeadVault.BaseMoveRefusal.load(root: root).map { (root, $0) } })
             files.keep(roots)
             let teams = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
-                (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer))
+                (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer,
+                                        workerModel: LeadWorkflow.claudeModel(command: commands[root] ?? "claude", home: home)))
             })
             let finished = Set(loaded.flatMap { root, board in LeadTeams.finished(Array(hosted.values), root: root, board: board) })
             return (fired, loaded, decisions, teams, records, refusals, finished, mail)
@@ -1603,6 +1613,10 @@ final class LeadController: ObservableObject {
         dispatchPrecondition(condition: .onQueue(.main))
         tell(timers: fired)
         let previous = boards
+        let waits = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
+            (root, TeamRows.usageWaits(board, team: teams[root] ?? TeamReading(), now: Date()))
+        })
+        if waits != rowUsageWaits { rowUsageWaits = waits }
         if loaded != boards { boards = loaded }
         // A lead with a question for you open needs you, its terminal idle or not.
         store.leadsAsking = asking(loaded)
