@@ -33,7 +33,8 @@ import VibeNode
 /// `--node-root` and the `--server` and host it names. `hostArguments`: more of the host's arguments (its test flags).
 /// `installRoot`: the install folder `build.switch` switches in (S8b): the server's `--server-arg --test-install-root=`,
 /// and the host's `--install-root`, so the host checks each handover's target as the node's host does
-/// (`HandoverTarget`); builds go there with `ScratchBuilds.install(commit:into:)`.
+/// (`HandoverTarget`); builds go there with `ScratchBuilds.install(commit:into:)`. `claudeProgram`: the name the fake
+/// Claude runs by (`FakeClaude.install(in:program:)`).
 ///
 /// `reusing`: the root of a node stopped before (its host ended), for a host restart (E8): its files are kept (its
 /// `engine.json`, its snapshot, its journal's record, its repositories), its links and stand-ins made again where missing.
@@ -65,7 +66,7 @@ final class ScratchNode: @unchecked Sendable {
     init(_ scratch: Scratch, userScopes: [String]? = ScratchNode.ownScope.map { [$0] }, housekeeping: Int? = nil,
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
          socketName: String = "host.sock", sealLife: Int? = nil, owner: pid_t = getpid(), reusing: URL? = nil, waitForServer: Bool = true,
-         build: URL? = nil, hostArguments: [String] = [], installRoot: URL? = nil) async throws {
+         build: URL? = nil, hostArguments: [String] = [], installRoot: URL? = nil, claudeProgram: String = "claude") async throws {
         root = try reusing ?? scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
         nodeRoot = build ?? root.appendingPathComponent("build", isDirectory: true)
@@ -90,7 +91,7 @@ final class ScratchNode: @unchecked Sendable {
             if build == nil { try Self.install(into: nodeRoot) }
             try Self.standIns(in: testFolder, scopes: userScopes)
             // The node's `claude` (EN-D13): a link a test puts there, to the fake's launcher.
-            fake = try FakeClaude.install(in: fakeFolder)
+            fake = try FakeClaude.install(in: fakeFolder, program: claudeProgram)
             try files.createSymbolicLink(atPath: testFolder.appendingPathComponent("claude").path, withDestinationPath: fake.launcher.path)
         } else {
             // A host restart on the same root: what the node before made stays (the journal's record too).

@@ -284,6 +284,7 @@ public enum ProcessTable {
         // Codex's app server (its background daemon, the daemon's pid-update-loop, a stdio server someone
         // started by hand) is the same `codex` binary but runs threads for sessions elsewhere: never one itself.
         if named == .codex { return isCodexAppServer(argv) ? .none : .agent(.codex) }
+        if VersionedClaude.isBinary(argv[0]) { return .agent(.claude) }
         return argv.first.map { ($0 as NSString).lastPathComponent }.flatMap(Agent.init(comm:)).map(Identity.agent) ?? .none
     }
 
