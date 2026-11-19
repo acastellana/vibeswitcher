@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import VibeCore
+import VibePlatform
 
 /// A real Claude Code turn in the session sandbox's prototype box (`prototype.sh`, the session sandbox plan's SB0
 /// Step 3), to measure what the shim's box must give it: which entries of its config folder it writes, whether it
@@ -149,7 +150,8 @@ struct RealClaudeSandboxTests {
         for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] {
             var info = stat()
             guard lstat(folder.appendingPathComponent(name).path, &info) == 0 else { continue }
-            found[name] = "\(info.st_ino) \(info.st_ctim.tv_sec).\(info.st_ctim.tv_nsec) \(info.st_size)"
+            let changed = Platform.Files.changed(info)
+            found[name] = "\(info.st_ino) \(changed.tv_sec).\(changed.tv_nsec) \(info.st_size)"
         }
         return found
     }
