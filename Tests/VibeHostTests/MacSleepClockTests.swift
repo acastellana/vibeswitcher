@@ -30,9 +30,9 @@ import Testing
         let folder = temp.url("probe-sleep")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let go = folder.appendingPathComponent("go").path, build = folder.appendingPathComponent("build").path
-        try "#!/bin/sh\nwhile [ ! -e '\(go)' ]; do sleep 0.01; done\necho '\(HostHandover.probeAnswer)'\n"
-            .write(toFile: build, atomically: true, encoding: .utf8)
-        chmod(build, 0o755)
+        // Copied into place by a child (`installScript`): written by this process, the probe's exec of it failed with
+        // "Text file busy" in a full run (2026-11-19), a child another test forked meanwhile holding it open for writing.
+        try installScript("#!/bin/sh\nwhile [ ! -e '\(go)' ]; do sleep 0.01; done\necho '\(HostHandover.probeAnswer)'\n", atPath: build)
         let looks = Looks()
         let time = MacTime(wall: Self.sleepingWall(), awake: {
             if looks.next() == 2 { FileManager.default.createFile(atPath: go, contents: nil) }
