@@ -399,3 +399,7 @@ Eight finished tasks sat 7–11 h waiting on Fable's limit (resets Nov 24) while
 
 This follows the user's instruction. The review gate for sensitive paths is a guard rail the lead doesn't work around.
 
+## 2026-11-19 11:02:14 the-config-seal-is: a passing merge test run that survives a config-seal hold is kept in the tool server's memory only. It is bound to the exact base and branch heads it tested, and it is lost on restart (option b, of the worker's three). No durable pass receipt.
+
+A durable pass sealed with the lead's seal could be forged from the lead's shell to skip a merge's test run, a new way past the gate. Keeping it in memory meets the contract (it survives a seal hold) without adding anything forgeable, and a restart only costs a rerun.
+
