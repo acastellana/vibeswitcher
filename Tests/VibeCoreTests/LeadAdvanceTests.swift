@@ -143,7 +143,28 @@ struct LeadAdvanceTests: LeadTeamFixture {
             }
         }
 
-        /// One more run of passes, and waits for it: what a change the folder watch might not see would bring.
+        /// Runs of passes, each asked for as settle() asks for one, until `condition` holds (60 s at most, less when the
+        /// test is cancelled); whether it does. For what a pass records after a change nothing else brings a pass for (a
+        /// power or lock state the folder watch doesn't see): until(_:) only waits on passes something else asks for.
+        @discardableResult
+        func settle(until condition: () -> Bool) async -> Bool {
+            let deadline = MacTime.real.awake() + 60
+            while true {
+                // Counted before the look, as in until(_:).
+                let seen = passes
+                if condition() { return true }
+                lead.advancing?.trigger()
+                while passes == seen {
+                    guard MacTime.real.awake() < deadline, !Task.isCancelled else { return false }
+                    try? await Task.sleep(nanoseconds: 10_000_000)
+                }
+            }
+        }
+
+        /// One more run of passes, and waits for it: what a change the folder watch might not see would bring. Only for
+        /// a check that nothing more happened: the run it sees end may have begun its last pass before the change (a
+        /// trigger that comes in while a run tells the lead ends that run and starts another), so a check that something
+        /// was recorded waits on that record with until(_:) or settle(until:) instead.
         func settle() async {
             let before = passes
             lead.advancing?.trigger()
@@ -940,9 +961,10 @@ struct LeadAdvanceTests: LeadTeamFixture {
         defer { again.stop() }
         // The audit of the new commit, as any: not a retry on the old one.
         #expect(await again.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == moved })
+        // Its report goes out once its run's passes are done: waited on, not settle()'s run.
+        #expect(await again.until { reports(runtime).contains { $0.contains("Started the audit of add-b at \(moved.prefix(8))") } }, "\(reports(runtime))")
         await again.settle()
         #expect(task("add-b", root)?.verifierRetry == nil)
-        #expect(reports(runtime).contains { $0.contains("Started the audit of add-b at \(moved.prefix(8))") }, "\(reports(runtime))")
         #expect(!reports(runtime).contains { $0.contains("started the audit again") })
         #expect(verifiersSpawned(runtime).count == 2 && killed(first, runtime))
     }
@@ -958,9 +980,11 @@ struct LeadAdvanceTests: LeadTeamFixture {
         runtime.others = [LeadSessionInfo(id: "other", cwd: "/elsewhere/.vibeswitcher/worktrees/x", label: "Worker: other", live: true, status: "working", tty: nil)]
         runtime.calls.unlock()
         quits(first, runtime, root: root)
-        await advancing.settle()
+        // The pass that records the wait, not settle()'s: the run settle() sees end may have begun its last pass before
+        // quits() (see aStartWaitsForTheMacsRoomAndGoesOnTheAppsNudge).
+        #expect(await advancing.until { roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "audit(add-b)" } },
+                "\(roomWaits.waits())")
         #expect(task("add-b", root)?.verifierRetry == nil && verifiersSpawned(runtime).count == 1 && !killed(first, runtime))
-        #expect(roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "audit(add-b)" }, "\(roomWaits.waits())")
         // Room again: the app's nudge, and the retry starts.
         runtime.calls.lock()
         runtime.others = []
@@ -1282,8 +1306,10 @@ struct LeadAdvanceTests: LeadTeamFixture {
         }
         let advancing = Advancing(lead)
         defer { advancing.stop() }
+        // The pass that counted them, not just any run's end; then that pass's run over (settle) before the checks.
+        #expect(await advancing.settle(until: { task("waits", root)?.status == .blocked }))
         await advancing.settle()
-        #expect(task("waits", root)?.status == .blocked && task("waits", root)?.worker == nil)
+        #expect(task("waits", root)?.worker == nil)
         #expect(runtime.spawned.isEmpty)
         #expect(!reports(runtime).contains { $0.contains("waits") })
     }
@@ -1300,9 +1326,9 @@ struct LeadAdvanceTests: LeadTeamFixture {
         await advancing.settle()
         probe.release()
         #expect(!LeadAdvance.running(store))
-        // The next run takes it, and keeps it.
-        await advancing.settle()
-        #expect(LeadAdvance.running(store))
+        // The next run takes it, and keeps it: waited on, run by run, not settle()'s run (which may have begun before the
+        // release).
+        #expect(await advancing.settle(until: { LeadAdvance.running(store) }))
     }
 
     @Test func afterTakesTheBoardsTasksAndRefusesLoops() throws {
@@ -1497,15 +1523,15 @@ struct LeadAdvanceTests: LeadTeamFixture {
             await advancing.settle()
         }
         #expect(holds().count == 1, "\(holds())")
-        // A new limit is news; so is a hold after AC power came back.
+        // A new limit is news; so is a hold after AC power came back. Each waited on, run by run: settle()'s run may have
+        // begun before the reading changed.
         power.set(held(20))
-        await advancing.settle()
-        #expect(holds().count == 2 && holds()[1].contains("under your 20 % limit"), "\(holds())")
+        #expect(await advancing.settle(until: { holds().count == 2 }), "\(holds())")
+        #expect(holds()[1].contains("under your 20 % limit"), "\(holds())")
         power.set(PowerState(onBattery: false, percent: 30, charging: true))
-        await advancing.settle()
+        #expect(await advancing.settle(until: { reports(runtime).contains { $0.contains("Released: on AC power") } }), "\(reports(runtime))")
         power.set(held(20))
-        await advancing.settle()
-        #expect(holds().count == 3, "\(holds())")
+        #expect(await advancing.settle(until: { holds().count == 3 }), "\(holds())")
     }
 
     /// The speed review (2026-11-12) couldn't tell how long battery holds lasted: only their start was logged. The
