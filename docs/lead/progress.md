@@ -4179,3 +4179,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 13:43 Automatically (auto_advance): Cleaned up the-config-seal-is (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-19 13:44 Update: Merged: merges no longer lose a passing test run to a settings hold; new work waits when the disk is short — **What changed:**
 - 2026-11-19 13:52 Automatically (auto_advance): Started the audit of session-host-measure-the at 204eb66d (It touches sensitive_paths (Sources/VibeHost/HostServer.swift), so it's treated as audit whatever its review says).
+- 2026-11-19 13:56 Released audits-run-on-codex's worker (idle since its done report on 11666559) while its audit runs
+- 2026-11-19 13:56 Automatically (auto_advance): Started the audit of audits-run-on-codex at 11666559 (A Codex worker worked on it, so a Claude verifier audits it whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-19 13:56 Planned codex-worked-tasks: Codex-worked tasks merged on a Codex verdict get the post-merge Claude re-audit too (review audit, for security)
+- 2026-11-19 13:56 Audit of audits-run-on-codex: complete, clean, round 4: 2 Important closed, 6 Nit (1 open), 1 Pre-existing open
+- 2026-11-19 13:56 Dismissed audits-run-on-codex:F8: Fixed on main by flaky-under-load (merged at 514453ea): the test now waits on its room wait with advancing.until; it passed 10 of 10 runs under load.
