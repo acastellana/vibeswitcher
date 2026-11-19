@@ -20,7 +20,9 @@ import VibeNode
 /// - `userScopes` (by default this process's own cgroup, `ownScope`) goes to the server as `--server-arg
 ///   --test-user-scopes=…`; nil leaves the server on the weaker rule. When this process runs inside the user's systemd
 ///   manager (`cgroupRoot`: a run a session of the node started, as its merge gate does), the server and the journal's
-///   stand-in read every cgroup from this process's own (`--server-arg --test-cgroup-root=…`), where `ownScope` is `/`. `housekeeping`: `--server-arg --test-housekeeping=…`. `testChild`:
+///   stand-in read every cgroup from this process's own (`--server-arg --test-cgroup-root=…`), where `ownScope` is `/`.
+///   When it runs under a branch code runner (`runnerAbove`: a merge's or an audit's run of the tests), the server
+///   doesn't count the runners above itself as a sender's (`--server-arg --test-runner-above`). `housekeeping`: `--server-arg --test-housekeeping=…`. `testChild`:
 ///   `--server-arg --test-child=…`. `path`: the host's PATH. `holdFirstLook`: `--hold-first-look`, and
 ///   `--server-arg --test-first-look` so the server's engine knows (E4; `serverKnowsFirstLook: false` leaves that out, for
 ///   a case that shows the vault's own hold with the engine's gate away, E8). `socketName`: the
@@ -79,6 +81,13 @@ final class ScratchNode: @unchecked Sendable {
         return components.contains("user@\(uid).service") || components.contains(VoiceRule.nodeUnit) ? own : nil
     }
 
+    /// Whether this process runs under a branch code runner (`BranchCode.wrapper`), as it does when the lead's tool
+    /// server runs the tests for a merge or an audit, or a verifier's shell does: every sender of this run is then
+    /// under that runner, which the voice rule refuses, so the test process could never speak as the user. A scratch
+    /// node of such a run tells its server (`ServerArguments.testRunnerAbove`), which then leaves out the runners
+    /// above itself and no other. Not from a terminal, a worker's shell, CI or the Mac: there every runner counts.
+    static let runnerAbove = !PeerFacts.runners(above: getpid()).isEmpty
+
     /// This process's own cgroup as a scratch node of this run reads it: `/` from `cgroupRoot`, else the machine's path.
     static let ownScope: String? = cgroupRoot == nil ? ownCgroup : "/"
 
@@ -129,6 +138,8 @@ final class ScratchNode: @unchecked Sendable {
         if let userScopes { arguments += ["--server-arg", ServerArguments.testUserScopesFlag + userScopes.joined(separator: ",")] }
         // Inside the user's manager only: elsewhere the server reads each sender's cgroup as the machine has it.
         if let root = Self.cgroupRoot { arguments += ["--server-arg", ServerArguments.testCgroupRootFlag + root] }
+        // Under a branch code runner only: elsewhere the server counts every runner in a sender's ancestry.
+        if Self.runnerAbove { arguments += ["--server-arg", ServerArguments.testRunnerAboveFlag] }
         if let housekeeping { arguments += ["--server-arg", ServerArguments.testHousekeepingFlag + String(housekeeping)] }
         if let testChild { arguments += ["--server-arg", ServerArguments.testChildFlag + testChild] }
         // The vault holds its first look, and the server knows it (its engine refuses `lead` until the accepts, S7).

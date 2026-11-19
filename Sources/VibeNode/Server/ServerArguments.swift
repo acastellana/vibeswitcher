@@ -4,7 +4,7 @@ import VibeCore
 /// What `vibeswitcher-server` is started with (the engine plan's E1, EN-D3): by the session host's `ServerChild`,
 /// `--host-connector N --host-socket PATH`, then `--node --node-root PATH` (the user's node) or `--root PATH
 /// --node-root PATH` (a scratch host's), then each `--server-arg X` a scratch host was given. The test flags
-/// (`--test-user-scopes=…`, `--test-cgroup-root=…`, `--test-housekeeping=…`, `--test-child=…`, `--test-first-look`,
+/// (`--test-user-scopes=…`, `--test-cgroup-root=…`, `--test-runner-above`, `--test-housekeeping=…`, `--test-child=…`, `--test-first-look`,
 /// `--test-install-root=…`, and the web's `--test-web-port=…`, `--test-web-root=…`, `--test-web-pair`, `--test-web-terminal`) come only that way; a server with `--node`
 /// refuses each, with a log line, and takes nothing from it.
 public struct ServerArguments: Equatable, Sendable {
@@ -27,6 +27,14 @@ public struct ServerArguments: Equatable, Sendable {
     /// path in the manager before it looks at a scope. It moves no path that isn't at or under it and changes
     /// nothing of the rule. The user's node reads `/proc/<pid>/cgroup` as it is, never through this.
     public var testCgroupRoot: String?
+    /// A scratch host's test runs under a branch code runner (`BranchCode.wrapper`): a merge's and an audit's test
+    /// command are started under one, so every process of such a run has it among its ancestors, the test process that
+    /// speaks to its scratch node as the user too, and `Voice.judge` refuses a sender under a runner. With this the
+    /// server reads its own ancestry once, at its start, and the runners in it (`PeerFacts.runners(above:)`, each by
+    /// pid and start) are not counted as a sender's: they are above the whole scratch node, server and all. A runner
+    /// anywhere else in a sender's ancestry counts as ever, and nothing of the rule changes. The flag names no
+    /// process: which runners is the server's own reading of `/proc`. The user's node never takes it.
+    public var testRunnerAbove = false
     /// A scratch host's test's housekeeping period, in seconds (30 otherwise).
     public var testHousekeeping: Int?
     /// A scratch host's test's program, started once at the server's start with every descriptor the server holds
@@ -57,6 +65,7 @@ public struct ServerArguments: Equatable, Sendable {
 
     public static let testUserScopesFlag = "--test-user-scopes="
     public static let testCgroupRootFlag = "--test-cgroup-root="
+    public static let testRunnerAboveFlag = "--test-runner-above"
     public static let testHousekeepingFlag = "--test-housekeeping="
     public static let testChildFlag = "--test-child="
     public static let testFirstLookFlag = "--test-first-look"
@@ -78,6 +87,7 @@ public struct ServerArguments: Equatable, Sendable {
         var nodeRoot: String?
         var scopes: [String]?
         var cgroupRoot: String?
+        var runnerAbove = false
         var housekeeping: Int?
         var child: String?
         var firstLook = false
@@ -122,6 +132,9 @@ public struct ServerArguments: Equatable, Sendable {
                     return .failure(Usage("\(testCgroupRootFlag) needs a cgroup's path under the root (/a/b, with no . or .. and no / at its end)"))
                 }
                 cgroupRoot = path
+            case testRunnerAboveFlag:
+                tests.append(word)
+                runnerAbove = true
             case _ where word.hasPrefix(testHousekeepingFlag):
                 tests.append(word)
                 guard let seconds = Int(word.dropFirst(testHousekeepingFlag.count)), seconds > 0 else {
@@ -171,10 +184,12 @@ public struct ServerArguments: Equatable, Sendable {
                                      testInstallRoot: installRoot, testWebPort: webPort, testWebRoot: webRoot, testWebPair: webPair)
         parsed.testWebTerminal = webTerminal
         parsed.testCgroupRoot = cgroupRoot
+        parsed.testRunnerAbove = runnerAbove
         if node {
             parsed.refused = tests
             parsed.testUserScopes = nil
             parsed.testCgroupRoot = nil
+            parsed.testRunnerAbove = false
             parsed.testHousekeeping = nil
             parsed.testChild = nil
             parsed.testFirstLook = false

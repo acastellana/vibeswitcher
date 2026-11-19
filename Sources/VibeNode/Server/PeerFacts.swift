@@ -62,8 +62,10 @@ public struct PeerFacts: Equatable, Sendable {
     /// and no peer is the user, which only Linux's server asks). `token`: the sender as the socket named it; when its
     /// pid now names another process (it ended and its number was given again), nothing is readable. `cgroupRoot`: a
     /// scratch server's test's (`ServerArguments.testCgroupRoot`), from which its cgroup lines are read (`rerooted`);
-    /// nil, as the user's node's server always has it: the lines as `/proc` gives them.
-    public static func read(pid: pid_t, token: Platform.PeerToken? = nil, cgroupRoot: String? = nil) -> PeerFacts {
+    /// nil, as the user's node's server always has it: the lines as `/proc` gives them. `runnersAbove`: the runners a
+    /// scratch server's test runs under (`ServerArguments.testRunnerAbove`: the server's own, `runners(above:)`),
+    /// which aren't counted as this process's; none, as the user's node's server always has it: every runner counts.
+    public static func read(pid: pid_t, token: Platform.PeerToken? = nil, cgroupRoot: String? = nil, runnersAbove: [Ancestor] = []) -> PeerFacts {
         var uid: uid_t?
         if case .record(let record) = Platform.Processes.record(pid) { uid = record.uid }
         var ancestry: [Ancestor] = []
@@ -88,7 +90,8 @@ public struct PeerFacts: Equatable, Sendable {
             for ancestor in ancestry {
                 let arguments = Platform.Processes.arguments(ancestor.pid)
                 guard !arguments.isEmpty else { underRunner = nil; break }
-                if BranchCode.isRunner(arguments) { underRunner = true; break }
+                // Any runner but one above the whole scratch node: the same process, by its pid and its start.
+                if BranchCode.isRunner(arguments), !runnersAbove.contains(ancestor) { underRunner = true; break }
             }
         } else {
             underRunner = nil
@@ -99,6 +102,22 @@ public struct PeerFacts: Equatable, Sendable {
                          terminal: readable ? terminal : .unreadable,
                          sessionMarker: environment.map { $0.contains { $0.hasPrefix(sessionMarkerName + "=") } },
                          underRunner: underRunner, commandLine: Platform.Processes.arguments(pid))
+    }
+
+    /// The branch code runners `pid` runs under (`BranchCode.isRunner`), nearest first, each by its pid and its start:
+    /// what a scratch server given `--test-runner-above` reads of itself, once, at its start. Its ancestors are read
+    /// as a sender's are (itself first, up to init); where a link can't be read the walk ends there, with the runners
+    /// found so far, and one whose arguments can't be read isn't one: fewer runners here is more senders refused.
+    public static func runners(above pid: pid_t) -> [Ancestor] {
+        var runners: [Ancestor] = []
+        var next = pid
+        var steps = 0
+        while next > 1, steps < deepest, let link = Platform.Processes.link(next) {
+            if BranchCode.isRunner(Platform.Processes.arguments(link.pid)) { runners.append(Ancestor(pid: link.pid, startTicks: link.startTicks)) }
+            next = link.parent
+            steps += 1
+        }
+        return runners
     }
 
     /// Whether `path` can be a test's cgroup root: a cgroup's path as the kernel writes one, below the hierarchy's root
