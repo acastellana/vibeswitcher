@@ -4194,3 +4194,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 14:34 Merged merge-stats-a-batch: Merge stats: a batch stopped before its first run, and a retained batch's landing, record the right lines (no audit: review none) (build 295fb14dedaa)
 - 2026-11-19 14:34 Automatically (auto_advance): Merged merge-stats-a-batch (Merge stats: a batch stopped before its first run, and a retained batch's landing, record the right lines) into main at c9af03f5, review none: on its worker's done report on 7064c2e8 and the full test run.
 - 2026-11-19 14:34 Automatically (auto_advance): Cleaned up merge-stats-a-batch; ended pid 10294 (Worker: Merge stats: a batch stopped before its first run, and a retained batch's landing, record the right lines) (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-19 14:41 Released codex-worked-tasks's worker (idle since its done report on 19f08396) while its audit runs
+- 2026-11-19 14:41 Automatically (auto_advance): Started the audit of codex-worked-tasks at 19f08396 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-19 14:44 Audit of codex-worked-tasks: complete, clean, round 1: 1 Nit open
+- 2026-11-19 14:53 Merged session-host-measure-the: Session host: measure the vault calls' stack use on its 512 KB queue threads (build 295fb14dedaa)
