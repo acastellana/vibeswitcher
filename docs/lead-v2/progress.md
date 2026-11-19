@@ -34,3 +34,15 @@
 - 2026-11-19 18:22 Audit of sb6-1-2-branch: finder 2 of 2 submitted (complete, clean, 4 findings)
 - 2026-11-19 18:27 Audit of sb6-1-2-branch: incomplete, clean, round 1: 2 Important unconfirmed, 5 Nit unconfirmed, 1 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 8 unconfirmed)
 - 2026-11-19 18:28 Planned the-full-suite-passes: The full suite passes when the node's own merge gate runs it (review audit)
+- 2026-11-19 18:30 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 18:30 Audit of sb3-the-launcher-builds at ca9f2101 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 18:30 Automatically (auto_advance): Started the audit of sb3-the-launcher-builds at ca9f2101 (Its review is audit).
+- 2026-11-19 18:30 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-19 18:30 Started a worker on sb6-1-2-branch
+- 2026-11-19 18:30 Automatically (auto_advance): Started a worker on sb6-1-2-branch (SB6 (1/2): branch code runs in a box of its own (BranchRun)).
+- 2026-11-19 18:30 Automatically (auto_advance): Overlap for sb6-1-2-branch's start (a warning only: nothing was refused or reordered). Package.swift: branch-runs-get-the (planned, set to start after this one: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-2-2-a (planned, set to start after this one: its boundaries name it), the-full-suite-passes (planned: its boundaries name it); Sources/VibeCore/V2/Sandbox/BranchRun.swift: branch-runs-get-the (planned, set to start after this one: its boundaries name it); Sources/VibeCore/Worktrees.swift: sb6-2-2-a (planned, set to start after this one: its boundaries name it).
+- 2026-11-19 18:30 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 18:30 Started a worker on the-full-suite-passes
+- 2026-11-19 18:30 Automatically (auto_advance): Started a worker on the-full-suite-passes (The full suite passes when the node's own merge gate runs it).
+- 2026-11-19 18:30 Automatically (auto_advance): Overlap for the-full-suite-passes's start (a warning only: nothing was refused or reordered). Package.swift: branch-runs-get-the (planned: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-1-2-branch (running: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
+- 2026-11-19 18:34 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
