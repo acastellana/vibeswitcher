@@ -7,6 +7,8 @@
 //   ?still        sends the snapshot and nothing after it (for screenshots)
 //   ?empty        a node with no sessions
 
+import { diffOps, summaryOf } from './chatops.js';
+
 const HOME = '/home/dev';
 const SITE = `${HOME}/projects/example-site`;
 const API = `${HOME}/projects/example-api`;
@@ -39,6 +41,8 @@ export function createMock(store, options = {}) {
   const next = (prefix) => `${prefix}:${++counter}`;
   const timers = new Set();
   const subscribed = new Set();
+  // Each followed chat as last sent, in the wire's items: a change is sent as the ops from it, as the node sends them.
+  const sentChats = new Map();
 
   // ---- The node's state, as the server would hold it ----
 
@@ -227,12 +231,51 @@ export function createMock(store, options = {}) {
   }
   const clone = (map) => [...map.values()].map((value) => structuredClone(value));
 
-  // The changes go out as one delta, as the server batches them; a chat's only to who subscribed to it.
+  // The changes go out as one delta, as the server batches them; a chat's as its ops, only to who follows it.
   function emit(...changes) {
-    const sent = changes.filter((change) => change.in !== 'chat' || subscribed.has(change.session));
-    if (!sent.length || down) return;
+    if (down) return;
+    const sent = changes.filter((change) => change && change.in !== 'chat');
+    for (const sid of new Set(changes.filter((change) => change?.in === 'chat').map((change) => change.session))) sendChat(sid);
+    if (!sent.length) return;
     seq += 1;
     store.apply({ v: 1, kind: 'delta', seq, changes: structuredClone(sent) });
+  }
+
+  // A followed chat's change: the ops from what was sent last to the chat now.
+  function sendChat(sid) {
+    if (!subscribed.has(sid)) return;
+    const now = wireChat(chats.get(sid) || []);
+    const ops = diffOps(sentChats.get(sid) || [], now);
+    sentChats.set(sid, now);
+    if (ops.length) store.chatOps(sid, structuredClone(ops));
+  }
+
+  // The mock's chat items as the wire's (the contract §6): each run of tool calls one `tools` item.
+  function wireChat(items) {
+    const out = [];
+    let run = null;
+    for (const item of items) {
+      if (item.kind === 'tool') {
+        const tool = { id: item.id, name: item.name, title: item.title, at: item.at, detail: item.detail,
+          result: item.result ? { output: item.result.output, truncated: false, failed: !!item.result.failed, at: item.result.at, images: [] } : null };
+        if (!run) out.push(run = { id: 'tools:' + item.id, type: 'tools', at: item.at, summary: '', tools: [] });
+        run.tools.push(tool);
+        run.summary = summaryOf(run.tools);
+        continue;
+      }
+      run = null;
+      if (item.kind === 'prompt') {
+        out.push({ id: item.id, type: 'prompt', at: item.at, text: item.text, steered: false, fromLead: false, images: [], ...(item.action ? { action: item.action } : {}) });
+      } else if (item.kind === 'reply') {
+        out.push({ id: item.id, type: 'reply', at: item.at, text: item.text, ...(item.streaming ? { streaming: true } : {}) });
+      } else if (item.kind === 'team') {
+        out.push({ id: item.id, type: 'team', at: item.at, text: item.text, title: item.title, sender: { kind: 'vibeSwitcher', name: `${item.from} ${item.title}`, task: null },
+          message: 'report', task: null, part: null });
+      } else {
+        out.push({ ...item, type: item.kind });
+      }
+    }
+    return out;
   }
 
   const put = (name, map, key) => ({ in: name, id: key, value: map.get(key) ?? null });
@@ -493,11 +536,25 @@ export function createMock(store, options = {}) {
     },
     // A snapshot again, after a gap.
     resync() { later(50, () => store.apply(snapshot())); },
+    // A chat's newest 200 items, then its ops; older ones come with pageChat.
     subscribeChat(sid) {
       later(options.still ? 0 : 140, () => {
+        if (down) return;
         subscribed.add(sid);
-        store.apply({ v: 1, kind: 'chat', session: sid, items: structuredClone(chats.get(sid) || []) });
+        const items = wireChat(chats.get(sid) || []);
+        sentChats.set(sid, items);
+        store.chatSnapshot(sid, { items: structuredClone(items.slice(-200)), after: null, more: items.length > 200 });
       });
+    },
+    unsubscribeChat(sid) { subscribed.delete(sid); },
+    pageChat(sid, before) {
+      return new Promise((resolve) => later(160, () => {
+        const items = sentChats.get(sid) || wireChat(chats.get(sid) || []);
+        const end = items.findIndex((item) => item.id === before);
+        if (end < 0) return resolve({ ok: false, error: { code: 'bad-args', message: 'No such item.' } });
+        const start = Math.max(0, end - 200);
+        resolve({ ok: true, result: { items: structuredClone(items.slice(start, end)), more: start > 0 } });
+      }));
     },
     request(message) {
       return new Promise((resolve) => later(160, () => resolve(down ? { ok: false, error: { code: 'not-yet', message: 'The node isn’t answering. It’s sent again once it’s back.' } } : handle(message))));
@@ -506,6 +563,7 @@ export function createMock(store, options = {}) {
     restart() {
       down = true;
       subscribed.clear();
+      sentChats.clear();
       store.setConnection('reconnecting');
       later(2400, () => {
         down = false;

@@ -39,6 +39,18 @@ function counted(tool, counts) {
   return made;
 }
 
+// The node's items (the wire contract §6: a run of tools is one `tools` item, `type` says what each is) as one entry a
+// prompt and one a tool call; the mock's older shape (`kind`, a tool a row) passes as it is.
+function flat(items) {
+  const out = [];
+  for (const item of items) {
+    if (item.type === 'tools') for (const tool of item.tools || []) out.push({ ...tool, kind: 'tool' });
+    else if (item.type && !item.kind) out.push({ ...item, kind: item.type });
+    else out.push(item);
+  }
+  return out;
+}
+
 // The rows for a chat's `items`:
 //
 //   { key, kind: 'file', path, folder, name, verb: 'Edited' | 'Written', edits, added, removed, replaced }
@@ -52,7 +64,7 @@ export function ledger(items, { cwd = null, home = null, counts = new Map() } = 
   const rows = [];
   let turn = 'start';
   let files = new Map();
-  for (const item of items) {
+  for (const item of flat(items)) {
     if (item.kind === 'prompt') {
       turn = item.id;
       files = new Map();

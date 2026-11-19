@@ -360,3 +360,112 @@ test('aStatusTheNodeCantDateShowsNoDuration', async () => {
   assert.equal(session(value, new Map()).since, null, 'the start of time is no moment to count from');
   assert.equal(session({ ...value, since: '2026-11-17T09:13:20.000Z' }, new Map()).since, '2026-11-17T09:13:20.000Z');
 });
+
+// ---- Chats (the contract §6) ----
+
+// A live page following the lead's chat: its subscribe, answered with the chat's snapshot vector.
+async function chatting() {
+  const r = await live();
+  r.store.openChat(LEAD);
+  const ask = r.sent('subscribe').at(-1);
+  r.socket().say({ v: 1, re: ask.id, ok: true, result: { sub: ask.args.sub, mode: 'snapshot' } });
+  r.socket().say({ ...vector('snapshot.chat'), sub: ask.args.sub, key: LEAD });
+  return { r, ask, chat: r.store.state.chats.get(LEAD) };
+}
+
+const ids = (chat) => chat.items.map((item) => item.id);
+
+test('a chat is followed by its session, its snapshot taken and its ops applied in place', async () => {
+  const { r, ask, chat } = await chatting();
+  assert.deepEqual(ask.args, { sub: 'c1', collection: 'chat', key: LEAD });
+  assert.equal(validate('frame', ask), null);
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0']);
+  assert.equal(chat.more, true);
+  const item = chat.items[1];
+  r.socket().say(vector('delta.chat'));
+  assert.equal(chat.items[1], item, 'the grown reply is the same item, its text appended');
+  assert.equal(item.text, "I'll start by reading the test. It reads the token from the wrong header.");
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0', 'tools:t_07']);
+  r.socket().say(vector('delta.chat-set'));
+  assert.deepEqual(ids(chat), ['m_01', 'tools:t_07', 'm_09']);
+  assert.equal(chat.items[1].tools[0].result.output, 'import Testing\n…');
+  assert.equal(chat.items[2].type, 'team');
+  assert.deepEqual(r.page.warnings, []);
+});
+
+test('aTextOpWhoseOffsetIsntMineIsAGap', async () => {
+  const { r, chat } = await chatting();
+  const delta = vector('delta.chat');
+  delta.ops[0].at = 7;
+  r.socket().say(delta);
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0'], 'nothing of the delta is applied: not its add either');
+  assert.equal(chat.items[1].text, "I'll start by reading the test.");
+  const again = r.sent('subscribe').at(-1);
+  assert.deepEqual(again.args, { sub: 'c1', collection: 'chat', key: LEAD, after: 'm_02.0' }, 'the item asked for again, and what follows it');
+  // The tail that answers it replaces the item and what followed.
+  r.socket().say({ v: 1, re: again.id, ok: true, result: { sub: 'c1', mode: 'tail' } });
+  const tail = vector('resume.chat-tail')[2];
+  r.socket().say({ ...tail, epoch: EPOCH, seq: 321, after: 'm_02.0',
+    items: [{ id: 'm_02.0', type: 'reply', at: null, text: "I'll start by reading the test. It reads the token from the wrong header." }] });
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0']);
+  assert.match(chat.items[1].text, /wrong header\.$/);
+});
+
+test('aChatTailReplacesFromItsItemOn', async () => {
+  const { r, chat } = await chatting();
+  r.socket().say(vector('delta.chat'));
+  r.socket().close();
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0', 'tools:t_07'], 'reconnecting: every item stays');
+  r.tick();
+  const restarted = vector('resume.chat-tail')[2].epoch;
+  r.socket().accept();
+  r.socket().say({ ...vector('hello.web'), epoch: restarted });
+  const ask = r.sent('subscribe').find((message) => message.args.collection === 'chat');
+  assert.deepEqual(ask.args, { sub: 'c1', collection: 'chat', key: LEAD, since: { epoch: EPOCH, seq: 320 }, after: 'tools:t_07' });
+  r.socket().say({ v: 1, re: ask.id, ok: true, result: { sub: 'c1', mode: 'tail' } });
+  r.socket().say(vector('resume.chat-tail')[2]);
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0', 'tools:t_07', 'm_03.0'], 'nothing lost, nothing twice');
+  assert.equal(chat.items[2].tools[0].result.output, 'import Testing\n…', 'the item `after` as it is now');
+  // The next delta follows the tail's seq, in the new epoch.
+  r.socket().say({ ...vector('delta.chat-set'), prev: 2, seq: 3, ops: [{ op: 'remove', id: 'm_03.0' }] });
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0', 'tools:t_07']);
+});
+
+test('a chat no longer shown is let go, keeps its items, and resumes when shown again', async () => {
+  const { r, chat } = await chatting();
+  r.store.closeChat(LEAD);
+  const left = r.sent('unsubscribe').at(-1);
+  assert.deepEqual(left.args, { sub: 'c1' });
+  r.socket().say({ ...vector('delta.chat') });
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0'], 'a late event of a chat let go is dropped');
+  r.store.openChat(LEAD);
+  const back = r.sent('subscribe').at(-1);
+  assert.deepEqual(back.args, { sub: 'c1', collection: 'chat', key: LEAD, since: { epoch: EPOCH, seq: 318 }, after: 'm_02.0' });
+  r.socket().say({ v: 1, re: back.id, ok: true, result: { sub: 'c1', mode: 'resume' } });
+  r.socket().say(vector('delta.chat'));
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0', 'tools:t_07']);
+});
+
+test('older items page in before the first, once at a time, while there are more', async () => {
+  const { r, chat } = await chatting();
+  r.store.pageChat(LEAD);
+  r.store.pageChat(LEAD);
+  const pages = r.sent('chat.page');
+  assert.equal(pages.length, 1, 'one page asked at a time');
+  assert.deepEqual(pages[0].args, { session: LEAD, before: 'm_01', limit: 200 });
+  assert.equal(validate('frame', pages[0]), null);
+  r.socket().say({ ...vector('chat.page')[1], re: pages[0].id });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(ids(chat), ['m_00.0', 'm_01', 'm_02.0']);
+  assert.equal(chat.more, false);
+  r.store.pageChat(LEAD);
+  assert.equal(r.sent('chat.page').length, 1, 'nothing more to ask for');
+});
+
+test('every chat frame the page reads passes its validator', () => {
+  for (const name of ['snapshot.chat', 'delta.chat', 'delta.chat-set']) {
+    const frame = vector(name);
+    assert.equal(validate('frame', frame), null, name);
+  }
+  assert.equal(validate('reply.chat.page', vector('chat.page')[1]), null);
+});

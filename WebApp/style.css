@@ -234,7 +234,8 @@ code, pre, kbd { font-family: var(--mono); }
 /* ---- Chat ---- */
 
 .chat { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable both-edges; }
+.chat-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; scrollbar-gutter: stable both-edges; }
+.chat-spacer { flex: none; }
 .chat-column { max-width: 800px; margin: 0 auto; padding: 22px 24px 10px; }
 .earlier { padding-bottom: 12px; color: var(--ink-3); font-size: var(--small); text-align: center; }
 .chat-skeleton { display: grid; gap: 14px; padding: 6px 0 0 30px; }
@@ -306,6 +307,19 @@ code, pre, kbd { font-family: var(--mono); }
 .note-text { color: var(--ink-2); }
 .note-time { color: var(--ink-3); font-size: var(--small); }
 .ask-row { margin-left: 30px; }
+.row-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.image-note { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; background: var(--fill); color: var(--ink-3); font-size: var(--small); }
+.image-note .icon { color: var(--ink-3); }
+.prose.quiet { color: var(--ink-2); font-size: 12.5px; }
+.todos { display: grid; gap: 3px; font-size: 12.5px; }
+.todo { position: relative; padding-left: 16px; color: var(--ink-2); }
+.todo::before { content: ""; position: absolute; left: 2px; top: 0.5em; width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--ink-3); }
+.todo.active::before { background: var(--working); box-shadow: none; }
+.todo.done { color: var(--ink-3); text-decoration: line-through; }
+.todo.done::before { background: var(--done); box-shadow: none; }
+.fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; font-size: 12px; }
+.fields dt { color: var(--ink-3); }
+.fields dd { min-width: 0; overflow-wrap: anywhere; }
 
 .chat-live { display: flex; align-items: center; gap: 7px; min-height: 18px; margin-top: 14px; padding-left: 30px; color: var(--ink-2); font-size: 12px; visibility: hidden; }
 .chat-live.on { visibility: visible; }
