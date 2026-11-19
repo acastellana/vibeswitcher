@@ -550,7 +550,8 @@ struct RestartTests {
 
     /// The snapshot of the last accept turns "everything is new" into what changed: after the restart the held list
     /// says of each thing whether it changed since the last accept, and of a guard rail what it was; what the snapshot
-    /// lists as it is now is said to be not known to be the same (the old host's vault sealed the snapshot).
+    /// lists as it is now is said to be not known to be the same (the old host's vault sealed the snapshot): once, after
+    /// the lines it applies to, and on each of them with `--long` (2026-11-19).
     @Test func theSnapshotTurnsEverythingNewIntoWhatChanged() async throws {
         let (node, repo) = try await hostRestarted(leadBefore: false) { node, repo in
             try #"{"env":{"CHANGED":"between the hosts"}}"#.write(to: node.homeSettings, atomically: true, encoding: .utf8)
@@ -564,12 +565,26 @@ struct RestartTests {
         // The snapshot's seal is the old host's vault's: nothing is said to be the same, only not known to be (the
         // security follow-ups' item 18).
         #expect(!lines.contains { $0.contains("; the same as at your last accept") }, "\(held.output)")
-        let unknown = lines.filter { $0.hasPrefix("    ") && $0.contains("not known to be the same as at your last accept") }
-        #expect(!unknown.isEmpty, "\(held.output)")
+        // Short: a guard rail is its key and value; the word it shares with the others is said once, at the end.
+        #expect(!lines.contains { $0.hasPrefix("    ") && $0.contains("not known to be the same as at your last accept") }, "\(held.output)")
+        #expect(lines.filter { $0.contains("not known to be the same as at your last accept") }.count == 1, "\(held.output)")
+        #expect(lines.contains { $0.hasPrefix("  each held thing and guard rail above with no note: not known to be the same") }, "\(held.output)")
         #expect(lines.contains { $0.hasPrefix("    test_command: make test; changed since your last accept") && $0.contains("from “make check”") },
                 "\(held.output)")
-        #expect(lines.contains { $0.hasPrefix("    merge_policy: ask_all; not known to be the same as at your last accept") }, "\(held.output)")
-        #expect(held.output.contains("compared with your last accept"), "\(held.output)")
+        #expect(lines.contains("    merge_policy: ask_all"), "\(held.output)")
+
+        // `--long` says it on every line, as before.
+        let long = try await node.run(["config", "held", repo.path, "--long"])
+        let longLines = long.output.components(separatedBy: "\n")
+        let unknown = longLines.filter { $0.hasPrefix("    ") && $0.contains("not known to be the same as at your last accept") }
+        #expect(unknown.count > 1, "\(long.output)")
+        #expect(longLines.contains { $0.hasPrefix("    merge_policy: ask_all; not known to be the same as at your last accept") }, "\(long.output)")
+        #expect(long.output.contains("compared with your last accept"), "\(long.output)")
+        // The short lines show every hash and value the long ones do: all the card is bound to.
+        for line in longLines where line.hasPrefix("    ") {
+            let bound = line.components(separatedBy: "; ").first ?? line
+            #expect(lines.contains { $0.hasPrefix(bound) }, "\(bound) not in the short lines:\n\(held.output)")
+        }
     }
 
     /// `config accept` records the floor workflow.md proposes, after the seal (EN-D7's order: the vault refuses the

@@ -288,6 +288,43 @@ struct ConfigHoldStoreTests {
         #expect(said != nil && said?.hasPrefix("the same") == false, "\(String(describing: said))")
     }
 
+    /// `config held`'s lines (2026-11-19): short, every held thing and guard rail on one line with its hash or value and
+    /// what changed since the last accept, and the word only saying it's as it was said once at the end, only when a
+    /// line had it; `long` puts it on each of those lines.
+    @Test func heldLinesAreShortWithTheSharedWordOnceAndLongAsBefore() throws {
+        let unknown = AcceptedSnapshot.unvouched("2026-11-19T10:00:00Z")
+        var card = CardStore.Card(root: "/r", kind: .configHeld)
+        card.config = ConfigHoldStore.Shown(
+            items: [ConfigHoldStore.Item(name: "~/.claude/settings.json", hash: "abc123", change: "env", sinceAccept: unknown),
+                    ConfigHoldStore.Item(name: "~/.zshrc", hash: "def456", sinceAccept: "changed since your last accept (2026-11-19T10:00:00Z)")],
+            guarded: [ConfigHoldStore.Rail(key: "merge_policy", value: "ask_all", sinceAccept: unknown),
+                      ConfigHoldStore.Rail(key: "max_workers", value: "3", sinceAccept: unknown),
+                      ConfigHoldStore.Rail(key: "test_command", value: "make test", sinceAccept: "changed since your last accept (2026-11-19T10:00:00Z), from “make check”")],
+            lastAccept: Date(timeIntervalSince1970: 1_790_000_000))
+        let short = CardText.lines(card.value)
+        #expect(short.contains("    merge_policy: ask_all"), "\(short)")
+        #expect(short.contains("    max_workers: 3"), "\(short)")
+        #expect(short.contains("    ~/.claude/settings.json, hash abc123: env"), "\(short)")
+        #expect(short.contains { $0.hasPrefix("    ~/.zshrc, hash def456; changed since your last accept") }, "\(short)")
+        #expect(short.contains { $0.hasPrefix("    test_command: make test; changed since") && $0.hasSuffix("from “make check”") }, "\(short)")
+        #expect(short.filter { $0.contains(AcceptedSnapshot.unvouchedPrefix) } == ["  each held thing and guard rail above with no note: " + unknown], "\(short)")
+        #expect(short.last == "  each held thing and guard rail above with no note: " + unknown, "\(short)")
+
+        let long = CardText.lines(card.value, long: true)
+        #expect(long.contains("    merge_policy: ask_all; " + unknown), "\(long)")
+        #expect(long.contains("    ~/.claude/settings.json, hash abc123: env; " + unknown), "\(long)")
+        #expect(long.filter { $0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 3, "\(long)")
+        #expect(long.contains { $0.hasPrefix("  compared with your last accept") }, "\(long)")
+
+        // Nothing that only says "as it was": no closing word, the comparison line as before.
+        card.config?.items = []
+        card.config?.guarded = [ConfigHoldStore.Rail(key: "merge_policy", value: "ask_all")]
+        let plain = CardText.lines(card.value)
+        #expect(plain.contains("    merge_policy: ask_all"), "\(plain)")
+        #expect(!plain.contains { $0.contains("with no note") }, "\(plain)")
+        #expect(plain.contains { $0.hasPrefix("  compared with your last accept") }, "\(plain)")
+    }
+
     /// The app's `theCardDrawsChangedFileTextVerbatim`: what the card shows of a changed file (its name, what changed,
     /// its files) reaches the terminal with control and bidirectional characters stripped (`ConfigSeal.inert`).
     @Test func heldTextIsPrintedInert() throws {

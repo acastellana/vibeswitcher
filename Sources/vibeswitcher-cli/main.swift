@@ -18,7 +18,7 @@ let usage = """
            vibeswitcher lead FOLDER [--goal TEXT] [--take-head] [--replace]
            vibeswitcher questions [FOLDER] [--all] [--json]
            vibeswitcher answer CARD TEXT | hold CARD
-           vibeswitcher config held [FOLDER] [--diff NAME] | config accept CARD
+           vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher hooks install|remove [--agent claude|codex]
            vibeswitcher web [--revoke]

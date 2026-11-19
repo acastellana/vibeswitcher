@@ -6,8 +6,10 @@ import VibeNode
 /// S7): what the host's vault holds of the agents' config for a project, as a card bound to exactly the hashes it
 /// shows, with the floor workflow.md proposes; then the user's accept of that card, which seals exactly those and then
 /// records the floor (EN-D7). `config held` changes nothing and asks no code; `config accept` asks the card's.
+/// `config held` is short (`CardText.lines(_:long:)`: a line per held thing and guard rail, a word they share said once);
+/// `--long` says every word on every line.
 enum ConfigCommand {
-    static let usage = "usage: vibeswitcher config held [FOLDER] [--diff NAME] | config accept CARD"
+    static let usage = "usage: vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD"
 
     static func run(_ arguments: [String]) -> Int32 {
         switch arguments.first {
@@ -29,6 +31,7 @@ enum ConfigCommand {
     static func held(_ arguments: [String]) -> Int32 {
         var folder: String?
         var diff: String?
+        var long = false
         var index = 0
         while index < arguments.count {
             let word = arguments[index]
@@ -36,6 +39,8 @@ enum ConfigCommand {
                 guard index + 1 < arguments.count else { return Say.usage(usage) }
                 index += 1
                 diff = arguments[index]
+            } else if word == "--long" {
+                long = true
             } else {
                 guard folder == nil, !word.hasPrefix("--") else { return Say.usage(usage) }
                 folder = CardCommand.absolute(word)
@@ -55,7 +60,7 @@ enum ConfigCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
             guard reply.ok, let result = reply.result, let card = result["card"] else { return Say.replyError(reply) }
-            CardText.lines(card).forEach(Say.out)
+            CardText.lines(card, long: long).forEach(Say.out)
             if let difference = result["difference"] {
                 if let lines = difference.array { lines.compactMap(\.string).forEach { Say.out(ConfigSeal.inert($0, limit: .max)) } }
                 else { Say.out(ConfigSeal.inert(difference.string ?? "", limit: .max)) }

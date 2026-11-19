@@ -28,8 +28,21 @@ public enum CardText {
         return lines
     }
 
-    /// The lines for `card` (`CardStore.Card.value`).
-    public static func lines(_ card: NodeWire.Value) -> [String] {
+    /// The lines for `card` (`CardStore.Card.value`), short (`lines(_:long:)`).
+    public static func lines(_ card: NodeWire.Value) -> [String] { lines(card, long: false) }
+
+    /// Whether a held thing's or guard rail's word on the last accept (`sinceAccept`) only says it's as it was: the
+    /// same (the vault sealed the snapshot), or not known to be (`AcceptedSnapshot.unvouched`). The short lines say it
+    /// once, after them, for every line it was on.
+    static func saysTheSame(_ since: String) -> Bool {
+        since.hasPrefix("the same as at your last accept") || since.hasPrefix(AcceptedSnapshot.unvouchedPrefix)
+    }
+
+    /// The lines for `card`. A config card's are short unless `long`: each held thing and each guard rail on one line
+    /// with its value or hash (all a card is bound to stays shown), what changed since the last accept on its line, and
+    /// a word that only says it's as it was (`saysTheSame`) once at the end, for the lines with no note; `long` puts
+    /// that word on every line it applies to, as before (`config held --long`).
+    public static func lines(_ card: NodeWire.Value, long: Bool) -> [String] {
         let id = inert(card["id"]?.string)
         let kind = card["kind"]?.string ?? "?"
         let root = card["root"]?.string ?? ""
@@ -68,6 +81,8 @@ public enum CardText {
             for problem in approval["problems"]?.array?.compactMap(\.string) ?? [] { lines.append("  note: " + inert(problem)) }
         }
         if let config = card["config"], config != .null {
+            // The word the short lines leave off, said once after them.
+            var same: String?
             let items = config["items"]?.array ?? []
             lines.append(items.isEmpty ? "  nothing held: accepting records what workflow.md proposes and ends a fresh vault's first look"
                                        : "  held (no worker, verifier or merge until accepted):")
@@ -78,7 +93,9 @@ public enum CardText {
                 line += ", hash " + inert(item["hash"]?.string)
                 if let change = item["change"]?.string { line += ": " + inert(change) }
                 if item["outside"]?.bool == true { line += " (changed outside a team session)" }
-                if let since = item["sinceAccept"]?.string { line += "; " + inert(since) }
+                if let since = item["sinceAccept"]?.string {
+                    if long || !saysTheSame(since) { line += "; " + inert(since) } else { same = same ?? since }
+                }
                 lines.append(line)
                 for file in item["files"]?.array?.compactMap(\.string) ?? [] { lines.append("      " + inert(file)) }
             }
@@ -93,10 +110,15 @@ public enum CardText {
             let rails = config["guarded"]?.array ?? []
             if !rails.isEmpty { lines.append("  workflow.md's guard rails (read each value: the accept records them):") }
             for rail in rails {
-                lines.append("    \(inert(rail["key"]?.string)): \(inert(rail["value"]?.string))"
-                             + (rail["sinceAccept"]?.string.map { "; " + inert($0) } ?? ""))
+                var line = "    \(inert(rail["key"]?.string)): \(inert(rail["value"]?.string))"
+                if let since = rail["sinceAccept"]?.string {
+                    if long || !saysTheSame(since) { line += "; " + inert(since) } else { same = same ?? since }
+                }
+                lines.append(line)
             }
-            if let at = config["lastAccept"]?.string {
+            if let same {
+                lines.append("  each held thing and guard rail above with no note: " + inert(same))
+            } else if let at = config["lastAccept"]?.string {
                 lines.append("  compared with your last accept (\(inert(at))), from an unsealed snapshot a worker could rewrite: read the values")
             } else if config["items"]?.array?.isEmpty == false {
                 lines.append("  no earlier accept is known here: everything held is new to this card")
