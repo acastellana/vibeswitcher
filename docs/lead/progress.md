@@ -4172,3 +4172,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 13:22 Automatically (auto_advance): Cleaned up new-work-waits-when (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-19 13:41 Pipeline held: the-config-seal-is ready to merge with none landing; cause: every test slot held
 - 2026-11-19 13:43 Merged the-config-seal-is: The config seal is checked before a merge's test run, and a passing run survives a seal hold (build 295fb14dedaa)
+- 2026-11-19 13:43 Automatically (auto_advance): Merged the-config-seal-is (The config seal is checked before a merge's test run, and a passing run survives a seal hold) into main at 0bdb2410, on its passing audit and the full test run.
+- 2026-11-19 13:43 Started a worker on merge-stats-a-batch
+- 2026-11-19 13:43 Automatically (auto_advance): Started a worker on merge-stats-a-batch (Merge stats: a batch stopped before its first run, and a retained batch's landing, record the right lines), its after tasks done (the-config-seal-is).
+- 2026-11-19 13:43 Automatically (auto_advance): Overlap for merge-stats-a-batch's start (a warning only: nothing was refused or reordered). Sources/VibeCore/LeadMergeBatch.swift: audits-run-on-codex (running: its branch changes it).
+- 2026-11-19 13:43 Automatically (auto_advance): Cleaned up the-config-seal-is (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-19 13:44 Update: Merged: merges no longer lose a passing test run to a settings hold; new work waits when the disk is short — **What changed:**
