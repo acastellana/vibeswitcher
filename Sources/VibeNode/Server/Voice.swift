@@ -19,7 +19,7 @@ public enum Voice: Equatable, Sendable {
     /// - that isn't under a `BranchCode` runner.
     /// A field that can't be read fails the rule. Under the closed rule (the server's own cgroup unread) no peer is.
     public static func judge(_ facts: PeerFacts, live: LiveSessions, rule: VoiceRule) -> Voice {
-        guard rule.mode != .closed else { return .notUser(VoiceRule.closedRefusal) }
+        guard rule.mode != .closed else { return .notUser(rule.refusal ?? VoiceRule.closedRefusal) }
         guard let uid = facts.uid else { return .notUser("its user can't be read") }
         guard uid == rule.uid else { return .notUser("it is another user's (uid \(uid))") }
         if rule.mode == .systemd {
@@ -97,7 +97,8 @@ public struct VoiceRule: Equatable, Sendable {
         /// The server's own cgroup couldn't be read at its start, on a system that has cgroups: which rule holds can't
         /// be told, so no peer is the user's (`closedRefusal`) until the node restarts, and `status` says so. A session
         /// can make that read fail (a cgroup path past `PATH_MAX` in the user manager's delegated subtree, then the
-        /// server restarted into it): failing open there would hand it the weaker rule.
+        /// server restarted into it): failing open there would hand it the weaker rule. Also the user's server on a
+        /// system with no cgroups (the Mac), where no rule that tells the user's voice is built yet (`refusal` says so).
         case closed
     }
 
@@ -159,12 +160,16 @@ public struct VoiceRule: Equatable, Sendable {
     public var uid: uid_t
     /// Why this mode, for `status`.
     public var says: String
+    /// Under the closed rule, why every peer is refused when it isn't `closedRefusal` (the unbuilt rule's,
+    /// `NodeSystem.voiceUnbuilt`); nil otherwise.
+    public var refusal: String?
 
-    public init(mode: Mode, scopes: [Scope], uid: uid_t, says: String) {
+    public init(mode: Mode, scopes: [Scope], uid: uid_t, says: String, refusal: String? = nil) {
         self.mode = mode
         self.scopes = scopes
         self.uid = uid
         self.says = says
+        self.refusal = refusal
     }
 
     /// The rule, fixed once at the server's start from its own cgroup lines (`ownCgroup`, `/proc/self`'s: no peer,
@@ -177,11 +182,18 @@ public struct VoiceRule: Equatable, Sendable {
     /// rule. No file decides it, and where the user's manager runs the server it is never the weaker rule: a session
     /// can move the server within the manager's delegated subtree, where its path still names the manager, or make
     /// its path unreadable, which is the closed rule.
+    ///
+    /// `usersNode`: the user's server (`--node`). On a system with no cgroups (the Mac) it is on the closed rule,
+    /// `NodeSystem.voiceUnbuilt`: the Mac's rule isn't built (the node on the Mac's design), and unbuilt is refused,
+    /// never the weaker rule by default. A scratch server there keeps the weaker rule, for its tests.
     public static func at(start ownCgroup: [String]?, testScopes: [String]?, uid: uid_t = getuid(),
-                          cgroups: Bool = systemHasCgroups) -> VoiceRule {
+                          cgroups: Bool = systemHasCgroups, usersNode: Bool = false) -> VoiceRule {
         if let testScopes {
             return VoiceRule(mode: .systemd, scopes: testScopes.map { Scope($0, basis: "a scratch host's test") }, uid: uid,
                              says: "the cgroup rule, on a scratch node's test scopes (\(testScopes.joined(separator: ", ")))")
+        }
+        if usersNode, !cgroups {
+            return VoiceRule(mode: .closed, scopes: [], uid: uid, says: NodeSystem.voiceUnbuilt, refusal: NodeSystem.voiceUnbuilt)
         }
         let ownCgroup = ownCgroup.flatMap { $0.isEmpty ? nil : $0 }
         if ownCgroup == nil, cgroups {

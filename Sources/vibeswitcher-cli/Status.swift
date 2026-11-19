@@ -162,6 +162,7 @@ enum StatusCommand {
     /// `status --ack`: the journal entry that clears what it shows, after the typed code.
     static func acknowledge() -> Int32 {
         let context = NodeContext.current()
+        if let unbuilt = context.usersNodeRefusal { return Say.unbuilt(unbuilt) }
         context.sayScratch()
         guard context.journalSocket != nil else { return Say.refused(NodeContext.noStandIn) }
         let action = UUID().uuidString.lowercased()

@@ -20,7 +20,8 @@ struct NodeContext {
         let home = getenv("VIBESWITCHER_HOME").map { String(cString: $0) }
         let account = VibePaths.accountHome
         var mode = NodeCheck.mode(vibeswitcherHome: home, accountHome: account)
-        if mode == .node, !Platform.CodeIdentity.isAvailable, NodeFolders.mode(runtimeFolder: NodeFolders.runtimeFolder(uid: getuid())) == .noSystemd {
+        // `Platform.Service.runtimeFolder` is nil on the Mac, whose user's node isn't built (`usersNodeRefusal`).
+        if mode == .node, let runtime = Platform.Service.runtimeFolder(uid: getuid()), NodeFolders.mode(runtimeFolder: runtime) == .noSystemd {
             mode = .detached(record: NodeRecord.read(root: NodeFolders.nodeRoot(accountHome: account)))
         }
         return NodeContext(root: URL(fileURLWithPath: NodeCheck.root(of: mode, environmentRoot: VibePaths.root.path, accountHome: account), isDirectory: true),
@@ -28,20 +29,24 @@ struct NodeContext {
     }
 
     var isScratch: Bool { if case .scratch = mode { return true } else { return false } }
+
+    /// Why the user's node can't be reached, started or stopped on this system (`NodeSystem`: the Mac's isn't built),
+    /// or nil: always nil for a scratch node. Asked before anything else is read or run.
+    var usersNodeRefusal: String? { isScratch ? nil : NodeSystem.usersNodeRefusal() }
     var socketPath: String { root.appendingPathComponent("v2/server.sock").path }
     var testFolder: URL { root.appendingPathComponent("v2/test", isDirectory: true) }
     static let noStandIn = "scratch node: no journal, no manager"
 
     /// A stand-in under `<root>/v2/test/` when this is a scratch node (nil when it isn't there); the system's path
-    /// otherwise.
-    private func tool(_ name: String, system: String) -> String? {
+    /// otherwise, nil where this system has no such tool (`Platform.Service`: no systemd tools on the Mac).
+    private func tool(_ name: String, system: String?) -> String? {
         guard isScratch else { return system }
         let path = testFolder.appendingPathComponent(name).path
         return FileManager.default.isExecutableFile(atPath: path) ? path : nil
     }
 
-    var journalctl: String? { tool("journalctl", system: "/usr/bin/journalctl") }
-    var systemctl: String? { tool("systemctl", system: "/usr/bin/systemctl") }
+    var journalctl: String? { tool("journalctl", system: Platform.Service.journalctl) }
+    var systemctl: String? { tool("systemctl", system: Platform.Service.systemctl) }
     var journalSocket: String? {
         guard isScratch else { return Platform.Journal.systemSocket }
         let path = testFolder.appendingPathComponent("journal.sock").path
@@ -206,6 +211,7 @@ final class NodeClient {
 
     /// Connects to `context`'s server, checks it, and reads its hello.
     static func connect(_ context: NodeContext, timeout: TimeInterval = 15) -> Result<NodeClient, Failure> {
+        if let unbuilt = context.usersNodeRefusal { return .failure(.notRunning(unbuilt)) }
         let fd: Int32
         do {
             fd = try UnixSocket.connect(path: context.socketPath, patience: 1)

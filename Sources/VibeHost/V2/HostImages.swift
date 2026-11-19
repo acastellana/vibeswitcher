@@ -90,6 +90,9 @@ public enum HostImages {
         return Platform.Tools.trustedShell(resolved)
     }
 
+    /// Why `--node` is refused on the Mac (`startAsNode`).
+    public static let macNodeRefusal = "\(nodeFlag): the node's host isn't built for the Mac yet, and this host would be the app's own (its ~/.vibeswitcher lock and socket)"
+
     /// The account's own home, from the user database (`getpwuid`): never the environment's. Nil when it has none.
     public static var accountHome: String? {
         guard let entry = getpwuid(getuid()), let directory = entry.pointee.pw_dir else { return nil }
@@ -100,9 +103,13 @@ public enum HostImages {
     /// `main`'s first act after hardening, Linux only, with `--node` in `arguments`: it needs `--node-root` and
     /// `--server`, and the server must be its build's own (`openServer`), whose descriptor is then held for `load`
     /// (`holdServer`), which copies the server from it; then this process's environment is made `nodeEnvironment`'s.
-    /// Why it may not start, or nil. Without `--node`, and on the Mac: nil, nothing done.
+    /// Why it may not start, or nil. Without `--node`: nil, nothing done. On the Mac `--node` is refused
+    /// (`macNodeRefusal`): the node's host isn't built there, and a host that ignored the flag would be the app's host
+    /// on the app's own `~/.vibeswitcher` lock and socket (the node on the Mac's design, 2026-11-19). The app never
+    /// passes `--node`, so its host is unchanged.
     public static func startAsNode(arguments: [String]) -> String? {
-        guard !Platform.CodeIdentity.isAvailable, arguments.contains(nodeFlag) else { return nil }
+        guard arguments.contains(nodeFlag) else { return nil }
+        guard !Platform.CodeIdentity.isAvailable else { return macNodeRefusal }
         guard let nodeRoot = value(after: nodeRootFlag, in: arguments), nodeRoot.hasPrefix("/") else {
             return "\(nodeFlag) needs \(nodeRootFlag) and an absolute folder after it"
         }

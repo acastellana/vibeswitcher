@@ -198,7 +198,7 @@ struct VoiceRuleTests {
                 }
             }
         }
-        #expect(calls == ["ServerStart.swift: let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes)"], "\(calls)")
+        #expect(calls == ["ServerStart.swift: let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes, usersNode: parsed.node)"], "\(calls)")
         // `Requests` keeps the rule it was given: a constant.
         let requests = ServerLintTests.code(try String(contentsOf: repo.appendingPathComponent("Sources/VibeNode/Server/Requests.swift"), encoding: .utf8))
         #expect(requests.contains("public let rule: VoiceRule"))
@@ -228,6 +228,34 @@ struct VoiceRuleTests {
         #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid, cgroups: false).mode == .weaker)
         // A scratch host's test scopes still give their cgroup rule.
         #expect(VoiceRule.at(start: nil, testScopes: ["/test.scope"], uid: Self.uid, cgroups: true).mode == .systemd)
+    }
+
+    /// The node on the Mac's design (2026-11-19), step 1: the user's server on a system with no cgroups (the Mac) has no
+    /// rule that tells the user's voice yet, so it is on the closed rule, every peer refused with the unbuilt rule's
+    /// reason; unbuilt is refused, never the weaker rule by default. A scratch server there keeps the weaker rule; on a
+    /// system with cgroups (Linux) the flag changes nothing. Both arms are pure: they run on both systems.
+    @Test func theUsersServerWithoutCgroupsIsClosedUntilItsRuleIsBuilt() {
+        for start in [nil, ["0::/"], Self.hybrid("/init.scope")] as [[String]?] {
+            let unbuilt = VoiceRule.at(start: start, testScopes: nil, uid: Self.uid, cgroups: false, usersNode: true)
+            #expect(unbuilt.mode == .closed && unbuilt.scopes.isEmpty, "\(String(describing: start)): \(unbuilt)")
+            #expect(unbuilt.says == NodeSystem.voiceUnbuilt && unbuilt.refusal == NodeSystem.voiceUnbuilt)
+            #expect(Self.judged(Self.peer(), rule: unbuilt) == .notUser(NodeSystem.voiceUnbuilt))
+            #expect(Self.judged(Self.peer(cgroup: nil), rule: unbuilt) == .notUser(NodeSystem.voiceUnbuilt))
+            #expect(Voice.handsRefusal(Self.peer(cgroup: nil, terminal: .none), kind: "stop", rule: unbuilt) == nil, "judge refused it already")
+            // A scratch server on the same system: the weaker rule, as before.
+            #expect(VoiceRule.at(start: start, testScopes: nil, uid: Self.uid, cgroups: false).mode == .weaker)
+        }
+        // On a system with cgroups the user's server's rule is its cgroup's, as before.
+        #expect(VoiceRule.at(start: Self.hybrid(Self.nodeUnit), testScopes: nil, uid: Self.uid, cgroups: true, usersNode: true) == Self.systemd)
+        #expect(VoiceRule.at(start: Self.hybrid("/init.scope"), testScopes: nil, uid: Self.uid, cgroups: true, usersNode: true).mode == .weaker)
+        #expect(VoiceRule.at(start: nil, testScopes: nil, uid: Self.uid, cgroups: true, usersNode: true).refusal == nil)
+        // This system's default: closed on the Mac, the cgroup's rule on Linux.
+        let here = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: nil, uid: Self.uid, usersNode: true)
+        if Platform.Processes.hasCgroups {
+            #expect(here.refusal == nil, "\(here)")
+        } else {
+            #expect(here.mode == .closed && here.refusal == NodeSystem.voiceUnbuilt, "\(here)")
+        }
     }
 
     @Test func underTheWeakerRuleAStateChangeNeedsAControllingTerminal() {

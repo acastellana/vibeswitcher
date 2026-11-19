@@ -76,7 +76,7 @@ public enum ServerStart {
             exit(0)
         }
         let sessions = NodeSessions(root: root, home: VibePaths.home, queue: queue, link: link, clock: clock, note: say)
-        let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes)
+        let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes, usersNode: parsed.node)
         say("voice rule: \(rule.says)")
         let commit = parsed.nodeRoot.flatMap { folder -> String? in
             if case .success(let info) = BuildInfo.read(buildFolder: folder) { return info.commit } else { return nil }

@@ -15,6 +15,7 @@ enum StartCommand {
     static func run(_ arguments: [String]) -> Int32 {
         guard let parsed = StartArguments.parse(arguments) else { return Say.usage(StartArguments.usage) }
         let context = NodeContext.current()
+        if let unbuilt = context.usersNodeRefusal { return Say.unbuilt(unbuilt) }
         context.sayScratch()
         let home = VibePaths.accountHome
         let prefix = NodeFolders.defaultPrefix(accountHome: home)
@@ -172,6 +173,8 @@ enum Say {
     static func err(_ line: String) { try? FileHandle.standardError.write(contentsOf: Data((line + "\n").utf8)) }
     static func usage(_ text: String) -> Int32 { err(text); return 64 }
     static func refused(_ why: String) -> Int32 { err("vibeswitcher: refused: \(why)"); return 77 }
+    /// The user's node isn't built for this system (`NodeContext.usersNodeRefusal`): said, exit 69.
+    static func unbuilt(_ why: String) -> Int32 { err("vibeswitcher: \(why)"); return NodeSystem.refusalExitCode }
     /// A failure's message, inert as a whole too (each untrusted field in it already is): a refusal can carry what
     /// the listener chose.
     static func failed(_ failure: NodeClient.Failure) -> Int32 {
