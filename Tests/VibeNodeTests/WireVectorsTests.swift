@@ -293,6 +293,8 @@ enum Samples {
         asked.notice = "taken late"
         var timed = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000002", root: root, kind: .question, at: at)
         timed.question = counting
+        // A draft a page left (B5), for the version it showed.
+        timed.draft = .init(text: "a", version: counting.version, at: at, action: "6f1d2a34-9b8c-4e7d-a1f0-3c5b7d9e2f46")
         var plain = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000003", root: root, kind: .question, at: at)
         plain.question = bare
 

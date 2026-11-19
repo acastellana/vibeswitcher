@@ -56,8 +56,9 @@ public final class Requests: @unchecked Sendable {
     var shutdown: () -> HostEvent? = { nil }
     /// The lead engine `lead` starts leads through, and whose leads `status` lists (E4); none: `lead` is refused.
     public var engine: LeadEngine?
-    /// The reply each recorded action got, by action id, the newest `repliesKept` (a retry is answered so).
-    private var replies: [String: NodeWire.Reply] = [:]
+    /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
+    /// answered so).
+    var replies: [String: NodeWire.Reply] = [:]
     private var replyOrder: [String] = []
     /// Each request as it is acted on, after the voice, the code and the vault's record (for tests). On `queue`.
     public var acting: (NodeWire.Request) -> Void = { _ in }
@@ -78,6 +79,9 @@ public final class Requests: @unchecked Sendable {
     public var web: WebAccess?
     /// `status`'s `web`: the listener's state (`NodeLive.webValue`); none: off.
     public var webValue: (() -> NodeWire.Value)?
+    /// The `seq` a live stream is at, by collection (`LiveHub.seq(of:)`, set by `NodeLive`): a draft's `applied`. On
+    /// `queue`.
+    public var liveSeq: ((String) -> Int)?
     /// A scratch server's `--test-web-pair`: `web.open` is taken from any process of the uid, its voice and typed code
     /// not asked (the sandbox's and the tests' scratch form). Never on the user's node (`ServerArguments` refuses it).
     public var openWebForAnyone = false
@@ -155,6 +159,11 @@ public final class Requests: @unchecked Sendable {
     public func handle(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
         let needs = NodeWire.kinds[request.kind] ?? .user
         if needs == .leadToolServer { return questionPost(request, from: facts, reply: reply) }
+        // A draft comes from a web page (`NodeLive` hands those to `draft` itself): from here it is no one's to leave.
+        if needs == .webDraft {
+            note("refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
+            return reply(.init(re: request.id, error: .init(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers")))
+        }
         if request.kind == "web.open", openWebForAnyone {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
             return act(request, reply: reply)
@@ -227,7 +236,7 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
-    private func keep(_ reply: NodeWire.Reply, for action: String) {
+    func keep(_ reply: NodeWire.Reply, for action: String) {
         replies[action] = reply
         replyOrder.append(action)
         if replyOrder.count > Self.repliesKept { replies[replyOrder.removeFirst()] = nil }

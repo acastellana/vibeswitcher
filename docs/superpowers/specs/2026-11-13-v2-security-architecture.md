@@ -594,7 +594,9 @@ command line alone where it doesn't (a guard rail):
 | `status`, `questions` | anyone of the uid | no | reads; no secret in them |
 | `start` (once the node runs: it prints S11 once), `stop` | the user's | `stop` | ends or starts every session |
 | `lead FOLDER --goal …` | the user's | yes | opens an app session, whose git commands `isYours` treats as the user's; refused on a fresh vault until `config accept` and `base accept` are done (S7) |
-| `answer CARD TEXT`, `hold CARD` | the user's | yes (the card's) | the user's answer to the lead, an approval included, bound to the card's id |
+| `answer CARD [TEXT]`, `hold CARD` | the user's | yes (the card's) | the user's answer to the lead, an approval included, bound to the card's id; with no TEXT, the card's draft, printed whole and inert before the code is asked, and sent as the text shown (the live plan's F3) |
+| `draft`, `draft.clear` | a web page whose token drafts; refused `voice` on the Unix socket | no | the user's words left on a card in the server's memory and told to nobody: no lead, no vault, nothing recorded, until `answer CARD` takes them as above (the live plan's B5, I3; LW-D6). A draft a thief plants is shown in full before the code is typed: a guard rail as strong as the typed word |
+| `web.open`, `web.revoke` | the user's | yes (from the action id) | mint a pairing code for a page, or drop every page's token (the live plan's I1) |
 | `config held`, `base show FOLDER [--from COMMIT]` | the user's | no | change nothing; each makes the card the next request takes |
 | `config accept CARD`, `base accept CARD`, `base keep CARD` | the user's | yes (the card's) | takes held config or a base move as the user's (S7) |
 | `hooks install`, `hooks remove` | the user's | yes | written as the app (`vault.appWrite`), so sealed as the user's |
