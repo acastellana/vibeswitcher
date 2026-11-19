@@ -4170,3 +4170,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 13:21 Automatically (auto_advance): Merge of audits-run-on-codex failed: Conflicts with main: the branch needs bringing up to date. Sent its worker the output; it's back at work.
 - 2026-11-19 13:21 Automatically (auto_advance): Merged new-work-waits-when at daa42fe6 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
 - 2026-11-19 13:22 Automatically (auto_advance): Cleaned up new-work-waits-when (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-19 13:41 Pipeline held: the-config-seal-is ready to merge with none landing; cause: every test slot held
+- 2026-11-19 13:43 Merged the-config-seal-is: The config seal is checked before a merge's test run, and a passing run survives a seal hold (build 295fb14dedaa)
