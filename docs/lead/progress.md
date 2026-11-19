@@ -4215,3 +4215,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 16:14 Merged auto-advance-staggers: auto_advance staggers audits: no more simultaneous audits than the Mac's heavy slots can test (build bdffa6a19fd8)
 - 2026-11-19 16:14 Automatically (auto_advance): Merged auto-advance-staggers (auto_advance staggers audits: no more simultaneous audits than the Mac's heavy slots can test) into main at 0763d7c0, on its passing audit and the full test run.
 - 2026-11-19 16:14 Automatically (auto_advance): Cleaned up auto-advance-staggers (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-19 16:57 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Error lines in app.log within 10 min, by kind: app: error ×1
+Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-19 16:57 Planned daily-memory-bench-the: Daily memory bench: the sandbox soak bench hangs in the app's run
+- 2026-11-19 16:58 Started a worker on daily-memory-bench-the
+- 2026-11-19 16:58 Automatically (auto_advance): Started a worker on daily-memory-bench-the (Daily memory bench: the sandbox soak bench hangs in the app's run).
