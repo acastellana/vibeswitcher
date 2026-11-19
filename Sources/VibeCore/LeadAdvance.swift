@@ -650,7 +650,7 @@ public final class LeadAdvance: @unchecked Sendable {
             did(held.map {
                 if lead.codexWorkers && lead.workflow.codexVerifier == .fallback {
                     return "Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0))): workers on Opus; audits try eligible Claude models first, then Codex when it has room. "
-                        + "Sensitive tasks merged on Codex get a post-merge Claude re-audit after reset. A worker Fable's refusal halted starts again on Opus in its worktree."
+                        + "Sensitive or Codex-worked tasks merged on Codex get a post-merge Claude re-audit after reset. A worker Fable's refusal halted starts again on Opus in its worktree."
                 }
                 return AccountUsage.fallbackText($0) + ". Claude refused Fable at its usage limit, so new workers and audits that would run on Fable start on Opus "
                     + "(audits under a floor that keeps them off the workers' model, on the next one down), and a worker Fable's refusal halted "

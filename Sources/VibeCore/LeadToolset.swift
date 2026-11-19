@@ -2374,7 +2374,7 @@ public final class LeadToolset: MCPToolset {
 
     /// start_worker's word on a Codex worker: always audited, and what its sandbox can't hold.
     static var codexStartNote: String {
-        "Codex implements it; a Claude verifier audits it before merge whatever its review says. At Claude's usage limit, Codex verifies instead (codex_verifier: fallback); sensitive merges get a Claude re-audit after reset. Its sandbox writes only "
+        "Codex implements it; a Claude verifier audits it before merge whatever its review says. At Claude's usage limit, Codex verifies instead (codex_verifier: fallback) and its merge gets a Claude re-audit after reset. Its sandbox writes only "
             + "in its worktree, its git folders and TMPDIR, with no network; what Codex can't be made to refuse ("
             + LeadLaunch.codexUnenforced.map(\.rule).joined(separator: "; ") + ") the audit's integrity check and merge's checks cover."
             + " Read its work critically."
