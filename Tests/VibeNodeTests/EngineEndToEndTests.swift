@@ -12,7 +12,7 @@ import Testing
 /// writes what Claude Code's hooks would (`hook(_:_:pid:)`) and takes the lead's inbox as its prompt's hook does
 /// (`promptHookTakes`). `anAnswerBeforeTheTurnEndsIsTakenByTheLeadsHookAsTheUsers` is the other way an answer reaches a
 /// lead: mid-turn, handed over by its own hook. `aRealLeadOnSonnetAsksAndIsAnswered` shows both with a real Claude Code
-/// on Sonnet, gated on the user's throwaway config folder (the security document's decision 16).
+/// on haiku (the cheapest model; the test's name is older), gated on the user's throwaway config folder (the security document's decision 16).
 @Suite(NodeTraits.linuxOnly, .serialized, .timeLimit(.minutes(15)))
 struct EngineEndToEndTests {
     private let scratch = Scratch()
@@ -281,8 +281,8 @@ struct EngineEndToEndTests {
         + "two options, Lexer and Scanner, and end your turn. "
         + "3. Once that answer has come, say the two names the user chose in one line, and stop."
 
-    /// The same with a real Claude Code on Sonnet as the lead (the scratch node's `<root>/v2/test/claude` a script that
-    /// runs the account's `claude` with the config folder given and `--model sonnet`), both ways an answer reaches it:
+    /// The same with a real Claude Code on haiku as the lead (the scratch node's `<root>/v2/test/claude` a script that
+    /// runs the account's `claude` with the config folder given and `--model haiku`), both ways an answer reaches it:
     ///
     /// 1. It asks which of two names to use and ends its turn; `questions` lists the card. The user answers once the lead
     ///    is idle (its Stop hook said so: waited for, the realistic order), and the answer, recorded in the vault, is
@@ -324,14 +324,14 @@ struct EngineEndToEndTests {
         let version = try await run(URL(fileURLWithPath: claude), ["--version"],
                                     environment: RealClaudeStatusTests.agentEnvironment(node.root, config: config))
         print("E9: \(claude) --version: \(version.output.trimmingCharacters(in: .whitespacesAndNewlines))")
-        // The node's `claude`: a script running the account's, with the folder given, on Sonnet (its argv[0] stays a
+        // The node's `claude`: a script running the account's, with the folder given, on haiku (its argv[0] stays a
         // path ending in claude, so the process table sees it as Claude).
         let quote = FakeClaude.quoted
         let script = node.testFolder.appendingPathComponent("real-claude")
         try ScratchNode.script("""
             #!/bin/sh
             export CLAUDE_CONFIG_DIR=\(quote(config.path)) DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-            exec \(quote(claude)) --model sonnet "$@"
+            exec \(quote(claude)) --model haiku "$@"
 
             """, at: script)
         let link = node.testFolder.appendingPathComponent("claude")
