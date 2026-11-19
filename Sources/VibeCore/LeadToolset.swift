@@ -268,6 +268,11 @@ public final class LeadToolset: MCPToolset {
     /// many): the tool server sets the Mac-wide ones, every project's merges sharing them with `vs-heavy`; nil (tests
     /// that don't give scratch ones): none.
     public var testLock: TestLock?
+    /// The audits this tool server is starting now, their build and test run before their verifier is on the board, and
+    /// the ones auto_advance last held for the project's audit cap, in board order (see `LeadAuditCap.swift`).
+    let auditStarts = NSLock()
+    var startingAudits: Set<String> = []
+    var heldAudits: [String] = []
     /// The pre-done check's time limit in place of done_check_min (tests); nil: done_check_min's.
     var doneCheckLimit: TimeInterval?
     /// Whether this tool server runs in a sandbox already (`LeadDoneCheck.inSandbox`; faked in tests).
@@ -769,7 +774,8 @@ public final class LeadToolset: MCPToolset {
                             required: ["task"]),
                 MCPToolInfo(name: "audit", description: "Start the read-only verifier on a task's branch. Its report, not the worker's, decides. A worktree left on another branch or a detached HEAD is put back on agent/<slug> first (refused, and its worker told what to run, when it holds uncommitted files or commits the branch lacks). A verifier already auditing the branch's head is left alone (the reply says since when and on which commit); a new commit, or a verifier that has ended, starts a new one in its place.",
                             properties: ["task": task, "restart": P(type: "boolean", description: "End the verifier already auditing the branch's head and start a new one on the same commit (its work is thrown away)"),
-                                         "override_usage": Self.overrideUsageProperty],
+                                         "override_usage": Self.overrideUsageProperty,
+                                         "override_heavy_slots": P(type: "boolean", description: "Start even though heavy_slots of this project's audits are under way already (each builds and runs the tests; the rest wait in board order, and auto_advance starts them as one ends): only when this audit can't wait")],
                             required: ["task"]),
                 MCPToolInfo(name: "merge", description: "Merge a task: rebase onto the lead's branch (squashed when the worker merged it in), run the test command, fast-forward that branch. An audit task (or one whose branch touches sensitive_paths) needs its passing audit; a review none task needs only its worker's done report on the branch's head and the test command passing.",
                             properties: ["task": task,
@@ -906,7 +912,8 @@ public final class LeadToolset: MCPToolset {
             case "tell_lead": return try tellLead(arguments, by: member)
             case "read_session": return try readSession(try taskSlug(arguments), who: arguments["who"] as? String ?? "worker")
             case "audit": return try audit(try taskSlug(arguments), restart: arguments["restart"] as? Bool ?? false,
-                                           overrideUsage: arguments["override_usage"] as? Bool ?? false)
+                                           overrideUsage: arguments["override_usage"] as? Bool ?? false,
+                                           overrideSlots: arguments["override_heavy_slots"] as? Bool ?? false)
             case "merge":
                 // A dry run: merge's rebase and test run, no fast-forward, and nothing committed (`dryRunMerge`).
                 if try Self.flagArgument(arguments, "dry_run") == true {
@@ -2940,8 +2947,9 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
-    private func audit(_ slug: String, restart: Bool = false, overrideUsage: Bool = false, expectedHead: String? = nil) throws -> MCPToolResult {
-        if store.load().task(slug)?.claudeReaudit?.pending == true { return try startClaudeReaudit(slug) }
+    private func audit(_ slug: String, restart: Bool = false, overrideUsage: Bool = false, overrideSlots: Bool = false,
+                       expectedHead: String? = nil) throws -> MCPToolResult {
+        if store.load().task(slug)?.claudeReaudit?.pending == true { return try startClaudeReaudit(slug, overrideSlots: overrideSlots) }
         if let task = store.load().task(slug), Self.settledStates.contains(task.status) { throw Self.settledRefusal(task, "Not audited") }
         // A verifier already at work on the branch's head is left to it: another would end it and throw its work away
         // (2026-10-27: audit(land-pr-1-host) ended the one auto_advance had started on that very head).
@@ -2980,6 +2988,10 @@ public final class LeadToolset: MCPToolset {
         // Not on a Mac every project's teams already load: the task's own worker (done) and earlier verifier aren't
         // counted, the verifier takes their place.
         let sessions = try hostSessions("whether the Mac has room for a verifier isn't known; no verifier was started")
+        // No more of this project's audits at once than heavy_slots (`claimAuditStart`): its place is held through its
+        // build and test run, until its verifier is on the board.
+        try claimAuditStart(slug, workflow: workflow, sessions: sessions, override: overrideSlots, not: "Not audited, no verifier started")
+        defer { auditStarted(slug) }
         let mac = try macLoad(sessions, load: runtime.steadyLoad(), except: Worktrees.path(root: root, slug: slug),
                               refused: "whether the Mac has room for a verifier isn't known; no verifier was started")
         // The finders' number and their Nits' cap as the lead set them, not as a worker rewrote them.
@@ -3272,7 +3284,7 @@ public final class LeadToolset: MCPToolset {
 
     /// A post-merge Claude check is independent of auto_advance and never reopens or re-merges the task.
     /// Its pinned baseline is from before merge: diffing against today's base would hide the code already landed.
-    func startClaudeReaudit(_ slug: String) throws -> MCPToolResult {
+    func startClaudeReaudit(_ slug: String, overrideSlots: Bool = false) throws -> MCPToolResult {
         try exclusively("claude-reaudit-\(slug)") {
             guard let task = store.load().task(slug), let followup = task.claudeReaudit, followup.pending, task.merged != nil else {
                 throw Problem(text: "No pending post-merge Claude re-audit on \(slug).")
@@ -3287,6 +3299,9 @@ public final class LeadToolset: MCPToolset {
             }
             if let refusal = usageRefusal(model: followup.model, sessions: sessions, not: "No post-merge Claude verifier started",
                                           what: "audit(\(slug))", instead: "wait for Claude's reset") { throw Problem(text: refusal) }
+            // One of this project's audits too: within heavy_slots (`claimAuditStart`).
+            try claimAuditStart(slug, workflow: workflow, sessions: sessions, override: overrideSlots, not: "No post-merge Claude verifier started")
+            defer { auditStarted(slug) }
             let mac = try macLoad(sessions, load: runtime.steadyLoad(), except: Worktrees.path(root: root, slug: slug))
             if let refusal = macRefusal(mac, not: "No post-merge Claude verifier started", what: "audit(\(slug))", need: 1) { throw Problem(text: refusal) }
             guard branchHead(Worktrees.branch(slug)) == followup.head, Worktrees.isWorktree(root: root, slug: slug) else {

@@ -150,6 +150,10 @@ public final class LeadAdvance: @unchecked Sendable {
     private var unbatched: Set<String> = []
     /// The look again armed for the window's end, at this time.
     private var batchWake: Date?
+    /// The audits this pass holds for the project's audit cap (heavy_slots, `LeadToolset.auditCap`), and the ones under
+    /// way it holds them behind. Read and written by passes only.
+    private var capHeld: [String] = []
+    private var capUnderWay: [String] = []
 
     struct Ready {
         let slug: String
@@ -426,7 +430,7 @@ public final class LeadAdvance: @unchecked Sendable {
                     }
                 }
             }
-            if usageHeld(model: followup.model) { continue }
+            if usageHeld(model: followup.model) || capHolds(task.slug) { continue }
             guard hasRoom(task.slug, need: 1) else { roomWait("audit(\(task.slug))", need: 1); continue }
             step("claude-reaudit|\(task.slug)|\(followup.head)") { try lead.startClaudeReaudit(task.slug).text }
         }
@@ -469,6 +473,8 @@ public final class LeadAdvance: @unchecked Sendable {
         resting = rest
         rest = []
         lock.unlock()
+        capHeld = []
+        defer { sayCapHeld() }
         guard let rotationGate = FileLock.attempt(LeadRotation.gate(lead.root), shared: true) else { return }
         defer { rotationGate.release() }
         guard (try? lead.authenticate()) != nil else { return }
@@ -752,7 +758,7 @@ public final class LeadAdvance: @unchecked Sendable {
 
     /// Starts `slug`'s audit at `head` (`why`: what sends it there) once the Mac has room for its finders.
     private func audit(_ slug: String, head: String, busy: Bool, why needed: String, key: String? = nil) {
-        if auditHeld(slug, head: head) { return }
+        if auditHeld(slug, head: head) || capHolds(slug) { return }
         let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else {
             // Raised: the lead hears why now, though its audit waits for the Mac's room.
@@ -934,6 +940,7 @@ public final class LeadAdvance: @unchecked Sendable {
                 + "read_session(\(slug), who: verifier) to see why, then audit(\(slug)) again or tell the user.")
             return
         }
+        if capHolds(slug) { return }
         let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
         if auditUsageHeld(slug, head: head) { return }
@@ -1373,6 +1380,31 @@ public final class LeadAdvance: @unchecked Sendable {
                 + (limit.model == nil ? "." : ", and a task can run on another model (update_task model, configure verifier_model).")
                 + (lead.codexWorkers ? " A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier, or by Codex while Claude is at its limit); you decide." : ""))
         return true
+    }
+
+    /// `slug`'s audit waits its turn: heavy_slots of this project's audits are under way (`LeadToolset.auditCap`), so it
+    /// is held, in board order, until one ends (that verdict's write brings the next pass). Not when the host can't be
+    /// read: audit's own check then refuses or lets it start.
+    private func capHolds(_ slug: String) -> Bool {
+        guard let sessions = try? lead.advanceSessions() else { return false }
+        let under = lead.auditsUnderWay(except: slug, sessions: sessions)
+        guard under.count >= lead.auditCap(lead.workflow) else { return false }
+        if !capHeld.contains(slug) { capHeld.append(slug) }
+        capUnderWay = under
+        return true
+    }
+
+    /// The pass's end: the audits it held for the cap, in board order, go to the lead's toolset (audit's refusal counts
+    /// a place in line by them) and into one line of the report, said once for each set of them.
+    private func sayCapHeld() {
+        let order = lead.store.load().tasks.map(\.slug)
+        let held = capHeld.sorted { (order.firstIndex(of: $0) ?? .max) < (order.firstIndex(of: $1) ?? .max) }
+        lead.holdAudits(held)
+        let key = "audit-cap|" + held.joined(separator: ",")
+        forget(where: { $0.hasPrefix("audit-cap|") && $0 != key })
+        guard !held.isEmpty else { return }
+        once(key, "Holding the audit\(held.count == 1 ? "" : "s") of \(held.joined(separator: ", ")): " + LeadToolset.capText(cap: lead.auditCap(lead.workflow), under: capUnderWay)
+             + " \(held.count == 1 ? "It starts" : "They start, in board order,") as one ends.")
     }
 
     /// The Mac has no room (or too much load) for `what`: the app nudges once it has.
