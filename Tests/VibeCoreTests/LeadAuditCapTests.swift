@@ -90,7 +90,8 @@ extension LeadAdvanceTests {
         let otherAudit = otherLead.call("audit", ["task": "two-z"])
         #expect(!otherAudit.isError, "\(otherAudit.text)")
         // Nor does two-z's count here.
-        #expect(lead.auditsUnderWay(except: nil, sessions: try lead.advanceSessions()) == ["one-x"])
+        let still = lead.call("audit", ["task": "one-y"])
+        #expect(still.isError && still.text.contains("1 of this project's audits is under way (one-x)") && !still.text.contains("two-z"), "\(still.text)")
 
         // one-x's verdict leaves an Important finding; its worker commits a fix and reports: the re-audit is one of
         // this project's audits, and one-y's waits behind it.
