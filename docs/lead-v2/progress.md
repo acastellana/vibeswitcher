@@ -117,3 +117,22 @@
 - 2026-11-19 22:26 Flaky in weblistener-slow-client's merge: aCodexWorkersCheckRunsInsideCodexsSandbox(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
 - 2026-11-19 22:48 Merged planner-a-worker-s: Planner: a worker's box can't write config.worktree or the agent's memory (build 5b6eccd929ad)
 - 2026-11-19 22:48 Flaky in planner-a-worker-s's merge: theAppsListingNeverRunsInTheWorktree(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-19 22:52 Sent sb3-the-launcher-builds's worker contract v3 (it had v2)
+- 2026-11-19 22:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 22:54 Audit of leadadvancetests-battery at a4c89015 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 22:54 Released leadadvancetests-battery's worker (idle since its done report on a4c89015) while its audit runs
+- 2026-11-19 22:54 Automatically (auto_advance): Started the audit of leadadvancetests-battery at a4c89015 (It touches sensitive_paths (Sources/VibeCore/LeadAdvance.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-19 22:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-19 22:54 Started a worker on the-vault-s-look
+- 2026-11-19 22:54 Automatically (auto_advance): Started a worker on the-vault-s-look (The vault's look never catches the tool server halfway through writing its git-hooks copy), its after tasks done (the-full-suite-passes, planner-a-worker-s).
+- 2026-11-19 22:54 Automatically (auto_advance): Overlap for the-vault-s-look's start (a warning only: nothing was refused or reordered). Package.swift: branch-runs-get-the (planned: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-1-2-branch (planned: its boundaries name it), sb6-2-2-a (planned: its boundaries name it); Sources/VibeCore/LeadToolset.swift: branch-runs-get-the (planned: its boundaries name it).
+- 2026-11-19 22:55 Workflow: security_audit_model = `fable`
+- 2026-11-19 22:55 Sent leadadvancetests-battery's audit contract v3 (it had v2)
+- 2026-11-19 22:55 Planned port-map-rows-from: Port map rows from two branches merge without a conflict
+- 2026-11-19 23:02 Started a worker on leadadvancetests-battery
+- 2026-11-19 23:02 Automatically (auto_advance): Started a worker on leadadvancetests-battery (LeadAdvanceTests: the settle() race and the earlier-verifier test).
+- 2026-11-19 23:02 Sent the-merge-s-test's worker contract v2 (it had v1)
+- 2026-11-19 23:06 Audit of sb3-the-launcher-builds at 548df9a1 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-19 23:07 Audit of sb3-the-launcher-builds: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-19 23:09 Audit of sb3-the-launcher-builds: complete, clean, round 2: 1 Nit open, 2 Pre-existing (1 open, 1 unconfirmed) (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-19 23:14 Sent sb6-1-2-branch's worker contract v5 (it had v4)
