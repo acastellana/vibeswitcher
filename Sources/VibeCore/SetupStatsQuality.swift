@@ -289,13 +289,13 @@ extension SetupStatsMath {
         return total / 3600
     }
 
-    /// "fable", "opus", "sonnet", "haiku", or the name as recorded; nil for Claude's default ("") and Codex's.
+    /// "mythos", "fable", "opus", "sonnet", "haiku", or the name as recorded; nil for Claude's default ("") and Codex's.
     static func family(_ model: String?) -> String? {
         guard let name = model?.trimmingCharacters(in: .whitespaces).lowercased(), !name.isEmpty, !name.hasPrefix("codex") else { return nil }
         return families.first { name.contains($0) } ?? name
     }
 
-    static let families = ["fable", "opus", "sonnet", "haiku"]
+    static let families = ["mythos", "fable", "opus", "sonnet", "haiku"]
 }
 
 // MARK: - The work, on the collector's queue

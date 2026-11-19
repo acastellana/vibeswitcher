@@ -105,7 +105,8 @@ extension LeadAdvanceTests {
 
     @Test(arguments: [nil, "opus", "sonnet"] as [String?], [false, true])
     func sensitiveAuditUsesFallbackWhenVerifierReportsFableLimit(model: String?, overrideUsage: Bool) throws {
-        let (root, runtime, lead) = try fableTeam(model.map { ["verifier_model": $0] } ?? [:])
+        // Sensitive audits set to Fable (security_audit_model; unset they run on Mythos, which a Fable limit doesn't hold).
+        let (root, runtime, lead) = try fableTeam(["security_audit_model": "fable"].merging(model.map { ["verifier_model": $0] } ?? [:]) { $1 })
         runtime.claude = "claude --model opus"
         _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
         #expect(!lead.call("start_worker", ["task": "touchy"]).isError)
@@ -143,7 +144,7 @@ extension LeadAdvanceTests {
 
     @Test(arguments: ["opus", "sonnet"], [false, true])
     func sensitiveAuditsFallBackAutomaticallyAndRespectTheFloor(workers: String, floor: Bool) throws {
-        let (root, runtime, lead) = try fableTeam()
+        let (root, runtime, lead) = try fableTeam(["security_audit_model": "fable"])
         runtime.claude = "claude --model \(workers)"
         if floor { try vault.setReviewFloor(LeadReviewFloor(), root: root) }
         _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])

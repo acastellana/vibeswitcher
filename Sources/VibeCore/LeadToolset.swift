@@ -835,6 +835,7 @@ public final class LeadToolset: MCPToolset {
                                          "base_branch": P(type: "string", description: "The branch workers start from and verified work is merged into (an existing local branch)"),
                                          "remote": P(type: "string", description: "The git remote, by its name, that fetch_remote fetches the base branch from and merge_remote merges it in from (empty: origin)"),
                                          "verifier_model": P(type: "string", description: "The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as capable (fable; opus when the workers run fable)"),
+                                         "security_audit_model": P(type: "string", description: "The model the important reviews run on: the audit of a branch that touches sensitive_paths or is flagged for security, whatever verifier_model says, where the review floor allows it (mythos, fable, opus, or a claude-… id; empty: mythos, the most capable). A guard rail: a change to it in the file that isn't configure's holds audits, merges and new workers"),
                                          "lead_model": P(type: "string", description: "The lead's own model, from its next start (empty: fable, the model best at deciding what to do and judging what comes back; Opus in its place while Fable is held back)"),
                                          "lead_advisor": P(type: "string", description: "The lead's advisor while it runs on Opus: fable (the default), opus, or none"),
                                          "worker_advisor": P(type: "string", description: "Every worker's advisor when its task sets none: none (the default), fable or opus. Mark hard tasks with add_task's advisor: fable instead of setting it for all"),
@@ -2946,7 +2947,7 @@ public final class LeadToolset: MCPToolset {
         let mac = try macLoad(sessions, load: runtime.steadyLoad(), except: Worktrees.path(root: root, slug: slug),
                               refused: "whether the Mac has room for a verifier isn't known; no verifier was started")
         // The finders' number and their Nits' cap as the lead set them, not as a worker rewrote them.
-        try checkSettings(workflow, not: "Not audited, no verifier started", keys: ["audit_finders", "audit_nit_cap"])
+        try checkSettings(workflow, not: "Not audited, no verifier started", keys: ["audit_finders", "audit_nit_cap", "security_audit_model"])
         // Several finders, or a merged result to test: the audit itself runs init_command and test_command as the lead
         // first (a scratch home is no boundary), so every guard rail must be the lead's, as for merge.
         if workflow.findersInForce > 1 || upToDate.merged != nil {
@@ -2956,10 +2957,11 @@ public final class LeadToolset: MCPToolset {
         if let refusal = macRefusal(mac, not: "No verifier started", what: "audit(\(slug))", need: finders) { throw Problem(text: refusal) }
         // The team's refusals kept first: one at the Fable limit moves the audit to another model (`auditModel`).
         _ = accountUsage(sessions: sessions)
-        // A sensitive or security branch is audited on Fable (where the floor allows it).
+        // A sensitive or security branch is audited on security_audit_model (where the floor allows it).
         let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)
         let verifierModel = auditModel(workflow, task: task, security: security != nil)
-        let fallback = security != nil && !LeadReviewFloor.sameModel(verifierModel, LeadWorkflow.securityAuditModel)
+        let fallback = security != nil && LeadReviewFloor.sameModel(workflow.securityAuditModel, AccountUsage.heldBackFamily)
+            && !LeadReviewFloor.sameModel(verifierModel, workflow.securityAuditModel)
             ? fableFallback()?.fableHeldBack(now: usageClock()) : nil
         let modelNotice = fallback.map { " on \(verifierModel) in Fable's place: Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0)))" } ?? ""
         // Near one of the account's usage limits on the audits' model: a verifier started now would stop mid-audit at it.
@@ -3149,8 +3151,8 @@ public final class LeadToolset: MCPToolset {
     /// the floor allows.
     /// The model its current worker was started on counts as the workers' too (a worker run on Opus while Fable was
     /// held back is never audited on Opus under that floor, the reset passed or not).
-    /// `security`: the branch touches sensitive_paths or is flagged for security (`securityReason`): Fable, where the
-    /// floor allows it (see `LeadWorkflow.auditModel`). While Fable is refused, sensitive and security audits follow
+    /// `security`: the branch touches sensitive_paths or is flagged for security (`securityReason`): security_audit_model
+    /// (Mythos unless set), where the floor allows it (see `LeadWorkflow.auditModel`). While Fable is refused, sensitive and security audits on it follow
     /// the same automatic fallback as other audits: the most capable other model the floor allows, even with no
     /// verifier_model set. At the reset the ordinary Fable preference applies again.
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> String {
@@ -3167,7 +3169,7 @@ public final class LeadToolset: MCPToolset {
                                    launchedModel: launched, heldBack: AccountUsage.heldBackFamily, security: security)
     }
 
-    /// The model `task`'s audit at `head` runs on, as `audit` picks it: Fable for a sensitive or security branch where
+    /// The model `task`'s audit at `head` runs on, as `audit` picks it: security_audit_model for a sensitive or security branch where
     /// the floor allows (`securityReason`), else `auditModel`'s. What auto_advance checks usage on before it starts one.
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask?, head: String) -> String {
         let security = task.map { Self.securityReason(root: root, head: head, workflow: workflow, raised: $0.riskRaised) != nil } ?? false
@@ -5655,6 +5657,11 @@ public final class LeadToolset: MCPToolset {
                     throw Problem(text: "stall_min must be a number of minutes, 0 (no stall watch, only test_timeout_min) or more.")
                 }
                 value = Self.gb(minutes)
+            case "security_audit_model" where !value.isEmpty:
+                value = try modelArgument(["model": value], key: key)?.lowercased() ?? ""
+                guard LeadReviewFloor.knownModel(value) else {
+                    throw Problem(text: "security_audit_model \(value) doesn't say which model it is (name one: mythos, fable, opus, sonnet, haiku, or its claude-… id). Nothing was changed.")
+                }
             case "lead_model" where !value.isEmpty:
                 value = try modelArgument(["model": value], key: "lead_model")?.lowercased() ?? ""
             case "lead_advisor" where !value.isEmpty, "worker_advisor" where !value.isEmpty:
@@ -5721,6 +5728,7 @@ public final class LeadToolset: MCPToolset {
                                           "init_command": after.initCommand ?? "",
                                           "done_check_command": after.doneCheckCommand ?? "", "done_check_min": Self.gb(after.doneCheckMinutes),
                                           "base_branch": after.baseBranch ?? "", "remote": after.remote ?? "", "verifier_model": after.verifierModel ?? "",
+                                          "security_audit_model": after.securityAuditModel,
                                           "lead_model": after.leadModel, "lead_advisor": after.leadAdvisor ?? "none",
                                           "worker_advisor": after.workerAdvisor ?? "none", "team_plugins": after.teamPlugins.joined(separator: ", "),
                                           "max_workers": String(after.maxWorkers),
@@ -5738,7 +5746,7 @@ public final class LeadToolset: MCPToolset {
                                           "watch_app_logs": String(after.watchAppLogs), "agent_default": after.agentDefault.rawValue,
                                           "handover_idle_min": String(after.handoverIdleMinutes), "handover_tokens": String(after.handoverTokens)]
             // A limit cleared reads back as its default.
-            let defaults = ["lead_model": LeadWorkflow.defaultLeadModel, "lead_advisor": LeadWorkflow.defaultLeadAdvisor, "worker_advisor": "none",
+            let defaults = ["security_audit_model": LeadWorkflow.defaultSecurityAuditModel, "lead_model": LeadWorkflow.defaultLeadModel, "lead_advisor": LeadWorkflow.defaultLeadAdvisor, "worker_advisor": "none",
                             "disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
                             "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "stall_min": Self.gb(LeadWorkflow().stallMinutes),
                             "done_check_min": Self.gb(LeadWorkflow().doneCheckMinutes),
@@ -7288,7 +7296,8 @@ public final class LeadToolset: MCPToolset {
                      "- base_branch: " + (raw.baseBranch ?? "not set: \(fallback) (the branch the lead first started on)"),
                      "- remote: " + (workflow.remote ?? "not set: \(LeadRemote.defaultRemote)") + " (fetch_remote and merge_remote sync the base branch with it; push_remote asks the user to push it there)",
                      "- verifier_model: " + (workflow.verifierModel ?? "not set: audits run on \(auditModel(workflow)), another model than the workers' (\(runtime.workerModel(root: root) ?? "Claude's default"))")
-                        + " (a sensitive or security audit runs on \(LeadWorkflow.securityAuditModel) where the floor allows; while Fable is refused at its limit, audits on it automatically fall back to the most capable other model the floor allows)",
+                        + " (while Fable is refused at its limit, audits on it automatically fall back to the most capable other model the floor allows)",
+                     "- security_audit_model: \(workflow.securityAuditModel) (the important reviews: a sensitive or security audit runs on it, whatever verifier_model says, where the floor allows; now \(auditModel(workflow, security: true)); a guard rail)",
                      "- lead_model: \(workflow.leadModel) (the lead's own, from its next start; Opus while Fable is held back)",
                      "- lead_advisor: \(workflow.leadAdvisor ?? "none") (while the lead runs on Opus)",
                      "- worker_advisor: \(workflow.workerAdvisor ?? "none") (for tasks that set no advisor; advisor: fable marks a task hard)",

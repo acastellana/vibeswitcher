@@ -88,12 +88,12 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
         }
     }
 
-    /// Whether two of `claude --model`'s names are one model: the same family (fable, opus, sonnet, haiku) or the same
+    /// Whether two of `claude --model`'s names are one model: the same family (mythos, fable, opus, sonnet, haiku) or the same
     /// name. False when either isn't known.
     public static func sameModel(_ one: String?, _ other: String?) -> Bool {
         guard let one = one?.trimmingCharacters(in: .whitespaces).lowercased(), !one.isEmpty,
               let other = other?.trimmingCharacters(in: .whitespaces).lowercased(), !other.isEmpty else { return false }
-        let family = { (name: String) in ["fable", "opus", "sonnet", "haiku"].first { name.contains($0) } ?? name }
+        let family = { (name: String) in ["mythos", "fable", "opus", "sonnet", "haiku"].first { name.contains($0) } ?? name }
         return family(one) == family(other)
     }
 
@@ -109,7 +109,7 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
     /// An alias (default, best) or anything else may be any model.
     public static func knownModel(_ name: String) -> Bool {
         let name = name.lowercased()
-        return ["fable", "opus", "sonnet", "haiku"].contains { name.contains($0) }
+        return ["mythos", "fable", "opus", "sonnet", "haiku"].contains { name.contains($0) }
     }
 
     /// risk_lines as strictness: 0 (no size trigger) is the least strict.
@@ -151,7 +151,7 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
         case "verifier_model":
             guard verifierDifferent, !value.isEmpty else { return nil }
             if !Self.knownModel(value) {
-                return "verifier_model \(value) doesn't say which model it is (name one: fable, opus, sonnet, haiku, or its claude-… id), and the floor says audits never run on the workers' model"
+                return "verifier_model \(value) doesn't say which model it is (name one: mythos, fable, opus, sonnet, haiku, or its claude-… id), and the floor says audits never run on the workers' model"
             }
             guard Self.sameModel(value, Self.workersModel(workerModel)) else { return nil }
             return "verifier_model \(value) is the workers' model (\(workerModel ?? "Claude's default, opus")), and the floor says audits run on a different one"
