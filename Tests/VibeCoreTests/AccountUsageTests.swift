@@ -384,9 +384,7 @@ struct AccountUsageTests: LeadTeamFixture {
         _ = call(lead, "add_task", ["title": "Three", "goal": "g", "acceptance": ["a"], "model": "sonnet"])
         #expect(!call(lead, "start_worker", ["task": "one"]).isError)
         #expect(!call(lead, "start_worker", ["task": "two"]).isError)
-        // Audits run on fable here (verifier_model; unset they'd run on mythos).
-        #expect(lead.auditModel(lead.workflow) == "mythos")
-        #expect(!call(lead, "configure", ["verifier_model": "fable"]).isError)
+        // Audits run on fable here (the workers' model is Claude's default).
         #expect(lead.auditModel(lead.workflow) == "fable")
         #expect(!call(lead, "audit", ["task": "one"]).isError)
         let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
@@ -395,20 +393,20 @@ struct AccountUsageTests: LeadTeamFixture {
         runtime.usageLimits[verifier] = refusal
         let status = call(lead, "status").text
         #expect(status.contains("the fable limit (seven_day_overage_included): reached (Claude refused a request at it)"), "\(status)")
-        // Fable held back: no audit starts on it; the next one starts on Mythos instead (`LeadUsageFallback`).
+        // Fable held back: no audit starts on it; the next one starts on Opus instead (`LeadUsageFallback`).
         #expect(lead.usageHold(model: "fable", sessions: try runtime.sessions()) != nil)
         let moved = call(lead, "audit", ["task": "two"])
         #expect(!moved.isError, "\(moved.text)")
         let command = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-two'") }?.command)
-        #expect(LeadWorkflow.claudeModel(command: command) == "mythos", "\(command)")
+        #expect(LeadWorkflow.claudeModel(command: command) == "opus", "\(command)")
         // Kept: once the verifier has gone, the limit still holds until its reset.
         runtime.usageLimits = [:]
         try runtime.kill(verifier)
-        #expect(lead.usageHold(model: "fable", sessions: nil) != nil && lead.auditModel(lead.workflow) == "mythos")
+        #expect(lead.usageHold(model: "fable", sessions: nil) != nil && lead.auditModel(lead.workflow) == "opus")
         // Up to its reset, by the lead's clock, and no longer: audits on Fable again.
         let reset = Date(timeIntervalSince1970: try #require(refusal.resetsAt))
         lead.usageClock = { reset.addingTimeInterval(-1) }
-        #expect(lead.usageHold(model: "fable", sessions: nil) != nil && lead.auditModel(lead.workflow) == "mythos")
+        #expect(lead.usageHold(model: "fable", sessions: nil) != nil && lead.auditModel(lead.workflow) == "opus")
         lead.usageClock = { reset }
         #expect(lead.usageHold(model: "fable", sessions: nil) == nil && lead.auditModel(lead.workflow) == "fable")
         lead.usageClock = { Self.now }
@@ -423,15 +421,14 @@ struct AccountUsageTests: LeadTeamFixture {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime, at: Self.now)
-        #expect(!call(lead, "configure", ["verifier_model": "fable"]).isError)
         for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
         #expect(!call(lead, "start_worker", ["task": "one"]).isError)
         #expect(!call(lead, "start_worker", ["task": "two"]).isError)
         #expect(!call(lead, "audit", ["task": "one"]).isError)
         let verifier = try #require(BoardStore(root: root).load().task("one")?.verifier)
         runtime.usageLimits[verifier] = try activeFableRefusal()
-        // The audit would go to Mythos by itself now (`LeadUsageFallback`); the lead moves it to Opus.
-        #expect(lead.fableFallback(sessions: try runtime.sessions()) != nil && lead.auditModel(lead.workflow) == "mythos")
+        // The audit would go to Opus by itself now (`LeadUsageFallback`); the lead setting it is the same.
+        #expect(lead.fableFallback(sessions: try runtime.sessions()) != nil && lead.auditModel(lead.workflow) == "opus")
         #expect(!call(lead, "configure", ["verifier_model": "opus"]).isError)
         let moved = call(lead, "audit", ["task": "two"])
         #expect(!moved.isError, "\(moved.text)")

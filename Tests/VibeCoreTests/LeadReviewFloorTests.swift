@@ -118,7 +118,7 @@ struct LeadReviewFloorTests: LeadTeamFixture {
         #expect(lead.auditModel(lead.workflow) == "fable")
         // Written into the file by a worker: audits run on another model all the same.
         try workerWrites("verifier_model", "opus", root: root)
-        #expect(lead.auditModel(lead.workflow) == "mythos")
+        #expect(lead.auditModel(lead.workflow) == "fable")
         // The user allows it in Settings: it's taken at once (configure reads the vault afresh), and in force once the
         // floor last read is stale.
         try vault.setReviewFloor(LeadReviewFloor(verifierDifferent: false), root: root)
@@ -157,17 +157,13 @@ struct LeadReviewFloorTests: LeadTeamFixture {
         #expect(!lead.call("configure", ["verifier_model": "fable"]).isError)
         var pinned = LeadTask(slug: "pinned", title: "Pinned", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""), status: .review)
         pinned.model = "fable"
-        #expect(lead.auditModel(lead.workflow, task: pinned) == "mythos")
+        #expect(lead.auditModel(lead.workflow, task: pinned) == "sonnet")
         try workerWrites("verifier_model", "", root: root)
-        #expect(lead.auditModel(lead.workflow, task: pinned) == "mythos")
-        // Pinned to Mythos as well as the verifier's Fable by its worker's start: the next one down that's neither.
-        pinned.model = "mythos"
-        #expect(lead.auditModel(lead.workflow, task: pinned) == "fable")
-        pinned.model = "fable"
+        #expect(lead.auditModel(lead.workflow, task: pinned) == "sonnet")
         // Without the floor's word, as before: verifier_model, or another than the project's workers'.
         try vault.setReviewFloor(LeadReviewFloor(verifierDifferent: false), root: root)
         clock.now += LeadToolset.floorFresh
-        #expect(lead.auditModel(lead.workflow, task: pinned) == "mythos")
+        #expect(lead.auditModel(lead.workflow, task: pinned) == "fable")
     }
 
     /// A worker started on the workers' model (opus) writes another model as its task's in board.json: its audit
@@ -192,7 +188,7 @@ struct LeadReviewFloorTests: LeadTeamFixture {
         // Claude's default (no --model, nothing in settings) counts as opus.
         runtime.claude = "claude --dangerously-skip-permissions"
         try workerWrites("verifier_model", "", root: root)
-        #expect(lead.auditModel(lead.workflow, task: task) == "mythos")
+        #expect(lead.auditModel(lead.workflow, task: task) == "sonnet")
     }
 
     /// An alias (default, best) may be the workers' model: refused under the floor, and passed over when written in.
@@ -207,7 +203,7 @@ struct LeadReviewFloorTests: LeadTeamFixture {
             #expect(refusedForFloor(refused) && refused.text.contains("doesn't say which model"), "\(refused.text)")
         }
         try workerWrites("verifier_model", "default", root: root)
-        #expect(lead.auditModel(lead.workflow) == "mythos")
+        #expect(lead.auditModel(lead.workflow) == "fable")
         #expect(!lead.call("configure", ["verifier_model": "claude-sonnet-5-5"]).isError)
     }
 

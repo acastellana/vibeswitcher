@@ -159,10 +159,9 @@ extension LeadFindingsToolTests {
         #expect(LeadWorkflow.claudeModel(command: "claude", home: home.path) == "opus")
         #expect(LeadWorkflow.claudeModel(command: "claude --model sonnet", home: home.path) == "sonnet")
         // Another model, at least as capable; verifier_model set still wins.
-        #expect(LeadWorkflow().auditModel(workerModel: nil) == "mythos")
-        #expect(LeadWorkflow().auditModel(workerModel: "opus") == "mythos")
-        #expect(LeadWorkflow().auditModel(workerModel: "claude-fable-5-1") == "mythos")
-        #expect(LeadWorkflow().auditModel(workerModel: "claude-mythos-5-2") == "fable")
+        #expect(LeadWorkflow().auditModel(workerModel: nil) == "fable")
+        #expect(LeadWorkflow().auditModel(workerModel: "opus") == "fable")
+        #expect(LeadWorkflow().auditModel(workerModel: "claude-fable-5-1") == "opus")
         var set = LeadWorkflow()
         set.verifierModel = "sonnet"
         #expect(set.auditModel(workerModel: "sonnet") == "sonnet")
@@ -173,11 +172,11 @@ extension LeadFindingsToolTests {
         let lead = try lead(root, runtime)
         try started(lead, runtime, root: root)
         _ = call(lead, "audit", ["task": "add-b"])
-        #expect(runtime.spawned.last?.command.contains("--model 'mythos'") == true)
-        #expect(runtime.spawned.last { $0.command.contains("--name 'worker-add-b'") }?.command.contains("--model") == false)
-        #expect(call(lead, "configure").text.contains("verifier_model: not set: audits run on mythos"))
-        runtime.claude = "claude --model mythos"
-        _ = call(lead, "audit", ["task": "add-b", "restart": true])
         #expect(runtime.spawned.last?.command.contains("--model 'fable'") == true)
+        #expect(runtime.spawned.last { $0.command.contains("--name 'worker-add-b'") }?.command.contains("--model") == false)
+        #expect(call(lead, "configure").text.contains("verifier_model: not set: audits run on fable"))
+        runtime.claude = "claude --model fable"
+        _ = call(lead, "audit", ["task": "add-b", "restart": true])
+        #expect(runtime.spawned.last?.command.contains("--model 'opus'") == true)
     }
 }

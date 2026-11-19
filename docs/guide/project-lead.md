@@ -194,8 +194,8 @@ The Team tab shows such a task as **Needs audit**, with why. `REVIEW.md` at the 
 what matters in this code; the verifier and the risk check read it from the base branch, so a worker can't change its
 own audit by editing it.
 
-A verifier runs on a different model from the task's worker when `verifier_model` is empty (the default): Mythos,
-or Fable when the workers run Mythos. The important reviews, the audit of a branch that touches `sensitive_paths` or
+A verifier runs on a different model from the task's worker when `verifier_model` is empty (the default).
+The important reviews, the audit of a branch that touches `sensitive_paths` or
 is flagged for security, run on `security_audit_model` (Mythos by default; `fable`, `opus` or a `claude-…` id switch
 it), whatever `verifier_model` says, unless your floor keeps audits off the workers' model and that is theirs.
 

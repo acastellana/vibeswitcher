@@ -446,8 +446,8 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     /// The settings the lead may change with `configure`.
     /// The model an audit's verifiers run on: verifier_model when it's set; else one other than the workers'
-    /// (`workerModel`, as `claude --model` names it; nil: Claude's default) and at least as capable: mythos, Claude's
-    /// most capable, or fable when the workers run mythos already. The aliases, as Claude Code 2.1.310 resolves them here
+    /// (`workerModel`, as `claude --model` names it; nil: Claude's default) and at least as capable: fable, or opus
+    /// when the workers run fable already. The aliases, as Claude Code 2.1.310 resolves them here
     /// (2026-10-25): fable → claude-fable-5-1, opus → claude-opus-5-5, sonnet → claude-sonnet-5-5; mythos is
     /// claude-mythos-5-2 (2026-11-19); Claude's default for this user's workers is opus (its settings' "model").
     /// Under a floor that says audits run on a different model than the workers', a verifier_model naming theirs is
@@ -456,7 +456,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// verifier_model that names no model this knows (an alias such as default) is passed over as well: it may be theirs.
     /// The task's model is board.json's, which any session of the team can write, so it only adds a model to keep the
     /// audit off, never takes the workers' off that list: a worker started on the workers' model that writes another
-    /// as its task's still gets an audit on neither (mythos, else fable, opus, sonnet; Claude's default counts as opus).
+    /// as its task's still gets an audit on neither (fable, else opus, else sonnet; Claude's default counts as opus).
     ///
     /// `heldBack`: a model family Claude refuses now (fable, see `AccountUsage.fableHeldBack`; the workers then run on
     /// opus, which `workerModel` says). A choice of that family goes to the most capable model that isn't it and that
@@ -487,8 +487,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// choice of 2026-11-19; `claude --model mythos`).
     public static let defaultSecurityAuditModel = "mythos"
 
-    /// The models an audit falls back through, the most capable first.
-    static let byCapability = ["mythos", "fable", "opus", "sonnet"]
+    /// The models an audit falls back through, the most capable first. Not Mythos: it's for the important reviews
+    /// only (`securityAuditModel`), and Fable's place at its limit goes to Opus (the user's answer of 2026-11-12).
+    static let byCapability = ["fable", "opus", "sonnet"]
 
     /// Whether the floor lets a sensitive audit run on `securityAuditModel`: always, unless it keeps audits off the
     /// workers' model and that's one of theirs, or a name that doesn't say which model it is (it may be theirs).
@@ -514,9 +515,9 @@ public struct LeadWorkflow: Equatable, Sendable {
         } ?? "sonnet"
     }
 
-    /// A model at least as capable as `worker` and not it: mythos, or fable for a worker on mythos.
+    /// A model at least as capable as `worker` and not it: fable, or opus for a worker on fable.
     public static func otherModel(than worker: String?) -> String {
-        worker?.lowercased().contains(byCapability[0]) == true ? byCapability[1] : byCapability[0]
+        worker?.lowercased().contains("fable") == true ? "opus" : "fable"
     }
 
     /// The model a Claude command runs: its own `--model` (or `--model=`), else `home`'s Claude settings' "model"
@@ -667,7 +668,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     # of pace and Codex has room, else Claude; a task that lands on Codex is audited by a Claude verifier).
     agent_default: claude
     # The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as
-    # capable (mythos; fable when the workers run mythos).
+    # capable (fable; opus when the workers run fable).
     verifier_model:
     # The model the important reviews run on: the audit of a branch that touches sensitive_paths or is flagged for
     # security, whatever verifier_model says (mythos, fable, opus, or a claude-… id). Empty: mythos.

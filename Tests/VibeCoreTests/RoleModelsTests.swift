@@ -235,20 +235,25 @@ extension LeadAdvanceTests {
         #expect(workflow.auditModel(workerModel: "fable", taskModel: "mythos", security: true) == "opus")
         workflow.securityAuditModel = "fable"
         #expect(workflow.auditModel(workerModel: "opus", security: true) == "fable")
-        #expect(workflow.auditModel(workerModel: "fable", security: true) == "mythos")
-        #expect(workflow.auditModel(workerModel: "opus", taskModel: "fable", security: true) == "mythos")
+        #expect(workflow.auditModel(workerModel: "fable", security: true) == "opus")
+        #expect(workflow.auditModel(workerModel: "opus", taskModel: "fable", security: true) == "sonnet")
         #expect(workflow.auditModel(workerModel: "opus", taskModel: "mythos", launchedModel: "fable", security: true) == "sonnet")
         // A name written into the file that doesn't say which model it is may be the workers': passed over.
         workflow.securityAuditModel = "default"
-        #expect(workflow.auditModel(workerModel: "opus", security: true) == "mythos")
-        // Fable held back: an audit set to it goes to the most capable other model the floor allows; Mythos isn't held.
+        #expect(workflow.auditModel(workerModel: "opus", security: true) == "fable")
+        // Fable held back: an audit set to it goes as before (Opus, or under the floor the next one down), never to
+        // Mythos by itself; one set to Mythos isn't held.
         workflow.securityAuditModel = "fable"
-        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable", security: true) == "mythos")
-        #expect(workflow.auditModel(workerModel: "opus", taskModel: "mythos", heldBack: "fable", security: true) == "sonnet")
+        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable", security: true) == "sonnet")
         workflow.securityAuditModel = "mythos"
         #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable", security: true) == "mythos")
         workflow.floor = nil
         #expect(workflow.auditModel(workerModel: "mythos", heldBack: "fable", security: true) == "mythos")
+        workflow.securityAuditModel = "fable"
+        #expect(workflow.auditModel(workerModel: "opus", heldBack: "fable", security: true) == "opus")
+        // Routine audits never go to Mythos by themselves.
+        #expect(LeadWorkflow().auditModel(workerModel: "opus") == "fable" && LeadWorkflow().auditModel(workerModel: "fable") == "opus")
+        #expect(LeadWorkflow().auditModel(workerModel: "fable", heldBack: "fable") == "opus")
         // Mythos is a model family as the others are.
         #expect(LeadReviewFloor.sameModel("mythos", "claude-mythos-5-2") && !LeadReviewFloor.sameModel("mythos", "fable"))
         #expect(LeadReviewFloor.knownModel("claude-mythos-5-2") && AccountUsage.family("claude-mythos-5-2[1m]") == "mythos")
