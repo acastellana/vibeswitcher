@@ -4221,3 +4221,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 16:57 Planned daily-memory-bench-the: Daily memory bench: the sandbox soak bench hangs in the app's run
 - 2026-11-19 16:58 Started a worker on daily-memory-bench-the
 - 2026-11-19 16:58 Automatically (auto_advance): Started a worker on daily-memory-bench-the (Daily memory bench: the sandbox soak bench hangs in the app's run).
+- 2026-11-19 18:17 Merged daily-memory-bench-the: Daily memory bench: the sandbox soak bench hangs in the app's run (no audit: review none) (build bdffa6a19fd8)
