@@ -4178,3 +4178,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 13:43 Automatically (auto_advance): Overlap for merge-stats-a-batch's start (a warning only: nothing was refused or reordered). Sources/VibeCore/LeadMergeBatch.swift: audits-run-on-codex (running: its branch changes it).
 - 2026-11-19 13:43 Automatically (auto_advance): Cleaned up the-config-seal-is (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-19 13:44 Update: Merged: merges no longer lose a passing test run to a settings hold; new work waits when the disk is short — **What changed:**
+- 2026-11-19 13:52 Automatically (auto_advance): Started the audit of session-host-measure-the at 204eb66d (It touches sensitive_paths (Sources/VibeHost/HostServer.swift), so it's treated as audit whatever its review says).
