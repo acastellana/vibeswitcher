@@ -4001,3 +4001,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-19 00:49 Exception on the-lead-s-records by lead of vibeswitcher: edits to Tests/**/*.swift accepted. Reason: The lead accepts the test edits the worker listed: existing tests that pin main or a merge's parent across a merge now flush the records first or check that only records commits landed (helper onlyRec…
 - 2026-11-19 00:59 Pipeline held: sigpipe-probe-always-on ready to merge with none landing; cause: a merge in progress
 - 2026-11-19 01:01 Merged sigpipe-probe-always-on: SIGPIPE probe always on: a test run that takes a SIGPIPE names the writer (build 31d37278312c)
+- 2026-11-19 01:01 Automatically (auto_advance): Merged sigpipe-probe-always-on (SIGPIPE probe always on: a test run that takes a SIGPIPE names the writer) into main at 9d0eec10, on its passing audit and the full test run.
+- 2026-11-19 01:01 Automatically (auto_advance): Cleaned up sigpipe-probe-always-on (freed 1.8 GB of build output and temporary folders). It stays done.
