@@ -240,12 +240,15 @@ Nine conflicts, each keeping main's change with `v2`'s portable form put back (`
 - `Tests/VibeHostTests/HostConnectionDeliveryTests.swift`: main's wait on the close itself.
 - `scripts/temporary-folder-lint.txt`: both sides' allow lines.
 
-What main added that didn't build or pass on Linux, changed in `891d3c47`, `3eae240b`, `3ff4742e` and `016aa6f1`
+What main added that didn't build or pass on Linux, changed in `891d3c47`, `3eae240b`, `3ff4742e`, `016aa6f1` and `9aa51c0d`
 (kinds 1 to 3, so listed here):
 
 - `Sources/VibeCore/Worktrees.swift` `Shell.ExitWatch` (a kqueue's NOTE_EXIT): moved into `VibePlatform` as
   `Platform.ExitWait` (the Mac's kqueue; Linux's `poll` on a pidfd, closed once it has told), `Shell.ExitWatch` a name
   for it (`ExitWaitTests`).
+- `Sources/VibeCore/LeadLaunch.swift` `listedPlugins`: Claude Code's `plugin list` runs in `Platform.Tools.loginShell`,
+  not `/bin/zsh` (kind 1, `9aa51c0d`); `TeamPluginsTests` reads a role's launch through `LaunchArguments`, and
+  `LeadLaunchTests.theMacsDenyRulesAreTodays`' four hashes are recorded again for main's rules.
 - `Sources/VibeCore/MemoryBench.swift`, `MemoryBenchRun.swift`: `import Darwin` removed. `SetupStats.swift`: the
   transcript's time through `Platform.Files.modified`. `ConfigSeal.swift` `walkCode`, `linkDigest`: an entry's name
   read as a C string (no `d_namlen` on Linux) and `readlinkat` into a `CChar` buffer.
