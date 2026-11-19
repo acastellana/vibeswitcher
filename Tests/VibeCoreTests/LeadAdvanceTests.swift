@@ -1612,7 +1612,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
     /// to the worker, and a planned task starts.
     @Test func otherTasksMoveOnWhileAMergesTestsRun() async throws {
         let held = heldRun("echo ran >> '\(log)'")
-        let (root, runtime, lead) = try team(test: held.test, ["max_workers": 5])
+        let (root, runtime, lead) = try team(test: held.test, ["max_workers": 5, "heavy_slots": 2])
         lead.macLimits = { MacLimits(maxSessions: 12) }
         let advancing = Advancing(lead)
         defer { advancing.stop() }

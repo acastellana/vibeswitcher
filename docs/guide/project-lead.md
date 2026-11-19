@@ -349,7 +349,11 @@ With `auto_advance: true` (the default), finished work moves on without waiting 
 tool server:
 
 - merges a review-none task reported done (unless the risk check raises it to audit);
-- starts an audit task's audit, and merges a clean verdict;
+- starts an audit task's audit, and merges a clean verdict; at most `heavy_slots` of the project's audits at once (re-audits
+  and post-merge Claude re-audits among them, counted from their start, build and test runs included, to their verdict),
+  the rest held in board order with one line in the report and started as one ends. The lead's `audit` past that is
+  refused with its place in line, unless it passes `override_heavy_slots: true`; other projects' audits count only for
+  their own cap;
 - sends the worker a verdict's open Important findings, once per verdict, never past the round cap;
 - retries once a verifier that ended without a verdict;
 - sends the worker a failed merge's output;

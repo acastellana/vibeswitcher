@@ -167,7 +167,7 @@ extension LeadAdvanceTests {
     }
 
     @Test func aSensitiveOrSecurityAuditRunsOnFableOthersOnVerifierModelAndTheFloorWins() throws {
-        let (root, runtime, lead) = try team(test: nil, ["auto_advance": false, "max_workers": 5, "verifier_model": "opus"])
+        let (root, runtime, lead) = try team(test: nil, ["auto_advance": false, "max_workers": 5, "verifier_model": "opus", "heavy_slots": 2])
         runtime.claude = "claude --model opus"
         _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
         _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
