@@ -476,7 +476,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         guard let heldBack, LeadReviewFloor.sameModel(chosen, heldBack) else { return chosen }
         let different = floor?.verifierDifferent == true
         let workers = LeadReviewFloor.workersModel(workerModel)
-        return Self.byCapability.first { model in
+        return (Self.byCapability + [Self.lastResortAuditModel]).first { model in
             !LeadReviewFloor.sameModel(model, heldBack)
                 && (!different || (!LeadReviewFloor.sameModel(model, workers) && !LeadReviewFloor.sameModel(model, taskModel)
                                    && !LeadReviewFloor.sameModel(model, launchedModel)))
@@ -490,6 +490,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The models an audit falls back through, the most capable first. Not Mythos: it's for the important reviews
     /// only (`securityAuditModel`), and Fable's place at its limit goes to Opus (the user's answer of 2026-11-12).
     static let byCapability = ["fable", "opus", "sonnet"]
+    /// Where a search under a different-model floor goes once the workers', the task's and its worker's models took
+    /// all of `byCapability`: a model none of them is, never one the floor excludes.
+    static let lastResortAuditModel = "mythos"
 
     /// Whether the floor lets a sensitive audit run on `securityAuditModel`: always, unless it keeps audits off the
     /// workers' model and that's one of theirs, or a name that doesn't say which model it is (it may be theirs).
@@ -510,7 +513,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         }
         guard different else { return Self.otherModel(than: workerModel) }
         let workers = LeadReviewFloor.workersModel(workerModel)
-        return Self.byCapability.first {
+        return (Self.byCapability + [Self.lastResortAuditModel]).first {
             !LeadReviewFloor.sameModel($0, workers) && !LeadReviewFloor.sameModel($0, taskModel) && !LeadReviewFloor.sameModel($0, launchedModel)
         } ?? "sonnet"
     }
