@@ -40,9 +40,13 @@ struct SandboxPlannerTests {
     }
 
     func world() throws -> World {
-        let base = scratch.url("planner").resolvingSymlinksInPath().path
-        let home = base + "/home"
         func make(_ path: String) throws { try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
+        // Made, then resolved by realpath, as the planner resolves a worktree's git folders: the Mac's
+        // `resolvingSymlinksInPath` gives /private/tmp back as /tmp.
+        let made = scratch.url("planner").path
+        try make(made)
+        let base = SandboxPolicy.resolved(made)
+        let home = base + "/home"
         func write(_ text: String, _ path: String) throws {
             try make((path as NSString).deletingLastPathComponent)
             try text.write(toFile: path, atomically: true, encoding: .utf8)

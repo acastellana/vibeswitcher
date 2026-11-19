@@ -8,7 +8,11 @@ struct SandboxPolicyTests {
     let scratch = Scratch()
 
     func home() throws -> String {
-        let home = scratch.url("policy-home").resolvingSymlinksInPath().path
+        // Made, then resolved by realpath: the Mac's `resolvingSymlinksInPath` gives /private/tmp back as /tmp, which
+        // isn't the path the policy resolves to.
+        let made = scratch.url("policy-home").path
+        try FileManager.default.createDirectory(atPath: made, withIntermediateDirectories: true)
+        let home = SandboxPolicy.resolved(made)
         for folder in [".ssh", ".config/gh", ".gnupg", ".vibeswitcher/state", ".cache/sdk", "sdk", "projects/app", "projects/other"] {
             try FileManager.default.createDirectory(atPath: home + "/" + folder, withIntermediateDirectories: true)
         }
