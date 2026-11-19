@@ -8,9 +8,10 @@ import VibeCore
 /// session (the page links to its chat), its review, times, attempts, budget, audit and merge.
 ///
 /// **A board is the sessions' writing** (the lead's tool server writes it, and what a worker reports lands in it), so
-/// every string here is inert text: controls, format characters and the like replaced (`text`), each one capped, a
-/// blocker at most `blockerLines` lines, and at most `mostTasks` tasks a board (the ones that need someone first: the
-/// rest are counted in `more`). No path in it is read or followed: a worktree isn't sent, and a worker's id is sent only
+/// every string here is inert text: controls, format characters and the like replaced (`text`), combining marks at most
+/// `marksKept` a character, each string capped in bytes of UTF-8, a blocker at most `blockerLines` lines, and at most
+/// `mostTasks` tasks and `mostBytes` encoded a board (the ones that need someone first: the rest are counted in
+/// `more`). No path in it is read or followed: a worktree isn't sent, and a worker's id is sent only
 /// as a session id when it is a host's UUID. A finished task is sent for a day after it finished (`doneFor`), so the
 /// page can show what was done today; older ones are the board's history.
 ///
@@ -25,9 +26,16 @@ public enum BoardValue {
     public static let mostTasks = 150
     /// How long a finished task is still sent, in seconds.
     public static let doneFor: TimeInterval = 24 * 3600
-    /// A blocker's most lines and characters.
+    /// A blocker's most lines, and bytes of UTF-8.
     public static let blockerLines = 40
-    public static let blockerLimit = 2000
+    public static let blockerLimit = 4000
+    /// The most bytes of UTF-8 a task's title, and its dim line or checkpoint, carry.
+    public static let titleBytes = 400
+    public static let lineBytes = 600
+    /// The most combining marks kept on one base character (a Zalgo string is a few characters of thousands of marks).
+    public static let marksKept = 4
+    /// The most bytes a project's whole value takes, encoded: past it, the last tasks go to `more` until it fits.
+    public static let mostBytes = 512 << 10
     /// The groups, in the order shown.
     public static let groups = ["attention", "running", "waiting", "done"]
 
@@ -43,8 +51,11 @@ public enum BoardValue {
             }
         }
         shown.sort { ($0.group, $0.position) < ($1.group, $1.position) }
-        let more = max(0, shown.count - mostTasks)
-        let kept = shown.prefix(mostTasks)
+        var kept = Array(shown.prefix(mostTasks))
+        // The byte budget: the tasks' encoded sizes and the rest of the value's, the last tasks dropped till it fits.
+        var size = 2_048 + root.utf8.count + project.utf8.count + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
+        while size > mostBytes, let last = kept.popLast() { size -= NodeWire.message(last.value).count + 1 }
+        let more = shown.count - kept.count
         var counts: [String: NodeWire.Value] = [:]
         for (index, name) in groups.enumerated() { counts[name] = .int(kept.filter { $0.group == index }.count) }
         return .object([
@@ -60,7 +71,7 @@ public enum BoardValue {
         let shown = Shown(task, board: board)
         if shown.group == "done", now.timeIntervalSince1970 - finishedAt(task) > doneFor { return nil }
         var fields: [String: NodeWire.Value] = [
-            "id": .string(text(task.id, limit: 80)), "slug": .string(text(task.slug, limit: 120)), "title": .string(text(task.title, limit: 200)),
+            "id": .string(text(task.id, limit: 80)), "slug": .string(text(task.slug, limit: 120)), "title": .string(text(task.title, limit: titleBytes)),
             "status": .string(task.status.rawValue), "group": .string(shown.group), "state": .string(shown.state),
             "line": shown.line.map { .string(line($0)) } ?? .null,
             "blocker": task.status == .blocked ? task.blocker.map { .string(text($0, limit: blockerLimit, lines: blockerLines)) } ?? .null : .null,
@@ -177,46 +188,63 @@ public enum BoardValue {
         return .date(Date(timeIntervalSince1970: seconds))
     }
 
-    /// The first line of `text`, inert, at most 300 characters.
+    /// The first line of `text`, inert, at most `lineBytes` bytes.
     static func line(_ text: String) -> String {
         let first = text.split(whereSeparator: \.isNewline).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        return ConfigSeal.inert(first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? "", limit: 300)
+        return Self.text(first.map(String.init) ?? "", limit: lineBytes)
     }
 
     /// `text` as inert text: newlines kept (at most `lines` of them), a tab a space, any other control, format,
-    /// separator, private-use or unassigned scalar replaced, at most `limit` characters ("…" where it was cut).
+    /// separator, private-use or unassigned scalar replaced, at most `marksKept` combining marks after one base, and at
+    /// most `limit` bytes of UTF-8 (cut between scalars, "…" where it was). Capped by bytes, not characters: one
+    /// character can be a base with thousands of marks on it.
     static func text(_ text: String, limit: Int, lines: Int = 1) -> String {
         var kept = String.UnicodeScalarView()
+        var bytes = 0
         var count = 0
+        var marks = 0
         var cut = false
-        for scalar in text.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars {
-            if scalar == "\n" {
+        func keep(_ scalar: Unicode.Scalar) -> Bool {
+            let size = scalar.utf8.count
+            guard bytes + size <= limit else { return false }
+            bytes += size
+            kept.append(scalar)
+            return true
+        }
+        scalars: for scalar in text.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars {
+            var taken = scalar
+            switch scalar.properties.generalCategory {
+            case .nonspacingMark, .spacingMark, .enclosingMark:
+                marks += 1
+                if marks > marksKept {
+                    cut = true
+                    continue scalars
+                }
+            case .control where scalar == "\n":
+                marks = 0
                 guard lines > 1 else {
-                    kept.append(" ")
-                    continue
+                    taken = " "
+                    break
                 }
                 count += 1
                 if count >= lines {
                     cut = true
-                    break
+                    break scalars
                 }
-                kept.append(scalar)
-                continue
+            case .control where scalar == "\t" || scalar == "\r":
+                marks = 0
+                taken = " "
+            case .control, .format, .lineSeparator, .paragraphSeparator, .privateUse, .unassigned, .surrogate:
+                marks = 0
+                taken = "\u{FFFD}"
+            default:
+                marks = 0
             }
-            if scalar == "\t" || scalar == "\r" {
-                kept.append(" ")
-                continue
-            }
-            switch scalar.properties.generalCategory {
-            case .control, .format, .lineSeparator, .paragraphSeparator, .privateUse, .unassigned, .surrogate: kept.append("\u{FFFD}")
-            default: kept.append(scalar)
+            guard keep(taken) else {
+                cut = true
+                break
             }
         }
-        var result = String(kept)
-        if result.count > limit {
-            result = String(result.prefix(limit))
-            cut = true
-        }
-        return cut ? result + "…" : result
+        return cut ? String(kept) + "…" : String(kept)
     }
 }
