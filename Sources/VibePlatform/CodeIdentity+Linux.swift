@@ -22,6 +22,12 @@ extension Platform.CodeIdentity {
         /// False: no process runs code this can name.
         static func runs(_ token: Platform.PeerToken, executable: String) -> Bool { false }
 
+        /// False: no process runs code this can name.
+        static func runs(_ token: Platform.PeerToken, cdhash: Data) -> Bool { false }
+
+        /// nil: Linux has no Hardened Runtime (its form is non-dumpable, `Platform.Processes.isDumpable`).
+        static func isHardened(_ token: Platform.PeerToken) -> Bool? { nil }
+
         /// nil: nothing to read it from.
         static func architecture(of pid: pid_t) -> Architecture? { nil }
 

@@ -28,11 +28,43 @@ extension Platform.CodeIdentity {
             // (e.g. arm64e.x1). Compare the configured executable's exact running slice, never a path alone.
             guard let architecture = architecture(of: token.pid),
                   let cdhash = cdhash(atPath: executable, architecture: architecture) else { return false }
+            return runs(token, cdhash: cdhash)
+        }
+
+        /// The guest the audit token names, as Security finds it (it refuses a token whose pid exec'd since).
+        static func guest(_ token: audit_token_t) -> SecCode? {
             var token = token
             let audit = Data(bytes: &token, count: MemoryLayout<audit_token_t>.size)
             var guest: SecCode?
-            guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: audit] as CFDictionary, [], &guest) == errSecSuccess,
-                  let guest else { return false }
+            guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: audit] as CFDictionary, [], &guest) == errSecSuccess else { return nil }
+            return guest
+        }
+
+        // The dynamic status word's flags (xnu's <kern/cs_blobs.h>): valid, the Hardened Runtime, get-task-allow, and
+        // a debugger attached.
+        static let validFlag: UInt32 = 0x0000_0001
+        static let getTaskAllowFlag: UInt32 = 0x0000_0004
+        static let runtimeFlag: UInt32 = 0x0001_0000
+        static let debuggedFlag: UInt32 = 0x1000_0000
+
+        static func isHardened(_ token: audit_token_t) -> Bool? {
+            guard let guest = guest(token) else { return nil }
+            var information: CFDictionary?
+            // A guest is a code object too: Security reads its dynamic status with kSecCSDynamicInformation.
+            guard SecCodeCopySigningInformation(unsafeBitCast(guest, to: SecStaticCode.self),
+                                                SecCSFlags(rawValue: numericCast(kSecCSDynamicInformation)), &information) == errSecSuccess,
+                  let information = information as? [String: Any],
+                  let status = (information[kSecCodeInfoStatus as String] as? NSNumber)?.uint32Value else { return nil }
+            return isHardened(status: status)
+        }
+
+        /// Whether a dynamic status word says valid, hardened and not debuggable.
+        static func isHardened(status: UInt32) -> Bool {
+            status & validFlag != 0 && status & runtimeFlag != 0 && status & (getTaskAllowFlag | debuggedFlag) == 0
+        }
+
+        static func runs(_ token: audit_token_t, cdhash: Data) -> Bool {
+            guard let guest = guest(token) else { return false }
             let hex = cdhash.map { String(format: "%02x", $0) }.joined()
             var requirement: SecRequirement?
             guard SecRequirementCreateWithString("cdhash H\"\(hex)\"" as CFString, [], &requirement) == errSecSuccess,

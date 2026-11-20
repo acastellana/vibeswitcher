@@ -24,6 +24,21 @@ extension Platform {
             System.runs(token, executable: executable)
         }
 
+        /// The process `token` names, as it runs now, is valid code whose cdhash is `cdhash` (read before, from the
+        /// file the process was started from: `cdhash(atPath:architecture:)`), whatever its path names by now. The Mac:
+        /// Security's dynamic check of the guest the audit token names, as `runs(_:executable:)`; it refuses a token
+        /// whose pid exec'd since. Linux: false.
+        public static func runs(_ token: Platform.PeerToken, cdhash: Data) -> Bool {
+            System.runs(token, cdhash: cdhash)
+        }
+
+        /// Whether the process `token` names runs under the Hardened Runtime as it runs now, and can't be debugged:
+        /// its dynamic code status valid, with the runtime flag (`CS_RUNTIME`: `DYLD_` variables ignored, another
+        /// process's `task_for_pid` refused) and neither `get-task-allow` (`CS_GET_TASK_ALLOW`) nor a debugger attached
+        /// (`CS_DEBUGGED`). The Mac's form of Linux's non-dumpable (the server child's connector asks it: the node on
+        /// the Mac's step 3). nil when it can't be told, and on Linux.
+        public static func isHardened(_ token: Platform.PeerToken) -> Bool? { System.isHardened(token) }
+
         /// The architecture the process `pid` runs (the slice of a universal binary it was started from); nil when it
         /// can't be read. Linux: nil.
         public static func architecture(of pid: pid_t) -> Architecture? { System.architecture(of: pid) }
