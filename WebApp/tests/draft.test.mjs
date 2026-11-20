@@ -181,3 +181,14 @@ test('a draft’s id never meets a subscription’s: each reply reaches its own 
   r.socket().say({ v: 1, re: request.id, ok: true, result: { applied: { cards: SEQ + 1 }, card: CARD } });
   assert.equal((await done).ok, true);
 });
+
+test('a draft goes in as the free-text answer of a single question that takes words, not a command, a multi-select or images', async () => {
+  const { answersQuestion } = await import('../js/views/drive.js');
+  const prompt = { question: 'Which name?', options: ['Parser', 'Reader', 'Type something.'], text: [2], multiSelect: false };
+  assert.equal(answersQuestion(prompt, { text: 'Tokenizer', images: [] }), true);
+  assert.equal(answersQuestion(prompt, { text: '/model', images: [] }), false);
+  assert.equal(answersQuestion(prompt, { text: 'See this', images: ['/x.png'] }), false);
+  assert.equal(answersQuestion({ ...prompt, multiSelect: true }, { text: 'Tokenizer' }), false);
+  assert.equal(answersQuestion({ ...prompt, text: [] }, { text: 'Tokenizer' }), false);
+  assert.equal(answersQuestion(null, { text: 'Tokenizer' }), false);
+});

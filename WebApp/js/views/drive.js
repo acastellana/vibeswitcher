@@ -18,6 +18,14 @@ export { sessionShort, shellWord };
 // Whether the page may drive `session` at all: one the node's host started, still running.
 export const drivable = (session) => !!session?.hosted && !session.ended;
 
+// Whether `drafted` (a session's draft) goes in as the free-text answer of `prompt` (the question open on its screen)
+// when `vibeswitcher send` types it: a single choice with an option that takes words, and words that aren't a `/`
+// command, with no images (the node's `send`, as the app's composer does).
+export function answersQuestion(prompt, drafted) {
+  return !!prompt && !prompt.multiSelect && (prompt.text || []).length > 0 && !!drafted?.text?.trim()
+    && !drafted.text.trim().startsWith('/') && !(drafted.images || []).length;
+}
+
 // The message drafted for a session, over its composer: the text as it will be typed, the line that sends it, and
 // Edit (back into the box) and Discard. Returns { el, update(session) }.
 export function draftBox(app, { edit }) {
@@ -49,9 +57,15 @@ export function draftBox(app, { edit }) {
       if (!drafted) return;
       setClass(el, 'sending', drafted.sending);
       setClass(el, 'now', !!drafted.now);
+      // A question open that takes typed words: the message goes in as its answer (the node's `send`, as the app's
+      // composer does), so the box says so.
+      const prompt = drivable(session) ? session.prompt : null;
+      const answers = answersQuestion(prompt, drafted);
+      setClass(el, 'answers', answers);
       setText(label, drafted.sending ? 'Saving your message…'
         : drafted.now ? `Steer ${AGENTS[session.agent] || 'the agent'} now: it gets this at its next step, without stopping`
-        : `Your message for ${AGENTS[session.agent] || 'the agent'}`);
+          : answers ? `Your answer to the question above (sent as its “${prompt.options[prompt.text[0]]}” words)`
+            : `Your message for ${AGENTS[session.agent] || 'the agent'}`);
       setText(text, drafted.text);
       text.hidden = !drafted.text;
       const images = drafted.images || [];

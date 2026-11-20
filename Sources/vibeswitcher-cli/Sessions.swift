@@ -180,6 +180,11 @@ enum SendCommand {
                 + "It is kept across a restart of the node's server or a switch, while the session lives")
             return
         }
+        if let answered = result["answered"]?.string {
+            Say.out("answered: your words went in as the answer to the question open in session \(short) "
+                + "(its option “\(ConfigSeal.inert(answered, limit: 80))”, the one that takes typed words), as the app's composer sends them")
+            return
+        }
         if result["steered"]?.bool == true {
             Say.out("steered: \(characters) characters into session \(short)'s steer inbox; its agent gets them at its next step, without stopping "
                 + "(typed in if its turn ends first)")
