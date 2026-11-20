@@ -15,6 +15,8 @@ final class SessionCompletions: @unchecked Sendable {
     private let lock = NSLock()
     private var commands: [String: (at: Date, list: [SlashCommand])] = [:]
     private var files: [String: (at: Date, list: [String])] = [:]
+    /// The folders being listed now: a page typing meanwhile gets the last list (or none), not another walk.
+    private var listing: Set<String> = []
 
     /// The commands `/` offers in `folder` for `agent`, the user's from `home` (`~/.claude/commands`, `~/.claude/skills`,
     /// Codex's `~/.codex/prompts`). Reads the disk: never on the engine's queue.
@@ -36,11 +38,20 @@ final class SessionCompletions: @unchecked Sendable {
         return list
     }
 
-    /// The files `@` offers in `folder`, relative to it. Reads the disk: never on the engine's queue.
+    /// The files `@` offers in `folder`, relative to it: one walk of a folder at a time (asked meanwhile, the last
+    /// list, or none). Reads the disk: never on the engine's queue.
     func files(in folder: String, now: Date = Date()) -> [String] {
-        if let hit = lock.withLock({ files[folder] }), now.timeIntervalSince(hit.at) < Self.kept { return hit.list }
+        let (hit, walk) = lock.withLock { () -> ((at: Date, list: [String])?, Bool) in
+            let hit = files[folder]
+            if let hit, now.timeIntervalSince(hit.at) < Self.kept { return (hit, false) }
+            return (hit, listing.insert(folder).inserted)
+        }
+        guard walk else { return hit?.list ?? [] }
         let list = FileIndex.files(in: folder)
-        lock.withLock { files = Self.kept(files, folder, (now, list)) }
+        lock.withLock {
+            files = Self.kept(files, folder, (now, list))
+            listing.remove(folder)
+        }
         return list
     }
 
