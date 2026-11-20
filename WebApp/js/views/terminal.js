@@ -10,15 +10,16 @@
 // bell, and xterm.js plays no sound). What the emulator answers to a program's queries goes up as input and the node
 // cuts it out (TerminalReplies): only the host's parser answers.
 //
-// The renderer is xterm.js's DOM one. It writes some of its CSS (the cell's size, the theme) into <style> elements it
-// makes, which the page's policy refuses (style-src 'self'): `mirrorStyles` gives the same text to stylesheets made by
-// script (adoptedStyleSheets), which the policy doesn't govern, so the policy stays as it was. The text is xterm.js's,
-// built from this file's options and colours the parser has already turned into #rrggbb: nothing the program prints
-// becomes CSS.
+// The renderer is xterm.js's DOM one. It writes some of its CSS into <style> elements and a truecolor cell's colour into
+// its style attribute, both of which the page's policy refuses (style-src 'self'): `takeXtermStyles` (js/xtermstyle.js)
+// hands them to script-made CSS, which the policy doesn't govern, so the policy stays as it was and a terminal logs
+// nothing. The text is xterm.js's, built from this file's options and colours the parser has already turned into
+// numbers: nothing the program prints becomes CSS.
 
 import { h, setText } from '../dom.js';
 import { icon } from '../marks.js';
 import { createTerminal, clampSize } from '../terminal.js';
+import { takeXtermStyles } from '../xtermstyle.js';
 
 const FONT = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 
@@ -51,44 +52,12 @@ function look() {
 let loading = null;
 function loadXterm() {
   if (!loading) {
+    takeXtermStyles();
     document.head.append(h('link', { rel: 'stylesheet', href: new URL('../../vendor/xterm.css', import.meta.url).href }));
     loading = Promise.all([import('../../vendor/xterm.mjs'), import('../../vendor/addon-fit.mjs')])
       .then(([xterm, fit]) => ({ Terminal: xterm.Terminal, FitAddon: fit.FitAddon }));
   }
   return loading;
-}
-
-// The CSS xterm.js writes into <style> elements under `root`, applied through stylesheets made by script instead (the
-// policy refuses the elements' own). Each element is taken out of the page once read, so its later text (a new cell
-// size, a new theme) is read from it again without the policy refusing it each time.
-function mirrorStyles(root) {
-  const sheets = new Map();
-  const watch = new MutationObserver(() => { for (const element of sheets.keys()) copy(element); });
-  function copy(element) {
-    const sheet = sheets.get(element);
-    const text = element.textContent;
-    if (sheet.text !== text) { sheet.text = text; sheet.css.replaceSync(text); }
-  }
-  function adopt() {
-    for (const element of root.querySelectorAll('style')) {
-      if (sheets.has(element)) continue;
-      sheets.set(element, { css: new CSSStyleSheet(), text: null });
-      copy(element);
-      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheets.get(element).css];
-      watch.observe(element, { childList: true, characterData: true, subtree: true });
-      element.remove();
-    }
-  }
-  const added = new MutationObserver(adopt);
-  added.observe(root, { childList: true, subtree: true });
-  adopt();
-  return () => {
-    added.disconnect();
-    watch.disconnect();
-    const ours = new Set([...sheets.values()].map((sheet) => sheet.css));
-    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => !ours.has(sheet));
-    sheets.clear();
-  };
 }
 
 export function terminalView(app) {
@@ -109,7 +78,6 @@ export function terminalView(app) {
 
   let term = null;     // the emulator, once made
   let fit = null;
-  let unmirror = null;
   let making = null;
   let shown = null;    // the session the pane shows
   let visible = false;
@@ -132,7 +100,6 @@ export function terminalView(app) {
         for (const code of [0, 1, 2, 8, 52]) term.parser.registerOscHandler(code, () => true);
         fit = new FitAddon();
         term.loadAddon(fit);
-        unmirror = mirrorStyles(screen);
         term.open(screen);
         term.onData((data) => control.input(data));
         // Bytes the emulator makes as such (an old mouse mode's reports): one byte per character.

@@ -42,7 +42,8 @@ export function connectSocket(store, options) {
   } = options;
 
   // Per subscription: its collection, the epoch and seq it holds (null: nothing yet), and whether it asked again. A
-  // chat's also names its session (`key`) and whether the page still shows it (`open`).
+  // chat's also names its session (`key`), whether the page still shows it (`open`), and whether it waits for the
+  // session's first transcript (`waiting`: the node refused it, the session having none yet).
   const subs = new Map(COLLECTIONS.map((collection, index) => ['s' + index, { collection, epoch: null, seq: null, asking: false }]));
   // The chats' subscriptions by session; their names are c1, c2, ….
   const chats = new Map();
@@ -190,6 +191,7 @@ export function connectSocket(store, options) {
       args.since = { epoch: sub.epoch, seq: sub.seq };
     }
     sub.asking = true;
+    sub.waiting = false;
     // Its own ids (`sub-N`, for subscribe, unsubscribe and chat.page), apart from the store's (`1`, `2`…): a reply is
     // matched to its request by id alone.
     request({ v: 1, id: 'sub-' + nextId++, kind: 'subscribe', args }).then((reply) => {
@@ -200,8 +202,23 @@ export function connectSocket(store, options) {
         store.state.follows = store.state.follows.filter((collection) => collection !== 'boards');
         return settle();
       }
+      // A new session's chat before its transcript is written (acceptance run, 2026-11-20: the page logged this and
+      // showed nothing): no conversation yet, shown as such, and asked for again once the session has a transcript.
+      if (sub.collection === 'chat' && reply.error?.code === 'gone' && raw.sessions.get(sub.key)?.hasTranscript === false) {
+        sub.asking = false;
+        sub.waiting = true;
+        if (!store.state.chats.get(sub.key)?.loaded) store.chatSnapshot(sub.key, { items: [] });
+        return;
+      }
       log('VibeSwitcher: the node refused a subscription:', reply.error?.message);
     });
+  }
+
+  // The chats waiting for their session's first transcript whose session has one now: asked for again.
+  function transcriptsCame() {
+    for (const [name, sub] of subs) {
+      if (sub.waiting && sub.open && authed && raw.sessions.get(sub.key)?.hasTranscript) subscribe(name, sub);
+    }
   }
 
   function event(message) {
@@ -281,6 +298,7 @@ export function connectSocket(store, options) {
       const shaped = (entry) => (entry.value === null ? entry : { id: entry.id, value: sessionValue(entry.value, leadOf) });
       if (whole) store.reconcile('sessions', entries.map(shaped).map((entry) => entry.value));
       else store.change('sessions', entries.map(shaped));
+      transcriptsCame();
       return;
     }
     if (whole) store.reconcile(collection, entries.map((entry) => entry.value));

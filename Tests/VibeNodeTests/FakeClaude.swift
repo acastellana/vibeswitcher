@@ -101,6 +101,9 @@ enum FakeClaude {
 # deletes only the row the caret is on, as its deleteToLineStart does)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
 # "processed" (the recording being processed is done now, whatever "processing" said) | "print" (the bytes of "file"
 # written on its terminal, as a command's output) |
+# "trust" (its folder-trust question, as 2.1.30x draws it at the start in a new folder: rows with no numbers, the cursor
+# on "No, exit"; Enter there or Esc quits, Enter on "Yes, I trust this folder" goes on, "trusted" true in STATE; with
+# "lose", that many of its first keys are lost, as a menu not yet taking keys loses them) |
 # "exit" (it quits, as /exit) | "mcp" (the node's: {"op": "mcp", "tool": NAME, "arguments": {...}} starts the tool
 # server its --mcp-config names, a path or inline JSON, "server" or the one named vibeswitcher or the first; sends
 # initialize and the tools/call, and records the reply, or what failed, in "mcp" in STATE)).
@@ -240,6 +243,8 @@ state = {
     "prompt": PROMPT,        # the prompt it was started with (None: none)
     "resume": resumed(sys.argv[1:]),  # the conversation --resume carried on (None: a fresh one)
     "mcp": [],               # the "mcp" op's calls: {"tool", "reply"} or {"tool", "error"}
+    "trusted": False,        # "Yes, I trust this folder" chosen on the "trust" op's question
+    "trustLose": 0,          # the trust question's keys still to be lost (the op's "lose")
 }
 MCP_DONE = threading.Event()  # an "mcp" call has finished: STATE to be written
 MCP_LOCK = threading.Lock()
@@ -260,6 +265,7 @@ COMMANDS = [("/clear", "Clear conversation history"), ("/compact", "Clear histor
 question = None              # the AskUserQuestion on screen
 permission = None
 picker = None
+trust = None                 # the "trust" op's question: its cursor's row (0: "No, exit", 1: Yes)
 control_offset = 0
 paste = None                 # bytes of a bracketed paste being read
 reading = None               # a paste whose image paths are being read (see `take_paste`)
@@ -292,6 +298,8 @@ def save_state():
         snapshot["focus"] = permission["focus"]
     if picker:
         snapshot["focus"] = picker["focus"]
+    if trust is not None:
+        snapshot["focus"] = trust
     with MCP_LOCK:
         snapshot["mcp"] = list(state["mcp"])
     tmp = STATE + ".tmp"
@@ -326,6 +334,8 @@ def draw():
         lines = draw_permission()
     elif state["mode"] == "picker":
         lines = draw_picker()
+    elif state["mode"] == "trust":
+        lines = draw_trust()
     else:
         lines.append("⏺ " + state["reply"])
         lines.append("")
@@ -473,6 +483,40 @@ def draw_picker():
     lines.append("")
     lines.append("Enter to confirm · Esc to cancel")
     return lines
+
+
+def draw_trust():
+    folder = os.getcwd()
+    lines = [" Accessing workspace:", "", " " + folder, "",
+             " Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source",
+             " project, or work from your team). If not, take a moment to review what's in this folder first.", "",
+             " Claude Code'll be able to read, edit, and execute files here.", "", " Security guide", ""]
+    for index, label in enumerate(["No, exit", "Yes, I trust this folder"]):
+        lines.append((" ❯ " if trust == index else "   ") + label)
+    lines.append("")
+    lines.append(" Enter to confirm · Esc to cancel")
+    return lines
+
+
+def trust_key(key):
+    global trust
+    if state["trustLose"] > 0:
+        state["trustLose"] -= 1
+        return
+    if key == "up":
+        trust = 0
+    elif key == "down":
+        trust = 1
+    elif key == "esc" or (key == "enter" and trust == 0):
+        state["mode"] = "exited"
+        save_state()
+        out(ESC + "[2J" + ESC + "[H")
+        sys.exit(0)
+    elif key == "enter":
+        trust = None
+        state["trusted"] = True
+        state["mode"] = "idle"
+        state["reply"] = "Trusted."
 
 
 # MARK: what happens
@@ -946,6 +990,8 @@ def key(name):
         permission_key(name)
     elif mode == "picker":
         picker_key(name)
+    elif mode == "trust":
+        trust_key(name)
     else:
         menu = suggestions()
         if menu and name in ("up", "down", "enter", "esc", "tab"):
@@ -1193,7 +1239,7 @@ def start_child(foreground, program="/bin/sleep"):
 
 
 def control():
-    global control_offset
+    global control_offset, trust
     try:
         with open(CONTROL) as f:
             f.seek(control_offset)
@@ -1265,6 +1311,10 @@ def control():
             draw()
         elif op == "mcp":
             threading.Thread(target=call_tool, args=(command,), daemon=True).start()
+        elif op == "trust":
+            trust = 0
+            state["trustLose"] = command.get("lose", 0)
+            state["mode"] = "trust"
         elif op == "freeze":
             state["frozen"] = True
         elif op == "thaw":
