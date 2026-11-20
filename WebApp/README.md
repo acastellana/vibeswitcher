@@ -186,8 +186,9 @@ Field names are the node's own where it has them. **In the node today** means `v
 ### Session
 
 From the node, `js/wire.js` maps the contract's session (§5) to this: `status` is its `shownStatus`, `title` its
-`task`, `detail` its `activity` (else `detail`), and `lead` the project of the lead whose `session` it is. A worker's
-or verifier's `lead` isn't on the wire yet, so it is listed on its own; `paused` is always false.
+`name` (yours, `vibeswitcher rename`) else its `task`, `detail` its `activity` (else `detail`), `paused` whether it has
+a `pausedUntil` (`vibeswitcher pause`), and `lead` the project of the lead whose `session` it is. A worker's or
+verifier's `lead` isn't on the wire yet, so it is listed on its own.
 
 ```js
 {

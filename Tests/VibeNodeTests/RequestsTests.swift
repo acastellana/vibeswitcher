@@ -212,7 +212,9 @@ struct RequestsTests {
                                     // The prompt-audit reminder (2026-11-20).
                                     "prompt-audit",
                                     // A setting changed (2026-11-20).
-                                    "set"]
+                                    "set",
+                                    // A session renamed or paused (2026-11-20).
+                                    "session.rename", "session.pause"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

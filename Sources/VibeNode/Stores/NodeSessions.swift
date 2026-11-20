@@ -52,6 +52,9 @@ public final class NodeSessions: @unchecked Sendable {
 
     /// The sessions as the last scan found them, ordered by terminal. On `queue`.
     public private(set) var sessions: [Session] = []
+    /// Your names for sessions and those you paused (`SessionMarks`), laid on each session at every scan; none: no
+    /// names, no pauses.
+    public var marks: SessionMarks?
     /// Every change to `sessions`, by the node's id for each (`NodeSessions.id(of:)`): its new value, or nil once it's
     /// gone.
     public let changes = Changes<Session>()
@@ -230,11 +233,12 @@ public final class NodeSessions: @unchecked Sendable {
     /// The app's reminders about sessions left alone (`Nudges.due`, `AlertRules.nudge`; parity: "Reminders about waiting
     /// or stuck sessions", 2026-11-20), as `status` notices while each stands: a session waiting on you for 10 minutes
     /// since it began to or since someone last looked at it (`acknowledge`), or one its hooks say works with no hook event
-    /// for 15. A team's are silent, a lead's only while it waits on you (`AlertRules.nudge`). A wait from before this
+    /// for 15. A team's are silent, a lead's only while it waits on you (`AlertRules.nudge`), a paused one's too. A wait from before this
     /// store started counts from its start. Every word a session wrote is inert. On `queue`.
     public func reminderNotices() -> [String] {
         let at = now()
         return sessions.compactMap { session in
+            guard !session.isPaused else { return nil }
             let activity = session.hasHooks && session.status == .working ? session.eventAt.map(Date.init(timeIntervalSince1970:)) : nil
             guard let due = Nudges.due(status: session.status, statusSince: max(session.statusSince, launchedAt), lastSeen: acknowledged[session.tty],
                                        lastActivity: activity, now: at),
@@ -455,6 +459,11 @@ public final class NodeSessions: @unchecked Sendable {
             session.leadAsks = LeadTeams.asks(session, asking: leadsAsking)
             session.agentSessionID = item.hook?.sessionId
             session.backgroundJobs = item.backgroundJobs
+            if let marks {
+                session.nameKeys = SessionMarks.keys(of: session)
+                session.customName = marks.name(for: session.nameKeys)
+                session.pausedUntil = marks.pausedUntil(for: session.nameKeys, now: now)
+            }
             if status == .working, let hook = item.hook, hook.lastEvent == "PreToolUse", let started = hook.toolStartedAt {
                 session.activity = hook.toolDetail
                 session.activitySince = Date(timeIntervalSince1970: started)
@@ -462,6 +471,7 @@ public final class NodeSessions: @unchecked Sendable {
             result.append(session)
         }
         let live = Set(raw.map(\.tty))
+        marks?.prune(liveKeys: Set(result.flatMap(\.nameKeys)), now: now)
         observed = observed.filter { live.contains($0.key) }
         acknowledged = acknowledged.filter { live.contains($0.key) }
         turns.prune(liveTTYs: live)

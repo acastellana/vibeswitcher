@@ -78,7 +78,7 @@ enum SessionCommand {
     /// A session in a few words, for what a command shows: its id, what it's at (its task, else its project), its
     /// status and terminal, all inert.
     static func describe(_ session: NodeWire.Value) -> String {
-        let about = session["task"]?.string ?? session["project"]?.string ?? session["cwd"]?.string ?? "?"
+        let about = session["name"]?.string ?? session["task"]?.string ?? session["project"]?.string ?? session["cwd"]?.string ?? "?"
         return "session \(short(session["id"]?.string)) (\(ConfigSeal.inert(about, limit: 80)); \(ConfigSeal.inert(session["status"]?.string ?? "?", limit: 20)) "
             + "on \(ConfigSeal.inert(session["terminal"]?.string ?? "?", limit: 20)))"
     }

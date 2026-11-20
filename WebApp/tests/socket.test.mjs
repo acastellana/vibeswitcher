@@ -361,6 +361,11 @@ test('aStatusTheNodeCantDateShowsNoDuration', async () => {
     since: '0001-01-01T00:00:00.000Z', role: null, task: null, activity: null, detail: null };
   assert.equal(session(value, new Map()).since, null, 'the start of time is no moment to count from');
   assert.equal(session({ ...value, since: '2026-11-17T09:13:20.000Z' }, new Map()).since, '2026-11-17T09:13:20.000Z');
+  // Your name for it heads its row; a pause greys it out.
+  assert.equal(session({ ...value, task: 'Fix the build', name: null }, new Map()).title, 'Fix the build');
+  assert.equal(session({ ...value, task: 'Fix the build', name: 'Release' }, new Map()).title, 'Release');
+  assert.equal(session({ ...value, pausedUntil: null }, new Map()).paused, false);
+  assert.equal(session({ ...value, pausedUntil: '2026-11-21T09:00:00.000Z' }, new Map()).paused, true);
 });
 
 // ---- Chats (the contract §6) ----

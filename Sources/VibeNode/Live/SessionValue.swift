@@ -20,6 +20,10 @@ extension Session {
         fields["startFolder"] = startFolder.map(NodeWire.Value.string) ?? .null
         fields["backgroundJobs"] = .int(backgroundJobs.count)
         fields["hasTranscript"] = .bool(transcriptPath != nil)
+        // Your name for it and its pause (`SessionMarks`, 2026-11-20), and the agent's own session id (what `--resume` takes).
+        fields["name"] = customName.map(NodeWire.Value.string) ?? .null
+        fields["pausedUntil"] = pausedUntil.map(NodeWire.Value.date) ?? .null
+        fields["agentSession"] = agentSessionID.map(NodeWire.Value.string) ?? .null
         return .object(fields)
     }
 }

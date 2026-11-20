@@ -297,7 +297,8 @@ public enum WireVectors {
                         "shownStatus": .string(shown), "project": .string(project), "task": text(task), "detail": .null,
                         "activity": .null, "activitySince": .null, "startedAt": .string(startedAt), "hasHooks": .bool(hasHooks),
                         "leadAsks": .bool(leadAsks), "startFolder": text(startFolder), "backgroundJobs": .int(0),
-                        "hasTranscript": .bool(hasTranscript), "prompt": prompt, "draft": draft])
+                        "hasTranscript": .bool(hasTranscript), "prompt": prompt, "draft": draft,
+                        "name": .null, "pausedUntil": .null, "agentSession": .null])
     }
 
     /// An ordinary Claude session asking its own question, a message drafted for it on a page (driving sessions,

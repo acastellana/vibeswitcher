@@ -66,5 +66,13 @@ struct SessionRemindersTests {
         #expect(stalled.count == 1, "\(notices())")
         #expect(line.contains("one command running for 16 min"), "\(line)")
         #expect(!line.contains("\u{1B}"), "\(line)")
+
+        // Paused (`vibeswitcher pause`): nothing reminds you of it.
+        let marks = SessionMarks(root: root)
+        nodes.queue.sync { nodes.marks = marks }
+        let stuck = try #require(nodes.queue.sync { nodes.sessions.first { $0.tty == "ttypts981" } })
+        try marks.pause(SessionMarks.keys(of: stuck), until: .distantFuture)
+        try await settle()
+        #expect(notices().allSatisfy { !$0.contains("ttypts981") }, "\(notices())")
     }
 }

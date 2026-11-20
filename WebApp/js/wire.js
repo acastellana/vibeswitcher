@@ -6,7 +6,8 @@
 // A session from the `sessions` collection. `leadOf` maps a session id to the project it leads (from `leads`).
 //
 // - status: what the user reads (`shownStatus`: a lead with a question open needs you), else the agent's own.
-// - title: what it's working on, when the node knows (`task`); null lets the views fall back to its folder.
+// - title: your name for it (`name`), else what it's working on (`task`); null lets the views fall back to its folder.
+// - paused: while you paused it (`pausedUntil`, `vibeswitcher pause`): greyed out, never notified of.
 // - detail: the tool call it runs right now (`activity`), else the node's detail.
 // - since: when its status began. A session whose status the node can't read (no hook wrote for it) says the start of
 //   time; that's no moment to count from, so the row shows no duration for it.
@@ -17,10 +18,10 @@ export function session(value, leadOf) {
     ...value,
     status: value.shownStatus || value.status,
     since: knownMoment(value.since),
-    title: value.task || null,
+    title: value.name || value.task || null,
     detail: value.activity || value.detail || null,
     lead: value.role === 'lead' ? leadOf.get(value.id) || null : null,
-    paused: false,
+    paused: Boolean(value.pausedUntil),
   };
 }
 

@@ -186,7 +186,8 @@ public enum WireSchema {
             field("task", Kind.string.orNull), field("detail", Kind.string.orNull), field("activity", Kind.string.orNull),
             field("activitySince", Kind.date.orNull), field("startedAt", .date), field("hasHooks", .bool), field("leadAsks", .bool),
             field("startFolder", Kind.string.orNull), field("backgroundJobs", .int), field("hasTranscript", .bool),
-            field("prompt", Kind.shape("session.prompt").orNull), field("draft", Kind.shape("session.draft").orNull)]))
+            field("prompt", Kind.shape("session.prompt").orNull), field("draft", Kind.shape("session.draft").orNull),
+            field("name", Kind.string.orNull), field("pausedUntil", Kind.date.orNull), field("agentSession", Kind.string.orNull)]))
         // What the node keeps beside a session (driving sessions, 2026-11-20): the question on its screen, a page's draft.
         shapes.append(shape("session.prompt", from: "SessionPrompt.value", [
             field("question", .string), field("options", strings), field("descriptions", .list(Kind.string.orNull)), field("text", .list(.int)),
