@@ -56,7 +56,6 @@ struct NodeAcceptanceTests {
         let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
         defer { node.stop() }
         let (session, _) = try await Self.newClaude(node)
-        try #require(await node.eventuallyStatus { Self.listed($0, NodeIds.session(host: session.id)) != nil }, "\(node.said)")
         let opened = try LiveScratch.open(node)
         let page = try RawClient.ask(port: opened.port, "GET / HTTP/1.1", ["Host: 127.0.0.1:\(opened.port)"])
         #expect(page.status == 200 && String(decoding: page.body, as: UTF8.self).contains("<html"), "\(page.head)")
@@ -707,6 +706,9 @@ extension NodeAcceptanceTests {
                                    sourceLocation: sourceLocation)
         let files = node.fake.files(terminal: session.tty)
         try #require(await eventually(timeout: 60) { EngineEndToEndTests.state(files)["pid"] != nil }, "\(node.said)", sourceLocation: sourceLocation)
+        // Listed by the node's session scan (every 2 s, slower on a loaded machine): what a page's draft, rename, pause and
+        // end find a session by. A case that drafts or marks it right after `new` raced the scan.
+        try #require(await node.eventuallyStatus { listed($0, NodeIds.session(host: session.id)) != nil }, "\(node.said)", sourceLocation: sourceLocation)
         return (session, files)
     }
 
