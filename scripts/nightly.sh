@@ -57,7 +57,7 @@ report() {
         failed=""
     fi
     other=$(grep -aE '^(web tests: [0-9]+ of [0-9]+ passed.*|WEB TEST FAILED: .*|retry-failed: not retried: .*|RETRY FAILED: .*|error: .*|.*: error: .*|LEFTOVER PROCESSES: .*|PREFERENCE FILES LEFT: .*)$' "$log" \
-        | grep -avE '^web tests: ([0-9]+) of \1 passed$' | awk '!seen[$0]++' | head -20)
+        | awk '!($1 == "web" && $2 == "tests:" && NF == 6 && $3 == $5 && $6 == "passed") && !seen[$0]++' | head -20)
     echo
     echo "## Failed"
     echo
