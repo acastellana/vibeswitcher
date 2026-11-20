@@ -177,7 +177,12 @@ enum SendCommand {
         if result["queued"]?.bool == true {
             Say.out("queued: \(ConfigSeal.inert(result["waits"]?.string ?? "a question is open on its screen", limit: 200)); the node types your "
                 + "message into session \(short) once that closes (`vibeswitcher reply \(short) CHOICE` answers a question). "
-                + "It waits in the node's memory: a restart of the node's server drops it")
+                + "It is kept across a restart of the node's server or a switch, while the session lives")
+            return
+        }
+        if let answered = result["answered"]?.string {
+            Say.out("answered: your words went in as the answer to the question open in session \(short) "
+                + "(its option “\(ConfigSeal.inert(answered, limit: 80))”, the one that takes typed words), as the app's composer sends them")
             return
         }
         if result["steered"]?.bool == true {

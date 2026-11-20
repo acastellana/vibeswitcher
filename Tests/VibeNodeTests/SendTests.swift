@@ -53,6 +53,48 @@ struct SendTests {
         #expect(prompts(harness) == ["Run the tests\nthen tell me", "And the next"], "\(prompts(harness))")
     }
 
+    /// A question open on its screen that takes typed words (its "Type something." row, the app's free-text row): the
+    /// message goes in as that answer, as the app's composer sends it, not held; a `/` command isn't an answer (held), and
+    /// a multi-select is ticked in its terminal (held).
+    @Test func aMessageAnswersAQuestionThatTakesWords() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let harness = try await claude(world)
+        let id = harness.session.id.uuidString
+        let question: [String: Any] = ["question": "Which name for the parser?", "header": "Name",
+                                       "options": [["label": "Parser"], ["label": "Reader"]], "multiSelect": false]
+        harness.tell(["op": "ask", "questions": [question]])
+        try await harness.screenShows { $0.contains("Type something.") }
+        try await harness.waitFor { harness.agent["mode"] as? String == "question" }
+        let command = try #require(await send(world, id, "/model"))
+        #expect(command.ok && command.result?["queued"]?.bool == true && command.result?["answered"] == nil, "\(command)")
+
+        let world2 = try await CardWorld.make(scratch)
+        defer { world2.stop() }
+        let other = try await claude(world2)
+        other.tell(["op": "ask", "questions": [question]])
+        try await other.screenShows { $0.contains("Type something.") }
+        try await other.waitFor { other.agent["mode"] as? String == "question" }
+        let reply = try #require(await send(world2, other.session.id.uuidString, "Tokenizer"))
+        #expect(reply.ok && reply.result?["answered"]?.string == "Type something." && reply.result?["queued"]?.bool == false, "\(reply)")
+        try await other.waitFor { (other.agent["reply"] as? String) == "Thanks." }
+        let answered = other.transcript.compactMap { ($0["toolUseResult"] as? [String: Any])?["answers"] as? [String: String] }.last
+        #expect(answered?["Which name for the parser?"] == "Tokenizer", "\(other.transcript.suffix(2))")
+        #expect(world2.queue.sync { world2.requests.heldSends.values[NodeIds.session(host: other.session.id)] } == nil)
+
+        // A multi-select takes ticks: held.
+        let world3 = try await CardWorld.make(scratch)
+        defer { world3.stop() }
+        let third = try await claude(world3)
+        var multi = question
+        multi["multiSelect"] = true
+        third.tell(["op": "ask", "questions": [multi]])
+        try await third.screenShows { $0.contains("Type something") }
+        try await third.waitFor { third.agent["mode"] as? String == "question" }
+        let held = try #require(await send(world3, third.session.id.uuidString, "Tokenizer"))
+        #expect(held.ok && held.result?["queued"]?.bool == true, "\(held)")
+    }
+
     /// A permission prompt on its screen takes keys: typed now, the words would go into it, so the message is held, as
     /// the app's composer holds it, and so is one sent after it (behind it); both go in, in order, once it's answered.
     @Test func aMessageSentWhileAQuestionIsOpenWaitsForItsAnswer() async throws {
@@ -81,6 +123,41 @@ struct SendTests {
         // It works on after the answer, so it queues them, as Claude Code queues what's typed during a turn.
         try await harness.waitFor { (harness.agent["queued"] as? [String] ?? []) + prompts(harness) == ["Then run the linter", "And the docs"] }
         try #require(await eventually { world.queue.sync { world.requests.heldSends.values[id] == nil } })
+    }
+
+    /// The security review of 7ca2061c: a held message's action is spent in the vault before its keys; a spend that fails
+    /// types nothing (it stays held, said in the log), and once the vault takes the spend it goes in.
+    @Test func aHeldMessageWhoseSpendFailsIsNotTyped() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let failing = Locked(true)
+        let tries = Locked(0)
+        world.queue.sync {
+            let real = world.requests.spendUserActions
+            world.requests.spendUserActions = { actions in
+                if failing.value {
+                    tries.mutate { $0 += 1 }
+                    throw HostCall.Failure(description: "the vault refused the spend")
+                }
+                try real(actions)
+            }
+        }
+        let harness = try await claude(world)
+        let id = NodeIds.session(host: harness.session.id)
+        harness.tell(["op": "permission", "command": "rm -rf build"])
+        try await harness.screenShows { $0.contains("Do you want to proceed?") }
+        try await harness.waitFor { harness.agent["mode"] as? String == "permission" }
+        let sent = try #require(await send(world, harness.session.id.uuidString, "Then run the linter"))
+        #expect(sent.ok && sent.result?["queued"]?.bool == true, "\(sent)")
+        let answered = try #require(await world.ask("session.reply", ["session": .string(harness.session.id.uuidString), "choice": .int(1)]))
+        #expect(answered.ok, "\(answered)")
+        try await harness.waitFor { harness.agent["reply"] as? String == "Allowed." }
+        // Its question closed, the pump tries: the spend fails, nothing is typed, it stays held.
+        #expect(await eventually(timeout: 30) { tries.value >= 2 }, "the pump tried twice: \(tries.value)")
+        #expect((harness.agent["queued"] as? [String] ?? []) + prompts(harness) == [], "\(harness.agent)")
+        #expect(world.queue.sync { world.requests.heldSends.values[id]?.map(\.text) } == ["Then run the linter"])
+        failing.value = false
+        try await harness.waitFor { (harness.agent["queued"] as? [String] ?? []) + prompts(harness) == ["Then run the linter"] }
     }
 
     /// An image goes as its quoted path on a line of its own after the words, as the app's composer sends it, and the

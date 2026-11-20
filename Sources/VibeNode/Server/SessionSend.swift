@@ -95,7 +95,7 @@ extension Requests {
         let (queue, drafts) = (self.queue, sessionDrafts)
         let id = NodeIds.session(host: session.id)
         let held = HeldSend(message: message, text: text, images: images, at: Date(), action: request.action ?? request.id)
-        let answer = { (queued: String?, opened: String?, steered: Bool) in
+        let answer = { (queued: String?, opened: String?, steered: Bool, answered: String?) in
             // The page's draft it was is sent (or waits to be): it goes from beside the session.
             if let draft = drafts.values[id], draft.text.trimmingCharacters(in: .whitespacesAndNewlines) == text, draft.images == images {
                 drafts.send(id, nil)
@@ -105,6 +105,7 @@ extension Requests {
             if let queued { result["waits"] = .string(queued) }
             if let opened { result["opened"] = .string(opened) }
             if now { result["steered"] = .bool(steered) }
+            if let answered { result["answered"] = .string(answered) }
             if let agent = HostedAgents.agent(of: session) { result["agent"] = .string(agent.rawValue) }
             reply(.init(re: request.id, result: .object(result)))
         }
@@ -123,18 +124,29 @@ extension Requests {
                     // Behind the messages it holds already, in the order sent.
                     if !(self.heldSends.values[id] ?? []).isEmpty {
                         guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
-                        return answer("messages sent before it wait in session \(short)", nil, false)
+                        return answer("messages sent before it wait in session \(short)", nil, false, nil)
                     }
                     self.typeIn(held, into: session) { outcome in
                         switch outcome {
                         case .typed:
                             // A command may open a picker (`/model`, `/resume`): the reply says so, as the app's composer
                             // watches the screen for one.
-                            guard text.hasPrefix("/"), images.isEmpty else { return answer(nil, nil, false) }
-                            Self.watchForMenu(session.id, link: self.link, queue: queue, until: Date().addingTimeInterval(Self.pickerWait)) { answer(nil, $0, false) }
+                            guard text.hasPrefix("/"), images.isEmpty else { return answer(nil, nil, false, nil) }
+                            Self.watchForMenu(session.id, link: self.link, queue: queue, until: Date().addingTimeInterval(Self.pickerWait)) { answer(nil, $0, false, nil) }
                         case .menuOpen(let open):
-                            guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
-                            answer(open, nil, false)
+                            // A question that takes typed words: they go in as its free-text answer, as the app's composer
+                            // sends them; else held until it closes.
+                            self.answerFreeText(held, in: session) { outcome in
+                                switch outcome {
+                                case .answered(let field): answer(nil, nil, false, field)
+                                case .partly:
+                                    reply(.init(re: request.id, error: .init(.refused, "session \(short): its question's answer stopped after your words "
+                                                                              + "went in (the host didn't take the rest): look at its terminal before you send it again")))
+                                case .notTyped:
+                                    guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
+                                    answer(open, nil, false, nil)
+                                }
+                            }
                         case .refused(let why):
                             reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
                         }
@@ -146,7 +158,7 @@ extension Requests {
                 engine.steerAsUser(message, session: session, agentPid: pid) { outcome in
                     switch outcome {
                     case .steered:
-                        answer(nil, nil, true)
+                        answer(nil, nil, true, nil)
                     case .idle:
                         // Its turn is over (or its hooks say nothing): a steer would wait for a step that never comes.
                         self.note("send to session \(short): --now, but its agent isn't working by its hooks: typed in instead")
@@ -262,6 +274,63 @@ extension Requests {
         }
     }
 
+    // MARK: The question's free-text answer
+
+    /// `held`'s words typed as the free-text answer of the question open on `session`'s screen, when it takes one (an
+    /// option that takes typed words, `SessionPrompt.takesText`, the app's free-text row; not a multi-select, whose
+    /// boxes are ticked in its terminal), as the app's composer sends a message then (`ChatSync.type`: `choose(field,
+    /// typing:)`). Only words: not a `/` command (a command isn't an answer) nor images. As `session.reply` types an
+    /// answer: one unit whose gate reads the screen right before the first key and goes only while the same question
+    /// shows with its cursor where it was, and whose words wait for the cursor on the option. `done` with the option
+    /// answered; `notTyped` when the words didn't go in (the message is then held, as before); `partly` when they did
+    /// and the rest didn't (never typed again). On `queue`.
+    func answerFreeText(_ held: HeldSend, in session: HostSession, done: @escaping (FreeTextOutcome) -> Void) {
+        guard !held.text.isEmpty, held.images.isEmpty, !held.text.hasPrefix("/") else { return done(.notTyped) }
+        let (link, queue, note) = (self.link, self.queue, self.note)
+        let short = String(session.id.uuidString.lowercased().prefix(8))
+        link.screen(session.id) { screen in
+            queue.async {
+                guard let screen, let menu = SessionPrompt.menu(on: screen), !menu.multiSelect,
+                      let index = menu.options.indices.first(where: { SessionPrompt.takesText(menu, $0) }) else { return done(.notTyped) }
+                let field = menu.options[index]
+                let replacing = field.lowercased().hasPrefix("type something") ? 0 : field.count
+                let writes = menu.keys(toChoose: index, typing: held.text, replacing: replacing)
+                let moves = abs(index - menu.selected)
+                // The write that carries the words: after the arrows and the erase.
+                let wordsAt = moves + (replacing > 0 ? 1 : 0)
+                let wordsWent = Locked(false)
+                link.type(writes, into: session.id, gate: { step, go in
+                    let going = { (ok: Bool) in
+                        if ok, step >= wordsAt { wordsWent.set(true) }
+                        go(ok)
+                    }
+                    if step == 0 {
+                        return link.screen(session.id) { now in
+                            guard now.flatMap(SessionPrompt.menu(on:)) == menu else { return go(false) }
+                            if moves > 0 { return go(true) }
+                            going(true)
+                        }
+                    }
+                    guard step == moves else { return going(true) }
+                    Self.cursorReaches(index, of: menu, in: session.id, link: link, since: Date(), done: going)
+                }, confirmed: { typed in
+                    queue.async {
+                        let outcome: FreeTextOutcome = typed ? .answered(field) : wordsWent.get() ? .partly : .notTyped
+                        note("send to session \(short): " + (typed ? "typed in as its question's free-text answer"
+                                                              : wordsWent.get() ? "its question's answer stopped after the words" : "not typed as its question's answer: held"))
+                        done(outcome)
+                    }
+                })
+            }
+        }
+    }
+
+    enum FreeTextOutcome: Equatable, Sendable {
+        case answered(String)
+        case notTyped
+        case partly
+    }
+
     // MARK: Held messages
 
     /// `held` kept for `session`, behind any it holds; false when it holds `heldLimit` already. The session's screen is
@@ -272,6 +341,7 @@ extension Requests {
         let list = heldSends.values[id] ?? []
         guard list.count < Self.heldLimit else { return false }
         heldSends.send(id, list + [held])
+        recordHeld(held, session: session.id)
         queue.asyncAfter(deadline: .now() + Self.heldEvery) { [weak self] in self?.pumpHeld(session.id) }
         return true
     }
@@ -285,8 +355,10 @@ extension Requests {
         guard !pumping.contains(hostID), let first = heldSends.values[id]?.first else { return }
         let short = String(hostID.uuidString.lowercased().prefix(8))
         guard let session = link.sessions.first(where: { $0.id == hostID && $0.isLive }) else {
-            note("send to session \(short): \(heldSends.values[id]?.count ?? 0) held message(s) dropped: the session ended")
+            let gone = (heldSends.values[id] ?? []).map(\.action)
+            note("send to session \(short): \(gone.count) held message(s) dropped: the session ended")
             heldSends.send(id, nil)
+            heldGone(gone)
             return
         }
         pumping.insert(hostID)
@@ -301,16 +373,34 @@ extension Requests {
             queue.async {
                 guard let self else { return }
                 guard runs else { return later(Self.heldEvery) }
-                self.typeIn(first, into: session) { outcome in
-                    switch outcome {
-                    case .menuOpen:
-                        later(Self.heldEvery)
-                    case .typed, .refused:
-                        if case .refused(let why) = outcome { self.note("send to session \(short): a held message dropped: \(why)") }
-                        let rest = Array((self.heldSends.values[id] ?? []).drop { $0.action == first.action })
-                        self.heldSends.send(id, rest.isEmpty ? nil : rest)
-                        // The next once the agent has taken this one's Enter.
-                        later(0.5)
+                // Fail closed against a replay: nothing open on its screen now, then its action spent in the vault before
+                // a key goes (a crash after the keys, or a spend that failed, would leave it restorable and typed twice
+                // after a restart). A spend that fails types nothing: it stays held, said in the log. One that's spent
+                // and then not typed (a question opened in between) is still typed from memory, but no restart brings it
+                // back: lost rather than typed twice.
+                self.link.screen(session.id) { screen in
+                    queue.async {
+                        if let screen, Self.openMenu(screen) != nil { return later(Self.heldEvery) }
+                        self.spendHeld(first.action) { failure in
+                            if let failure {
+                                self.note("send to session \(short): a held message not typed: its action couldn't be spent in the vault first "
+                                          + "(\(failure)), so it would be typed again after a restart; it stays held")
+                                return later(Self.heldEvery)
+                            }
+                            self.typeIn(first, into: session) { outcome in
+                                switch outcome {
+                                case .menuOpen:
+                                    later(Self.heldEvery)
+                                case .typed, .refused:
+                                    if case .refused(let why) = outcome { self.note("send to session \(short): a held message dropped: \(why)") }
+                                    let rest = Array((self.heldSends.values[id] ?? []).drop { $0.action == first.action })
+                                    self.heldSends.send(id, rest.isEmpty ? nil : rest)
+                                    self.heldChanged()
+                                    // The next once the agent has taken this one's Enter.
+                                    later(0.5)
+                                }
+                            }
+                        }
                     }
                 }
             }

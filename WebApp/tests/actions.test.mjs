@@ -9,7 +9,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   sessionShort, shellWord, sessionWord, renameLine, pauseLine, PAUSES, endable, endLine, closeShellsLine, resumeLine, endedEntry,
-  recentFolders, newEntries, newLine, presetProblem, presetLine, presetArgs, PRESET_VARIABLES,
+  recentFolders, newEntries, newLine, presetProblem, presetLine, presetArgs, PRESET_VARIABLES, leadFolders, leadLine,
 } from '../js/actions.js';
 
 const HOSTED = { id: 'local:3f2a9c41-7d1e-4b8a-9c0f-2e5d6a7b8c9d', hosted: true, cwd: '/home/me/site', name: null, role: null };
@@ -141,4 +141,19 @@ test('the variables listed here are the node’s own (SessionPresets.allowedVari
   const block = /allowedVariables: Set<String> = \[([^\]]*)\]/.exec(swift)[1];
   const names = [...block.matchAll(/"([A-Z_]+)"/g)].map((match) => match[1]).sort();
   assert.deepEqual([...PRESET_VARIABLES].sort(), names);
+});
+
+test('“Start Project Lead in …”: the shown session’s folder first, then the recent ones, and the line with its goal as one word', () => {
+  const sessions = [
+    { ...HOSTED, cwd: '/a', startedAt: '2026-11-20T10:00:00Z' },
+    { ...HOSTED, cwd: '/b', startedAt: '2026-11-20T12:00:00Z' },
+  ];
+  assert.deepEqual(leadFolders({ ...HOSTED, cwd: '/a' }, sessions, [{ folder: '/c' }]), ['/a', '/b', '/c']);
+  assert.deepEqual(leadFolders(null, sessions, []), ['/b', '/a']);
+  // A lead's own session isn't a folder to start another lead in from its row.
+  assert.deepEqual(leadFolders({ ...HOSTED, cwd: '/lead', role: 'lead' }, sessions, []), ['/b', '/a']);
+  assert.equal(leadLine('/home/me/site'), 'vibeswitcher lead /home/me/site');
+  assert.equal(leadLine('/home/me/site', '  '), 'vibeswitcher lead /home/me/site');
+  const line = leadLine('/home/me/my site', 'add a subtract function; with a test $(rm -rf ~)');
+  assert.deepEqual(words(line), ['vibeswitcher', 'lead', '/home/me/my site', '--goal', 'add a subtract function; with a test $(rm -rf ~)']);
 });

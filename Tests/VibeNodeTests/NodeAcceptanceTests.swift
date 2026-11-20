@@ -94,7 +94,7 @@ struct NodeAcceptanceTests {
         #expect(shown.output.contains(String(session.id.uuidString.lowercased().prefix(8))) || shown.output.contains(session.tty), "\(shown.output)")
     }
 
-    @Test("A5: send types the message into the session, and the agent takes it")
+    @Test("A5: send types the message into the session, and the agent takes it; with a question open that takes words, it answers it")
     func a5Send() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
@@ -102,6 +102,13 @@ struct NodeAcceptanceTests {
         let sent = try await node.runOnTerminal(["send", Self.short(session), "say hello in three words"])
         #expect(sent.status == 0 && sent.output.contains("sent: "), "\(sent.output)\(sent.errors)\n\(node.said)")
         _ = try await EngineEndToEndTests.prompt(files) { $0 == "say hello in three words" }
+        // Its question that takes typed words: what's sent goes in as that answer, as the app's composer sends it.
+        try EngineEndToEndTests.tell(files, ["op": "ask", "questions": [["question": "Which greeting?", "header": "Greeting",
+                                                                         "options": [["label": "Hello"], ["label": "Hi"]], "multiSelect": false]]])
+        try #require(await eventually(timeout: 60) { node.screen(session.id)?.contains("Type something.") == true }, "\(node.screen(session.id) ?? "")")
+        let answered = try await node.runOnTerminal(["send", Self.short(session), "Howdy"])
+        #expect(answered.status == 0 && answered.output.contains("answered: your words went in as the answer"), "\(answered.output)\(answered.errors)")
+        #expect(await eventually(timeout: 60) { EngineEndToEndTests.state(files)["reply"] as? String == "Thanks." }, "\(EngineEndToEndTests.state(files))")
         // The page's chat of a session is ScratchNodeTests.aPageFollowsASessionsChat's (the fake's transcript isn't in
         // Claude's own folders, where the node reads chats from).
     }

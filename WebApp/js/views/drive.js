@@ -9,7 +9,7 @@ import { AGENTS } from '../words.js';
 import { copyLine } from './cards.js';
 import {
   sessionShort, shellWord, renameLine, PAUSES, pauseLine, endable, endLine, closeShellsLine, resumeLine, endedEntry, newLine,
-  PRESET_VARIABLES, presetProblem, presetLine, presetArgs,
+  PRESET_VARIABLES, presetProblem, presetLine, presetArgs, leadLine,
 } from '../actions.js';
 
 // The command line's words for a session and for what the user typed (js/actions.js, where the page's lines are made).
@@ -17,6 +17,14 @@ export { sessionShort, shellWord };
 
 // Whether the page may drive `session` at all: one the node's host started, still running.
 export const drivable = (session) => !!session?.hosted && !session.ended;
+
+// Whether `drafted` (a session's draft) goes in as the free-text answer of `prompt` (the question open on its screen)
+// when `vibeswitcher send` types it: a single choice with an option that takes words, and words that aren't a `/`
+// command, with no images (the node's `send`, as the app's composer does).
+export function answersQuestion(prompt, drafted) {
+  return !!prompt && !prompt.multiSelect && (prompt.text || []).length > 0 && !!drafted?.text?.trim()
+    && !drafted.text.trim().startsWith('/') && !(drafted.images || []).length;
+}
 
 // The message drafted for a session, over its composer: the text as it will be typed, the line that sends it, and
 // Edit (back into the box) and Discard. Returns { el, update(session) }.
@@ -49,9 +57,15 @@ export function draftBox(app, { edit }) {
       if (!drafted) return;
       setClass(el, 'sending', drafted.sending);
       setClass(el, 'now', !!drafted.now);
+      // A question open that takes typed words: the message goes in as its answer (the node's `send`, as the app's
+      // composer does), so the box says so.
+      const prompt = drivable(session) ? session.prompt : null;
+      const answers = answersQuestion(prompt, drafted);
+      setClass(el, 'answers', answers);
       setText(label, drafted.sending ? 'Saving your message…'
         : drafted.now ? `Steer ${AGENTS[session.agent] || 'the agent'} now: it gets this at its next step, without stopping`
-        : `Your message for ${AGENTS[session.agent] || 'the agent'}`);
+          : answers ? `Your answer to the question above (sent as its “${prompt.options[prompt.text[0]]}” words)`
+            : `Your message for ${AGENTS[session.agent] || 'the agent'}`);
       setText(text, drafted.text);
       text.hidden = !drafted.text;
       const images = drafted.images || [];
@@ -262,6 +276,43 @@ export function actionsStrip() {
 // Starting a session: a folder, one of the launch presets the node keeps for it (`session.presets`: the folder's own
 // and its default first, as the app's New Session lists them; Claude and Shell when the node lists none), Claude's model;
 // the line that starts it, as you type. `folder()` gives the folder to offer first. Returns { el, update() }.
+// Starting a project lead in a folder (the Mac's Start Project Lead…, and the palette's "Start Project Lead in …"): the
+// folder and the goal, and the line that starts it, a click to copy. Returns { el, choose(folder), update() }.
+export function newLeadForm(app) {
+  const path = h('input', { class: 'answer-input', type: 'text', placeholder: '/path/to/project', 'aria-label': 'Project folder', spellcheck: 'false', autocomplete: 'off' });
+  const goal = h('textarea', { class: 'answer-input lead-goal', rows: 2, placeholder: 'The goal (optional: without one it plans from its records)', 'aria-label': 'Goal' });
+  const lineSlot = h('div', { class: 'prompt-line' });
+  const el = h('section', { class: 'new-session new-lead', 'aria-label': 'Start a project lead' },
+    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, 'Start a project lead')),
+    h('div', { class: 'new-fields' }, path, goal),
+    lineSlot,
+    h('p', { class: 'confirm-note' }, 'A lead that runs workers, has their work verified, and merges. Run the line in a terminal on this node: it asks for a code (and, the first time, says to accept the project’s config and base), then starts the lead.'));
+  function where() {
+    const home = app.store.state.node?.home;
+    const typed = path.value.trim();
+    return home && (typed === '~' || typed.startsWith('~/')) ? home + typed.slice(1) : typed;
+  }
+  function draw() {
+    const folder = where();
+    lineSlot.replaceChildren(folder ? copyLine(leadLine(folder, goal.value), 'the command that starts the lead')
+      : h('p', { class: 'confirm-note' }, 'Give a folder: the line that starts its lead shows here.'));
+  }
+  path.addEventListener('input', draw);
+  goal.addEventListener('input', draw);
+  draw();
+  return {
+    el,
+    // The palette's "Start Project Lead in …": that folder in the form, the goal to write.
+    choose(folder) {
+      path.value = folder;
+      draw();
+      goal.focus?.();
+      el.scrollIntoView?.({ block: 'nearest' });
+    },
+    update: draw,
+  };
+}
+
 export function newSessionForm(app, { folder }) {
   const BUILT_IN = [{ name: 'Claude', kind: 'claude', builtIn: true }, { name: 'Shell', kind: 'shell', builtIn: true }];
   let presets = BUILT_IN;

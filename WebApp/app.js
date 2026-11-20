@@ -17,7 +17,7 @@ import { settingsView, settingsHref } from './js/views/settings.js';
 import { startView } from './js/views/start.js';
 import { palette } from './js/views/palette.js';
 import { notifications } from './js/notify.js';
-import { recentFolders, newEntries, endable } from './js/actions.js';
+import { recentFolders, newEntries, endable, leadFolders } from './js/actions.js';
 
 const params = new URLSearchParams(location.search);
 const store = createStore();
@@ -139,6 +139,19 @@ function newCommands() {
   }));
 }
 
+// The palette's "Start Project Lead in …" (the Mac's): the shown session's folder and the recent ones. Running one shows
+// the start page's lead form with that folder, the goal to write, and the line that starts the lead.
+function leadCommands(selected) {
+  if (store.state.connection === 'unpaired' || store.state.connection === 'revoked') return [];
+  const home = store.state.node?.home;
+  return leadFolders(selected, store.state.sessions.values(), store.state.node?.ended).map((folder) => ({
+    title: `Start Project Lead in ${lastPart(folder) || folder}`,
+    about: `${tilde(folder, home)} · a lead that runs workers, has their work verified, and merges`,
+    icon: 'team',
+    run: () => { ui.go('#/'); start.lead(folder); },
+  }));
+}
+
 // The Mac's row menu for the session shown: each opens the line that does it, under its header.
 function sessionCommands(selected) {
   if (!selected || selected.ended) return [];
@@ -173,6 +186,7 @@ function commands() {
     { title: 'Group by Attention', icon: 'filter', run: () => ui.setGrouping('attention') },
     { title: 'Group by Project', icon: 'filter', run: () => ui.setGrouping('projects') },
     { title: 'Filter Sessions', keys: `${KEY.alt}F`, icon: 'search', run: () => list.focusFilter() },
+    ...leadCommands(selected),
     ...newCommands(),
     // The mock's own: what a server restart looks like from here.
     ...(feed.restart ? [{ title: 'Restart the Mock Server', about: 'Shows the reconnect: nothing is lost, nothing reloads', icon: 'node', run: () => feed.restart() }] : []),
