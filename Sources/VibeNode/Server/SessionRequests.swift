@@ -159,6 +159,13 @@ extension Requests {
         model.count <= 64 && model.range(of: #"^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$"#, options: .regularExpression) != nil
     }
 
+    /// The command line an ordinary Claude session runs: the node's Claude, with `--model` and `--resume` when given
+    /// (each checked by its caller: a model's name, a conversation id), every word quoted.
+    static func claudeCommand(program: String, model: String?, resume: String? = nil) -> String {
+        RecentProjects.shellQuote(program) + (model.map { " --model " + RecentProjects.shellQuote($0) } ?? "")
+            + (resume.map { " --resume " + RecentProjects.shellQuote($0) } ?? "")
+    }
+
     /// The labels the app gives an ordinary session (its built-in presets' names): never a role's (`LeadTeams.role`).
     static let sessionLabels = ["claude": "Claude", "shell": "Shell"]
 
@@ -200,7 +207,7 @@ extension Requests {
                 guard let program = found.path else {
                     return queue.async { reply(.init(re: request.id, error: .init(.refused, found.why ?? "no claude for this node"))) }
                 }
-                command = RecentProjects.shellQuote(program) + (model.map { " --model " + RecentProjects.shellQuote($0) } ?? "")
+                command = Self.claudeCommand(program: program, model: model)
             }
             // A scratch node's hooks and tools keep to its root, as its leads' do.
             let environment = scratch ? ["VIBESWITCHER_HOME": nodeRoot.path] : [:]

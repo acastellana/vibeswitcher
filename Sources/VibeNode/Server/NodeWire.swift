@@ -284,7 +284,7 @@ public enum NodeWire {
         "web.open": .user, "web.revoke": .user,
         "term.open": .webTerminal, "term.close": .webTerminal,
         // Driving an ordinary session (the parity table's gaps 1, 3 and 6, 2026-11-20): the user's voice, and a page's draft.
-        "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user,
+        "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user, "session.reopen": .user,
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
     ]
 
@@ -316,7 +316,8 @@ public enum NodeWire {
                                "chat.page",
                                "tell",
                                "board", "seen",
-                               "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear"]
+                               "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
+                               "session.reopen"]
 
     // MARK: Lines
 

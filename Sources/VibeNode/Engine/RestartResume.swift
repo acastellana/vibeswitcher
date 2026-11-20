@@ -170,7 +170,7 @@ extension LeadEngine {
     }
 
     /// The first and last 64 KB of a file, where Claude writes the session's name (`TranscriptLocator`'s read).
-    private static func edges(of url: URL) -> Data? {
+    static func edges(of url: URL) -> Data? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         let limit = 64 * 1024

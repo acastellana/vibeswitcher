@@ -60,11 +60,32 @@ public struct EngineState: Codable, Equatable, Sendable {
         public var before: Double
         /// The roots whose lead ran under the old host, each until a lead starts there again.
         public var gone: [String]
+        /// The user's own sessions that ended with the old host (`OpenSessions`' as it last stood), each offered to
+        /// `vibeswitcher reopen` until it's reopened or the offer is put away. Absent from a file written before it.
+        public var sessions: [RestartReopen.Entry]?
 
-        public init(at: Double, before: Double, gone: [String]) {
+        public init(at: Double, before: Double, gone: [String], sessions: [RestartReopen.Entry]? = nil) {
             self.at = at
             self.before = before
             self.gone = gone
+            self.sessions = sessions
+        }
+    }
+
+    /// The user's own sessions live in the host (the app's `RestartReopen.Record`, for a node): Claude sessions the host
+    /// started that aren't a lead's or its team's, each with its folder and Claude's conversation id once its hook said
+    /// it, kept while the host that runs them is the one `hostStartedAt` names. A host restart ends them, and they're
+    /// offered back (`Restart.sessions`). Only a hint, as `Reopen` is: a worker of the user's uid can write this file, so a
+    /// reopen takes from it only the folder, the conversation and the model's name, each checked (`LeadEngine.reopenable`),
+    /// never its command or its label.
+    public struct OpenSessions: Codable, Equatable, Sendable {
+        /// The start time of the host they run under (seconds since 1970).
+        public var hostStartedAt: Double
+        public var entries: [RestartReopen.Entry]
+
+        public init(hostStartedAt: Double, entries: [RestartReopen.Entry]) {
+            self.hostStartedAt = hostStartedAt
+            self.entries = entries
         }
     }
 
@@ -129,9 +150,11 @@ public struct EngineState: Codable, Equatable, Sendable {
     public var restart: Restart?
     /// What reopens each project's lead after a host restart, by root (`Reopen`). Absent from a file written before it.
     public var reopen: [String: Reopen]?
+    /// The user's own sessions live in the host (`OpenSessions`). Absent from a file written before it.
+    public var open: OpenSessions?
 
     public init(held: [Held] = [], told: [String]? = nil, firstSightings: [String: Double]? = nil, hostStartedAt: Double? = nil,
-                leads: [String]? = nil, restart: Restart? = nil, reopen: [String: Reopen]? = nil) {
+                leads: [String]? = nil, restart: Restart? = nil, reopen: [String: Reopen]? = nil, open: OpenSessions? = nil) {
         format = Self.currentFormat
         self.held = held
         self.told = told
@@ -140,6 +163,7 @@ public struct EngineState: Codable, Equatable, Sendable {
         self.leads = leads
         self.restart = restart
         self.reopen = reopen
+        self.open = open
     }
 
     /// `<root>/v2/engine.json`.

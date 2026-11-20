@@ -244,6 +244,8 @@ public final class LeadEngine: @unchecked Sendable {
     public internal(set) var hostRestart: EngineState.Restart?
     /// What reopens each project's lead after a host restart, by root (`EngineState.Reopen`, `RestartResume.swift`).
     public internal(set) var reopen: [String: EngineState.Reopen] = [:]
+    /// The user's own sessions live in the host, as last recorded (`EngineState.OpenSessions`, `SessionReopen.swift`).
+    public internal(set) var openSessions: EngineState.OpenSessions?
     /// Whether this engine took a welcome yet: its first is the server's start, where the running leads are bound again
     /// and told which questions the user no longer sees.
     var welcomedOnce = false

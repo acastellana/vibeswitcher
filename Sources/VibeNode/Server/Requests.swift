@@ -149,7 +149,7 @@ public final class Requests: @unchecked Sendable {
     /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
                                                "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
-                                               "send", "session.new", "session.end", "session.reply"]
+                                               "send", "session.new", "session.end", "session.reply", "session.reopen"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -235,6 +235,7 @@ public final class Requests: @unchecked Sendable {
         case "session.new": newSession(request, reply: reply)
         case "session.end": endSession(request, reply: reply)
         case "session.reply": replySession(request, reply: reply)
+        case "session.reopen": reopenSessions(request, reply: reply)
         case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)
@@ -336,6 +337,7 @@ public final class Requests: @unchecked Sendable {
                 + (engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []).map(NodeWire.Value.string)
                 + ((engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])).map(NodeWire.Value.string)),
             "restart": engine?.restartValue ?? .null,
+            "reopen": engine?.offeredValue ?? .array([]),
             "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
         ])
