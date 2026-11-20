@@ -594,6 +594,7 @@ extension LeadEngine {
         work.async { [weak self] in
             // The last accept the snapshot knows (E8): each held thing said the same, changed or new since.
             let held = ConfigHoldStore.held(root: root, vault: vault, home: home, snapshot: AcceptedSnapshot.load(root: node).projects[root])
+                .map { SessionPresets.withPresetsToAccept($0, vault: vault, home: home, nodeRoot: node) }
             let difference: [String]? = { if case .success(let shown) = held, let diff { return ConfigHoldStore.difference(shown, name: diff, home: home) } else { return nil } }()
             guard let self else { return }
             self.queue.async {
@@ -669,7 +670,12 @@ extension LeadEngine {
             let (root, vault, node) = (card.root, cardVault, self.root)
             work.async { [weak self] in
                 let accepted = ConfigHoldStore.accept(shown, root: root, vault: vault, snapshotRoot: node)
+                // The user's explicit accept of the presets file: the hash it sealed, recorded where a preset's start
+                // asks (`Requests.presetsBaselineRefusal`) before the accept is answered; a look alone records none.
+                var markFailed: Error?
+                if case .success(.sealed) = accepted { markFailed = SessionPresets.markAccepted(shown, vault: vault, nodeRoot: node) }
                 guard let self else { return }
+                if let markFailed { self.note("config accept: the presets file's accept couldn't be recorded: \(markFailed)") }
                 self.queue.async {
                     switch accepted {
                     case .failure(let error): then(.failure(.refused("the vault didn't take the accept: \(error)")))
@@ -682,6 +688,7 @@ extension LeadEngine {
                         then(.failure(.refused(why + " Held now: " + held.map { ConfigSeal.inert($0, limit: 200) }.joined(separator: ", "))))
                     case .success(.sealed(let names, let floor)):
                         self.cards.change(id) { $0.closed = "accepted" }
+
                         if self.leads.leads[card.project] != nil, !names.isEmpty {
                             self.deliver(built: { "The user accepted the change to \(names.joined(separator: ", ")) at the command line: it's sealed as it is, "
                                 + "and workers, verifiers and merges go ahead again." }, from: .system("the user, at the command line"), root: root, action: nil)

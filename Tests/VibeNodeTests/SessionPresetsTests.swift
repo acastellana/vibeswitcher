@@ -16,7 +16,7 @@ struct SessionPresetsTests {
     private static let presets: LaunchPresets = {
         var presets = LaunchPresets.builtIns()
         let opus = LaunchPreset(name: "Opus", kind: .claude, command: "claude --model opus --add-dir ../shared", env: ["MAX_THINKING_TOKENS": "16000"])
-        let shell = LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["RUN_SLOW": "1"], keepShell: true)
+        let shell = LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["DISABLE_TELEMETRY": "1"], keepShell: true)
         presets.byProject[project] = [shell, opus]
         presets.defaults[project] = opus.id
         return presets
@@ -89,9 +89,44 @@ struct SessionPresetsTests {
     @Test func withNoVaultOrAnotherFileNothingStarts() throws {
         let home = scratch.url("home")
         let root = home.appendingPathComponent(".vibeswitcher")
-        #expect(Requests.presetsBaselineRefusal(vault: nil, home: home.path, nodeRoot: root, folder: "/w")?.contains("no vault") == true)
-        #expect(Requests.presetsBaselineRefusal(vault: nil, home: home.path, nodeRoot: scratch.url("elsewhere"), folder: "/w")?
+        let read = SessionPresets.decode(Data("{}".utf8))
+        #expect(Requests.presetsBaselineRefusal(vault: nil, home: home.path, nodeRoot: root, file: read, folder: "/w")?.contains("no vault") == true)
+        #expect(Requests.presetsBaselineRefusal(vault: nil, home: home.path, nodeRoot: scratch.url("elsewhere"), file: read, folder: "/w")?
             .contains("isn't the one the config seal watches") == true)
+    }
+
+    /// The file is read once, with O_NOFOLLOW: a link is refused, the hash is the seal's own of the bytes read, and the
+    /// presets are decoded from those same bytes, so a change made after the open can't come between.
+    @Test func thePresetsFileIsReadOnceAndNeverThroughALink() throws {
+        let home = scratch.url("home")
+        let root = home.appendingPathComponent(".vibeswitcher")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("presets.json")
+        try Self.presets.save(to: file)
+        let bytes = try Data(contentsOf: file)
+        // The hash is the config seal's own for that file.
+        let watched = try #require(ConfigSeal.homeWatched(home: home.path).first { $0.name == SessionPresets.sealName })
+        #expect(SessionPresets.read(root: root).fingerprint == ConfigSeal.fingerprint(watched))
+        // Changed once it is open: what was read is what is hashed and decoded, and it was opened once.
+        var opens = 0
+        let changed = LaunchPresets(global: [LaunchPreset(name: "Planted", kind: .shell, command: "", env: ["MAX_THINKING_TOKENS": "1"])])
+        let read = SessionPresets.read(root: root) { path in
+            opens += 1
+            let fd = Sys.open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            try? changed.save(to: URL(fileURLWithPath: path))
+            return fd
+        }
+        #expect(opens == 1)
+        #expect(read.presets == Self.presets && read.fingerprint == SessionPresets.sealFingerprint(of: bytes))
+        #expect(SessionPresets.read(root: root).presets == changed)
+        // A link is never followed: the built-ins alone, no hash, said.
+        try FileManager.default.removeItem(at: file)
+        let target = scratch.url("planted.json")
+        try changed.save(to: target)
+        try FileManager.default.createSymbolicLink(atPath: file.path, withDestinationPath: target.path)
+        let linked = SessionPresets.read(root: root)
+        #expect(linked.fingerprint == nil && linked.presets == LaunchPresets.builtIns() && linked.problems.first?.contains("is a link") == true, "\(linked.problems)")
+        #expect(Requests.presetsBaselineRefusal(vault: nil, home: home.path, nodeRoot: root, file: linked, folder: "/w")?.contains("is a link") == true)
     }
 
     @Test func aVariablesValueCantBeGuessedFromTheDigest() {
@@ -145,13 +180,15 @@ struct SessionPresetsTests {
                      "GIT_DIR", "LD_AUDIT", "DYLD_LIBRARY_PATH", "MY_PROXY", "my_var", "A" + String(repeating: "B", count: 41)] {
             #expect(SessionPresets.envRefusal(name) != nil, "\(name)")
         }
-        for name in ["MAX_THINKING_TOKENS", "ANTHROPIC_MODEL", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "DISABLE_TELEMETRY", "DISABLE_AUTOUPDATER",
-                     "RUN_SLOW", "DEBUG", "MY_FLAG", "A" + String(repeating: "B", count: 40)] {
-            #expect(SessionPresets.envRefusal(name) == nil, "\(name)")
+        // Only the reviewed few: no user namespace (the final round of 2026-11-20).
+        for name in ["RUN_SLOW", "DEBUG", "MY_FLAG", "A" + String(repeating: "B", count: 40)] {
+            #expect(SessionPresets.envRefusal(name)?.contains("only Claude Code's reviewed variables") == true, "\(name)")
         }
+        #expect(SessionPresets.allowedVariables.count == 20)
+        for name in SessionPresets.allowedVariables { #expect(SessionPresets.envRefusal(name) == nil, "\(name)") }
         let planted = LaunchPreset(name: "Opus", kind: .claude, command: "claude", env: ["NODE_OPTIONS": "--require /home/u/x.js", "RUN_SLOW": "1"])
         let why = SessionPresets.refusal(planted)
-        #expect(why?.contains("NODE_OPTIONS (it changes what a program loads or runs)") == true, "\(String(describing: why))")
+        #expect(why?.contains("NODE_OPTIONS (a preset sets only Claude Code's reviewed variables") == true, "\(String(describing: why))")
     }
 
     /// A project's preset named as a built-in one never stands in for it: it can't start, and the name finds the built-in.
@@ -210,7 +247,7 @@ struct SessionPresetsTests {
         defer { world.stop() }
         let file = world.host.root.appendingPathComponent("presets.json")
         var presets = LaunchPresets.builtIns()
-        presets.byProject[world.repo] = [LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["RUN_SLOW": "1"])]
+        presets.byProject[world.repo] = [LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["DISABLE_TELEMETRY": "1"])]
         try presets.save(to: file)
         func accept() async throws {
             let held = try #require(await world.ask("config.held", ["folder": .string(world.repo)]))
@@ -236,7 +273,7 @@ struct SessionPresetsTests {
         try await accept()
         #expect(try await start().ok)
 
-        presets.byProject[world.repo]?[0].env["RUN_SLOW"] = "2"
+        presets.byProject[world.repo]?[0].env["DISABLE_TELEMETRY"] = "2"
         try presets.save(to: file)
         let refused = try await start()
         #expect(refused.error?.code == NodeWire.Code.refused.rawValue && refused.error?.message.contains("accept the presets first") == true, "\(refused)")
@@ -245,6 +282,38 @@ struct SessionPresetsTests {
     }
 
     // MARK: Starting one
+
+    /// A seal the vault made without the user's explicit accept of the presets file (an app's look with no card seals
+    /// what didn't move) starts nothing; the user's accept of it, once it shows as held, does.
+    @Test func aPresetsFileSealedByALookAloneStartsNothing() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let file = world.host.root.appendingPathComponent("presets.json")
+        var presets = LaunchPresets.builtIns()
+        presets.byProject[world.repo] = [LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["DISABLE_TELEMETRY": "1"])]
+        try presets.save(to: file)
+        try await acceptConfig(world)
+        // Changed, then sealed by a look with no card: the vault's record matches the file, but no accept of the user's.
+        presets.byProject[world.repo]?[0].env["DISABLE_TELEMETRY"] = "0"
+        try presets.save(to: file)
+        let vault = world.host.vault
+        _ = try await offPool { try vault.checkConfig(root: world.repo, shown: [:]) }
+        _ = try await offPool { try vault.checkConfig(root: world.repo) }
+        let record = try #require(try await offPool { try vault.guardedRecord(root: SessionPresets.acceptRoot(nodeRoot: world.host.root)) })
+        #expect(record[ConfigSeal.keyPrefix + SessionPresets.sealName] == SessionPresets.read(root: world.host.root).fingerprint, "sealed by the look")
+        func start() async throws -> NodeWire.Reply {
+            let list = try #require(await world.ask("session.presets", ["folder": .string(world.repo)], action: nil))
+            let digest = try #require(list.result?["presets"]?.array?.first?["digest"])
+            return try #require(await world.ask("session.new", ["folder": .string(world.repo), "preset": .string("Tests shell"), "digest": digest]))
+        }
+        let refused = try await start()
+        #expect(refused.error?.message.contains("never accepted by you") == true, "\(refused)")
+        // Changed again, held, and accepted by the user: it starts.
+        presets.byProject[world.repo]?[0].env["DISABLE_TELEMETRY"] = "1"
+        try presets.save(to: file)
+        try await acceptConfig(world)
+        #expect(try await start().ok)
+    }
 
     /// The user's `config held` and `config accept` for the world's repository: the home's config, the presets file
     /// among it, sealed as it is now.
@@ -285,7 +354,7 @@ struct SessionPresetsTests {
         try linkClaude(world)
         var presets = LaunchPresets.builtIns()
         let opus = LaunchPreset(name: "Opus", kind: .claude, command: "claude --model opus", env: ["MAX_THINKING_TOKENS": "16000"])
-        let shell = LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["RUN_SLOW": "1"], keepShell: true)
+        let shell = LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["DISABLE_TELEMETRY": "1"], keepShell: true)
         presets.byProject[world.repo] = [opus, shell]
         try presets.save(to: world.host.root.appendingPathComponent("presets.json"))
         try await acceptConfig(world)
@@ -311,7 +380,7 @@ struct SessionPresetsTests {
         let started = try #require(await world.ask("session.new", ["folder": .string(world.repo), "preset": .string("Tests shell"),
                                                                    "digest": .string(shellDigest)]))
         let shellSession = try #require(hosted(world, started))
-        #expect(shellSession.label == "Tests shell" && shellSession.agent == nil && environment(of: shellSession)["RUN_SLOW"] == "1", "\(started)")
+        #expect(shellSession.label == "Tests shell" && shellSession.agent == nil && environment(of: shellSession)["DISABLE_TELEMETRY"] == "1", "\(started)")
 
         // Changed since it was shown: nothing starts.
         var changed = presets
@@ -342,13 +411,16 @@ struct SessionPresetsTests {
         let folder = node.root.appendingPathComponent("work").path
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         var presets = LaunchPresets.builtIns()
-        presets.byProject[folder] = [LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["RUN_SLOW": "yes-slow", "SOME_TOKEN": "value-to-hide-7"],
-                                                  keepShell: true)]
+        presets.byProject[folder] = [LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["DISABLE_TELEMETRY": "yes-quiet"], keepShell: true),
+                                     LaunchPreset(name: "Keyed", kind: .shell, command: "", env: ["SOME_TOKEN": "value-to-hide-7"])]
         try presets.save(to: node.root.appendingPathComponent("presets.json"))
 
         let listed = try await node.run(["presets", folder])
         #expect(listed.status == 0, "\(listed.output)\(listed.errors)")
-        #expect(listed.output.hasPrefix("Tests shell (a shell; this project's; sets RUN_SLOW=yes-slow, SOME_TOKEN=<set>; a shell stays when it ends)"),
+        #expect(listed.output.hasPrefix("Tests shell (a shell; this project's; sets DISABLE_TELEMETRY=yes-quiet; a shell stays when it ends)"),
+                "\(listed.output)")
+        // A variable outside the reviewed few: listed with its value masked, and refused.
+        #expect(listed.output.contains("Keyed (a shell; this project's; sets SOME_TOKEN=<set>)\n    can't start here: its environment sets SOME_TOKEN"),
                 "\(listed.output)")
         #expect(listed.output.contains("Codex (codex: `codex`)\n    can't start here: Codex doesn't run on this node yet"), "\(listed.output)")
 
@@ -356,12 +428,11 @@ struct SessionPresetsTests {
         // closed, after the confirmation showed it.
         let started = try await node.runOnTerminal(["new", folder, "--preset", "tests shell"])
         #expect(started.status == 77 && started.output.contains("isn't the one the config seal watches"), "\(started.output)\(started.errors)\n\(node.said)")
-        // The confirmation shows each value but a secret-looking one's (the security review of 2026-11-20).
-        #expect(started.output.contains("This starts preset Tests shell (a shell; this project's; sets RUN_SLOW=yes-slow, SOME_TOKEN=<set>"),
-                "\(started.output)")
-        #expect(!started.output.contains("value-to-hide-7") && !listed.output.contains("value-to-hide-7"), "\(started.output)")
+        // The confirmation shows each value (the security review of 2026-11-20).
+        #expect(started.output.contains("This starts preset Tests shell (a shell; this project's; sets DISABLE_TELEMETRY=yes-quiet"), "\(started.output)")
+        #expect(!listed.output.contains("value-to-hide-7"), "\(listed.output)")
         // Nor the server's log, either value.
-        #expect(!node.said.contains("value-to-hide-7") && !node.said.contains("yes-slow"))
+        #expect(!node.said.contains("value-to-hide-7") && !node.said.contains("yes-quiet"))
         let builtIn = try await node.runOnTerminal(["new", folder, "--preset", "shell"])
         #expect(builtIn.status == 0 && builtIn.output.contains("started: session "), "\(builtIn.output)\(builtIn.errors)")
 

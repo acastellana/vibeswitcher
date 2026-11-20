@@ -28,18 +28,78 @@ public enum SessionPresets {
         public var builtIn = false
     }
 
-    /// The presets the node's `root` keeps, and a line for each thing in the file that couldn't be read (the file as a
-    /// whole too: the built-ins then).
-    public static func load(root: URL) -> (presets: LaunchPresets, problems: [String]) {
-        let url = root.appendingPathComponent(VibePaths.presetsFile.lastPathComponent)
+    /// The presets file as one read of it (the security review of 2026-11-20): its bytes, opened with `O_NOFOLLOW` (a
+    /// link is refused, never followed), hashed exactly as the config seal hashes a regular file (`sealFingerprint`),
+    /// and decoded from those same bytes; the path is never read again, so what is checked against the seal is what
+    /// starts.
+    public struct PresetsFile: Sendable {
+        /// The file's presets (the built-ins alone when there is none, or it can't be taken).
+        public var presets: LaunchPresets
+        /// A line for each thing in it that couldn't be read, or why the file as a whole wasn't taken.
+        public var problems: [String]
+        /// The seal's hash of the bytes read; nil when there is no regular file to start presets from (none, a link,
+        /// unreadable): then only the built-ins start.
+        public var fingerprint: String?
+    }
+
+    /// The most the file may be.
+    static let fileLimit = 1 << 20
+
+    /// The node's presets file, read once (`PresetsFile`). `opener` opens it (a test's counts, and changes the file
+    /// once it is open).
+    public static func read(root: URL, opener: (String) -> Int32 = { Sys.open($0, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC) }) -> PresetsFile {
         let builtIns = LaunchPresets.builtIns()
-        guard let data = try? Data(contentsOf: url) else { return (builtIns, []) }
-        if data.allSatisfy({ $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }) { return (builtIns, []) }
-        // The lenient decode skips what it can't read (`LaunchPresets.init(from:)`).
-        guard var presets = try? JSONDecoder().decode(LaunchPresets.self, from: data) else {
-            return (builtIns, ["\(url.lastPathComponent) isn't readable JSON, so the built-in presets are used"])
+        let path = root.appendingPathComponent(VibePaths.presetsFile.lastPathComponent).path
+        let fd = opener(path)
+        guard fd >= 0 else {
+            let failure = errno
+            if failure == ENOENT { return PresetsFile(presets: builtIns, problems: [], fingerprint: nil) }
+            let why = failure == ELOOP ? "is a link, which is never followed" : "can't be opened (errno \(failure))"
+            return PresetsFile(presets: builtIns, problems: ["presets.json \(why): the built-in presets alone"], fingerprint: nil)
         }
-        return (presets, [])
+        defer { Sys.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_size <= Int64(fileLimit) else {
+            return PresetsFile(presets: builtIns, problems: ["presets.json isn't a regular file of at most 1 MB: the built-in presets alone"], fingerprint: nil)
+        }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = Sys.read(fd, &buffer, buffer.count)
+            if count < 0, errno == EINTR { continue }
+            guard count >= 0 else { return PresetsFile(presets: builtIns, problems: ["presets.json couldn't be read: the built-in presets alone"], fingerprint: nil) }
+            if count == 0 { break }
+            data.append(contentsOf: buffer[0..<count])
+            guard data.count <= fileLimit else { return PresetsFile(presets: builtIns, problems: ["presets.json is over 1 MB: the built-in presets alone"], fingerprint: nil) }
+        }
+        return decode(data)
+    }
+
+    /// `data` (the presets file's bytes) decoded, with the seal's hash of exactly those bytes.
+    static func decode(_ data: Data) -> PresetsFile {
+        let builtIns = LaunchPresets.builtIns()
+        let fingerprint = sealFingerprint(of: data)
+        if data.allSatisfy({ $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }) {
+            return PresetsFile(presets: builtIns, problems: [], fingerprint: fingerprint)
+        }
+        // The lenient decode skips what it can't read (`LaunchPresets.init(from:)`).
+        guard let presets = try? JSONDecoder().decode(LaunchPresets.self, from: data) else {
+            return PresetsFile(presets: builtIns, problems: ["presets.json isn't readable JSON, so the built-in presets are used"], fingerprint: fingerprint)
+        }
+        return PresetsFile(presets: presets, problems: [], fingerprint: fingerprint)
+    }
+
+    /// The config seal's hash of a regular file (not a link) whose bytes are `data` (`ConfigSeal.fingerprint`'s `.file`
+    /// case: SHA-256 of `file\0` and the hex SHA-256 of the contents, hex).
+    static func sealFingerprint(of data: Data) -> String {
+        let hex = { (digest: SHA256.Digest) in digest.map { String(format: "%02x", $0) }.joined() }
+        return hex(SHA256.hash(data: Data(("file\u{0}" + hex(SHA256.hash(data: data))).utf8)))
+    }
+
+    /// The presets the node's `root` keeps and what couldn't be read (`read`, without its hash).
+    public static func load(root: URL) -> (presets: LaunchPresets, problems: [String]) {
+        let file = read(root: root)
+        return (file.presets, file.problems)
     }
 
     /// The presets for `folder` (absolute), as the app's New Session lists them: the folder's own (its nearest project
@@ -94,6 +154,51 @@ public enum SessionPresets {
     /// the file is as the user's accept sealed it (`Requests.presetsBaselineRefusal`).
     public static var sealName: String { "~/.vibeswitcher/presets.json" }
 
+    /// The vault key under which the user's explicit `config accept` of the presets file records the hash it sealed
+    /// (`LeadEngine.configAccept`): a seal a look made alone (a vault not holding its first look records what it has
+    /// nothing recorded for) has no such key, and starts nothing.
+    public static let acceptedKey = "presets_accepted"
+
+    /// `shown` (a `config held` card) with the presets file among what it asks the user to accept when the user's own
+    /// accept of the file as it is isn't recorded (`acceptedKey`): the file the seal sealed silently (a vault's first
+    /// sight of it, a look with no card) is shown as an item to accept even though nothing holds it, so the accept is
+    /// the user's explicit one. Unchanged when the file is held already (the accept takes it as any held thing), when
+    /// it is accepted as it is, or when there is no regular presets file where the seal watches. Asks the vault and
+    /// reads the file: never on the engine's queue.
+    public static func withPresetsToAccept(_ shown: ConfigHoldStore.Shown, vault: LeadVault, home: String, nodeRoot: URL) -> ConfigHoldStore.Shown {
+        guard !shown.items.contains(where: { $0.name == sealName }),
+              let watched = ConfigSeal.homeWatched(home: home).first(where: { $0.name == sealName }),
+              URL(fileURLWithPath: watched.path).standardizedFileURL.path == nodeRoot.appendingPathComponent("presets.json").standardizedFileURL.path,
+              read(root: nodeRoot).fingerprint != nil, let now = ConfigSeal.fingerprint(watched) else { return shown }
+        let record = (try? vault.guardedRecord(root: acceptRoot(nodeRoot: nodeRoot))) ?? nil
+        guard record?[acceptedKey] != now else { return shown }
+        var asked = shown
+        asked.items.append(ConfigHoldStore.Item(name: sealName, hash: String(now.prefix(12)),
+                                                change: "never accepted by you: a preset of it starts only once you accept it as it is"))
+        asked.hashes[ConfigSeal.keyPrefix + sealName] = now
+        return asked
+    }
+
+    /// After the user's accept of `shown` sealed it: the presets file's hash recorded as accepted by the user
+    /// (`acceptedKey`), when the card showed it and the vault's home-wide record now seals that very hash. The error
+    /// when it couldn't be recorded (nothing starts then: the check fails closed). Asks the vault: never on the queue.
+    public static func markAccepted(_ shown: ConfigHoldStore.Shown, vault: LeadVault, nodeRoot: URL) -> Error? {
+        let key = ConfigSeal.keyPrefix + sealName
+        guard shown.items.contains(where: { $0.name == sealName }), let hash = shown.hashes[key] else { return nil }
+        let root = acceptRoot(nodeRoot: nodeRoot)
+        do {
+            guard try vault.guardedRecord(root: root)?[key] == hash else { return nil }
+            try vault.setGuardedSettings([acceptedKey: hash], root: root)
+            return nil
+        } catch {
+            return error
+        }
+    }
+
+    /// The vault root that key is kept under: a folder of the node's own, never a project (no lead starts there), so
+    /// only VibeSwitcher records it. The home's sealed config comes with any root's record.
+    public static func acceptRoot(nodeRoot: URL) -> String { nodeRoot.appendingPathComponent("v2/presets-accept").path }
+
     /// Why the node can't start `preset` (nil: it can): Codex, a name that is a role's, a Claude command that isn't
     /// `claude` and plain words, an environment variable the host refuses.
     public static func refusal(_ preset: LaunchPreset, builtIn: Bool = false) -> String? {
@@ -129,37 +234,13 @@ public enum SessionPresets {
         "DISABLE_NON_ESSENTIAL_MODEL_CALLS",
     ]
 
-    /// The families of names no preset may set, each with why: what a program loads or runs, where it reads its config,
-    /// whom it talks to, what its shell does first. A name is matched by its prefix, its suffix, or whole.
-    static let refusedFamilies: [(prefixes: [String], suffixes: [String], names: [String], why: String)] = [
-        (["CLAUDE_", "ANTHROPIC_", "OPENAI_", "CODEX_", "VIBESWITCHER_"], [], [], "an agent's own settings, endpoints or keys"),
-        (["NODE_", "NPM_", "PYTHON", "PERL", "RUBY", "GEM_", "BUN_", "DENO_", "JAVA_", "JDK_", "CLASSPATH", "LD_", "DYLD_", "GIT_", "MALLOC_",
-          "GLIBC_", "GCONV_"], [], [], "it changes what a program loads or runs"),
-        (["LESS"], [], ["PAGER", "MANPAGER", "EDITOR", "VISUAL", "BROWSER", "SUDO_ASKPASS", "SSH_ASKPASS"], "a program the session would run"),
-        ([], ["PATH"], ["HOME", "SHELL", "USER", "LOGNAME", "PWD", "OLDPWD", "TMPDIR", "TMP", "TEMP", "ZDOTDIR", "INPUTRC", "ENV", "IFS",
-                        "PROMPT_COMMAND", "TERMINFO", "TERM"], "where a session's home, shell or files are"),
-        (["BASH_", "PS", "HIST"], [], [], "a shell's prompt, startup or history"),
-        (["XDG_", "SSL_", "SSH_", "GNUPG", "GPG", "DOCKER_", "KUBE", "AWS_", "GOOGLE_", "AZURE_", "DBUS_", "WAYLAND_"],
-         ["_HOME", "_CONFIG", "_CONFIG_DIR", "_CONFIG_FILE", "_DIR"], ["DISPLAY", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"],
-         "where a program reads its config, keys or trust"),
-        (["HOSTALIASES", "RESOLV_", "PROXY", "NO_PROXY"], ["_PROXY", "_URL", "_HOST", "_ENDPOINT", "_API_BASE"], [], "whom a program talks to"),
-    ]
-
     /// Why a preset may not set the variable `name` (nil: it may) (the security review of 2026-11-20: `presets.json` is a
-    /// file any process of the uid can write, so the class is closed, not chased by name). An allowlist: the reviewed few
-    /// (`allowedVariables`), and plain user variables, `[A-Z][A-Z0-9_]{0,40}`, outside the refused families
-    /// (`refusedFamilies`) and what the host refuses any spawn (`Platform.Tools.spawnEnvironmentRefused`).
+    /// file any process of the uid can write, so the class is closed): only the reviewed few (`allowedVariables`). A
+    /// user who needs another sets it in the session, started with `new`.
     public static func envRefusal(_ name: String) -> String? {
         if allowedVariables.contains(name) { return nil }
-        guard name.range(of: #"^[A-Z][A-Z0-9_]{0,40}$"#, options: .regularExpression) != nil else {
-            return "a preset's variables are capitals, digits and _, starting with a letter, at most 41 long"
-        }
-        if !Platform.Tools.spawnEnvironmentRefused([name]).isEmpty { return "the host refuses it for any session" }
-        for family in refusedFamilies where family.names.contains(name) || family.prefixes.contains(where: name.hasPrefix)
-            || family.suffixes.contains(where: name.hasSuffix) {
-            return family.why
-        }
-        return nil
+        return "a preset sets only Claude Code's reviewed variables (\(allowedVariables.sorted().joined(separator: ", "))); "
+            + "start the session with `vibeswitcher new` and set it there"
     }
 
     /// Whether a variable's value is shown masked: a name that looks secret (a key, a token, a password…), or a value
