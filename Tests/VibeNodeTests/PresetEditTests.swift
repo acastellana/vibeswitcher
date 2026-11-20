@@ -75,7 +75,7 @@ struct PresetEditTests {
     @Test func whatTheNodeWouldntStartIsntWritten() throws {
         let base = try data(applied(["op": "add", "name": "Fast", "folder": NodeWire.Value.string(Self.project), "args": "--model sonnet"], to: nil))
         let add = { (extra: [String: Any]) in try self.applied(["op": "add", "name": "New", "folder": NodeWire.Value.string(Self.project)].merging(extra) { $1 }, to: base) }
-        #expect(refusal(try add(["env": ["PATH": "/tmp/evil"]]))?.contains("which a preset may not set") == true)
+        #expect(refusal(try add(["env": ["PATH": "/opt/evil"]]))?.contains("which a preset may not set") == true)
         #expect(refusal(try add(["env": ["NODE_OPTIONS": "--require x"]]))?.contains("which a preset may not set") == true)
         #expect(refusal(try add(["name": "shell"]))?.contains("built-in preset's name") == true)
         #expect(refusal(try add(["args": "--model $(id)"]))?.contains("plain words") == true)
