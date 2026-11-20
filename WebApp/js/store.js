@@ -14,8 +14,9 @@
 //   store.openChat(id), closeChat(id), pageChat(id)   what the chat view asks of the feed
 //   store.draft(card, text)      leaves an answer drafted on a card, shown at once (the contract's §8); null clears it
 //   store.draftOf(card)          the draft a card shows: this page's overlay over the node's, or null
-//   store.sessionDraft(id, text, images) leaves a message drafted for a session (`session.draft`), with the paths of
-//                                images attached to it, shown at once; null clears it
+//   store.sessionDraft(id, text, images, now) leaves a message drafted for a session (`session.draft`), with the paths
+//                                of images attached to it, shown at once; null clears it. `now`: to steer a working
+//                                agent mid-turn (`vibeswitcher send` then steers it, as `--now` does)
 //   store.sessionDraftOf(id)     the message a session shows drafted: this page's overlay over the node's, or null
 //   store.read(kind, args)       a read (no action id): resolves with the feed's reply
 //   store.attach(id, bytes, type) an image for a session's composer, sent in parts (`session.attach`): the last reply,
@@ -372,15 +373,15 @@ export function createStore() {
   // at once as an overlay keyed by its action id, and kept until the sessions stream reaches what the node acked
   // (`applied`), as a card's draft. Nothing is typed: the user sends it with `vibeswitcher send` in a terminal.
   const sessionTouched = (id) => emit(new Map([['sessions', [{ in: 'sessions', id, drafting: true }]]]));
-  function sessionDraft(id, text, images = []) {
+  function sessionDraft(id, text, images = [], now = false) {
     if (!state.sessions.get(id)?.hosted) return Promise.resolve({ ok: false, error: { code: 'gone', message: 'This session can’t be typed into.' } });
     const action = crypto.randomUUID();
     const clearing = text === null;
-    state.sessionDrafts.set(id, { text: clearing ? null : text, images: clearing ? [] : images, action, sent: false });
+    state.sessionDrafts.set(id, { text: clearing ? null : text, images: clearing ? [] : images, now: !clearing && now, action, sent: false });
     state.sessionDraftRefused.delete(id);
     sessionTouched(id);
     const mine = () => state.sessionDrafts.get(id)?.action === action;
-    const args = clearing ? { session: id } : images.length ? { session: id, text, images } : { session: id, text };
+    const args = clearing ? { session: id } : { session: id, text, ...(images.length ? { images } : {}), ...(now ? { now: true } : {}) };
     return request(clearing ? 'session.draft.clear' : 'session.draft', args, action).then((reply) => {
       if (!mine()) return reply;
       if (!reply.ok) {
@@ -400,13 +401,13 @@ export function createStore() {
     });
   }
 
-  // The message session `id` shows drafted, `{ text, images, sending, mine }`, or null: this page's overlay while it has
-  // one, else the node's (left here, in another tab, on another device).
+  // The message session `id` shows drafted, `{ text, images, now, sending, mine }`, or null: this page's overlay while
+  // it has one, else the node's (left here, in another tab, on another device).
   function sessionDraftOf(id) {
     const overlay = state.sessionDrafts.get(id);
-    if (overlay) return overlay.text === null ? null : { text: overlay.text, images: overlay.images || [], sending: !overlay.sent, mine: true };
+    if (overlay) return overlay.text === null ? null : { text: overlay.text, images: overlay.images || [], now: !!overlay.now, sending: !overlay.sent, mine: true };
     const draft = state.sessions.get(id)?.draft;
-    return draft?.text || draft?.images?.length ? { text: draft.text || '', images: draft.images || [], sending: false, mine: false } : null;
+    return draft?.text || draft?.images?.length ? { text: draft.text || '', images: draft.images || [], now: draft.now === true, sending: false, mine: false } : null;
   }
 
   // A message typed into a session, shown at once as a pending row; the transcript's own row replaces it.

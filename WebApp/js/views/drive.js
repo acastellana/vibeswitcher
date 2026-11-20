@@ -52,7 +52,10 @@ export function draftBox(app, { edit }) {
       if (why) setText(refused, why);
       if (!drafted) return;
       setClass(el, 'sending', drafted.sending);
-      setText(label, drafted.sending ? 'Saving your message…' : `Your message for ${AGENTS[session.agent] || 'the agent'}`);
+      setClass(el, 'now', !!drafted.now);
+      setText(label, drafted.sending ? 'Saving your message…'
+        : drafted.now ? `Steer ${AGENTS[session.agent] || 'the agent'} now: it gets this at its next step, without stopping`
+        : `Your message for ${AGENTS[session.agent] || 'the agent'}`);
       setText(text, drafted.text);
       text.hidden = !drafted.text;
       const images = drafted.images || [];
