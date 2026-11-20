@@ -334,8 +334,11 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         for (lock, ownsLaunchers, starts) in [(scratch, true, false), (usersLock, false, false), (usersLock, true, true), (scratch, false, true)] {
             let socket = scratchSocketPath()
             defer { unlink(socket) }
-            let server = HostServer(config: Self.config(socket: socket, lock: lock,
-                                                        heldLockIsAllowed: HostHardening.heldLockIsAllowed(ownsLaunchers: ownsLaunchers, usersLock: usersLock)))
+            let allowed = try #require(HostHardening.heldLockIsAllowed(ownsLaunchers: ownsLaunchers, usersLock: usersLock))
+            let server = HostServer(config: Self.config(socket: socket, lock: lock, heldLockIsAllowed: { fd in
+                #expect(Self.isCloseOnExec(fd), "the lock isn't close-on-exec: \(lock) \(ownsLaunchers)")
+                return allowed(fd)
+            }))
             if starts {
                 #expect(throws: Never.self, "\(lock) \(ownsLaunchers)") { try server.start() }
                 server.stop(terminateSessions: true)
@@ -349,7 +352,8 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
     /// A refused start lets go of its lock even while a child of this process is between its fork and its exec, as
     /// another test's spawn may be at any moment (a full run 18 wide failed `aHostStartsOnlyOnTheLockItTookItselfFor`
     /// so): the child, spawned while the host held the lock, has a copy of the host's descriptor, and with it the lock,
-    /// until its exec closes it (close-on-exec). Forced here: the spawn is held in its file actions across the start.
+    /// until its exec closes it (close-on-exec). Forced here: the spawn is held in its file actions across the start,
+    /// and let go once `expectNotHeld` has found the lock held: the host's descriptor gone at once, the lock free then.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's lock by identity; the Mac asks nothing"))
     func aRefusedStartLetsGoWhileASpawnIsBeforeItsExec() throws {
         let (dir, _, _) = try Self.home()
@@ -359,13 +363,21 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         defer { unlink(socket) }
         let child = try SpawnHeldBeforeExec(in: dir)
         defer { child.release() }
-        let server = HostServer(config: Self.config(socket: socket, lock: lock, heldLockIsAllowed: { _ in
+        var closeOnExec = false
+        let server = HostServer(config: Self.config(socket: socket, lock: lock, heldLockIsAllowed: { fd in
+            closeOnExec = Self.isCloseOnExec(fd)
             child.start()
             return false
         }))
         #expect(throws: HostServer.Failure.lock(EPERM)) { try server.start() }
         try #require(child.holds, "the child wasn't spawned")
-        Self.expectNotHeld(lock, socket: socket, server: server)
+        #expect(closeOnExec, "the lock isn't close-on-exec")
+        var seenHeld = false
+        Self.expectNotHeld(lock, socket: socket, server: server, seenHeld: {
+            seenHeld = true
+            child.release()
+        })
+        #expect(seenHeld, "the held child didn't hold the lock: nothing was forced")
     }
 
     /// A host whose held lock isn't allowed doesn't start: `start()` throws, the lock released and no socket bound;
@@ -403,15 +415,40 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         return config
     }
 
-    /// After a refused `start()`: `lock` free for another to take at once, nothing listening at `socket`.
-    static func expectNotHeld(_ lock: String, socket: String, server: HostServer, sourceLocation: SourceLocation = #_sourceLocation) {
+    /// After a refused `start()`: the host let go of `lock` at once, nothing listening at `socket`, and `lock` free for
+    /// another to take.
+    ///
+    /// Letting go at once is the host's part, checked first: no descriptor of this process open on the lock's file. The flock itself belongs to the open file description, which a child
+    /// spawned by any thread of this process while the host held it shares from its fork until its exec closes it (the
+    /// host's lock is close-on-exec: `isCloseOnExec`). Every test runs in this one process, and many spawn, so a full
+    /// run 18 wide once found the lock still held just after the host had closed it. So a lock still held is waited
+    /// for, bounded (`eventuallyBlocking`): such a child's copy goes at its exec, while a descriptor the host kept or
+    /// let a long-lived child inherit would hold it for good, and fail here. `seenHeld` runs when the first look finds
+    /// it held, before the wait (a test holding such a child lets it go there).
+    static func expectNotHeld(_ lock: String, socket: String, server: HostServer, seenHeld: () -> Void = {},
+                              sourceLocation: SourceLocation = #_sourceLocation) {
+        #expect(openDescriptors(on: lock).isEmpty, "this process still has the lock open", sourceLocation: sourceLocation)
         let other = open(lock, O_RDWR | O_CLOEXEC)
         #expect(other >= 0, sourceLocation: sourceLocation)
-        #expect(flock(other, LOCK_EX | LOCK_NB) == 0, "the lock is still held", sourceLocation: sourceLocation)
+        if flock(other, LOCK_EX | LOCK_NB) != 0 {
+            seenHeld()
+            #expect(eventuallyBlocking { flock(other, LOCK_EX | LOCK_NB) == 0 }, "the lock is still held",
+                    sourceLocation: sourceLocation)
+        }
         Sys.close(other)
         #expect(server.listenFD == -1 && server.acceptSource == nil, sourceLocation: sourceLocation)
         #expect(!FileManager.default.fileExists(atPath: socket), "a socket was bound", sourceLocation: sourceLocation)
     }
+
+    /// This process's descriptors open on the file at `path` (by its resolved path): none once a host let go of it.
+    static func openDescriptors(on path: String) -> [String] {
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        return Platform.Processes.openFiles(getpid()).filter { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path == resolved }
+    }
+
+    /// Whether descriptor `fd` is close-on-exec: a child of this process spawned while it is open has a copy only
+    /// until its exec.
+    static func isCloseOnExec(_ fd: Int32) -> Bool { fcntl(fd, F_GETFD) & FD_CLOEXEC != 0 }
 
     /// A host refused at its start doesn't start unless it is a new image of a handover given its state (which goes
     /// back instead): a `--handover` with nothing after it is no handover. Nothing refused, it goes on.
