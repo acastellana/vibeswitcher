@@ -114,6 +114,8 @@ struct SessionDriveTests {
 
         harness.tell(["op": "permission", "command": "rm -rf build"])
         try await harness.screenShows { $0.contains("Do you want to proceed?") }
+        // It draws before it writes its state.
+        try await harness.waitFor { harness.agent["mode"] as? String == "permission" }
         let question = try #require(SessionPrompt.menu(on: harness.screen)).question
         #expect(question.contains("rm -rf build") && question.contains("Do you want to proceed?"), "\(question)")
         for (args, says) in [(["choice": NodeWire.Value.int(4)], "3 options"), (["choice": .int(1), "question": .string("Delete it?")], "isn't the one"),
@@ -275,7 +277,7 @@ struct SessionDriveTests {
     @Test func theCommandLineStartsAnswersAndEndsASession() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
-        let repo = node.root.deletingLastPathComponent().appendingPathComponent("work", isDirectory: true)
+        let repo = scratch.url("work")
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
         let started = try await node.runOnTerminal(["new", repo.path])
         #expect(started.status == 0 && started.output.contains("started: session"), "\(started.output)\(started.errors)\n\(node.said)")

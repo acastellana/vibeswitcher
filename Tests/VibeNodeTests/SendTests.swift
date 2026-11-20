@@ -61,6 +61,8 @@ struct SendTests {
         let harness = try await claude(world)
         harness.tell(["op": "permission", "command": "rm -rf build"])
         try await harness.screenShows { $0.contains("Do you want to proceed?") }
+        // It draws before it writes its state.
+        try await harness.waitFor { harness.agent["mode"] as? String == "permission" }
         let reply = try #require(await send(world, harness.session.id.uuidString, "2"))
         #expect(reply.error?.code == NodeWire.Code.refused.rawValue, "\(reply)")
         #expect(reply.error?.message.contains("a question is open") == true, "\(reply)")
