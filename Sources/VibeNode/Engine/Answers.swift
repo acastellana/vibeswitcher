@@ -587,7 +587,8 @@ extension LeadEngine {
 
     /// `config held FOLDER [--diff NAME]`: what the vault holds for the project, as a card bound to exactly the hashes
     /// it shows (any earlier open one of the project closed), with the floor and rails workflow.md proposes; `diff`,
-    /// that held thing's difference too. From any thread.
+    /// that held thing's difference too. Asked again with nothing changed, the same open card (its id and code). From
+    /// any thread.
     public func configHeld(root: String, diff: String?, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
         let (vault, home, node) = (cardVault, self.home, self.root)
         work.async { [weak self] in
@@ -600,10 +601,21 @@ extension LeadEngine {
                 case .failure(let error): then(.failure(.refused("the vault can't be asked what it holds for \(root): \(error)")))
                 case .success(let shown):
                     let project = NodeIds.project(root: root)
-                    for old in self.cards.list(project: project) where old.kind == .configHeld { self.cards.change(old.id) { $0.closed = "superseded by a newer card" } }
-                    var card = CardStore.Card(root: root, kind: .configHeld)
-                    card.config = shown
-                    self.cards.put(card)
+                    let open = self.cards.list(project: project).filter { $0.kind == .configHeld }
+                    // Nothing changed since an open card was drawn: that card again, so a `config held` and a `config
+                    // accept` from two separate calls meet (2026-11-20, the node's frictions). Only a card showing all
+                    // the same (every field of `Shown`) is kept; anything else closes the open ones and draws anew.
+                    let card: CardStore.Card
+                    if let same = open.last(where: { $0.config == shown }) {
+                        for old in open where old.id != same.id { self.cards.change(old.id) { $0.closed = "superseded by a newer card" } }
+                        card = same
+                    } else {
+                        for old in open { self.cards.change(old.id) { $0.closed = "superseded by a newer card" } }
+                        var drawn = CardStore.Card(root: root, kind: .configHeld)
+                        drawn.config = shown
+                        self.cards.put(drawn)
+                        card = drawn
+                    }
                     var result: [String: NodeWire.Value] = ["card": card.value]
                     if let diff { result["difference"] = difference.map { .array($0.map(NodeWire.Value.string)) } ?? .string("nothing held is named \(diff)") }
                     then(.success(.object(result)))

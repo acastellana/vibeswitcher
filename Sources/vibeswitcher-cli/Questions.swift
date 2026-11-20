@@ -2,20 +2,27 @@ import Foundation
 import VibeCore
 import VibeNode
 
-/// `vibeswitcher questions [FOLDER] [--all] [--json]` (the engine plan's E6): the open cards the server holds (the
-/// lead's questions and approvals, held config, base moves), closed ones too with `--all`. A read: anyone of the uid,
+/// `vibeswitcher questions [FOLDER] [--all | --wait] [--json]` (the engine plan's E6): the open cards the server holds
+/// (the lead's questions and approvals, held config, base moves), closed ones too with `--all`. With `--wait`, it
+/// blocks until a card needs the user (at once when one does), prints the open ones and exits. A read: anyone of the uid,
 /// no code. Every field a worker or the lead wrote is printed inert (`CardText`); under `--json`, what `inert` would
 /// replace is escaped (`NodeWire.printable`).
 enum QuestionsCommand {
-    static let usage = "usage: vibeswitcher questions [FOLDER] [--all] [--json]"
+    static let usage = "usage: vibeswitcher questions [FOLDER] [--all | --wait] [--json]"
+
+    /// What `--all` says of the closed cards it left out (the server lists the newest, `Requests.closedListed`).
+    static func moreLine(_ more: Int) -> String {
+        "\(more) more closed card\(more == 1 ? "" : "s") not shown (the newest are; a card's whole id or its prefix finds any: vibeswitcher answer CARD)"
+    }
 
     static func run(_ arguments: [String]) -> Int32 {
         var folder: String?
-        var all = false, json = false
+        var all = false, json = false, wait = false
         for word in arguments {
             switch word {
             case "--all": all = true
             case "--json": json = true
+            case "--wait": wait = true
             default:
                 guard folder == nil, !word.hasPrefix("--") else { return Say.usage(usage) }
                 folder = CardCommand.absolute(word)
@@ -28,9 +35,16 @@ enum QuestionsCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
+        guard !(all && wait) else { return Say.usage(usage) }
         var args: [String: NodeWire.Value] = ["all": .bool(all)]
         if let folder { args["folder"] = .string(folder) }
-        switch client.request("questions", args: args) {
+        if wait { args["wait"] = .bool(true) }
+        // A wait the server ends with no card (`Requests.cardWait`) is asked again: until a card needs the user.
+        var answer = client.request("questions", args: args, timeout: wait ? Requests.cardWait + 30 : 30)
+        while wait, case .success(let reply) = answer, reply.ok, reply.result?["waited"]?.bool == true {
+            answer = client.request("questions", args: args, timeout: Requests.cardWait + 30)
+        }
+        switch answer {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
             guard reply.ok, let cards = reply.result?["cards"]?.array else { return Say.replyError(reply) }
@@ -40,6 +54,7 @@ enum QuestionsCommand {
             }
             if cards.isEmpty { Say.out(all ? "no cards" : "no open cards") }
             for card in cards { CardText.lines(card).forEach(Say.out) }
+            if let more = reply.result?["more"]?.int, more > 0 { Say.out(moreLine(more)) }
             return 0
         }
     }
@@ -53,17 +68,17 @@ enum CardCommand {
     }
 
     /// The card `wanted` names among every card the server holds: its whole id, or a prefix of its UUID that only one
-    /// has.
-    /// The open cards are asked first, the ones an answer, hold or accept is for: every card the server holds can be
-    /// past a line's limit on a node that has run for a day (329 cards, 1.4 MB, 2026-11-19), and then no card could be
-    /// answered. All of them only when no open card is the one.
+    /// has. The server is asked for that card alone (`questions` with `card`), so however many it holds the reply is one
+    /// card (2026-11-19: 329 cards, 1.4 MB, past a line's limit, and no card could be answered). A server from before
+    /// `card` lists its open cards for it (it ignores the field), then all of them, and the match is made here.
     static func find(_ wanted: String, client: NodeClient) -> Result<NodeWire.Value, NodeClient.Failure> {
-        if case .success(let card) = find(wanted, client: client, all: false) { return .success(card) }
-        return find(wanted, client: client, all: true)
+        if case .success(let card) = find(wanted, client: client, args: ["card": .string(wanted)]) { return .success(card) }
+        if case .success(let card) = find(wanted, client: client, args: nil) { return .success(card) }
+        return find(wanted, client: client, args: ["all": .bool(true)])
     }
 
-    private static func find(_ wanted: String, client: NodeClient, all: Bool) -> Result<NodeWire.Value, NodeClient.Failure> {
-        switch client.request("questions", args: all ? ["all": .bool(true)] : nil) {
+    private static func find(_ wanted: String, client: NodeClient, args: [String: NodeWire.Value]?) -> Result<NodeWire.Value, NodeClient.Failure> {
+        switch client.request("questions", args: args) {
         case .failure(let failure): return .failure(failure)
         case .success(let reply):
             guard reply.ok, let cards = reply.result?["cards"]?.array else {

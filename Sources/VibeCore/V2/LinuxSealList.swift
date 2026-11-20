@@ -41,6 +41,8 @@ public enum LinuxSealList {
         (".config/gh", .listing),
         // The node's allowed projects, its installed builds, the roles' launch files and the lead's accepted hooks.
         (".vibeswitcher/v2/projects", .file),
+        // The user's known Startup shortcuts (`StartupShortcuts`): a line added is a held change.
+        (StartupShortcuts.listFile, .file),
         (".vibeswitcher/v2/builds", .listing),
         (".vibeswitcher/lead/run", .entries),
         (".vibeswitcher/lead/git-hooks", .entries),
@@ -154,7 +156,9 @@ public enum LinuxSealList {
 
     /// A listing's hash: the thing at `path` and each entry under it (links never followed, every one, no cap), each
     /// by its relative name, type, mode, size, inode, mtime and ctime with nanoseconds, and a link's target; never a
-    /// file's contents. A write changes ctime, which no one can set back. Absent: hashes as absent.
+    /// file's contents. A write changes ctime, which no one can set back. Absent: hashes as absent. A Windows user's
+    /// Startup folder the user's known-startup list names shortcuts of: each known shortcut by its line, and the
+    /// folder's own line without its times (`StartupShortcuts`).
     static func listingHash(_ path: String) -> String {
         var hasher = SHA256()
         let add = { (text: String) in hasher.update(data: Data((text + "\n").utf8)) }
@@ -163,8 +167,15 @@ public enum LinuxSealList {
             hasher.update(data: Data("absent".utf8))
             return ConfigSeal.hex(hasher.finalize())
         }
-        add("listing " + line(info, path: path, relative: ""))
-        walk(path, relative: "", add)
+        var known: [String: StartupShortcuts.Known] = [:]
+        if let startup = StartupShortcuts.startupFolder(path), let list = StartupShortcuts.list(root: startup.root),
+           list.contains(where: { $0.user == startup.user }), (info.st_mode & S_IFMT) == S_IFDIR {
+            known = StartupShortcuts.knownEntries(in: path, user: startup.user, list: list)
+            add("listing known-startup d \(info.st_mode & 0o7777)")
+        } else {
+            add("listing " + line(info, path: path, relative: ""))
+        }
+        walk(path, relative: "", known: known, add)
         return ConfigSeal.hex(hasher.finalize())
     }
 
@@ -184,8 +195,9 @@ public enum LinuxSealList {
         return text
     }
 
-    /// Each entry under `folder` in name order, depth first: folders entered, links never followed.
-    private static func walk(_ folder: String, relative: String, _ add: (String) -> Void) {
+    /// Each entry under `folder` in name order, depth first: folders entered, links never followed; a top-level entry
+    /// `known` names by its known line.
+    private static func walk(_ folder: String, relative: String, known: [String: StartupShortcuts.Known] = [:], _ add: (String) -> Void) {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else {
             add("unreadable \(relative.utf8.count):\(relative)")
             return
@@ -193,6 +205,10 @@ public enum LinuxSealList {
         for name in names.sorted() {
             let path = (folder as NSString).appendingPathComponent(name)
             let shown = relative.isEmpty ? name : relative + "/" + name
+            if let line = known[name] {
+                add(line.hashLine)
+                continue
+            }
             var info = stat()
             guard lstat(path, &info) == 0 else { continue }
             add(line(info, path: path, relative: shown))

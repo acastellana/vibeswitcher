@@ -25,7 +25,9 @@ The gaps that matter most for daily use, worst first:
    End Session. The node runs only leads and their teams. `stop` ends everything.
 4. **No board view.** A lead's tasks, decisions, scorecard and messages between leads aren't shown anywhere (no
    command and no web tab). You'd have to read `board.json` yourself.
-5. **No notifications.** No banner, sound or reminder when a session needs you or finishes.
+5. **Notifications only while the page is open** (2026-11-20). The page notifies through the browser when a card opens, a
+   session's prompt waits or a lead stops, and counts what needs you in its title; `vibeswitcher questions --wait`
+   blocks until a card needs you. No sound, no reminders, nothing with the page closed (stage 7's push).
 6. **You can't answer a session's own prompt.** Permission prompts and Claude's own questions can't be answered. Only
    the lead's cards can.
 7. ~~**The lead ignores `lead_model` and `lead_advisor`**~~: closed 2026-11-19, the node starts its lead as the app does.
@@ -148,7 +150,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
-| Banners when a session needs input or finishes | `AppDelegate.swift`, Settings › Notifications | missing | there's no browser Notification code in `WebApp/` | M | planned "through the browser" |
+| Banners when a session needs input or finishes | `AppDelegate.swift`, Settings › Notifications | partial | `WebApp/js/notify.js` (2026-11-20): the browser's notification while the page is open, when a card opens, a session's prompt waits (not a worker's or verifier's) or a lead stops; first line only; asked once, a toggle on This node; the title counts what needs you. `vibeswitcher questions --wait` for a terminal. Missing: a finished worker's banner (the Mac's is off for workers too), per-kind choices | M | planned "through the browser" |
 | A sound when a session needs input | Settings › Notifications | missing | | S | |
 | Reminders about waiting or stuck sessions | Settings › Notifications, `Sources/VibeCore/AlertRules.swift` | missing | `AlertRules.baseMoved` is the only alert, shown as a `status` notice | S | |
 | Phone push notifications | `Sources/VibeCore/WebPush.swift`, `Web/sw.js` | missing | stage 7 | M | |

@@ -9,11 +9,16 @@ import VibeNode
 /// `config held` is short (`CardText.lines(_:long:)`: a line per held thing and guard rail, a word they share said once);
 /// `--long` says every word on every line.
 enum ConfigCommand {
-    static let usage = "usage: vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD"
+    static let usage = "usage: vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup"
 
     static func run(_ arguments: [String]) -> Int32 {
         switch arguments.first {
         case "held": return held(Array(arguments.dropFirst()))
+        case "startup":
+            // The Windows Startup shortcuts as the known-startup list writes them (`StartupShortcuts`); reads, changes nothing.
+            guard arguments.count == 1 else { return Say.usage(usage) }
+            StartupShortcuts.report().forEach { Say.out(ConfigSeal.inert($0, limit: 1000)) }
+            return 0
         case "accept":
             guard arguments.count == 2 else { return Say.usage(usage) }
             return CardCommand.act("config.accept", card: arguments[1], what: { card in

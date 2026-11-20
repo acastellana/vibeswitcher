@@ -15,6 +15,7 @@ import { nodeView } from './js/views/node.js';
 import { boardView } from './js/views/board.js';
 import { startView } from './js/views/start.js';
 import { palette } from './js/views/palette.js';
+import { notifications } from './js/notify.js';
 
 const params = new URLSearchParams(location.search);
 const store = createStore();
@@ -44,6 +45,8 @@ const app = {
   order: () => list.order(),
   commands,
 };
+// The browser's notifications when something needs you, and the title bar's count (js/notify.js).
+app.notifications = notifications(app);
 
 const list = sidebar(app);
 const session = sessionView(app);
@@ -56,7 +59,7 @@ const offline = h('div', { class: 'offline', role: 'status', hidden: true }, 'Re
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
 const main = h('main', { class: 'main' }, start.el, session.el, node.el, board.el);
 const root = document.getElementById('app');
-root.replaceChildren(list.el, main, palette(app).el, offline, unpaired);
+root.replaceChildren(list.el, main, palette(app).el, offline, unpaired, app.notifications.offer);
 
 function route() {
   const name = ui.state.route.name;
@@ -114,6 +117,7 @@ function commands() {
     ...[...store.state.boards.values()].map((board) => ({ title: `Board: ${lastPart(board.root) || 'a project'}`, about: 'Its lead’s tasks, as they move', icon: 'team', run: () => ui.go(boardHref(board.project)) })),
     { title: 'Start Page', icon: 'home', run: () => ui.go('#/') },
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
+    { title: app.notifications.enabled() ? 'Turn Notifications Off' : 'Turn Notifications On', about: 'When something needs you, while this page is open', icon: 'question', run: () => app.notifications.turn(!app.notifications.enabled()) },
     { title: 'Group by Attention', icon: 'filter', run: () => ui.setGrouping('attention') },
     { title: 'Group by Project', icon: 'filter', run: () => ui.setGrouping('projects') },
     { title: 'Filter Sessions', keys: `${KEY.alt}F`, icon: 'search', run: () => list.focusFilter() },
