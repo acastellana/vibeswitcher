@@ -190,4 +190,41 @@ struct SandboxPolicyTests {
         // A file that leaves them unset is what was recorded: nothing held.
         #expect(try lead.changedSettings(old, root: root).isEmpty)
     }
+
+    /// `sandbox_env`: the variables a run is given for the tools it uses from the account, any tool: `~` is the
+    /// account's home, `PATH` names folders put first, and nothing at or under a hidden place, nor a name of the run's
+    /// own machinery, is taken. Guarded as every `sandbox*` key is: a worker's edit of it is held, naming it.
+    @Test func sandboxEnvGivesAnyToolItsVariablesAndRefusesTheRunsOwnNamesAndHiddenPlaces() throws {
+        let home = try home()
+        let taken = try SandboxPolicy.read(Self.workflow("sandbox_env: MADE_UP_HOME=~/sdk, MADE_UP_PATH=~/sdk:lib:/usr/share, PYTHONUSERBASE=~/.local, PATH=~/sdk/bin:/opt/tool/bin, FLAG=1"),
+                                           home: home, root: home + "/projects/app").get()
+        #expect(taken.environment == ["MADE_UP_HOME": home + "/sdk", "MADE_UP_PATH": home + "/sdk:lib:/usr/share", "PYTHONUSERBASE": home + "/.local", "FLAG": "1"],
+                "\(taken.environment)")
+        #expect(taken.path == [home + "/sdk/bin", "/opt/tool/bin"])
+        // A value is passed on as written but for `~`: a URL's `//`, a trailing `/`.
+        let written = try SandboxPolicy.read(Self.workflow("sandbox_env: REGISTRY=https://registry.example.com:8080/simple/, DIR=~/sdk/"), home: home,
+                                             root: home + "/projects/app").get()
+        #expect(written.environment == ["REGISTRY": "https://registry.example.com:8080/simple/", "DIR": home + "/sdk/"], "\(written.environment)")
+        for (value, said) in [("KEY=~/.ssh/id_ed25519", ".ssh"), ("CFG=~/.config", ".config"), ("NODE=~/.vibeswitcher/state", ".vibeswitcher"),
+                              ("SOCK=/run/user/1000/bus", "/run"), ("MIXED=~/sdk:~/.gnupg", ".gnupg"), ("PATH=~/.claude/bin", ".claude"),
+                              ("PATH=bin", "from / or from ~/"), ("OTHER=~root/x", "isn't this user's"),
+                              ("LD_PRELOAD=/x.so", "the run's own"), ("HOME=~/sdk", "the run's own"), ("BASH_ENV=~/sdk/rc", "the run's own"),
+                              ("VIBESWITCHER_TEST_LOCK=/x", "the run's own"), ("GIT_DIR=~/sdk", "the run's own"), ("VS_HEAVY_CORES=64", "the run's own"),
+                              ("1BAD=x", "not a variable's name"), ("NOEQUALS", "not NAME=value"), ("A=1, A=2", "twice")] {
+            let result = SandboxPolicy.read(Self.workflow("sandbox_env: \(value)"), home: home, root: home + "/projects/app")
+            guard case .failure(let refusal) = result else {
+                Issue.record("sandbox_env: \(value) was taken: \(result)")
+                continue
+            }
+            #expect(refusal.key == "sandbox_env" && refusal.description.contains(said), "\(value): \(refusal)")
+        }
+        // Guarded as the others: a change to it is a change of the guard rails' hashes.
+        #expect(LeadVault.guardedKeys.contains("sandbox_env"))
+        let before = Self.workflow("sandbox_env: MADE_UP_HOME=~/sdk"), after = Self.workflow("sandbox_env: MADE_UP_HOME=~/sdk, EXTRA=~/sdk")
+        #expect(LeadVault.guardedHashes(before).filter { LeadVault.guardedHashes(after)[$0.key] != $0.value }.map(\.key) == ["sandbox_env"])
+        // And as accepted only: an edit not recorded reads as unset.
+        let accepted = LeadVault.acceptedSandbox(after, recorded: LeadVault.guardedHashes(before))
+        #expect(accepted.settings["sandbox_env"] == nil)
+        #expect(LeadVault.acceptedSandbox(after, recorded: LeadVault.guardedHashes(after)).settings["sandbox_env"] == "MADE_UP_HOME=~/sdk, EXTRA=~/sdk")
+    }
 }

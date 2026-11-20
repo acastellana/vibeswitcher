@@ -351,6 +351,12 @@ struct ProcessSelfTests {
         #expect(System.dumpable(descriptorsOwner: 1001, effectiveUser: 1000) == nil)
         #expect(System.dumpable(descriptorsOwner: 0, effectiveUser: 0) == nil)
         #expect(System.dumpable(descriptorsOwner: 1000, effectiveUser: 0) == nil)
+        // In a box's user namespace root's fd reads as the overflow uid: not dumpable there; outside one, unknown.
+        let box = Platform.Tools.BoxOwners(own: 1000, overflow: 65534)
+        #expect(System.dumpable(descriptorsOwner: 65534, effectiveUser: 1000, box: box) == false)
+        #expect(System.dumpable(descriptorsOwner: 1000, effectiveUser: 1000, box: box) == true)
+        #expect(System.dumpable(descriptorsOwner: 1001, effectiveUser: 1000, box: box) == nil)
+        #expect(System.dumpable(descriptorsOwner: 65534, effectiveUser: 1000, box: nil) == nil)
     }
     #endif
 

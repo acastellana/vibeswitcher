@@ -43,8 +43,9 @@ public enum BranchRun {
 
     /// What to start for `wrapped` (`BranchCode.wrapper` and its command) in `cwd`, with `home` as the run's scratch
     /// home: the launcher at `server` with its request, or, where no box can be built (`facts.why`) and on the Mac,
-    /// `wrapped` as it is. `keep`: the descriptors the launcher must inherit, none in this slice (a proxied run's
-    /// listener line, from slice 2).
+    /// `wrapped` as it is. With the project's `sandbox: off` (`policy.enabled` false), where a box could be built:
+    /// `wrapped` plain, saying so first (`plain`). `keep`: the descriptors the launcher must inherit, none in this
+    /// slice (a proxied run's listener line, from slice 2).
     public static func command(_ wrapped: [String], cwd: String, home: String, policy: SandboxPolicy, server: String,
                                facts: Platform.Sandbox.Facts) -> (executable: String, arguments: [String], keep: [Int32]) {
         command(wrapped, cwd: cwd, home: home, policy: policy, server: server, facts: facts, accountHome: VibePaths.home,
@@ -56,6 +57,10 @@ public enum BranchRun {
                         facts: Platform.Sandbox.Facts, accountHome: String, onTheMac: Bool)
         -> (executable: String, arguments: [String], keep: [Int32]) {
         guard !onTheMac, facts.why == nil, !wrapped.isEmpty else { return (wrapped.first ?? "", wrapped, []) }
+        guard policy.enabled else {
+            let plain = plain(wrapped)
+            return (plain[0], plain, [])
+        }
         let request = Request(cwd: cwd, home: home, accountHome: accountHome, policy: policy, wrapped: wrapped)
         return (server, [server] + request.arguments, [])
     }
@@ -110,18 +115,65 @@ public enum BranchRun {
     /// the tool server, `VibePaths.home`), and for the settings `SandboxPolicy.standard`.
     ///
     /// The settings reach a run only this way: neither `Shell.run` nor a verifier's prefix knows the project, and this
-    /// type never reads `workflow.md` itself, whose `sandbox*` keys count only once the vault's guard has passed them
-    /// (`LeadVault.guardedKeys`). Until the lead's tools set them around their runs, a run's box is the standard one.
+    /// type never reads `workflow.md` itself, whose `sandbox*` keys count only as the vault holds them accepted
+    /// (`LeadVault.sandboxPolicy`). The lead's tools set them around the runs they start (`with(policy:)`: where a
+    /// branch's code is marked as running, `LeadToolset.markBranchRun`, and the pre-done check); any other run's box is
+    /// the standard one.
+    ///
+    /// `refusal`: the project's settings couldn't be read (a key that names a hidden folder, the vault unreadable):
+    /// a run that would be boxed starts nothing then, and says why (`launching`).
     struct Scope {
         var launcher: String?
         var accountHome: String?
         var policy = SandboxPolicy.standard
+        var refusal: SandboxRefusal?
     }
 
     private static let scopeKey = "VibeCore.BranchRun.scope"
 
     /// The scope `with` gave this thread.
     static var scope: Scope? { Thread.current.threadDictionary[scopeKey] as? Scope }
+
+    /// The account home this thread's runs are planned and judged by: its scope's, else the account's own
+    /// (`VibePaths.accountHome`, which no environment moves). What the project's paths are read against.
+    static var accountHome: String { scope?.accountHome ?? VibePaths.accountHome }
+
+    /// Runs `body` with the project's settings `policy` (`LeadVault.sandboxPolicy`'s) for the branch runs it starts on
+    /// this thread, the rest of this thread's scope (a launcher a test named, its account home) kept.
+    static func with<T>(policy: Result<SandboxPolicy, SandboxRefusal>, _ body: () throws -> T) rethrows -> T {
+        try with(scoped(policy), body)
+    }
+
+    /// This thread's scope with `policy` in it.
+    static func scoped(_ policy: Result<SandboxPolicy, SandboxRefusal>) -> Scope {
+        var scope = self.scope ?? Scope()
+        switch policy {
+        case .success(let read): (scope.policy, scope.refusal) = (read, nil)
+        case .failure(let refusal): (scope.policy, scope.refusal) = (.standard, refusal)
+        }
+        return scope
+    }
+
+    private static let enteredKey = "VibeCore.BranchRun.entered"
+
+    /// A scope this thread had before an `enter` (none: `nil`), as the stack keeps it.
+    private struct Before { var scope: Scope? }
+
+    /// `with(policy:)` for a span that isn't one closure (a mark and its end, `LeadToolset.markBranchRun`): the
+    /// thread's scope until its `leave`, on the same thread. Spans nest; each `leave` gives back what its `enter` found.
+    static func enter(policy: Result<SandboxPolicy, SandboxRefusal>) {
+        let dictionary = Thread.current.threadDictionary
+        dictionary[enteredKey] = ((dictionary[enteredKey] as? [Before]) ?? []) + [Before(scope: scope)]
+        dictionary[scopeKey] = scoped(policy)
+    }
+
+    /// Ends this thread's last `enter`: its scope is what that found. Nothing when none is open.
+    static func leave() {
+        let dictionary = Thread.current.threadDictionary
+        guard var stack = dictionary[enteredKey] as? [Before], let before = stack.popLast() else { return }
+        dictionary[enteredKey] = stack.isEmpty ? nil : stack
+        if let scope = before.scope { dictionary[scopeKey] = scope } else { dictionary.removeObject(forKey: scopeKey) }
+    }
 
     /// Runs `body` with `scope` for the branch runs it starts on this thread (nil: with none), as `ShellCancel.with`
     /// gives a thread its cancel.
@@ -165,13 +217,95 @@ public enum BranchRun {
     /// The run's scratch home is the one its caller made, `CFFIXED_USER_HOME` (`Worktrees.runChecks`); for a command
     /// that has the account's own (a verifier's), `verifierHome` in its TMPDIR; with neither, none, which the launcher
     /// refuses. `facts`: nil for this machine's, asked only once a launcher is known.
+    ///
+    /// The scope's settings: refused (`Scope.refusal`), the run starts nothing, boxed or not, and says which key on
+    /// stderr, exiting `refused`; `sandbox: off`, the wrapper runs plain, saying so first (`command`).
     static func launching(_ wrapped: [String], in directory: String, environment: [String: String],
                           facts: Platform.Sandbox.Facts? = nil, onTheMac: Bool = Platform.CodeIdentity.isAvailable) -> [String] {
         let scope = self.scope
+        if let refusal = scope?.refusal, !wrapped.isEmpty { return refusing(refusal) }
         guard !onTheMac, let launcher = scope?.launcher ?? own.launcher else { return wrapped }
         let account = scope?.accountHome ?? VibePaths.home
+        let facts = facts ?? Platform.Sandbox.probe()
         return command(wrapped, cwd: directory, home: home(environment, account: account), policy: scope?.policy ?? .standard,
-                       server: launcher, facts: facts ?? Platform.Sandbox.probe(), accountHome: account, onTheMac: onTheMac).arguments
+                       server: launcher, facts: facts, accountHome: account, onTheMac: onTheMac).arguments
+    }
+
+    // MARK: A verifier's commands
+
+    /// The variable a verifier's session carries its project's settings in, fixed when the tool server started it
+    /// (`LeadLaunch.prepare`'s `box`, read by `LeadVault.sandboxPolicy` as for the tool server's own runs): its shell
+    /// prefix (`BranchCode.runPrefix`), the tool server's binary started once per command, boxes each command by them.
+    /// It is in the verifier's `--settings` file and its process's environment, which its commands can't write: they
+    /// run in their box, where neither is (the file is in the vault's run folder, the process outside the box's pid
+    /// namespace), and a command that sets it for another prefix it starts inside changes no more than its own box
+    /// shows. A policy accepted after the verifier started doesn't reach it.
+    public static let policyVariable = "VIBESWITCHER_BRANCH_RUN_POLICY"
+
+    /// `policy` as `policyVariable` carries it: JSON, the settings or their refusal.
+    public static func carried(_ policy: Result<SandboxPolicy, SandboxRefusal>) -> String {
+        let carried: Carried
+        switch policy {
+        case .success(let read): carried = Carried(policy: read)
+        case .failure(let refusal): carried = Carried(refusal: .init(key: refusal.key, value: refusal.value, reason: refusal.reason))
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(carried)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+    }
+
+    /// What `policyVariable`'s `value` carries: none, the standard settings (a verifier started before it was set);
+    /// one that can't be read, a refusal, so its runs start nothing.
+    public static func carried(from value: String?) -> Result<SandboxPolicy, SandboxRefusal> {
+        guard let value else { return .success(.standard) }
+        let read = try? JSONDecoder().decode(Carried.self, from: Data(value.utf8))
+        if let policy = read?.policy, read?.refusal == nil { return .success(policy) }
+        if let refusal = read?.refusal, read?.policy == nil { return .failure(SandboxRefusal(key: refusal.key, value: refusal.value, reason: refusal.reason)) }
+        return .failure(SandboxRefusal(value: policyVariable, reason: "the settings this verifier was started with can't be read"))
+    }
+
+    private struct Carried: Codable {
+        struct Refusal: Codable {
+            var key: String?
+            var value: String
+            var reason: String
+        }
+        var policy: SandboxPolicy?
+        var refusal: Refusal?
+    }
+
+    /// `environment`, for a run this thread starts, with what the project's settings tell its tools (`sandbox_env`):
+    /// its variables, and its folders first on the PATH (the PATH given, else this process's). Boxed or not: a run's
+    /// home is a scratch one (`Worktrees.runChecks`), where a tool installed in the account finds nothing of itself
+    /// even with no box. A run that will be boxed gets them from its plan (`plan`) instead, and its launcher, the tool
+    /// server's image before it enters, is given none of them. As given when this thread has no such settings.
+    static func tools(_ environment: [String: String], inherited: [String: String] = ProcessInfo.processInfo.environment,
+                      facts: Platform.Sandbox.Facts? = nil, onTheMac: Bool = Platform.CodeIdentity.isAvailable) -> [String: String] {
+        guard let policy = scope?.policy, scope?.refusal == nil, !(policy.environment.isEmpty && policy.path.isEmpty) else { return environment }
+        let boxed = !onTheMac && policy.enabled && (scope?.launcher ?? own.launcher) != nil && (facts ?? Platform.Sandbox.probe()).why == nil
+        guard !boxed else { return environment }
+        var given = environment.merging(policy.environment) { $1 }
+        if !policy.path.isEmpty {
+            given["PATH"] = (policy.path + [environment["PATH"] ?? inherited["PATH"] ?? ""]).filter { !$0.isEmpty }.joined(separator: ":")
+        }
+        return given
+    }
+
+    /// What starts in place of a run whose project's settings were refused: a shell that says so and exits `refused`.
+    static func refusing(_ refusal: SandboxRefusal) -> [String] {
+        ["/bin/sh", "-c", "printf '%s\\n' \"$0\" >&2; exit \(refused)",
+         "vibeswitcher: this branch run wasn't started: the project's settings for its box are refused (workflow.md's \(refusal)). Nothing of it ran."]
+    }
+
+    /// The line a run with `sandbox: off` says first.
+    static let plainNotice = "vibeswitcher: this branch run is in no box: the project's workflow.md says sandbox: off, as the user accepted it."
+
+    /// `wrapped`, plain, saying `plainNotice` on stderr first: inside the wrapper when it starts with it (so what runs is
+    /// still known for the wrapper's, `BranchCode.isRunner`), else before it.
+    static func plain(_ wrapped: [String]) -> [String] {
+        let say = ["/bin/sh", "-c", "printf '%s\\n' \"$0\" >&2; exec \"$@\"", plainNotice]
+        let wrapper = wrapped.starts(with: BranchCode.wrapper) ? BranchCode.wrapper.count : 0
+        return Array(wrapped.prefix(wrapper)) + say + wrapped.dropFirst(wrapper)
     }
 
     /// The run's scratch home, from the environment it is started with (see `launching`); empty for none.
@@ -252,8 +386,10 @@ public enum BranchRun {
     /// - Judged twice: by `request.accountHome`, and by `realHome` (the user database's, which no environment moves),
     ///   so a process started with another HOME still shows nothing the real account hides. A PATH folder either
     ///   refuses is left out, as the planner leaves one out; any other source refuses the plan.
-    /// - Its environment is the plan's (an allow-list), with `passed` and `CFFIXED_USER_HOME` (the home, as
-    ///   `runChecks` gives it today).
+    /// - Its environment is the plan's (an allow-list), with `passed`, `CFFIXED_USER_HOME` (the home, as `runChecks`
+    ///   gives it today) and the variables the project's `sandbox_env` names (`SandboxPolicy.environment`).
+    /// - Its PATH: the folders the project's `sandbox_env` puts first (`SandboxPolicy.path`), then the launcher's own,
+    ///   each shown read-only as the planner shows a PATH folder.
     static func plan(_ request: Request, environment: [String: String], image: String?, realHome: String = VibePaths.accountHome,
                      run: String = "\(getpid())-\(UUID().uuidString.prefix(8))") -> Result<Planned, SandboxRefusal> {
         func refuse(_ value: String, _ reason: String) -> Result<Planned, SandboxRefusal> {
@@ -303,7 +439,7 @@ public enum BranchRun {
                                  temporary: temporary(in: home), build: build(image), pathFolders: path, agentProgram: nil, box: box,
                                  policy: request.policy, network: .none, slots: nil, environment: variables)
         }
-        var path = (environment["PATH"] ?? "").split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
+        var path = request.policy.path + (environment["PATH"] ?? "").split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
         if real != account {
             let judge = inputs(real, path: [])
             // Each by the spelling the planner would show it by.
@@ -321,6 +457,10 @@ public enum BranchRun {
 
         // Where the command starts, and the layers in the run's own folder.
         plan.directory = cwd
+        // A shell's process substitution (`<(…)`, `/dev/fd/63`) and `/dev/stdout` as a path, as a build's and a test's
+        // scripts use them: links into the box's own /proc, as the machine has them.
+        plan.mounts += [.init("/dev/fd", .link(to: "/proc/self/fd")), .init("/dev/stdin", .link(to: "/proc/self/fd/0")),
+                        .init("/dev/stdout", .link(to: "/proc/self/fd/1")), .init("/dev/stderr", .link(to: "/proc/self/fd/2"))]
         var folders = [temporary(in: home)]
         let made = planned.box + "/layers/"
         plan.mounts = plan.mounts.map { entry in
@@ -329,7 +469,14 @@ public enum BranchRun {
                 folder.hasPrefix(made) ? layers + "/layers/" + folder.dropFirst(made.count) : folder
             }
             folders += [placed(upper), placed(work)]
-            return Platform.Sandbox.Mount(entry.target, .overlay(lower: lower, upper: placed(upper), work: placed(work)))
+            // The account's standard package caches (SwiftPM's, npm's: `SandboxPlanner.caches`) are layered where the
+            // run's tools look for them by HOME: under the run's own home. At the account's spelling a tool never found
+            // one, and a fresh build folder fetched (no network: "Fetching https://github.com/apple/swift-crypto.git …
+            // error"). What `sandbox_private` names stays at its own path, where a `sandbox_env` variable (`~` the
+            // account's home) points.
+            let standard = SandboxPlanner.caches.contains { entry.target == account + "/" + $0 }
+            let target = standard ? home + entry.target.dropFirst(account.count) : entry.target
+            return Platform.Sandbox.Mount(target, .overlay(lower: lower, upper: placed(upper), work: placed(work)))
         }
         if real != account {
             let judge = inputs(real, path: path)
@@ -338,6 +485,10 @@ public enum BranchRun {
             }
         }
         plan.environment += passed.compactMap { name in environment[name].map { "\(name)=\($0)" } } + ["CFFIXED_USER_HOME=\(home)"]
+        // The tools the project names (`sandbox_env`): told where they are, as the account's home has them.
+        plan.environment = plan.environment.filter { entry in
+            !request.policy.environment.keys.contains(String(entry.prefix { $0 != "=" }))
+        } + request.policy.environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
         return .success(Planned(plan: plan, folders: folders, layers: layers))
     }
 

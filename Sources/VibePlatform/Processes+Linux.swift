@@ -465,9 +465,16 @@ extension Platform.Processes.System {
 
     /// Its own user's, it is dumpable; root's, it isn't; anyone else's, it can't be told (its user changed between
     /// the reads). A process whose effective user is root can't be told either: its entries are root's either way.
-    static func dumpable(descriptorsOwner owner: uid_t, effectiveUser user: uid_t) -> Bool? {
+    ///
+    /// In a box's user namespace (`Platform.Tools.boxOwners`, the kernel's `uid_map`) root is unmapped, so a
+    /// non-dumpable process's fd reads as the overflow uid's: that is root's there (the box's pid namespace holds only
+    /// its own processes, and nothing with a mapped uid can own a file as the overflow uid), so it isn't dumpable.
+    /// Outside one, exactly as above.
+    static func dumpable(descriptorsOwner owner: uid_t, effectiveUser user: uid_t,
+                         box: Platform.Tools.BoxOwners? = Platform.Tools.boxOwners) -> Bool? {
         guard user != 0 else { return nil }
         if owner == user { return true }
+        if let box, owner == box.overflow { return false }
         return owner == 0 ? false : nil
     }
 

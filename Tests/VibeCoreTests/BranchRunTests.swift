@@ -140,7 +140,10 @@ struct BranchRunTests {
         let layers = layout.area + "/.branch-runs/77-run"
         #expect(planned.layers == layers)
         let cache = layout.account + "/.cache/org.swift.swiftpm"
-        #expect(plan.mounts.contains(.init(cache, .overlay(lower: cache, upper: layers + "/layers/0/upper", work: layers + "/layers/0/work"))))
+        // Layered where the run's tools look for it, under its own home (its HOME), not at the account's spelling.
+        #expect(plan.mounts.contains(.init(layout.home + "/.cache/org.swift.swiftpm",
+                                           .overlay(lower: cache, upper: layers + "/layers/0/upper", work: layers + "/layers/0/work"))), "\(plan.mounts)")
+        #expect(!plan.mounts.contains { $0.target == cache })
         #expect(planned.folders.contains(layers + "/layers/0/upper") && planned.folders.contains(layers + "/layers/0/work"))
         #expect(planned.folders.contains(BranchRun.temporary(in: layout.home)))
         #expect(!sources.contains { $0.hasPrefix(layout.home + "/") && $0 != BranchRun.temporary(in: layout.home) })
@@ -270,6 +273,68 @@ struct BranchRunTests {
         }
         #expect(run.ok && run.output.contains("vibeswitcher-branch-code"), "\(run.output) \(run.error)")
         #expect(!run.output.contains(BranchRun.flag))
+    }
+
+    /// The project's `sandbox: off`, accepted: where a box could be built, the wrapper runs plain (as before SB6),
+    /// saying so first, and is still known for the wrapper's; elsewhere it is as it always was.
+    @Test func withSandboxOffTheWrapperRunsPlainSayingSoFirst() throws {
+        let notice = "vibeswitcher: this branch run is in no box: the project's workflow.md says sandbox: off, as the user accepted it."
+        let wrapped = Self.wrapped()
+        let off = SandboxPolicy(enabled: false)
+        let made = BranchRun.command(wrapped, cwd: "/w/tree", home: "/s/home", policy: off, server: Self.server, facts: Self.able,
+                                     accountHome: "/home/u", onTheMac: false)
+        #expect(made.executable != Self.server && !made.arguments.contains(BranchRun.flag), "\(made.arguments)")
+        #expect(BranchCode.isRunner(made.arguments) && made.executable == made.arguments.first)
+        #expect(made.arguments.contains(notice) && Array(made.arguments.suffix(3)) == Array(wrapped.suffix(3)), "\(made.arguments)")
+        // What it runs: the notice on stderr, then the command, which has its arguments as they were.
+        let folder = scratch.url("off")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let echoed = BranchRun.command(Self.wrapped(["/bin/sh", "-c", "echo \"ran $1\"", "sh", "a b"]), cwd: folder.path, home: "/s/home", policy: off,
+                                       server: Self.server, facts: Self.able, accountHome: "/home/u", onTheMac: false)
+        let run = Shell.run(executable: echoed.executable, args: Array(echoed.arguments.dropFirst()), in: folder.path, timeout: 60, interleaved: true)
+        #expect(run.ok && run.output == notice + "\nran a b", "\(run.output)")
+        // No box to be had, or the Mac: as always.
+        for (facts, mac) in [(Self.unable, false), (Self.able, true)] {
+            let plain = BranchRun.command(wrapped, cwd: "/w/tree", home: "/s/home", policy: off, server: Self.server, facts: facts,
+                                          accountHome: "/home/u", onTheMac: mac)
+            #expect(plain.arguments == wrapped)
+        }
+    }
+
+    /// The project's `sandbox_env` (`SandboxPolicy.environment`, `path`): a run is told its variables and has its
+    /// folders first on its PATH, shown read-only; nothing else the launcher has passes.
+    @Test func aRunIsGivenTheVariablesAndPathItsSettingsNameAndNothingWider() throws {
+        let layout = try Layout(scratch)
+        let tool = layout.account + "/tools/made-up"
+        for folder in ["bin", "share"] { try FileManager.default.createDirectory(atPath: tool + "/" + folder, withIntermediateDirectories: true) }
+        let outside = ["PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "MADE_UP_TOKEN": "x", "XDG_CONFIG_HOME": layout.account + "/.config"]
+        func planned(_ policy: SandboxPolicy) throws -> (environment: [String: String], plan: Platform.Sandbox.Plan) {
+            let plan = try layout.plan(layout.request(policy: policy), environment: outside).get().plan
+            return (Dictionary(uniqueKeysWithValues: plan.environment.compactMap { entry -> (String, String)? in
+                guard let equals = entry.firstIndex(of: "=") else { return nil }
+                return (String(entry[..<equals]), String(entry[entry.index(after: equals)...]))
+            }), plan)
+        }
+        let given = try planned(SandboxPolicy(read: [tool], environment: ["MADE_UP_HOME": tool], path: [tool + "/bin"]))
+        let standard = try planned(.standard)
+        #expect(given.environment["MADE_UP_HOME"] == tool, "\(given.environment)")
+        #expect(given.environment["PATH"]?.hasPrefix(tool + "/bin:") == true, "\(given.environment)")
+        #expect(given.plan.mounts.contains(.init(tool + "/bin", .readOnly(source: tool + "/bin"))))
+        // Nothing wider: only the name it gives is new, and the launcher's own others don't pass.
+        #expect(Set(given.environment.keys).subtracting(standard.environment.keys) == ["MADE_UP_HOME"], "\(given.environment)")
+        for name in ["MADE_UP_TOKEN", "XDG_CONFIG_HOME"] { #expect(given.environment[name] == nil, "\(name) reached a branch run") }
+        #expect(standard.environment["PATH"]?.contains(tool) == false)
+
+        // Unboxed, the same for a run this thread starts: its variables, and its folders first on the PATH given.
+        let scope = BranchRun.Scope(policy: SandboxPolicy(environment: ["MADE_UP_HOME": tool], path: [tool + "/bin"]))
+        let told = BranchRun.with(scope) { BranchRun.tools(["TMPDIR": "/t/"], inherited: ["PATH": "/usr/bin"], facts: Self.unable, onTheMac: false) }
+        #expect(told == ["TMPDIR": "/t/", "MADE_UP_HOME": tool, "PATH": tool + "/bin:/usr/bin"])
+        // A run that will be boxed gets them from its plan: its launcher, the tool server's image, none.
+        var launched = scope
+        launched.launcher = Self.server
+        #expect(BranchRun.with(launched) { BranchRun.tools(["TMPDIR": "/t/"], facts: Self.able, onTheMac: false) } == ["TMPDIR": "/t/"])
+        #expect(BranchRun.with(launched) { BranchRun.tools(["TMPDIR": "/t/"], inherited: ["PATH": "/usr/bin"], facts: Self.able, onTheMac: true) }["MADE_UP_HOME"] == tool)
+        #expect(BranchRun.tools(["TMPDIR": "/t/"]) == ["TMPDIR": "/t/"])
     }
 
     /// What an ended run's layers left (a layer's work folder is the kernel's, mode 000) goes at the next run beside

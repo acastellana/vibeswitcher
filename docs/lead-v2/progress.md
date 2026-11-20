@@ -257,3 +257,65 @@
 - 2026-11-20 03:57 Automatically (auto_advance): Started a worker on mac-gitguardtests (Mac: GitGuardTests' baseline message compared against the resolved root).
 - 2026-11-20 03:57 Sent sb5-the-host-confines's worker contract v7 (it had v6)
 - 2026-11-20 03:58 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-20 04:07 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-20 04:07 Audit of sb5-the-host-confines at 3dbad682 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-20 04:07 Sent sb5-the-host-confines's audit contract v7 (it had v6)
+- 2026-11-20 04:07 Automatically (auto_advance): Started the audit of sb5-the-host-confines at 3dbad682 (Its review is audit).
+- 2026-11-20 04:07 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-20 04:07 Started a worker on mac-gitguardtests
+- 2026-11-20 04:07 Automatically (auto_advance): Started a worker on mac-gitguardtests (Mac: GitGuardTests' baseline message compared against the resolved root).
+- 2026-11-20 04:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 04:17 Automatically (auto_advance): Didn't start measure-does-claude-code: measure-does-claude-code's worker not started: ~/.local/bin changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the …
+- 2026-11-20 04:18 Audit of sb5-the-host-confines: finder 1 of 2 submitted (incomplete, clean, 9 findings)
+- 2026-11-20 04:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 04:20 Audit of sb5-the-host-confines: incomplete, suspect, round 1: 6 Important (3 open, 3 unconfirmed), 5 Nit unconfirmed (2 finders voted: 3 new findings confirmed, 8 unconfirmed, 3 Nits past audit_nit_cap (5) left out)
+- 2026-11-20 04:20 Exception on sb5-the-host-confines by lead of vibeswitcher-v2-lead: edits to Sources/VibeCore/V2/Sandbox/SandboxRole.swift, Sources/VibeHost/HostNotesAnswer.swift, Sources/vibeswitcher-cli/Start.swift, scripts/temporary-folder-lint.txt accepted. Reason: Small edits SB5 needs to say which roles a node confines: SandboxRole.confinedByTheNode (one property the host and status both read), HostNotesAnswer filling the `confined` field, one line in the CLI'…
+- 2026-11-20 04:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 04:28 Automatically (auto_advance): Didn't merge mac-gitguardtests: Not merged: mac-gitguardtests's tests passed, and after them: ~/.local/bin changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change, they accept it there; if not, they set it back first.
+- 2026-11-20 04:31 Sent tests-that-write-a's worker contract v5 (it had v4)
+- 2026-11-20 10:39 Started a worker on measure-does-claude-code
+- 2026-11-20 10:39 Automatically (auto_advance): Started a worker on measure-does-claude-code (Measure: does Claude Code stop re-creating its link when its updater is off?).
+- 2026-11-20 10:40 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 10:40 Started a worker on sb5-the-host-confines
+- 2026-11-20 10:41 Workflow: max_workers = `3`
+- 2026-11-20 10:41 Started a worker on mac-gitguardtests
+- 2026-11-20 10:43 Planned the-merge-s-test-2: The merge's test run: where its 11 minutes go, and the cheap cuts
+- 2026-11-20 10:55 Planned team-sessions-start: Team sessions start Claude Code with its updater off (review audit)
+- 2026-11-20 10:55 Folded measure-does-claude-code into team-sessions-start: that task carries its work
+- 2026-11-20 11:06 Started a worker on team-sessions-start
+- 2026-11-20 11:09 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-20 11:09 Audit of tests-that-write-a at e7d2a079 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 11:09 Automatically (auto_advance): Started the audit of tests-that-write-a at e7d2a079 (It touches sensitive_paths (Sources/VibeCore/Paths.swift, Tests/VibeCoreTests/CloseOnExecLintTests.swift, Tests/VibeCoreTests/PrivateWriteLintTests.swift), so it's treated as audit whatever its review says).
+- 2026-11-20 11:09 Pipeline held: mac-gitguardtests ready to merge with none landing; cause: every test slot held
+- 2026-11-20 11:26 Audit of tests-that-write-a: finder 2 of 2 submitted (incomplete, clean, 8 findings)
+- 2026-11-20 11:28 Audit of tests-that-write-a: incomplete, clean, round 1: 5 Important (1 open, 4 unconfirmed), 5 Nit (1 open, 4 unconfirmed) (2 finders voted: 2 new findings confirmed, 8 unconfirmed)
+- 2026-11-20 11:28 Started a worker on tests-that-write-a
+- 2026-11-20 11:29 Automatically (auto_advance): Sent tests-that-write-a's worker the open Important findings tests-that-write-a:F1 from its audit at e7d2a079 (in a new worker: its last one had ended).
+- 2026-11-20 11:30 Workflow: max_workers = `2`
+- 2026-11-20 11:30 Planned hookscommandtests-hooks: HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit
+- 2026-11-20 11:32 Exception on sb5-the-host-confines by lead of vibeswitcher-v2-lead: edits to Sources/VibeNode/Server/Requests.swift, Sources/VibeNode/Live/Wire/WireSchema.swift, Sources/VibeNode/Live/Wire/WireVectors.swift, Sources/vibeswitcher-cli/Status.swift, WebApp/wire/validators.js, WebApp/wire/vectors.json, Sources/VibeNode/Web/WebAssets.generated.swift, Tests/VibeNodeTests/WireVectorsTests.swift, Tests/VibeNodeTests/ServerTests.swift accepted. Reason: The audit's finding F3 (status must say what the HOST confines, not what the command line's own probe says) can only be met by carrying HostNotes.confined to `status` through the server's wire: Reques…
+- 2026-11-20 11:36 Abandoned toolserverswitchtests-2: The user fixed it in 5c31a74d (in v2 since 1f6fd5f0): the cause was the fixture, as this contract's first branch: the switch test's stand-ins were started with no agent in their SpawnRequest, so HostedAgents decided "no agent"; they are now started with agent: "claude" as the engine starts a lead and a worker. ToolServerSwitchTests passes its 3 cases (3 runs under load 24, the user's commit message). The task never ran.
+- 2026-11-20 11:36 You accepted 34 commits on v2 from the command line: 1f6fd5f Merge the main checkout's v2 (hosted agents from the host's record, web board, seen, Mac node seams, CLI card lookup); 5c31a74 v2 tests: the switch test's stand-ins are started as Claude, as the engine starts a lead and a worker; d5b0b04 v2: merge the lead's v2 (switch test, lock test, double-start fix); …
+- 2026-11-20 11:39 Pipeline held: mac-gitguardtests ready to merge with none landing; cause: a merge in progress
+- 2026-11-20 11:42 Incident: On the WSL node the wall clock ran about 60 s behind process start times during a loaded test run, so everything that compares a process's start (btime + ticks)… (in mac-gitguardtests); planned turn-this-incident-into-2 to turn it into a check
+- 2026-11-20 11:45 Review of turn-this-incident-into-2: audit
+- 2026-11-20 12:08 Automatically (auto_advance): Didn't audit team-sessions-start: Not audited: finder 1 of 2 couldn't start (Problem(text: "team-sessions-start\'s finder not started: ~/.claude/settings.json changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can\'…
+- 2026-11-20 12:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-20 12:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-20 12:17 Audit of team-sessions-start at d9650237 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 12:17 Released team-sessions-start's worker (idle since its done report on d9650237) while its audit runs
+- 2026-11-20 12:17 Automatically (auto_advance): Started the audit of team-sessions-start at d9650237 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-20 12:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 12:17 Audit of team-sessions-start at d9650237 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 12:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 12:18 Audit of team-sessions-start at d9650237 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 12:18 Automatically (auto_advance): The verifier on team-sessions-start ended without a verdict (exited 129 after pid 5634 (vibeswitcher-mc) closed it): closed its session and started the audit again on the same commit, d9650237. If this one ends without a verdict too, it's left to you.
+- 2026-11-20 12:19 Workflow: heavy_slots = `1`
+- 2026-11-20 16:41 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 16:42 Audit of team-sessions-start at d9650237 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run of its merged result 10b4d91b: test command failed
+- 2026-11-20 16:42 Automatically (auto_advance): Started the audit of team-sessions-start at d9650237 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-20 16:43 Abandoned mac-gitguardtests: Fixed on v2 by the user's supervisor (in v2 at ddb2f9a2): Tests/VibeCoreTests/GitGuardTests.swift:599-600 now accepts the root as given, /private + root, and the resolved root. The branch's one-line change (409f487e, SandboxPolicy.resolved in the same expectation) is superseded; its two merge runs failed only on the clock-lag cluster (task turn-this-incident-into-2), not on this change.
+- 2026-11-20 16:44 Started a worker on tests-that-write-a
+- 2026-11-20 16:44 Automatically (auto_advance): Started a worker on tests-that-write-a (Tests that write a program and run it no longer fail with "Text file busy"), its after tasks done (the-vault-s-look).
+- 2026-11-20 16:44 Started a worker on sb5-the-host-confines
+- 2026-11-20 16:46 Audit of team-sessions-start: finder 2 of 2 submitted (blocked, clean, 0 findings)

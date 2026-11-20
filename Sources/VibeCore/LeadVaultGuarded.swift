@@ -61,6 +61,33 @@ extension LeadVault {
         return hashes
     }
 
+    /// The project's settings for its boxes (`SandboxPolicy`), from `workflow`'s `sandbox*` keys as the vault holds them
+    /// accepted (`acceptedSandbox`), every path judged against `home` and the project's `root`; the first refusal
+    /// otherwise, and one when the vault can't be asked. Only read: nothing is recorded (`changedSettings` records what
+    /// it has nothing for, which would take a worker's `sandbox: off` on first sight).
+    public func sandboxPolicy(_ workflow: LeadWorkflow, root: String, home: String = VibePaths.accountHome) -> Result<SandboxPolicy, SandboxRefusal> {
+        // None set: the standard settings, whatever is recorded, and the vault isn't asked (a run is as it always was).
+        if SandboxPolicy.keys.allSatisfy({ Self.guardedValue($0, in: workflow).trimmingCharacters(in: .whitespaces).isEmpty }) {
+            return .success(.standard)
+        }
+        let recorded: [String: String]?
+        do { recorded = try guardedSettings(root: root) } catch {
+            return .failure(SandboxRefusal(value: "the sandbox* keys", reason: "the session host couldn't say what the user accepted of them (\(error))"))
+        }
+        return SandboxPolicy.read(Self.acceptedSandbox(workflow, recorded: recorded), home: home, root: root)
+    }
+
+    /// `workflow` with each `sandbox*` key as the user accepted it: as written where its hash is the one the vault
+    /// records, else unset (its default, the tighter one for every key). The vault keeps hashes only, so a value
+    /// accepted before an edit can't be told: an edit not accepted, or a key with nothing recorded, never widens a box.
+    public static func acceptedSandbox(_ workflow: LeadWorkflow, recorded: [String: String]?) -> LeadWorkflow {
+        var accepted = workflow
+        for key in SandboxPolicy.keys where recorded?[key] != hash(guardedValue(key, in: workflow)) {
+            accepted.settings[key] = nil
+        }
+        return accepted
+    }
+
     /// These settings are the lead's now (the app, or the repository's lead); the others stay as recorded.
     public func setGuardedSettings(_ hashes: [String: String], root: String) throws {
         _ = try call(.setGuarded(root: root, hashes: hashes))

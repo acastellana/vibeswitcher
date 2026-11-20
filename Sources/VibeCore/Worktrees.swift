@@ -190,9 +190,13 @@ public enum BranchCode {
         var passed = isRunner(argv) ? Platform.Tools.branchEnvironment(environment) : environment
         passed[prefixVariable] = nil
         // Linux: the branch's code as a child in a session of its own, waited for (V2/BranchCodeSession.swift).
-        // And there in a box of its own, where one can be built: the child is its launcher (V2/Sandbox/BranchRun.swift).
+        // And there in a box of its own, where one can be built: the child is its launcher (V2/Sandbox/BranchRun.swift),
+        // boxed by the project's settings the verifier was started with.
         if Platform.Tools.branchCodeGetsOwnSession && isRunner(argv) {
-            return BranchCodeSession.run(BranchRun.launching(argv, in: FileManager.default.currentDirectoryPath, environment: passed), environment: passed)
+            let policy = BranchRun.carried(from: passed.removeValue(forKey: BranchRun.policyVariable))
+            return BranchCodeSession.run(BranchRun.with(policy: policy) {
+                BranchRun.launching(argv, in: FileManager.default.currentDirectoryPath, environment: passed)
+            }, environment: passed)
         }
         let cArgs = argv.map { strdup($0) } + [nil]
         let cEnv = passed.map { strdup("\($0.key)=\($0.value)") } + [nil]
@@ -1425,7 +1429,8 @@ public enum Worktrees {
                 return (cancel?.isCancelled == true, run)
             }
             Git.run(["clean", "-q", "-f", "-d"], in: path)
-            var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
+            // With what the project's settings tell its tools (`sandbox_env`), boxed or not (V2/Sandbox/BranchRun.swift).
+            var env = BranchRun.tools(["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"])
             if let held, let lock {
                 env[TestLock.heldVariable] = held.path
                 env[TestLock.coresVariable] = String(TestLock.coreBudget(slots: lock.slots))
@@ -1446,7 +1451,8 @@ public enum Worktrees {
             // command and all it starts have the scratch one.
             let script = "export HOME=\(RecentProjects.shellQuote(home))\n" + command
             // All of it, in order: what failed may be anywhere in it, and its tail is often a build's warnings.
-            var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
+            // With what the project's settings tell its tools (`sandbox_env`), boxed or not (V2/Sandbox/BranchRun.swift).
+            var env = BranchRun.tools(["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"])
             if let held, let lock {
                 env[TestLock.heldVariable] = held.path
                 env[TestLock.coresVariable] = String(TestLock.coreBudget(slots: lock.slots))
