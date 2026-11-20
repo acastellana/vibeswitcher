@@ -12,7 +12,9 @@ enum SessionCommand {
     /// status when the command can't go on (nil: it can), before anything is shown or the code asked. Accepted (the
     /// voice passed and the server recorded it), a refusal of the server's (`refused`) comes after that, and is
     /// journaled too.
-    static func act(_ kind: String, lookup: String? = nil, refuse: (NodeWire.Value) -> Int32? = { _ in nil },
+    /// `fetch`, without `lookup`: what the command shows, asked of the server some other way (a preset).
+    static func act(_ kind: String, lookup: String? = nil, fetch: ((NodeClient) -> Result<NodeWire.Value, NodeClient.Failure>)? = nil,
+                    refuse: (NodeWire.Value) -> Int32? = { _ in nil },
                     args: (NodeWire.Value) -> [String: NodeWire.Value], what: (NodeWire.Value) -> String, timeout: TimeInterval = 120,
                     say: (NodeWire.Value) -> Void) -> Int32 {
         let context = NodeContext.current()
@@ -25,6 +27,12 @@ enum SessionCommand {
         var session = NodeWire.Value.null
         if let lookup {
             switch find(lookup, client: client) {
+            case .failure(let failure): return Say.failed(failure)
+            case .success(let found): session = found
+            }
+            if let status = refuse(session) { return status }
+        } else if let fetch {
+            switch fetch(client) {
             case .failure(let failure): return Say.failed(failure)
             case .success(let found): session = found
             }
@@ -129,21 +137,26 @@ enum SendCommand {
     }
 }
 
-/// `vibeswitcher new FOLDER [--agent claude|shell] [--model M]`: an ordinary session started in the node's host, as
-/// the app's New Session starts its Claude or Shell preset.
+/// `vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M]`: an ordinary session started in the
+/// node's host, as the app's New Session starts its Claude or Shell preset, or the launch preset named (`vibeswitcher
+/// presets FOLDER` lists them): what it runs and the names of the variables it sets are shown before the code.
 enum NewCommand {
-    static let usage = "usage: vibeswitcher new FOLDER [--agent claude|shell] [--model M]"
+    static let usage = "usage: vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M]"
 
     static func run(_ arguments: [String]) -> Int32 {
         var folder: String?
-        var agent = "claude"
+        var agent: String?
+        var preset: String?
         var model: String?
         var words = arguments[...]
         while let word = words.popFirst() {
             switch word {
             case "--agent":
-                guard let value = words.popFirst(), ["claude", "shell"].contains(value) else { return Say.usage(usage) }
+                guard agent == nil, let value = words.popFirst(), ["claude", "shell"].contains(value) else { return Say.usage(usage) }
                 agent = value
+            case "--preset":
+                guard preset == nil, let value = words.popFirst(), !value.isEmpty, !value.hasPrefix("--") else { return Say.usage(usage) }
+                preset = value
             case "--model":
                 guard let value = words.popFirst(), !value.isEmpty, !value.hasPrefix("--") else { return Say.usage(usage) }
                 model = value
@@ -152,18 +165,101 @@ enum NewCommand {
                 folder = word
             }
         }
-        guard let given = folder, model == nil || agent == "claude" else { return Say.usage(usage) }
+        guard let given = folder, agent == nil || preset == nil, model == nil || agent != "shell" else { return Say.usage(usage) }
         let path = CardCommand.absolute(given)
-        var args: [String: NodeWire.Value] = ["folder": .string(path), "agent": .string(agent)]
+        let withModel = model.map { " (model \(ConfigSeal.inert($0, limit: 64)))" } ?? ""
+        if let preset { return start(preset: preset, in: path, model: model, withModel: withModel) }
+        let chosen = agent ?? "claude"
+        var args: [String: NodeWire.Value] = ["folder": .string(path), "agent": .string(chosen)]
         if let model { args["model"] = .string(model) }
-        let what = agent == "shell" ? "a shell" : "Claude" + (model.map { " (model \(ConfigSeal.inert($0, limit: 64)))" } ?? "")
+        let what = chosen == "shell" ? "a shell" : "Claude" + withModel
         return SessionCommand.act("session.new", args: { _ in args }, what: { _ in
             "This starts \(what) in a new session in \(ConfigSeal.inert(path, limit: 200)), as you."
-        }) { result in
-            let short = SessionCommand.short(result["session"]?.string)
-            Say.out("started: session \(short) on \(ConfigSeal.inert(result["terminal"]?.string ?? "?", limit: 20)) "
-                + "(`vibeswitcher send \(short) TEXT` types into it; `vibeswitcher end \(short)` ends it)")
+        }, say: started)
+    }
+
+    /// The preset `name` for `path`, as the server lists it, shown whole (its variables by name) and started.
+    private static func start(preset name: String, in path: String, model: String?, withModel: String) -> Int32 {
+        SessionCommand.act("session.new", fetch: { client in
+            switch client.request("session.presets", args: ["folder": .string(path)]) {
+            case .failure(let failure): return .failure(failure)
+            case .success(let reply):
+                guard reply.ok, let list = reply.result?["presets"]?.array else {
+                    return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no presets"))
+                }
+                guard let found = PresetsCommand.named(name, in: list) else {
+                    let names = list.compactMap { $0["name"]?.string }.map { ConfigSeal.inert($0, limit: 40) }.joined(separator: ", ")
+                    return .failure(.refused("no preset \(ConfigSeal.inert(name, limit: 80)) for \(ConfigSeal.inert(path, limit: 200)); it has: \(names)"))
+                }
+                return .success(found)
+            }
+        }, refuse: { preset in
+            if let why = preset["refused"]?.string { return Say.refused("preset \(ConfigSeal.inert(name, limit: 80)) can't start here: \(ConfigSeal.inert(why, limit: 400))") }
+            if model != nil, preset["kind"]?.string != "claude" { return Say.usage(usage + "\n(preset \(ConfigSeal.inert(name, limit: 80)) starts a shell: no model)") }
+            return nil
+        }, args: { preset in
+            var args: [String: NodeWire.Value] = ["folder": .string(path), "preset": preset["name"] ?? .string(name), "digest": preset["digest"] ?? .null]
+            if let model { args["model"] = .string(model) }
+            return args
+        }, what: { preset in
+            "This starts preset " + PresetsCommand.describe(preset) + withModel + " in a new session in \(ConfigSeal.inert(path, limit: 200)), as you."
+        }, say: started)
+    }
+
+    static func started(_ result: NodeWire.Value) {
+        let short = SessionCommand.short(result["session"]?.string)
+        Say.out("started: session \(short) on \(ConfigSeal.inert(result["terminal"]?.string ?? "?", limit: 20)) "
+            + "(`vibeswitcher send \(short) TEXT` types into it; `vibeswitcher end \(short)` ends it)")
+    }
+}
+
+/// `vibeswitcher presets [FOLDER]`: the launch presets `new --preset` takes for a folder (the current one when none is
+/// given), its default first, as the app's New Session lists them; those the node can't start say why.
+enum PresetsCommand {
+    static let usage = "usage: vibeswitcher presets [FOLDER]"
+
+    static func run(_ arguments: [String]) -> Int32 {
+        guard arguments.count <= 1, !(arguments.first?.hasPrefix("--") ?? false) else { return Say.usage(usage) }
+        let path = CardCommand.absolute(arguments.first ?? FileManager.default.currentDirectoryPath)
+        let context = NodeContext.current()
+        context.sayScratch()
+        let client: NodeClient
+        switch NodeClient.connect(context) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let connected): client = connected
         }
+        switch client.request("session.presets", args: ["folder": .string(path)]) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let reply):
+            guard reply.ok, let list = reply.result?["presets"]?.array else { return Say.replyError(reply) }
+            for problem in reply.result?["problems"]?.array ?? [] { Say.err("presets: \(ConfigSeal.inert(problem.string ?? "", limit: 400))") }
+            for preset in list {
+                let why = preset["refused"]?.string.map { "\n    can't start here: " + ConfigSeal.inert($0, limit: 400) } ?? ""
+                Say.out(describe(preset) + why)
+            }
+            Say.out("(`vibeswitcher new \(ConfigSeal.inert(path, limit: 200)) --preset NAME` starts one)")
+            return 0
+        }
+    }
+
+    /// The preset `name` names among the server's list: the same name, else the same ignoring case (the server's rule).
+    static func named(_ name: String, in list: [NodeWire.Value]) -> NodeWire.Value? {
+        list.first { $0["name"]?.string == name } ?? list.first { $0["name"]?.string?.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
+    /// A preset in one line: its name, what it runs, the variables it sets (by name), and where it's from. Inert.
+    static func describe(_ preset: NodeWire.Value) -> String {
+        let kind = preset["kind"]?.string ?? "?"
+        let command = preset["command"]?.string ?? ""
+        let runs = kind == "shell" ? "a shell" : "\(kind == "claude" ? "Claude" : kind): `\(command.isEmpty ? kind : command)`"
+        var notes: [String] = []
+        if preset["default"]?.bool == true { notes.append("the folder's default") }
+        if preset["project"]?.bool == true { notes.append("this project's") }
+        let env = (preset["env"]?.array ?? []).compactMap(\.string)
+        if !env.isEmpty { notes.append("sets " + env.joined(separator: ", ")) }
+        if preset["keepShell"]?.bool == true { notes.append("a shell stays when it ends") }
+        let tail = notes.isEmpty ? "" : "; " + notes.joined(separator: "; ")
+        return ConfigSeal.inert("\(preset["name"]?.string ?? "?") (\(runs)\(tail))", limit: 600)
     }
 }
 

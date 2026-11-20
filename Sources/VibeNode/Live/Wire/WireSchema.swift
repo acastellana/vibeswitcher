@@ -60,7 +60,8 @@ public enum WireSchema {
                                   "subscribe.args", "subscribe.result", "unsubscribe.args", "chat.page.args", "chat.page.result",
                                   "draft.args", "draft.result", "draft.clear.args",
                                   "board.args", "board.result", "seen.args",
-                                  "session.draft.args", "session.draft.result", "session.draft.clear.args"]
+                                  "session.draft.args", "session.draft.result", "session.draft.clear.args",
+                                  "session.presets.args", "session.presets.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -143,6 +144,13 @@ public enum WireSchema {
             shape("session.draft.args", from: "Requests.sessionDraft (driving sessions, 2026-11-20)", [field("session", .string), field("text", .string)]),
             shape("session.draft.result", from: "Requests.sessionDraft", [field("applied", .map(.int)), field("session", .string)]),
             shape("session.draft.clear.args", from: "Requests.sessionDraft", [field("session", .string)]),
+            // The launch presets (the composer's lane, 2026-11-20): a read, what the page's New session form offers.
+            shape("session.presets.args", from: "Requests.presets (launch presets, 2026-11-20)", [optional("folder", .string)]),
+            shape("session.presets.result", from: "Requests.presets", [field("presets", .list(.shape("session.preset"))), field("problems", strings)]),
+            shape("session.preset", from: "SessionPresets.value", [
+                field("name", .string), field("kind", .words(["claude", "codex", "shell"])), field("command", .string), field("env", strings),
+                field("keepShell", .bool), field("project", .bool), field("default", .bool), field("digest", .string),
+                field("refused", Kind.string.orNull)]),
         ]
 
         // The node (the contract's §5).

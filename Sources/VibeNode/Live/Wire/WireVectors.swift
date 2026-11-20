@@ -380,12 +380,23 @@ public enum WireVectors {
         ])
     }
 
+    /// The launch presets of the vectors' example: the project's own Opus (its default, with a variable set) and the
+    /// built-ins, Codex among them (the node can't start it).
+    static var presetsExample: LaunchPresets {
+        var presets = LaunchPresets.builtIns()
+        let opus = LaunchPreset(id: UUID(uuidString: "6f1d2c3b-4a5e-4f60-8a71-92b3c4d5e6f7")!, name: "Opus", kind: .claude,
+                                command: "claude --model opus", env: ["MAX_THINKING_TOKENS": "16000"])
+        presets.byProject[root] = [opus]
+        presets.defaults[root] = opus.id
+        return presets
+    }
+
     static var hello: NodeWire.Hello {
         NodeWire.Hello(node: NodeIds.node, epoch: epoch,
                        server: .init(commit: "f62aef61", startedAt: "2026-11-17T09:12:44.031Z", pid: 41822),
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
                        kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
-                               "session.draft", "session.draft.clear"],
+                               "session.draft", "session.draft.clear", "session.presets"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -601,6 +612,12 @@ public enum WireVectors {
             ("session.draft.clear", [request(.init(id: "16", kind: "session.draft.clear", args: ["session": .string(plainSession)],
                                                    action: "1c5e8a20-4b7d-4f3e-9a61-0d2c7b5e8f13")),
                                      delta("s1", "sessions", prev: 50, seq: 51, at: "2026-11-17T09:23:41.020Z", changes: [(plainSession, asking(draft: false))])]),
+            // The launch presets for a folder (2026-11-20): the page's New session form offers them; `vibeswitcher new FOLDER
+            // --preset NAME` starts one, the user's voice.
+            ("session.presets", [request(.init(id: "18", kind: "session.presets", args: ["folder": .string(root)])),
+                                 reply("reply.session.presets", .init(re: "18", result: .object([
+                                     "presets": .array(SessionPresets.list(presetsExample, folder: root).map(SessionPresets.value)),
+                                     "problems": .array([])])))]),
             ("send.from-a-page", [reply(.init(re: "17", error: .init(.voice,
                                                                     "send is the user's voice: a web page is never that; run it with `vibeswitcher` in a terminal")))]),
             // §8: a draft, acked; refused.

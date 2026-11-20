@@ -235,6 +235,7 @@ public final class Requests: @unchecked Sendable {
         case "session.new": newSession(request, reply: reply)
         case "session.end": endSession(request, reply: reply)
         case "session.reply": replySession(request, reply: reply)
+        case "session.presets": presets(request, reply: reply)
         case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)

@@ -286,6 +286,8 @@ public enum NodeWire {
         // Driving an ordinary session (the parity table's gaps 1, 3 and 6, 2026-11-20): the user's voice, and a page's draft.
         "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user,
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
+        // The composer and launch presets (2026-11-20): what a session's `/` and `@` offer, and the presets, are reads.
+        "session.presets": .anyone,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
@@ -308,7 +310,7 @@ public enum NodeWire {
     /// and `web.revoke` from the live plan's I1; `chat.page` from I2; `draft` and `draft.clear` from I3, a web page's
     /// only; `tell` from the node frictions of 2026-11-19; `board` from the board view's; `seen` from the parity gaps
     /// of 2026-11-19; `send`, `session.new`, `session.end`, `session.reply`, `session.draft` and `session.draft.clear`
-    /// from driving sessions, 2026-11-20): every kind `kinds` names but the live protocol's later ones (the terminal from
+    /// from driving sessions, 2026-11-20; `session.presets` from the composer's lane, 2026-11-20): every kind `kinds` names but the live protocol's later ones (the terminal from
     /// I4).
     public static let taken = ["status", "start", "stop", "lead", "questions", "draft", "draft.clear", "answer", "hold", "config.held", "config.accept",
                                "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
@@ -316,7 +318,8 @@ public enum NodeWire {
                                "chat.page",
                                "tell",
                                "board", "seen",
-                               "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear"]
+                               "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
+                               "session.presets"]
 
     // MARK: Lines
 

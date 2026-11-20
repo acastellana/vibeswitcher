@@ -21,7 +21,7 @@ let usage = """
            vibeswitcher answer CARD [TEXT] | hold CARD
            vibeswitcher tell FOLDER TEXT
            vibeswitcher send SESSION [TEXT] | reply SESSION CHOICE [TEXT]
-           vibeswitcher new FOLDER [--agent claude|shell] [--model M] | end SESSION
+           vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M] | end SESSION | presets [FOLDER]
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher hooks install|remove [--agent claude|codex]
@@ -58,6 +58,8 @@ case "reply":
     exit(ReplyCommand.run(Array(words.dropFirst())))
 case "new":
     exit(NewCommand.run(Array(words.dropFirst())))
+case "presets":
+    exit(PresetsCommand.run(Array(words.dropFirst())))
 case "end":
     exit(EndCommand.run(Array(words.dropFirst())))
 case "config":

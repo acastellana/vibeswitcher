@@ -162,19 +162,30 @@ extension Requests {
     /// The labels the app gives an ordinary session (its built-in presets' names): never a role's (`LeadTeams.role`).
     static let sessionLabels = ["claude": "Claude", "shell": "Shell"]
 
-    /// `session.new` with `folder` (absolute), `agent` (`claude`, the default, or `shell`) and `model` (Claude's, optional)
+    /// `session.new` with `folder` (absolute), `agent` (`claude`, the default, or `shell`) or `preset` (a launch
+    /// preset's name, with the `digest` `session.presets` gave for it), and `model` (Claude's, optional)
     /// (2026-11-20, the parity table's gap 3): an ordinary session started in the node's host, as the app's New Session
-    /// starts its built-in Claude or Shell preset: labelled as one, the agent recorded with it (`HostedAgents`), 120 by 36.
+    /// starts its built-in Claude or Shell preset, or the preset named (`SessionPresets`: its environment, whether a
+    /// shell stays): labelled as one, the agent recorded with it (`HostedAgents`), 120 by 36.
     /// Claude is the program the node's `claude` link names (`NodePreflight`, never a PATH or a login shell: EN-D13),
-    /// with `--model` when given; a shell is the host's plain shell. Nothing answers its first questions (Claude's trust
-    /// question shows as the session's prompt: `vibeswitcher reply`). Refused: a folder that isn't one, a model name
-    /// that isn't a word, Claude with no `claude` link.
+    /// with a preset's arguments and `--model` when given; a shell is the host's plain shell. Nothing answers its first
+    /// questions (Claude's trust question shows as the session's prompt: `vibeswitcher reply`). Refused: a folder that
+    /// isn't one, a model name that isn't a word, Claude with no `claude` link, a preset the folder hasn't or the node
+    /// can't start, and one whose digest isn't the one shown (it changed since).
     func newSession(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let folder = request.args?["folder"]?.string, folder.hasPrefix("/") else {
             return reply(.init(re: request.id, error: .init(.badArgs, "session.new needs folder, an absolute path")))
         }
+        let presetName = request.args?["preset"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        let shownDigest = request.args?["digest"]?.string
+        if presetName != nil {
+            guard request.args?["agent"] == nil else { return reply(.init(re: request.id, error: .init(.badArgs, "session.new takes agent or preset, not both"))) }
+            guard shownDigest != nil else {
+                return reply(.init(re: request.id, error: .init(.badArgs, "session.new with a preset needs its digest, as `session.presets` gave it")))
+            }
+        }
         let agent = request.args?["agent"]?.string ?? "claude"
-        guard let label = Self.sessionLabels[agent] else {
+        guard Self.sessionLabels[agent] != nil else {
             return reply(.init(re: request.id, error: .init(.badArgs, "session.new's agent is claude or shell, not \(ConfigSeal.inert(agent, limit: 40))")))
         }
         let model = request.args?["model"]?.string.flatMap { $0.isEmpty ? nil : $0 }
@@ -187,40 +198,78 @@ extension Requests {
         let claudeLink = engine?.preflight.claudeLink ?? NodePreflight.claudeLink(root: root)
         let scratch = !VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome)
         let (link, queue, note, nodeRoot) = (self.link, self.queue, self.note, root)
-        // Off the queue: the folder and the link are read from the disk.
+        let refuse = { (why: String) in queue.async { reply(.init(re: request.id, error: .init(.refused, why))) } }
+        // Off the queue: the folder, the presets and the link are read from the disk.
         DispatchQueue.global(qos: .userInitiated).async {
             var isFolder: ObjCBool = false
             let standard = (folder as NSString).standardizingPath
             guard FileManager.default.fileExists(atPath: standard, isDirectory: &isFolder), isFolder.boolValue else {
-                return queue.async { reply(.init(re: request.id, error: .init(.refused, "\(ConfigSeal.inert(folder, limit: 200)) isn't a folder"))) }
+                return refuse("\(ConfigSeal.inert(folder, limit: 200)) isn't a folder")
+            }
+            // The built-in Claude or Shell, else the preset named.
+            var preset = agent == "shell" ? LaunchPreset(name: "Shell", kind: .shell, command: "") : LaunchPreset(name: "Claude", kind: .claude, command: "")
+            if let presetName {
+                let listed = SessionPresets.list(SessionPresets.load(root: nodeRoot).presets, folder: standard)
+                let shown = ConfigSeal.inert(presetName, limit: 80)
+                guard let found = SessionPresets.named(presetName, in: listed) else {
+                    return refuse("no preset \(shown) for \(ConfigSeal.inert(standard, limit: 200)) (`vibeswitcher presets \(ConfigSeal.inert(standard, limit: 200))` lists them)")
+                }
+                if let why = found.refusal { return refuse("preset \(shown) can't start here: \(why)") }
+                guard SessionPresets.digest(found.preset) == shownDigest else {
+                    return refuse("preset \(shown) changed since it was shown: nothing started; run the command again to see it as it is now")
+                }
+                guard model == nil || found.preset.kind == .claude else { return refuse("preset \(shown) starts a shell, which takes no model") }
+                preset = found.preset
             }
             var command: String?
-            if agent == "claude" {
+            if preset.kind == .claude {
                 let found = NodePreflight.resolve(claudeLink)
-                guard let program = found.path else {
-                    return queue.async { reply(.init(re: request.id, error: .init(.refused, found.why ?? "no claude for this node"))) }
-                }
-                command = RecentProjects.shellQuote(program) + (model.map { " --model " + RecentProjects.shellQuote($0) } ?? "")
+                guard let program = found.path else { return refuse(found.why ?? "no claude for this node") }
+                command = SessionPresets.command(preset, program: program).map { $0 + (model.map { " --model " + RecentProjects.shellQuote($0) } ?? "") }
             }
             // A scratch node's hooks and tools keep to its root, as its leads' do.
-            let environment = scratch ? ["VIBESWITCHER_HOME": nodeRoot.path] : [:]
-            let spawn = SpawnRequest(cwd: standard, command: command, env: environment, cols: 120, rows: 36, keepShell: false,
-                                     label: label, agent: agent == "claude" ? "claude" : nil)
+            var environment = preset.env
+            if scratch { environment["VIBESWITCHER_HOME"] = nodeRoot.path }
+            let (kind, label) = (preset.kind == .claude ? "claude" : "shell", preset.name)
+            let spawn = SpawnRequest(cwd: standard, command: command, env: environment, cols: 120, rows: 36, keepShell: preset.keepShell,
+                                     label: preset.name, agent: preset.kind == .claude ? "claude" : nil)
             queue.async {
                 link.spawn(spawn) { result in
                     queue.async {
                         switch result {
                         case .success(let session):
-                            note("session.new: \(label) started in session \(session.id.uuidString.prefix(8)) (\(session.tty))")
+                            note("session.new: \(presetName == nil ? kind : "a preset's \(kind)") started in session \(session.id.uuidString.prefix(8)) (\(session.tty))")
                             reply(.init(re: request.id, result: .object([
                                 "session": .string(NodeIds.session(host: session.id)), "terminal": .string(session.tty),
-                                "agent": .string(agent), "folder": .string(standard), "model": model.map(NodeWire.Value.string) ?? .null,
+                                "agent": .string(kind), "folder": .string(standard), "model": model.map(NodeWire.Value.string) ?? .null,
+                                "preset": presetName.map { _ in .string(label) } ?? .null,
                             ])))
                         case .failure(let failure):
                             reply(.init(re: request.id, error: .init(.refused, "the session host didn't start it: \(failure.message)")))
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// `session.presets` with `folder` (absolute, optional), a read (the parity table's launch presets, 2026-11-20): the
+    /// launch presets the node keeps for that folder (`SessionPresets.list`: its default first), each with the `digest`
+    /// `session.new` takes back, and the lines about what in the file couldn't be read. Off the queue: the file is read.
+    func presets(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        let folder = request.args?["folder"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        if let folder, !folder.hasPrefix("/") {
+            return reply(.init(re: request.id, error: .init(.badArgs, "session.presets' folder is an absolute path")))
+        }
+        let (queue, nodeRoot) = (self.queue, root)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loaded = SessionPresets.load(root: nodeRoot)
+            let listed = SessionPresets.list(loaded.presets, folder: folder)
+            queue.async {
+                reply(.init(re: request.id, result: .object([
+                    "presets": .array(listed.map(SessionPresets.value)),
+                    "problems": .array(loaded.problems.map(NodeWire.Value.string)),
+                ])))
             }
         }
     }
