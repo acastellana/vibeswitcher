@@ -15,9 +15,15 @@ extension LeadEngine {
     func watchRoom(_ waits: LeadWitness.RoomWaits) {
         queue.async { [self] in
             roomWaits = waits
+            // The settings' watches look on the same minute (`SettingsWatch.swift`): the policy, then boost, then the room.
+            let files = settingsFiles
+            policyWatch = LeadWitness.PolicyWatch(read: { WorkingPolicy.load(from: files.policy) }, file: files.policyTold)
             roomTimer = clock?.every(60) { [weak self] in
                 guard let engine = self else { return }
-                engine.queue.async { engine.lookAtRoom() }
+                engine.queue.async {
+                    engine.lookAtPolicy()
+                    engine.lookAtBoost { [weak engine] _ in engine?.lookAtRoom() }
+                }
             }
         }
     }
