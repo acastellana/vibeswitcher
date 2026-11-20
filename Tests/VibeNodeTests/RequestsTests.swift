@@ -208,7 +208,9 @@ struct RequestsTests {
                                     // Driving an ordinary session (2026-11-20).
                                     "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
                                     // A setting changed (2026-11-20).
-                                    "set"]
+                                    "set",
+                                    // Settling the lead's push request (2026-11-20).
+                                    "push", "push.decline"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

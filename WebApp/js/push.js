@@ -1,0 +1,29 @@
+// The push a lead asks for (push_remote), as the page shows it in the lead's chat: what goes where, its commits, and
+// the two lines that settle it in a terminal, `vibeswitcher push` and `vibeswitcher decline-push` (the node's lead
+// value, `push`, while the request is open). Nothing here pushes: a page is never the user's voice; the command shows
+// the request and asks for its code where the user's own hands type it.
+
+import { plural } from './words.js';
+
+// `text` as one shell word, as drive.js writes it: as it is when it needs no quoting, else in single quotes.
+const word = (text) => {
+  const value = String(text);
+  return /^[A-Za-z0-9._\/:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+};
+
+// A URL with no credentials in it: the node sends it so already (`PushText.displayURL`); this holds if one ever doesn't.
+const shownURL = (url) => String(url || '').replace(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#]*@/, '$1');
+
+// What the card says of `push`, the lead of `root`'s open request; null when there's none.
+export function pushLines(push, root) {
+  if (!push || !root) return null;
+  const subjects = push.subjects || [];
+  return {
+    what: `${push.branch} at ${push.short}, ${plural(push.ahead, 'commit')} ahead of ${push.target}`,
+    url: shownURL(push.url),
+    subjects,
+    more: Math.max(0, push.ahead - subjects.length),
+    push: `vibeswitcher push ${word(root)}`,
+    decline: `vibeswitcher decline-push ${word(root)}`,
+  };
+}

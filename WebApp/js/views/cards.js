@@ -12,6 +12,7 @@
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { since, until, clock, plural } from '../words.js';
+import { pushLines } from '../push.js';
 
 const PRIORITY = { blocking: 'Blocking', important: 'Important', whenever: 'Whenever' };
 
@@ -281,11 +282,36 @@ export function questionCard(app, first) {
 }
 
 // The stack under a lead's chat: "2 questions for you", then the cards, open ones first.
+// The push the lead asks for, while it's open: what goes where, from git and the vault, and the two lines that settle
+// it in a terminal. Nothing on the page pushes.
+function pushCard(lead) {
+  const said = pushLines(lead.push, lead.root);
+  const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
+  return h('article', { class: 'card push-card', 'aria-label': 'The lead asks you to push' },
+    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, 'Push'),
+      h('time', { class: 'asked', data: { ago: lead.push.askedAt } }, `asked ${since(lead.push.askedAt)} ago`)),
+    h('h3', { class: 'card-question' }, 'The lead asks you to push'),
+    h('div', { class: 'facts' },
+      h('div', { class: 'facts-head' }, 'From git and the vault'),
+      h('dl', null,
+        fact('Push', said.what),
+        fact('To', h('code', null, said.url)),
+        fact('Commits', h('ul', { class: 'files' }, said.subjects.map((subject) => h('li', null, h('code', null, subject))),
+          said.more ? h('li', null, `and ${plural(said.more, 'more')}`) : null)))),
+    h('div', { class: 'card-command' },
+      h('span', { class: 'card-command-label' }, 'Settle it in a terminal'),
+      copyLine(said.push, 'the command that pushes it'),
+      copyLine(said.decline, 'the command that declines it')),
+    h('p', { class: 'card-foot' }, 'Either shows the request and asks for its code. Push pushes that commit itself, as a fast-forward only; nothing is pushed before you type the code.'));
+}
+
 export function questionStack(app, project) {
   const count = h('h2', { class: 'stack-title' });
   const order = h('span', { class: 'stack-note' }, 'Answer in any order');
+  const pushSlot = h('div', { class: 'stack-cards' });
   const list = h('div', { class: 'stack-cards' });
-  const el = h('section', { class: 'stack', 'aria-label': 'Questions for you' }, h('header', { class: 'stack-head' }, count, order), list);
+  const el = h('section', { class: 'stack', 'aria-label': 'Questions for you' }, h('header', { class: 'stack-head' }, count, order), pushSlot, list);
+  let shownPush = null;
   const rows = new Map();
   // Each card's place: keyed by its first id and ordered by when that card was first asked, so a question the node
   // posts again after a restart (a new card id, the same question) keeps its row, its place and what was typed in it.
@@ -298,8 +324,16 @@ export function questionStack(app, project) {
     const isOpen = (card) => card.open && app.store.state.acting.get(card.id)?.kind !== 'answer';
     const open = cards.filter(isOpen);
     cards.sort((a, b) => (isOpen(b) - isOpen(a)) || (firstAt.get(keyOf(a)) - firstAt.get(keyOf(b))));
-    el.hidden = cards.length === 0;
-    setText(count, open.length ? `${plural(open.length, 'question')} for you` : 'No questions waiting');
+    const lead = app.store.state.leads.get(project);
+    const push = lead?.push && lead.root ? lead : null;
+    // Drawn again only when the request changed: a newer one replaces it, a settled one leaves.
+    const pushKey = push ? `${push.push.id}:${push.root}` : null;
+    if (pushKey !== shownPush) {
+      shownPush = pushKey;
+      pushSlot.replaceChildren(...(push ? [pushCard(push)] : []));
+    }
+    el.hidden = cards.length === 0 && !push;
+    setText(count, open.length ? `${plural(open.length, 'question')}${push ? ' and a push' : ''} for you` : push ? 'A push waits for you' : 'No questions waiting');
     setClass(count, 'blocking', open.some((card) => card.blocking));
     order.hidden = open.length < 2;
     const before = rows.size;
@@ -317,7 +351,7 @@ export function questionStack(app, project) {
     for (const [id, row] of rows) if (!next.has(id)) row.el.remove();
     rows.clear();
     for (const [id, row] of next) rows.set(id, row);
-    return open.length;
+    return open.length + (push ? 1 : 0);
   }
 
   return { el, update, focusLast() { const cards = el.querySelectorAll('.card:not(.closed)'); cards[cards.length - 1]?.querySelector('.option, .answer-input')?.focus(); } };
