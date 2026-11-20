@@ -145,4 +145,22 @@ struct PushAsksTests {
         let (book, folder, leadID) = (world.host.book, world.host.folder, lead.session.id.uuidString)
         #expect(throws: (any Error).self) { try book.vault(folder: folder, as: { .session(leadID) }).settlePush(id: request.id, root: repo) }
     }
+
+    /// Through the command line on a scratch node: with no request open there's nothing to settle and no code is asked;
+    /// a folder no lead holds is refused; a wrong form is the usage.
+    @Test func theCommandLineRefusesWithNoRequestOpenAndNoLeadThere() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let lead = try await node.askingLead("Name the parser?", options: ["Parser", "Reader"])
+        let none = try await node.runOnTerminal(["push", lead.repo.path])
+        #expect(none.status == 77, "\(none.output)\(none.errors)\n\(node.said)")
+        #expect((none.output + none.errors).contains("has no push request open: nothing to push"), "\(none.output)\(none.errors)")
+        let other = node.root.appendingPathComponent("other")
+        try await scratchRepository(other)
+        let elsewhere = try await node.runOnTerminal(["decline-push", other.path])
+        #expect(elsewhere.status == 77 && (elsewhere.output + elsewhere.errors).contains("no lead on this node holds"),
+                "\(elsewhere.output)\(elsewhere.errors)")
+        let usage = try await node.run(["decline-push"])
+        #expect(usage.status == 64 && usage.errors.contains("usage: vibeswitcher decline-push FOLDER"), "\(usage.output)\(usage.errors)")
+    }
 }
