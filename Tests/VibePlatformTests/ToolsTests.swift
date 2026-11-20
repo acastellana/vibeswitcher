@@ -22,9 +22,9 @@ struct ToolsTests {
         #expect(FileManager.default.isExecutableFile(atPath: git))
         #expect(Platform.Tools.git == git)
         #if os(Linux)
-        // The first on PATH in a folder only root can write.
+        // The first on PATH in a folder only root can write (in a box, by the box's rule: `boxOwners`).
         #expect(git == Platform.Tools.trustedGit(path: ProcessInfo.processInfo.environment["PATH"] ?? Platform.Tools.pathWhenUnset,
-                                                 status: Platform.Tools.fileStatus))
+                                                 status: Platform.Tools.fileStatus, box: Platform.Tools.boxOwners))
         #else
         #expect(git == "/usr/bin/git")
         #endif
