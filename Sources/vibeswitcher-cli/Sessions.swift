@@ -167,6 +167,10 @@ enum SendCommand {
         Say.out(result["working"]?.bool == true
             ? "sent: \(characters) characters typed into session \(short); it was working, so it takes them after its turn"
             : "sent: \(characters) characters typed into session \(short)")
+        if let opened = result["opened"]?.string {
+            Say.out("\(ConfigSeal.inert(opened, limit: 200)) now: choose in the session's terminal, or close it there (Esc); "
+                + "what you send meanwhile waits for it")
+        }
     }
 }
 

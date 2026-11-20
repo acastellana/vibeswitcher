@@ -399,7 +399,7 @@ public enum WireVectors {
                        server: .init(commit: "f62aef61", startedAt: "2026-11-17T09:12:44.031Z", pid: 41822),
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
                        kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
-                               "session.draft", "session.draft.clear", "session.presets"],
+                               "session.draft", "session.draft.clear", "session.presets", "session.complete"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -617,6 +617,12 @@ public enum WireVectors {
                                      delta("s1", "sessions", prev: 50, seq: 51, at: "2026-11-17T09:23:41.020Z", changes: [(plainSession, asking(draft: false))])]),
             // A message sent while the question is open waits for it (the composer's lane, 2026-11-20).
             ("session.queued", [delta("s1", "sessions", prev: 51, seq: 52, at: "2026-11-17T09:23:50.010Z", changes: [(plainSession, asking(draft: false, queued: true))])]),
+            // What the composer offers as `@` and `/` are typed (the composer's lane, 2026-11-20).
+            ("session.complete", [request(.init(id: "19", kind: "session.complete", args: ["session": .string(plainSession), "kind": .string("mention"),
+                                                                                       "query": .string("logn")])),
+                                  reply("reply.session.complete", .init(re: "19", result: .object(["items": .array([
+                                      SessionCompletions.value(insert: "@src/login.ts ", title: "login.ts", subtitle: "src/login.ts"),
+                                      SessionCompletions.value(insert: "@tests/login.test.ts ", title: "login.test.ts", subtitle: "tests/login.test.ts")])])))]),
             // The launch presets for a folder (2026-11-20): the page's New session form offers them; `vibeswitcher new FOLDER
             // --preset NAME` starts one, the user's voice.
             ("session.presets", [request(.init(id: "18", kind: "session.presets", args: ["folder": .string(root)])),

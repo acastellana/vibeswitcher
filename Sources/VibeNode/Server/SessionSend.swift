@@ -44,8 +44,8 @@ extension Requests {
     /// agent: the app's composer refuses it too), one whose agent left its terminal, a lead another one replaced
     /// (`vibeswitcher tell` reaches the live lead), an image that isn't one Claude Code reads (png, jpg, jpeg, gif,
     /// webp) or isn't a file. The screen is read in the unit's gate, right before its first write, so nothing typed
-    /// meanwhile can come between. The reply names the session, its terminal, whether its agent was working, and
-    /// `queued` for a held message. A page's draft for the session that is the message sent goes.
+    /// meanwhile can come between. The reply names the session, its terminal, whether its agent was working,
+    /// `queued` for a held message (and why it `waits`), and what a `/` command `opened` on the screen (a picker). A page's draft for the session that is the message sent goes.
     func send(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let text = (request.args?["text"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let images = request.args?["images"]?.array?.map { $0.string ?? "" } ?? []
@@ -78,7 +78,7 @@ extension Requests {
         let (queue, drafts) = (self.queue, sessionDrafts)
         let id = NodeIds.session(host: session.id)
         let held = HeldSend(message: message, text: text, images: images, at: Date(), action: request.action ?? request.id)
-        let answer = { (queued: String?) in
+        let answer = { (queued: String?, opened: String?) in
             // The page's draft it was is sent (or waits to be): it goes from beside the session.
             if let draft = drafts.values[id], draft.text.trimmingCharacters(in: .whitespacesAndNewlines) == text, draft.images == images {
                 drafts.send(id, nil)
@@ -86,6 +86,7 @@ extension Requests {
             var result: [String: NodeWire.Value] = ["session": .string(id), "terminal": .string(session.tty), "working": .bool(working),
                                                     "characters": .int(message.count), "queued": .bool(queued != nil)]
             if let queued { result["waits"] = .string(queued) }
+            if let opened { result["opened"] = .string(opened) }
             reply(.init(re: request.id, result: .object(result)))
         }
         // Off the engine's queue: the agent's process is read from /proc, the images from the disk.
@@ -101,15 +102,18 @@ extension Requests {
                 // Behind the messages it holds already, in the order sent.
                 if !(self.heldSends.values[id] ?? []).isEmpty {
                     guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
-                    return answer("messages sent before it wait in session \(short)")
+                    return answer("messages sent before it wait in session \(short)", nil)
                 }
                 self.typeIn(held, into: session) { outcome in
                     switch outcome {
                     case .typed:
-                        answer(nil)
+                        // A command may open a picker (`/model`, `/resume`): the reply says so, as the app's composer
+                        // watches the screen for one.
+                        guard text.hasPrefix("/"), images.isEmpty else { return answer(nil, nil) }
+                        Self.watchForMenu(session.id, link: self.link, queue: queue, until: Date().addingTimeInterval(Self.pickerWait)) { answer(nil, $0) }
                     case .menuOpen(let open):
                         guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
-                        answer(open)
+                        answer(open, nil)
                     case .refused(let why):
                         reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
                     }
@@ -190,6 +194,20 @@ extension Requests {
             }
             done(outcome)
         })
+    }
+
+    /// How long the screen is watched for a picker after a `/` command went in.
+    static let pickerWait: TimeInterval = 2
+
+    /// Answers `found` with what opened on the session's screen (`openMenu`), or nil at `deadline`.
+    static func watchForMenu(_ id: UUID, link: HostLink, queue: DispatchQueue, until deadline: Date, _ found: @escaping (String?) -> Void) {
+        link.screen(id) { screen in
+            queue.async {
+                if let screen, let open = openMenu(screen) { return found(open) }
+                guard Date() < deadline else { return found(nil) }
+                queue.asyncAfter(deadline: .now() + 0.2) { watchForMenu(id, link: link, queue: queue, until: deadline, found) }
+            }
+        }
     }
 
     /// Answers `go` once the session's input box shows `images` taken (`ComposerText.imagesTaken`), or at `deadline`

@@ -110,6 +110,22 @@ struct SendTests {
         }
     }
 
+    /// A `/` command goes in as the composer types it; one that opens a picker (`/model`) is said, and a message sent
+    /// while the picker is open waits for it to close.
+    @Test func aSlashCommandsPickerIsSaidAndAMessageWaitsForIt() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let harness = try await claude(world)
+        let model = try #require(await send(world, harness.session.id.uuidString, "/model"))
+        #expect(model.ok && model.result?["opened"]?.string?.contains("open on its screen") == true, "\(model)")
+        let held = try #require(await send(world, harness.session.id.uuidString, "Carry on"))
+        #expect(held.ok && held.result?["queued"]?.bool == true, "\(held)")
+        #expect(harness.agent["mode"] as? String == "picker", "\(harness.agent)")
+        // Esc closes it, in the session's terminal; the message goes in then.
+        world.queue.sync { world.world.link.type([HostInput.Write(bytes: [27], delay: 0)], into: harness.session.id) }
+        try await harness.waitFor { prompts(harness).contains("Carry on") }
+    }
+
     @Test func aMessageIsItsWordsThenEachImagesPathOnALineOfItsOwn() {
         #expect(Requests.message(text: "Look", images: ["/a/b.png", "/c/it's.png"]) == "Look\n\n'/a/b.png'\n'/c/it'\\''s.png'")
         #expect(Requests.message(text: "", images: ["/a/b.png"]) == "'/a/b.png'")
@@ -190,5 +206,74 @@ struct SendTests {
         #expect(Requests.openMenu(box) == nil)
         let question = "Bash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n\nEsc to cancel"
         #expect(Requests.openMenu(question)?.contains("a question is open") == true)
+    }
+}
+
+/// What a session's composer completes (the composer's lane, 2026-11-20): `/` to its agent's commands, the user's and
+/// the project's own among them, `@` to its folder's files, as the app's composer offers them; a read.
+@Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(5)))
+struct SessionCompleteTests {
+    private let scratch = Scratch()
+
+    private func write(_ text: String, to path: String, in folder: URL) throws {
+        let url = folder.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: url)
+    }
+
+    @Test func slashAndMentionCompleteAsTheAppsComposerDoes() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let home = scratch.url("home")
+        world.queue.sync { world.requests.home = home.path }
+        try write("---\ndescription: Ship it to staging\n---\nDeploy.", to: ".claude/commands/deploy.md", in: home)
+        try write("---\nname: review-pr\ndescription: Review a pull request\n---\n", to: ".claude/skills/review-pr/SKILL.md", in: home)
+        let repo = URL(fileURLWithPath: world.repo)
+        try write("# Release\nSteps.", to: ".claude/commands/release.md", in: repo)
+        try write("export {}", to: "src/login.ts", in: repo)
+        try write("x", to: "node_modules/left-pad/login.js", in: repo)
+        let harness = try await NodeHarness.start(on: world.host, fake: world.world.fake, cwd: world.repo, label: "Claude")
+        try #require(await eventually(timeout: 60) { world.queue.sync { world.world.link.sessions.contains { $0.id == harness.session.id && $0.isLive } } })
+        let session = harness.session.id.uuidString
+
+        func complete(_ kind: String, _ query: String) async throws -> [NodeWire.Value] {
+            let reply = try #require(await world.ask("session.complete", ["session": .string(session), "kind": .string(kind), "query": .string(query)], action: nil))
+            #expect(WireSchema.check(try #require(reply.result, "\(reply)"), as: "session.complete.result", strict: true) == nil)
+            return reply.result?["items"]?.array ?? []
+        }
+        #expect(try await complete("slash", "dep").first == SessionCompletions.value(insert: "/deploy ", title: "/deploy", subtitle: "Ship it to staging"))
+        #expect(try await complete("slash", "review").first?["insert"]?.string == "/review ")
+        #expect(try await complete("slash", "review-").first?["insert"]?.string == "/review-pr ")
+        #expect(try await complete("slash", "rel").first?["subtitle"]?.string == "Release")
+        #expect(try await complete("slash", "comp").first?["insert"]?.string == "/compact ")
+        let files = try await complete("mention", "login")
+        #expect(files.map { $0["insert"]?.string } == ["@src/login.ts "], "\(files)")
+
+        let shell = try await world.host.spawn("exec /bin/sleep 600", cwd: world.repo, label: "Shell")
+        try #require(await eventually(timeout: 60) { world.queue.sync { world.world.link.sessions.contains { $0.id == shell.id && $0.isLive } } })
+        for (args, says) in [(["session": NodeWire.Value.string(shell.id.uuidString), "kind": .string("slash"), "query": .string("")], "no agent"),
+                             (["session": .string(session), "kind": .string("other"), "query": .string("")], "slash or mention")] {
+            let refused = try #require(await world.ask("session.complete", args, action: nil))
+            #expect(refused.error?.message.contains(says) == true, "\(refused)")
+        }
+    }
+
+    @Test func aListIsReusedAWhileThenMadeAgain() throws {
+        let folder = scratch.url("work")
+        try write("a", to: "one.txt", in: folder)
+        let index = SessionCompletions()
+        let now = Date()
+        #expect(index.files(in: folder.path, now: now) == ["one.txt"])
+        try write("b", to: "two.txt", in: folder)
+        #expect(index.files(in: folder.path, now: now.addingTimeInterval(5)) == ["one.txt"])
+        #expect(Set(index.files(in: folder.path, now: now.addingTimeInterval(SessionCompletions.kept + 1))) == ["one.txt", "two.txt"])
+    }
+
+    @Test func aPageReadsCompletionsAndPresets() {
+        for kind in ["session.complete", "session.presets"] {
+            #expect(NodeWire.kinds[kind] == .anyone && NodeWire.taken.contains(kind) && !NodeWire.changesState(kind))
+            #expect(WebAccess.kinds(for: [.read]).contains(kind))
+            #expect(WebAccess.refusal(for: NodeWire.Request(id: "1", kind: kind), rights: [.draft])?.error?.code == NodeWire.Code.voice.rawValue)
+        }
     }
 }

@@ -64,6 +64,8 @@ public final class Requests: @unchecked Sendable {
     public let heldSends = Changes<[HeldSend]>()
     /// The sessions whose held messages are being typed in now (`pumpHeld`). On `queue`.
     var pumping: Set<UUID> = []
+    /// What sessions' composers complete (`session.complete`), kept a while.
+    let completionIndex = SessionCompletions()
     /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]
@@ -241,6 +243,7 @@ public final class Requests: @unchecked Sendable {
         case "session.end": endSession(request, reply: reply)
         case "session.reply": replySession(request, reply: reply)
         case "session.presets": presets(request, reply: reply)
+        case "session.complete": complete(request, reply: reply)
         case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)

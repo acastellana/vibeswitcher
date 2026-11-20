@@ -61,7 +61,7 @@ public enum WireSchema {
                                   "draft.args", "draft.result", "draft.clear.args",
                                   "board.args", "board.result", "seen.args",
                                   "session.draft.args", "session.draft.result", "session.draft.clear.args",
-                                  "session.presets.args", "session.presets.result"]
+                                  "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -147,6 +147,11 @@ public enum WireSchema {
             // The launch presets (the composer's lane, 2026-11-20): a read, what the page's New session form offers.
             shape("session.presets.args", from: "Requests.presets (launch presets, 2026-11-20)", [optional("folder", .string)]),
             shape("session.presets.result", from: "Requests.presets", [field("presets", .list(.shape("session.preset"))), field("problems", strings)]),
+            // What a session's composer completes (the composer's lane, 2026-11-20): a read, at the page's keystrokes.
+            shape("session.complete.args", from: "Requests.complete (the composer, 2026-11-20)", [
+                field("session", .string), field("kind", .words(["slash", "mention"])), field("query", .string)]),
+            shape("session.complete.result", from: "Requests.complete", [field("items", .list(.shape("session.completion")))]),
+            shape("session.completion", from: "SessionCompletions.value", [field("insert", .string), field("title", .string), field("subtitle", .string)]),
             shape("session.preset", from: "SessionPresets.value", [
                 field("name", .string), field("kind", .words(["claude", "codex", "shell"])), field("command", .string), field("env", strings),
                 field("keepShell", .bool), field("project", .bool), field("default", .bool), field("digest", .string),
