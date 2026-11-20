@@ -92,3 +92,11 @@ The user's answer; a later lead must not ask again about installing 9b022ea3, an
 
 A later lead must know which commit is the finished one, that the installed build may come from the main checkout's v2 rather than this branch, why three tasks sit planned with auto_advance off, and what releases them.
 
+## 2026-11-20 20:50:00 Windows access as a per-session permission (the last task of the sandbox's first slice; it starts after SB6 2/2): who turns it on for a session? A session that has it can act as you on Windows, so its box no longer holds it. → You, per session: the lead asks for it on one task, you approve that grant at the command line with the typed code; shown on the card and in status
+
+The lead proposed it with a 240 min timer and the user didn't answer in time, so it went ahead (question 6F2DF7B9). Why it was asked: The task's contract is written on this; its worker starts in some hours.
+
+## 2026-11-20 20:50:11 Windows access for a box is granted by the user, per session (question 6F2DF7B9, no answer in 240 min, the lead's proposal stands since 2026-11-20 20:49): the lead asks for it on one task, the user approves that grant at the command line with the typed code, and it is shown on the session's card and in status; off by default, no project-wide key. windows-access-is-a's contract is already written on this; it starts after SB6 2/2 and ends the sandbox's first slice. If the user answers differently later, the contract is changed before its worker starts.
+
+A reversible design choice proposed with a timer; a session with Windows access can act as the user on Windows, so the narrowest grant (one session, the user's own typed approval) is the default the lead goes ahead with.
+
