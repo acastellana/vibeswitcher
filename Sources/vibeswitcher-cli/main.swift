@@ -20,7 +20,7 @@ let usage = """
            vibeswitcher board [FOLDER] [--json]
            vibeswitcher answer CARD [TEXT] | hold CARD
            vibeswitcher tell FOLDER TEXT
-           vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD
+           vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher hooks install|remove [--agent claude|codex]
            vibeswitcher web [--revoke]
