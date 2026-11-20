@@ -261,6 +261,29 @@ struct SessionDriveTests {
         #expect(status(world, requests, id)?["draft"] == .null)
     }
 
+    /// A page's send-now draft (its composer while the agent works) is kept saying so, for `vibeswitcher send SESSION` to
+    /// steer it (`SteerNowTests`); a plain one after it says nothing of now.
+    @Test func aPagesSendNowDraftIsKeptSayingSo() async throws {
+        let (world, sessions, requests) = try await scanned()
+        defer { world.stop(); sessions.stop() }
+        let harness = try await NodeHarness.start(on: world.host, fake: world.fake, cwd: world.repo, label: "Claude")
+        let id = NodeIds.session(host: harness.session.id)
+        try #require(await eventually(timeout: 60) { sessions.refresh(); return status(world, requests, id) != nil })
+        func page(_ args: [String: NodeWire.Value]) async -> NodeWire.Reply? {
+            let reply = Locked<NodeWire.Reply?>(nil)
+            let request = NodeWire.Request(id: "1", kind: "session.draft", args: args, action: UUID().uuidString.lowercased())
+            world.queue.async { requests.draft(request) { reply.value = $0 } }
+            _ = await eventually(timeout: 60) { reply.value != nil }
+            return reply.value
+        }
+        let now = try #require(await page(["session": .string(id), "text": .string("Read the logs first"), "now": .bool(true)]))
+        #expect(now.ok, "\(now)")
+        #expect(status(world, requests, id)?["draft"]?["now"]?.bool == true)
+        #expect(harness.transcript.isEmpty, "a draft is typed into nothing")
+        _ = try #require(await page(["session": .string(id), "text": .string("Later")]))
+        #expect(status(world, requests, id)?["draft"]?["text"]?.string == "Later" && status(world, requests, id)?["draft"]?["now"] == nil)
+    }
+
     /// An image a page pastes comes in parts, is written to the node's attachments folder as the app saves a pasted
     /// one, and the page's draft names it; `send` with the draft's words and image types both, and the draft goes. A
     /// draft names no file but an attached image.
