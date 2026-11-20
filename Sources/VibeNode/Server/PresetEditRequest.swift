@@ -217,7 +217,7 @@ enum PresetEdit {
         guard let data, !data.allSatisfy({ $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }) else { return nil }
         let file = SessionPresets.decode(data)
         guard let why = Requests.presetsBaselineRefusal(vault: vault, home: home, nodeRoot: nodeRoot, file: file, folder: "FOLDER") else { return nil }
-        return "presets.json has changes you haven't accepted (\(why)): review them with `vibeswitcher config held` and accept them first; nothing changed"
+        return "presets.json has changes you haven't accepted: review with `vibeswitcher config held`, then `config accept` (\(why)); nothing changed"
     }
 
     /// A Claude preset's command: `claude` and the words given.
