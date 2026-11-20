@@ -36,11 +36,32 @@ public enum PushText {
         return url
     }
 
-    /// `text` with every URL's userinfo taken out (`scheme://anything@` is `scheme://`): git's own words, the lead's
-    /// message and the outcome, before any of them is shown.
+    /// `text` with no URL's credentials in it: every URL's userinfo taken out (`scheme://anything@` is `scheme://`), and in
+    /// an http(s) URL the value of a token-ish query parameter (`token`, `access_token`, `private_token`, `password`,
+    /// `secret`, `api_key`, `apikey`, `sig`, `signature`, `auth`) written `…`. Nothing else in the text changes. Git's own
+    /// words, the lead's message, the outcome, and every chat item the node serves (`ChatValue`) go through it.
     public static func scrub(_ text: String) -> String {
-        text.replacingOccurrences(of: #"([A-Za-z][A-Za-z0-9+.\-]*://)[^\s/'"]+@"#, with: "$1", options: .regularExpression)
+        guard text.contains("://") else { return text }
+        let bare = text.replacingOccurrences(of: #"([A-Za-z][A-Za-z0-9+.\-]*://)[^\s/'"]+@"#, with: "$1", options: .regularExpression)
+        guard bare.range(of: "[?&]", options: .regularExpression) != nil else { return bare }
+        let found = urls.matches(in: bare, range: NSRange(bare.startIndex..., in: bare))
+        guard !found.isEmpty else { return bare }
+        var scrubbed = bare
+        for match in found.reversed() {
+            guard let range = Range(match.range, in: bare) else { continue }
+            let url = String(bare[range])
+            let cleaned = queryTokens.stringByReplacingMatches(in: url, range: NSRange(url.startIndex..., in: url), withTemplate: "$1…")
+            if cleaned != url, let at = Range(match.range, in: scrubbed) { scrubbed.replaceSubrange(at, with: cleaned) }
+        }
+        return scrubbed
     }
+
+    /// An http(s) URL in text, to its first space, quote or angle bracket.
+    private static let urls = try! NSRegularExpression(pattern: #"[Hh][Tt][Tt][Pp][Ss]?://[^\s'"<>]+"#)
+    /// A token-ish query parameter's name, and its value up to the next parameter or the fragment.
+    private static let queryTokens = try! NSRegularExpression(
+        pattern: #"([?&](?:access_token|private_token|token|password|secret|api_key|apikey|sig|signature|auth)=)[^&#]+"#,
+        options: [.caseInsensitive])
 
     /// The lines shown above the code: `push` true for Push, false for Decline.
     public static func what(_ push: NodeWire.Value, root: String, approve: Bool) -> String {
