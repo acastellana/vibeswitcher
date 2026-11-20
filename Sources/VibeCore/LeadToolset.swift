@@ -5849,13 +5849,19 @@ public final class LeadToolset: MCPToolset {
     /// it never heard of would leave the team quiet, and what the run wrote would be sealed as the user's.
     /// It counts as running until `endBranchRun` with the id this gives.
     func markBranchRun(not: String) throws -> String {
-        do { return try vault.markBranchRun(root: root) } catch {
+        do {
+            let id = try vault.markBranchRun(root: root)
+            // Until its end, this thread's runs are boxed by the project's settings, as the user accepted them.
+            BranchRun.enter(policy: vault.sandboxPolicy(workflow, root: root, home: BranchRun.accountHome))
+            return id
+        } catch {
             throw Problem(text: "\(not): the session host couldn't record that the branch's code runs (\(error)), so it didn't run.")
         }
     }
 
     /// The branch run `id` (`markBranchRun`'s) ended. Not told, the vault counts it as running for a day: never quiet.
     func endBranchRun(_ id: String) {
+        BranchRun.leave()
         try? vault.endBranchRun(id, root: root)
     }
 
@@ -6172,8 +6178,10 @@ public final class LeadToolset: MCPToolset {
         try? FileManager.default.removeItem(at: home)
         do { try vault.ensurePrivate(home) } catch { return undecided("it couldn't start: its scratch home couldn't be made (\(error))") }
         defer { try? FileManager.default.removeItem(at: home) }
-        let (stopped, _) = Worktrees.runChecks(setup: nil, test: run, in: worktree, home: home.path, timeout: limit, lock: heavyLock(workflow),
-                                               as: "the pre-done check of \(slug)", place: worktree)
+        let stopped = BranchRun.with(policy: vault.sandboxPolicy(workflow, root: root, home: BranchRun.accountHome)) {
+            Worktrees.runChecks(setup: nil, test: run, in: worktree, home: home.path, timeout: limit, lock: heavyLock(workflow),
+                                as: "the pre-done check of \(slug)", place: worktree).stopped
+        }
         // What's recorded is the commit checked: one committed while it ran wasn't.
         if let now = branchHead(Worktrees.branch(slug)), now != head {
             throw Problem(text: "Not reported: your branch moved from \(head.prefix(8)) to \(now.prefix(8)) while the pre-done check ran, so it didn't check what you'd report. Report done again.")

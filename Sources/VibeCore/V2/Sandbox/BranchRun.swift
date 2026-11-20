@@ -43,8 +43,9 @@ public enum BranchRun {
 
     /// What to start for `wrapped` (`BranchCode.wrapper` and its command) in `cwd`, with `home` as the run's scratch
     /// home: the launcher at `server` with its request, or, where no box can be built (`facts.why`) and on the Mac,
-    /// `wrapped` as it is. `keep`: the descriptors the launcher must inherit, none in this slice (a proxied run's
-    /// listener line, from slice 2).
+    /// `wrapped` as it is. With the project's `sandbox: off` (`policy.enabled` false), where a box could be built:
+    /// `wrapped` plain, saying so first (`plain`). `keep`: the descriptors the launcher must inherit, none in this
+    /// slice (a proxied run's listener line, from slice 2).
     public static func command(_ wrapped: [String], cwd: String, home: String, policy: SandboxPolicy, server: String,
                                facts: Platform.Sandbox.Facts) -> (executable: String, arguments: [String], keep: [Int32]) {
         command(wrapped, cwd: cwd, home: home, policy: policy, server: server, facts: facts, accountHome: VibePaths.home,
@@ -56,6 +57,10 @@ public enum BranchRun {
                         facts: Platform.Sandbox.Facts, accountHome: String, onTheMac: Bool)
         -> (executable: String, arguments: [String], keep: [Int32]) {
         guard !onTheMac, facts.why == nil, !wrapped.isEmpty else { return (wrapped.first ?? "", wrapped, []) }
+        guard policy.enabled else {
+            let plain = plain(wrapped)
+            return (plain[0], plain, [])
+        }
         let request = Request(cwd: cwd, home: home, accountHome: accountHome, policy: policy, wrapped: wrapped)
         return (server, [server] + request.arguments, [])
     }
@@ -110,18 +115,65 @@ public enum BranchRun {
     /// the tool server, `VibePaths.home`), and for the settings `SandboxPolicy.standard`.
     ///
     /// The settings reach a run only this way: neither `Shell.run` nor a verifier's prefix knows the project, and this
-    /// type never reads `workflow.md` itself, whose `sandbox*` keys count only once the vault's guard has passed them
-    /// (`LeadVault.guardedKeys`). Until the lead's tools set them around their runs, a run's box is the standard one.
+    /// type never reads `workflow.md` itself, whose `sandbox*` keys count only as the vault holds them accepted
+    /// (`LeadVault.sandboxPolicy`). The lead's tools set them around the runs they start (`with(policy:)`: where a
+    /// branch's code is marked as running, `LeadToolset.markBranchRun`, and the pre-done check); any other run's box is
+    /// the standard one.
+    ///
+    /// `refusal`: the project's settings couldn't be read (a key that names a hidden folder, the vault unreadable):
+    /// a run that would be boxed starts nothing then, and says why (`launching`).
     struct Scope {
         var launcher: String?
         var accountHome: String?
         var policy = SandboxPolicy.standard
+        var refusal: SandboxRefusal?
     }
 
     private static let scopeKey = "VibeCore.BranchRun.scope"
 
     /// The scope `with` gave this thread.
     static var scope: Scope? { Thread.current.threadDictionary[scopeKey] as? Scope }
+
+    /// The account home this thread's runs are planned and judged by: its scope's, else the account's own
+    /// (`VibePaths.accountHome`, which no environment moves). What the project's paths are read against.
+    static var accountHome: String { scope?.accountHome ?? VibePaths.accountHome }
+
+    /// Runs `body` with the project's settings `policy` (`LeadVault.sandboxPolicy`'s) for the branch runs it starts on
+    /// this thread, the rest of this thread's scope (a launcher a test named, its account home) kept.
+    static func with<T>(policy: Result<SandboxPolicy, SandboxRefusal>, _ body: () throws -> T) rethrows -> T {
+        try with(scoped(policy), body)
+    }
+
+    /// This thread's scope with `policy` in it.
+    static func scoped(_ policy: Result<SandboxPolicy, SandboxRefusal>) -> Scope {
+        var scope = self.scope ?? Scope()
+        switch policy {
+        case .success(let read): (scope.policy, scope.refusal) = (read, nil)
+        case .failure(let refusal): (scope.policy, scope.refusal) = (.standard, refusal)
+        }
+        return scope
+    }
+
+    private static let enteredKey = "VibeCore.BranchRun.entered"
+
+    /// A scope this thread had before an `enter` (none: `nil`), as the stack keeps it.
+    private struct Before { var scope: Scope? }
+
+    /// `with(policy:)` for a span that isn't one closure (a mark and its end, `LeadToolset.markBranchRun`): the
+    /// thread's scope until its `leave`, on the same thread. Spans nest; each `leave` gives back what its `enter` found.
+    static func enter(policy: Result<SandboxPolicy, SandboxRefusal>) {
+        let dictionary = Thread.current.threadDictionary
+        dictionary[enteredKey] = ((dictionary[enteredKey] as? [Before]) ?? []) + [Before(scope: scope)]
+        dictionary[scopeKey] = scoped(policy)
+    }
+
+    /// Ends this thread's last `enter`: its scope is what that found. Nothing when none is open.
+    static func leave() {
+        let dictionary = Thread.current.threadDictionary
+        guard var stack = dictionary[enteredKey] as? [Before], let before = stack.popLast() else { return }
+        dictionary[enteredKey] = stack.isEmpty ? nil : stack
+        if let scope = before.scope { dictionary[scopeKey] = scope } else { dictionary.removeObject(forKey: scopeKey) }
+    }
 
     /// Runs `body` with `scope` for the branch runs it starts on this thread (nil: with none), as `ShellCancel.with`
     /// gives a thread its cancel.
@@ -165,13 +217,35 @@ public enum BranchRun {
     /// The run's scratch home is the one its caller made, `CFFIXED_USER_HOME` (`Worktrees.runChecks`); for a command
     /// that has the account's own (a verifier's), `verifierHome` in its TMPDIR; with neither, none, which the launcher
     /// refuses. `facts`: nil for this machine's, asked only once a launcher is known.
+    ///
+    /// The scope's settings: refused (`Scope.refusal`), a run that would be boxed starts nothing and says which key on
+    /// stderr, exiting `refused`; `sandbox: off`, the wrapper runs plain, saying so first (`command`).
     static func launching(_ wrapped: [String], in directory: String, environment: [String: String],
                           facts: Platform.Sandbox.Facts? = nil, onTheMac: Bool = Platform.CodeIdentity.isAvailable) -> [String] {
         let scope = self.scope
         guard !onTheMac, let launcher = scope?.launcher ?? own.launcher else { return wrapped }
         let account = scope?.accountHome ?? VibePaths.home
+        let facts = facts ?? Platform.Sandbox.probe()
+        if let refusal = scope?.refusal, facts.why == nil, !wrapped.isEmpty { return refusing(refusal) }
         return command(wrapped, cwd: directory, home: home(environment, account: account), policy: scope?.policy ?? .standard,
-                       server: launcher, facts: facts ?? Platform.Sandbox.probe(), accountHome: account, onTheMac: onTheMac).arguments
+                       server: launcher, facts: facts, accountHome: account, onTheMac: onTheMac).arguments
+    }
+
+    /// What starts in place of a run whose project's settings were refused: a shell that says so and exits `refused`.
+    static func refusing(_ refusal: SandboxRefusal) -> [String] {
+        ["/bin/sh", "-c", "printf '%s\\n' \"$0\" >&2; exit \(refused)",
+         "vibeswitcher: this branch run wasn't started: the project's settings for its box are refused (workflow.md's \(refusal)). Nothing of it ran."]
+    }
+
+    /// The line a run with `sandbox: off` says first.
+    static let plainNotice = "vibeswitcher: this branch run is in no box: the project's workflow.md says sandbox: off, as the user accepted it."
+
+    /// `wrapped`, plain, saying `plainNotice` on stderr first: inside the wrapper when it starts with it (so what runs is
+    /// still known for the wrapper's, `BranchCode.isRunner`), else before it.
+    static func plain(_ wrapped: [String]) -> [String] {
+        let say = ["/bin/sh", "-c", "printf '%s\\n' \"$0\" >&2; exec \"$@\"", plainNotice]
+        let wrapper = wrapped.starts(with: BranchCode.wrapper) ? BranchCode.wrapper.count : 0
+        return Array(wrapped.prefix(wrapper)) + say + wrapped.dropFirst(wrapper)
     }
 
     /// The run's scratch home, from the environment it is started with (see `launching`); empty for none.
@@ -252,8 +326,8 @@ public enum BranchRun {
     /// - Judged twice: by `request.accountHome`, and by `realHome` (the user database's, which no environment moves),
     ///   so a process started with another HOME still shows nothing the real account hides. A PATH folder either
     ///   refuses is left out, as the planner leaves one out; any other source refuses the plan.
-    /// - Its environment is the plan's (an allow-list), with `passed` and `CFFIXED_USER_HOME` (the home, as
-    ///   `runChecks` gives it today).
+    /// - Its environment is the plan's (an allow-list), with `passed`, `CFFIXED_USER_HOME` (the home, as `runChecks`
+    ///   gives it today) and swiftly's folders where the box shows them (`toolchain`).
     static func plan(_ request: Request, environment: [String: String], image: String?, realHome: String = VibePaths.accountHome,
                      run: String = "\(getpid())-\(UUID().uuidString.prefix(8))") -> Result<Planned, SandboxRefusal> {
         func refuse(_ value: String, _ reason: String) -> Result<Planned, SandboxRefusal> {
@@ -338,7 +412,41 @@ public enum BranchRun {
             }
         }
         plan.environment += passed.compactMap { name in environment[name].map { "\(name)=\($0)" } } + ["CFFIXED_USER_HOME=\(home)"]
+        let shown = plan
+        plan.environment += toolchain(environment, accountHome: account) { shows(shown, $0) }
         return .success(Planned(plan: plan, folders: folders, layers: layers))
+    }
+
+    /// The variables of a toolchain that finds itself by them, the only ones a run is given for a toolchain: swiftly's.
+    /// Outside, swiftly takes its folders from them or else from the account's home (`~/.local/share/swiftly`); in a
+    /// box the home is the run's scratch one, where swiftly finds no configuration ("Could not load swiftly's
+    /// configuration file at <scratch home>/.local/share/swiftly/config.json"), so a run that is shown swiftly's
+    /// folders is told where they are.
+    static let toolchainVariables = ["SWIFTLY_HOME_DIR", "SWIFTLY_BIN_DIR", "SWIFTLY_TOOLCHAINS_DIR"]
+
+    /// `toolchainVariables` for a run, "NAME=value" each, each the folder swiftly would use outside: the launcher's
+    /// `environment`'s value (an absolute path), else swiftly's own default, `$XDG_DATA_HOME/swiftly` or
+    /// `<accountHome>/.local/share/swiftly` for its home and `bin` and `toolchains` in that. Each only where the box
+    /// `shown` it (read-only, by the project's `sandbox_read` or as a PATH folder), by the spelling it has there; the
+    /// others aren't passed, as nothing else outside the box's allow-list is.
+    static func toolchain(_ environment: [String: String], accountHome: String, shown: (String) -> Bool) -> [String] {
+        func given(_ name: String) -> String? { environment[name].flatMap { $0.hasPrefix("/") ? $0 : nil } }
+        let data = given("XDG_DATA_HOME") ?? accountHome + "/.local/share"
+        let home = given("SWIFTLY_HOME_DIR") ?? data + "/swiftly"
+        let folders = ["SWIFTLY_HOME_DIR": home, "SWIFTLY_BIN_DIR": given("SWIFTLY_BIN_DIR") ?? home + "/bin",
+                       "SWIFTLY_TOOLCHAINS_DIR": given("SWIFTLY_TOOLCHAINS_DIR") ?? home + "/toolchains"]
+        return toolchainVariables.compactMap { name in
+            let folder = settled(folders[name] ?? "")
+            return folder.hasPrefix("/") && shown(folder) ? "\(name)=\(folder)" : nil
+        }
+    }
+
+    /// Whether `plan` shows `path` read-only at its own spelling: a read-only mount of the same path, at or above it.
+    static func shows(_ plan: Platform.Sandbox.Plan, _ path: String) -> Bool {
+        plan.mounts.contains { entry in
+            guard case .readOnly(let source) = entry.kind, source == entry.target else { return false }
+            return path == source || SandboxPolicy.isBelow(path, source)
+        }
     }
 
     /// The real folders and files `plan` shows.

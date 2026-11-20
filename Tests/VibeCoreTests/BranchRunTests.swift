@@ -272,6 +272,67 @@ struct BranchRunTests {
         #expect(!run.output.contains(BranchRun.flag))
     }
 
+    /// The project's `sandbox: off`, accepted: where a box could be built, the wrapper runs plain (as before SB6),
+    /// saying so first, and is still known for the wrapper's; elsewhere it is as it always was.
+    @Test func withSandboxOffTheWrapperRunsPlainSayingSoFirst() throws {
+        let notice = "vibeswitcher: this branch run is in no box: the project's workflow.md says sandbox: off, as the user accepted it."
+        let wrapped = Self.wrapped()
+        let off = SandboxPolicy(enabled: false)
+        let made = BranchRun.command(wrapped, cwd: "/w/tree", home: "/s/home", policy: off, server: Self.server, facts: Self.able,
+                                     accountHome: "/home/u", onTheMac: false)
+        #expect(made.executable != Self.server && !made.arguments.contains(BranchRun.flag), "\(made.arguments)")
+        #expect(BranchCode.isRunner(made.arguments) && made.executable == made.arguments.first)
+        #expect(made.arguments.contains(notice) && Array(made.arguments.suffix(3)) == Array(wrapped.suffix(3)), "\(made.arguments)")
+        // What it runs: the notice on stderr, then the command, which has its arguments as they were.
+        let folder = scratch.url("off")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let echoed = BranchRun.command(Self.wrapped(["/bin/sh", "-c", "echo \"ran $1\"", "sh", "a b"]), cwd: folder.path, home: "/s/home", policy: off,
+                                       server: Self.server, facts: Self.able, accountHome: "/home/u", onTheMac: false)
+        let run = Shell.run(executable: echoed.executable, args: Array(echoed.arguments.dropFirst()), in: folder.path, timeout: 60, interleaved: true)
+        #expect(run.ok && run.output == notice + "\nran a b", "\(run.output)")
+        // No box to be had, or the Mac: as always.
+        for (facts, mac) in [(Self.unable, false), (Self.able, true)] {
+            let plain = BranchRun.command(wrapped, cwd: "/w/tree", home: "/s/home", policy: off, server: Self.server, facts: facts,
+                                          accountHome: "/home/u", onTheMac: mac)
+            #expect(plain.arguments == wrapped)
+        }
+    }
+
+    /// swiftly finds its folders by three variables, else under the home, which is the run's scratch one: a run whose
+    /// box shows swiftly's folder (the project's `sandbox_read`) is told where it is, by those three names and no other.
+    @Test func aRunIsToldSwiftlysFoldersWhereItsBoxShowsThemAndNothingWider() throws {
+        let layout = try Layout(scratch)
+        let swiftly = layout.account + "/.local/share/swiftly"
+        for folder in ["bin", "toolchains"] { try FileManager.default.createDirectory(atPath: swiftly + "/" + folder, withIntermediateDirectories: true) }
+        let outside = ["PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "SWIFTLY_EXTRA": "x", "TOOLCHAIN_TOKEN": "y", "XDG_CONFIG_HOME": layout.account + "/.config"]
+        func environment(_ policy: SandboxPolicy, _ given: [String: String] = [:]) throws -> [String: String] {
+            let plan = try layout.plan(layout.request(policy: policy), environment: outside.merging(given) { $1 }).get().plan
+            return Dictionary(uniqueKeysWithValues: plan.environment.compactMap { entry -> (String, String)? in
+                guard let equals = entry.firstIndex(of: "=") else { return nil }
+                return (String(entry[..<equals]), String(entry[entry.index(after: equals)...]))
+            })
+        }
+        let names = ["SWIFTLY_HOME_DIR", "SWIFTLY_BIN_DIR", "SWIFTLY_TOOLCHAINS_DIR"]
+        let shown = try environment(SandboxPolicy(read: [swiftly]))
+        #expect(names.map { shown[$0] } == [swiftly, swiftly + "/bin", swiftly + "/toolchains"], "\(shown)")
+        // Nothing wider: no other name the launcher has beyond the box's own and its allow-list.
+        let standard = try environment(.standard)
+        #expect(Set(shown.keys).subtracting(standard.keys) == Set(names), "\(shown)")
+        for name in ["SWIFTLY_EXTRA", "TOOLCHAIN_TOKEN", "XDG_CONFIG_HOME"] { #expect(shown[name] == nil, "\(name) reached a branch run") }
+        // A folder the box doesn't show is named to nothing: the standard box, or a value given for a folder not shown.
+        #expect(names.allSatisfy { standard[$0] == nil }, "\(standard)")
+        let elsewhere = layout.account + "/elsewhere"
+        try FileManager.default.createDirectory(atPath: elsewhere, withIntermediateDirectories: true)
+        let given = try environment(SandboxPolicy(read: [swiftly]), ["SWIFTLY_HOME_DIR": elsewhere, "SWIFTLY_BIN_DIR": swiftly + "/bin"])
+        #expect(given["SWIFTLY_HOME_DIR"] == nil && given["SWIFTLY_BIN_DIR"] == swiftly + "/bin", "\(given)")
+        // swiftly's own default for its home follows XDG_DATA_HOME, as outside.
+        let data = layout.account + "/data"
+        try FileManager.default.createDirectory(atPath: data + "/swiftly/bin", withIntermediateDirectories: true)
+        let moved = try environment(SandboxPolicy(read: [data + "/swiftly"]), ["XDG_DATA_HOME": data])
+        #expect(moved["SWIFTLY_HOME_DIR"] == data + "/swiftly" && moved["SWIFTLY_BIN_DIR"] == data + "/swiftly/bin", "\(moved)")
+        #expect(moved["XDG_DATA_HOME"] == nil)
+    }
+
     /// What an ended run's layers left (a layer's work folder is the kernel's, mode 000) goes at the next run beside
     /// it; a run still going keeps its own.
     @Test func aRunsLayersLeftBehindGoAtTheNextRunBesideIt() throws {
