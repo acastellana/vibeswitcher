@@ -359,6 +359,55 @@ struct NodeAcceptanceTests {
         #expect(await Self.liveSession(node) { $0.label == "Shell" && $0.cwd == repo.path } != nil, "\(node.said)")
     }
 
+    // MARK: A20, a restart
+
+    @Test("A20: after a host restart and the accepts, lead --resume brings the lead back in its conversation and reopen the user's own sessions")
+    func a20RestartResumeReopen() async throws {
+        let (leadConversation, ownConversation) = (UUID().uuidString.lowercased(), UUID().uuidString.lowercased())
+        let first = try await ScratchNode(scratch, holdFirstLook: true)
+        let repo = try await Self.repository(first)
+        let lead = try await Self.startLead(first, repo, goal: "plan the work")
+        // The lead's transcript, as Claude writes it for `--name lead-repo`, its hook naming it.
+        let leadTranscript = Self.transcript(first, folder: repo, conversation: leadConversation)
+        try (#"{"type":"agent-name","agentName":"lead-repo","sessionId":"\#(leadConversation)"}"# + "\n").write(to: leadTranscript, atomically: true, encoding: .utf8)
+        try hook(first, ["hook_event_name": "Stop", "transcript_path": leadTranscript.path], tty: lead.session.tty, pid: lead.pid)
+        // A session of the user's, its conversation named by its hook.
+        let folder = first.root.appendingPathComponent("proj").resolvingSymlinksInPath()
+        let (own, ownFiles) = try await Self.newClaude(first, folder: folder)
+        let ownPid = try #require((EngineEndToEndTests.state(ownFiles)["pid"] as? Int).map(Int32.init))
+        let ownTranscript = Self.transcript(first, folder: folder, conversation: ownConversation)
+        try (#"{"type":"user","sessionId":"\#(ownConversation)","cwd":"\#(folder.path)","message":{"content":"hello"}}"# + "\n")
+            .write(to: ownTranscript, atomically: true, encoding: .utf8)
+        try hook(first, ["hook_event_name": "Stop", "session_id": ownConversation, "transcript_path": ownTranscript.path], tty: own.tty, pid: ownPid)
+        let record = EngineState.url(root: first.root)
+        try #require(await eventually(timeout: 90) {
+            let text = (try? String(contentsOf: record, encoding: .utf8)) ?? ""
+            return text.contains(leadConversation) && text.contains(ownConversation)
+        }, "\(String(describing: try? String(contentsOf: record, encoding: .utf8)))\n\(first.said)")
+        // The host goes down (`vs stop`'s end of the host, its sessions with it) and a new one starts on the same root.
+        first.stop()
+        let node = try await ScratchNode(scratch, holdFirstLook: true, reusing: first.root)
+        defer { node.stop() }
+
+        let status = try await node.statusJSON()
+        let notices = (status["notices"] as? [String]) ?? []
+        #expect(notices.contains { $0.contains("`vibeswitcher lead \(repo.path) --resume`") }, "\(notices)")
+        #expect(notices.contains { $0.contains("vibeswitcher reopen") }, "\(notices)")
+        try await node.acceptConfig(repo)
+        try await node.acceptBase(repo, from: Git.run(["rev-parse", "main"], in: repo.path).output)
+        let resumed = try await node.runOnTerminal(["lead", repo.path, "--resume"])
+        #expect(resumed.status == 0 && resumed.output.contains("same conversation"), "\(resumed.output)\n\(node.said)")
+        let back = try #require(await Self.liveSession(node) { $0.label.hasPrefix("Lead · ") }, "\(node.said)")
+        let backFiles = node.fake.files(terminal: back.tty)
+        #expect(await eventually(timeout: 60) { EngineEndToEndTests.state(backFiles)["resume"] as? String == leadConversation },
+                "\(EngineEndToEndTests.state(backFiles))")
+
+        let reopened = try await node.runOnTerminal(["reopen", "all"])
+        #expect(reopened.status == 0 && reopened.output.contains("reopened:"), "\(reopened.output)\n\(node.said)")
+        let again = try #require(await Self.liveSession(node) { $0.label == "Claude" && $0.cwd == folder.path }, "\(node.said)")
+        #expect(again.command?.hasSuffix("--resume '\(ownConversation)'") == true, "\(String(describing: again.command))")
+    }
+
     // MARK: A22-A23, who may act as the user
 
     @Test("A22: vibeswitcher answer run from inside a session is refused: not the user's voice")
@@ -533,6 +582,14 @@ extension NodeAcceptanceTests {
         let verdict = try #require(try await ScratchRunTests.verdict(node, repo, task: slug), "no verdict: \(node.said)", sourceLocation: sourceLocation)
         #expect(verdict.commit == commit && verdict.passes, "\(verdict)", sourceLocation: sourceLocation)
         return AuditedTask(repo: repo, lead: lead, slug: slug, commit: commit, verifiers: verifiers.count)
+    }
+
+    /// Where Claude Code writes `conversation`'s transcript for `folder`, under the node's home (its folder made).
+    static func transcript(_ node: ScratchNode, folder: URL, conversation: String) -> URL {
+        let url = node.home.appendingPathComponent(".claude/projects")
+            .appendingPathComponent(RecentProjects.claudeSlug(for: folder.resolvingSymlinksInPath().path)).appendingPathComponent("\(conversation).jsonl")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        return url
     }
 
     /// An empty commit on `repo`'s main (the base moves on): its hash.
