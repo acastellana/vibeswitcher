@@ -188,6 +188,65 @@ struct NodeAcceptanceTests {
         #expect(EngineEndToEndTests.state(files)["mode"] as? String == "permission", "\(EngineEndToEndTests.state(files))")
     }
 
+    // MARK: A11-A16, a project's lead and its team
+
+    @Test("A11: lead with a goal starts the lead, which plans a task and starts its worker")
+    func a11LeadWithAGoal() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "add a subtract function with a test")
+        #expect((EngineEndToEndTests.state(lead.tools)["prompt"] as? String)?.contains("add a subtract function with a test") == true)
+        try EngineEndToEndTests.limits(node, maxSessions: 10)
+        let worker = try await Self.planAndStart(node, lead, title: "Add subtract")
+        #expect(worker.cwd.contains("/.vibeswitcher/worktrees/add-subtract"), "\(worker)")
+        // Listed in status, and the board shows the task running.
+        let listed = await node.eventuallyStatus { status in
+            ((status["sessions"] as? [[String: Any]]) ?? []).contains { $0["terminal"] as? String == worker.tty }
+        }
+        let status = try await node.run(["status"])
+        #expect(listed, "\(status.output)")
+        let board = try await node.run(["board", repo.path])
+        #expect(board.status == 0 && board.output.contains("Add subtract") && !board.output.contains("1 waiting"), "\(board.output)")
+    }
+
+    @Test("A12: board shows the task, and questions --wait ends with the lead's question as a card")
+    func a12BoardAndQuestionsWait() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "add a subtract function with a test")
+        try lead.tools.call("add_task", ["title": "Add subtract", "goal": "Add subtract.", "acceptance": ["it builds"], "auto_advance": false])
+        try #require(await eventually(timeout: 120) { lead.tools.calls().count == 2 }, "\(lead.tools.calls())")
+        let board = try await node.run(["board", repo.path])
+        #expect(board.status == 0 && board.output.contains("Add subtract"), "\(board.output)\(board.errors)")
+        async let waited = node.run(["questions", repo.path, "--wait"])
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        try lead.tools.call("ask_user", ["question": "Name it subtract or minus?", "options": ["subtract", "minus"]])
+        let asked = try await waited
+        #expect(asked.status == 0 && asked.output.contains("Name it subtract or minus?"), "\(asked.output)\(asked.errors)\n\(node.said)")
+    }
+
+    @Test("A13: answer and tell reach the lead, which takes them as the user's")
+    func a13AnswerAndTell() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "add a subtract function with a test")
+        try lead.tools.call("ask_user", ["question": "Name it subtract or minus?", "options": ["subtract", "minus"]])
+        let card = try await EngineEndToEndTests.card(node, question: "Name it subtract or minus?")
+        let answered = try await node.runOnTerminal(["answer", card, "minus"])
+        #expect(answered.status == 0 && answered.output.contains("answered: the lead is told"), "\(answered.output)\(answered.errors)")
+        let typed = try await EngineEndToEndTests.prompt(lead.tools) { $0.hasSuffix("minus") }
+        #expect(!typed.hasPrefix(LeadDelivery.prefix), "as the user's: \(typed)")
+        // Its turn over (as its Stop hook would say), `tell` is typed in too, as the user's.
+        try hook(node, ["hook_event_name": "Stop"], tty: lead.session.tty, pid: lead.pid)
+        let told = try await node.runOnTerminal(["tell", repo.path, "Keep the tests fast"])
+        #expect(told.status == 0 && told.output.contains("told: the lead"), "\(told.output)\(told.errors)")
+        let took = try await EngineEndToEndTests.prompt(lead.tools) { $0.hasSuffix("Keep the tests fast") }
+        #expect(!took.hasPrefix(LeadDelivery.prefix), "as the user's: \(took)")
+    }
+
     // MARK: A17, settings
 
     @Test("A17: settings shows a project's; set records it, the lead is told, and config held holds nothing for it")
@@ -312,6 +371,21 @@ extension NodeAcceptanceTests {
         try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)", sourceLocation: sourceLocation)
         try hook(node, ["hook_event_name": "Stop"], tty: session.tty, pid: pid)
         return Lead(session: session, tools: tools, pid: pid)
+    }
+
+    /// `title` added to `lead`'s board and its worker started (its tool server connected, as Claude Code's starts): the
+    /// worker's session.
+    static func planAndStart(_ node: ScratchNode, _ lead: Lead, title: String, sourceLocation: SourceLocation = #_sourceLocation) async throws -> HostSession {
+        let slug = title.lowercased().replacingOccurrences(of: " ", with: "-")
+        let before = lead.tools.calls().count
+        try lead.tools.call("add_task", ["title": title, "goal": "\(title).", "acceptance": ["it builds"], "auto_advance": false])
+        try #require(await eventually(timeout: 120) { lead.tools.calls().count == before + 1 }, "\(lead.tools.calls())", sourceLocation: sourceLocation)
+        try lead.tools.call("start_worker", ["task": slug])
+        let worker = try await EngineEndToEndTests.connected(node, label: "Worker: \(title)", calling: "progress", ["task": slug, "text": "starting"])
+        try #require(await eventually(timeout: 120) { lead.tools.calls().count == before + 2 }, "\(lead.tools.calls())", sourceLocation: sourceLocation)
+        #expect(lead.tools.text(of: lead.tools.calls()[before + 1]).contains("Worker started on \(slug)"), "\(lead.tools.calls())",
+                sourceLocation: sourceLocation)
+        return worker
     }
 
     /// `new FOLDER [--model M]` on a terminal, the code typed: the session it started, its fake up.
