@@ -207,3 +207,9 @@
 - 2026-11-20 01:43 Started a worker on toolserverswitchtests
 - 2026-11-20 01:43 Automatically (auto_advance): Started a worker on toolserverswitchtests (ToolServerSwitchTests says why a switch was refused, and expects what the product promises).
 - 2026-11-20 01:52 Merged the-merge-s-test: The merge's test run retries only the tests that failed, once (build 5b6eccd929ad)
+- 2026-11-20 01:52 Automatically (auto_advance): Merged the-merge-s-test (The merge's test run retries only the tests that failed, once) into v2 at fe62128e, on its passing audit and the full test run.
+- 2026-11-20 01:52 Started a worker on a-lead-asked-for
+- 2026-11-20 01:52 Automatically (auto_advance): Started a worker on a-lead-asked-for (A lead asked for twice at once starts twice under load), its after tasks done (the-merge-s-test).
+- 2026-11-20 01:52 Automatically (auto_advance): Cleaned up the-merge-s-test (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-20 01:52 Workflow: test_command = `Resources/bin/vs-heavy bash scripts/test.sh --retry-failed`
+- 2026-11-20 02:05 Merged sb3-the-launcher-builds: SB3: the launcher builds the box (SessionSandbox) (build 5b6eccd929ad)
