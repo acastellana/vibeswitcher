@@ -7,17 +7,13 @@ import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { AGENTS } from '../words.js';
 import { copyLine } from './cards.js';
+import {
+  sessionShort, shellWord, renameLine, PAUSES, pauseLine, endable, endLine, closeShellsLine, resumeLine, endedEntry, newLine,
+  PRESET_VARIABLES, presetProblem, presetLine, presetArgs,
+} from '../actions.js';
 
-// A session as the command line names it: the first 8 characters of its host id (`vibeswitcher send` takes any prefix
-// of 4 or more that only one session has).
-export const sessionShort = (id) => String(id || '').replace(/^[^:]*:/, '').slice(0, 8);
-
-// `text` as one shell word: as it is when it needs no quoting, else in single quotes, each ' written '\''. What the
-// user typed never becomes a command that does something else when pasted.
-export function shellWord(text) {
-  const value = String(text);
-  return /^[A-Za-z0-9._\/:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
-}
+// The command line's words for a session and for what the user typed (js/actions.js, where the page's lines are made).
+export { sessionShort, shellWord };
 
 // Whether the page may drive `session` at all: one the node's host started, still running.
 export const drivable = (session) => !!session?.hosted && !session.ended;
@@ -152,26 +148,112 @@ export function promptCard(app) {
   };
 }
 
-// Ending a session, under its header: the line that ends it and what that does. A lead and a lead's team aren't ended
-// from here (their lead and `vibeswitcher stop` are). Returns { el, toggle(), update(session) }.
-export function endStrip() {
-  const lineSlot = h('div');
+// What the Mac's row menu does to a session (Rename…, Pause, Resume Notifications, End Session…, Close Finished
+// Shells…), under its header: pick one, and the line that does it shows, a click to copy. A lead and a lead's team
+// aren't ended from here (their lead and `vibeswitcher stop` are). A session that ended has its Resume line, where the
+// node knows its conversation. Returns { el, open(tab), toggle(), update(session, node) → whether it offers anything }.
+export function actionsStrip() {
+  const TABS = [
+    { id: 'rename', label: 'Rename' },
+    { id: 'pause', label: 'Pause' },
+    { id: 'end', label: 'End' },
+    { id: 'shells', label: 'Close shells' },
+    { id: 'resume', label: 'Resume' },
+  ];
+  const tabs = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Do' });
+  const panel = h('div', { class: 'action-panel' });
   const close = h('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close', title: 'Close' }, icon('close', 13));
-  const el = h('div', { class: 'end-strip', role: 'group', 'aria-label': 'End this session', hidden: true },
-    h('div', { class: 'end-text' }, h('strong', null, 'End this session'), h('span', null, ' — its agent stops, with everything running in its terminal.')),
-    lineSlot, close);
-  let open = false;
+  const el = h('div', { class: 'end-strip action-strip', role: 'group', 'aria-label': 'Rename, pause or end this session', hidden: true }, tabs, panel, close);
+  let opened = false;
+  let tab = 'rename';
   let id = null;
-  close.addEventListener('click', () => { open = false; el.hidden = true; });
+  let session = null;
+  let node = null;
+  let typed = null;
+  let pause = 'indefinitely';
+  let drawn = '';
+  close.addEventListener('click', () => { opened = false; el.hidden = true; });
+
+  // What can be done to it now: renamed and paused while the node lists it (any session, one in your own terminal
+  // too: a name types nothing), ended when the page may end it, its folder's shells closed, resumed once ended.
+  function offered() {
+    if (!session) return [];
+    const ended = endedEntry(node, session.id);
+    if (session.ended) return ended ? ['resume'] : [];
+    return ['rename', 'pause', ...(endable(session) ? ['end'] : []), ...(session.hosted && session.cwd ? ['shells'] : [])];
+  }
+
+  function line(text, label, note) {
+    return [text ? copyLine(text, label) : null, note ? h('p', { class: 'confirm-note' }, note) : null];
+  }
+
+  function body() {
+    if (tab === 'rename') {
+      if (typed === null) typed = session.name || '';
+      const input = h('input', { class: 'answer-input', type: 'text', value: typed, placeholder: session.task || 'Its own name', 'aria-label': 'Name', spellcheck: 'false', autocomplete: 'off' });
+      const slot = h('div');
+      const fill = () => {
+        const text = renameLine(session, typed);
+        slot.replaceChildren(...line(text, 'the command that renames it',
+          text ? (typed.trim() ? 'Kept across a resume; the list and status show it.' : 'Gives it its own name back.')
+            : typed.trim() ? 'That’s its name now.' : 'Type a name.'));
+      };
+      input.addEventListener('input', () => { typed = input.value; fill(); });
+      fill();
+      return [input, slot];
+    }
+    if (tab === 'pause') {
+      if (session.paused) {
+        return line(pauseLine(session, 'off'), 'the command that resumes its notifications',
+          'Paused: greyed out, never reminded or notified of. This resumes its notifications.');
+      }
+      const choices = h('div', { class: 'segmented presets', role: 'group', 'aria-label': 'For how long' }, PAUSES.map((one) => h('button', {
+        type: 'button', 'aria-pressed': String(one.id === pause), onclick: () => { pause = one.id; draw(true); },
+      }, one.label)));
+      return [choices, ...line(pauseLine(session, pause), 'the command that pauses it', 'Greyed out, and nothing reminds or notifies you of it until then.')];
+    }
+    if (tab === 'end') return line(endLine(session), 'the command that ends it', 'Its agent stops, with everything running in its terminal.');
+    if (tab === 'shells') {
+      return line(closeShellsLine(session.cwd), 'the command that closes the finished shells',
+        'Ends this node’s shells in this folder or below that are back at their prompt; one still running something stays.');
+    }
+    const ended = endedEntry(node, session.id);
+    const resume = resumeLine(ended);
+    return [...line(resume, 'the command that resumes it', resume ? 'Starts it again in its same conversation.' : 'Its conversation id wasn’t known: it can’t be resumed.'),
+      ended?.conversation ? copyLine(ended.conversation, 'its conversation id') : null];
+  }
+
+  function draw(force = false) {
+    const can = offered();
+    if (!can.includes(tab)) tab = can[0] || 'rename';
+    const key = JSON.stringify([session?.id, session?.name, session?.paused, session?.cwd, can, tab, pause, endedEntry(node, session?.id)]);
+    if (!force && key === drawn) return;
+    drawn = key;
+    tabs.replaceChildren(...TABS.filter((one) => can.includes(one.id)).map((one) => h('button', {
+      type: 'button', 'aria-pressed': String(one.id === tab), onclick: () => { tab = one.id; draw(true); el.querySelector('.action-panel input, .action-panel .copy-button')?.focus(); },
+    }, one.id === 'pause' && session?.paused ? 'Resume notifications' : one.label)));
+    tabs.hidden = can.length < 2;
+    panel.replaceChildren(...(session && can.length ? body() : []).filter(Boolean));
+  }
+
   return {
     el,
-    toggle() { open = !open; el.hidden = !open; if (open) el.querySelector('.copy-button')?.focus(); },
-    update(session) {
-      if (session?.id !== id) { open = false; id = session?.id || null; }
-      const can = drivable(session) && !session.role;
-      if (!can) open = false;
-      el.hidden = !open;
-      if (can) lineSlot.replaceChildren(copyLine(`vibeswitcher end ${sessionShort(session.id)}`, 'the command that ends it'));
+    open(which) {
+      if (which) tab = which;
+      opened = true;
+      draw(true);
+      el.hidden = !offered().length;
+      el.querySelector('.action-panel input, .action-panel .copy-button')?.focus();
+    },
+    toggle() { opened ? (opened = false, el.hidden = true) : this.open(); },
+    update(next, nodeValue) {
+      if (next?.id !== id) { opened = false; id = next?.id || null; typed = null; pause = 'indefinitely'; }
+      session = next || null;
+      node = nodeValue || null;
+      const can = offered().length > 0;
+      if (!can) opened = false;
+      el.hidden = !opened;
+      if (opened) draw();
       return can;
     },
   };
@@ -193,12 +275,21 @@ export function newSessionForm(app, { folder }) {
   const kinds = h('div', { class: 'segmented presets', role: 'group', 'aria-label': 'Preset' });
   const about = h('p', { class: 'confirm-note preset-about', hidden: true });
   const lineSlot = h('div', { class: 'prompt-line' });
+  // Adding, changing and removing the folder's presets: the `vibeswitcher preset` line for each.
+  const editor = presetEditor({ folder: () => where() });
+  const editing = h('button', { class: 'confirm-clear preset-edit-toggle', type: 'button', 'aria-expanded': 'false', onclick: () => {
+    const open = editor.el.hidden;
+    editor.el.hidden = !open;
+    editing.setAttribute('aria-expanded', String(open));
+    if (open) editor.update(presets, true);
+  } }, 'Edit presets…');
   const el = h('section', { class: 'new-session', 'aria-label': 'Start a session' },
-    h('h2', { class: 'new-title' }, 'Start a session'),
+    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, 'Start a session'), editing),
     h('div', { class: 'new-fields' }, path, kinds, model),
     about,
     lineSlot,
-    h('p', { class: 'confirm-note' }, 'Run it in a terminal on this node: it asks for a code, then starts the session here.'));
+    h('p', { class: 'confirm-note' }, 'Run it in a terminal on this node: it asks for a code, then starts the session here.'),
+    editor.el);
   let offered = false;
 
   // `~/` is the node's home, as a shell would read it (the command line takes the folder as given).
@@ -236,18 +327,28 @@ export function newSessionForm(app, { folder }) {
     const folder = where();
     if (!folder) {
       lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, 'Give a folder: the line that starts it shows here.'));
+      if (!editor.el.hidden) editor.update(presets);
       return;
     }
-    const chosenModel = preset.kind === 'claude' ? model.value.trim() : '';
-    const how = preset.builtIn ? (preset.kind === 'shell' ? ' --agent shell' : '') : ` --preset ${shellWord(preset.name)}`;
-    const line = `vibeswitcher new ${shellWord(folder)}${how}${chosenModel ? ` --model ${shellWord(chosenModel)}` : ''}`;
-    lineSlot.replaceChildren(copyLine(line, 'the command that starts it'));
+    lineSlot.replaceChildren(copyLine(newLine(folder, preset, model.value), 'the command that starts it'));
+    if (!editor.el.hidden) editor.update(presets);
   }
   path.addEventListener('input', () => { draw(); ask(); });
   model.addEventListener('input', draw);
 
   return {
     el,
+    // The palette's "New … in …": that folder and preset in the form, and its line ready to copy.
+    choose(given, name) {
+      path.value = given;
+      offered = true;
+      chosen = name;
+      picked = true;
+      ask();
+      draw();
+      lineSlot.querySelector('.copy-button')?.focus();
+      el.scrollIntoView?.({ block: 'nearest' });
+    },
     update() {
       if (!offered && !path.value) {
         const given = folder();
@@ -255,6 +356,118 @@ export function newSessionForm(app, { folder }) {
       }
       ask();
       draw();
+    },
+  };
+}
+
+// The presets of yours for a folder (not the built-ins, which come from VibeSwitcher itself), and a form that adds one or
+// changes one: the `vibeswitcher preset` line it makes, after the checks the node makes too (`presetProblem`). The page
+// never sees a variable's value (the node sends their names only), so a change names only what it sets or takes off.
+// Returns { el, update(presets, force) }.
+export function presetEditor({ folder }) {
+  const list = h('div', { class: 'preset-list' });
+  const formSlot = h('div', { class: 'preset-form-slot' });
+  const el = h('div', { class: 'preset-editor', hidden: true },
+    h('p', { class: 'new-title' }, 'Your presets'), list, formSlot,
+    h('p', { class: 'confirm-note' }, 'A changed presets file waits for your accept (`vibeswitcher config held`, then `config accept`): none of its presets starts, and no next change is taken, before that.'));
+  let drawn = '';
+  // What the form edits: null (closed), { op: 'add' }, { op: 'edit', original } or { op: 'remove', original }.
+  let open = null;
+
+  function form() {
+    const where = folder();
+    if (open.op === 'remove') {
+      const scoped = open.original.project ? where : null;
+      return h('div', { class: 'preset-form' }, h('p', { class: 'confirm-note' }, `Removes ${open.original.name}${scoped ? ' from this folder' : ' (every folder’s)'}.`),
+        copyLine(presetLine('remove', { name: open.original.name }, { folder: scoped, original: open.original }), 'the command that removes it'));
+    }
+    const original = open.original || null;
+    const state = {
+      name: original?.name || '', kind: original?.kind === 'shell' ? 'shell' : 'claude', args: original ? presetArgs(original) : '',
+      keepShell: !!original?.keepShell, isDefault: false, env: [], unset: [], scoped: original ? !!original.project : !!where,
+    };
+    const name = h('input', { class: 'answer-input', type: 'text', value: state.name, placeholder: 'Name', 'aria-label': 'Preset name', spellcheck: 'false', autocomplete: 'off' });
+    const args = h('input', { class: 'answer-input', type: 'text', value: state.args, placeholder: 'Claude’s arguments, e.g. --model opus', 'aria-label': 'Claude’s arguments', spellcheck: 'false', autocomplete: 'off' });
+    const kinds = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Runs' });
+    const tick = (label, key, disabled = false) => {
+      const box = h('input', { type: 'checkbox', disabled });
+      box.checked = state[key];
+      box.addEventListener('change', () => { state[key] = box.checked; fill(); });
+      return h('label', { class: 'preset-tick' }, box, ' ', label);
+    };
+    const variables = h('div', { class: 'preset-vars' });
+    const lineSlot = h('div', { class: 'prompt-line' });
+    const listId = 'preset-variables';
+    const names = h('datalist', { id: listId }, PRESET_VARIABLES.map((variable) => h('option', { value: variable })));
+    const addVariable = h('button', { class: 'confirm-clear', type: 'button', onclick: () => { state.env.push(['', '']); drawVariables(); variables.querySelector('.preset-var:last-child input')?.focus(); } }, 'Add a variable');
+
+    function drawVariables() {
+      const kept = (original?.env || []).map((variable) => {
+        const off = state.unset.includes(variable);
+        return h('span', { class: 'preset-chip' + (off ? ' off' : '') }, variable, h('button', {
+          class: 'icon-button', type: 'button', 'aria-label': off ? `Keep ${variable}` : `Take ${variable} off`, title: off ? 'Keep it' : 'Take it off',
+          onclick: () => { state.unset = off ? state.unset.filter((one) => one !== variable) : [...state.unset, variable]; drawVariables(); fill(); },
+        }, icon(off ? 'plus' : 'close', 11)));
+      });
+      const rows = state.env.map((pair, index) => {
+        const key = h('input', { class: 'answer-input', type: 'text', value: pair[0], placeholder: 'VARIABLE', list: listId, 'aria-label': 'Variable', spellcheck: 'false', autocomplete: 'off' });
+        const value = h('input', { class: 'answer-input', type: 'text', value: pair[1], placeholder: 'Value', 'aria-label': 'Value', spellcheck: 'false', autocomplete: 'off' });
+        key.addEventListener('input', () => { state.env[index][0] = key.value.trim(); fill(); });
+        value.addEventListener('input', () => { state.env[index][1] = value.value; fill(); });
+        return h('div', { class: 'preset-var' }, key, value);
+      });
+      variables.replaceChildren(...(kept.length ? [h('div', { class: 'preset-chips' }, kept)] : []), ...rows);
+    }
+
+    function fill() {
+      args.hidden = state.kind === 'shell';
+      [...kinds.children].forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.kind === state.kind)));
+      const scoped = state.scoped && where ? where : null;
+      const problem = presetProblem(state) || (state.isDefault && !scoped ? 'A default is a folder’s: give a folder and keep it this folder’s.' : null);
+      if (problem) { lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, problem)); return; }
+      const line = presetLine(open.op, state, { folder: scoped, original });
+      // An edit that changes nothing yet: the line with no change in it.
+      const unchanged = original && presetLine('edit', { name: original.name, kind: original.kind, args: presetArgs(original), keepShell: original.keepShell }, { folder: scoped, original });
+      lineSlot.replaceChildren(open.op === 'edit' && line === unchanged
+        ? h('p', { class: 'confirm-note' }, 'Change something: the line that does it shows here.')
+        : copyLine(line, open.op === 'add' ? 'the command that adds it' : 'the command that changes it'));
+    }
+
+    kinds.replaceChildren(...[['claude', 'Claude'], ['shell', 'Shell']].map(([kind, label]) => h('button', {
+      type: 'button', 'data-kind': kind, onclick: () => { state.kind = kind; fill(); },
+    }, label)));
+    name.addEventListener('input', () => { state.name = name.value; fill(); });
+    args.addEventListener('input', () => { state.args = args.value; fill(); });
+    drawVariables();
+    const ticks = h('div', { class: 'preset-ticks' },
+      open.op === 'add' ? tick('Only for this folder', 'scoped', !where) : null,
+      tick('A shell stays when it ends', 'keepShell'),
+      tick('This folder’s default', 'isDefault', !where));
+    const node = h('div', { class: 'preset-form' }, h('div', { class: 'new-fields' }, name, kinds, args), variables, addVariable, names, ticks, lineSlot);
+    fill();
+    return node;
+  }
+
+  function drawList(presets) {
+    const mine = presets.filter((preset) => !preset.builtIn);
+    list.replaceChildren(...mine.map((preset) => h('div', { class: 'preset-row' },
+      h('span', { class: 'preset-name' }, preset.name), h('span', { class: 'preset-note' }, [presetNote(preset), preset.project ? 'this folder’s' : 'every folder’s', preset.refused ? `can’t start: ${preset.refused}` : null].filter(Boolean).join(' · ')),
+      h('span', { class: 'confirm-actions' },
+        h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'edit', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, 'Edit'),
+        h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'remove', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('.copy-button')?.focus(); } }, 'Remove')))),
+    h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'add' }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, 'Add a preset'));
+  }
+
+  return {
+    el,
+    update(presets, force = false) {
+      const key = JSON.stringify([folder(), presets.map((preset) => [preset.name, preset.digest, preset.project, preset.refused])]);
+      if (!force && key === drawn) return;
+      const moved = drawn && key !== drawn;
+      drawn = key;
+      drawList(presets);
+      // The folder or its presets changed under an open form: it closes, rather than edit what's no longer shown.
+      if (moved || force) { open = null; formSlot.replaceChildren(); }
     },
   };
 }

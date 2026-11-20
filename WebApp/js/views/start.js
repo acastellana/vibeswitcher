@@ -5,7 +5,8 @@
 import { h, setText, framed } from '../dom.js';
 import { KEY, tilde } from '../words.js';
 import { summary } from '../ui.js';
-import { newSessionForm, sessionShort } from './drive.js';
+import { newSessionForm } from './drive.js';
+import { resumeLine } from '../actions.js';
 import { copyLine } from './cards.js';
 
 // How many ended sessions the page lists (the node keeps 20).
@@ -45,7 +46,7 @@ export function startView(app) {
     const home = store.state.node?.home;
     endedList.replaceChildren(...list.map((entry) => h('div', { class: 'ended-row' },
       h('div', { class: 'ended-name' }, h('span', null, entry.name || 'A session'), h('span', { class: 'ended-folder' }, tilde(entry.folder, home))),
-      entry.conversation ? copyLine(`vibeswitcher resume ${sessionShort(entry.session)}`, 'the command that resumes it')
+      entry.conversation ? copyLine(resumeLine(entry), 'the command that resumes it')
         : h('p', { class: 'confirm-note' }, 'Its conversation id wasn’t known: it can’t be resumed.'),
       entry.conversation ? copyLine(entry.conversation, 'its conversation id') : null)));
   }
@@ -82,5 +83,6 @@ export function startView(app) {
   store.subscribe('connection', schedule);
   store.subscribe('node', schedule);
   render();
-  return { el };
+  // The palette's "New … in …": the start page with that folder and preset in its form.
+  return { el, choose: (folder, preset) => starting.choose(folder, preset) };
 }

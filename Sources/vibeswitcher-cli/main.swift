@@ -23,6 +23,7 @@ let usage = """
            vibeswitcher push FOLDER | decline-push FOLDER
            vibeswitcher send SESSION [TEXT] [--image PATH]... [--now] | reply SESSION CHOICE [TEXT]
            vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M] | end SESSION | presets [FOLDER]
+           vibeswitcher preset add|edit|remove NAME [--folder FOLDER] ...  (`vibeswitcher preset` says more)
            vibeswitcher close-shells [FOLDER]
            vibeswitcher reopen [all | SESSION... | --forget] | resume [SESSION]
            vibeswitcher rename SESSION [NAME] | pause SESSION [--hours N | --tomorrow | --off]
@@ -69,6 +70,8 @@ case "reply":
     exit(ReplyCommand.run(Array(words.dropFirst())))
 case "new":
     exit(NewCommand.run(Array(words.dropFirst())))
+case "preset":
+    exit(PresetEditCommand.run(Array(words.dropFirst())))
 case "close-shells":
     exit(CloseShellsCommand.run(Array(words.dropFirst())))
 case "presets":

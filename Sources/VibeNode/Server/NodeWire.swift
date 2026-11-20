@@ -295,6 +295,8 @@ public enum NodeWire {
         // Close Finished Shells (the stability lane, 2026-11-20): the list a read of the user's (no code), the closing
         // the user's voice.
         "shells": .user, "session.close-shells": .user,
+        // A launch preset added, changed or removed (the page-actions lane, 2026-11-20).
+        "presets.edit": .user,
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
         // The composer and launch presets (2026-11-20): what a session's `/` and `@` offer, and the presets, are reads.
         "session.presets": .anyone, "session.complete": .anyone, "session.attach": .webDraft,
@@ -341,7 +343,7 @@ public enum NodeWire {
                                "settings", "set",
                                "push", "push.decline",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
-                               "session.resume", "shells", "session.close-shells"]
+                               "session.resume", "shells", "session.close-shells", "presets.edit"]
 
     // MARK: Lines
 
