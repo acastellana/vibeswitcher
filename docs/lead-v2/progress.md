@@ -280,3 +280,20 @@
 - 2026-11-20 10:41 Workflow: max_workers = `3`
 - 2026-11-20 10:41 Started a worker on mac-gitguardtests
 - 2026-11-20 10:43 Planned the-merge-s-test-2: The merge's test run: where its 11 minutes go, and the cheap cuts
+- 2026-11-20 10:55 Planned team-sessions-start: Team sessions start Claude Code with its updater off (review audit)
+- 2026-11-20 10:55 Folded measure-does-claude-code into team-sessions-start: that task carries its work
+- 2026-11-20 11:06 Started a worker on team-sessions-start
+- 2026-11-20 11:09 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-20 11:09 Audit of tests-that-write-a at e7d2a079 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 11:09 Automatically (auto_advance): Started the audit of tests-that-write-a at e7d2a079 (It touches sensitive_paths (Sources/VibeCore/Paths.swift, Tests/VibeCoreTests/CloseOnExecLintTests.swift, Tests/VibeCoreTests/PrivateWriteLintTests.swift), so it's treated as audit whatever its review says).
+- 2026-11-20 11:09 Pipeline held: mac-gitguardtests ready to merge with none landing; cause: every test slot held
+- 2026-11-20 11:26 Audit of tests-that-write-a: finder 2 of 2 submitted (incomplete, clean, 8 findings)
+- 2026-11-20 11:28 Audit of tests-that-write-a: incomplete, clean, round 1: 5 Important (1 open, 4 unconfirmed), 5 Nit (1 open, 4 unconfirmed) (2 finders voted: 2 new findings confirmed, 8 unconfirmed)
+- 2026-11-20 11:28 Started a worker on tests-that-write-a
+- 2026-11-20 11:29 Automatically (auto_advance): Sent tests-that-write-a's worker the open Important findings tests-that-write-a:F1 from its audit at e7d2a079 (in a new worker: its last one had ended).
+- 2026-11-20 11:30 Workflow: max_workers = `2`
+- 2026-11-20 11:30 Planned hookscommandtests-hooks: HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit
+- 2026-11-20 11:32 Exception on sb5-the-host-confines by lead of vibeswitcher-v2-lead: edits to Sources/VibeNode/Server/Requests.swift, Sources/VibeNode/Live/Wire/WireSchema.swift, Sources/VibeNode/Live/Wire/WireVectors.swift, Sources/vibeswitcher-cli/Status.swift, WebApp/wire/validators.js, WebApp/wire/vectors.json, Sources/VibeNode/Web/WebAssets.generated.swift, Tests/VibeNodeTests/WireVectorsTests.swift, Tests/VibeNodeTests/ServerTests.swift accepted. Reason: The audit's finding F3 (status must say what the HOST confines, not what the command line's own probe says) can only be met by carrying HostNotes.confined to `status` through the server's wire: Reques…
+- 2026-11-20 11:36 Abandoned toolserverswitchtests-2: The user fixed it in 5c31a74d (in v2 since 1f6fd5f0): the cause was the fixture, as this contract's first branch: the switch test's stand-ins were started with no agent in their SpawnRequest, so HostedAgents decided "no agent"; they are now started with agent: "claude" as the engine starts a lead and a worker. ToolServerSwitchTests passes its 3 cases (3 runs under load 24, the user's commit message). The task never ran.
+- 2026-11-20 11:36 You accepted 34 commits on v2 from the command line: 1f6fd5f Merge the main checkout's v2 (hosted agents from the host's record, web board, seen, Mac node seams, CLI card lookup); 5c31a74 v2 tests: the switch test's stand-ins are started as Claude, as the engine starts a lead and a worker; d5b0b04 v2: merge the lead's v2 (switch test, lock test, double-start fix); …
+- 2026-11-20 11:39 Pipeline held: mac-gitguardtests ready to merge with none landing; cause: a merge in progress

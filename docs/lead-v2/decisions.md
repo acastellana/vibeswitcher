@@ -40,3 +40,23 @@ The user's answer; a guard rail isn't loosened for convenience when the cause ca
 
 A lead that starts after the next restart or handover must find the standing answers, the two things this clone still waits for, and why a merged-looking task was restarted, here and not in a lost conversation.
 
+## 2026-11-20 10:44:32 New workers are pinned to Opus (the user, 2026-11-20, answer 616490E3): since the restart the Claude command's default is Mythos 5.2, and configure has no key for the workers' model, so every task the lead adds carries model: opus (sonnet for a mechanical one), and hard tasks keep advisor: fable. The four planned tasks (sb6-2-2-a, branch-runs-get-the, toolserverswitchtests-2, the-merge-s-test-2) are set; the workers already running on Mythos (sb5-the-host-confines, measure-does-claude-code) finish as they are.
+
+The weekly limit was at 44%, 31 points ahead of pace, with the two largest tasks of the slice still to start; a lead after a handover would otherwise add tasks on the command's default again.
+
+## 2026-11-20 10:56:04 The relink is measured (measure-does-claude-code, 2026-11-20, folded into team-sessions-start): ~/.local/bin/claude is re-created only by an interactive Claude Code session whose own binary is older than the newest version on disk; DISABLE_AUTOUPDATER=1 in that session's process environment stops it (one start each way on 2.1.328 against 2.1.329, plus Claude Code's own code). Task team-sessions-start sets the variable for every team role in LeadLaunch (audited, sensitive path: the user approves the commit); turn-this-incident-into stays kept. Not covered: the user's own interactive session left open on an older version relinks the same way, and such a hold is still the supervisor's to accept.
+
+The user asked for the source fix to be measured first; the next lead needs the result and its one known gap without re-running real-agent starts.
+
+## 2026-11-20 11:06:09 A hold on the Windows Startup folder (/mnt/c/Users/…/Start Menu/Programs/Startup) on 2026-11-20 was the user's dictation app (Wispr Flow) rewriting its own shortcut at 11:01 after the reboot; the user looked and accepted it (answer 422475B0). A later hold on that folder is still asked each time, naming this as the likely cause (after a reboot or that app's update): the acceptance covered that one change, and the lead can't list the folder itself.
+
+The Startup folder is a place a session could plant a program, so it stays the user's to look at; knowing the usual cause keeps the question to one line.
+
+## 2026-11-20 11:30:29 max_workers is back at 2 (2026-11-20 11:30). With 3 workers, an audit's shared run, a merge's run and the finders' and a worker's `test-under-load.sh --load 48` runs at once, the node reached load 69 (limit 48): the audit of tests-that-write-a saw 0 of 3 on its load check and a full run with 26 deadline failures (HooksCommandTests, TestLockTests, StallWatchTests, ShellTidyHostTests), none from the branch, and mac-gitguardtests' merge run went past 35 minutes. Load checks stack on top of the heavy slots, so contracts now tell a worker to start its load check only when the 1-minute load is under 12. HooksCommandTests' minutes-long installs are task hookscommandtests-hooks (from finding tests-that-write-a:F5); the other load-only findings of that audit (F6, F7, F8) stay unconfirmed and are not tasks unless they show at load 48 on a calm node.
+
+The user's policy: serialize expensive builds and tests so workers don't compete for CPU; an overloaded node turns audits and merges red on deadlines and wastes their runs.
+
+## 2026-11-20 11:36:52 The user merged the main checkout's v2 into this clone on 2026-11-20 (v2 at 1f6fd5f0; HostedAgents, the web board, `seen`, lead_model at a lead's start, the Mac node's first seams, docs/process/v2-parity.md) and accepted the base move. toolserverswitchtests-2 is abandoned: the user's 5c31a74d fixed it (the fixture: stand-ins are spawned with agent: "claude"). Running workers (sb5-the-host-confines, team-sessions-start) were told to `git merge v2` before their final runs; SB5 regenerates the wire files and WebAssets.generated.swift after that merge. tests-that-write-a is blocked on the user's word (one fewer worker while every test slot is held; load 60): its worker was stopped, its contract v6 carries everything the next worker needs (finding F1's lint, the load check on a calm node, merge v2 first), and the lead sets it back to planned when a worker has finished and the load is down. The parity tasks are planned from docs/process/v2-parity.md once the first sandbox slice has merged.
+
+A later lead must know why a task with an open finding sits blocked with no worker, and that the v2 sync it was told to wait for has happened.
+
