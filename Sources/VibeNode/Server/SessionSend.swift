@@ -30,6 +30,9 @@ extension Requests {
     /// How long a message's Enter waits for Claude Code to show its pasted images, then goes anyway (the app's
     /// `ChatSync.imageWait`: within the host's hold between a unit's parts, `InputOrder.holdLimit`, 10 s).
     static let imageWait: TimeInterval = 8
+    /// The most characters a steered message (`--now`) carries: what a hook hands Claude inline (the app's
+    /// `ComposerLimits.maxSteerCharacters`).
+    static let steerLimit = 8_000
 
     /// `send` with `session`, `text` and `images` (absolute paths of image files, optional; text may be empty when there
     /// are some) (2026-11-20, the parity table's gap 1): the user's words typed into the session's agent the way the
@@ -46,9 +49,16 @@ extension Requests {
     /// webp) or isn't a file. The screen is read in the unit's gate, right before its first write, so nothing typed
     /// meanwhile can come between. The reply names the session, its terminal, whether its agent was working,
     /// `queued` for a held message (and why it `waits`), and what a `/` command `opened` on the screen (a picker). A page's draft for the session that is the message sent goes.
+    ///
+    /// With `now` (`vibeswitcher send SESSION TEXT --now`, 2026-11-20, the app's ↩ while its agent works): a Claude agent
+    /// working by its hooks gets it mid-turn, through its steer inbox as the user's (`LeadEngine.steerAsUser`), at its
+    /// next step and without stopping (`steered`); at most `steerLimit` characters. One between turns gets it typed, as
+    /// above (the app does the same), and a Codex agent too (it takes typed input mid-turn as a steer). The reply names
+    /// the `agent`.
     func send(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let text = (request.args?["text"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let images = request.args?["images"]?.array?.map { $0.string ?? "" } ?? []
+        let now = request.args?["now"]?.bool == true
         guard !text.isEmpty || !images.isEmpty else { return reply(.init(re: request.id, error: .init(.badArgs, "send needs text or images"))) }
         guard images.count <= Self.imagesLimit else {
             return reply(.init(re: request.id, error: .init(.badArgs, "at most \(Self.imagesLimit) images a message")))
@@ -60,6 +70,10 @@ extension Requests {
         guard message.utf8.count <= Self.sendLimit else {
             return reply(.init(re: request.id, error: .init(.badArgs, "too long to type into a terminal (at most \(Self.sendLimit / 1024) KB): "
                                                             + "save it to a file and mention the file instead")))
+        }
+        guard !now || message.count <= Self.steerLimit else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "too long to steer (at most \(Self.steerLimit) characters, what a hook hands "
+                                                            + "Claude at once): send it without --now (it goes after the turn), or save it to a file and mention the file")))
         }
         let session: HostSession
         switch hostedSession(request.args?["session"]?.string, for: "send", id: request.id) {
@@ -74,11 +88,14 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a lead another one replaced: what you type there reaches "
                                                             + "no live lead (`vibeswitcher tell FOLDER TEXT` tells the running one)")))
         }
+        guard !now || engine != nil else {
+            return reply(.init(re: request.id, error: .init(.refused, "this server has no engine to steer through: send it without --now")))
+        }
         let working = sessions?.sessions.first { $0.hostID == session.id }?.status == .working
         let (queue, drafts) = (self.queue, sessionDrafts)
         let id = NodeIds.session(host: session.id)
         let held = HeldSend(message: message, text: text, images: images, at: Date(), action: request.action ?? request.id)
-        let answer = { (queued: String?, opened: String?) in
+        let answer = { (queued: String?, opened: String?, steered: Bool) in
             // The page's draft it was is sent (or waits to be): it goes from beside the session.
             if let draft = drafts.values[id], draft.text.trimmingCharacters(in: .whitespacesAndNewlines) == text, draft.images == images {
                 drafts.send(id, nil)
@@ -87,33 +104,53 @@ extension Requests {
                                                     "characters": .int(message.count), "queued": .bool(queued != nil)]
             if let queued { result["waits"] = .string(queued) }
             if let opened { result["opened"] = .string(opened) }
+            if now { result["steered"] = .bool(steered) }
+            if let agent = HostedAgents.agent(of: session) { result["agent"] = .string(agent.rawValue) }
             reply(.init(re: request.id, result: .object(result)))
         }
         // Off the engine's queue: the agent's process is read from /proc, the images from the disk.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let runs = HostedAgents.agentPid(of: session) != nil
+            let pid = HostedAgents.agentPid(of: session)
             let missing = images.lazy.compactMap { Self.imageRefusal($0, onDisk: true) }.first
             queue.async {
                 guard let self else { return }
                 if let missing { return reply(.init(re: request.id, error: .init(.refused, missing))) }
-                guard runs else {
+                guard let pid else {
                     return reply(.init(re: request.id, error: .init(.refused, "no agent runs in session \(short)'s terminal now (it quit, or ended): nothing typed")))
                 }
-                // Behind the messages it holds already, in the order sent.
-                if !(self.heldSends.values[id] ?? []).isEmpty {
-                    guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
-                    return answer("messages sent before it wait in session \(short)", nil)
-                }
-                self.typeIn(held, into: session) { outcome in
-                    switch outcome {
-                    case .typed:
-                        // A command may open a picker (`/model`, `/resume`): the reply says so, as the app's composer
-                        // watches the screen for one.
-                        guard text.hasPrefix("/"), images.isEmpty else { return answer(nil, nil) }
-                        Self.watchForMenu(session.id, link: self.link, queue: queue, until: Date().addingTimeInterval(Self.pickerWait)) { answer(nil, $0) }
-                    case .menuOpen(let open):
+                let typeIt = { [weak self] in
+                    guard let self else { return }
+                    // Behind the messages it holds already, in the order sent.
+                    if !(self.heldSends.values[id] ?? []).isEmpty {
                         guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
-                        answer(open, nil)
+                        return answer("messages sent before it wait in session \(short)", nil, false)
+                    }
+                    self.typeIn(held, into: session) { outcome in
+                        switch outcome {
+                        case .typed:
+                            // A command may open a picker (`/model`, `/resume`): the reply says so, as the app's composer
+                            // watches the screen for one.
+                            guard text.hasPrefix("/"), images.isEmpty else { return answer(nil, nil, false) }
+                            Self.watchForMenu(session.id, link: self.link, queue: queue, until: Date().addingTimeInterval(Self.pickerWait)) { answer(nil, $0, false) }
+                        case .menuOpen(let open):
+                            guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
+                            answer(open, nil, false)
+                        case .refused(let why):
+                            reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
+                        }
+                    }
+                }
+                // `--now` to a Claude agent: through its hook while it works (the app's steer). Codex takes what's typed
+                // during its turn as a steer itself, so it's typed, as the app types it.
+                guard now, HostedAgents.agent(of: session) == .claude, let engine = self.engine else { return typeIt() }
+                engine.steerAsUser(message, session: session, agentPid: pid) { outcome in
+                    switch outcome {
+                    case .steered:
+                        answer(nil, nil, true)
+                    case .idle:
+                        // Its turn is over (or its hooks say nothing): a steer would wait for a step that never comes.
+                        self.note("send to session \(short): --now, but its agent isn't working by its hooks: typed in instead")
+                        typeIt()
                     case .refused(let why):
                         reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
                     }

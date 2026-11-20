@@ -120,6 +120,8 @@ public final class LeadEngine: @unchecked Sendable {
     /// working again; until then another would type a second prompt).
     var flushing: Set<String> = []
     var typedAt: [String: Date] = [:]
+    /// The user's steered messages this node posted, by id, watched until taken (`watchSteered`).
+    var steerWatched: [String: Steered] = [:]
     /// Each steer inbox read (its terminal), on the thread that reads (for tests): every one is on `reads`.
     public var inboxRead: (String) -> Void = { _ in }
     /// Each step of typing into a session (for tests). On `queue`.

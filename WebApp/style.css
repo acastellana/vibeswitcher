@@ -450,6 +450,9 @@ code, pre, kbd { font-family: var(--mono); }
 .copy-line .copy-text { flex: 1; min-width: 0; padding: 0; overflow: hidden; background: none; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
 .composer-draft { flex: none; width: calc(100% - 48px); max-width: 752px; margin: 4px auto 0; }
 .composer-draft .confirm-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+/* A send-now draft steers a working agent: the working colour, as the app shows a steered message. */
+.composer-draft.now { box-shadow: inset 3px 0 0 var(--working); }
+.composer-draft.now .confirm-label { color: var(--working); }
 .confirm-actions { display: inline-flex; gap: 12px; }
 .session-prompt { margin-top: 14px; }
 .session-prompt .option-note { margin-left: auto; color: var(--ink-3); font-size: var(--small); font-weight: 400; }

@@ -96,17 +96,23 @@ enum SessionCommand {
 /// session the node's host runs, as the app's composer types them (a working agent takes them after its turn; with a
 /// question open on its screen the node holds them, as the app does, and types them once it closes). With no TEXT and
 /// no image, the message a web page's composer left for the session (its `draft`, its images too), shown whole first;
-/// what is sent is what was shown. Refused for a session the host didn't start and a shell.
+/// what is sent is what was shown. Refused for a session the host didn't start and a shell. `--now` (the app's ↩ while
+/// its agent works): a working Claude agent gets it mid-turn, at its next step and without stopping, through its hook;
+/// one between turns gets it typed in (`Requests.send`'s `now`). A draft the page left to go now goes so.
 enum SendCommand {
-    static let usage = "usage: vibeswitcher send SESSION [TEXT] [--image PATH]...  (neither: the message drafted on the session's web page)"
+    static let usage = "usage: vibeswitcher send SESSION [TEXT] [--image PATH]... [--now]  (neither: the message drafted on the session's web page)"
 
     static func run(_ arguments: [String]) -> Int32 {
         var words = arguments[...]
         guard let session = words.popFirst(), !session.isEmpty, !session.hasPrefix("--") else { return Say.usage(usage) }
         var text: String?
         var images: [String] = []
+        var now = false
         while let word = words.popFirst() {
-            if word == "--image" {
+            if word == "--now" {
+                guard !now else { return Say.usage(usage) }
+                now = true
+            } else if word == "--image" {
                 guard let path = words.popFirst(), !path.isEmpty else { return Say.usage(usage) }
                 images.append(CardCommand.absolute(path))
             } else {
@@ -114,15 +120,21 @@ enum SendCommand {
                 text = word
             }
         }
-        if text == nil && images.isEmpty { return takeDraft(session) }
+        if text == nil && images.isEmpty { return takeDraft(session, now: now) }
         let typed = text ?? ""
         guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else { return Say.usage(usage) }
         var args: [String: NodeWire.Value] = ["session": .string(session), "text": .string(typed)]
         if !images.isEmpty { args["images"] = .array(images.map(NodeWire.Value.string)) }
+        if now { args["now"] = .bool(true) }
         return SessionCommand.act("send", args: { _ in args }, what: { _ in
-            "This types into session \(ConfigSeal.inert(session, limit: 80)), as you: " + ConfigSeal.inert(typed, limit: 400) + attached(images)
+            (now ? "This steers session \(ConfigSeal.inert(session, limit: 80)) now, as you (\(steerWhen)): "
+                 : "This types into session \(ConfigSeal.inert(session, limit: 80)), as you: ")
+                + ConfigSeal.inert(typed, limit: 400) + attached(images)
         }, say: said)
     }
+
+    /// What `--now` does, as what is shown says it.
+    static let steerWhen = "a working agent gets it at its next step, without stopping; one between turns gets it typed in"
 
     /// The images a message carries, as what is shown says them.
     static func attached(_ images: [String]) -> String {
@@ -130,15 +142,16 @@ enum SendCommand {
             + images.map { ConfigSeal.inert($0, limit: 200) }.joined(separator: ", ")
     }
 
-    /// The session's draft (its words and images), if it has one.
-    static func draft(of session: NodeWire.Value) -> (text: String, images: [String])? {
+    /// The session's draft (its words and images, and whether the page left it to go now), if it has one.
+    static func draft(of session: NodeWire.Value) -> (text: String, images: [String], now: Bool)? {
         let text = session["draft"]?["text"]?.string ?? ""
         let images = session["draft"]?["images"]?.array?.compactMap(\.string) ?? []
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else { return nil }
-        return (text, images)
+        return (text, images, session["draft"]?["now"]?.bool == true)
     }
 
-    private static func takeDraft(_ wanted: String) -> Int32 {
+    /// `now`: `--now` given, or the page left the draft to go now.
+    private static func takeDraft(_ wanted: String, now: Bool) -> Int32 {
         SessionCommand.act("send", lookup: wanted, refuse: { session in
             guard draft(of: session) == nil else { return nil }
             return Say.usage("\(usage)\n\(SessionCommand.describe(session)) has no draft: write it on its web page, or give TEXT")
@@ -146,11 +159,14 @@ enum SendCommand {
             let drafted = draft(of: session)
             var args: [String: NodeWire.Value] = ["session": session["id"] ?? .string(wanted), "text": .string(drafted?.text ?? "")]
             if let images = drafted?.images, !images.isEmpty { args["images"] = .array(images.map(NodeWire.Value.string)) }
+            if now || drafted?.now == true { args["now"] = .bool(true) }
             return args
         }, what: { session in
             // Whole: this is what the agent will take as the user's.
             let drafted = draft(of: session)
-            return "This types into \(SessionCommand.describe(session)), as you, the message drafted on its web page: "
+            return (now || drafted?.now == true
+                    ? "This steers \(SessionCommand.describe(session)) now, as you (\(steerWhen)), with the message drafted on its web page: "
+                    : "This types into \(SessionCommand.describe(session)), as you, the message drafted on its web page: ")
                 + ConfigSeal.inert(drafted?.text ?? "", limit: .max) + attached(drafted?.images ?? [])
         }, say: said)
     }
@@ -164,9 +180,21 @@ enum SendCommand {
                 + "It waits in the node's memory: a restart of the node's server drops it")
             return
         }
-        Say.out(result["working"]?.bool == true
-            ? "sent: \(characters) characters typed into session \(short); it was working, so it takes them after its turn"
-            : "sent: \(characters) characters typed into session \(short)")
+        if result["steered"]?.bool == true {
+            Say.out("steered: \(characters) characters into session \(short)'s steer inbox; its agent gets them at its next step, without stopping "
+                + "(typed in if its turn ends first)")
+            return
+        }
+        if result["steered"]?.bool == false {
+            Say.out(result["agent"]?.string == "codex"
+                ? "sent: \(characters) characters typed into session \(short); Codex takes what is typed during its turn as a steer"
+                : "sent: \(characters) characters typed into session \(short); its agent wasn't working by its hooks, so it takes them now as its prompt")
+        } else {
+            Say.out(result["working"]?.bool == true
+                ? "sent: \(characters) characters typed into session \(short); it was working, so it takes them after its turn "
+                    + "(`--now` steers it mid-turn)"
+                : "sent: \(characters) characters typed into session \(short)")
+        }
         if let opened = result["opened"]?.string {
             Say.out("\(ConfigSeal.inert(opened, limit: 200)) now: choose in the session's terminal, or close it there (Esc); "
                 + "what you send meanwhile waits for it")

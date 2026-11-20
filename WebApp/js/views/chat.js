@@ -496,9 +496,12 @@ export function chatView(app) {
     const agent = AGENTS[session.agent] || AGENTS.claude;
     const working = stateOf(session) === 'working';
     if (drafting()) {
-      input.placeholder = `Message ${agent}… (↩ leaves a draft)`;
-      sendButton.title = 'Leave as a draft (↩)';
-      sendButton.setAttribute('aria-label', 'Leave as a draft');
+      // While it works, as the app's ↩ steers and ⌥↩ queues: ↩ leaves a draft that steers it now, ⌥↩ one for after.
+      const steers = working && session.agent === 'claude';
+      input.placeholder = steers ? `Steer ${agent} while it works… (↩ leaves a send-now draft, ⌥↩ one for after its turn)`
+        : `Message ${agent}… (↩ leaves a draft)`;
+      sendButton.title = steers ? 'Leave as a send-now draft: it steers the agent at its next step (↩)' : 'Leave as a draft (↩)';
+      sendButton.setAttribute('aria-label', steers ? 'Leave as a send-now draft' : 'Leave as a draft');
     } else {
       input.placeholder = working ? `Steer ${agent} while it works — ↩ sends it to its next step` : `Message ${agent}…`;
     }
@@ -553,6 +556,8 @@ export function chatView(app) {
   input.addEventListener('keyup', (event) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) lookToken(); });
   input.addEventListener('click', lookToken);
   input.addEventListener('blur', () => setTimeout(closeSuggestions, 120));
+  // ⌥↩: the next submit is for after the turn.
+  let queueNext = false;
   input.addEventListener('keydown', (event) => {
     if (completion && !event.isComposing) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -574,6 +579,7 @@ export function chatView(app) {
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
+      queueNext = event.altKey;
       form.requestSubmit();
     } else if (event.key === 'ArrowUp' && input.value === '') {
       // ↑ from an empty box steps into what's waiting for an answer (the Mac's "↑ ↓ and ↩ with the message box empty").
@@ -592,7 +598,11 @@ export function chatView(app) {
     drawAttached();
     closeSuggestions();
     grow();
-    if (drafting()) store.sessionDraft(view.session, text, images); else store.send(view.session, text);
+    // A draft left while a Claude agent works steers it (`now`), unless ⌥↩ asked for after its turn.
+    const session = store.state.sessions.get(view.session);
+    const now = !queueNext && stateOf(session) === 'working' && session?.agent === 'claude';
+    queueNext = false;
+    if (drafting()) store.sessionDraft(view.session, text, images, now); else store.send(view.session, text);
   });
 
   // ---- `/` and `@`: what the app's composer completes, asked of the node as you type ----

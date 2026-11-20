@@ -67,7 +67,7 @@ test('the store sends an image part by part, then a draft that names it', async 
   for (const message of sent) assert.equal(validate('session.attach.args', message.args), null);
 
   store.sessionDraft(session, 'What is this?', [reply.result.path]);
-  assert.deepEqual(store.sessionDraftOf(session), { text: 'What is this?', images: ['/n/attachments/pasted-x.png'], sending: true, mine: true });
+  assert.deepEqual(store.sessionDraftOf(session), { text: 'What is this?', images: ['/n/attachments/pasted-x.png'], now: false, sending: true, mine: true });
   const draft = sent.at(-1);
   assert.equal(draft.kind, 'session.draft');
   assert.deepEqual(draft.args.images, ['/n/attachments/pasted-x.png']);
@@ -76,6 +76,27 @@ test('the store sends an image part by part, then a draft that names it', async 
   const read = sent.length;
   await store.read('session.complete', { session, kind: 'mention', query: 'lo' });
   assert.equal(sent[read].action, undefined, 'a read carries no action id');
+});
+
+test('a send-now draft asks the node to steer, and shows so here and from the node', async () => {
+  const store = createStore();
+  const sent = [];
+  const session = vectors['session.attach'][0].args.session;
+  store.connect({ request(message) { sent.push(message); return new Promise(() => {}); } });
+  store.apply({ kind: 'snapshot', epoch: 'e', seq: 1, state: { sessions: [{ id: session, hosted: true, draft: null, queued: [] }] } });
+  store.sessionDraft(session, 'Stop and read the logs', [], true);
+  assert.deepEqual(sent.at(-1).args, { session, text: 'Stop and read the logs', now: true });
+  assert.equal(validate('session.draft.args', sent.at(-1).args), null);
+  assert.equal(store.sessionDraftOf(session).now, true);
+  store.sessionDraft(session, 'After the turn');
+  assert.deepEqual(sent.at(-1).args, { session, text: 'After the turn' }, 'no now unless asked');
+  assert.equal(store.sessionDraftOf(session).now, false);
+
+  // Left on another page: the node's value says it.
+  const other = createStore();
+  other.apply({ kind: 'snapshot', epoch: 'e', seq: 1, state: { sessions: [{ id: session, hosted: true, queued: [],
+    draft: { text: 'Now', images: [], at: '2026-11-20T10:00:00Z', action: 'a', now: true } }] } });
+  assert.equal(other.sessionDraftOf(session).now, true);
 });
 
 test('a preset the node refuses is never the form’s default, a built-in’s name taken by a project’s included', () => {
