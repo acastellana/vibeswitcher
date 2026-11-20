@@ -163,4 +163,43 @@ struct PushAsksTests {
         let usage = try await node.run(["decline-push"])
         #expect(usage.status == 64 && usage.errors.contains("usage: vibeswitcher decline-push FOLDER"), "\(usage.output)\(usage.errors)")
     }
+
+    /// A remote's credentials never leave the node: not on the wire (every page with a read token), not in what the
+    /// command line shows or prints, not in the reply, the log or the lead's message (its chat is the page's), however
+    /// the URL carries them; an scp-like login name stays.
+    @Test func aURLsCredentialsAreNeverShown() async throws {
+        let secret = "hunter2-token"
+        #expect(PushText.displayURL("https://someone:\(secret)@example.invalid/r.git") == "https://example.invalid/r.git")
+        #expect(PushText.displayURL("https://\(secret)@example.invalid/r.git?access_token=\(secret)#x") == "https://example.invalid/r.git")
+        #expect(PushText.displayURL("ssh://git:\(secret)@example.invalid:22/r.git") == "ssh://example.invalid:22/r.git")
+        #expect(PushText.displayURL("git@example.invalid:r.git") == "git@example.invalid:r.git")
+        #expect(PushText.displayURL("someone:\(secret)@example.invalid:r.git") == "…@example.invalid:r.git")
+        #expect(PushText.displayURL("/srv/git/r.git") == "/srv/git/r.git")
+        #expect(PushText.scrub("fatal: unable to access 'https://a@b:\(secret)@example.invalid/r.git/': 403") == "fatal: unable to access 'https://example.invalid/r.git/': 403")
+
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.world.lead(idle: false)
+        let url = "https://someone:\(secret)@example.invalid/r.git"
+        let request = request(url: url)
+        try await ask(world, lead, request)
+        let value = try #require(world.queue.sync { world.engine.leads.leads[world.project]?.value })
+        let wire = String(decoding: NodeWire.line(value), as: UTF8.self)
+        #expect(!wire.contains(secret) && wire.contains("https://example.invalid/r.git"), "\(wire)")
+        let words = PushText.what(try #require(value["push"]), root: world.repo, approve: true)
+        #expect(!words.contains(secret) && words.contains("https://example.invalid/r.git"), "\(words)")
+        // git's own words carry the URL whole: the outcome is shown without it, everywhere.
+        world.queue.sync {
+            world.engine.pushSettle = { id, root, _, vault in
+                (try? vault.settlePush(id: id, root: root), .failed("fatal: unable to access '\(url)/': The requested URL returned error: 403"))
+            }
+        }
+        // The log's line is the reply's `said`.
+        let reply = try #require(await settle(world, request.id, push: true))
+        let replied = String(decoding: NodeWire.line(reply.result ?? .null), as: UTF8.self)
+        #expect(reply.result?["settled"]?.string == "failed" && !replied.contains(secret), "\(replied)")
+        #expect(await eventually(timeout: 60) { heard(world.world, lead, "git push failed") == 1 }, "\(world.world.pending(lead).map(\.text))")
+        let told = world.world.pending(lead).map(\.text) + world.world.prompts(lead)
+        #expect(!told.contains { $0.contains(secret) }, "\(told)")
+    }
 }

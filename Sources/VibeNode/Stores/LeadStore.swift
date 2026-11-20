@@ -55,11 +55,12 @@ public final class LeadStore: @unchecked Sendable {
                      "push": push.map(Self.pushValue) ?? .null])
         }
 
-        /// A push request as the wire carries it.
+        /// A push request as the wire carries it: its URL as it may be shown (`PushText.displayURL`: no credentials),
+        /// every page with a read token sees it.
         static func pushValue(_ request: LeadPush.Request) -> NodeWire.Value {
             .object(["id": .string(request.id), "commit": .string(request.commit), "short": .string(request.short),
                      "branch": .string(request.branch), "remote": .string(request.remote), "target": .string(request.target),
-                     "url": .string(request.url), "ahead": .int(request.ahead), "subjects": .array(request.subjects.map(NodeWire.Value.string)),
+                     "url": .string(PushText.displayURL(request.url)), "ahead": .int(request.ahead), "subjects": .array(request.subjects.map { .string(PushText.scrub($0)) }),
                      "askedAt": .date(Date(timeIntervalSince1970: request.askedAt))])
         }
     }

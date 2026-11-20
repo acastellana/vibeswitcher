@@ -25,3 +25,9 @@ test('a folder that needs quoting is one shell word, and nothing is said with no
   assert.equal(pushLines(null, '/r'), null);
   assert.equal(pushLines(push, null), null);
 });
+
+test('a URL with credentials is shown without them', () => {
+  const said = pushLines({ ...push, url: 'https://someone:hunter2-token@example.invalid/r.git' }, '/r');
+  assert.equal(said.url, 'https://example.invalid/r.git');
+  assert.equal(pushLines({ ...push, url: 'git@example.invalid:r.git' }, '/r').url, 'git@example.invalid:r.git', 'an scp-like login name stays');
+});

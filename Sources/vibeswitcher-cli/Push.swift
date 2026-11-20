@@ -49,7 +49,7 @@ enum PushCommand {
             }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             (result["said"]?.string ?? "settled").split(separator: "\n", omittingEmptySubsequences: false)
-                .forEach { Say.out(ConfigSeal.inert(String($0), limit: 2000)) }
+                .forEach { Say.out(ConfigSeal.inert(PushText.scrub(String($0)), limit: 2000)) }
             return result["ok"]?.bool == true ? 0 : 1
         }
     }

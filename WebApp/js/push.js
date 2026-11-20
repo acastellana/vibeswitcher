@@ -11,13 +11,16 @@ const word = (text) => {
   return /^[A-Za-z0-9._\/:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 };
 
+// A URL with no credentials in it: the node sends it so already (`PushText.displayURL`); this holds if one ever doesn't.
+const shownURL = (url) => String(url || '').replace(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#]*@/, '$1');
+
 // What the card says of `push`, the lead of `root`'s open request; null when there's none.
 export function pushLines(push, root) {
   if (!push || !root) return null;
   const subjects = push.subjects || [];
   return {
     what: `${push.branch} at ${push.short}, ${plural(push.ahead, 'commit')} ahead of ${push.target}`,
-    url: push.url,
+    url: shownURL(push.url),
     subjects,
     more: Math.max(0, push.ahead - subjects.length),
     push: `vibeswitcher push ${word(root)}`,

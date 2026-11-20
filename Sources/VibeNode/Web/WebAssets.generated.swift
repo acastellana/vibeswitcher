@@ -1552,7 +1552,7 @@ extension EmbeddedAssets {
             IGRyYXcoKTsKICBsb29rKCk7CiAgcmV0dXJuIHsgZWwsIG9mZmVyLCBsb29rLCB0dXJuLCBlbmFi
             bGVkIH07Cn0K
             """),
-        EmbeddedAssets.File(path: "js/push.js", sha256: "49bdfb9f21e568448d3b9314b7b316c40a5f579342ba8800e5b29b84822f6b8e", base64: """
+        EmbeddedAssets.File(path: "js/push.js", sha256: "38507bdf854470be07f651d656de3514ee2236ec3fc5709c7374d921405a1edf", base64: """
             Ly8gVGhlIHB1c2ggYSBsZWFkIGFza3MgZm9yIChwdXNoX3JlbW90ZSksIGFzIHRoZSBwYWdlIHNo
             b3dzIGl0IGluIHRoZSBsZWFkJ3MgY2hhdDogd2hhdCBnb2VzIHdoZXJlLCBpdHMgY29tbWl0cywg
             YW5kCi8vIHRoZSB0d28gbGluZXMgdGhhdCBzZXR0bGUgaXQgaW4gYSB0ZXJtaW5hbCwgYHZpYmVz
@@ -1565,16 +1565,20 @@ extension EmbeddedAssets {
             aXQ6IGFzIGl0IGlzIHdoZW4gaXQgbmVlZHMgbm8gcXVvdGluZywgZWxzZSBpbiBzaW5nbGUgcXVv
             dGVzLgpjb25zdCB3b3JkID0gKHRleHQpID0+IHsKICBjb25zdCB2YWx1ZSA9IFN0cmluZyh0ZXh0
             KTsKICByZXR1cm4gL15bQS1aYS16MC05Ll9cLzpAJSs9LC1dKyQvLnRlc3QodmFsdWUpID8gdmFs
-            dWUgOiBgJyR7dmFsdWUucmVwbGFjZSgvJy9nLCBgJ1xcJydgKX0nYDsKfTsKCi8vIFdoYXQgdGhl
-            IGNhcmQgc2F5cyBvZiBgcHVzaGAsIHRoZSBsZWFkIG9mIGByb290YCdzIG9wZW4gcmVxdWVzdDsg
-            bnVsbCB3aGVuIHRoZXJlJ3Mgbm9uZS4KZXhwb3J0IGZ1bmN0aW9uIHB1c2hMaW5lcyhwdXNoLCBy
-            b290KSB7CiAgaWYgKCFwdXNoIHx8ICFyb290KSByZXR1cm4gbnVsbDsKICBjb25zdCBzdWJqZWN0
-            cyA9IHB1c2guc3ViamVjdHMgfHwgW107CiAgcmV0dXJuIHsKICAgIHdoYXQ6IGAke3B1c2guYnJh
-            bmNofSBhdCAke3B1c2guc2hvcnR9LCAke3BsdXJhbChwdXNoLmFoZWFkLCAnY29tbWl0Jyl9IGFo
-            ZWFkIG9mICR7cHVzaC50YXJnZXR9YCwKICAgIHVybDogcHVzaC51cmwsCiAgICBzdWJqZWN0cywK
-            ICAgIG1vcmU6IE1hdGgubWF4KDAsIHB1c2guYWhlYWQgLSBzdWJqZWN0cy5sZW5ndGgpLAogICAg
-            cHVzaDogYHZpYmVzd2l0Y2hlciBwdXNoICR7d29yZChyb290KX1gLAogICAgZGVjbGluZTogYHZp
-            YmVzd2l0Y2hlciBkZWNsaW5lLXB1c2ggJHt3b3JkKHJvb3QpfWAsCiAgfTsKfQo=
+            dWUgOiBgJyR7dmFsdWUucmVwbGFjZSgvJy9nLCBgJ1xcJydgKX0nYDsKfTsKCi8vIEEgVVJMIHdp
+            dGggbm8gY3JlZGVudGlhbHMgaW4gaXQ6IHRoZSBub2RlIHNlbmRzIGl0IHNvIGFscmVhZHkgKGBQ
+            dXNoVGV4dC5kaXNwbGF5VVJMYCk7IHRoaXMgaG9sZHMgaWYgb25lIGV2ZXIgZG9lc24ndC4KY29u
+            c3Qgc2hvd25VUkwgPSAodXJsKSA9PiBTdHJpbmcodXJsIHx8ICcnKS5yZXBsYWNlKC9eKFtBLVph
+            LXpdW0EtWmEtejAtOSsuLV0qOlwvXC8pW14vPyNdKkAvLCAnJDEnKTsKCi8vIFdoYXQgdGhlIGNh
+            cmQgc2F5cyBvZiBgcHVzaGAsIHRoZSBsZWFkIG9mIGByb290YCdzIG9wZW4gcmVxdWVzdDsgbnVs
+            bCB3aGVuIHRoZXJlJ3Mgbm9uZS4KZXhwb3J0IGZ1bmN0aW9uIHB1c2hMaW5lcyhwdXNoLCByb290
+            KSB7CiAgaWYgKCFwdXNoIHx8ICFyb290KSByZXR1cm4gbnVsbDsKICBjb25zdCBzdWJqZWN0cyA9
+            IHB1c2guc3ViamVjdHMgfHwgW107CiAgcmV0dXJuIHsKICAgIHdoYXQ6IGAke3B1c2guYnJhbmNo
+            fSBhdCAke3B1c2guc2hvcnR9LCAke3BsdXJhbChwdXNoLmFoZWFkLCAnY29tbWl0Jyl9IGFoZWFk
+            IG9mICR7cHVzaC50YXJnZXR9YCwKICAgIHVybDogc2hvd25VUkwocHVzaC51cmwpLAogICAgc3Vi
+            amVjdHMsCiAgICBtb3JlOiBNYXRoLm1heCgwLCBwdXNoLmFoZWFkIC0gc3ViamVjdHMubGVuZ3Ro
+            KSwKICAgIHB1c2g6IGB2aWJlc3dpdGNoZXIgcHVzaCAke3dvcmQocm9vdCl9YCwKICAgIGRlY2xp
+            bmU6IGB2aWJlc3dpdGNoZXIgZGVjbGluZS1wdXNoICR7d29yZChyb290KX1gLAogIH07Cn0K
             """),
         EmbeddedAssets.File(path: "js/socket.js", sha256: "1c67369a82adeccb08a910e14343d302f4464e980159fbbf77f4f53a50a870f9", base64: """
             Ly8gVGhlIG5vZGUncyBsaXZlIGZlZWQgb3ZlciBpdHMgV2ViU29ja2V0ICh0aGUgd2lyZSBjb250

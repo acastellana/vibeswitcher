@@ -74,15 +74,23 @@ extension LeadEngine {
         pushSettling.remove(root)
         let shown = request ?? pushAsked[root]
         if pushAsked[root]?.id == id { keepPush(nil, root: root) }
-        let said = request.map { Self.pushOutcome($0, outcome) } ?? Self.pushGone(id, outcome)
+        // Shown everywhere (the reply, the log, the lead's chat, which the page reads) with no URL's credentials.
+        let said = PushText.scrub(request.map { Self.pushOutcome(Self.shown($0), outcome) } ?? Self.pushGone(id, outcome))
         note("lead: \(LeadMail.project(of: root))'s push request \(ConfigSeal.inert(id, limit: 40)): \(ConfigSeal.inert(said, limit: 400))")
         // The lead hears what came of it, from VibeSwitcher (the app's `onSettled`): only of a request the vault handed over.
-        if let request { deliver(built: { LeadPush.message(request, outcome) }, from: .system("push"), root: root, action: nil) }
+        if let request { deliver(built: { PushText.scrub(LeadPush.message(Self.shown(request), outcome)) }, from: .system("push"), root: root, action: nil) }
         then(.success(.object([
             "request": .string(id), "settled": .string(Self.settledWord(outcome)),
             "ok": .bool(outcome.pushed || outcome == .declined), "said": .string(said),
             "target": shown.map { .string($0.target) } ?? .null,
         ])))
+    }
+
+    /// `request` as it may be shown: its URL without credentials (`PushText.displayURL`).
+    static func shown(_ request: LeadPush.Request) -> LeadPush.Request {
+        var shown = request
+        shown.url = PushText.displayURL(request.url)
+        return shown
     }
 
     /// The outcome as one word, for the command line.
