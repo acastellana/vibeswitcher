@@ -328,10 +328,10 @@ final class TermPage {
         return page
     }
 
-    func send(_ kind: String, _ args: [String: NodeWire.Value]) throws -> String {
+    func send(_ kind: String, _ args: [String: NodeWire.Value], action: String? = nil) throws -> String {
         counter += 1
         let id = String(counter)
-        try client.sendText(String(decoding: NodeWire.message(NodeWire.Request(id: id, kind: kind, args: args)), as: UTF8.self))
+        try client.sendText(String(decoding: NodeWire.message(NodeWire.Request(id: id, kind: kind, args: args, action: action)), as: UTF8.self))
         return id
     }
 

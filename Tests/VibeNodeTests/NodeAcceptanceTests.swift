@@ -157,6 +157,121 @@ struct NodeAcceptanceTests {
         #expect(back.cwd == folder.path && back.command?.hasSuffix("--resume '\(conversation)'") == true, "\(back)")
         #expect(await eventually(timeout: 60) { EngineEndToEndTests.state(node.fake.files(terminal: back.tty))["resume"] as? String == conversation })
     }
+
+    // MARK: A10, the terminal on the page
+
+    @Test("A10: the page's terminal of a hosted session is live and watch-only: keys go nowhere")
+    func a10TerminalWatch() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: TerminalRelayTests.watchArguments)
+        defer { node.stop() }
+        let (session, files) = try await Self.newClaude(node)
+        let page = try TermPage.paired(node)
+        let id = try page.send("term.open", ["session": .string(NodeIds.session(host: session.id)), "cols": .int(120), "rows": .int(40)])
+        let reply = try #require(try page.next()?.json, "no reply to term.open: \(node.said)")
+        #expect(reply["re"]?.string == id && reply["ok"]?.bool == true && reply["result"]?["readOnly"]?.bool == true, "\(reply)")
+        let stream = try #require(reply["result"]?["stream"]?.int.flatMap(UInt32.init(exactly:)), "\(reply)")
+        let replay = try #require(try page.until { $0.term?.kind == 2 }, "no end of the replay: \(node.said)")
+        let shown = String(decoding: replay.compactMap(\.term).filter { $0.kind == 1 }.flatMap(\.payload), as: UTF8.self)
+        #expect(shown.contains("? for shortcuts"), "the session's live screen: \(shown.debugDescription)")
+        // Live: what it draws next comes as it draws it.
+        try EngineEndToEndTests.tell(files, ["op": "permission", "command": "make clean"])
+        var live = ""
+        _ = try page.until { item in
+            guard let term = item.term, term.stream == stream, term.kind == 1 else { return false }
+            live += String(decoding: term.payload, as: UTF8.self)
+            return live.contains("Do you want to proceed?")
+        }
+        #expect(live.contains("Do you want to proceed?"), "\(live.debugDescription)")
+        // Watch-only: a key from the page goes nowhere.
+        try page.type("2", on: stream)
+        try #require(await eventually(timeout: 60) { node.said.contains("terminal stream \(stream): input refused") }, "\(node.said)")
+        #expect(EngineEndToEndTests.state(files)["mode"] as? String == "permission", "\(EngineEndToEndTests.state(files))")
+    }
+
+    // MARK: A17, settings
+
+    @Test("A17: settings shows a project's; set records it, the lead is told, and config held holds nothing for it")
+    func a17SettingsAndSet() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "keep going")
+        let shown = try await node.run(["settings", repo.path])
+        #expect(shown.status == 0 && shown.output.contains("max_workers"), "\(shown.output)\(shown.errors)")
+        let set = try await node.runOnTerminal(["set", repo.path, "max_workers", "2"])
+        #expect(set.status == 0 && set.output.contains("the project's lead is told"), "\(set.output)\(set.errors)\n\(node.said)")
+        #expect(LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: repo.path)).maxWorkers == 2)
+        // Told: typed into the idle lead, or waiting in its inbox for its next step.
+        #expect(await eventually(timeout: 60) {
+            node.inbox(lead.session.tty).contains { $0.agentPid == lead.pid && $0.text.contains("max_workers to 2") }
+                || EngineEndToEndTests.prompts(lead.tools).contains { $0.contains("max_workers to 2") }
+        }, "\(node.inbox(lead.session.tty)) \(EngineEndToEndTests.prompts(lead.tools))\n\(node.said)")
+        let held = try await node.run(["config", "held", repo.path, "--long"])
+        #expect(held.status == 0 && held.output.contains("nothing held"), "\(held.output)\(held.errors)")
+        let rail = held.output.components(separatedBy: "\n").first { $0.contains("max_workers: 2") } ?? ""
+        #expect(!rail.contains("changed since"), "set by the user, no second hold: \(held.output)")
+    }
+
+    // MARK: A22-A23, who may act as the user
+
+    @Test("A22: vibeswitcher answer run from inside a session is refused: not the user's voice")
+    func a22AnswerFromASession() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "ask something")
+        try lead.tools.call("ask_user", ["question": "Which name for the parser?", "options": ["Parser", "Reader"]])
+        let card = try await EngineEndToEndTests.card(node, question: "Which name for the parser?")
+        let out = node.root.appendingPathComponent("answer.out")
+        let environment = ["HOME": node.home.path, "VIBESWITCHER_HOME": node.root.path].map { "\($0.key)='\($0.value)'" }.joined(separator: " ")
+        let asking = try await node.spawn("env \(environment) '\(commandLine.path)' answer \(card) the-second > '\(out.path).part' 2>&1; "
+                                 + "echo \"status $?\" >> '\(out.path).part'; mv '\(out.path).part' '\(out.path)'; exec sleep 600", label: "Claude")
+        // Should it ask for the card's code on the session's terminal first, it's typed there (a scratch session's), so
+        // what refuses it is the voice, never a missing code.
+        var code: String?
+        _ = await eventually(timeout: 60) {
+            code = node.screen(asking.id).flatMap { screen in
+                screen.range(of: #"Type [A-Z0-9]{4,8} and Enter"#, options: .regularExpression).map {
+                    String(screen[$0].dropFirst(5).prefix { $0 != " " })
+                }
+            }
+            return code != nil || FileManager.default.fileExists(atPath: out.path)
+        }
+        if let code {
+            _ = try await offPool { [socket = node.socket] in
+                try HostCall.type(HostInput.writes(text: code, submit: true, key: nil), into: asking.id, socket: socket, appKey: nil, timeout: 10)
+            }
+        }
+        try #require(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: out.path) }, "\(node.screen(asking.id) ?? "")\n\(node.said)")
+        let said = try String(contentsOf: out, encoding: .utf8)
+        #expect(said.contains("status 77") && said.contains("not the user's voice") && said.contains("live session"), "\(said)")
+        // Still open: the lead was told nothing.
+        #expect(try await EngineEndToEndTests.listedCard(node, question: "Which name for the parser?", timeout: 5) == card)
+    }
+
+    @Test("A23: a page's token can't answer or send: refused, and it leaves only drafts")
+    func a23PageTokenRefused() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
+        defer { node.stop() }
+        let (session, files) = try await Self.newClaude(node)
+        let page = try TermPage.paired(node)
+        let kinds = Set(page.hello?["kinds"]?.array?.compactMap(\.string) ?? [])
+        #expect(!kinds.contains("answer") && !kinds.contains("session.send") && !kinds.contains("session.reply"), "\(kinds.sorted())")
+        let sessionID = NodeIds.session(host: session.id)
+        for (kind, args) in [("answer", ["card": NodeWire.Value.string("0123abcd"), "answer": .string("A")]),
+                             ("session.send", ["session": .string(sessionID), "text": .string("echo hi")]),
+                             ("session.reply", ["session": .string(sessionID), "choice": .int(1)])] {
+            let id = try page.send(kind, args, action: UUID().uuidString.lowercased())
+            let reply = try #require(try page.until { $0.json?["re"]?.string == id }?.last?.json, "no reply to \(kind)")
+            #expect(reply["ok"]?.bool != true && reply["error"] != nil, "\(kind): \(reply)")
+        }
+        // A draft it may leave: shown beside the session, nothing typed.
+        let id = try page.send("session.draft", ["session": .string(sessionID), "text": .string("a draft from the page")],
+                               action: UUID().uuidString.lowercased())
+        let drafted = try #require(try page.until { $0.json?["re"]?.string == id }?.last?.json, "no reply to session.draft")
+        #expect(drafted["ok"]?.bool == true, "\(drafted)")
+        #expect(EngineEndToEndTests.prompts(files).isEmpty, "\(EngineEndToEndTests.prompts(files))")
+    }
 }
 
 /// The suite's gate and helpers.
@@ -172,6 +287,31 @@ extension NodeAcceptanceTests {
         try await scratchRepository(repo)
         try EngineEndToEndTests.workflow(repo)
         return repo
+    }
+
+    /// A lead the user started: `repo`'s config and base accepted (the first look the scratch node holds), then
+    /// `lead FOLDER --goal GOAL`, each with the code typed; its fake up and between turns (its Stop hook written).
+    struct Lead {
+        var session: HostSession
+        var tools: FakeClaude.Files
+        var pid: Int32
+    }
+
+    static func startLead(_ node: ScratchNode, _ repo: URL, goal: String, sourceLocation: SourceLocation = #_sourceLocation) async throws -> Lead {
+        try await node.acceptConfig(repo)
+        try await node.acceptBase(repo, from: Git.run(["rev-parse", "main"], in: repo.path).output)
+        let started = try await node.runOnTerminal(["lead", repo.path, "--goal", goal])
+        try #require(started.status == 0 && started.output.contains("the lead started"), "\(started.output)\n\(node.said)", sourceLocation: sourceLocation)
+        let session = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") }, "\(node.said)", sourceLocation: sourceLocation)
+        let tools = node.fake.files(terminal: session.tty)
+        try #require(await eventually(timeout: 60) { EngineEndToEndTests.state(tools)["pid"] != nil }, "\(node.said)", sourceLocation: sourceLocation)
+        let pid = try #require((EngineEndToEndTests.state(tools)["pid"] as? Int).map(Int32.init), sourceLocation: sourceLocation)
+        // Its tool server up, as Claude Code starts its MCP servers at its start: the vault binds the lead's role at its
+        // first call, and only a lead it binds is delivered to.
+        try tools.call("status", [:])
+        try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)", sourceLocation: sourceLocation)
+        try hook(node, ["hook_event_name": "Stop"], tty: session.tty, pid: pid)
+        return Lead(session: session, tools: tools, pid: pid)
     }
 
     /// `new FOLDER [--model M]` on a terminal, the code typed: the session it started, its fake up.
