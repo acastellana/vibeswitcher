@@ -346,6 +346,28 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
         }
     }
 
+    /// A refused start lets go of its lock even while a child of this process is between its fork and its exec, as
+    /// another test's spawn may be at any moment (a full run 18 wide failed `aHostStartsOnlyOnTheLockItTookItselfFor`
+    /// so): the child, spawned while the host held the lock, has a copy of the host's descriptor, and with it the lock,
+    /// until its exec closes it (close-on-exec). Forced here: the spawn is held in its file actions across the start.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's lock by identity; the Mac asks nothing"))
+    func aRefusedStartLetsGoWhileASpawnIsBeforeItsExec() throws {
+        let (dir, _, _) = try Self.home()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let socket = scratchSocketPath()
+        let lock = dir + "/h.lock"
+        defer { unlink(socket) }
+        let child = try SpawnHeldBeforeExec(in: dir)
+        defer { child.release() }
+        let server = HostServer(config: Self.config(socket: socket, lock: lock, heldLockIsAllowed: { _ in
+            child.start()
+            return false
+        }))
+        #expect(throws: HostServer.Failure.lock(EPERM)) { try server.start() }
+        try #require(child.holds, "the child wasn't spawned")
+        Self.expectNotHeld(lock, socket: socket, server: server)
+    }
+
     /// A host whose held lock isn't allowed doesn't start: `start()` throws, the lock released and no socket bound;
     /// `start(restoring:)` throws, having taken neither inherited descriptor. Either platform: the Mac's host sets no
     /// check, but the server asks one it is given.
@@ -1144,5 +1166,59 @@ extension Result where Failure == HostImages.Refused {
     var failureDescription: String? {
         if case .failure(let why) = self { return why.description }
         return nil
+    }
+}
+
+/// A child of this process held between its fork and its exec, as another test's spawn can be at any moment: it has a
+/// copy of this process's descriptors, the close-on-exec ones too until its exec closes them, so it shares each open
+/// file description and the flock on it. Held by its own file actions, which run in the child before its exec: it
+/// opens the FIFO `ready` for writing (`start` waits for that: the child has its copy then), then `go` for reading,
+/// which waits for `release` to open it for writing. Then it execs `sh -c :`, ends, and is reaped.
+final class SpawnHeldBeforeExec: @unchecked Sendable {
+    let ready: String, go: String
+    private(set) var pid: pid_t = -1
+    private let spawned = DispatchSemaphore(value: 0)
+    private var started = false, released = false, failed = false
+    /// Whether the child was spawned and is held (between `start` and `release`).
+    var holds: Bool { started && !failed && !released }
+
+    init(in folder: String) throws {
+        ready = folder + "/spawn-ready"
+        go = folder + "/spawn-go"
+        try #require(mkfifo(ready, 0o600) == 0 && mkfifo(go, 0o600) == 0, "mkfifo: errno \(errno)")
+    }
+
+    /// Spawns the child from a thread of its own (posix_spawn returns once the child has exec'd, which waits for
+    /// `release`), and returns once the child has its copy of this process's descriptors.
+    func start() {
+        started = true
+        Thread.detachNewThread { [self] in
+            var spawn = Platform.Spawn(executable: "/bin/sh", arguments: ["sh", "-c", ":"])
+            spawn.stdin = .path(ready, flags: O_WRONLY)
+            spawn.stdout = .path(go, flags: O_RDONLY)
+            switch spawn.start() {
+            case .success(let started): pid = started
+            case .failure:
+                failed = true
+                // No child to open `ready`: this opens it instead, so `start`'s open below returns.
+                let fd = open(ready, O_WRONLY | O_CLOEXEC)
+                if fd >= 0 { Sys.close(fd) }
+            }
+            spawned.signal()
+        }
+        let fd = open(ready, O_RDONLY | O_CLOEXEC)
+        if fd >= 0 { Sys.close(fd) }
+    }
+
+    /// Lets the child go on to its exec, and reaps it: its copy of the descriptors is gone when this returns.
+    func release() {
+        guard started, !released else { return }
+        released = true
+        // Read and write: it never waits for a reader (Linux), and the child's open for reading returns on it.
+        let fd = open(go, O_RDWR | O_CLOEXEC)
+        if fd >= 0 { Sys.close(fd) }
+        #expect(spawned.wait(timeout: .now() + hangGuard) == .success, "the held spawn didn't return")
+        var status: Int32 = 0
+        if pid > 0 { _ = waitpid(pid, &status, 0) }
     }
 }
