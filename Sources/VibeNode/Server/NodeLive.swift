@@ -223,10 +223,12 @@ public final class NodeLive: @unchecked Sendable {
 public struct LiveAssets: WebAssetSource {
     public let folder: URL?
     let port: @Sendable () -> UInt16
+    /// The listener's name in the policy: the loopback's address, or the tailnet's MagicDNS name (`TailnetWeb`).
+    var host = "127.0.0.1"
 
     public func asset(path: String) -> WebAsset? {
-        if let folder { return FolderAssets(root: folder, port: port()).asset(path: path) }
-        return EmbeddedAssets(port: port()).asset(path: path)
+        if let folder { return FolderAssets(root: folder, port: port(), host: host).asset(path: path) }
+        return EmbeddedAssets(port: port(), host: host).asset(path: path)
     }
 
     /// `hello.assets`: the build of the files served now.

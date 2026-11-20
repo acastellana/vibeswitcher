@@ -49,6 +49,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     /// its code than after it issued its token raced a revoke, and the token it issued is dropped (a revoke means no page
     /// until `vibeswitcher web` again, whatever was under way).
     private var revocations = 0
+    private var hostName = "127.0.0.1"
     private var listenHook: Listen = { .failure(WebTokens.Refusal("this server has no web listener")) }
     private var changeHook: (@Sendable () -> Void)?
     private var revokeHook: (@Sendable () -> Void)?
@@ -93,8 +94,16 @@ public final class WebAccess: WebGate, @unchecked Sendable {
         set { lock.withLock { admittedHook = newValue } }
     }
 
-    /// `http://127.0.0.1:<port>/#pair=<code>`: the one origin (LW-D5), the code in the fragment.
-    public static func url(port: UInt16, code: String) -> String { "http://127.0.0.1:\(port)/#pair=\(code)" }
+    /// `http://127.0.0.1:<port>/#pair=<code>`: the one origin (LW-D5), the code in the fragment. On the tailnet the
+    /// host is the MagicDNS name (`TailnetWeb`).
+    public static func url(port: UInt16, code: String, host: String = "127.0.0.1") -> String { "http://\(host):\(port)/#pair=\(code)" }
+
+    /// The listener's name in the address `open` gives: 127.0.0.1, or the tailnet's MagicDNS name, set before `listen`
+    /// returns (`TailnetWeb`).
+    public var host: String {
+        get { lock.withLock { hostName } }
+        set { lock.withLock { hostName = newValue } }
+    }
 
     // MARK: Codes
 
@@ -119,9 +128,10 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             return .failure(refusal)
         case .success(let port):
             let code = openCode(now: now())
-            note("web.open: a pairing code made, taken once in the next \(Int(Self.codeLife)) s; the web listens on 127.0.0.1:\(port)")
+            let host = host
+            note("web.open: a pairing code made, taken once in the next \(Int(Self.codeLife)) s; the web listens on \(host):\(port)")
             onChange?()
-            return .success(Opened(url: Self.url(port: port, code: code), port: port, expiresIn: Int(Self.codeLife)))
+            return .success(Opened(url: Self.url(port: port, code: code, host: host), port: port, expiresIn: Int(Self.codeLife)))
         }
     }
 
