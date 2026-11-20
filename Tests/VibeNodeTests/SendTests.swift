@@ -104,7 +104,7 @@ struct SendTests {
     }
 
     /// Through the command line on a scratch node, its code typed on its terminal: the fake's session gets the words; a
-    /// wrong form is the usage.
+    /// wrong form is the usage (one word alone is the session's draft: `SessionDriveTests`).
     @Test func theCommandLineTypesIntoASession() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
@@ -115,8 +115,10 @@ struct SendTests {
         #expect(sent.status == 0, "\(sent.output)\(sent.errors)\n\(node.said)")
         #expect(sent.output.contains("sent: 19 characters typed into session"), "\(sent.output)")
         _ = try await EngineEndToEndTests.prompt(files) { $0 == "Hello from the node" }
-        let usage = try await node.run(["send", session.id.uuidString])
-        #expect(usage.status == 64 && usage.errors.contains("usage: vibeswitcher send SESSION [TEXT]"), "\(usage.output)\(usage.errors)")
+        for words in [["send"], ["send", session.id.uuidString, "one", "two"], ["send", session.id.uuidString, " "]] {
+            let usage = try await node.run(words)
+            #expect(usage.status == 64 && usage.errors.contains("usage: vibeswitcher send SESSION [TEXT]"), "\(words): \(usage.output)\(usage.errors)")
+        }
     }
 
     /// A web page is never the user's voice, whatever its token's rights.

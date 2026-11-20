@@ -168,7 +168,7 @@ public final class Requests: @unchecked Sendable {
         // A draft comes from a web page (`NodeLive` hands those to `draft` itself): from here it is no one's to leave.
         if needs == .webDraft {
             note("refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
-            return reply(.init(re: request.id, error: .init(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers")))
+            return reply(.init(re: request.id, error: .init(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers and `vibeswitcher send SESSION TEXT` sends")))
         }
         if request.kind == "web.open", openWebForAnyone {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")

@@ -59,7 +59,8 @@ public enum WireSchema {
     public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "auth.args",
                                   "subscribe.args", "subscribe.result", "unsubscribe.args", "chat.page.args", "chat.page.result",
                                   "draft.args", "draft.result", "draft.clear.args",
-                                  "board.args", "board.result", "seen.args"]
+                                  "board.args", "board.result", "seen.args",
+                                  "session.draft.args", "session.draft.result", "session.draft.clear.args"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -139,6 +140,9 @@ public enum WireSchema {
             shape("draft.result", from: "Requests.draft", [field("applied", .map(.int)), field("card", .string)]),
             shape("draft.clear.args", from: "the contract's §8", [field("card", .string)]),
             shape("seen.args", from: "Requests.seen (the parity gaps of 2026-11-19)", [field("session", .string)]),
+            shape("session.draft.args", from: "Requests.sessionDraft (driving sessions, 2026-11-20)", [field("session", .string), field("text", .string)]),
+            shape("session.draft.result", from: "Requests.sessionDraft", [field("applied", .map(.int)), field("session", .string)]),
+            shape("session.draft.clear.args", from: "Requests.sessionDraft", [field("session", .string)]),
         ]
 
         // The node (the contract's §5).
@@ -177,7 +181,13 @@ public enum WireSchema {
             field("shownStatus", .words(["needs-you", "working", "background", "done", "idle", "unknown"])), field("project", .string),
             field("task", Kind.string.orNull), field("detail", Kind.string.orNull), field("activity", Kind.string.orNull),
             field("activitySince", Kind.date.orNull), field("startedAt", .date), field("hasHooks", .bool), field("leadAsks", .bool),
-            field("startFolder", Kind.string.orNull), field("backgroundJobs", .int), field("hasTranscript", .bool)]))
+            field("startFolder", Kind.string.orNull), field("backgroundJobs", .int), field("hasTranscript", .bool),
+            field("prompt", Kind.shape("session.prompt").orNull), field("draft", Kind.shape("session.draft").orNull)]))
+        // What the node keeps beside a session (driving sessions, 2026-11-20): the question on its screen, a page's draft.
+        shapes.append(shape("session.prompt", from: "SessionPrompt.value", [
+            field("question", .string), field("options", strings), field("descriptions", .list(Kind.string.orNull)), field("text", .list(.int)),
+            field("multiSelect", .bool), field("at", .date)]))
+        shapes.append(shape("session.draft", from: "SessionDraft.value", [field("text", .string), field("at", .date), field("action", .string)]))
 
         // A lead (the contract's §5): the store's value, with what `status` adds.
         let byStatus = "Requests.leadValue adds it"
