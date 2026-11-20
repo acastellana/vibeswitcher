@@ -13,3 +13,10 @@ Evidence: 2026-11-20, merge of mac-gitguardtests (one test expectation changed),
 Task: mac-gitguardtests
 Check: task turn-this-incident-into-2 turns it into a check that runs before merge.
 
+## 2026-11-20 16:48:52 A build of v2 carrying SB6 1/2 (the branch-run box) was installed on the node before the task that lets swift run in that box had merged, so every merge's test run, audit run, done check and verifier command fails at the build and nothing can merge or be audited
+
+Evidence: 2026-11-20 16:41: the audit's shared run of team-sessions-start (d9650237 merged into ddb2f9a2 as 10b4d91b) ended in 2 s; .vibeswitcher/audit/team-sessions-start/10b4d91b74c8/test.log: "Resources/bin/vs-heavy: line 250: /tmp/vibeswitcher-1000/test-build.lock.cores: No such file or directory" (the box's own empty /tmp; the folder exists outside), "Could not load swiftly's configuration file at /tmp/vs-test.Q5xW6l/home/.local/share/swiftly/config.json", "retry-failed: not retried: the build failed". status: "merges run the installed build (e09844422e92)"; `git merge-base --is-ancestor 40fdebeb e0984442` is true (SB6 1/2 is in it) and false for 5b6eccd9, the build that ran last night's merges. BranchRun.launching (Sources/VibeCore/V2/Sandbox/BranchRun.swift:168-175) boxes every run of a tool server with `.standard` and has no switch. The hold was recorded (decisions.md 2026-11-19 17:32 point 6; the update of 2026-11-20 02:16 "Don't install a build from v2 on this node yet") but nothing checks it: status itself says "Gate code on v2 isn't installed yet", inviting the install. The check to build: a node that boxes branch runs proves at start (and `status` says) that the project's test_command's toolchain runs in a branch run's box under the project's accepted policy, and an install or start that would break the gate says so before it replaces the build.
+
+Task: team-sessions-start
+Check: task turn-this-incident-into-3 turns it into a check that runs before merge.
+

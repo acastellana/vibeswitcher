@@ -319,3 +319,8 @@
 - 2026-11-20 16:44 Automatically (auto_advance): Started a worker on tests-that-write-a (Tests that write a program and run it no longer fail with "Text file busy"), its after tasks done (the-vault-s-look).
 - 2026-11-20 16:44 Started a worker on sb5-the-host-confines
 - 2026-11-20 16:46 Audit of team-sessions-start: finder 2 of 2 submitted (blocked, clean, 0 findings)
+- 2026-11-20 16:48 Workflow: max_workers = `3`
+- 2026-11-20 16:48 Planned the-node-s-gate: The node's gate builds again: the project's sandbox policy and swiftly's variables reach branch runs (review audit, for security)
+- 2026-11-20 16:48 Started a worker on the-node-s-gate
+- 2026-11-20 16:48 Incident: A build of v2 carrying SB6 1/2 (the branch-run box) was installed on the node before the task that lets swift run in that box had merged, so every merge's test … (in team-sessions-start); planned turn-this-incident-into-3 to turn it into a check
+- 2026-11-20 16:49 Planned windows-access-is-a: Windows access is a per-session permission of a box, off by default, given only by the user (review audit, for security)
