@@ -147,6 +147,25 @@ struct SessionDriveTests {
         try await harness.waitFor { harness.agent["reply"] as? String == "Allowed." }
     }
 
+    /// Claude's folder-trust question at the start of a session in a new folder, its rows unnumbered (acceptance run,
+    /// 2026-11-20: needs-you with no `prompt`, and `reply S 2` refused "asks nothing now"): read as a question, its
+    /// options in screen order, and `reply 2` trusts the folder.
+    @Test func claudesFolderTrustQuestionIsAnswered() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let harness = try await claude(world)
+        harness.tell(["op": "trust"])
+        try await harness.screenShows { $0.contains("Yes, I trust this folder") }
+        try await harness.waitFor { harness.agent["mode"] as? String == "trust" }
+        let menu = try #require(SessionPrompt.menu(on: harness.screen))
+        #expect(menu.options == ["No, exit", "Yes, I trust this folder"] && menu.question.contains("Quick safety check"), "\(menu)")
+        let reply = try #require(await world.ask("session.reply", ["session": .string(harness.session.id.uuidString), "choice": .int(2),
+                                                                    "options": .array(menu.options.map(NodeWire.Value.string))]))
+        #expect(reply.ok && reply.result?["option"]?.string == "Yes, I trust this folder", "\(reply)")
+        try await harness.waitFor { harness.agent["trusted"] as? Bool == true }
+        #expect(live(world, harness.session.id))
+    }
+
     // MARK: voice
 
     @Test func aSessionsProcessAToolServerAndAWebPageCannotDrive() async throws {
