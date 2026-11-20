@@ -67,9 +67,11 @@ struct SessionTempTests {
                                      SessionNote.roleVariable: "lead"])
         #expect(worker.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "worker-x", in: sessions).path + "/",
                                      SessionNote.roleVariable: "worker"])
-        // A verifier's also runs its commands as branch code, with no auto-memory (`LeadLaunch.verifierEnvironment`).
+        // A verifier's also runs its commands as branch code, with no auto-memory (`LeadLaunch.verifierEnvironment`),
+        // and carries the settings for its commands' boxes it was started with (none given: the standard ones).
         #expect(verifier.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "verify-x", in: sessions).path + "/",
-                                     SessionNote.roleVariable: "verifier"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 })
+                                     SessionNote.roleVariable: "verifier"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 }
+            .merging([BranchRun.policyVariable: BranchRun.carried(.success(.standard))]) { $1 })
         for launch in [lead, worker, verifier] {
             let tmpdir = try #require(launch.environment["TMPDIR"])
             #expect(try mode(tmpdir) == 0o700)
