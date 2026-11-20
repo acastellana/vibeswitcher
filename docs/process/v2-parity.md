@@ -12,11 +12,11 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **40 has it**, **20 partly**, **25 missing** (one of them, Codex workers, on purpose), **9 not needed on
-Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`: after the
-2026-11-20 lanes' rows and that lane's small ones, reopening your own sessions after a restart, the prompt-audit reminder,
-reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads and
-the all-done mark).
+Of 101 features: **47 has it**, **17 partly**, **21 missing** (one of them, Codex workers, on purpose), **9 not needed on
+Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`, after the
+settings lane's merge and that lane's rows: reopening your own sessions after a restart, the prompt-audit reminder,
+reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads, the
+all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells).
 
 The gaps that matter most for daily use, worst first:
 
