@@ -468,6 +468,24 @@ code, pre, kbd { font-family: var(--mono); }
 .gone-resume { width: 100%; text-align: left; }
 .new-session { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; margin: 22px 0 26px; padding: 14px 16px 15px; border-radius: 12px; background: var(--fill); }
 .new-title { color: var(--ink-2); font-size: var(--small); font-weight: 600; }
+/* The folder's presets under the new session form: each with Edit and Remove, and the form that drafts a change. */
+.new-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.preset-editor { display: grid; gap: 9px; padding-top: 10px; border-top: 1px solid var(--line); }
+.preset-list { display: grid; gap: 6px; justify-items: start; }
+.preset-row { display: flex; align-items: baseline; gap: 10px; width: 100%; min-width: 0; }
+.preset-name { flex: none; font-weight: 600; }
+.preset-note { flex: 1; min-width: 0; overflow: hidden; color: var(--ink-3); font-size: var(--small); text-overflow: ellipsis; white-space: nowrap; }
+.preset-form { display: grid; gap: 8px; justify-items: start; }
+.preset-form > * { max-width: 100%; }
+.preset-form > .new-fields, .preset-form > .prompt-line, .preset-vars { width: 100%; }
+.preset-vars { display: grid; gap: 6px; }
+.preset-var { display: flex; gap: 8px; }
+.preset-var .answer-input:first-child { flex: 1 1 50%; font-family: var(--mono); font-size: 12.5px; }
+.preset-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 8px; border-radius: 6px; background: var(--fill-2); font-family: var(--mono); font-size: 12px; }
+.preset-chip.off { color: var(--ink-3); text-decoration: line-through; }
+.preset-ticks { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--ink-2); font-size: var(--small); }
+.preset-tick { display: inline-flex; align-items: center; gap: 4px; }
 /* Your sessions that ended lately, on the start page: a name and folder, the line that resumes it, its id. */
 .ended { display: grid; gap: 9px; margin: 0 0 26px; }
 .ended-list { display: grid; gap: 14px; }
