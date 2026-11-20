@@ -73,6 +73,8 @@ export function nodeView(app) {
       node.journal?.length ? group('Journal', h('ul', { class: 'lines' }, node.journal.map((line) => h('li', null, line.replace(/^journal: /, ''))))) : null,
       node.accepted?.length ? group('Requests it took as yours',
         h('ul', { class: 'lines' }, node.accepted.map((entry) => h('li', null, h('code', null, entry.commandLine.join(' ')), ' · ', ago(entry.at), ' ago · ', entry.cgroup)))) : null,
+      // This page's own: the browser's notifications (js/notify.js).
+      app.notifications?.el,
     ].filter(Boolean));
   }
 
