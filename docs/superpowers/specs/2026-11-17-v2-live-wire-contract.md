@@ -534,6 +534,8 @@ is done once (rule 8). What the first write actions need:
 | `session.reopen` **new** (2026-11-20) | `all` bool, or `sessions` [string] (ids as `reopen` lists them, or prefixes of 4 or more), or `forget` bool | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: `vibeswitcher reopen` |
 | `mail` **new** (2026-11-20) | `folder` string? (absolute), `all` bool? | the user's voice, no typed code (a read of the projects' private record of their leads' `tell_lead` messages) | refused, `voice`: `vibeswitcher mail` |
 | `prompt-audit` **new** (2026-11-20) | `folder` string (absolute), `do`: `snooze`, `off` or `on` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: `vibeswitcher prompt-audit` |
+| `settings` **new** (2026-11-20) | `folder?` | anyone | a token with `read`: `{node: {root, settings}, project: {project, root, settings} or null, leftOut: [{title, why}]}`, each setting `{key, title, about, section, scope, form, home, choices, limits, value, default, isDefault, where, guardRail, note}` (the schema's `setting`; the vector `settings`); a folder no lead has worked in is `gone` |
+| `set` **new** (2026-11-20) | `folder?`, `key`, `value` | the user's voice, the typed code from the action id, `action`; recorded: `{key, value, was, scope, project, told}` | refused, `voice` (the vector `set.from-a-page`): the page drafts the `vibeswitcher set` line (`views/settings.js`) |
 
 A session (§5) carries two more fields since 2026-11-20, each null when there's none: `prompt` {`question` †,
 `options` †, `descriptions` †, `text` (the options that take words, by index), `multiSelect`, `at`}, the question open

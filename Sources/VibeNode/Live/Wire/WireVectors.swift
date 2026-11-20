@@ -385,7 +385,7 @@ public enum WireVectors {
                        server: .init(commit: "f62aef61", startedAt: "2026-11-17T09:12:44.031Z", pid: 41822),
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
                        kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
-                               "session.draft", "session.draft.clear"],
+                               "session.draft", "session.draft.clear", "settings"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -530,6 +530,32 @@ public enum WireVectors {
         return BoardValue.value(project: NodeIds.project(root: root), root: root, board: board, now: Date(timeIntervalSince1970: now))
     }
 
+    // The node's settings (`settings`' result), from a few of them whose words and limits are the same on any machine.
+
+    static var settingsValue: NodeWire.Value {
+        func shown(_ key: String, _ value: String, _ fallback: String, place: String, note: String? = nil) -> NodeWire.Value {
+            NodeSettings.Shown(setting: NodeSettings.setting(key)!, value: value, defaultValue: fallback, place: place, note: note).wire
+        }
+        let node = "/home/u/.vibeswitcher"
+        let workflow = root + "/.vibeswitcher/workflow.md"
+        return .object([
+            "node": .object(["root": .string(node), "settings": .array([
+                shown("mac_max_sessions", "8", String(MacLimits.defaultMaxSessions), place: node + "/mac-limits.json"),
+                shown("ignore_usage_limits", "off", "off", place: node + "/mac-limits.json"),
+                shown("boost", "on", "off", place: node + "/settings.plist"),
+                shown("lead_mail", "on", "on", place: node + "/settings.plist"),
+                shown("policy", "- Ship small.\n- Ask before deleting data.", WorkingPolicy.defaultText, place: node + "/policy.md"),
+            ])]),
+            "project": .object(["project": .string(NodeIds.project(root: root)), "root": .string(root), "settings": .array([
+                shown("lead_model", "fable", "fable", place: workflow),
+                shown("max_workers", "4", "3", place: workflow),
+                shown("floor_audit_finders", "2", "1", place: "the session host's vault",
+                      note: "not recorded yet: the project's values, recorded when you set one or accept its config"),
+            ])]),
+            "leftOut": .array(NodeSettings.leftOut.prefix(2).map { .object(["title": .string($0.title), "why": .string($0.why)]) }),
+        ])
+    }
+
     /// Every vector.
     public static var all: [Vector] {
         let resumeAsk = request(.init(id: "2", kind: "subscribe", args: [
@@ -601,6 +627,11 @@ public enum WireVectors {
             ("session.draft.clear", [request(.init(id: "16", kind: "session.draft.clear", args: ["session": .string(plainSession)],
                                                    action: "1c5e8a20-4b7d-4f3e-9a61-0d2c7b5e8f13")),
                                      delta("s1", "sessions", prev: 50, seq: 51, at: "2026-11-17T09:23:41.020Z", changes: [(plainSession, asking(draft: false))])]),
+            // The node's settings (2026-11-20): read by a page, which drafts the line that sets one; `set` is never a page's.
+            ("settings", [request(.init(id: "18", kind: "settings", args: ["folder": .string(root)])),
+                          reply("reply.settings", .init(re: "18", result: settingsValue))]),
+            ("set.from-a-page", [reply(.init(re: "19", error: .init(.voice,
+                                                                   "set is the user's voice: a web page is never that; run it with `vibeswitcher` in a terminal")))]),
             ("send.from-a-page", [reply(.init(re: "17", error: .init(.voice,
                                                                     "send is the user's voice: a web page is never that; run it with `vibeswitcher` in a terminal")))]),
             // §8: a draft, acked; refused.

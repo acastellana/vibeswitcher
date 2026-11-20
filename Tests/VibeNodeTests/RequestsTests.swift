@@ -200,7 +200,9 @@ struct RequestsTests {
         let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "mail", "question.post", "question.revise", "question.withdraw",
                                   "subscribe", "unsubscribe", "chat.page", "board",
                                   // It changes nothing but a session's seen mark (done or idle), so it needs no voice.
-                                  "seen"]
+                                  "seen",
+                                  // The node's settings, read (2026-11-20).
+                                  "settings"]
         let changes: Set<String> = ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
                                     "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close",
                                     // Driving an ordinary session (2026-11-20).
@@ -208,7 +210,9 @@ struct RequestsTests {
                                     // Reopening the user's sessions after a host restart (2026-11-20).
                                     "session.reopen",
                                     // The prompt-audit reminder (2026-11-20).
-                                    "prompt-audit"]
+                                    "prompt-audit",
+                                    // A setting changed (2026-11-20).
+                                    "set"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

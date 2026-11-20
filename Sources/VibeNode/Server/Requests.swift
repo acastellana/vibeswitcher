@@ -12,7 +12,7 @@ public final class Requests: @unchecked Sendable {
     public struct Accepted: Equatable, Sendable {
         public var kind: String
         public var action: String?
-        /// The card, project, folder or session it named, when it named one.
+        /// The card, project, folder or session it named, when it named one; else a setting's key.
         public var subject: String?
         public var at: Date
         public var pid: pid_t
@@ -150,7 +150,7 @@ public final class Requests: @unchecked Sendable {
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
                                                "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
                                                "send", "session.new", "session.end", "session.reply", "session.reopen",
-                                               "prompt-audit"]
+                                               "prompt-audit", "set"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -229,6 +229,8 @@ public final class Requests: @unchecked Sendable {
         case "lead": lead(request, reply: reply)
         case "questions": questions(request, reply: reply)
         case "board": board(request, reply: reply)
+        case "settings": settings(request, reply: reply)
+        case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)
         case "tell": tell(request, reply: reply)
@@ -289,7 +291,7 @@ public final class Requests: @unchecked Sendable {
     /// The card or project a request names, as recorded and shown.
     static func subject(_ request: NodeWire.Request) -> String? {
         request.args?["card"]?.string ?? request.args?["project"]?.string ?? request.args?["folder"]?.string
-            ?? request.args?["session"]?.string
+            ?? request.args?["session"]?.string ?? request.args?["key"]?.string
     }
 
     // MARK: status

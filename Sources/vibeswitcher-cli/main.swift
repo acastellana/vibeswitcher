@@ -27,6 +27,7 @@ let usage = """
            vibeswitcher mail [FOLDER] [--all] [--json] | prompt-audit FOLDER snooze|off|on
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
+           vibeswitcher settings [FOLDER] [--json] | set [FOLDER] KEY VALUE
            vibeswitcher hooks install|remove [--agent claude|codex]
            vibeswitcher web [--revoke]
     """
@@ -75,6 +76,10 @@ case "config":
     exit(ConfigCommand.run(Array(words.dropFirst())))
 case "base":
     exit(BaseCommand.run(Array(words.dropFirst())))
+case "settings":
+    exit(SettingsCommand.run(Array(words.dropFirst())))
+case "set":
+    exit(SetCommand.run(Array(words.dropFirst())))
 case "hooks":
     exit(HooksCommand.run(Array(words.dropFirst())))
 case "web":

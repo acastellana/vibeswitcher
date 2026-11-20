@@ -439,6 +439,7 @@ extension LeadEngine {
                         }
                         self.leads.update(sessions: self.link.sessions, holders: self.holders)
                         self.noteStarted(root: root, session: session.id, run: run, resumed: resumed)
+                        if resumed == nil { self.policyPrompted(session.id) }
                         self.finish(root: root, .started(session: session.id, program: program, notes: notes))
                     }
                 }

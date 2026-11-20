@@ -13,6 +13,7 @@ import { sidebar } from './js/views/sidebar.js';
 import { sessionView } from './js/views/session.js';
 import { nodeView } from './js/views/node.js';
 import { boardView } from './js/views/board.js';
+import { settingsView, settingsHref } from './js/views/settings.js';
 import { startView } from './js/views/start.js';
 import { palette } from './js/views/palette.js';
 import { notifications } from './js/notify.js';
@@ -52,12 +53,13 @@ const list = sidebar(app);
 const session = sessionView(app);
 const node = nodeView(app);
 const board = boardView(app);
+const settings = settingsView(app);
 const start = startView(app);
 const offline = h('div', { class: 'offline', role: 'status', hidden: true }, 'Reconnecting to the node…');
 // The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
 // had stay readable underneath.
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
-const main = h('main', { class: 'main' }, start.el, session.el, node.el, board.el);
+const main = h('main', { class: 'main' }, start.el, session.el, node.el, board.el, settings.el);
 const root = document.getElementById('app');
 root.replaceChildren(list.el, main, palette(app).el, offline, unpaired, app.notifications.offer);
 
@@ -68,9 +70,10 @@ function route() {
   session.el.hidden = name !== 'session';
   node.el.hidden = name !== 'node';
   board.el.hidden = name !== 'board';
+  settings.el.hidden = name !== 'settings';
   if (name === 'board') return; // the board names itself (views/board.js)
   const shown = store.state.sessions.get(ui.state.route.id);
-  document.title = name === 'session' && shown ? `${shown.title || 'Session'} · VibeSwitcher` : name === 'node' ? 'This node · VibeSwitcher' : 'VibeSwitcher';
+  document.title = name === 'session' && shown ? `${shown.title || 'Session'} · VibeSwitcher` : name === 'node' ? 'This node · VibeSwitcher' : name === 'settings' ? 'Settings · VibeSwitcher' : 'VibeSwitcher';
 }
 ui.subscribe((what) => { if (what === 'route') route(); });
 store.subscribe('sessions', route);
@@ -117,6 +120,9 @@ function commands() {
     ...[...store.state.boards.values()].map((board) => ({ title: `Board: ${lastPart(board.root) || 'a project'}`, about: 'Its lead’s tasks, as they move', icon: 'team', run: () => ui.go(boardHref(board.project)) })),
     { title: 'Start Page', icon: 'home', run: () => ui.go('#/') },
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
+    // The node's settings, and each lead's project's (views/settings.js).
+    { title: 'Settings', about: 'Limits, Boost, the working policy', icon: 'settings', run: () => ui.go(settingsHref(null)) },
+    ...[...store.state.leads.values()].filter((lead) => lead.root).map((lead) => ({ title: `Settings: ${lastPart(lead.root)}`, about: 'Its models, max_workers and review floor', icon: 'settings', run: () => ui.go(settingsHref(lead.project)) })),
     { title: app.notifications.enabled() ? 'Turn Notifications Off' : 'Turn Notifications On', about: 'When something needs you, while this page is open', icon: 'question', run: () => app.notifications.turn(!app.notifications.enabled()) },
     { title: 'Group by Attention', icon: 'filter', run: () => ui.setGrouping('attention') },
     { title: 'Group by Project', icon: 'filter', run: () => ui.setGrouping('projects') },
