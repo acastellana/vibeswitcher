@@ -272,6 +272,7 @@ extension Requests {
         let list = heldSends.values[id] ?? []
         guard list.count < Self.heldLimit else { return false }
         heldSends.send(id, list + [held])
+        recordHeld(held, session: session.id)
         queue.asyncAfter(deadline: .now() + Self.heldEvery) { [weak self] in self?.pumpHeld(session.id) }
         return true
     }
@@ -285,8 +286,10 @@ extension Requests {
         guard !pumping.contains(hostID), let first = heldSends.values[id]?.first else { return }
         let short = String(hostID.uuidString.lowercased().prefix(8))
         guard let session = link.sessions.first(where: { $0.id == hostID && $0.isLive }) else {
-            note("send to session \(short): \(heldSends.values[id]?.count ?? 0) held message(s) dropped: the session ended")
+            let gone = (heldSends.values[id] ?? []).map(\.action)
+            note("send to session \(short): \(gone.count) held message(s) dropped: the session ended")
             heldSends.send(id, nil)
+            heldGone(gone)
             return
         }
         pumping.insert(hostID)
@@ -309,6 +312,7 @@ extension Requests {
                         if case .refused(let why) = outcome { self.note("send to session \(short): a held message dropped: \(why)") }
                         let rest = Array((self.heldSends.values[id] ?? []).drop { $0.action == first.action })
                         self.heldSends.send(id, rest.isEmpty ? nil : rest)
+                        self.heldGone([first.action])
                         // The next once the agent has taken this one's Enter.
                         later(0.5)
                     }

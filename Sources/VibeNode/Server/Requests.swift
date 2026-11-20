@@ -64,6 +64,10 @@ public final class Requests: @unchecked Sendable {
     public let heldSends = Changes<[HeldSend]>()
     /// The sessions whose held messages are being typed in now (`pumpHeld`). On `queue`.
     var pumping: Set<UUID> = []
+    /// The held messages' vault calls and file writes, one after another (`HeldSendStore.swift`), and whether the file's
+    /// were restored yet (at the first welcome). On `queue`.
+    let heldWrites = DispatchQueue(label: "vibeswitcher-server.held-sends")
+    var heldRestored = false
     /// What sessions' composers complete (`session.complete`), kept a while.
     let completionIndex = SessionCompletions()
     /// Images web pages are sending in parts (`session.attach`). On `queue`.

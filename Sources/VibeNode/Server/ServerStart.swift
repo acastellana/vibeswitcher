@@ -129,6 +129,7 @@ public enum ServerStart {
         server.hub = live.hub
         link.onWelcome = { _, _ in
             requests.refreshNotes()
+            requests.restoreHeldSends()
             engine.welcomed()
         }
         link.start()
