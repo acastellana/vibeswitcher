@@ -215,14 +215,14 @@ export function newSessionForm(app, { folder }) {
       app.store.read('session.presets', folder.startsWith('/') ? { folder } : {}).then((reply) => {
         if (asked !== folder || !reply?.ok) return;
         presets = reply.result.presets.length ? reply.result.presets : BUILT_IN;
-        if (!picked || !presets.some((preset) => preset.name === chosen && !preset.refused)) chosen = presets.find((preset) => !preset.refused)?.name || chosen;
+        chosen = presetChosen(presets, chosen, picked);
         draw();
       });
     }, 250);
   }
 
   function draw() {
-    const preset = presets.find((one) => one.name === chosen) || presets[0];
+    const preset = presets.find((one) => one.name === chosen && !one.refused) || presets.find((one) => one.name === chosen) || presets[0];
     kinds.replaceChildren(...presets.map((one) => h('button', {
       type: 'button', 'aria-pressed': String(one === preset), disabled: !!one.refused, title: one.refused ? `Can’t start here: ${one.refused}` : presetNote(one),
       onclick: () => { chosen = one.name; picked = true; draw(); },
@@ -254,6 +254,14 @@ export function newSessionForm(app, { folder }) {
       draw();
     },
   };
+}
+
+// The preset the form shows chosen once the node's list comes: the one you picked while it can start, else the first
+// that can (the folder's default, as the node orders them). One the node refuses (a project's preset that takes a
+// built-in's name, a variable a preset may not set) is never chosen for you.
+export function presetChosen(presets, chosen, picked) {
+  if (picked && presets.some((preset) => preset.name === chosen && !preset.refused)) return chosen;
+  return presets.find((preset) => !preset.refused)?.name || chosen;
 }
 
 // A preset in a few words: what it runs, the variables it sets (by name), whether a shell stays.

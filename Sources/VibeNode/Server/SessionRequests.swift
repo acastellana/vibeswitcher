@@ -128,7 +128,9 @@ extension Requests {
         }
         let claudeLink = engine?.preflight.claudeLink ?? NodePreflight.claudeLink(root: root)
         let scratch = !VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome)
-        let (link, queue, note, nodeRoot) = (self.link, self.queue, self.note, root)
+        let (link, queue, note, nodeRoot, repositoryOf) = (self.link, self.queue, self.note, root, self.repositoryOf)
+        // The projects whose config the vault keeps: a change to the presets file it holds stops any preset starting.
+        let (vault, leadRoots) = (engine?.cardVault, engine.map { $0.leads.leads.values.map(\.root) } ?? [])
         let refuse = { (why: String) in queue.async { reply(.init(re: request.id, error: .init(.refused, why))) } }
         // Off the queue: the folder, the presets and the link are read from the disk.
         DispatchQueue.global(qos: .userInitiated).async {
@@ -140,6 +142,11 @@ extension Requests {
             // The built-in Claude or Shell, else the preset named.
             var preset = agent == "shell" ? LaunchPreset(name: "Shell", kind: .shell, command: "") : LaunchPreset(name: "Claude", kind: .claude, command: "")
             if let presetName {
+                if let vault, let held = Self.presetsHeld(vault: vault, roots: leadRoots + [repositoryOf(standard)]) {
+                    return refuse("the presets file changed and the vault holds that change (\(SessionPresets.sealName), seen from "
+                                  + "\(ConfigSeal.inert(held, limit: 200))): no preset starts until you accept it "
+                                  + "(`vibeswitcher config held \(ConfigSeal.inert(held, limit: 200))`, then `config accept CARD`)")
+                }
                 let listed = SessionPresets.list(SessionPresets.load(root: nodeRoot).presets, folder: standard)
                 let shown = ConfigSeal.inert(presetName, limit: 80)
                 guard let found = SessionPresets.named(presetName, in: listed) else {
@@ -185,10 +192,28 @@ extension Requests {
         }
     }
 
-    /// `session.presets` with `folder` (absolute, optional), a read (the parity table's launch presets, 2026-11-20): the
+    /// The first of `roots` whose config the vault keeps and holds a change to the presets file in
+    /// (`SessionPresets.sealName`, on the config seal's Linux list), after a look as `config held` makes one (a card
+    /// that showed nothing: nothing sealed); nil when none does. A root the vault has no record for isn't looked at, so
+    /// no first look starts here. Asks the vault: never on the engine's queue.
+    static func presetsHeld(vault: LeadVault, roots: [String]) -> String? {
+        for root in Set(roots).sorted() {
+            guard case .some(.some) = try? vault.guardedRecord(root: root) else { continue }
+            _ = try? vault.checkConfig(root: root, shown: [:])
+            if case .some(let record) = try? vault.guardedRecord(root: root), ConfigSeal.held(in: record).contains(SessionPresets.sealName) {
+                return root
+            }
+        }
+        return nil
+    }
+
+    /// `session.presets` with `folder` (absolute, optional) and `values` (a terminal's), a read (the parity table's launch presets, 2026-11-20): the
     /// launch presets the node keeps for that folder (`SessionPresets.list`: its default first), each with the `digest`
     /// `session.new` takes back, and the lines about what in the file couldn't be read. Off the queue: the file is read.
-    func presets(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+    func presets(_ request: NodeWire.Request, terminal: Bool = false, reply: @escaping (NodeWire.Reply) -> Void) {
+        // The variables' values (a secret-looking one masked) only to a process of the uid asking for them, for its
+        // confirmation: never to a web page, whatever it asks.
+        let values = terminal && request.args?["values"]?.bool == true
         let folder = request.args?["folder"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         if let folder, !folder.hasPrefix("/") {
             return reply(.init(re: request.id, error: .init(.badArgs, "session.presets' folder is an absolute path")))
@@ -199,7 +224,7 @@ extension Requests {
             let listed = SessionPresets.list(loaded.presets, folder: folder)
             queue.async {
                 reply(.init(re: request.id, result: .object([
-                    "presets": .array(listed.map { SessionPresets.value($0) }),
+                    "presets": .array(listed.map { SessionPresets.value($0, values: values) }),
                     "problems": .array(loaded.problems.map(NodeWire.Value.string)),
                 ])))
             }

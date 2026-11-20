@@ -218,7 +218,7 @@ enum NewCommand {
     /// The preset `name` for `path`, as the server lists it, shown whole (its variables by name) and started.
     private static func start(preset name: String, in path: String, model: String?, withModel: String) -> Int32 {
         SessionCommand.act("session.new", fetch: { client in
-            switch client.request("session.presets", args: ["folder": .string(path)]) {
+            switch client.request("session.presets", args: ["folder": .string(path), "values": .bool(true)]) {
             case .failure(let failure): return .failure(failure)
             case .success(let reply):
                 guard reply.ok, let list = reply.result?["presets"]?.array else {
@@ -265,7 +265,7 @@ enum PresetsCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        switch client.request("session.presets", args: ["folder": .string(path)]) {
+        switch client.request("session.presets", args: ["folder": .string(path), "values": .bool(true)]) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
             guard reply.ok, let list = reply.result?["presets"]?.array else { return Say.replyError(reply) }
@@ -292,8 +292,11 @@ enum PresetsCommand {
         var notes: [String] = []
         if preset["default"]?.bool == true { notes.append("the folder's default") }
         if preset["project"]?.bool == true { notes.append("this project's") }
+        // Each variable with its value as the node shows it to a terminal (a secret-looking one `<set>`); by name alone
+        // from a node that sends no values.
         let env = (preset["env"]?.array ?? []).compactMap(\.string)
-        if !env.isEmpty { notes.append("sets " + env.joined(separator: ", ")) }
+        let values = preset["values"]?.object ?? [:]
+        if !env.isEmpty { notes.append("sets " + env.map { name in values[name]?.string.map { "\(name)=\($0)" } ?? name }.joined(separator: ", ")) }
         if preset["keepShell"]?.bool == true { notes.append("a shell stays when it ends") }
         let tail = notes.isEmpty ? "" : "; " + notes.joined(separator: "; ")
         return ConfigSeal.inert("\(preset["name"]?.string ?? "?") (\(runs)\(tail))", limit: 600)

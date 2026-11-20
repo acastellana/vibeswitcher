@@ -164,7 +164,7 @@ public enum WireSchema {
             shape("session.preset", from: "SessionPresets.value", [
                 field("name", .string), field("kind", .words(["claude", "codex", "shell"])), field("command", .string), field("env", strings),
                 field("keepShell", .bool), field("project", .bool), field("default", .bool), field("digest", .string),
-                field("refused", Kind.string.orNull)]),
+                field("refused", Kind.string.orNull), optional("values", .map(.string))]),
         ]
 
         // The node (the contract's §5).
