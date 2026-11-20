@@ -356,7 +356,7 @@ struct WebTokensTests {
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func webWithNoTerminalRefusesBeforeAnyRequest() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
-        for arguments in [["web"], ["web", "--revoke"]] {
+        for arguments in [["web"], ["web", "--revoke"], ["web", "--tailnet"]] {
             let ran = try await run(URL(fileURLWithPath: "/usr/bin/setsid"), ["--wait", commandLine.path] + arguments, environment: node.environment())
             #expect(ran.status == 77, "\(arguments): \(ran.output)\(ran.errors)")
             #expect(ran.errors.contains(TypedOutcome.noTerminal.refusal), "\(arguments): \(ran.errors)")
@@ -365,8 +365,10 @@ struct WebTokensTests {
             #expect(lines.count == 1, "\(arguments): only the refusal: \(ran.errors)")
         }
         #expect(!node.said.contains("web."), "\(node.said)")
-        let usage = try await node.run(["web", "--open"])
-        #expect(usage.status == 64, "\(usage.errors)")
+        for arguments in [["web", "--open"], ["web", "--tailnet", "--revoke"], ["web", "--revoke", "--tailnet"], ["web", "--tailnet", "x"]] {
+            let usage = try await node.run(arguments)
+            #expect(usage.status == 64, "\(arguments): \(usage.errors)")
+        }
     }
 }
 

@@ -291,6 +291,65 @@ struct TailnetWebTests {
         try #require(await eventually { again.port(isOn: true) }, "\(again.state)")
         #expect(restarted.lookups.value == 1)
     }
+
+    // MARK: The user's voice
+
+    /// `web.open` with `tailnet` is the user's voice like `web.open`: a peer that isn't is refused before Tailscale is
+    /// even asked, a scratch server's open form (`--test-web-pair`) never covers it, and a server with no tailnet (a
+    /// scratch one) refuses it. What the server answers the user: the MagicDNS address; `web.revoke` drops the
+    /// tailnet's tokens too and says how many.
+    @Test(NodeTraits.linuxOnly) func theTailnetIsOpenedInTheUsersVoiceAndRevokedWithTheRest() async throws {
+        let stub = try StubHost(scratch)
+        defer { stub.quit() }
+        let link = HostLink(dialer: stub.dialer, root: scratch.url("link-root"), queue: DispatchQueue(label: "engine"), sweep: { _ in })
+        link.start()
+        try #require(await eventually { link.queue.sync { link.state == .connected } }, "the link was never welcomed")
+        let requests = Requests(link: link, sessions: nil, rule: CardWorld.rule, root: scratch.url("node-root"), hostSocket: stub.path,
+                                commit: "test", hostPID: 1)
+        requests.shutdown = { .error("not in this test") }
+        let rig = Rig(scratch, root: requests.root)
+        defer { rig.stop() }
+        requests.web = WebAccess(tokens: WebTokens(root: requests.root))
+        requests.tailnet = rig.web
+        func ask(_ kind: String, _ args: [String: NodeWire.Value], from peer: PeerFacts) async -> NodeWire.Reply? {
+            let reply = Locked<NodeWire.Reply?>(nil)
+            requests.queue.async {
+                requests.handle(NodeWire.Request(id: "r1", kind: kind, args: args, action: UUID().uuidString.lowercased()), from: peer) { reply.value = $0 }
+            }
+            _ = await eventually(timeout: 60) { reply.value != nil }
+            return reply.value
+        }
+        var noTerminal = CardWorld.user
+        noTerminal.terminal = .none
+        for anyone in [false, true] {
+            requests.openWebForAnyone = anyone
+            let reply = try #require(await ask("web.open", ["tailnet": .bool(true)], from: noTerminal))
+            #expect(reply.error?.code == NodeWire.Code.voice.rawValue, "anyone: \(anyone): \(reply)")
+        }
+        requests.openWebForAnyone = false
+        #expect(rig.lookups.value == 0 && !rig.web.access.wanted)
+        #expect(requests.queue.sync { requests.accepted }.isEmpty)
+
+        // What the server's handler answers the user.
+        let opened = Locked<NodeWire.Reply?>(nil)
+        requests.queue.async { requests.webOpenTailnet(NodeWire.Request(id: "o", kind: "web.open", args: ["tailnet": .bool(true)])) { opened.value = $0 } }
+        try #require(await eventually { opened.value != nil })
+        let url = try #require(opened.value?.result?["url"]?.string, "\(String(describing: opened.value))")
+        #expect(url.hasPrefix("http://\(Self.name):") && url.contains("/#pair="), "\(url)")
+        #expect(opened.value?.result?["tailnet"]?.bool == true && opened.value?.result?["expiresIn"]?.int == 120)
+        _ = try rig.web.access.tokens.issue(now: Date())
+        let revoked = Locked<NodeWire.Reply?>(nil), access = try #require(requests.web)
+        requests.queue.sync { requests.webRevoke(NodeWire.Request(id: "r", kind: "web.revoke"), web: access) { revoked.value = $0 } }
+        #expect(revoked.value?.result?["tailnetRevoked"]?.int == 1 && revoked.value?.result?["revoked"]?.int == 0, "\(String(describing: revoked.value))")
+        let web = rig.web
+        try #require(await eventually { web.state == .off })
+
+        // A server with no tailnet refuses it.
+        requests.tailnet = nil
+        let refused = Locked<NodeWire.Reply?>(nil)
+        requests.queue.sync { requests.webOpenTailnet(NodeWire.Request(id: "n", kind: "web.open")) { refused.value = $0 } }
+        #expect(refused.value?.error?.message.contains("only the user's node") == true, "\(String(describing: refused.value))")
+    }
 }
 
 private extension TailnetWeb {
