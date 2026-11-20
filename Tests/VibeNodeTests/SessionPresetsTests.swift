@@ -372,7 +372,8 @@ struct SessionPresetsTests {
         let session = try #require(hosted(world, reply))
         #expect(session.label == "Opus" && session.agent == "claude", "\(session)")
         #expect(session.command?.hasSuffix("'--model' 'opus'") == true, "\(String(describing: session.command))")
-        #expect(environment(of: session)["MAX_THINKING_TOKENS"] == "16000")
+        // The program's environment is the launcher's until it has exec'd it: waited for, not read at once.
+        #expect(await eventually { environment(of: session)["MAX_THINKING_TOKENS"] == "16000" })
         #expect(await world.actions().filter { $0.action == action }.map(\.kind) == ["session.new"])
 
         // The shell preset, as listed: its variable and the shell that stays.
@@ -380,7 +381,8 @@ struct SessionPresetsTests {
         let started = try #require(await world.ask("session.new", ["folder": .string(world.repo), "preset": .string("Tests shell"),
                                                                    "digest": .string(shellDigest)]))
         let shellSession = try #require(hosted(world, started))
-        #expect(shellSession.label == "Tests shell" && shellSession.agent == nil && environment(of: shellSession)["DISABLE_TELEMETRY"] == "1", "\(started)")
+        #expect(shellSession.label == "Tests shell" && shellSession.agent == nil, "\(started)")
+        #expect(await eventually { environment(of: shellSession)["DISABLE_TELEMETRY"] == "1" }, "\(started)")
 
         // Changed since it was shown: nothing starts.
         var changed = presets
