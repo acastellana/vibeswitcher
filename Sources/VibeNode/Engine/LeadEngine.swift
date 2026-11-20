@@ -179,11 +179,18 @@ public final class LeadEngine: @unchecked Sendable {
     var workingTold: [String: (sessions: Set<String>, at: Date)] = [:]
     /// How often the same working sessions are told the vault again (the app's `LeadController.workingEvery`).
     static let workingEvery: TimeInterval = 30
-    /// Each lead's open push request (push_remote), by root, as the vault last said; the request each lead was told
-    /// nothing here pushes, by root; the roots whose vault look is under way (`PushAsks.swift`). On `queue`.
+    /// Each lead's open push request (push_remote), by root, as the vault last said; the request last noted in the log,
+    /// by root; the roots whose vault look is under way, and whose push the user is settling (`PushAsks.swift`). On
+    /// `queue`.
     var pushAsked: [String: LeadPush.Request] = [:]
-    var pushTold: [String: String] = [:]
+    var pushNoted: [String: String] = [:]
     var pushLooking: Set<String> = []
+    var pushSettling: Set<String> = []
+    /// Settles a push request (`LeadPush.settle`: the request's id, the root, push or decline, the vault), off the
+    /// engine's queue. Faked in tests.
+    var pushSettle: @Sendable (String, String, Bool, LeadVault) -> (request: LeadPush.Request?, outcome: LeadPush.Outcome) = { id, root, push, vault in
+        LeadPush.settle(id: id, root: root, push: push, vault: vault)
+    }
     /// Where those are told, one after another: a later look's never overtakes an earlier one's (`work` is concurrent).
     let workingNotes = DispatchQueue(label: "vibenode.lead-engine.working", qos: .utility)
     /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"

@@ -122,7 +122,7 @@ extension LeadEngine {
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
             rotateIfDue(root: root)
         }
-        // A push the lead asked for (push_remote), which nothing on a node offers yet: in `status` while it's open.
+        // A push the lead asked for (push_remote): in `status` while it's open, saying the commands that settle it.
         for (root, request) in pushAsked where roots.contains(root) {
             standing[root, default: []].append(Self.pushNotice(request, root: root))
         }
