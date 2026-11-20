@@ -1211,7 +1211,7 @@ extension Result where Failure == HostImages.Refused {
 /// copy of this process's descriptors, the close-on-exec ones too until its exec closes them, so it shares each open
 /// file description and the flock on it. Held by its own file actions, which run in the child before its exec: it
 /// opens the FIFO `ready` for writing (`start` waits for that: the child has its copy then), then `go` for reading,
-/// which waits for `release` to open it for writing. Then it execs `sh -c :`, ends, and is reaped.
+/// which waits until `release` has it open for writing. Then it execs `sh -c :`, ends, and is reaped.
 final class SpawnHeldBeforeExec: @unchecked Sendable {
     let ready: String, go: String
     private(set) var pid: pid_t = -1
@@ -1252,10 +1252,12 @@ final class SpawnHeldBeforeExec: @unchecked Sendable {
     func release() {
         guard started, !released else { return }
         released = true
-        // Read and write: it never waits for a reader (Linux), and the child's open for reading returns on it.
+        // Read and write: it never waits for a reader (Linux). Kept open until the spawn returns: the child may not
+        // have begun its open of `go` yet, and an open for reading waits for a writer that comes after it begins (a
+        // writer opened and closed before is missed: every run under load lost the child so).
         let fd = open(go, O_RDWR | O_CLOEXEC)
-        if fd >= 0 { Sys.close(fd) }
         #expect(spawned.wait(timeout: .now() + hangGuard) == .success, "the held spawn didn't return")
+        if fd >= 0 { Sys.close(fd) }
         var status: Int32 = 0
         if pid > 0 { _ = waitpid(pid, &status, 0) }
         if failedWriter >= 0 { Sys.close(failedWriter) }
