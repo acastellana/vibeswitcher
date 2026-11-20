@@ -62,12 +62,14 @@ struct SettingsRequestTests {
     @Test func boostOnIsDecidedForTheLeadsAtOnce() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
-        #expect(try #require(await set(world, "boost_max_sessions", "20")).ok)
+        // Within the ceiling on any machine (4× the cores), and above the normal limit.
+        let sessions = min(20, BoostLimits.countCeiling)
+        #expect(try #require(await set(world, "boost_max_sessions", String(sessions))).ok)
         #expect(try #require(await set(world, "boost", "on")).ok)
         let file = files(world).boost
         #expect(await eventually(timeout: 60) { BoostState.active(from: file) != nil })
-        #expect(BoostState.active(from: file)?.limits.maxSessions == 20)
-        #expect(MacLimits.current(file: files(world).limits, boostFile: file).maxSessions >= 20)
+        #expect(BoostState.active(from: file)?.limits.maxSessions == sessions)
+        #expect(MacLimits.current(file: files(world).limits, boostFile: file).maxSessions >= sessions)
         // Automatic acts as off on a node: the boost is taken back.
         #expect(try #require(await set(world, "boost", "automatic")).ok)
         #expect(await eventually(timeout: 60) { BoostState.load(from: file)?.on == false })

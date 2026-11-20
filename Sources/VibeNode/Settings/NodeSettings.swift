@@ -225,6 +225,8 @@ public enum NodeSettings {
         let limits = MacLimits.load(from: files.limits)
         let store = files.preferences
         let boost = boostLimits(store)
+        // Boost's defaults as this machine keeps them: on a small one the ceilings (4× the cores) are under them.
+        let boostDefault = BoostLimits()
         return all.filter { $0.scope == .node }.map { setting in
             let (value, fallback): (String, String) = {
                 switch setting.key {
@@ -233,10 +235,10 @@ public enum NodeSettings {
                 case "mac_heavy_slots": return (String(limits.heavySlots), String(MacLimits.defaultHeavySlots))
                 case "ignore_usage_limits": return (flag(limits.ignoreUsageLimits), "off")
                 case "boost": return (boostMode(store).rawValue, BoostMode.off.rawValue)
-                case "boost_load_threshold": return (MacLoad.number(boost.loadThreshold), MacLoad.number(BoostLimits.defaultLoadThreshold))
-                case "boost_max_sessions": return (String(boost.maxSessions), String(BoostLimits.defaultMaxSessions))
-                case "boost_max_workers": return (String(boost.maxWorkers), String(BoostLimits.defaultMaxWorkers))
-                case "boost_heavy_slots": return (String(boost.heavySlots), String(BoostLimits.defaultHeavySlots))
+                case "boost_load_threshold": return (MacLoad.number(boost.loadThreshold), MacLoad.number(boostDefault.loadThreshold))
+                case "boost_max_sessions": return (String(boost.maxSessions), String(boostDefault.maxSessions))
+                case "boost_max_workers": return (String(boost.maxWorkers), String(boostDefault.maxWorkers))
+                case "boost_heavy_slots": return (String(boost.heavySlots), String(boostDefault.heavySlots))
                 case "lead_mail": return (flag(LeadMail.isOn(store)), "on")
                 case "policy": return (WorkingPolicy.load(from: files.policy), WorkingPolicy.defaultText)
                 default: return ("", "")
