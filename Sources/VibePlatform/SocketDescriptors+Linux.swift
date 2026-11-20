@@ -2,8 +2,12 @@
 // Linux's descriptors passed over a Unix socket: one byte carrying one descriptor (SCM_RIGHTS), through the shim, whose
 // C walks a message's control data with the macros Swift doesn't see. The host's connector rests on it: the server
 // child inherits one end of a pair, asks over it for a connection to the host, and the host hands one end of a new
-// pair back. The Mac has no connector, and its forms (SocketDescriptors+Darwin.swift) pass nothing.
+// pair back. The Mac's forms (SocketDescriptors+Darwin.swift) pass one descriptor the same way, over a stream.
 extension Platform.Sockets {
+    /// The type of a connector's pair: `SOCK_SEQPACKET` on Linux (`seqpacket`), each request and answer a message of
+    /// its own. The Mac's is a stream (SocketDescriptors+Darwin.swift).
+    public static var connectorType: Int32 { seqpacket }
+
     /// Sends `fd` over the Unix socket `socket`: one byte carrying it (`SCM_RIGHTS`), with no SIGPIPE when the peer has
     /// gone. True when the byte went; false and `errno` otherwise. `fd` stays open here, and the caller closes it when
     /// the peer's copy is the only one it means to leave.
