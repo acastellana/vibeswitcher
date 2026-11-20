@@ -112,7 +112,7 @@ public enum ServerStart {
         // The live protocol and the web (the live plan's I1): the hub on the stores, the Unix socket's `subscribe`, and
         // the loopback listener, off until `vibeswitcher web` (or a live token at rest) wants it.
         let live = NodeLive(requests: requests, sessions: sessions, engine: engine, clock: clock, port: parsed.testWebPort ?? NodeWeb.port,
-                            webRoot: parsed.testWebRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, terminals: parsed.testWebTerminal,
+                            webRoot: parsed.testWebRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, terminals: parsed.webTerminal,
                             note: say)
         requests.openWebForAnyone = parsed.testWebPair
         server.hub = live.hub

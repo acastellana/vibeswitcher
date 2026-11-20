@@ -178,7 +178,7 @@ struct WebSecurityTests {
                 action: UUID().uuidString.lowercased())).dropLast(), as: UTF8.self))
             let reply = try #require(try client.nextFrame()?.json, "\(kind): no reply")
             #expect(reply["re"]?.string == "k\(index)" && reply["ok"]?.bool == false, "\(kind): \(reply)")
-            // A terminal's kinds are no kind this server takes (LW-D12: only a scratch server's terminals take them).
+            // A terminal's kinds are no kind this server takes (the rig's screen has no terminals).
             let code = NodeWire.kinds[kind] == .webTerminal ? NodeWire.Code.unknownKind : NodeWire.Code.voice
             #expect(reply["error"]?["code"]?.string == code.rawValue, "\(kind): \(reply)")
         }

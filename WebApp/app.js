@@ -129,7 +129,7 @@ function commands() {
 addEventListener('keydown', (event) => {
   // In a session's terminal the keyboard is the program's: Ctrl+K, Ctrl+J, Alt+F and the rest are its keys. A Mac's ⌘
   // keys stay the page's (the terminal sends none), and so do Ctrl+Alt+1 2 (Terminal, Chat) elsewhere.
-  if (event.target?.closest?.('.terminal-screen') && !(MAC && event.metaKey)
+  if (event.target?.closest?.('.terminal-pane:not(.is-watching) .terminal-screen') && !(MAC && event.metaKey)
     && !(!MAC && event.ctrlKey && event.altKey && /^Digit[12]$/.test(event.code))) return;
   const mod = MAC ? event.metaKey : event.ctrlKey;
   const digit = /^Digit[1-9]$/.test(event.code) ? Number(event.code.slice(5)) : 0;

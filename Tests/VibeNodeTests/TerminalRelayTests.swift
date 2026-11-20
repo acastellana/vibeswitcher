@@ -6,14 +6,17 @@ import VibeCore
 /// A session's terminal in a page (the live plan's B6 and I4, the live wire contract's §9), on a `ScratchNode` whose
 /// server takes `--test-web-terminal`: `term.open`, the host's replay and then its live bytes as binary frames, the
 /// page's input typed into the session (a scratch one's: AGENTS.md's first hard rule), a page that stops reading
-/// resynced from the host's replay, the page's emulator's answers to queries dropped, and the user's server opening
-/// none.
+/// resynced from the host's replay, the page's emulator's answers to queries dropped; and the user's node's form,
+/// watched (`--test-web-terminal-watch`, its stand-in on a scratch server): the session's output at its own size, the
+/// page's input and resizes refused, the host still answering the program's queries, `web --revoke` ending it.
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(10)))
 struct TerminalRelayTests {
     private let scratch = Scratch()
 
     /// A scratch node's server that opens terminals to its pages.
     static let terminalArguments = LiveScratch.webArguments + ["--server-arg", ServerArguments.testWebTerminalFlag]
+    /// A scratch node's server that shows terminals to its pages as the user's node does: watched.
+    static let watchArguments = LiveScratch.webArguments + ["--server-arg", ServerArguments.testWebTerminalWatchFlag]
 
     /// The reply to `term.open` comes first, then the host's replay as type 1 (what the program printed before the page
     /// came), then type 2, and then what it prints next, live, as type 1: all on the stream the reply named.
@@ -135,10 +138,98 @@ struct TerminalRelayTests {
         #expect(TerminalReplies.strip(Array("a\u{1b}[6;1Rb\u{1b}P>|xterm\u{1b}\\c\u{1b}[?1u\u{1b}[8;30;100t".utf8)).kept == Array("abc".utf8))
     }
 
-    /// The user's server opens no terminal (LW-D12): a server without `--test-web-terminal` answers `term.open`
-    /// `unknown-kind` and doesn't list it in `hello`, a binary frame does nothing, and the user's server (`--node`)
-    /// refuses the flag.
-    @Test func theUsersServerOpensNoTerminal() async throws {
+    /// Watched, as on the user's node (the supervisor's decision, 2026-11-20): `term.open`'s reply says `readOnly` and
+    /// the session's size, each replay starts with type 5 (that size), the page's input and resize frames are refused
+    /// (each with a log line, nothing typed and nothing sized: the program, reading raw, gets only the host's answers
+    /// after them), the host's parser answers the program's cursor and device-attribute queries while the page
+    /// watches, and the output goes on live.
+    @Test func aWatchedTerminalShowsTheSessionAndTakesNothingFromThePage() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: Self.watchArguments)
+        defer { node.stop() }
+        let go = node.root.appendingPathComponent("go")
+        let session = try await node.spawn("stty raw -echo; printf 'before-the-page\\r\\n'; "
+            + "while [ ! -e '\(go.path)' ]; do sleep 0.05; done; "
+            + "printf '\\033[H\\033[6n'; dsr=$(dd bs=1 count=6 2>/dev/null | od -An -c | tr -d ' \\n'); "
+            + "printf '\\033[c'; da=''; while :; do ch=$(dd bs=1 count=1 2>/dev/null | od -An -c | tr -d ' \\n'); "
+            + "da=\"$da$ch\"; [ \"$ch\" = c ] && break; done; "
+            + "stty sane; printf 'dsr:%s da:%s end\\n' \"$dsr\" \"$da\"; exec sleep 600")
+        let page = try TermPage.paired(node)
+        let kinds = page.hello?["kinds"]?.array?.compactMap(\.string) ?? []
+        #expect(kinds.contains("term.open") && kinds.contains("term.close"), "\(kinds)")
+
+        let id = try page.send("term.open", ["session": .string(NodeIds.session(host: session.id)), "cols": .int(120), "rows": .int(40)])
+        let reply = try #require(try page.next()?.json, "no reply to term.open: \(node.said)")
+        #expect(reply["re"]?.string == id && reply["ok"]?.bool == true, "\(reply)")
+        let result = try #require(reply["result"], "\(reply)")
+        #expect(result["readOnly"]?.bool == true && result["cols"]?.int == 100 && result["rows"]?.int == 30, "\(result)")
+        let stream = try #require(result["stream"]?.int.flatMap(UInt32.init(exactly:)), "\(reply)")
+        let replay = try #require(try page.until { $0.term?.kind == 2 }, "no end of the replay: \(node.said)")
+        let frames = replay.compactMap(\.term)
+        #expect(frames.first?.kind == 5 && frames.first?.payload == [0, 100, 0, 30], "\(frames)")
+        #expect(frames.dropFirst().dropLast().allSatisfy { $0.kind == 1 && $0.stream == stream }, "\(frames)")
+        let replayText = String(decoding: frames.filter { $0.kind == 1 }.flatMap(\.payload), as: UTF8.self)
+        #expect(replayText.contains("before-the-page"), "\(replayText)")
+        #expect(page.unsound.isEmpty, "\(page.unsound)")
+
+        // Nothing from the page goes in: not keys, not a resize.
+        try page.type("typed-from-the-page\r", on: stream)
+        try page.sendBinary(Array(TerminalRelay.frame(.resize, stream: stream, [0, 120, 0, 40])))
+        try #require(await eventually(timeout: 60) { node.said.contains("terminal stream \(stream): a resize refused") }, "\(node.said)")
+        #expect(node.said.contains("terminal stream \(stream): input refused"), "\(node.said)")
+        #expect(!node.said.contains("typed-from-the-page"), "terminal text in the log")
+        let size = try await offPool { [socket = node.socket] in try HostCall.sessions(socket: socket, appKey: nil) }.first { $0.id == session.id }
+        #expect(size?.cols == 100 && size?.rows == 30, "\(String(describing: size))")
+
+        // The program asks while the page watches: the host's parser answers, and only it.
+        FileManager.default.createFile(atPath: go.path, contents: nil)
+        var live = ""
+        let went = try page.until { item in
+            guard let term = item.term, term.stream == stream, term.kind == 1 else { return false }
+            live += String(decoding: term.payload, as: UTF8.self)
+            return live.contains(" end")
+        }
+        #expect(went != nil, "the live bytes never came: \(live)\n\(node.said)")
+        #expect(live.contains("dsr:033[1;1R da:033[?"), "\(live.debugDescription)")
+        #expect(went?.allSatisfy { $0.term?.kind == 1 } == true, "\(String(describing: went))")
+    }
+
+    /// Watched: a session resized elsewhere (its own terminal, here a client of the host's) is shown again at its new
+    /// size: type 4, type 5 with it, the replay.
+    @Test func aWatchedSessionResizedElsewhereIsReplayedAtItsNewSize() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: Self.watchArguments)
+        defer { node.stop() }
+        let session = try await node.spawn("printf 'resize-me\\n'; exec sleep 600")
+        let page = try TermPage.paired(node)
+        let stream = try page.open(session)
+        _ = try #require(try page.until { $0.term?.kind == 2 }, "no end of the replay: \(node.said)")
+        try await offPool { [socket = node.socket] in try HostCall.send(.resize(id: session.id, cols: 90, rows: 20), socket: socket, appKey: nil) }
+        let again = try #require(try page.until { $0.term?.kind == 2 }, "no second replay: \(node.said)")
+        let frames = again.compactMap(\.term).filter { $0.stream == stream }
+        let resync = try #require(frames.firstIndex { $0.kind == 4 }, "\(frames)")
+        #expect(frames.dropFirst(resync + 1).first.map { $0.kind == 5 && $0.payload == [0, 90, 0, 20] } == true, "\(frames)")
+        #expect(node.said.contains("resized to 90×20"), "\(node.said)")
+    }
+
+    /// `vibeswitcher web --revoke` (the user's voice, on a terminal) closes the page's connection and its watched
+    /// streams with it, and the session's attachment goes.
+    @Test func aRevokeEndsAWatch() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: Self.watchArguments)
+        defer { node.stop() }
+        let session = try await node.spawn("printf 'watched\\n'; exec sleep 600")
+        let page = try TermPage.paired(node)
+        let stream = try page.open(session)
+        _ = try #require(try page.until { $0.term?.kind == 2 }, "no end of the replay: \(node.said)")
+        let revoked = try await node.runOnTerminal(["web", "--revoke"])
+        #expect(revoked.status == 0, "\(revoked)")
+        let bye = try page.until { $0.json?["kind"]?.string == "bye" }
+        #expect(bye?.last?.json?["code"]?.string == "revoked", "\(String(describing: bye))")
+        #expect(await eventually(timeout: 60) { node.said.contains("terminal stream \(stream) closed") }, "\(node.said)")
+    }
+
+    /// A server given no terminal flag opens none: it answers `term.open` `unknown-kind` and doesn't list it in
+    /// `hello`, and a binary frame does nothing. The user's server (`--node`) refuses both test flags and watches
+    /// (`webTerminal`); a scratch server types with `--test-web-terminal`, watches with `--test-web-terminal-watch`.
+    @Test func aServerWithoutATerminalFlagOpensNone() async throws {
         let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
         defer { node.stop() }
         let session = try await node.spawn("printf 'not for the page\\n'; exec sleep 600")
@@ -158,9 +249,14 @@ struct TerminalRelayTests {
 
         let base = ["vibeswitcher-server", "--host-connector", "3", "--host-socket", "/x/host.sock"]
         let user = try ServerArguments.parse(base + ["--node", "--node-root", "/x/b", ServerArguments.testWebTerminalFlag]).get()
-        #expect(user.refused == [ServerArguments.testWebTerminalFlag] && !user.testWebTerminal)
+        #expect(user.refused == [ServerArguments.testWebTerminalFlag] && !user.testWebTerminal && user.webTerminal == .watch)
+        let userWatch = try ServerArguments.parse(base + ["--node", "--node-root", "/x/b", ServerArguments.testWebTerminalWatchFlag]).get()
+        #expect(userWatch.refused == [ServerArguments.testWebTerminalWatchFlag] && !userWatch.testWebTerminalWatch && userWatch.webTerminal == .watch)
         let scratchServer = try ServerArguments.parse(base + ["--root", "/x", ServerArguments.testWebTerminalFlag]).get()
-        #expect(scratchServer.refused.isEmpty && scratchServer.testWebTerminal)
+        #expect(scratchServer.refused.isEmpty && scratchServer.testWebTerminal && scratchServer.webTerminal == .readWrite)
+        let scratchWatch = try ServerArguments.parse(base + ["--root", "/x", ServerArguments.testWebTerminalWatchFlag]).get()
+        #expect(scratchWatch.refused.isEmpty && scratchWatch.webTerminal == .watch)
+        #expect(try ServerArguments.parse(base + ["--root", "/x"]).get().webTerminal == nil)
         let open = NodeWire.Request(id: "t", kind: "term.open")
         #expect(WebAccess.refusal(for: open, rights: WebAccess.rights)?.error?.code == NodeWire.Code.unknownKind.rawValue)
         #expect(WebAccess.refusal(for: open, rights: WebAccess.rights, terminals: true) == nil)

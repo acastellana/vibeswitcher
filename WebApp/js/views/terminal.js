@@ -1,6 +1,8 @@
 // The session view's Terminal pane: the session's screen in xterm.js (vendor/, at the exact version vendor/README.md
-// names), fed by js/terminal.js over the node's socket. Only where the connection can open one (a scratch node's:
-// LW-D12); anywhere else the pane says to use the session's own terminal, and xterm.js isn't even loaded.
+// names), fed by js/terminal.js over the node's socket. Only where the connection can open one; anywhere else the pane
+// says to use the session's own terminal, and xterm.js isn't even loaded. On the user's own node the terminal is
+// watched (the node's `readOnly`): drawn live at the session's own size, with no cursor and no keyboard, and a line
+// saying where typing goes (`vibeswitcher send`, in a terminal: a page is never the user's voice).
 //
 // What the program in the session can't do from here (the live plan's Security): write the clipboard (OSC 52 is
 // swallowed; xterm.js has no handler for it, and none is added), open a link (OSC 8 hyperlinks are swallowed and no link
@@ -95,12 +97,15 @@ export function terminalView(app) {
 
   const screen = h('div', { class: 'terminal-screen' });
   const note = h('p', { class: 'terminal-note', role: 'status' });
+  const watching = h('p', { class: 'terminal-watching', hidden: true },
+    icon('eye', 13), h('span', null, 'Watching. To type into this session, run '), h('code', null, 'vibeswitcher send'),
+    h('span', null, ' in a terminal.'));
   const says = h('p');
   const showChat = h('button', { class: 'button quiet', type: 'button', onclick: () => ui.setPane(ui.state.route.id, 'chat') }, 'Show Chat');
   const retry = h('button', { class: 'button quiet', type: 'button', hidden: true, onclick: () => { const session = shown; control.hide(); show(session); } }, 'Try Again');
   const heading = h('h2', null, 'Terminal');
   const placeholder = h('div', { class: 'placeholder' }, icon('terminal', 22), heading, says, showChat, retry);
-  const el = h('div', { class: 'pane terminal-pane' }, screen, note, placeholder);
+  const el = h('div', { class: 'pane terminal-pane' }, screen, note, watching, placeholder);
 
   let term = null;     // the emulator, once made
   let fit = null;
@@ -134,7 +139,11 @@ export function terminalView(app) {
         term.onBinary((data) => control.input(Uint8Array.from(data, (character) => character.charCodeAt(0) & 0xff)));
         // A Mac's ⌘ keys stay the page's and the browser's; elsewhere the terminal has the keyboard (app.js).
         term.attachCustomKeyEventHandler((event) => !event.metaKey);
-        control.attach({ reset: () => term.reset(), write: (bytes) => term.write(bytes) });
+        control.attach({
+          reset: () => term.reset(), write: (bytes) => term.write(bytes),
+          // Watching: the session's own size, whatever the pane's (the pane scrolls when it is wider).
+          resize: (cols, rows) => { if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows); },
+        });
         new ResizeObserver(() => refit()).observe(screen);
         return term;
       });
@@ -148,7 +157,7 @@ export function terminalView(app) {
     refitting = true;
     requestAnimationFrame(() => {
       refitting = false;
-      if (!term || !visible || screen.clientWidth === 0) return;
+      if (!term || !visible || screen.clientWidth === 0 || control.state.readOnly) return;
       const next = clampSize(sizeNow());
       if (next.cols !== term.cols || next.rows !== term.rows) term.resize(next.cols, next.rows);
       control.resize(next);
@@ -193,6 +202,15 @@ export function terminalView(app) {
     if (noting) setText(note, noting);
     el.classList.toggle('is-stale', words === null && drawn && (phase === 'reconnecting' || ended));
     el.classList.toggle('is-waiting', words === null && !drawn);
+    const watched = words === null && control.state.readOnly;
+    el.classList.toggle('is-watching', watched);
+    watching.hidden = !(watched && drawn && !ended);
+    if (term) {
+      term.options.disableStdin = watched;
+      term.options.cursorStyle = watched ? 'underline' : 'block';
+      term.options.cursorInactiveStyle = watched ? 'none' : 'outline';
+      if (watched && screen.contains(document.activeElement)) term.blur();
+    }
   }
   control.onChange(() => { draw(); if (control.state.phase === 'live') refit(); });
 
@@ -213,7 +231,7 @@ export function terminalView(app) {
       if (shown !== session || !visible) return;
       if (!control.drawn(session)) term.reset();
       const size = clampSize(sizeNow());
-      if (size.cols !== term.cols || size.rows !== term.rows) term.resize(size.cols, size.rows);
+      if (!control.state.readOnly && (size.cols !== term.cols || size.rows !== term.rows)) term.resize(size.cols, size.rows);
       control.show(session, size);
       draw();
     });
@@ -230,6 +248,6 @@ export function terminalView(app) {
       if (control.state.session !== null || control.state.phase !== 'idle') control.hide({ ended: gone || ended });
       if (gone) shown = null;
     },
-    focus() { if (term && !screen.hidden) term.focus(); },
+    focus() { if (term && !screen.hidden && !control.state.readOnly) term.focus(); },
   };
 }

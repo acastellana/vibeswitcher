@@ -611,13 +611,15 @@ An `answer` sent from a page (`answer.from-a-page`):
 
 ## 9. The terminal (slice 4)
 
-The spike's form (B6, D5, G3), measured on a scratch node. What opens a terminal on the user's node is still open
-(the last point).
+The spike's form (B6, D5, G3), measured on a scratch node; on the user's node a terminal is watched only (the last
+point).
 
-- `term.open` `{session, cols, rows}` replies `{stream: int}`; `term.close` `{stream}`.
+- `term.open` `{session, cols, rows}` replies `{stream: int, readOnly: bool}`, and when `readOnly`, the session's own
+  `cols` and `rows` too (the request's are checked and unused); `term.close` `{stream}`.
 - Binary frames, both ways: one byte of type, four bytes of stream (big-endian), then the payload. Server to client:
   type 1, the session's bytes from the host's `attach` (replay first, then live); type 2, replay is over. Client to
-  server: type 1, input; type 3, a resize (two 16-bit numbers).
+  server: type 1, input; type 3, a resize (two 16-bit numbers). Watched only: type 5 to the client, the session's size
+  (two 16-bit numbers), before each replay; a session resized elsewhere is replayed again (type 4, type 5, the replay).
 - When the client falls behind, the server sends type 4 (`resync`) and starts the stream again from the host's
   replay, as the host does to its own clients.
 - Only the host's parser answers a program's terminal queries: the client's emulator's replies are never sent.
@@ -640,9 +642,14 @@ The spike's form (B6, D5, G3), measured on a scratch node. What opens a terminal
 
   Inside the budget at the median in both runs and at p95 in the warm one; whether stage 5 builds on xterm.js is the
   lead's call on these numbers. The cold run's tail is worth a look on the Mac and a phone first.
-- **Rights.** A token with `read` does not open a terminal: a session's screen is more than a process of the user's
-  uid gets today, and input types into a session. The spike runs on a scratch node. What opens a terminal on the
-  user's node is the lead's and the user's decision (the plan's LW-D12).
+- **Rights.** On the user's node a token with `read` may **watch** a session's terminal (the supervisor's decision,
+  2026-11-20; the plan's LW-D12 as amended): the host's `watch`, never its `attach`, so the page takes nothing over
+  (the host's parser keeps answering the program's queries, the session keeps its size), and the client's types 1 and
+  3 are refused, each with a log line. A watcher sees nothing a `read` token can't already see (the chat streams to
+  it), so H1 (the host binds the web port) is waived for watching; it stays required before any page input reaches a
+  real session. Typing stays the user's voice: `vibeswitcher send` on the user's terminal with the typed code
+  (the security architecture's S3). `web --revoke` closes the streams with their connections. Only a scratch node's
+  server types from a page (`--test-web-terminal`, the spike).
 
 ## 10. Errors and versions
 

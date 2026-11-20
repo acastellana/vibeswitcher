@@ -3,10 +3,13 @@
 // fake feed and a fake emulator.
 //
 // - Frames: one byte of type, four of stream (big-endian), the payload. From the node: 1, the session's bytes (its
-//   replay first, then live); 2, the replay is over; 4, resync (what the page shows is stale, the replay comes again).
-//   To the node: 1, input; 3, a resize (columns and rows, 16 bits each, big-endian).
-// - Opening: `term.open {session, cols, rows}` replies `{stream}`. A connection whose `hello.kinds` lacks it (the user's
-//   own node: LW-D12), or that answers `unknown-kind`, has no terminal: the pane says so and no emulator is made.
+//   replay first, then live); 2, the replay is over; 4, resync (what the page shows is stale, the replay comes again);
+//   5, watching only, the session's size (columns and rows, 16 bits each, big-endian), before each replay. To the node:
+//   1, input; 3, a resize (the same four bytes).
+// - Opening: `term.open {session, cols, rows}` replies `{stream, readOnly}`. A connection whose `hello.kinds` lacks it,
+//   or that answers `unknown-kind`, has no terminal: the pane says so and no emulator is made.
+// - Watching (`readOnly`, the user's own node): the screen at the session's size (type 5), and nothing goes up: no
+//   key, no resize. Typing into a real session is the user's voice, `vibeswitcher send` in a terminal.
 // - Calm: a replay is held until its type 2 and only then drawn, over a reset emulator, in one go. A resync or a
 //   reconnect leaves the old screen up until the new one is whole: nothing empties, nothing blinks.
 // - Reconnecting: the node's streams go with the connection. The screen stays, the pane is marked, and after the next
@@ -14,7 +17,7 @@
 // - Leaving: `term.close` as the pane is left or another session shown. A session that ended has no stream left on
 //   the node (the sessions stream says it ended; no frame does), so nothing is sent for it.
 
-export const FRAME = { bytes: 1, replayed: 2, resize: 3, resync: 4 };
+export const FRAME = { bytes: 1, replayed: 2, resize: 3, resync: 4, size: 5 };
 // What the node takes (TerminalRelay.cols and rows).
 export const COLS = { min: 10, max: 1000 };
 export const ROWS = { min: 5, max: 300 };
@@ -72,17 +75,27 @@ function joined(chunks) {
   return out;
 }
 
+// The size in a type 5 frame's payload, inside the node's ranges; null when it isn't four bytes.
+export function parseSize(payload) {
+  if (payload.length !== 4) return null;
+  const view = new DataView(payload.buffer, payload.byteOffset, 4);
+  return clampSize({ cols: view.getUint16(0, false), rows: view.getUint16(2, false) });
+}
+
 // The stream's life for one pane. `feed`: the socket's (`request`, `sendBinary`, `onBinary`, `onLink`); `can(kind)`:
-// the store's; `emulator`: `{ reset(), write(bytes) }`, made by the view only once the terminal can be shown.
+// the store's; `emulator`: `{ reset(), write(bytes), resize?(cols, rows) }`, made by the view only once the terminal
+// can be shown. `state.readOnly`: the node's last open said the stream is watched; `state.size`, the session's size
+// it drew at then (null otherwise).
 //
 // Phases: idle (nothing shown), unavailable (this connection has no terminal), opening, replaying, live,
 // reconnecting (the connection dropped; the screen stays), gone (the node has no such session to show), failed.
 export function createTerminal({ feed, can, log = (...args) => console.warn(...args) }) {
-  const state = { phase: 'idle', session: null, stream: null, message: null };
+  const state = { phase: 'idle', session: null, stream: null, message: null, readOnly: false, size: null };
   const listeners = new Set();
   let emulator = null;
   let size = { cols: 80, rows: 24 };
   let replay = [];
+  let watchedSize = null;   // the session's size from the replay under way (type 5), drawn at with it
   let drawnSession = null;   // the session whose screen the emulator shows (its last replay drawn), even stale
   let attempt = 0;       // the open in flight: a reply to an older one is late
   let nextId = 1;
@@ -116,7 +129,11 @@ export function createTerminal({ feed, can, log = (...args) => console.warn(...a
       }
       if (Number.isInteger(stream)) {
         state.stream = stream;
+        state.readOnly = reply.result.readOnly === true;
         replay = [];
+        // Watching: the session's size as the open found it (each replay's type 5 says it again).
+        const { cols, rows } = reply.result;
+        watchedSize = state.readOnly && Number.isInteger(cols) && Number.isInteger(rows) ? clampSize({ cols, rows }) : null;
         set('replaying');
         return;
       }
@@ -137,8 +154,15 @@ export function createTerminal({ feed, can, log = (...args) => console.warn(...a
         if (state.phase === 'replaying') replay.push(parsed.payload.slice());
         else if (state.phase === 'live') emulator?.write(parsed.payload);
         return;
+      case FRAME.size:
+        if (state.readOnly && state.phase === 'replaying') watchedSize = parseSize(parsed.payload);
+        return;
       case FRAME.replayed:
         if (state.phase !== 'replaying') return;
+        if (state.readOnly && watchedSize) {
+          state.size = watchedSize;
+          emulator?.resize?.(watchedSize.cols, watchedSize.rows);
+        }
         emulator?.reset();
         emulator?.write(joined(replay));
         replay = [];
@@ -147,6 +171,7 @@ export function createTerminal({ feed, can, log = (...args) => console.warn(...a
       case FRAME.resync:
         // The screen stays until the new replay is whole.
         replay = [];
+        watchedSize = null;
         return set('replaying');
       default:
     }
@@ -195,16 +220,16 @@ export function createTerminal({ feed, can, log = (...args) => console.warn(...a
       state.session = null;
       set('idle');
     },
-    // The pane's new size, sent to the node when a stream is open.
+    // The pane's new size, sent to the node when a stream is open that isn't watched.
     resize(at) {
       const next = clampSize(at);
       if (next.cols === size.cols && next.rows === size.rows) return;
       size = next;
-      if (state.stream !== null) feed.sendBinary(resizeFrame(state.stream, size));
+      if (state.stream !== null && !state.readOnly) feed.sendBinary(resizeFrame(state.stream, size));
     },
-    // Keys typed, as text (UTF-8) or bytes; dropped while no stream is open.
+    // Keys typed, as text (UTF-8) or bytes; dropped while no stream is open, and always while it is watched.
     input(data) {
-      if (state.stream === null || !data.length) return false;
+      if (state.stream === null || state.readOnly || !data.length) return false;
       for (const each of inputFrames(state.stream, data)) if (!feed.sendBinary(each)) return false;
       return true;
     },

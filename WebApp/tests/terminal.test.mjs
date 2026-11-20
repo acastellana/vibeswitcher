@@ -66,10 +66,11 @@ function rig({ kinds = ['term.open', 'term.close'], binary = true } = {}) {
       onLink(fn) { listeners.link.add(fn); return () => listeners.link.delete(fn); },
     } : {}),
   };
-  const screen = { resets: 0, text: '', writes: 0 };
+  const screen = { resets: 0, text: '', writes: 0, sizes: [] };
   const emulator = {
     reset() { screen.resets += 1; screen.text = ''; },
     write(data) { screen.writes += 1; screen.text += text(data); },
+    resize(cols, rows) { screen.sizes.push([cols, rows]); },
   };
   const phases = [];
   const term = createTerminal({ feed, can: (kind) => kinds.includes(kind), log: () => {} });
@@ -157,6 +158,44 @@ test('keys go as type 1 on the stream, a resize as type 3, and nothing goes befo
     [1, 0, 0, 0, 4, 0x1b, 0x5b, 0x4d, 0xff],
     [3, 0, 0, 0, 4, 0, 100, 0, 30],
   ], 'the same size twice is sent once');
+});
+
+test('watched (the user’s node): drawn at the session’s size from type 5, and no key or resize goes up', async () => {
+  const r = rig();
+  r.term.show(SESSION, { cols: 80, rows: 24 });
+  await r.node.answer('term.open', { ok: true, result: { stream: 6, readOnly: true, cols: 132, rows: 43 } });
+  assert.equal(r.term.state.readOnly, true);
+  assert.equal(r.term.input('ls\r'), false, 'a watched stream takes no key');
+  r.term.resize({ cols: 90, rows: 30 });
+  r.node.say(FRAME.size, 6, '\u0000\u0064\u0000\u001e');
+  r.node.say(FRAME.bytes, 6, 'the session');
+  r.node.say(FRAME.replayed, 6);
+  assert.deepEqual(r.screen.sizes, [[100, 30]], 'the size type 5 said, before the replay is drawn');
+  assert.deepEqual(r.term.state.size, { cols: 100, rows: 30 });
+  assert.equal(r.screen.text, 'the session');
+  // A resync whose type 5 says nothing new resizes nothing; the open's size stands where no type 5 comes.
+  r.node.say(FRAME.resync, 6);
+  r.node.say(FRAME.size, 6, '\u0000\u0064\u0000\u001e');
+  r.node.say(FRAME.replayed, 6);
+  assert.equal(r.term.input(new Uint8Array([0x03])), false);
+  assert.equal(r.sent.length, 0, 'nothing went to the node');
+});
+
+test('the open’s size stands for a watched replay without type 5; type 5 on a typed stream is ignored', async () => {
+  const watched = rig();
+  watched.term.show(SESSION, { cols: 80, rows: 24 });
+  await watched.node.answer('term.open', { ok: true, result: { stream: 2, readOnly: true, cols: 132, rows: 43 } });
+  watched.node.say(FRAME.replayed, 2);
+  assert.deepEqual(watched.screen.sizes, [[132, 43]]);
+
+  const typed = rig();
+  typed.term.show(SESSION, { cols: 80, rows: 24 });
+  await typed.node.answer('term.open', { ok: true, result: { stream: 2 } });
+  typed.node.say(FRAME.size, 2, '\u0000\u0064\u0000\u001e');
+  typed.node.say(FRAME.replayed, 2);
+  assert.deepEqual(typed.screen.sizes, []);
+  assert.equal(typed.term.state.readOnly, false);
+  assert.equal(typed.term.input('x'), true);
 });
 
 test('leaving the pane closes the stream; another session’s screen is opened anew', async () => {

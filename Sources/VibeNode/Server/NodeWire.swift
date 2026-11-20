@@ -264,7 +264,8 @@ public enum NodeWire {
         /// the Unix socket. It changes state (a draft on a card), so the integration task that takes such a kind checks
         /// the right before `Requests.handle`'s user's-voice path is reached.
         case webDraft
-        /// A web client's terminal, on a scratch node only (LW-D12).
+        /// A web client's terminal: watched on the user's node, typed into on a scratch node only (LW-D12, amended
+        /// 2026-11-20).
         case webTerminal
     }
 

@@ -21,7 +21,8 @@
 # Options: --dir DIR (where its pid, state pointer and log are kept, .build/sandbox-server), --port N (run: the web's
 # port; by default a free one picked at the start and kept, so the page reconnects across a server restart), --web-root (run: serve WebApp/ from the worktree, read at each request, instead of
 # the files embedded in the server: a change shows at the next reload), --still (run: no status changes by
-# themselves; by default the second session's changes every 20 s and the first one's agent takes a step every 8 s), --wait S (how long a reply is waited for, 600 for
+# themselves; by default the second session's changes every 20 s and the first one's agent takes a step every 8 s), --watch (run:
+# the terminals watched, as on your own node: shown, never typed into from the page), --wait S (how long a reply is waited for, 600 for
 # run, 60 otherwise).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -34,6 +35,7 @@ dir=$repo/.build/sandbox-server
 port=0
 web_root=""
 still=""
+watch=""
 wait_for=""
 
 while [[ $# -gt 0 ]]; do
@@ -42,6 +44,7 @@ while [[ $# -gt 0 ]]; do
         --port) port=$2; shift 2 ;;
         --web-root) web_root=$repo/WebApp; shift ;;
         --still) still=1; shift ;;
+        --watch) watch=1; shift ;;
         --wait) wait_for=$2; shift 2 ;;
         -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         --*) echo "unknown option $1 (--help)"; exit 64 ;;
@@ -127,7 +130,7 @@ run_sandbox() {
     with_tmpdir "$state/tmp/" env -u DBUS_SESSION_BUS_ADDRESS -u CLAUDE_CONFIG_DIR -u CODEX_HOME -u VIBESWITCHER_SESSION \
         HOME="$state/home" CFFIXED_USER_HOME="$state/home" VIBESWITCHER_HOME="$state/home/.vibeswitcher" XDG_RUNTIME_DIR="$state/xdg" \
         VIBESWITCHER_SANDBOX_SERVER="$state" VIBESWITCHER_SANDBOX_PORT="$port" \
-        ${web_root:+VIBESWITCHER_SANDBOX_WEB_ROOT="$web_root"} ${still:+VIBESWITCHER_SANDBOX_STILL=1} \
+        ${web_root:+VIBESWITCHER_SANDBOX_WEB_ROOT="$web_root"} ${still:+VIBESWITCHER_SANDBOX_STILL=1} ${watch:+VIBESWITCHER_SANDBOX_WATCH=1} \
         nohup "$bundle" --testing-library swift-testing --filter 'SandboxServerDriver' >>"$dir/node.log" 2>&1 </dev/null &
     local launched=$! deadline=$((SECONDS + ${wait_for:-600}))
     disown 2>/dev/null || true
