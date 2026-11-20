@@ -149,7 +149,7 @@ public final class HostServer {
     private var startedAt = Date()
     public static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover,
                                       HostProtocol.Capability.leadVault, HostProtocol.Capability.appProof, HostProtocol.Capability.inputUnits,
-                                      HostProtocol.Capability.census]
+                                      HostProtocol.Capability.census, HostProtocol.Capability.watch]
         + (Platform.CodeIdentity.isAvailable ? [] : [HostProtocol.Capability.hostNotes, HostProtocol.Capability.vaultV2])
     /// Per session, its input from every client in order (see `InputOrder`).
     private var inputOrders: [UUID: InputOrder] = [:]
@@ -445,6 +445,8 @@ public final class HostServer {
              .resize(let id, _, _), .screen(let id), .styledScreen(let id), .history(let id, _),
              .kill(let id), .remove(let id):
             return mayKill(id, from: caller)
+        case .watch(let id):
+            return mayKill(id, from: caller)
         }
     }
 
@@ -485,6 +487,8 @@ public final class HostServer {
             reply(.hostNotes(hostNotes(startedAt: startedAt)))
         case .vaultV2(let request):
             reply(.vaultV2(VaultV2Handler.answer(request, from: caller(of: client), vault: config.vault)))
+        case .watch(let id):
+            watch(id, from: client, reply: reply)
         case .spawn(let request):
             // Started now, it would be torn down with the host a moment later.
             guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }
@@ -527,6 +531,7 @@ public final class HostServer {
         case .attach(let id, let cols, let rows):
             guard let session = sessions[id] else { return reply(missing) }
             client.attached.insert(id)
+            client.watchOnly.remove(id)
             primary[id] = key
             session.clientsAttached = true
             if !client.sendOutput(id, frames: HostFrame.output(session: id, bytes: session.replay())) {
@@ -677,7 +682,7 @@ public final class HostServer {
         }
         if isReply {
             return primary[id] == key
-        } else if client.attached.contains(id) {
+        } else if client.attached.contains(id), !client.watchOnly.contains(id) {
             // Typing makes a watching client the one whose size and replies count; a client that only sends
             // keys (the lead's tool server, one connection per call) doesn't take the session over.
             primary[id] = key
@@ -906,7 +911,7 @@ public final class HostServer {
     }
 
     func updateAttachment(_ id: UUID) {
-        let watching = clients.filter { $0.value.attached.contains(id) }
+        let watching = clients.filter { $0.value.attached.contains(id) && !$0.value.watchOnly.contains(id) }
         sessions[id]?.clientsAttached = !watching.isEmpty
         if let current = primary[id], watching[current] == nil { primary[id] = watching.keys.first }
     }

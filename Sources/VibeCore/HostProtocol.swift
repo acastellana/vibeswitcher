@@ -30,6 +30,8 @@ public enum HostProtocol {
         /// Answers `HostRequest.vaultV2`, the app's alone: the node's record of the user's actions in the vault
         /// (`LeadVaultV2`). Listed only on Linux, where the app is the server child.
         public static let vaultV2 = "vaultV2"
+        /// Takes `HostRequest.watch`: a session's replay and output to a client that doesn't take its terminal over.
+        public static let watch = "watch"
     }
 
     /// The error a spawn gets once the host agreed to shut down.
@@ -304,6 +306,12 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// The node's record of the user's actions in the vault (see `LeadVaultV2`): answered `vaultV2` to the app alone.
     /// Sent only to a host whose welcome lists `HostProtocol.Capability.vaultV2`.
     case vaultV2(LeadVaultV2.Request)
+    /// The session's replay and then its output, as `attach` sends them, to a client that only watches: it doesn't
+    /// count as attached, so the host's parser goes on answering the program's terminal queries, and it neither sizes
+    /// the session nor becomes the one whose replies count. Answered `attached` once the replay is sent (`resync` when it
+    /// didn't fit); `detach` ends it, `attach` makes it a full attachment. Sent only to a host whose welcome lists
+    /// `HostProtocol.Capability.watch` (see `Sources/VibeHost/V2/HostWatch.swift`).
+    case watch(id: UUID)
 }
 
 public enum HostEvent: Codable, Equatable, Sendable {
