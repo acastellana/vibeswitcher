@@ -469,6 +469,45 @@ test('older items page in before the first, once at a time, while there are more
   assert.equal(r.sent('chat.page').length, 1, 'nothing more to ask for');
 });
 
+test('a new session’s chat before its transcript: no conversation yet, nothing logged, and followed once there is one', async () => {
+  const sessions = vector('snapshot.sessions');
+  sessions.entries[0].value.hasTranscript = false;
+  const r = rig();
+  await r.feed.start();
+  serve(r, { snapshots: { sessions } });
+  r.store.openChat(LEAD);
+  const ask = r.sent('subscribe').at(-1);
+  r.socket().say({ v: 1, re: ask.id, ok: false, error: { code: 'gone', message: 'no such session, or it has no transcript' } });
+  await new Promise((resolve) => setImmediate(resolve));
+  const chat = r.store.state.chats.get(LEAD);
+  assert.equal(chat.loaded, true, 'shown as a conversation with nothing in it yet');
+  assert.deepEqual(ids(chat), []);
+  assert.deepEqual(r.page.warnings, []);
+  // A change that isn't its transcript asks nothing.
+  const asked = r.sent('subscribe').length;
+  const other = vector('delta.session-status');
+  other.changes[0].value.hasTranscript = false;
+  r.socket().say(other);
+  assert.equal(r.sent('subscribe').length, asked);
+  // Its transcript written: followed again, from nothing.
+  const written = vector('delta.session-status');
+  written.prev = 42;
+  written.seq = 43;
+  r.socket().say(written);
+  const again = r.sent('subscribe').at(-1);
+  assert.equal(r.sent('subscribe').length, asked + 1);
+  assert.deepEqual(again.args, { sub: 'c1', collection: 'chat', key: LEAD });
+  r.socket().say({ v: 1, re: again.id, ok: true, result: { sub: 'c1', mode: 'snapshot' } });
+  r.socket().say({ ...vector('snapshot.chat'), sub: 'c1', key: LEAD });
+  assert.deepEqual(ids(chat), ['m_01', 'm_02.0']);
+  // Another refusal (a session the node doesn't know) is still logged.
+  r.store.openChat('local:00000000-0000-4000-8000-000000000000');
+  const unknown = r.sent('subscribe').at(-1);
+  r.socket().say({ v: 1, re: unknown.id, ok: false, error: { code: 'gone', message: 'no such session, or it has no transcript' } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(r.page.warnings.length, 1);
+});
+
 test('every chat frame the page reads passes its validator', () => {
   for (const name of ['snapshot.chat', 'delta.chat', 'delta.chat-set']) {
     const frame = vector(name);
