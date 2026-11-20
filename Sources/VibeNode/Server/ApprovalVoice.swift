@@ -117,6 +117,17 @@ public struct ApprovalVoice: Sendable {
         case "session.new": return "start a session for you"
         case "session.end": return "end a session"
         case "session.reply": return "answer a session's question for you"
+        case "set": return "change a VibeSwitcher setting"
+        case "push": return "push a lead's branch for you"
+        case "push.decline": return "decline a lead's push"
+        case "session.reopen": return "reopen your sessions after a restart"
+        case "session.resume": return "resume an ended session"
+        case "session.rename": return "rename a session"
+        case "session.pause": return "pause a session's reminders"
+        case "session.close-shells": return "close finished shells"
+        case "prompt-audit": return "change a project's prompt-audit reminder"
+        case "presets.edit": return "edit your launch presets"
+        case "start": return "start your VibeSwitcher node"
         default: return "do \(ConfigSeal.inert(kind, limit: 40)) for you"
         }
     }
