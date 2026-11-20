@@ -13,12 +13,22 @@ import VibeCore
 /// any process but the one it was made for makes it no one's. (`checkPeer`'s `SO_PEERCRED` re-read would name the host
 /// itself on a pair it made, and skips it.)
 ///
-/// The Mac has no connector (its app proves itself by its code, `AppProof`): `openAppConnector` gives nil there.
+/// The Mac (the node on the Mac's step 3): the Mac app has no connector (it proves itself by its code, `AppProof`), but
+/// the node's server child has one, a stream pair (`Platform.Sockets.connectorType`). A child's token can't be read at
+/// its spawn there (`Platform.Processes.token` is nil), so its connector is told the child's pid and the cdhash its
+/// server file had when the host loaded it (`setAppConnectorChild`): a request is answered only from that pid, as it
+/// runs that code (`Platform.CodeIdentity.runs(_:cdhash:)`, Security's dynamic check, which also refuses a pid that
+/// exec'd since), and its token, the first such request's, is then the connector's sender, as on Linux. Non-dumpable is
+/// the Hardened Runtime there (`Platform.CodeIdentity.isHardened`). `adoptAppConnector` (a handover's, a test's stand-in)
+/// stays Linux's.
 final class AppConnector {
     /// The host's end, nonblocking, close-on-exec, with its senders passed (`enableCredentials`).
     let fd: Int32
-    /// The process whose requests are answered; nil until it is set: every request is refused.
+    /// The process whose requests are answered; nil until it is set: every request is refused (on the Mac, until a
+    /// request from `child` running `code`, whose token it then is).
     var sender: Platform.PeerToken?
+    /// The Mac's form (`setAppConnectorChild`): the child's pid and the cdhash its code must have. Nil on Linux.
+    var child: (pid: pid_t, code: Data)?
     let requireNonDumpable: Bool
     let onDumpable: ((pid_t) -> Void)?
     /// A scratch host's test stand-in (see `TestAppPrincipal`): the test process's pid, which a handover carries with
@@ -84,18 +94,33 @@ final class AppConnector {
 }
 
 extension HostServer {
-    /// Opens an app connector (see `AppConnector`): a `SOCK_SEQPACKET` pair, whose end the host keeps and reads on its
-    /// queue, and whose other end it returns, close-on-exec here, for its caller to hand a child with `keep:` and then
+    /// Opens an app connector (see `AppConnector`): a pair of `Platform.Sockets.connectorType` (`SOCK_SEQPACKET` on
+    /// Linux, a stream on the Mac), whose end the host keeps and reads on its queue, and whose other end it returns, close-on-exec here, for its caller to hand a child with `keep:` and then
     /// close in this process. That number names the connector to `setAppConnectorSender` and `closeAppConnector`.
     /// `sender`: the process whose requests are answered (nil: none yet; set it once the child is started).
     /// `requireNonDumpable`: a request is answered only while its sender is non-dumpable
     /// (`Platform.Processes.isDumpable` false), else refused, logged, and `onDumpable` called with its pid on the
-    /// host's queue (Task 8a ends the child there). `onClosed`: called with the number on the host's queue when the
-    /// connector closes by itself (see `AppConnector.onClosed`). Nil on the Mac, which has no connector, when the pair
-    /// can't be made, and once the host has stopped (nothing registered after `closeAppConnectors`).
+    /// host's queue (Task 8a ends the child there); on the Mac, while it runs under the Hardened Runtime
+    /// (`Platform.CodeIdentity.isHardened`). `onClosed`: called with the number on the host's queue when the
+    /// connector closes by itself (see `AppConnector.onClosed`). Nil on the Mac, where the app proves itself by its code
+    /// (its server child's connector is `openServerChildConnector`'s), when the pair can't be made, and once the host
+    /// has stopped (nothing registered after `closeAppConnectors`).
     public func openAppConnector(expecting sender: Platform.PeerToken?, requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?,
                                  onClosed: ((Int32) -> Void)? = nil) -> Int32? {
-        guard !Platform.CodeIdentity.isAvailable, let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.seqpacket) else { return nil }
+        guard !Platform.CodeIdentity.isAvailable else { return nil }
+        return makeAppConnector(expecting: sender, requireNonDumpable: requireNonDumpable, onDumpable: onDumpable, onClosed: onClosed)
+    }
+
+    /// The Mac's server child's connector (the node on the Mac's step 3): `openAppConnector`'s, on the Mac too, its
+    /// requests answered once `setAppConnectorChild` (the Mac) or `setAppConnectorSender` (Linux) names its child.
+    /// Never the Mac app's, nor a test's stand-in for it there.
+    public func openServerChildConnector(requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?, onClosed: ((Int32) -> Void)? = nil) -> Int32? {
+        makeAppConnector(expecting: nil, requireNonDumpable: requireNonDumpable, onDumpable: onDumpable, onClosed: onClosed)
+    }
+
+    private func makeAppConnector(expecting sender: Platform.PeerToken?, requireNonDumpable: Bool, onDumpable: ((pid_t) -> Void)?,
+                                  onClosed: ((Int32) -> Void)?) -> Int32? {
+        guard let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.connectorType) else { return nil }
         Platform.Sockets.enableCredentials(mine)
         _ = fcntl(mine, F_SETFL, fcntl(mine, F_GETFL) | O_NONBLOCK)
         let connector = AppConnector(fd: mine, sender: sender, requireNonDumpable: requireNonDumpable, onDumpable: onDumpable)
@@ -193,6 +218,16 @@ extension HostServer {
         onQueue { appConnectors[connector]?.sender = token }
     }
 
+    /// The Mac's form of `setAppConnectorSender` (see `AppConnector`): requests on `connector` are answered from now on
+    /// only from `pid`, as it runs the code whose cdhash is `code`; the first such request's token is the connector's
+    /// sender from then on.
+    public func setAppConnectorChild(_ pid: pid_t, code: Data, for connector: Int32) {
+        onQueue {
+            appConnectors[connector]?.child = (pid, code)
+            appConnectors[connector]?.sender = nil
+        }
+    }
+
     /// Closes `connector`'s end in the host and ends every connection made through it. The caller's own copy of the
     /// other end, if it still holds one, is its to close.
     public func closeAppConnector(_ connector: Int32) {
@@ -222,12 +257,24 @@ extension HostServer {
             guard connector.peerHasGone else { return refuse(connector, number, "an empty request") }
             return closeConnector(connector, number, why: "its other end has closed")
         }
+        if let child = connector.child, connector.sender == nil {
+            // The Mac's first request: from the child, running the code the host loaded; its token then the sender's.
+            guard let from, from.pid == child.pid else {
+                return refuse(connector, number, "a request from \(from.map { "pid \($0.pid)" } ?? "a sender gone or unnamed"), not pid \(child.pid)")
+            }
+            guard Platform.CodeIdentity.runs(from, cdhash: child.code) else {
+                return refuse(connector, number, "pid \(from.pid) doesn't run the server's code (its cdhash as the host loaded it)")
+            }
+            connector.sender = from
+        }
         guard let expected = connector.sender else { return refuse(connector, number, "a request before its process was named") }
         guard let from, from.sameImage(as: expected) else {
             return refuse(connector, number, "a request from \(from.map { "pid \($0.pid)" } ?? "a sender gone or unnamed"), not pid \(expected.pid)")
         }
-        if connector.requireNonDumpable, Platform.Processes.isDumpable(from.pid) != false {
-            refuse(connector, number, "pid \(from.pid) is dumpable (or can't be told): any process of the user could take its connections")
+        if connector.requireNonDumpable, Self.isNonDumpable(from) != true {
+            refuse(connector, number, Platform.CodeIdentity.isAvailable
+                   ? "pid \(from.pid) doesn't run under the Hardened Runtime, or can be debugged (or can't be told): any process of the user could take its connections"
+                   : "pid \(from.pid) is dumpable (or can't be told): any process of the user could take its connections")
             connector.onDumpable?(from.pid)
             return
         }
@@ -249,6 +296,13 @@ extension HostServer {
         }
         connector.made(client)
         note("host: app connection made through connector \(number) for pid \(expected.pid)")
+    }
+
+    /// Whether the process `token` names is out of reach of the user's other processes: on Linux non-dumpable
+    /// (`Platform.Processes.isDumpable` false), on the Mac under the Hardened Runtime and not debuggable
+    /// (`Platform.CodeIdentity.isHardened`). nil when it can't be told.
+    static func isNonDumpable(_ token: Platform.PeerToken) -> Bool? {
+        Platform.CodeIdentity.isAvailable ? Platform.CodeIdentity.isHardened(token) : Platform.Processes.isDumpable(token.pid).map { !$0 }
     }
 
     private func refuse(_ connector: AppConnector, _ number: Int32, _ why: String) {

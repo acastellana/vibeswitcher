@@ -11,6 +11,8 @@ extension Platform.Service {
         static let launchctl: String? = nil
         static let unifiedLogTool: String? = nil
         static func runtimeFolder(uid: uid_t) -> String? { "/run/user/\(uid)" }
+        // No app here: the node's root is the account's `~/.vibeswitcher`, as it has always been.
+        static let nodeRootFolder = ".vibeswitcher"
     }
 }
 #endif

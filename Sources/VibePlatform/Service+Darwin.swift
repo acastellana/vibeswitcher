@@ -12,6 +12,8 @@ extension Platform.Service {
         static let launchctl: String? = "/bin/launchctl"
         static let unifiedLogTool: String? = "/usr/bin/log"
         static func runtimeFolder(uid: uid_t) -> String? { nil }
+        // Beside the app's `~/.vibeswitcher` (its host's lock, socket and log, its vault), never in its place.
+        static let nodeRootFolder = ".vibeswitcher/v2/node"
     }
 }
 #endif

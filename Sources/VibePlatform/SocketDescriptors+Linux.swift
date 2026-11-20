@@ -2,8 +2,12 @@
 // Linux's descriptors passed over a Unix socket: one byte carrying one descriptor (SCM_RIGHTS), through the shim, whose
 // C walks a message's control data with the macros Swift doesn't see. The host's connector rests on it: the server
 // child inherits one end of a pair, asks over it for a connection to the host, and the host hands one end of a new
-// pair back. The Mac has no connector, and its forms (SocketDescriptors+Darwin.swift) pass nothing.
+// pair back. The Mac's forms (SocketDescriptors+Darwin.swift) pass one descriptor the same way, over a stream.
 extension Platform.Sockets {
+    /// The type of a connector's pair: `SOCK_SEQPACKET` on Linux (`seqpacket`), each request and answer a message of
+    /// its own. The Mac's is a stream (SocketDescriptors+Darwin.swift).
+    public static var connectorType: Int32 { seqpacket }
+
     /// Sends `fd` over the Unix socket `socket`: one byte carrying it (`SCM_RIGHTS`), with no SIGPIPE when the peer has
     /// gone. True when the byte went; false and `errno` otherwise. `fd` stays open here, and the caller closes it when
     /// the peer's copy is the only one it means to leave.
@@ -39,6 +43,19 @@ extension Platform.Sockets {
     /// reports no hang-up and reads as 0 for good, is gone too.
     public static func peerHasGone(_ socket: Int32) -> Bool {
         vibe_peer_has_gone(socket) != 0
+    }
+
+    /// Waits until `socket` reports a hang-up or an error, reading nothing: true then, and when the poll fails; false
+    /// when `socket` isn't open (`POLLNVAL`). The server child's watch on its connector (`ServerStart.watchConnector`):
+    /// a poll asking for no event, so a hang-up or an error is all that wakes it.
+    public static func waitUntilPeerHasGone(_ socket: Int32) -> Bool {
+        while true {
+            var watched = pollfd(fd: socket, events: 0, revents: 0)
+            let ready = poll(&watched, 1, -1)
+            if ready < 0, errno == EINTR { continue }
+            if ready > 0, watched.revents & Int16(POLLNVAL) != 0 { return false }
+            if ready > 0 || ready < 0 { return true }
+        }
     }
 
     /// Sends `bytes` over the Unix socket `socket` with the descriptors `fds` (at most 8; `SCM_RIGHTS`) riding on the

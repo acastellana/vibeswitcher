@@ -20,9 +20,21 @@ public enum NodeFolders {
     /// Where installs go unless told otherwise: `<home>/.vibeswitcher/v2/builds`.
     public static func defaultPrefix(accountHome: String) -> String { join(accountHome, ".vibeswitcher/v2/builds") }
 
-    /// The user's node's root, `<home>/.vibeswitcher`, the home from `getpwuid` (the root the host started with
-    /// `--node` takes): where a detached node's record and log are (S3), whatever the command line's HOME says.
-    public static func nodeRoot(accountHome: String) -> String { join(accountHome, ".vibeswitcher") }
+    /// The user's node's root, the home from `getpwuid` (the root the host started with `--node` takes): where a
+    /// detached node's record and log are (S3), whatever the command line's HOME says. `<home>/.vibeswitcher` on Linux,
+    /// `<home>/.vibeswitcher/v2/node` on the Mac, beside the app's own folder (`Platform.Service.nodeRoot`).
+    public static func nodeRoot(accountHome: String) -> String { Platform.Service.nodeRoot(accountHome: accountHome) }
+
+    /// Whether `root` is the user's node's (`nodeRoot`) or the account's own `~/.vibeswitcher`, however spelled (`..`,
+    /// a trailing slash, a link): on Linux the two are one folder (`VibePaths.isAccountRoot`, as before); on the Mac the
+    /// account's is the app's, which is never taken for a scratch node's either: a node there is the user's, which is
+    /// refused (`NodeSystem`), never a scratch node on the app's files.
+    public static func isUsersRoot(_ root: URL, accountHome: String) -> Bool {
+        if VibePaths.isAccountRoot(root, accountHome: accountHome) { return true }
+        let own = URL(fileURLWithPath: nodeRoot(accountHome: accountHome), isDirectory: true)
+        return root.standardizedFileURL.path == own.standardizedFileURL.path
+            || root.resolvingSymlinksInPath().path == own.resolvingSymlinksInPath().path
+    }
 
     /// The host's lock in a root, `<root>/host.lock` (`VibePaths.hostLock`'s name): the user's node's host holds the
     /// account's (`--node` takes no `--lock`), which a detached node's record is checked against (S3).

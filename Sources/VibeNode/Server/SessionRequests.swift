@@ -127,7 +127,7 @@ extension Requests {
             }
         }
         let claudeLink = engine?.preflight.claudeLink ?? NodePreflight.claudeLink(root: root)
-        let scratch = !VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome)
+        let scratch = !NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome)
         let (link, queue, note, nodeRoot) = (self.link, self.queue, self.note, root)
         // The vault that keeps the user's accepted config, and the home the config seal reads: a preset of the file
         // starts only while the file is as an accept sealed it.

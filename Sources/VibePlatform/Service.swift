@@ -50,5 +50,23 @@ extension Platform {
         /// no such folder: launchd is reached by `launchctl` through its own Mach port, not through a folder of the
         /// user's.
         public static func runtimeFolder(uid: uid_t) -> String? { System.runtimeFolder(uid: uid) }
+
+        /// The user's node's root under the account's home, as a relative path (`nodeRoot(accountHome:)`): `.vibeswitcher`
+        /// on Linux, which has no app; `.vibeswitcher/v2/node` on the Mac, beside the app's `~/.vibeswitcher` and never
+        /// in its place, so that the node's host never takes the app's lock or socket and its vault, records and hooks
+        /// are apart (the node on the Mac's design, "The root", step 2).
+        public static var nodeRootFolder: String { System.nodeRootFolder }
+
+        /// The user's node's root, `<accountHome>/<nodeRootFolder>`: the home is the user database's (never `HOME`),
+        /// given by the caller. The node's host and server (`--node`) run with it as their root, and the command line
+        /// reads and connects under it.
+        public static func nodeRoot(accountHome: String) -> String {
+            accountHome.hasSuffix("/") ? accountHome + System.nodeRootFolder : accountHome + "/" + System.nodeRootFolder
+        }
+
+        /// Whether the node's root is the account's own `~/.vibeswitcher` (Linux), so that a `--node` process leaves
+        /// `VIBESWITCHER_HOME` unset (its root then follows `HOME`, the user database's), or a folder of its own (the
+        /// Mac), which it names in `VIBESWITCHER_HOME`.
+        public static var nodeRootIsTheAccountRoot: Bool { System.nodeRootFolder == ".vibeswitcher" }
     }
 }

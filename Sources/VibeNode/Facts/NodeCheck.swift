@@ -32,11 +32,12 @@ public enum NodeCheck {
     public static let scratchLock = "scratch-host.lock"
 
     /// Which check: a scratch node when `vibeswitcherHome` is an absolute folder other than `accountHome`'s
-    /// `.vibeswitcher` (however spelled, links resolved), the user's node otherwise.
+    /// `.vibeswitcher` and the node's root (`NodeFolders.isUsersRoot`: however spelled, links resolved), the user's
+    /// node otherwise.
     public static func mode(vibeswitcherHome: String?, accountHome: String) -> Mode {
         guard let home = vibeswitcherHome, home.hasPrefix("/") else { return .node }
         let root = URL(fileURLWithPath: home, isDirectory: true)
-        return VibePaths.isAccountRoot(root, accountHome: accountHome) ? .node : .scratch(root: root.standardizedFileURL.path)
+        return NodeFolders.isUsersRoot(root, accountHome: accountHome) ? .node : .scratch(root: root.standardizedFileURL.path)
     }
 
     /// The root the command line reads and connects under for `mode` (its socket, record, test folder): a scratch

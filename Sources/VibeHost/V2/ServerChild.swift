@@ -36,9 +36,22 @@ import VibeCore
 ///   the record a handover carries says what the running child runs (`runningImageSHA256`), so a second switch, or a
 ///   fallback to the build that was to replace it, still replaces a child of another build's bytes.
 ///
-/// The Mac has none: no sealed copies there, no connector (its app proves itself by its code, `AppProof`), and
-/// `start` gives nil.
+/// The Mac (the node on the Mac's step 3; the Mac app proves itself by its code, `AppProof`, and starts no server):
+/// no sealed copies there. At the start the host reads the cdhash of the `--server` file (`Platform.CodeIdentity.cdhash`;
+/// a file with none starts nothing) and keeps it, never the bytes: each start checks the file's cdhash is still that one
+/// and starts the child from the file (`Image.checked`), and its connector, a stream pair, answers only that child's
+/// pid as it runs that code (`HostServer.setAppConnectorChild`, Security's dynamic check), under the Hardened Runtime
+/// (the Mac's non-dumpable: `Platform.CodeIdentity.isHardened`). So a file rewritten after the host loaded it starts
+/// nothing that is the app, as on Linux. A handover carries no child there (`record` is nil: the Mac's process records
+/// carry no start ticks): the new image starts the server again, and the old child, its connector closed by the exec,
+/// exits. Nothing of this has run on a real Mac (docs/process/v2-mac-tasks.md).
 public final class ServerChild {
+    /// What a child is started from: Linux's sealed copy, or the Mac's file checked by the cdhash read at the start.
+    enum Image {
+        case sealed(Platform.ProcessSelf.SealedCopy)
+        case checked(path: String, cdhash: Data)
+    }
+
     /// What the child is started with besides its connector and the host's socket.
     public struct Launch {
         /// The `--server` path: its sealed copy is what runs.
@@ -66,7 +79,7 @@ public final class ServerChild {
 
     private weak var server: HostServer?
     private let queue: DispatchQueue
-    private let copy: Platform.ProcessSelf.SealedCopy
+    private let image: Image
     private let launch: Launch
 
     private let lock = NSLock()
@@ -87,10 +100,14 @@ public final class ServerChild {
     private var delay = ServerChild.firstDelay
     private var restartCount = 0
 
-    private init(server: HostServer, copy: Platform.ProcessSelf.SealedCopy, launch: Launch) {
+    private convenience init(server: HostServer, copy: Platform.ProcessSelf.SealedCopy, launch: Launch) {
+        self.init(server: server, image: .sealed(copy), launch: launch)
+    }
+
+    private init(server: HostServer, image: Image, launch: Launch) {
         self.server = server
         queue = server.queue
-        self.copy = copy
+        self.image = image
         self.launch = launch
     }
 
@@ -120,11 +137,13 @@ public final class ServerChild {
             if let carried { Sys.close(carried.fd) }
             return nil
         }
-        guard !Platform.CodeIdentity.isAvailable else {
-            say(server, "ignored --server: this system has no server child (the app proves itself by its code)")
-            return nil
-        }
         if !refused.isEmpty { say(server, "refused --server-arg: the user's host passes its server no test arguments") }
+        if Platform.CodeIdentity.isAvailable {
+            // The Mac: no sealed copy was loaded or carried, and no handover's record names a child (`record`).
+            if let copy { Sys.close(copy.fd) }
+            if let carried { Sys.close(carried.fd) }
+            return start(launch, server: server)
+        }
         if let restored, let record = restored.serverChild {
             return restore(record, launch: launch, sessionPrograms: Self.programs(of: restored),
                            otherDescriptors: Self.otherDescriptors(of: restored), server: server, loaded: copy, carried: carried)
@@ -307,9 +326,22 @@ public final class ServerChild {
 
     /// Loads `launch.image` into a sealed copy (or takes `loaded`, the host's checked copy of it) and starts the child
     /// from it on the host's queue (the host started already), unless the host has stopped by then. Nil, said on
-    /// stderr, when the copy can't be made (the Mac has none: ENOTSUP), and on the Mac.
+    /// stderr, when the copy can't be made. The Mac: `launch.image`'s cdhash read instead (nil, said, when it has none),
+    /// each start from the file once its cdhash is still that (`Image.checked`).
     public static func start(_ launch: Launch, server: HostServer, loaded: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
-        guard !Platform.CodeIdentity.isAvailable else { return nil }
+        if Platform.CodeIdentity.isAvailable {
+            guard let cdhash = Platform.CodeIdentity.cdhash(atPath: launch.image) else {
+                say(server, "no server child: \(launch.image) has no code signature to check it by (no cdhash)")
+                return nil
+            }
+            let child = ServerChild(server: server, image: .checked(path: launch.image, cdhash: cdhash), launch: launch)
+            server.queue.async {
+                guard !server.stopped else { return child.dropUnstarted() }
+                server.serverChild = child
+                child.spawn()
+            }
+            return child
+        }
         switch loaded.map({ .success($0) }) ?? Platform.ProcessSelf.sealedCopy(of: launch.image, name: "vibeswitcher-server") {
         case .failure(let error):
             say(server, "no server child: \(launch.image) couldn't be loaded (errno \(error.code))")
@@ -341,8 +373,8 @@ public final class ServerChild {
     /// The child running now as a handover carries it (`HostHandover.State.serverChild`): nil when none runs, or its
     /// connector has closed (a handover then waits: `handoverRefusal`). On the host's queue.
     var record: HostHandover.ServerChildRecord? {
-        guard let server, let running = lock.withLock({ child }), let end = server.appConnectorEnd(running.connector),
-              let link = Platform.Processes.link(running.pid) else { return nil }
+        guard case .sealed(let copy) = image, let server, let running = lock.withLock({ child }),
+              let end = server.appConnectorEnd(running.connector), let link = Platform.Processes.link(running.pid) else { return nil }
         let due = lock.withLock { self.due }.flatMap { $0.pid == running.pid ? $0.sha256 : nil }
         return HostHandover.ServerChildRecord(pid: running.pid, startTicks: link.startTicks, connector: end, image: copy.fd,
                                               path: launch.image, runningImageSHA256: due)
@@ -377,7 +409,7 @@ public final class ServerChild {
                 var status: Int32 = 0
                 while waitpid(running.pid, &status, 0) < 0, errno == EINTR {}
             }
-            Sys.close(self.copy.fd)
+            if case .sealed(let copy) = self.image { Sys.close(copy.fd) }
         }
         if DispatchQueue.getSpecific(key: HostServer.queueKey) != nil { work() } else { queue.sync(execute: work) }
     }
@@ -399,14 +431,28 @@ public final class ServerChild {
     private func spawn() {
         guard let server, !server.stopped, !lock.withLock({ stopped }) else { return }
         lock.withLock { restartPending = false }
-        // Cleared first: restoreMode's refusals of a copy not fully sealed, or not a regular file, fail no call.
-        errno = 0
-        guard Platform.ProcessSelf.restoreMode(of: copy.fd) else {
-            Self.say(server, "server child not started: the mode of \(launch.image)'s sealed copy couldn't be put back ("
-                      + Self.whyModeWasntPutBack(errno: errno) + ")")
-            return scheduleRestart()
+        // What runs: Linux's sealed copy, its mode put back and kept across the spawn, named to the image; the Mac's file,
+        // still the code the host loaded.
+        let prepared: (executable: String, kept: [Int32], named: [String], from: String)
+        switch image {
+        case .sealed(let copy):
+            // Cleared first: restoreMode's refusals of a copy not fully sealed, or not a regular file, fail no call.
+            errno = 0
+            guard Platform.ProcessSelf.restoreMode(of: copy.fd) else {
+                Self.say(server, "server child not started: the mode of \(launch.image)'s sealed copy couldn't be put back ("
+                          + Self.whyModeWasntPutBack(errno: errno) + ")")
+                return scheduleRestart()
+            }
+            prepared = (copy.path, [copy.fd], ["\(Platform.ProcessSelf.imageVariable)=\(copy.fd)"], "\(launch.image)'s sealed copy")
+        case .checked(let path, let cdhash):
+            guard Platform.CodeIdentity.cdhash(atPath: path) == cdhash else {
+                Self.say(server, "server child not started: \(path) isn't the code the host loaded (its cdhash changed, or can't be read)")
+                return scheduleRestart()
+            }
+            prepared = (path, [], [], "\(path), its cdhash checked")
         }
-        guard let connector = server.openAppConnector(expecting: nil, requireNonDumpable: true, onDumpable: { [weak self] pid in
+        let (executable, kept, named, from) = prepared
+        guard let connector = server.openServerChildConnector(requireNonDumpable: true, onDumpable: { [weak self] pid in
             self?.endDumpable(pid)
         }, onClosed: { [weak self] number in
             self?.connectorClosed(number)
@@ -414,28 +460,31 @@ public final class ServerChild {
             Self.say(server, "no server child: no connector could be made (errno \(errno))")
             return scheduleRestart()
         }
-        var spawn = Platform.Spawn(executable: copy.path,
+        var spawn = Platform.Spawn(executable: executable,
                                    arguments: ["vibeswitcher-server", "--host-connector", String(connector), "--host-socket", launch.socketPath]
                                        + launch.arguments)
-        spawn.environment = launch.environment.filter { $0.key != Platform.ProcessSelf.imageVariable }.map { "\($0.key)=\($0.value)" }
-            + ["\(Platform.ProcessSelf.imageVariable)=\(copy.fd)"]
+        spawn.environment = launch.environment.filter { $0.key != Platform.ProcessSelf.imageVariable }.map { "\($0.key)=\($0.value)" } + named
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
-        spawn.keep = [copy.fd, connector]
+        spawn.keep = kept + [connector]
         spawn.group = .ownGroup
         switch spawn.start() {
         case .failure(let error):
             server.closeAppConnector(connector)
             Sys.close(connector)
-            Self.say(server, "server child didn't start from \(launch.image)'s sealed copy (errno \(error.code))")
+            Self.say(server, "server child didn't start from \(from) (errno \(error.code))")
             scheduleRestart()
         case .success(let pid):
             // In this turn: the connector's requests are read on this queue, so none is answered before its sender is.
             let token = Platform.Processes.token(pid)
-            server.setAppConnectorSender(token, for: connector)
+            if case .checked(_, let cdhash) = image {
+                server.setAppConnectorChild(pid, code: cdhash, for: connector)
+            } else {
+                server.setAppConnectorSender(token, for: connector)
+            }
             Sys.close(connector)
             let watch = Platform.ProcessExit.watch(pid, queue: queue) { [weak self] in self?.ended(pid) }
             lock.withLock { child = (pid, token, connector, Date(), watch) }
-            Self.say(server, "server child pid \(pid) started from \(launch.image)'s sealed copy, connector \(connector)")
+            Self.say(server, "server child pid \(pid) started from \(from), connector \(connector)")
         }
     }
 

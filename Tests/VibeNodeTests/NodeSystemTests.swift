@@ -13,7 +13,7 @@ struct NodeSystemTests {
         let mac = try #require(NodeSystem.usersNodeRefusal(manager: .launchd))
         #expect(mac == NodeSystem.macUnbuilt)
         // It says what isn't built, that the app is left alone, what does run, and where the design is.
-        for words in ["isn't built for the Mac", "launchd", "the app's ~/.vibeswitcher", "your voice", "Mac app is unchanged",
+        for words in ["isn't built for the Mac", "launchd", "~/.vibeswitcher/v2/node", "the app's ~/.vibeswitcher", "your voice", "Mac app is unchanged",
                       "scratch node", "docs/superpowers/specs/2026-11-19-v2-node-on-macos.md"] {
             #expect(mac.contains(words), "\(words)")
         }
@@ -54,5 +54,32 @@ struct NodeSystemTests {
         let connect = try #require(client.firstIndex { $0.hasPrefix("static func connect(_ context: NodeContext") })
         #expect(client[connect + 1] == "if let unbuilt = context.usersNodeRefusal { return .failure(.notRunning(unbuilt)) }", "\(client[connect + 1])")
         #expect(client.contains("var usersNodeRefusal: String? { isScratch ? nil : NodeSystem.usersNodeRefusal() }"))
+    }
+
+    /// The node on the Mac's step 2: `VIBESWITCHER_HOME` naming the node's root, or the account's own `~/.vibeswitcher`,
+    /// is the user's node on both systems (on Linux they are one folder): on the Mac the account's folder is the app's,
+    /// and a node there is the user's, which is refused, never a scratch node on the app's files. Anything else is a
+    /// scratch node, a folder under the node's root included.
+    @Test func theNodesRootAndTheAccountsFolderAreBothTheUsersNode() {
+        let account = "/home/someone"
+        let own = NodeFolders.nodeRoot(accountHome: account)
+        #expect(own == (Platform.CodeIdentity.isAvailable ? "/home/someone/.vibeswitcher/v2/node" : "/home/someone/.vibeswitcher"))
+        #expect(NodeCheck.root(of: .node, environmentRoot: "/scratch/elsewhere/.vibeswitcher", accountHome: account) == own)
+        for spelled in [own, own + "/", own + "/.", account + "/.vibeswitcher", account + "/./.vibeswitcher/"] {
+            #expect(NodeCheck.mode(vibeswitcherHome: spelled, accountHome: account) == .node, "\(spelled)")
+            #expect(NodeFolders.isUsersRoot(URL(fileURLWithPath: spelled, isDirectory: true), accountHome: account), "\(spelled)")
+        }
+        for scratch in ["/home/someone/.vibeswitcher/v2/builds", "/home/someone/.vibeswitcher/v2/node/v2", "/srv/vsn-1"] {
+            #expect(NodeCheck.mode(vibeswitcherHome: scratch, accountHome: account) == .scratch(root: scratch), "\(scratch)")
+            #expect(!NodeFolders.isUsersRoot(URL(fileURLWithPath: scratch, isDirectory: true), accountHome: account), "\(scratch)")
+        }
+        // The user's server's VIBESWITCHER_HOME: unset where the node's root is the account's folder (Linux), the node's
+        // root otherwise (the Mac); never the environment's.
+        #expect(ServerStart.nodeRootVariable(accountHome: account) == (Platform.CodeIdentity.isAvailable ? own : nil))
+        if let variable = ServerStart.nodeRootVariable(accountHome: account) {
+            #expect(VibePaths.root(environment: ["HOME": account, "VIBESWITCHER_HOME": variable], fallbackHome: "/elsewhere").path == own)
+        } else {
+            #expect(VibePaths.root(environment: ["HOME": account], fallbackHome: "/elsewhere").path == own)
+        }
     }
 }

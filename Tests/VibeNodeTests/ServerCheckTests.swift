@@ -151,18 +151,21 @@ struct ServerCheckTests {
 
     /// The step 8 sweep: the user's node's root (its socket, its record) is the account's, from the user database,
     /// whatever `HOME` or `CFFIXED_USER_HOME` move `VibePaths.root` to: its host listens there. Only a scratch node's
-    /// is the environment's.
+    /// is the environment's. On the Mac the account's node root is `~/.vibeswitcher/v2/node`, beside the app's folder
+    /// (the node on the Mac's step 2).
     @Test func theUsersNodeRootIsTheAccountsWhateverHomeSays() {
         let account = "/home/someone"
         let moved = "/scratch/elsewhere/.vibeswitcher"
-        #expect(NodeCheck.root(of: .node, environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
-        #expect(NodeCheck.root(of: .detached(record: nil), environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
+        let own = Platform.CodeIdentity.isAvailable ? "/home/someone/.vibeswitcher/v2/node" : "/home/someone/.vibeswitcher"
+        #expect(NodeFolders.nodeRoot(accountHome: account) == own)
+        #expect(NodeCheck.root(of: .node, environmentRoot: moved, accountHome: account) == own)
+        #expect(NodeCheck.root(of: .detached(record: nil), environmentRoot: moved, accountHome: account) == own)
         #expect(NodeCheck.root(of: .detached(record: NodeRecord(pid: 4, startTicks: 5)), environmentRoot: moved, accountHome: account)
             == NodeFolders.nodeRoot(accountHome: account))
         #expect(NodeCheck.root(of: .scratch(root: "/srv/vsn-1"), environmentRoot: "/srv/vsn-1", accountHome: account) == "/srv/vsn-1")
         // The mode itself never looks at HOME: VIBESWITCHER_HOME unset is the user's node.
         let mode = NodeCheck.mode(vibeswitcherHome: nil, accountHome: account)
-        #expect(NodeCheck.root(of: mode, environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
+        #expect(NodeCheck.root(of: mode, environmentRoot: moved, accountHome: account) == own)
     }
 
     @Test func aScratchHomeThatIsTheAccountsOwnGetsTheNodesCheck() {

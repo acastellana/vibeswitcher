@@ -215,6 +215,13 @@ Each step is small, keeps the app unchanged, and says what it needs from a real 
 8. **The Mac seal list**, measured. Needs: a real Mac.
 9. **Coexistence**: `lead` refusing an app-led project; the hooks decision. Needs: a real Mac with the app.
 
+Progress (2026-11-20, on Linux, checked on the hosted Mac only when pushed; each commit and what a real Mac must run are
+in [the Mac's tasks](../../process/v2-mac-tasks.md)): step 2 is built (`Platform.Service.nodeRoot`; `--node` still
+refused on the Mac). Step 3's code is built: the server child from a cdhash-checked file, its connector a stream pair
+with the Hardened Runtime as non-dumpable; Hardened Runtime and `task_for_pid` wait for a real Mac. The user decided the
+voice (2026-11-20: Touch ID or the login password for each state change, with the caller check); its code is built
+behind a seam (`Platform.Approval`, `ApprovalVoice`) and not wired: step 4 measures it first.
+
 ## Decisions
 
 - **(call)** On the Mac, in this step, the user's node is refused by every command before anything is read or run
@@ -222,8 +229,9 @@ Each step is small, keeps the app unchanged, and says what it needs from a real 
 - **(call)** `vibeswitcher-host --node` is refused on the Mac (it used to be ignored, making the app's host).
 - **(call)** The user's server on a system with no cgroups is on the closed rule until the Mac's rule is built.
 - **(call)** The node's root on the Mac is `~/.vibeswitcher/v2/node`, never the app's `~/.vibeswitcher`.
-- **(call, for the user to confirm)** The user's voice on the Mac: LocalAuthentication asked by the server per state
-  change, with the peer's code identity and the guard rails; the app's window later, through main.
+- **(confirmed by the user, 2026-11-20)** The user's voice on the Mac: LocalAuthentication (Touch ID or the login
+  password) asked by the server per state change, with the peer's code identity and the guard rails; the app's window
+  later, through main.
 - **(call)** The service is a LaunchAgent in `gui/<uid>`, not started by the app.
 - **(call)** Events in the unified log, stderr in a file.
 - **(for the user)** Signing the node's builds with `setup-signing.sh`'s identity, so the vault's Keychain key doesn't

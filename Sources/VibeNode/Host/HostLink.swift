@@ -154,7 +154,7 @@ public final class HostLink: @unchecked Sendable {
     /// The default sweep: `SessionTemp.sweep` of `root`'s session folders (and, for the user's own root, the handover
     /// tests' leftovers in the shared temporary folder), on a utility queue.
     static func sweeper(root: URL) -> ([HostSession]) -> Void {
-        let account = VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome)
+        let account = NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome)
         let folders = account ? URL(fileURLWithPath: "\(Platform.Files.sharedTemporaryRoot)/vibeswitcher-\(getuid())", isDirectory: true)
             : root.appendingPathComponent("tmp", isDirectory: true)
         let handovers = account ? URL(fileURLWithPath: Platform.Files.sharedTemporaryRoot, isDirectory: true) : nil

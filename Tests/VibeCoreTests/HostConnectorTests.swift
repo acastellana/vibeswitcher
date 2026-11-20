@@ -30,18 +30,15 @@ struct HostConnectorTests {
         return count
     }
 
-    /// A connector registered for the path that can't give a connection: on Linux one whose far end has closed, on
-    /// the Mac any number (it has no connector). The connection throws, and the listener at the path has none.
+    /// A connector registered for the path that can't give a connection: one whose far end has closed, of this
+    /// system's connector type (Linux's seqpacket, the Mac's stream). The connection throws, and the listener at the
+    /// path has none.
     @Test func aRegisteredPathIsNeverReachedByThePath() throws {
         let (path, listening) = try listener()
         defer { Sys.close(listening) }
-        var connector: Int32 = 99_999
-        if !Platform.CodeIdentity.isAvailable {
-            let (mine, theirs) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
-            Sys.close(theirs)
-            connector = mine
-        }
-        defer { if connector != 99_999 { Sys.close(connector) } }
+        let (connector, theirs) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
+        Sys.close(theirs)
+        defer { Sys.close(connector) }
         HostConnection.register(connector: connector, for: path)
         defer { HostConnection.unregister(path: path) }
         #expect(HostConnection.connector(for: path) == connector)
@@ -56,11 +53,10 @@ struct HostConnectorTests {
 
     /// Through a connector whose host never answers, a call keeps to its timeout: `HostCall`'s connect waits its own
     /// patience (at most half its timeout), not the connector's longer wait for a caller that gives none.
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
-    func aCallThroughAConnectorKeepsToItsTimeout() throws {
+    @Test func aCallThroughAConnectorKeepsToItsTimeout() throws {
         let (path, listening) = try listener()
         defer { Sys.close(listening) }
-        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
         defer {
             Sys.close(host)
             Sys.close(connector)
@@ -102,12 +98,12 @@ struct HostConnectorTests {
 
     /// Through a connector, the connection is the one the host hands back: the byte asking for it arrives on the
     /// host's end with its sender, this process; and with an app key given and no hello sent, a request goes out at
-    /// once, held for no proof (the host sends such a connection no challenge). This test plays the host.
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's connector; the Mac has none"))
-    func aConnectorsConnectionIsTheOneTheHostHandsBack() async throws {
+    /// once, held for no proof (the host sends such a connection no challenge). This test plays the host. On both
+    /// systems, each over its connector type (the Mac's a stream: the node on the Mac's step 3).
+    @Test func aConnectorsConnectionIsTheOneTheHostHandsBack() async throws {
         let (path, listening) = try listener()
         defer { Sys.close(listening) }
-        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
         defer {
             Sys.close(host)
             Sys.close(connector)
@@ -135,8 +131,10 @@ struct HostConnectorTests {
         if byPath != 0 { _ = shutdown(host, Int32(SHUT_RDWR)) }
         let (sender, end) = try await served.value
         defer { Sys.close(end) }
-        let own = try #require(Platform.Processes.token(getpid()))
-        #expect(sender.map { $0.sameImage(as: own) } == true, "\(String(describing: sender)), this process \(own)")
+        #expect(sender?.pid == getpid(), "\(String(describing: sender))")
+        if let own = Platform.Processes.token(getpid()) {
+            #expect(sender.map { $0.sameImage(as: own) } == true, "\(String(describing: sender)), this process \(own)")
+        }
 
         // A request, no hello: it reaches the host's end at once.
         let seq = try connection.send(.census)

@@ -993,15 +993,20 @@ extension HostHardeningTests {
         #expect(HostImages.mayStart(lockPath: scratchLock, usersLock: accountLock, accountRoot: root, node: false, ownsLaunchers: false) == nil)
     }
 
-    /// The node's environment: `HOME` the account's, and neither `VIBESWITCHER_HOME` nor `CFFIXED_USER_HOME`, whatever
-    /// it was given; the rest as given. No `--node` host is started in a test: it would be the user's, on their own
-    /// `~/.vibeswitcher`.
+    /// The node's environment: `HOME` the account's, no `CFFIXED_USER_HOME`, and `VIBESWITCHER_HOME` the node's root
+    /// or nothing (unset on Linux, where the node's root is the account's `~/.vibeswitcher`; `~/.vibeswitcher/v2/node`
+    /// on the Mac, beside the app's), whatever it was given; the rest as given. No `--node` host is started in a test:
+    /// it would be the user's, on their own home (`NodeRootHostTests` starts a scratch host in this environment).
     @Test func theNodesRootIsNeverFromTheEnvironment() throws {
         let given = ["HOME": "/scratch/home", "VIBESWITCHER_HOME": "/scratch/root", "CFFIXED_USER_HOME": "/scratch/fixed",
                      "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash"]
         let node = HostImages.nodeEnvironment(given, accountHome: "/home/someone", accountName: "someone", shell: "/bin/bash")
-        #expect(node == ["HOME": "/home/someone", "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash", "USER": "someone", "LOGNAME": "someone"])
-        #expect(VibePaths.root(environment: node, fallbackHome: "/elsewhere").path == "/home/someone/.vibeswitcher")
+        var expected = ["HOME": "/home/someone", "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash", "USER": "someone", "LOGNAME": "someone"]
+        if Platform.CodeIdentity.isAvailable { expected["VIBESWITCHER_HOME"] = "/home/someone/.vibeswitcher/v2/node" }
+        #expect(node == expected)
+        #expect(VibePaths.root(environment: node, fallbackHome: "/elsewhere").path == Platform.Service.nodeRoot(accountHome: "/home/someone"))
+        #expect(VibePaths.root(environment: node, fallbackHome: "/elsewhere").path
+            == (Platform.CodeIdentity.isAvailable ? "/home/someone/.vibeswitcher/v2/node" : "/home/someone/.vibeswitcher"))
         #expect(HostImages.accountHome == VibePaths.accountHome)
         // And --node is refused without its node root and its own server, before anything is changed.
         #expect(HostImages.startAsNode(arguments: ["host"]) == nil)

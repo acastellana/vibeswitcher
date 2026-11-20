@@ -2241,7 +2241,8 @@ extension StartCommandTests {
         // The confirmation: detached, its command, its environment, its log and its record, the weaker rule.
         let said = world.said
         #expect(said.contains("No systemd here: this starts the node detached") && said.contains(NodeUnit.execStart(prefix: StartWorld.prefix, commit: StartWorld.installed).joined(separator: " ")), "\(said)")
-        #expect(said.contains("SWIFT_BACKTRACE=enable=no") && said.contains("/home/u/.vibeswitcher/v2/host.log") && said.contains("/home/u/.vibeswitcher/v2/node.pid"), "\(said)")
+        #expect(said.contains("SWIFT_BACKTRACE=enable=no") && said.contains(NodeFolders.nodeRoot(accountHome: StartWorld.home) + "/v2/host.log")
+                    && said.contains(NodeFolders.nodeRoot(accountHome: StartWorld.home) + "/v2/node.pid"), "\(said)")
         #expect(said.contains(NodeTexts.weakerRule) && said.contains("current is \(Self.other)"), "\(said)")
 
         // --at-login: refused, nothing asked.

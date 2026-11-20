@@ -341,18 +341,59 @@ extension SocketsTests {
         #expect(Platform.Sockets.receiveDescriptorAndSender(over: named[1]) == nil && errno == EBADMSG)
     }
 }
-#else
+#endif
+
+/// The connector's pair on both systems (`Platform.Sockets.connectorType`: Linux's `SOCK_SEQPACKET`, the Mac's stream,
+/// the node on the Mac's step 3): one descriptor passed arrives close-on-exec and is the same open file; a byte that
+/// carries none, or carries two, gives none (EBADMSG); the end gives none (EPIPE). On the Mac
+/// this is the Swift layout of the control message in SocketDescriptors+Darwin.swift, checked on the hosted Mac.
 extension SocketsTests {
-    /// The Mac has no connector: nothing is sent, and nothing is read.
-    @Test func noDescriptorIsPassedOnTheMac() throws {
-        var ends: [Int32] = [-1, -1]
-        try #require(socketpair(AF_UNIX, Platform.Sockets.stream, 0, &ends) == 0)
-        defer { ends.forEach { Sys.close($0) } }
-        #expect(!Platform.Sockets.sendDescriptor(ends[0], over: ends[1]))
-        var waiting = pollfd(fd: ends[0], events: Int16(POLLIN), revents: 0)
-        #expect(poll(&waiting, 1, 0) == 0, "something was sent")
-        #expect(Platform.Sockets.receiveDescriptor(over: ends[0]) == nil)
-        #expect(Platform.Sockets.receiveDescriptorAndSender(over: ends[0]) == nil)
+    /// A message of one byte carrying every one of `fds`.
+    static func sendSeveral(_ fds: [Int32], over socket: Int32) -> Bool {
+        #if os(Linux)
+        sendRights(fds, over: socket)
+        #else
+        Platform.Sockets.sendDescriptors(fds, over: socket)
+        #endif
+    }
+
+    @Test func aDescriptorPassesOverAConnectorPair() throws {
+        let (test, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
+        var helper = other
+        defer { Sys.close(test); if helper >= 0 { Sys.close(helper) } }
+        var pipeEnds: [Int32] = [-1, -1]
+        try #require(pipe(&pipeEnds) == 0)
+        defer { Sys.close(pipeEnds[0]); Sys.close(pipeEnds[1]) }
+        #expect(Platform.Sockets.sendDescriptor(pipeEnds[1], over: helper))
+        let got = try #require(Platform.Sockets.receiveDescriptor(over: test))
+        defer { Sys.close(got) }
+        #expect(got != pipeEnds[1])
+        #expect(fcntl(got, F_GETFD) & FD_CLOEXEC != 0, "close-on-exec from its arrival")
+        var byte = UInt8(ascii: "z")
+        #expect(write(got, &byte, 1) == 1)
+        byte = 0
+        #expect(read(pipeEnds[0], &byte, 1) == 1 && byte == UInt8(ascii: "z"), "the same pipe")
+
+        // A byte with no descriptor, and one with two: none taken. (Whether the two are closed isn't read here: other
+        // tests of the run open and close descriptors meanwhile.)
+        byte = UInt8(ascii: "x")
+        #expect(Platform.Sockets.send(helper, &byte, 1) == 1)
+        #expect(Platform.Sockets.receiveDescriptor(over: test) == nil && errno == EBADMSG)
+        #expect(Self.sendSeveral([pipeEnds[0], pipeEnds[1]], over: helper))
+        #expect(Platform.Sockets.receiveDescriptor(over: test) == nil && errno == EBADMSG)
+
+        // The end: the other end closed.
+        Sys.close(helper)
+        helper = -1
+        #expect(Platform.Sockets.receiveDescriptor(over: test) == nil && errno == EPIPE)
+        #expect(Platform.Sockets.peerHasGone(test))
+    }
+
+    /// A connector's pair on this system: the Mac's Unix domain has no `SOCK_SEQPACKET`, so its connector is a stream.
+    @Test func theConnectorsPairIsEachSystemsOwn() throws {
+        #expect(Platform.Sockets.connectorType == (Platform.CodeIdentity.isAvailable ? Platform.Sockets.stream : Platform.Sockets.seqpacket))
+        let ends = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
+        Sys.close(ends.0)
+        Sys.close(ends.1)
     }
 }
-#endif
