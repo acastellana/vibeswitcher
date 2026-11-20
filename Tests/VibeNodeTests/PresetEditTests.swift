@@ -238,6 +238,31 @@ struct PresetEditTests {
         #expect(SessionPresets.load(root: world.host.root).presets.byProject[world.repo]?.map(\.name) == ["Mine", "Planted"])
     }
 
+    /// What the accept relies on is shown whole: a long command every word of it (an attacker's words past any cut),
+    /// and a variable whose value alone changed said by name, its value as the confirmation shows it.
+    @Test func theDifferenceShowsACommandWholeAndAValueThatChanged() throws {
+        let long = "claude " + (1...200).map { "--add-dir=/srv/p\($0)" }.joined(separator: " ") + " --dangerously-tail"
+        var before = LaunchPresets.builtIns()
+        let opus = LaunchPreset(name: "Opus", kind: .claude, command: "claude", env: ["ANTHROPIC_MODEL": "opus", "MAX_THINKING_TOKENS": "sk-" + "old"])
+        before.byProject[Self.project] = [opus]
+        var after = before
+        after.byProject[Self.project] = [LaunchPreset(id: opus.id, name: "Opus", kind: .claude, command: "claude",
+                                                      env: ["ANTHROPIC_MODEL": "sonnet", "MAX_THINKING_TOKENS": "sk-" + "new"]),
+                                         LaunchPreset(name: String(repeating: "N", count: 150), kind: .claude, command: long)]
+        #expect(long.count > 2000)
+        let lines = SessionPresets.changeLines(before: before, after: after, values: true)
+        #expect(lines.contains { $0.contains(long) && $0.contains(String(repeating: "N", count: 150)) }, "\(lines)")
+        #expect(lines.contains("  ~ Opus: value of ANTHROPIC_MODEL changed (opus → sonnet), value of MAX_THINKING_TOKENS changed (<set> → <set>)"), "\(lines)")
+        #expect(!lines.joined().contains("sk-"))
+        let card = SessionPresets.cardChange(before: before, after: after)
+        #expect(card.contains(long) && card.contains("~ Opus: value of ANTHROPIC_MODEL changed, value of MAX_THINKING_TOKENS changed")
+                && !card.contains("sonnet") && !card.contains("sk-"), "\(card)")
+        // And through the card's own lines, as `config held` prints them.
+        let item = NodeWire.Value.object(["name": .string(SessionPresets.sealName), "hash": .string("abc"), "change": .string(card)])
+        let printed = CardText.lines(.object(["id": .string("c"), "kind": .string("config-held"), "config": .object(["items": .array([item])])]), long: false)
+        #expect(printed.joined(separator: "\n").contains(long), "\(printed)")
+    }
+
     private func acceptConfig(_ world: CardWorld) async throws {
         let held = try #require(await world.ask("config.held", ["folder": .string(world.repo)]))
         let card = try #require(held.result?["card"]?["id"]?.string, "\(held)")

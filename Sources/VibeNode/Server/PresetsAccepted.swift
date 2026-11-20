@@ -39,7 +39,8 @@ extension SessionPresets {
             parts.append("sets " + preset.env.keys.sorted().map { values ? "\($0)=\(shown[$0] ?? "<set>")" : $0 }.joined(separator: ", "))
         }
         if preset.keepShell { parts.append("a shell stays") }
-        return ConfigSeal.inert(preset.name, limit: 80) + " (" + ConfigSeal.inert(parts.joined(separator: "; "), limit: 600) + ")"
+        // Whole, never cut (the review of 2026-11-20): what the accept relies on shows every word of a command.
+        return ConfigSeal.inert(preset.name, limit: .max) + " (" + ConfigSeal.inert(parts.joined(separator: "; "), limit: .max) + ")"
     }
 
     /// What changed in presets from `before` (nil: nothing known of the last accept, so every preset of `after` is
@@ -53,7 +54,20 @@ extension SessionPresets {
             var found: [String] = []
             for preset in now {
                 if let earlier = was.first(where: { $0.id == preset.id }) ?? was.first(where: { $0.name == preset.name }) {
-                    if earlier != preset { found.append("~ \(described(earlier, values: values)) → \(described(preset, values: values))") }
+                    guard earlier != preset else { continue }
+                    // A variable kept whose value changed is said by name (its value as the confirmation shows it).
+                    let shownWas = shownValues(earlier), shownNow = shownValues(preset)
+                    let revalued = preset.env.keys.sorted().filter { earlier.env[$0] != nil && earlier.env[$0] != preset.env[$0] }.map { name in
+                        "value of \(name) changed" + (values ? " (\(shownWas[name] ?? "<set>") → \(shownNow[name] ?? "<set>"))" : "")
+                    }
+                    var same = earlier
+                    same.env = preset.env
+                    if same == preset {
+                        found.append("~ \(ConfigSeal.inert(preset.name, limit: .max)): " + revalued.joined(separator: ", "))
+                    } else {
+                        found.append("~ \(described(earlier, values: values)) → \(described(preset, values: values))"
+                                     + (revalued.isEmpty ? "" : "; " + revalued.joined(separator: ", ")))
+                    }
                 } else {
                     found.append("+ " + described(preset, values: values))
                 }
@@ -65,14 +79,14 @@ extension SessionPresets {
         }
         scope("every folder", old.global, after.global)
         for root in Set(old.byProject.keys).union(after.byProject.keys).sorted() {
-            scope(ConfigSeal.inert(root, limit: 200), old.byProject[root] ?? [], after.byProject[root] ?? [])
+            scope(ConfigSeal.inert(root, limit: .max), old.byProject[root] ?? [], after.byProject[root] ?? [])
         }
         let named = { (presets: LaunchPresets, root: String, id: UUID?) -> String in
             guard let id else { return "none" }
-            return ConfigSeal.inert(presets.presets(for: root).first { $0.id == id }?.name ?? id.uuidString, limit: 80)
+            return ConfigSeal.inert(presets.presets(for: root).first { $0.id == id }?.name ?? id.uuidString, limit: .max)
         }
         for root in Set(old.defaults.keys).union(after.defaults.keys).sorted() where old.defaults[root] != after.defaults[root] {
-            lines.append("default for \(ConfigSeal.inert(root, limit: 200)): \(named(after, root, after.defaults[root])) (was \(named(old, root, old.defaults[root])))")
+            lines.append("default for \(ConfigSeal.inert(root, limit: .max)): \(named(after, root, after.defaults[root])) (was \(named(old, root, old.defaults[root])))")
         }
         return lines
     }
