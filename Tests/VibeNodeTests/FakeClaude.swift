@@ -102,7 +102,8 @@ enum FakeClaude {
 # "processed" (the recording being processed is done now, whatever "processing" said) | "print" (the bytes of "file"
 # written on its terminal, as a command's output) |
 # "trust" (its folder-trust question, as 2.1.30x draws it at the start in a new folder: rows with no numbers, the cursor
-# on "No, exit"; Enter there or Esc quits, Enter on "Yes, I trust this folder" goes on, "trusted" true in STATE) |
+# on "No, exit"; Enter there or Esc quits, Enter on "Yes, I trust this folder" goes on, "trusted" true in STATE; with
+# "lose", that many of its first keys are lost, as a menu not yet taking keys loses them) |
 # "exit" (it quits, as /exit) | "mcp" (the node's: {"op": "mcp", "tool": NAME, "arguments": {...}} starts the tool
 # server its --mcp-config names, a path or inline JSON, "server" or the one named vibeswitcher or the first; sends
 # initialize and the tools/call, and records the reply, or what failed, in "mcp" in STATE)).
@@ -243,6 +244,7 @@ state = {
     "resume": resumed(sys.argv[1:]),  # the conversation --resume carried on (None: a fresh one)
     "mcp": [],               # the "mcp" op's calls: {"tool", "reply"} or {"tool", "error"}
     "trusted": False,        # "Yes, I trust this folder" chosen on the "trust" op's question
+    "trustLose": 0,          # the trust question's keys still to be lost (the op's "lose")
 }
 MCP_DONE = threading.Event()  # an "mcp" call has finished: STATE to be written
 MCP_LOCK = threading.Lock()
@@ -498,6 +500,9 @@ def draw_trust():
 
 def trust_key(key):
     global trust
+    if state["trustLose"] > 0:
+        state["trustLose"] -= 1
+        return
     if key == "up":
         trust = 0
     elif key == "down":
@@ -1308,6 +1313,7 @@ def control():
             threading.Thread(target=call_tool, args=(command,), daemon=True).start()
         elif op == "trust":
             trust = 0
+            state["trustLose"] = command.get("lose", 0)
             state["mode"] = "trust"
         elif op == "freeze":
             state["frozen"] = True

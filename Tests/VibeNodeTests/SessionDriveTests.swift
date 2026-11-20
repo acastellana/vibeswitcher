@@ -166,6 +166,24 @@ struct SessionDriveTests {
         #expect(live(world, harness.session.id))
     }
 
+    /// An arrow lost on a menu not yet taking keys: Enter isn't pressed on the row the cursor stayed on ("No, exit"
+    /// would end the session); the answer is refused, and the next one goes in.
+    @Test func enterWaitsForTheCursorOnTheOptionChosen() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let harness = try await claude(world)
+        harness.tell(["op": "trust", "lose": 1])
+        try await harness.waitFor { harness.agent["mode"] as? String == "trust" }
+        try await harness.screenShows { $0.contains("Yes, I trust this folder") }
+        let id = harness.session.id.uuidString
+        let lost = try #require(await world.ask("session.reply", ["session": .string(id), "choice": .int(2)]))
+        #expect(lost.error?.code == NodeWire.Code.refused.rawValue && lost.error?.message.contains("didn't reach option 2") == true, "\(lost)")
+        #expect(live(world, harness.session.id) && harness.agent["mode"] as? String == "trust", "\(harness.agent)")
+        let again = try #require(await world.ask("session.reply", ["session": .string(id), "choice": .int(2)]))
+        #expect(again.ok, "\(again)")
+        try await harness.waitFor { harness.agent["trusted"] as? Bool == true }
+    }
+
     // MARK: voice
 
     @Test func aSessionsProcessAToolServerAndAWebPageCannotDrive() async throws {

@@ -298,7 +298,8 @@ extension Requests {
     /// (`ChatSync.keys`: arrows from its cursor to the option, then Enter; for free text, the words then Enter). The
     /// screen is read, the question found there (`SessionPrompt.menu(on:)`), and the keys typed as one unit of the host's whose
     /// gate reads the screen again right before the first key: unless the same question shows with its cursor where it
-    /// was, nothing is typed. Refused, nothing typed: a session the host didn't start, a shell, no question on its
+    /// was, nothing is typed; and the key after the arrows waits for the screen to show the cursor on the option
+    /// (`cursorReaches`), else the unit stops there, nothing chosen. Refused, nothing typed: a session the host didn't start, a shell, no question on its
     /// screen, a question or options other than those shown, a choice it hasn't, a multi-select (its boxes are
     /// ticked one by one: answer it in its terminal), and words for an option that takes none (or none for one that
     /// does).
@@ -347,14 +348,26 @@ extension Requests {
                     writes = menu.keys(toChoose: index)
                 }
                 let stopped = Locked<String?>(nil)
+                // The arrows' count: the key after them (Enter, or the words) goes only once the screen shows the cursor
+                // on the option, as `TrustPrompt.answer` waits: an arrow lost on a menu not yet taking keys would put
+                // Enter on the row the cursor was on ("No, exit" on Claude's trust question ends the session).
+                let moves = abs(index - menu.selected)
                 link.type(writes, into: session.id, gate: { step, go in
-                    guard step == 0 else { return go(true) }
-                    link.screen(session.id) { now in
-                        guard let now, SessionPrompt.menu(on: now) == menu else {
-                            stopped.set("its question changed or was answered meanwhile: nothing typed")
-                            return go(false)
+                    if step == 0 {
+                        return link.screen(session.id) { now in
+                            guard let now, SessionPrompt.menu(on: now) == menu else {
+                                stopped.set("its question changed or was answered meanwhile: nothing typed")
+                                return go(false)
+                            }
+                            go(true)
                         }
-                        go(true)
+                    }
+                    guard step == moves else { return go(true) }
+                    Self.cursorReaches(index, of: menu, in: session.id, link: link, since: Date()) { reached in
+                        if !reached {
+                            stopped.set("the cursor didn't reach option \(choice) on its screen (a key lost?): nothing chosen, answer again")
+                        }
+                        go(reached)
                     }
                 }, confirmed: { typed in
                     note("session.reply to session \(short): \(typed ? "option \(choice) typed" : "not typed: \(stopped.get() ?? "the host didn't take it")")")
@@ -364,6 +377,26 @@ extension Requests {
                         "choice": .int(choice), "option": .string(menu.options[index]), "question": .string(menu.question),
                     ])))
                 })
+            }
+        }
+    }
+}
+
+extension Requests {
+    /// How long `session.reply` waits for the screen to show its arrows' cursor on the option, and how often it looks.
+    static let replyCursorWait: TimeInterval = 5
+    static let replyCursorEvery: TimeInterval = 0.1
+
+    /// Reads `id`'s screen until it shows `menu`'s question with its cursor on option `index` (`done(true)`), or
+    /// `replyCursorWait` passes (`done(false)`; a read taken mid-redraw may show no question for a moment).
+    static func cursorReaches(_ index: Int, of menu: ScreenMenu, in id: UUID, link: HostLink, since: Date,
+                              done: @escaping (Bool) -> Void) {
+        link.screen(id) { screen in
+            let now = screen.flatMap(SessionPrompt.menu(on:))
+            if let now, now.sameQuestion(as: menu), now.selected == index { return done(true) }
+            guard Date().timeIntervalSince(since) < replyCursorWait else { return done(false) }
+            link.queue.asyncAfter(deadline: .now() + replyCursorEvery) {
+                cursorReaches(index, of: menu, in: id, link: link, since: since, done: done)
             }
         }
     }
