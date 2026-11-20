@@ -757,16 +757,47 @@ extension HostHardeningTests {
         }
     }
 
+    /// What a session's program prints of the sealed memory it holds and of the image variable in its environment.
+    static let heldImages = """
+        printf 'memfd=%s image=%s\\n' "$(ls -l /proc/self/fd | grep -c memfd)" "$(env | grep -c \(Platform.ProcessSelf.imageVariable))"; exec sleep 600
+        """
+
+    /// A confined session's program holds none either, nor its plan's sealed memory (the session sandbox plan's Task
+    /// SB3, Step 3): its launcher is started from a sealed copy of the host's image as the host starts every launcher
+    /// (`/proc/self/fd/N`, named to it in `VIBESWITCHER_IMAGE_FD`, non-dumpable from its exec), here one this process
+    /// makes, since a scratch host process can't be told to confine before SB5. The launcher closed the image first,
+    /// read its plan and closed it, and the box's init and program hold nothing it was given.
+    private func aConfinedSessionsProgramHoldsNoImageDescriptor() async throws {
+        let scratch = Scratch()
+        let folder = try SessionBox.folder(scratch)
+        let copy = try Platform.ProcessSelf.sealedCopy(of: hostLauncher, name: "vibeswitcher-host-test").get()
+        defer { Sys.close(copy.fd) }
+        let probe = SessionProbe()
+        let session = try SessionBox.start(Self.heldImages, in: folder, sandbox: SessionBox.launch(folder), launcher: "/proc/self/fd/\(copy.fd)", probe: probe)
+        defer { probe.end(session) }
+        #expect(await eventually { probe.text.contains("image=") }, "\(probe.diagnosis(session))")
+        #expect(probe.text.contains("memfd=0 image=0"), "\(probe.text.debugDescription)")
+        // Its launcher ran the sealed copy, and keeps a box.
+        let keeper = probe.queue.sync { session.info.childPID }
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(keeper)/exe"))?.contains("memfd:") == true)
+        #expect(SessionBox.keepsABox(keeper))
+        // The keeper holds its terminal and its line to init: no sealed memory, the image's or the plan's.
+        let held = ((try? FileManager.default.contentsOfDirectory(atPath: "/proc/\(keeper)/fd")) ?? []).compactMap {
+            try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(keeper)/fd/\($0)")
+        }
+        #expect(!held.isEmpty && !held.contains { $0.contains("memfd:") }, "\(held)")
+    }
+
     /// A session's program holds no copy of the host's image: no `memfd:` among its descriptors, and no
     /// `VIBESWITCHER_IMAGE_FD` in its environment (its launcher, started from the host's copy, closed it first).
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies; the Mac has none"))
-    func aSessionsProgramHoldsNoImageDescriptor() async throws {
+    /// `confined`: the same of a session in a box (`SessionBox.kinds`; above).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's sealed copies; the Mac has none"), arguments: SessionBox.kinds)
+    func aSessionsProgramHoldsNoImageDescriptor(confined: Bool) async throws {
+        guard !confined else { return try await aConfinedSessionsProgramHoldsNoImageDescriptor() }
         let host = try await ScratchHostProcess()
         defer { host.stop() }
         let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
-        let session = try await client.spawn("""
-            printf 'memfd=%s image=%s\\n' "$(ls -l /proc/self/fd | grep -c memfd)" "$(env | grep -c \(Platform.ProcessSelf.imageVariable))"; exec sleep 600
-            """)
+        let session = try await client.spawn(Self.heldImages)
         defer { kill(session.childPID, SIGKILL) }
         #expect(await eventually { client.screen(session.id)?.contains("image=") == true }, "\(client.screen(session.id) ?? "")\n\(host.log)")
         #expect(client.screen(session.id)?.contains("memfd=0 image=0") == true, "\(client.screen(session.id) ?? "")")

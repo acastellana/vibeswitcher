@@ -13,46 +13,80 @@ import Testing
 /// and its launcher exits 127 without running its program; a chain whose program has the pid of a session's but
 /// another start, or whose ancestor started after its child, is no session's; and a program reaped is no session's
 /// before the session's queue hears of it.
+///
+/// Each test that starts a session runs for a confined one too (`confined`, `SessionBox.kinds`; the session sandbox
+/// plan's Task SB3, Step 3): the host knows a confined session by its keeper, the launcher, which kept its pid and
+/// leads the terminal, so all of the above holds for it as it is.
 @Suite(hostTestLimit) struct HostedSessionTerminalTests {
     let temp = Scratch()
 
     /// A scratch host's session running `command`, once its program has its terminal as its own (the launcher makes
-    /// it so before it execs): the session, and the name `ProcessTable` gives that terminal.
-    private func session(of host: TestHost, running command: String) async throws -> (session: HostSession, tty: String) {
+    /// it so before it execs): the session, and the name `ProcessTable` gives that terminal. `box`: a scratch folder
+    /// the session is confined over, its program then running inside (`box(_:)`); nil for a plain one.
+    private func session(of host: TestHost, running command: String, in box: String? = nil) async throws -> (session: HostSession, tty: String) {
+        if let box { host.confine(to: box) }
         let client = try TestClient(host)
         let session = try await client.spawn(command)
         #expect(await eventually { ProcessTable.info(pid: session.childPID)?.tty != nil })
         let tty = try #require(ProcessTable.info(pid: session.childPID)?.tty)
+        if box != nil { #expect(await eventually { SessionBox.keepsABox(session.childPID) }, "pid \(session.childPID) keeps no box") }
         return (session, tty)
     }
 
-    @Test func aSessionsTerminalIsTheTablesName() async throws {
+    /// A scratch folder for a confined case's box; nil for a plain one.
+    private func box(_ confined: Bool) throws -> String? { confined ? try SessionBox.folder(temp) : nil }
+
+    @Test(arguments: SessionBox.kinds)
+    func aSessionsTerminalIsTheTablesName(confined: Bool) async throws {
         let host = try TestHost()
-        let (session, tty) = try await session(of: host, running: "sleep 30")
+        let (session, tty) = try await session(of: host, running: "sleep 30", in: box(confined))
         #expect(session.tty == tty)
         if !Platform.CodeIdentity.isAvailable { #expect(session.tty.hasPrefix("ttypts")) }
     }
 
     /// A process on the session's terminal that isn't under its program (one that left it: a double fork, so its parent
     /// is whatever takes this process's orphans) is the session's by its terminal.
-    @Test func aProcessOnTheSessionsTerminalIsThatSessions() async throws {
+    ///
+    /// In a box the number it writes is the box's own, so it is found from outside, under the keeper, by that number
+    /// (never signalled or looked up by it); and what takes its orphans there is the box's init, under the keeper: it
+    /// left its shell, and is the session's by its ancestry as well as by its terminal.
+    @Test(arguments: SessionBox.kinds)
+    func aProcessOnTheSessionsTerminalIsThatSessions(confined: Bool) async throws {
         let host = try TestHost()
-        let pidFile = temp.url("orphan-pid").path
+        // A folder a confined session's box has, so its program can write there.
+        let pidFile = try SessionBox.folder(temp) + "/orphan-pid"
         let (session, tty) = try await session(of: host, running:
-            "(sh -c 'echo $$ > \(pidFile).partial && mv \(pidFile).partial \(pidFile); exec sleep 30' &); \(keepRunning)")
+            "(sh -c 'echo $$ > \(pidFile).partial && mv \(pidFile).partial \(pidFile); exec sleep 30' &); \(keepRunning)",
+            in: confined ? (pidFile as NSString).deletingLastPathComponent : nil)
         #expect(await eventually { FileManager.default.fileExists(atPath: pidFile) })
         let text = try String(contentsOfFile: pidFile, encoding: .utf8)
-        let orphan = try #require(pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+        let written = try #require(pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+        var found: pid_t? = confined ? nil : written
+        if confined {
+            #expect(await eventually {
+                found = SessionBox.under(session.childPID).first { SessionBox.numbers($0) == [$0, written] }
+                return found != nil
+            })
+        }
+        let orphan = try #require(found)
         defer { kill(orphan, SIGKILL) }
-        // Not under the program: only its terminal makes it the session's.
-        #expect(await eventually { ProcessTable.ancestry(of: orphan).map { !$0.map(\.pid).contains(session.childPID) } == true })
+        if confined {
+            // Under the box's init, no longer under the shell that started it.
+            let initial = try #require(Platform.Processes.children(session.childPID).first)
+            #expect(await eventually { Platform.Processes.link(orphan)?.parent == initial })
+            #expect(ProcessTable.ancestry(of: orphan).map { $0.map(\.pid).contains(session.childPID) } == true)
+        } else {
+            // Not under the program: only its terminal makes it the session's.
+            #expect(await eventually { ProcessTable.ancestry(of: orphan).map { !$0.map(\.pid).contains(session.childPID) } == true })
+        }
         #expect(ProcessTable.info(pid: orphan)?.tty == tty)
         #expect(host.server.queue.sync { host.server.session(of: orphan) } == session.id.uuidString)
     }
 
-    @Test func theHookStateFileOfASessionIsDirectlyInState() async throws {
+    @Test(arguments: SessionBox.kinds)
+    func theHookStateFileOfASessionIsDirectlyInState(confined: Bool) async throws {
         let host = try TestHost()
-        let (session, _) = try await session(of: host, running: "sleep 30")
+        let (session, _) = try await session(of: host, running: "sleep 30", in: box(confined))
         let file = VibePaths.stateFile(tty: session.tty)
         #expect(file.deletingLastPathComponent().standardizedFileURL.path == VibePaths.stateDir.standardizedFileURL.path)
         #expect(file.lastPathComponent == session.tty + ".json")
@@ -101,10 +135,13 @@ import Testing
     /// An escaped worker (a process that left its session with `setsid`) opens a new session's terminal while the
     /// session's launcher is still starting (the launcher's test delay holds that window open): it is no session's,
     /// neither while the launcher waits nor after, and to the vault an unknown caller; the launcher finds the terminal
-    /// another session's, says so on it and exits 127, its program never run.
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's launcher check and live rule; the Mac's are unchanged"))
-    func aProcessThatTookASessionsTerminalFirstIsNotThatSession() async throws {
+    /// another session's, says so on it and exits 127, its program never run. A confined session's launcher finds
+    /// the same before it builds anything: no box is made.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's launcher check and live rule; the Mac's are unchanged"),
+          arguments: SessionBox.kinds)
+    func aProcessThatTookASessionsTerminalFirstIsNotThatSession(confined: Bool) async throws {
         let host = try TestHost(launcherTestDelay: 5)
+        if let box = try box(confined) { host.confine(to: box) }
         let client = try TestClient(host)
         let ran = temp.url("ran").path
         let session = try await client.spawn("touch \(ran); \(keepRunning)")
@@ -124,6 +161,8 @@ import Testing
         #expect(await eventually { client.text(session.id).contains("this session's terminal isn't its own") })
         #expect(!FileManager.default.fileExists(atPath: ran))
         #expect(host.server.queue.sync { host.server.session(of: thief) } == nil)
+        // It stopped at its terminal: no box was tried.
+        #expect(!client.text(session.id).contains("sandbox couldn't be built"), "\(client.text(session.id).debugDescription)")
     }
 
     /// The launcher run on a terminal another session already controls exits 127 before it runs its program.
@@ -157,10 +196,10 @@ import Testing
 
     /// A chain whose entry has a session program's pid but another start (the pid given again) is no session's; the
     /// same chain with the program's own start is the session's.
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's tokens; the Mac matches by pid, as always"))
-    func aReusedProgramPidIsNotTheSession() async throws {
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's tokens; the Mac matches by pid, as always"), arguments: SessionBox.kinds)
+    func aReusedProgramPidIsNotTheSession(confined: Bool) async throws {
         let host = try TestHost()
-        let (session, _) = try await session(of: host, running: "sleep 30")
+        let (session, _) = try await session(of: host, running: "sleep 30", in: box(confined))
         let program = try #require(Platform.Processes.link(session.childPID))
         let itself = Self.table(program: program, programTicks: program.startTicks, childTicks: program.startTicks + 100)
         let reused = Self.table(program: program, programTicks: program.startTicks + 1, childTicks: program.startTicks + 100)
@@ -169,10 +208,10 @@ import Testing
     }
 
     /// A chain where an ancestor started after its child (its number given again since) is no session's.
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's chain check; the Mac's ancestry is unchanged"))
-    func anAncestorYoungerThanItsChildBreaksTheChain() async throws {
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's chain check; the Mac's ancestry is unchanged"), arguments: SessionBox.kinds)
+    func anAncestorYoungerThanItsChildBreaksTheChain(confined: Bool) async throws {
         let host = try TestHost()
-        let (session, _) = try await session(of: host, running: "sleep 30")
+        let (session, _) = try await session(of: host, running: "sleep 30", in: box(confined))
         let program = try #require(Platform.Processes.link(session.childPID))
         let older = Self.table(program: program, programTicks: program.startTicks, childTicks: program.startTicks + 100)
         let younger = Self.table(program: program, programTicks: program.startTicks, childTicks: program.startTicks - 1)
@@ -204,11 +243,12 @@ import Testing
     /// A program reaped by `HostedSession.reap(_:until:)` (on its own queue), its session's queue not having heard, is
     /// no session's program: asked while the host's queue is held, a chain through it is no session's. Held by
     /// `TIOCGSID` on the master (`SessionIdentityChecks.holdsIdentity`): the program led its session, and a session
-    /// leader that exits leaves its terminal with no session.
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's live rule; the Mac's is unchanged"))
-    func aReapedSessionIsNotLive() async throws {
+    /// leader that exits leaves its terminal with no session. A confined session's leader is its keeper, and the
+    /// same holds of it.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's live rule; the Mac's is unchanged"), arguments: SessionBox.kinds)
+    func aReapedSessionIsNotLive(confined: Bool) async throws {
         let host = try TestHost()
-        let (session, _) = try await session(of: host, running: "sleep 30")
+        let (session, _) = try await session(of: host, running: "sleep 30", in: box(confined))
         let program = try #require(Platform.Processes.link(session.childPID))
         let chain = Self.table(program: program, programTicks: program.startTicks, childTicks: program.startTicks + 100)
         #expect(host.server.queue.sync { host.server.session(of: Self.below, reading: chain) } == session.id.uuidString)
