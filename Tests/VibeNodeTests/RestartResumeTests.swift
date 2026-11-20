@@ -70,7 +70,7 @@ struct RestartResumeTests {
     /// branch at which commit; and the project's restart notice is over.
     @Test func aRestartedNodeReopensTheLeadInItsConversation() async throws {
         let conversation = UUID().uuidString.lowercased()
-        let (node, repo) = try await hostRestarted(conversation: conversation)
+        let (node, repo, firstLead) = try await hostRestarted(conversation: conversation)
         defer { node.stop() }
         let head = Git.run(["rev-parse", "agent/write-the-parser"], in: repo.path).output
 
@@ -91,7 +91,9 @@ struct RestartResumeTests {
         let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") }, "\(node.said)")
         let files = node.fake.files(terminal: lead.tty)
         let state = { (try? JSONSerialization.jsonObject(with: Data(contentsOf: files.state))) as? [String: Any] ?? [:] }
-        #expect(await eventually(timeout: 60) { state()["pid"] != nil }, "\(node.said)")
+        // The new lead's fake: Linux hands the ended lead's pty number out again, and its files stay there until the new
+        // fake starts and moves them aside, so a state with any pid may still be the first lead's.
+        #expect(await eventually(timeout: 60) { (state()["pid"] as? Int).map { $0 != firstLead } == true }, "\(state())\n\(node.said)")
         #expect(state()["resume"] as? String == conversation, "\(state())")
         let prompt = try #require(state()["prompt"] as? String, "\(state())")
         #expect(prompt.contains("session host restarted") && prompt.contains("reopened you in your same conversation"), "\(prompt)")
@@ -107,7 +109,7 @@ struct RestartResumeTests {
     @Test func aForgedRecordReopensNothing() async throws {
         let forged = scratch.url("forged")
         let conversation = UUID().uuidString.lowercased()
-        let (node, repo) = try await hostRestarted(conversation: conversation) { node, repo in
+        let (node, repo, _) = try await hostRestarted(conversation: conversation) { node, repo in
             let outside = forged.appendingPathComponent("\(conversation).jsonl")
             try FileManager.default.createDirectory(at: forged, withIntermediateDirectories: true)
             try #"{"agentName":"lead-repo"}"#.write(to: outside, atomically: true, encoding: .utf8)
@@ -130,9 +132,9 @@ struct RestartResumeTests {
     /// A node whose host restarted with a lead's conversation recorded: a first node on a fresh vault (its config and
     /// base accepted), its lead started, a task with a worker running on its branch, the lead's hook naming its
     /// transcript `<conversation>.jsonl` in Claude's folder for the repository; once `engine.json` holds both, the host
-    /// stops, `between` runs, and a second host starts on the same root.
+    /// stops, `between` runs, and a second host starts on the same root. The first lead's fake's pid comes back with them.
     private func hostRestarted(conversation: String,
-                               between: (ScratchNode, URL) async throws -> Void = { _, _ in }) async throws -> (ScratchNode, URL) {
+                               between: (ScratchNode, URL) async throws -> Void = { _, _ in }) async throws -> (ScratchNode, URL, Int) {
         let first = try await ScratchNode(scratch, holdFirstLook: true)
         let repo = first.root.appendingPathComponent("repo")
         try await scratchRepository(repo)
@@ -178,7 +180,7 @@ struct RestartResumeTests {
         first.stop()
         try await between(first, repo)
         let second = try await ScratchNode(scratch, holdFirstLook: true, reusing: first.root)
-        return (second, repo)
+        return (second, repo, Int(pid))
     }
 
     /// `engine.json`'s reopen record for `repo`, as written (read as JSON: what the next server reads).
