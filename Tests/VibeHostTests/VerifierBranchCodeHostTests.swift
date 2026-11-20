@@ -75,12 +75,15 @@ import Testing
         try asLead.bind(asLead.issue(role: .verifier, root: team.root, task: "add-b", auditing: commit), root: team.root, session: verifier.id.uuidString)
         FileManager.default.createFile(atPath: folder + "/go", contents: nil)
 
-        // The branch's test is no session's: refused, and it's no one.
-        #expect(await eventually { wire.answered(answers, 2...3) }, "the probe got no answers")
-        FileManager.default.createFile(atPath: stop.path, contents: nil)
-        let replies = try wire.replies(Data(contentsOf: answers))
-        if case .vault(.refused)? = replies[2] {} else { Issue.record("the branch's test submitted the verdict: \(String(describing: replies[2]))") }
-        if case .vault(.member(nil))? = replies[3] {} else { Issue.record("the branch's test is the verifier: \(String(describing: replies[3]))") }
+        // The branch's test is no session's: refused, and it's no one. (Where its command runs in a box of its own it
+        // never gets to ask, `BranchCodeHostTests.branchCodeIsBoxed`: no answer is waited for there.)
+        if !BranchCodeHostTests.branchCodeIsBoxed {
+            #expect(await eventually { wire.answered(answers, 2...3) }, "the probe got no answers")
+            FileManager.default.createFile(atPath: stop.path, contents: nil)
+            let replies = try wire.replies(Data(contentsOf: answers))
+            if case .vault(.refused)? = replies[2] {} else { Issue.record("the branch's test submitted the verdict: \(String(describing: replies[2]))") }
+            if case .vault(.member(nil))? = replies[3] {} else { Issue.record("the branch's test is the verifier: \(String(describing: replies[3]))") }
+        }
         #expect(vault(.app).verdict(root: team.root, task: "add-b") == nil)
 
         // Its own tool server is the verifier, and its verdict goes in.
@@ -99,7 +102,8 @@ import Testing
     /// place, the command was in the verifier's POSIX session, and the grandchild had the verifier's terminal as its
     /// controlling terminal: by the terminal rule it was the verifier, and its verdict went in. Started in a session of
     /// its own (`BranchCodeSession`), it has no controlling terminal: refused, and no one.
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's prefix; the Mac's runs the command in place"))
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's prefix; the Mac's runs the command in place"),
+          .enabled(if: !BranchCodeHostTests.branchCodeIsBoxed, BranchCodeHostTests.boxedNote))
     func anEscapedVerifierCommandWithoutSetsidIsNobodys() async throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")

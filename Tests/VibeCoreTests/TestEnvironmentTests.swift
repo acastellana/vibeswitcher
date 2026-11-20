@@ -142,7 +142,7 @@ struct TestEnvironmentTests {
         expectClean(report, try await started("scripts/test-under-load.sh", ["--load", "1", "--max-time", "300", "--", reporter.path], more: fake))
     }
 
-    /// Where each script drops the variables: test.sh in the bash vs-heavy runs and around each web test's node; the
+    /// Where each script drops the variables: test.sh in the bashes vs-heavy runs (the tests, and their retry) and around each web test's node; the
     /// load script in each run's subshell and at its COMMAND. Never in the script's own shell, whose vs-heavy would
     /// lose the session's marker with it.
     @Test func eachScriptDropsThemWhereItStartsTestsAndNowhereElse() throws {
@@ -156,8 +156,10 @@ struct TestEnvironmentTests {
             #expect(script.firstIndex(of: "known_umask") == source + 1)
         }
         let drops = test.filter { $0.contains("clean_test_environment") }.map { $0.trimmingCharacters(in: .whitespaces) }
-        #expect(drops.count == 2 && drops.first == #"if (clean_test_environment; node "$file"); then"#, "\(drops)")
-        #expect(drops.last?.hasPrefix("Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build ") == true, "\(drops)")
+        // The build and the tests (`swift_tests`), and --retry-failed's retry of the tests that failed.
+        #expect(drops.count == 3 && drops.first == #"if (clean_test_environment; node "$file"); then"#, "\(drops)")
+        #expect(drops.dropFirst().first?.hasPrefix("Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build ") == true, "\(drops)")
+        #expect(drops.last?.hasPrefix(#"with_tmpdir "$retry/tmp/" Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift test --skip-build "$@"'"#) == true, "\(drops)")
         #expect(load.filter { $0.contains("clean_test_environment") || $0.contains("team_session_unsets") } == [
             #"    env $(team_session_unsets) "${command[@]}" 8>&- &"#,
             "        clean_test_environment",

@@ -6,6 +6,10 @@
 import Foundation
 import VibeCore
 
+// A branch run's launcher (the session sandbox plan's SB6), first of all: started with `--branch-run`, this process has
+// one thread and has run nothing; it enters its run's box and never returns. Otherwise it returns at once.
+BranchRun.execIfLaunched(CommandLine.arguments)
+
 // The session sandbox (its plan's SB4), before anything reads a path: inside a confined session's box the tool server,
 // its status line and its permission hook are relays to the session's porter outside (`DoorRelay`), and a helper the
 // porter started takes its session's connector; `--porter` is the porter itself. Each returns at once otherwise.

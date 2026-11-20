@@ -28,3 +28,7 @@ The reason for keeping them (the merge's test run failing on this node's environ
 
 The user asked for the retry so one flake doesn't block every merge; no test's own failure is hidden by this limit, only an abnormal end after all results are recorded.
 
+## 2026-11-20 01:52:37 the-merge-s-test merged into v2 at fe62128e (2026-11-20); test_command is now `Resources/bin/vs-heavy bash scripts/test.sh --retry-failed`. A merge's run prints `flaky (passed on retry): Module.Suite/name()` for each test that needed the retry and the engine records such a run as a plain pass, so the lead copies those lines from the merge's output into the daily summary and makes a task for a test seen three times. A branch based on v2 from before fe62128e doesn't know the option: an AUDIT of such a branch (which runs the command on the branch's own tree) needs `git merge v2` by its worker first; a merge rebases onto v2 and has it.
+
+The user asked for the retry so a flake doesn't block every merge; the note on old-base branches saves the next lead a confusing audit failure.
+

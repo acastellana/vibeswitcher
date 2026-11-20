@@ -14,6 +14,11 @@ import Foundation
 ///
 /// Only the wrapped branch code (`BranchCode.isRunner`): the verifier's own tool server, which `prefix` runs as itself,
 /// is still run in place, so a SIGKILL Claude Code sends it reaches it.
+///
+/// Where a box can be built the child is the branch run's launcher (`BranchRun.launching`, the session sandbox plan's
+/// SB6), which runs the wrapper inside its box: the signals sent on reach the launcher, the box's keeper, which sends
+/// them on to the command, and when the wrapper ends the box ends everything the command started, whatever session or
+/// group it had moved to.
 enum BranchCodeSession {
     /// The signals sent on to the command.
     static let passedOn: [Int32] = [SIGTERM, SIGINT, SIGHUP]
@@ -25,8 +30,9 @@ enum BranchCodeSession {
     static func run(_ argv: [String], environment: [String: String]) -> Int32 {
         var spawn = Platform.Spawn(executable: argv[0], arguments: argv)
         spawn.environment = environment.map { "\($0.key)=\($0.value)" }
-        // As an exec in place: every descriptor that isn't close-on-exec, and ignored signals still ignored.
-        spawn.keep = nil
+        // As an exec in place: every descriptor that isn't close-on-exec, and ignored signals still ignored. A box's
+        // launcher holds its three and nothing else: what the prefix was left holding is none of the command's.
+        spawn.keep = BranchRun.isLauncher(argv) ? [] : nil
         spawn.defaults = .only([])
         spawn.group = .ownSession
 
@@ -52,6 +58,8 @@ enum BranchCodeSession {
         while waitpid(pid, &status, 0) < 0 {
             guard errno == EINTR else { return 126 }
         }
+        // A box's launcher can't take its own layers away (it ends as the command does): its starter does, here.
+        BranchRun.sweep(after: argv)
         let signalled = status & 0x7f
         guard signalled != 0 else { return (status >> 8) & 0xff }
         // Ended by a signal that ends a process without a core: so does this one. By another, 128 and its number.

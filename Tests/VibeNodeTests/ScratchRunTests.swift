@@ -5,7 +5,7 @@ import Testing
 
 /// The bootstrap path's step 9 (the start plan's S10, ST-D21): a whole team on a `ScratchNode`, never the user's node,
 /// driven through the built command line on a pty of its own (`script`) as the user drives it. A scratch repository with
-/// `src/`, a committed `check.sh` (the test command, which notes where it ran) and its `workflow.md` (`merge_policy:
+/// `src/`, a committed `check.sh` (the test command, which says where it ran) and its `workflow.md` (`merge_policy:
 /// ask_sensitive` over `src/**`, one finder, the verifier on sonnet); the host holds its fresh vault's first look, so the
 /// lead starts only once the user accepted the config and recorded the base. The lead asks the user one question, starts
 /// two workers at once in their worktrees, audits one of them and merges it, the merge held for the user's approval of
@@ -25,9 +25,8 @@ struct ScratchRunTests {
     @Test func aScratchTeamOfFakesBuildsAuditsAndMerges() async throws {
         let node = try await ScratchNode(scratch, holdFirstLook: true)
         defer { node.stop() }
-        let marker = try Self.markerFile(scratch)
         let repo = node.root.appendingPathComponent("repo")
-        let first = try await Self.scratchRepository(in: repo, marker: marker)
+        let first = try await Self.scratchRepository(in: repo)
         let cli = Self.CommandLine(node: node)
 
         // 1. The accepts: the config the first look holds, then the base, each card's code typed.
@@ -131,7 +130,7 @@ struct ScratchRunTests {
         let landed = try await Self.landed(repo, since: first)
         #expect(landed.compactMap { Self.trailer("VS-Task", in: $0) } == [parser], "one merge on the base: \(landed)")
         #expect(try await scratchGit(repo.path, ["show", "main:src/parser.txt"]) == "Write the parser", "the worker's change on the base")
-        #expect(Self.ranForMerge(marker, task: parser), "check.sh's marker: \((try? String(contentsOf: marker, encoding: .utf8)) ?? "none")")
+        #expect(Self.ranForMerge(repo, task: parser), "the merge's receipt: \(String(describing: BoardStore(root: repo.path).load().task(parser)?.receipt))")
         #expect(BoardStore(root: repo.path).load().task(parser)?.status == .done)
         // Run under a test and build slot of the node's own (`<root>/tmp`), never one of the account's: this suite holds
         // one of those itself (scripts/test.sh), the only one on a machine under 12 cores, where the merge waited for
@@ -222,7 +221,7 @@ struct ScratchRunTests {
     /// cut (the lead's records, every 5 minutes) isn't one.
     @Test func aWorkersCommitIsOneOnItsBranchThatTouchesSrc() async throws {
         let repo = scratch.url("records-repo")
-        let first = try await Self.scratchRepository(in: repo, marker: try Self.markerFile(scratch))
+        let first = try await Self.scratchRepository(in: repo)
         try FileManager.default.createDirectory(at: repo.appendingPathComponent("records"), withIntermediateDirectories: true)
         try "progress\n".write(to: repo.appendingPathComponent("records/progress.md"), atomically: true, encoding: .utf8)
         try await scratchGit(repo.path, ["add", "--", "records/progress.md"])
@@ -265,7 +264,6 @@ struct ScratchRunTests {
         let claude = try #require(RealClaudeStatusTests.claudeExecutable(), "no claude on PATH")
         let node = try await ScratchNode(scratch, holdFirstLook: true)
         let repo = node.root.appendingPathComponent("repo")
-        let marker = try Self.markerFile(scratch)
         // Registered before anything is written into the user's folder, undone on every way out once begun: the hooks,
         // then each trust entry (the repository's, each worktree's), and the node stopped.
         var hooksWritten = false
@@ -281,7 +279,7 @@ struct ScratchRunTests {
                 do { try RealClaudeStatusTests.trust(path, in: config, false) } catch { Issue.record("the trust entry for \(path) stayed: \(error)") }
             }
         }
-        let first = try await Self.scratchRepository(in: repo, marker: marker)
+        let first = try await Self.scratchRepository(in: repo)
         let project = repo.resolvingSymlinksInPath().path
         let version = try await run(URL(fileURLWithPath: claude), ["--version"],
                                     environment: RealClaudeStatusTests.agentEnvironment(node.root, config: config))
@@ -427,7 +425,7 @@ struct ScratchRunTests {
         // One merge on the base, its tests run.
         let onBase = try await Self.landed(repo, since: first)
         #expect(onBase.compactMap { Self.trailer("VS-Task", in: $0) } == [greeting], "\(onBase)")
-        #expect(Self.ranForMerge(marker, task: greeting), "check.sh's marker: \((try? String(contentsOf: marker, encoding: .utf8)) ?? "none")")
+        #expect(Self.ranForMerge(repo, task: greeting), "the merge's receipt: \(String(describing: BoardStore(root: repo.path).load().task(greeting)?.receipt))")
         // The lead's question answered as the user's: its action, and the message's digest under it, in the vault.
         let card = try #require(question, "the lead asked no question")
         #expect(approvalCard != nil, "no approval card was answered")
@@ -440,15 +438,14 @@ struct ScratchRunTests {
 
     // MARK: Helpers
 
-    /// A scratch repository at `folder` whose commit on `main` holds `src/`, `check.sh` (the test command: it notes
-    /// the folder it ran in, in `marker`, and passes) and nothing else; its `workflow.md` (ST-D21) written beside, in the
-    /// board's folder, as the lead's is (not committed: the board's folder isn't the repository's). The commit.
-    static func scratchRepository(in folder: URL, marker: URL) async throws -> String {
+    /// A scratch repository at `folder` whose commit on `main` holds `src/`, `check.sh` (the test command: it says
+    /// the folder it ran in, `checkScript`, and passes) and nothing else; its `workflow.md` (ST-D21) written beside, in
+    /// the board's folder, as the lead's is (not committed: the board's folder isn't the repository's). The commit.
+    static func scratchRepository(in folder: URL) async throws -> String {
         try await VibeNodeTests.scratchRepository(folder)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("src"), withIntermediateDirectories: true)
         try "The scratch run's sources.\n".write(to: folder.appendingPathComponent("src/README"), atomically: true, encoding: .utf8)
-        try ScratchNode.script("#!/bin/sh\n# The scratch run's test command: where it ran, noted; it passes.\npwd >> \(FakeClaude.quoted(marker.path))\nexit 0\n",
-                               at: folder.appendingPathComponent("check.sh"))
+        try ScratchNode.script(checkScript, at: folder.appendingPathComponent("check.sh"))
         try FileManager.default.removeItem(at: folder.appendingPathComponent("check.sh.txt"))
         // Its own committer, as the user's repository has one (the merge stamps its landed commit).
         try await scratchGit(folder.path, ["config", "user.name", "Test"])
@@ -470,16 +467,28 @@ struct ScratchRunTests {
         return try await scratchGit(folder.path, ["rev-parse", "main"])
     }
 
-    /// `check.sh`'s marker: a file in a scratch folder of its own, outside the node's root and home.
-    static func markerFile(_ scratch: Scratch) throws -> URL {
-        let folder = scratch.url("check")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("ran")
-    }
+    /// `check.sh`, the scratch run's test command. It says where it ran in the one thing that leaves a branch run's
+    /// box, its output: a test count the merge keeps in the task's receipt (`LeadReceipt.testCount`), which is the
+    /// bytes of its folder's name, summed (`count(of:)`). A file written anywhere outside its worktree and its scratch
+    /// home isn't there to look at afterwards: where a merge's test command runs in a box (the session sandbox plan's
+    /// SB6) that box has a /tmp of its own, and the worktree and the home go when the run is over.
+    static let checkScript = #"""
+        #!/bin/sh
+        # The scratch run's test command: where it ran, said as a test count; it passes.
+        n=0
+        for b in $(basename "$(pwd)" | tr -d '\n' | od -An -v -tu1); do n=$((n + b)); done
+        echo "Test run with $n tests in 1 suite passed"
+        exit 0
 
-    /// Whether `check.sh` ran in `task`'s merge (`Worktrees.rebaseAndTest`'s worktree, `merge-<task>`).
-    static func ranForMerge(_ marker: URL, task: String) -> Bool {
-        Platform.lines((try? String(contentsOf: marker, encoding: .utf8)) ?? "").contains { $0.contains("merge-\(task)") }
+        """#
+
+    /// The count `check.sh` says in a folder of this name.
+    static func count(of folder: String) -> Int { folder.utf8.reduce(0) { $0 + Int($1) } }
+
+    /// Whether `check.sh` ran in `task`'s merge (`Worktrees.rebaseAndTest`'s worktree, `merge-<task>`): the receipt of
+    /// that merge, on the board, has the count the script says there, from its own test run's output.
+    static func ranForMerge(_ repo: URL, task: String) -> Bool {
+        BoardStore(root: repo.path).load().task(task)?.receipt?.tests == count(of: "merge-\(task)")
     }
 
     /// Writes the real-claude script into `root` (`real-claude`) and points `root/claude` at it: the account's `claude`

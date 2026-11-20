@@ -190,7 +190,10 @@ public enum BranchCode {
         var passed = isRunner(argv) ? Platform.Tools.branchEnvironment(environment) : environment
         passed[prefixVariable] = nil
         // Linux: the branch's code as a child in a session of its own, waited for (V2/BranchCodeSession.swift).
-        if Platform.Tools.branchCodeGetsOwnSession && isRunner(argv) { return BranchCodeSession.run(argv, environment: passed) }
+        // And there in a box of its own, where one can be built: the child is its launcher (V2/Sandbox/BranchRun.swift).
+        if Platform.Tools.branchCodeGetsOwnSession && isRunner(argv) {
+            return BranchCodeSession.run(BranchRun.launching(argv, in: FileManager.default.currentDirectoryPath, environment: passed), environment: passed)
+        }
         let cArgs = argv.map { strdup($0) } + [nil]
         let cEnv = passed.map { strdup("\($0.key)=\($0.value)") } + [nil]
         execve(argv[0], cArgs, cEnv)
@@ -272,7 +275,9 @@ public enum Shell {
         // nothing of why; posix_spawn's errno does.
         let process: Running
         do {
-            process = try Spawned((branchCode ? BranchCode.wrapper : []) + [executable] + args, in: directory,
+            // Branch code: the wrapper through a branch run's launcher, where a box can be built (V2/Sandbox/BranchRun.swift).
+            process = try Spawned(branchCode ? BranchRun.launching(BranchCode.wrapper + [executable] + args, in: directory, environment: environment)
+                                      : [executable] + args, in: directory,
                                   environment: branchCode ? Platform.Tools.branchEnvironment(environment) : environment,
                                   output: out, errors: err, session: branchCode || ownSession)
         } catch { return Git.Result(status: -1, output: "", error: "\(error)") }

@@ -136,11 +136,14 @@ struct PreferencesCheckTests {
         let lines = try String(contentsOf: Self.repo.appendingPathComponent("scripts/test.sh"), encoding: .utf8)
             .components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         let build = #"Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@""#
+        // swift test runs in `swift_tests` (and `swift_tests_retrying_failed`, which calls it), called between the two.
+        let defined = lines.firstIndex(of: "swift_tests() {")
+        #expect(defined.map { lines[$0 + 1] } == build, "scripts/test.sh has no `swift_tests() {` running `\(build)`")
         let before = lines.firstIndex(of: "defaults_before=$(build_defaults)")
-        let swift = lines.firstIndex(of: build)
+        let swift = lines.firstIndex(of: #"swift_tests "$@""#), retrying = lines.firstIndex(of: #"swift_tests_retrying_failed "$@""#)
         let check = lines.firstIndex(of: #"check_preferences "$preferences_before" "$defaults_before" || status=1"#)
-        #expect(before != nil && swift != nil && check != nil, "scripts/test.sh doesn't check the build's defaults around swift test")
-        guard let before, let swift, let check else { return }
-        #expect(before < swift && swift < check)
+        #expect(before != nil && swift != nil && retrying != nil && check != nil, "scripts/test.sh doesn't check the build's defaults around swift test")
+        guard let before, let swift, let retrying, let check else { return }
+        #expect(before < swift && swift < check && before < retrying && retrying < check)
     }
 }

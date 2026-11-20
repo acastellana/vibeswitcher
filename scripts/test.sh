@@ -42,6 +42,10 @@
 # before an install, on a calm Mac (over its load threshold a bench prints its numbers and doesn't judge them).
 #
 # scripts/test.sh [swift test options], e.g. scripts/test.sh --filter HomeIsolationTests
+# scripts/test.sh --retry-failed [swift test options]: the default run, but when swift test fails on a few tests alone,
+#   only those run once more in a fresh run, and pass the Swift tests when they pass, each named on a line of its own,
+#   "flaky (passed on retry): Module.Suite/name()" (`swift_tests_retrying_failed`, below; TestScriptRetryTests).
+#   For a merge's and an audit's full run, where one load-sensitive test failing would fail every merge.
 # scripts/test.sh --perf [swift test options]: only the benches (no web tests), on a scratch home as above.
 # scripts/test.sh --width: only the width Swift Testing would get here (`slot_width`, below; TestScriptWidthTests).
 # scripts/test.sh --leftovers MARK: only the check, for the processes whose environment or arguments hold MARK
@@ -57,6 +61,20 @@ cd "$(dirname "$0")/.."
 # (`clean_test_environment`: it says what they cost, and why this script and its vs-heavy keep the session's marker).
 source scripts/lib/test-environment.sh
 known_umask
+
+# --retry-failed first, then the default run's swift test options: never with another mode (the benches judge time, the
+# others run no Swift test).
+retry_failed=""
+if [[ ${1:-} == --retry-failed ]]; then
+    shift
+    case ${1:-} in
+        --width | --leftovers | --web | --preferences | --perf | --retry-failed)
+            echo "scripts/test.sh: --retry-failed is for the default run (swift test's options after it), not with $1. Nothing ran."
+            exit 2
+            ;;
+    esac
+    retry_failed=1
+fi
 
 # The live processes holding $1 in their environment or arguments, and every process under one of them (the programs a
 # scratch host runs: ps shows the environment of the app's own binaries, not of Apple's /bin/sh), as "pid command".
@@ -253,6 +271,96 @@ on_exit 'end_leftovers "$mark" > /dev/null'
 export VIBESWITCHER_PREFERENCE_LEDGER=$tool_scratch/preference-suites
 : > "$VIBESWITCHER_PREFERENCE_LEDGER"
 
+# swift build, then swift test "$@", under one vs-heavy call: on the width it gives the run, VS_HEAVY_CORES
+# (scripts/lib/swift-jobs.sh), and so are the tests (`slot_width` above). The bash it runs drops the team session's
+# variables first; vs-heavy and its supervisor keep them.
+swift_tests() {
+    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
+}
+
+# The most failed tests --retry-failed retries: more is a broken change, not a flake.
+retry_limit=10
+
+# --retry-failed's run: `swift_tests "$@"`, and when it fails on at most `retry_limit` tests and nothing else, those
+# tests alone once more, in a fresh run: a new swift test (--skip-build: the same build) in a new scratch home (HOME,
+# CFFIXED_USER_HOME, VIBESWITCHER_HOME and TMPDIR in $tool_scratch/r, so the leftover check's mark covers it), on a
+# vs-heavy slot of its own. Returns 0 when that run ran exactly them and each passed, each then named on a line,
+# "flaky (passed on retry): Module.Suite/name()", printed only: today's engine reads flakes from a failed run alone, so
+# its flake ledger and its "passed only on rerun" count never see them, and the lead copies them into the record; else 1,
+# with both runs' failures, or a line saying why nothing was retried. On 2026-11-19 every full run on the node failed
+# on one or two of several load-sensitive tests, each passing alone, and the merge's own rerun of the whole command
+# then failed on another.
+#
+# Never a pass by accident: scripts/lib/retry-failed.mjs names the failed tests from Swift Testing's event stream (full
+# IDs: the console prints "shared()" for every suite's shared()), and anything it can't vouch for fails the run as it
+# would have without the option: swift test's exit not 1 (a signal, a stop, vs-heavy's time limit), a failed build, a
+# run that never wrote its end (a crash or a kill) or left a test started and unended, an issue recorded outside a test
+# function (a SIGPIPE, a disk read) or the console's count of issues differing from the stream's, a test process that
+# SwiftPM says "exited with unexpected signal code" (signals 1, 3, 4, 6, 7, 8, 10, 11, 13 and 14, a fatalError's 4, even
+# after the run's end), an XCTest failure, more than `retry_limit` tests, processes the run left behind.
+# Not seen, a limit the lead accepted (2026-11-19): a test process ended by SIGKILL, SIGTERM or SIGINT, or exiting
+# non-zero without a signal, only after every test has ended and been recorded, in a run that also has 1 to
+# `retry_limit` failed tests that then pass alone, is retried into a pass. swift test 6.4.2 shows nothing of it: the
+# same console, stderr, event stream (its end written) and exit 1 as those failures alone, -v too. The retry's
+# filter is each ID matched literally and whole (`filter`), one argument (--filter=…); the caller's own --filter and
+# --skip don't go to it (the failed tests passed them). The web, phone and security checks after it are never retried.
+swift_tests_retrying_failed() {
+    local first=$tool_scratch/first retry=$tool_scratch/r judge=scripts/lib/retry-failed.mjs
+    local status again why pattern arg skip_next="" retry_args=()
+    mkdir -p "$first" || return 1
+    swift_tests "$@" --event-stream-output-path "$first/events.jsonl" --experimental-event-stream-version 0 2>&1 | tee "$first/console.log"
+    status=${PIPESTATUS[0]}
+    (( status == 0 )) && return 0
+    if [[ -e $VS_BUILD_FAILED_MARK ]]; then
+        echo "retry-failed: not retried: the build failed (above). The run fails as it would without --retry-failed."
+        return "$status"
+    fi
+    if (( status != 1 )); then
+        echo "retry-failed: not retried: swift test exited $status, not 1 as for failing tests (a signal, a stop, a time limit). The run fails as it would without --retry-failed."
+        return "$status"
+    fi
+    if ! end_leftovers "$mark"; then
+        echo "retry-failed: not retried: the run left processes behind (above). The run fails as it would without --retry-failed."
+        return 1
+    fi
+    if ! why=$(node "$judge" first "$first/events.jsonl" "$first/console.log" "$retry_limit" "$first/failed" 2>&1); then
+        echo "retry-failed: not retried: ${why:-its judge failed}. The run fails as it would without --retry-failed."
+        return 1
+    fi
+    if ! pattern=$(node "$judge" filter "$first/failed" 2>&1); then
+        echo "retry-failed: not retried: ${pattern:-no filter}. The run fails as it would without --retry-failed."
+        return 1
+    fi
+    for arg in "$@"; do
+        if [[ -n $skip_next ]]; then skip_next=""; continue; fi
+        case $arg in
+            --filter | --skip | --event-stream-output-path | --experimental-event-stream-version) skip_next=1 ;;
+            --filter=* | --skip=* | --event-stream-output-path=* | --experimental-event-stream-version=* | --skip-build) ;;
+            *) retry_args+=("$arg") ;;
+        esac
+    done
+    echo "retry-failed: swift test failed on $(wc -l < "$first/failed" | tr -d ' ') tests and nothing else; running only them once more, in a fresh run (a new swift test, a new scratch home):"
+    sed 's/^/  /' "$first/failed"
+    mkdir -p "$retry/home" && mkdir -m 700 "$retry/tmp" || return 1
+    (
+        export HOME=$retry/home CFFIXED_USER_HOME=$retry/home VIBESWITCHER_HOME=$retry/home/.vibeswitcher
+        with_tmpdir "$retry/tmp/" Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift test --skip-build "$@"' scripts/test.sh \
+            ${retry_args[@]+"${retry_args[@]}"} "--filter=$pattern" --event-stream-output-path "$retry/events.jsonl" --experimental-event-stream-version 0
+    ) 2>&1 | tee "$retry/console.log"
+    again=${PIPESTATUS[0]}
+    if (( again == 0 )) && why=$(node "$judge" retry "$retry/events.jsonl" "$retry/console.log" "$first/failed" 2>&1); then
+        node "$judge" flaky "$first/failed"
+        echo "retry-failed: each test that failed passed on its retry: the Swift tests pass, those above listed as flaky."
+        return 0
+    fi
+    (( again == 0 )) || why="swift test exited $again"
+    echo "RETRY FAILED: the failed tests' retry didn't pass ($why). The first run's failures:"
+    node "$judge" issues "$first/events.jsonl" "$first/failed"
+    echo "The retry's:"
+    node "$judge" issues "$retry/events.jsonl" "$first/failed"
+    return 1
+}
+
 # The real user's preferences folder, before HOME moves: cfprefsd writes a named defaults suite
 # (UserDefaults(suiteName: "x.y")) and an unbundled binary's own defaults (domain: the binary's file name) there,
 # whatever HOME and CFFIXED_USER_HOME say, and removePersistentDomain leaves the file. Tests keep theirs in scratch
@@ -345,8 +453,11 @@ else
     # A test a core, then at most the run's width (`suite_width`, `slot_width` above).
     suite_width
     # Both on the width vs-heavy gives the run, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh), and so are the tests.
-    # The bash it runs drops the team session's variables first; vs-heavy and its supervisor keep them.
-    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
+    if [[ -n $retry_failed ]]; then
+        swift_tests_retrying_failed "$@"
+    else
+        swift_tests "$@"
+    fi
     status=$?
     check_preferences "$preferences_before" "$defaults_before" || status=1
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.

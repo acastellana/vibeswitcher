@@ -16,9 +16,11 @@ public enum PTYSpawn {
         // On Linux started from the host's sealed copy: closed first, so the program never holds it (see V2/HostImages.swift).
         Platform.ProcessSelf.closeInheritedImage()
         // Its terminal made its controlling terminal; on Linux, its own or it exits 127 (see `SessionIdentityChecks`).
-        let program = SessionIdentityChecks.takeTerminal(Array(arguments[2...]))
+        var program = SessionIdentityChecks.takeTerminal(Array(arguments[2...]))
         // On Linux dumpable again, and its oom_score_adj raised for the program (see V2/HostImages.swift).
         HostImages.beforeProgram()
+        // A session given a box is entered here, this process its keeper: it returns only for a plain session (see V2/SessionSandbox.swift).
+        SessionSandbox.enterIfAsked(&program)
         let argv = program.map { strdup($0) } + [nil]
         execv(program[0], argv)
         // On the session's terminal, so its window says which program wasn't there (the shell named by $SHELL, say)
@@ -35,8 +37,10 @@ public enum PTYSpawn {
 
     /// `failure`: posix_spawn's errno when it couldn't start the launcher (0 when the terminal couldn't be made).
     /// `launcherFlags`: before the program, for the launcher (`SessionIdentityChecks.launcherFlags`).
+    /// `sandbox`: the box the program is started in (see V2/SessionSandbox.swift); nil: none, as always.
     static func spawn(launcher: String, executable: String, args: [String], env: [String], directory: String,
-                      size: inout winsize, failure: inout Int32, launcherFlags: [String] = []) -> (pid: pid_t, masterFD: Int32)? {
+                      size: inout winsize, failure: inout Int32, launcherFlags: [String] = [],
+                      sandbox: SessionSandbox.Launch? = nil) -> (pid: pid_t, masterFD: Int32)? {
         // Both ends close-on-exec (from their making on Linux), the slave's path named from the master: see
         // `Platform.Terminals.open`.
         guard case .success(let terminal) = Platform.Terminals.open(rows: size.ws_row, cols: size.ws_col) else { return nil }
@@ -50,7 +54,11 @@ public enum PTYSpawn {
 
         // In a session of its own, the terminal its only descriptors (opened by its path, so the launcher's own
         // `makeControlling` takes it), with default signals and an empty mask.
-        var spawn = Platform.Spawn(executable: launcher, arguments: [launcher, "--pty-exec"] + launcherFlags + [executable] + args.dropFirst())
+        // A session given a box: its plan in sealed memory, named to the launcher after its other flags and kept in it;
+        // nothing for any other session (see V2/SessionSandbox.swift).
+        let box = SessionSandbox.launching(sandbox)
+        defer { box.close.forEach { close($0) } }
+        var spawn = Platform.Spawn(executable: launcher, arguments: [launcher, "--pty-exec"] + launcherFlags + box.flags + [executable] + args.dropFirst())
         spawn.stdin = .path(terminal.devicePath, flags: Platform.Terminals.launcherOpenFlags)
         spawn.stdout = .sameAsStdin
         spawn.stderr = .sameAsStdin
@@ -59,7 +67,7 @@ public enum PTYSpawn {
         // On Linux the launcher is the host's sealed copy: kept, and named to it (see V2/HostImages.swift).
         let image = HostImages.launching(launcher, environment: env)
         spawn.environment = image.environment
-        spawn.keep = image.keep
+        spawn.keep = image.keep + box.keep
         switch spawn.start() {
         case .success(let pid):
             return (pid, master)
