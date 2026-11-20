@@ -104,7 +104,7 @@ final class SessionAttachments {
         let folder = folder(root: root)
         let files = FileManager.default
         do {
-            try files.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try VibePaths.ensurePrivate(folder, within: root)
         } catch {
             return .failure(Refusal("the attachments folder couldn't be made: \(error.localizedDescription)"))
         }
@@ -121,8 +121,10 @@ final class SessionAttachments {
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
         let name = "pasted-\(formatter.string(from: now))-\(UUID().uuidString.prefix(4).lowercased()).\(types[type] ?? "png")"
         let url = folder.appendingPathComponent(name)
-        guard files.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
-            return .failure(Refusal("the image couldn't be written in the attachments folder"))
+        do {
+            try VibePaths.writePrivate(data, to: url)
+        } catch {
+            return .failure(Refusal("the image couldn't be written in the attachments folder: \(error.localizedDescription)"))
         }
         return .success(url.path)
     }
