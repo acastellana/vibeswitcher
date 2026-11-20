@@ -120,3 +120,21 @@ export function summaryOf(tools) {
   const text = parts.join(' · ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+// "New since you looked" (the Mac's ChatTimeline marker): the position of the first item after `seen` (the id of the last
+// item you had seen), or -1: nothing seen yet, `seen` not among the items (paged out, or gone), or nothing after it.
+export function newSince(items, seen) {
+  if (!seen) return -1;
+  const at = items.findIndex((item) => item.id === seen);
+  return at >= 0 && at < items.length - 1 ? at + 1 : -1;
+}
+
+// What came since, in a line under the marker: "Ran 2 commands · edited 1 file · 1 reply" (ChatTimeline.summary(of:)).
+export function sinceSummary(items) {
+  const tools = items.filter((item) => item.type === 'tools').flatMap((item) => item.tools || []);
+  const replies = items.filter((item) => item.type === 'reply').length;
+  const parts = tools.length ? [summaryOf(tools)] : [];
+  if (replies) parts.push(replies === 1 ? '1 reply' : `${replies} replies`);
+  const text = parts.join(' · ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}

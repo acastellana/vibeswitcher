@@ -22,6 +22,7 @@ bash scripts/test.sh --web WebApp/tests
 | `/?still` | The mock's snapshot with nothing happening after it (for screenshots). |
 | `/?empty` | A mock node with no sessions. |
 | `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat: its newest 200 first, the rest paged in as you scroll up. |
+| `/#/settings`, `/#/settings/<project id>` | Settings: the node's and a project's, each change drafted as the `vibeswitcher set` line to run in a terminal (`js/views/settings.js`). |
 | `/?theme=dark`, `/?theme=light` | The other look, whatever the system says. |
 
 Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
@@ -54,8 +55,12 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes. |
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
 | `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
+| `js/notify.js` | The browser's notifications while the page is open (a card opens, a session's prompt waits, a lead stops), asked once and toggled on This node; the title bar's count of what needs you. |
+| `js/composing.js` | The composer's word at the caret (`/` and `@`, as the app's composer finds it) and an image's parts for `session.attach`. In the box, `/` and `@` complete from the node (`session.complete`); a pasted or dropped image goes to the node and the draft names it; the messages the node holds behind a question show over the box. |
+| `js/settings.js` | The settings' parts with no page in them: grouped by section, a change's `vibeswitcher set` line quoted as the shell needs, what a draft is checked against. |
+| `js/push.js` | The push a lead asks for (the lead's `push`), in words: what goes where, its commits, and the two lines that settle it in a terminal; the card heads the lead's question stack. Nothing on the page pushes. |
 | `js/activity.js` | The inspector's Activity, made from a chat's items: files changed with their line counts, commands run. |
-| `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `node`, `start`, `palette`. |
+| `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `node`, `settings`, `start`, `palette`. |
 
 ## Keys
 
@@ -125,8 +130,7 @@ it has run every frame through `wire/validators.js` and judged each subscription
 the connection may do: the node's page reads and drafts (`draft`, not `answer`), so a card's options leave a draft
 (`store.draft`, an overlay kept until the cards stream reaches the ack's `applied`: `feed.reached`) and the card shows
 the line that confirms it; a page that only reads shows `vibeswitcher answer …` with the options as text; the
-terminal says it comes in a later build where `term.open` isn't among the kinds (the user's node: LW-D12), as a lead's
-board does, and the chat says so where `chat.page` isn't among the kinds. `mock.js` keeps the older whole-state messages below for the keyed collections, which the store still takes:
+terminal says it comes in a later build where `term.open` isn't among the kinds, as a lead's board does, and the chat says so where `chat.page` isn't among the kinds. `mock.js` keeps the older whole-state messages below for the keyed collections, which the store still takes:
 
 ```js
 feed.start()                    // sends store.apply(snapshot), then deltas
@@ -144,7 +148,10 @@ feed.onLink(fn)                 // 'up' after each hello, 'down' when the connec
 The terminal (`js/terminal.js`, `js/views/terminal.js`; the contract's §9) opens `term.open {session, cols, rows}` where
 `hello.kinds` has it, holds the replay until its type 2 and draws it whole over a reset emulator (a resync or a
 reconnect leaves the old screen up, dimmed, until the new one is whole), writes live bytes as they come, sends keys as
-type 1 and the pane's fitted size as type 3, and closes with `term.close` when the pane is left. In the terminal the
+type 1 and the pane's fitted size as type 3, and closes with `term.close` when the pane is left. On the user's own node the reply says `readOnly`
+(with the session's `cols` and `rows`, and each replay's type 5 says them again): the pane watches, drawn at the
+session's size (scrolled when wider than the pane), with no cursor and no keyboard, nothing sent up, and a line saying
+to type with `vibeswitcher send` in a terminal (the live plan's LW-D12, 2026-11-20). In a typed terminal the
 keyboard is the program's (Ctrl+K, Ctrl+J and the rest), but for a Mac's ⌘ keys. The program can't reach past the
 pane: OSC 52 (clipboard), OSC 8 (links) and the titles are swallowed, no link add-on is loaded, and the bell is
 silent.
@@ -166,7 +173,10 @@ Messages are the design's live protocol ("State as snapshot and deltas"), in `No
 { in: 'node', id: 'local', value }
 
 // A request, as NodeWire.Request: `action` is a new UUID, sent again on a retry so it's done once.
-{ v: 1, id, kind: 'answer' | 'hold' | 'send' | 'ask.answer' | 'seen', args, action }
+{ v: 1, id, kind: 'draft' | 'draft.clear' | 'session.draft' | 'session.draft.clear' | 'session.attach' | 'seen' | …, args, action }
+
+// A read (no action: nothing is sent again after a reconnect), e.g. what a session's / and @ complete to.
+{ v: 1, id, kind: 'chat.page' | 'session.complete' | 'session.presets' | …, args }
 ```
 
 A snapshot with another `epoch` (the server restarted) replaces everything and the open chats are asked for again. A
@@ -181,8 +191,9 @@ Field names are the node's own where it has them. **In the node today** means `v
 ### Session
 
 From the node, `js/wire.js` maps the contract's session (§5) to this: `status` is its `shownStatus`, `title` its
-`task`, `detail` its `activity` (else `detail`), and `lead` the project of the lead whose `session` it is. A worker's
-or verifier's `lead` isn't on the wire yet, so it is listed on its own; `paused` is always false.
+`name` (yours, `vibeswitcher rename`) else its `task`, `detail` its `activity` (else `detail`), `paused` whether it has
+a `pausedUntil` (`vibeswitcher pause`), and `lead` the project of the lead whose `session` it is. A worker's or
+verifier's `lead` isn't on the wire yet, so it is listed on its own.
 
 ```js
 {

@@ -26,8 +26,9 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
     /// integration's (I1: the rights, then `Requests`). It answers on the transport itself. None: `unknown-kind`. On
     /// `queue`.
     public var others: ((NodeWire.Request, LiveTransport, LiveRights) -> Void)?
-    /// A scratch server's terminals (slice 4, LW-D12): `term.open` and `term.close` are the hub's while it has one, and
-    /// so are the binary frames. None (the user's node): neither. Set on `queue`, before the listener starts.
+    /// The terminals (slice 4; `TerminalRelay.Mode`: the user's node's watched, a scratch server's typed into):
+    /// `term.open` and `term.close` are the hub's while it has one, and so are the binary frames. None: neither. Set
+    /// on `queue`, before the listener starts.
     public var terminals: TerminalRelay?
     /// The sessions' chats (slice 2, B4): a `chat` subscription's stream, opened for it, and `chat.page`. None: `chat`
     /// is no collection here. On `queue`.

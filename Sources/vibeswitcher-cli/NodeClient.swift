@@ -273,6 +273,8 @@ final class NodeClient {
             }
             if envelope.re == id, let reply = NodeWire.decode(NodeWire.Reply.self, next) { return .success(reply) }
         }
+        // An older server's reply past the line's limit (today's says so in a reply of its own: `NodeWire.replyLine`).
+        if lines.tooLong { return .failure(.broken("the node's server answered \(kind) with a line past the limit of \(NodeWire.maxLine) bytes: ask for less")) }
         return .failure(.broken("the node's server didn't answer \(kind)"))
     }
 

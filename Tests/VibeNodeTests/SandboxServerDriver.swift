@@ -19,7 +19,7 @@ import VibeCore
 ///   which its chat on the page shows as it lands. Its transcript starts with a short conversation.
 /// - `answer`: `vibeswitcher answer CARD` with no text on the lead's open card, on a terminal of its own with the
 ///   card's code typed, as the user confirms what the page drafted (the live plan's slice 3); its output.
-/// - Its server opens terminals to its pages (`--test-web-terminal`, a scratch server's alone: LW-D12), and a third
+/// - Its server opens terminals to its pages (`--test-web-terminal`, typed: a scratch server's alone, LW-D12), and a third
 ///   session is a shell in a scratch folder (`example-shell`), whose screen the page's Terminal pane shows and types
 ///   into: the only session typed into from a page, and a scratch one (AGENTS.md's first hard rule).
 /// - Unless `VIBESWITCHER_SANDBOX_STILL` is set, the second session's status changes by itself every 20 s too, and the
@@ -35,8 +35,10 @@ struct SandboxServerDriver {
         let control = folder.appendingPathComponent("control", isDirectory: true)
         let environment = ProcessInfo.processInfo.environment
         let port = environment["VIBESWITCHER_SANDBOX_PORT"].flatMap(UInt16.init) ?? 0
+        // `--watch`: the terminals watched, as on the user's node; by default typed, a scratch server's spike.
+        let terminal = environment["VIBESWITCHER_SANDBOX_WATCH"] != nil ? ServerArguments.testWebTerminalWatchFlag : ServerArguments.testWebTerminalFlag
         var arguments = ["--server-arg", ServerArguments.testWebPortFlag + String(port), "--server-arg", ServerArguments.testWebPairFlag,
-                         "--server-arg", ServerArguments.testWebTerminalFlag]
+                         "--server-arg", terminal]
         if let root = environment["VIBESWITCHER_SANDBOX_WEB_ROOT"] { arguments += ["--server-arg", ServerArguments.testWebRootFlag + root] }
         let scratch = Scratch()
         let node = try await ScratchNode(scratch, holdFirstLook: true, hostArguments: arguments)
@@ -67,7 +69,8 @@ struct SandboxServerDriver {
         try FileManager.default.createDirectory(at: shellBin, withIntermediateDirectories: true)
         let bash = shellBin.appendingPathComponent("claude")
         try copyClosedOnExec(URL(fileURLWithPath: "/bin/bash").resolvingSymlinksInPath().path, to: bash.path)
-        let shell = try await node.spawn("printf '\\033[1mexample-shell\\033[0m: a scratch session, typed into from the page.\\n\\n'; "
+        let says = environment["VIBESWITCHER_SANDBOX_WATCH"] != nil ? "watched from the page" : "typed into from the page"
+        let shell = try await node.spawn("printf '\\033[1mexample-shell\\033[0m: a scratch session, \(says).\\n\\n'; "
             + "PS1='\\[\\033[32m\\]example-shell\\[\\033[0m\\] $ ' exec '\(bash.path)' --noprofile --norc -i", cwd: shellFolder.path, label: "Shell",
                                      agent: "claude")
         try HookedAgent(session: shell, pid: shell.childPID, folder: shellFolder).hook(node, "Stop")

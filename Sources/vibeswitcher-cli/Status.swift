@@ -92,7 +92,9 @@ enum StatusCommand {
         let sessions = result["sessions"]?.array ?? []
         out.append(sessions.isEmpty ? "No agent sessions." : "sessions:")
         for session in sessions {
-            out.append("  \(inert(session["terminal"]?.string))  \(inert(session["agent"]?.string))  \(inert(session["cwd"]?.string))  \(inert(session["status"]?.string))")
+            let name = session["name"]?.string.map { "  \u{201C}\(inert($0))\u{201D}" } ?? ""
+            let paused = session["pausedUntil"]?.string == nil ? "" : "  (paused)"
+            out.append("  \(inert(session["terminal"]?.string))  \(inert(session["agent"]?.string))  \(inert(session["cwd"]?.string))  \(inert(session["status"]?.string))\(name)\(paused)")
         }
         out += CardText.statusLines(leads: result["leads"]?.array ?? [], cards: result["cards"])
         for accepted in result["accepted"]?.array ?? [] {

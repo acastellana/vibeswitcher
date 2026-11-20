@@ -82,8 +82,19 @@ extension Requests {
 
     // MARK: questions
 
-    /// `questions [FOLDER] [--all]`: the open cards (closed ones too with `all`), each as `CardStore.Card.value`.
+    /// The closed cards `questions --all` lists at most when it isn't given `limit`.
+    static let closedListed = 50
+
+    /// `questions [FOLDER] [--all]`: the open cards (closed ones too with `all`: the newest `limit` of them, at most
+    /// `closedListed` unless given, `more` saying how many closed were left out), each as `CardStore.Card.value`.
+    /// With `card` (a whole id or a prefix only one card has, `CardStore.resolve`), that card alone, open or closed,
+    /// or none: what `answer`, `hold` and the accepts find a card by, however many the server holds. With `wait`, the
+    /// open cards once there is one (`waitForCards`).
     func questions(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        if let wanted = request.args?["card"]?.string {
+            let card = engine?.cards.resolve(wanted)
+            return reply(.init(re: request.id, result: .object(["cards": .array(card.map { [$0.value] } ?? []), "more": .int(0)])))
+        }
         namedRoot(request, required: false) { [weak self] named in
             guard let self else { return }
             let project: String?
@@ -91,9 +102,46 @@ extension Requests {
             case .failure(let refusal): return reply(refusal)
             case .root(let root): project = root.map { NodeIds.project(root: $0) }
             }
-            let cards = self.engine?.cards.list(project: project, all: request.args?["all"]?.bool == true) ?? []
-            reply(.init(re: request.id, result: .object(["cards": .array(cards.map(\.value))])))
+            if request.args?["wait"]?.bool == true { return self.waitForCards(request, project: project, reply: reply) }
+            let listed = self.engine?.cards.list(project: project, all: request.args?["all"]?.bool == true) ?? []
+            let limit = max(0, request.args?["limit"]?.int ?? Self.closedListed)
+            let closed = listed.filter { !$0.isOpen }
+            let left = Set(closed.dropLast(limit).map(\.id))
+            let cards = listed.filter { !left.contains($0.id) }
+            reply(.init(re: request.id, result: .object(["cards": .array(cards.map(\.value)), "more": .int(left.count)])))
         }
+    }
+
+    /// How long `questions` with `wait` holds its reply at most before it answers with no card (`waited`): the command
+    /// line asks again, so a client that went away holds nothing longer.
+    public static let cardWait: TimeInterval = 300
+
+    /// `questions --wait`: the open cards of `project` (every project's when nil) as soon as there is one: at once when
+    /// there are, else at the first change of the cards that opens one; none after `wait` (or `cardWait`) seconds, with
+    /// `waited` true. On `queue`.
+    private func waitForCards(_ request: NodeWire.Request, project: String?, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server holds no cards"))) }
+        let waiting = CardWait()
+        func answer(_ cards: [CardStore.Card]) {
+            guard !waiting.answered else { return }
+            waiting.answered = true
+            waiting.watch?.cancel()
+            waiting.watch = nil
+            reply(.init(re: request.id, result: .object(["cards": .array(cards.map(\.value)), "more": .int(0), "waited": .bool(cards.isEmpty)])))
+        }
+        func look() {
+            let open = engine.cards.list(project: project)
+            if !open.isEmpty { answer(open) }
+        }
+        waiting.watch = engine.cards.changes.subscribe(on: queue) { _ in look() }
+        let seconds = min(max(request.args?["seconds"]?.int.map(TimeInterval.init) ?? Self.cardWait, 0), Self.cardWait)
+        queue.asyncAfter(deadline: .now() + seconds) { answer([]) }
+        look()
+    }
+
+    private final class CardWait: @unchecked Sendable {
+        var answered = false
+        var watch: Subscription?
     }
 
     // MARK: answer, hold
@@ -152,6 +200,8 @@ extension Requests {
             reply(answer)
         }
         guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
+        if request.kind == "session.attach" { return attach(request, done: done) }
+        if request.kind.hasPrefix("session.") { return sessionDraft(request, action: action, done: done) }
         guard let engine else { return done(.init(re: request.id, error: .init(.refused, "this server keeps no cards"))) }
         guard let id = request.args?["card"]?.string else { return done(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs card"))) }
         guard let card = engine.cards.cards[id] else {

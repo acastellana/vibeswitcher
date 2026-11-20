@@ -54,7 +54,7 @@ export function createMock(store, options = {}) {
     const hex = /^[0-9a-f]{8}$/.test(sid.slice(6, 14)) ? sid.slice(6, 14) : 'c7e40b18';
     return {
       id: sid, terminal: 'pts/' + (3 + sessions.size), agent, cwd: SITE, status: 'idle', since: ago(60), hosted, role: null,
-      title: null, detail: null, paused: false, lead: null, task: null,
+      title: null, detail: null, paused: false, lead: null, task: null, prompt: null, draft: null, queued: [],
       startedAt: fields.since || ago(60), activity: null, activitySince: null, branch: 'main',
       agentSession: `${hex.split('').reverse().join('')}-0c2e-4a71-b3d5-9f6e8a1c2b40`, pid: 51022 + 37 * sessions.size,
       command: hosted ? agent : null, size: hosted ? { cols: 132, rows: 38 } : null, ...fields,
@@ -67,7 +67,13 @@ export function createMock(store, options = {}) {
     add(W_SYNC, { status: 'working', since: ago(252), role: 'worker', lead: SITE_PROJECT, task: 'sync-landing-base', branch: 'agent/sync-landing-base', title: 'Sync landing-base with main', detail: 'Resolving the hero’s conflicts', activity: 'Edit pages/hero.html', activitySince: ago(12) });
     add(W_CLEAN, { agent: 'codex', status: 'idle', since: ago(130), startedAt: ago(1300), role: 'worker', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders' });
     add(V_CLEAN, { status: 'working', since: ago(118), role: 'verifier', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders', detail: 'Checking the work', activity: 'Read tools/cleanup.py', activitySince: ago(60) });
-    add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py' });
+    // Its own question, as the node reads it off the session's screen (`prompt`, SessionPrompt.value), and a message
+    // drafted for it on a page (`draft`, session.draft).
+    add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py',
+      prompt: { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
+        descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },
+      draft: { text: 'Once the tests pass, also add one for two regions at once.', images: [], at: ago(8), action: 'mock-draft' },
+      queued: [{ text: 'And keep the old job name in the logs.', images: 0, at: ago(5), action: 'mock-queued' }] });
     add(WEBHOOKS, { agent: 'codex', cwd: PAYOUTS, status: 'working', since: ago(95), startedAt: ago(400), branch: 'retry-webhooks', title: 'Retry failed bank webhooks', detail: 'Running the retry tests', activity: 'pytest tests/test_webhook_retry.py', activitySince: ago(95) });
     add(DARK, { status: 'done', since: ago(380), startedAt: ago(1900), branch: 'settings-dark-mode', title: 'Add dark mode to the settings page' });
     add(PREVIEW, { cwd: DOCS, status: 'background', since: ago(720), startedAt: ago(760), title: 'Preview the docs site', detail: '1 shell · 12m: npm run dev' });
@@ -77,6 +83,10 @@ export function createMock(store, options = {}) {
   const leads = new Map(options.empty ? [] : [[SITE_PROJECT, {
     project: SITE_PROJECT, root: SITE, session: LEAD, named: null, bound: LEAD, replaced: [], held: 0, reportsWaiting: 0, notice: null,
     starting: false, lastStart: null, lastStartAt: ago(5400), looks: 14, questions: { open: 1, blocking: 1 }, cards: [CARD_LAUNCH],
+    // The push the lead asked for (push_remote), open: its card in the lead's chat drafts the two lines that settle it.
+    push: { id: '3c9e1f20', commit: 'c41d7e09b2a65f38d1e0c7b94a2f6e1d3b8c5a70', short: 'c41d7e09', branch: 'landing-base', remote: 'origin',
+      target: 'origin/landing-base', url: 'git@example.invalid:example-site.git', ahead: 2,
+      subjects: ['c41d7e0 Landing copy', '9b2a65f Hero image'], askedAt: ago(600) },
   }]]);
 
   const task = (slug, title, status, fields = {}) => ({ id: slug, slug, title, status, since: ago(300), worker: null, verifier: null, branch: 'agent/' + slug, after: [], checkpoints: [], blocker: null, merged: null, ...fields });
@@ -113,6 +123,12 @@ export function createMock(store, options = {}) {
     accepted: [{ kind: 'lead', action: 'b7e0c2d4-5a61-4f38-9c0b-1e2d3f4a5b6c', at: ago(5400), pid: 51022, cgroup: '/init.scope', commandLine: ['vibeswitcher', 'lead', SITE] }],
     notices: options.empty ? [] : ['example-site: landing-base moved outside the lead’s merges; its next merge is refused until you accept the move'],
     restart: null,
+    reopen: [],
+    // Your sessions that ended lately (`vibeswitcher resume`).
+    ended: [
+      { session: id('5c1e7a92'), folder: `${HOME}/projects/example-api`, name: 'example-api', conversation: '7a3f0c21-9b4d-4e8a-a1f2-3c5d7e9b0a14', at: ago(1500) },
+      { session: id('9d2b4f60'), folder: `${HOME}/projects/notes`, name: 'Tidy the notes', conversation: null, at: ago(7200) },
+    ],
     builds: { installRoot: `${HOME}/.local/share/vibeswitcher`, installed: ['f62aef61', '200e2c32', '5e563cf5'], rollback: { commit: '200e2c32', line: '200e2c32 v2 journal: an entry with no cgroup softens no mark' } },
     facts: [
       'plain mode: no sandbox before stage 6; what that doesn’t promise is S11’s list (`vibeswitcher start` prints it once)',
@@ -145,7 +161,6 @@ export function createMock(store, options = {}) {
       read(`${API}/jobs/scheduler.py`, 126),
       reply('The job takes its lock after it reads the schedule, so two workers can both see a run as due:\n\n- the scheduler starts one worker per region\n- each reads the schedule before it takes the lock\n- the second to get the lock runs the job again\n\nThe fix is to take the lock first, in `jobs/payouts.py`. Running its tests before I change it.', 60),
       command('pytest tests/test_payouts.py', '', 21, null),
-      { id: next('a'), kind: 'ask', at: ago(20), title: 'Bash command', text: 'pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently'], answer: null },
     ]);
     chats.set(LEAD, [
       prompt('Sync the landing pages and finish the sidebar review.', 5400),
@@ -462,6 +477,62 @@ export function createMock(store, options = {}) {
 
   const refused = (message) => ({ ok: false, error: { code: 'refused', message } });
 
+  // The node's settings (`settings`' result, as `NodeSettings` makes it), the project's for the site's folder.
+  const POLICY = '- One agent owns each change through completion. Separate reviewers only for security, irreversible operations, or complex changes.\n'
+    + '- Run affected tests while editing, then the full suite once before merging. Repeat only when new changes justify it.\n'
+    + '- Parallelize independent implementation work. Serialize expensive builds and tests so workers don\'t compete for CPU.\n'
+    + '- Fix material bugs. Cosmetic observations don\'t automatically become tasks or block delivery.\n'
+    + '- Stop when the requested behavior works and relevant checks pass. No recursive audit loop without a concrete unresolved concern.';
+  function settingsResult(folder) {
+    const at = (file) => `${HOME}/.vibeswitcher/${file}`;
+    const workflow = `${SITE}/.vibeswitcher/workflow.md`;
+    const row = (key, title, about, section, scope, form, home, value, fallback, where, extra = {}) => ({
+      key, title, about, section, scope, form, home, choices: extra.choices || [], limits: extra.limits ?? null, value, default: fallback,
+      isDefault: value === fallback, where, guardRail: !!extra.rail, note: extra.note ?? null,
+    });
+    const limits = (key, title, about, form, value, fallback, extra) => row(key, title, about, extra?.section || 'Machine-wide limits', 'node', form, 'limits', value, fallback, at('mac-limits.json'), extra);
+    const boost = (key, title, about, form, value, fallback, extra) => row(key, title, about, 'Boost', 'node', form, 'preferences', value, fallback, at('settings.plist'), extra);
+    const models = (key, title, about, form, value, fallback, extra) => row(key, title, about, extra?.section || 'Models', 'project', form, 'workflow', value, fallback, workflow, extra);
+    const floor = (key, title, about, form, value, fallback, extra) => row(key, title, about, 'Review rules floor', 'project', form, 'floor', value, fallback, 'the session host\'s vault', extra);
+    const node = [
+      limits('mac_max_sessions', 'Team sessions on this node, at most', 'How many workers and verifiers, across every project, may run at once.', 'count', '10', '10', { limits: '1 to 99' }),
+      limits('load_threshold', 'Start nothing above a load of', 'Leads start nothing while the load is above this; default means twice the cores (24).', 'number', 'default', 'default', { limits: 'above 0' }),
+      limits('mac_heavy_slots', 'Test and build slots at once', 'How many builds and full test runs may run at once on this node.', 'count', '3', '2', { limits: '1 to 12' }),
+      limits('ignore_usage_limits', 'Ignore usage limits', 'Leads keep starting work at any share of a Claude limit, instead of stopping at 80 %.', 'flag', 'off', 'off', { section: 'Usage limits', limits: 'on or off' }),
+      boost('boost', 'Boost', 'Raises the machine-wide limits for more throughput. On a node Automatic acts as Off: it can\'t tell whether you\'re away.', 'choice', 'off', 'off', { choices: ['off', 'on', 'automatic'], limits: 'off, on, automatic' }),
+      boost('boost_load_threshold', 'Start nothing above a load of, while boosted', 'While boosted, leads start nothing once the load is above this.', 'number', '36', '36', { limits: 'above 0, at most 48' }),
+      boost('boost_max_sessions', 'Team sessions while boosted, at most', 'How many workers and verifiers may run at once across every project while boosted.', 'count', '18', '18', { limits: '1 to 48' }),
+      boost('boost_max_workers', 'Workers per project while boosted, at most', 'The most workers any one project may run at once while boosted.', 'count', '7', '7', { limits: '1 to 48' }),
+      boost('boost_heavy_slots', 'Test and build slots while boosted', 'How many builds and full test runs may run at once while boosted.', 'count', '3', '3', { limits: '1 to 12' }),
+      row('lead_mail', 'Let project leads message each other', 'Lets one project\'s lead send messages to another\'s (tell_lead).', 'Leads', 'node', 'flag', 'preferences', 'on', 'on', at('settings.plist'), { limits: 'on or off' }),
+      row('policy', 'Working policy', 'The rules every project\'s lead, workers and verifiers get in their prompts; running leads are told when it changes.', 'Working policy', 'node', 'text', 'policy', POLICY, POLICY, at('policy.md'), { limits: 'at most 32000 characters' }),
+    ];
+    const project = folder === SITE ? [
+      models('lead_model', 'The lead\'s model', 'The model the project\'s lead runs on (Opus in Fable\'s place while Fable is held back); from its next start.', 'model', 'fable', 'fable', { limits: 'a model\'s name as claude --model takes it' }),
+      models('lead_advisor', 'The lead\'s advisor', 'The lead\'s advisor while it runs on Opus: fable, opus or none; from its next start.', 'choice', 'fable', 'fable', { choices: ['fable', 'opus', 'none'], limits: 'fable, opus, none' }),
+      models('worker_advisor', 'Workers\' advisor', 'Every worker\'s advisor when its task sets none: none, fable or opus.', 'choice', 'none', 'none', { choices: ['none', 'fable', 'opus'], limits: 'none, fable, opus' }),
+      models('verifier_model', 'Verifier\'s model', 'The model audits run on; default means another model than the workers\', at least as capable.', 'model', 'default', 'default', { limits: 'a model\'s name as claude --model takes it' }),
+      models('security_audit_model', 'Security audits\' model', 'The model a sensitive or security audit runs on, whatever the verifier\'s model is.', 'model', 'mythos', 'mythos', { rail: true, limits: 'a model\'s name as claude --model takes it' }),
+      models('max_workers', 'Workers at once, at most', 'How many workers the project\'s lead may run at once.', 'count', '4', '3', { section: 'Team', rail: true, limits: '1 to 99' }),
+      floor('floor_sensitive_paths', 'Sensitive paths', 'Paths whose changes always count as sensitive; a lead can add to these, never remove them.', 'paths', '.claude/, .mcp.json, CLAUDE.md, AGENTS.md, .github/', 'none', { limits: 'globs, comma-separated; none for no paths' }),
+      floor('floor_strict_paths', 'Strict paths', 'Paths whose changes get the strictest review; a lead can add to these, never remove them.', 'paths', 'none', 'none', { limits: 'globs, comma-separated; none for no paths' }),
+      floor('floor_audit_finders', 'Audit finders, at least', 'The fewest independent checkers an audit may use in this project.', 'count', '1', '1', { limits: '1 to 3' }),
+      floor('floor_merge_policy', 'Merge policy, at least', 'How much approval a merge needs at minimum, from automatic to asking you every time.', 'choice', 'ask_sensitive', 'auto', { choices: ['auto', 'ask_sensitive', 'ask_all'], limits: 'auto, ask_sensitive, ask_all' }),
+      floor('floor_risk_lines', 'Risk lines, at most', 'A change bigger than this many lines counts as risky; 0 sets no floor, and the project\'s own limit applies.', 'count', '0', '0', { limits: '0 to 1000000' }),
+      floor('floor_risk_model', 'Risk check\'s model pass', 'Keeps the model\'s second look at a change\'s risk switched on.', 'flag', 'off', 'off', { limits: 'on or off' }),
+      floor('floor_audit_sample_percent', 'Audit sample, at least', 'The smallest share of finished work, in percent, that gets audited.', 'count', '10', '0', { limits: '0 to 100' }),
+      floor('floor_verifier_different', 'Verifier never on the workers\' model', 'Keeps audits on a different model from the one the workers use.', 'flag', 'on', 'on', { limits: 'on or off' }),
+    ] : null;
+    return {
+      node: { root: at('').replace(/\/$/, ''), settings: node },
+      project: project ? { project: SITE_PROJECT, root: SITE, settings: project } : null,
+      leftOut: [
+        { title: 'Also on battery (Boost)', why: 'a node runs on mains: it reads no battery' },
+        { title: 'Notifications (banners, sound, reminders)', why: 'the page\'s own: This node\'s toggle, in each browser' },
+      ],
+    };
+  }
+
   function handle(message) {
     const args = message.args || {};
     if (message.kind === 'answer') {
@@ -514,6 +585,43 @@ export function createMock(store, options = {}) {
         else emit(setSession(args.session, { status: 'done', since: new Date().toISOString() }));
       }));
       return { ok: true, result: {} };
+    }
+    if (message.kind === 'session.draft' || message.kind === 'session.draft.clear') {
+      const target = sessions.get(args.session);
+      if (!target) return { ok: false, error: { code: 'gone', message: 'That session has ended.' } };
+      if (!target.hosted) return refused('That session runs in a terminal of yours: VibeSwitcher only types into the sessions it started.');
+      const drafted = message.kind === 'session.draft' ? { text: args.text, images: args.images || [], at: new Date().toISOString(), action: message.action } : null;
+      emit(setSession(args.session, { draft: drafted }));
+      return { ok: true, result: { session: args.session } };
+    }
+    // The composer's lane: what `/` and `@` complete to, a pasted image's parts, and the launch presets.
+    if (message.kind === 'session.complete') {
+      const query = String(args.query || '').toLowerCase();
+      const items = args.kind === 'slash'
+        ? [['compact', 'Summarize the conversation to free context'], ['clear', 'Start a new conversation'], ['model', 'Switch model'],
+          ['review', 'Review the current changes'], ['deploy', 'Ship it to staging'], ['context', 'Show what fills the context']]
+          .filter(([name]) => name.includes(query)).map(([name, note]) => ({ insert: `/${name} `, title: `/${name}`, subtitle: note }))
+        : ['payouts/worker.py', 'payouts/schedule.py', 'tests/test_payouts.py', 'README.md', 'docs/regions.md']
+          .filter((path) => path.toLowerCase().includes(query)).map((path) => ({ insert: `@${path} `, title: path.split('/').pop(), subtitle: path }));
+      return { ok: true, result: { items } };
+    }
+    if (message.kind === 'session.attach') {
+      if (args.part + 1 < args.parts) return { ok: true, result: { session: args.session, received: args.part + 1 } };
+      const ext = { 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }[args.type] || 'png';
+      return { ok: true, result: { session: args.session, received: args.parts, path: `/home/you/.vibeswitcher/attachments/pasted-mock-${next('i')}.${ext}` } };
+    }
+    if (message.kind === 'session.presets') {
+      const presets = [
+        { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, digest: 'mock-opus', refused: null },
+        { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, digest: 'mock-claude', refused: null },
+        { name: 'Codex', kind: 'codex', command: 'codex', env: [], keepShell: false, project: false, default: false, digest: 'mock-codex', refused: 'Codex doesn’t run on this node yet' },
+        { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, digest: 'mock-shell', refused: null },
+      ];
+      return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
+    }
+    if (message.kind === 'settings') {
+      if (args.folder && args.folder !== SITE) return { ok: false, error: { code: 'gone', message: `no lead has worked in ${args.folder} yet: \`vibeswitcher lead ${args.folder}\` starts one` } };
+      return { ok: true, result: settingsResult(args.folder) };
     }
     if (message.kind === 'seen') {
       const target = sessions.get(args.session);

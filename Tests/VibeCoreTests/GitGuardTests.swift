@@ -594,7 +594,10 @@ struct GitGuardTests: LeadTeamFixture {
         try #require(chmod(lead.path, 0o500) == 0)
         defer { chmod(lead.path, 0o700) }
         let told = GitGuard.notice(root: root, store: store) ?? ""
-        #expect(told.contains("couldn't take the baseline of \(root)/.git/hooks"), "\(told)")
+        // The notice names the folder by its real path: on the Mac a scratch /tmp is /private/tmp there.
+        let real = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        #expect(told.contains("couldn't take the baseline of \(root)/.git/hooks") || told.contains("couldn't take the baseline of /private\(root)/.git/hooks")
+                || told.contains("couldn't take the baseline of \(real)/.git/hooks"), "\(told)")
         #expect(GitGuard.accepted(in: store) == nil)
     }
 

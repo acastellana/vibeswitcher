@@ -221,6 +221,40 @@ struct HostLinkTests {
 
     // MARK: Requests across a reconnect (HostClientHandoverTests' two request cases)
 
+    /// A watched terminal (`attach(watch:)`, the user's node's web terminal) asks the host's `watch`, never its
+    /// `attach`, and sends no key and no size; a host whose welcome doesn't list `watch` ends it, attaching nothing.
+    @Test func aWatchedTerminalAsksTheHostsWatchAndAnOlderHostEndsIt() async throws {
+        let session = StubHost.session()
+        let watching = try StubHost(scratch, capabilities: [HostProtocol.Capability.inputUnits, HostProtocol.Capability.watch], sessions: [session])
+        defer { watching.quit() }
+        let link = try await link(watching.dialer, timing: Self.quick)
+        let sink = HostLink.TerminalSink(restart: {}, output: { _ in }, attached: {}, ended: { _ in })
+        on(link) {
+            link.attach(session.id, cols: 120, rows: 40, watch: true, sink: sink)
+            link.input(session.id, bytes: Data("typed".utf8))
+            link.resize(session.id, cols: 90, rows: 20)
+            link.history(session.id, lines: 1) { _ in }
+        }
+        #expect(await eventually { watching.requests.contains { if case .history = $0 { true } else { false } } }, "\(watching.requests)")
+        let terminal = watching.requests.filter {
+            switch $0 {
+            case .watch, .attach, .input, .resize: true
+            default: false
+            }
+        }
+        #expect(terminal == [.watch(id: session.id)], "\(watching.requests)")
+        // (The stand-in answers `ok`, which no watch is answered: that terminal ends on it, as on any reply it can't read.)
+
+        let older = try StubHost(scratch, sessions: [session])
+        defer { older.quit() }
+        let other = try await self.link(older.dialer, timing: Self.quick)
+        let refused = Locked<String?>(nil)
+        on(other) { other.attach(session.id, cols: 120, rows: 40, watch: true, sink: HostLink.TerminalSink(restart: {}, output: { _ in }, attached: {}, ended: { refused.value = $0 })) }
+        #expect(await eventually { refused.value != nil })
+        #expect(refused.value == HostLink.cantWatch)
+        #expect(!older.requests.contains { if case .watch = $0 { true } else if case .attach = $0 { true } else { false } }, "\(older.requests)")
+    }
+
     /// The link has lost its connection and makes the next one: a kill and a read asked meanwhile aren't lost, they go
     /// out once on the new connection.
     @Test func requestsAskedWhileTheLinkReconnectsGoOutOnTheNewConnection() async throws {

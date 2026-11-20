@@ -35,12 +35,17 @@ extension LeadEngine {
         lastHostStart = state.hostStartedAt
         knownLeads = Set(state.leads ?? [])
         hostRestart = state.restart
+        reopen = state.reopen ?? [:]
+        openSessions = state.open
+        endedSessions = state.ended ?? []
     }
 
     /// Everything `engine.json` keeps, as it is now. On `queue`.
     func stateAtRest() -> EngineState {
         EngineState(held: heldAtRest(), told: told.sorted(), firstSightings: advanceSeen.mapValues(\.timeIntervalSince1970),
-                    hostStartedAt: lastHostStart, leads: knownLeads.sorted(), restart: hostRestart)
+                    hostStartedAt: lastHostStart, leads: knownLeads.sorted(), restart: hostRestart,
+                    reopen: reopen.isEmpty ? nil : reopen, open: openSessions,
+                    ended: endedSessions.isEmpty ? nil : endedSessions)
     }
 
     /// `engine.json` written on `reads` (in order with every other write there). On `queue`.
@@ -53,6 +58,8 @@ extension LeadEngine {
 
     /// The roots with a lead running now join those `engine.json` keeps (a host restart ends them). On `queue`.
     func noteKnownLeads() {
+        noteReopen()
+        noteOpenSessions()
         let running = Set(leads.leads.values.filter { $0.session != nil }.map(\.root))
         guard !running.isSubset(of: knownLeads) else { return }
         knownLeads.formUnion(running)
@@ -85,7 +92,8 @@ extension LeadEngine {
     /// team's news or an answer to a question it didn't ask. On `queue`.
     func hostRestarted(at: Double, before: Double) {
         let gone = knownLeads.union(hostRestart?.gone ?? []).union(heldAtRest().map(\.root))
-        hostRestart = EngineState.Restart(at: at, before: before, gone: gone.sorted())
+        hostRestart = EngineState.Restart(at: at, before: before, gone: gone.sorted(), sessions: endedSessions(before: before))
+        openSessions = nil
         knownLeads = Set(leads.leads.values.filter { $0.session != nil }.map(\.root))
         for root in gone.sorted() {
             let dropped = leads.takeHeld(project: NodeIds.project(root: root))
@@ -117,8 +125,8 @@ extension LeadEngine {
         return restart.gone.map { root in
             "the session host restarted at \(at): the lead and team of \(LeadMail.project(of: root)) (\(root)) ended with the host before it, "
                 + "and its vault started over (" + Self.resetByRestart + "). Run `vibeswitcher config held \(root)`, `config accept CARD`, "
-                + "`base show \(root)` and `base accept CARD`, reading the values, then `vibeswitcher lead \(root)`"
-        }
+                + "`base show \(root)` and `base accept CARD`, reading the values, then " + reopenStep(root: root)
+        } + sessionsNotice(restart, at: at)
     }
 
     /// What a host restart resets (the security document's S7).
@@ -129,7 +137,8 @@ extension LeadEngine {
     var restartValue: NodeWire.Value {
         guard let restart = hostRestart else { return .null }
         return .object(["at": .date(Date(timeIntervalSince1970: restart.at)), "before": .date(Date(timeIntervalSince1970: restart.before)),
-                        "gone": .array(restart.gone.map(NodeWire.Value.string)), "reset": .string(Self.resetByRestart)])
+                        "gone": .array(restart.gone.map(NodeWire.Value.string)), "reset": .string(Self.resetByRestart),
+                        "sessions": .int(restart.sessions?.count ?? 0)])
     }
 
     // MARK: The server's start

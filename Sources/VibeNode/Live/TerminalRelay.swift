@@ -3,13 +3,21 @@ import VibeCore
 
 /// A session's terminal in a web page (the live plan's B6, slice 4's spike; the live wire contract's §9): `term.open`
 /// and `term.close` on a WebSocket, the host's `attach` through the link (`HostLink.attach`: the server is the app to
-/// the host here), and the contract's binary frames both ways. Only a scratch server makes one (LW-D12, I4's
-/// `--test-web-terminal`); the user's node answers `term.open` `unknown-kind`.
+/// the host here), and the contract's binary frames both ways. Two modes (`Mode`): a scratch server's read-write
+/// terminal (I4's `--test-web-terminal`, LW-D12's spike), and the user's node's `watch`: output only.
+///
+/// - **Watching** (the user's node, and a scratch server given `--test-web-terminal-watch`): the host's `watch`, not
+///   its `attach` (`HostLink.attach(watch:)`, `Sources/VibeHost/V2/HostWatch.swift`), so the page takes nothing over:
+///   the host's parser goes on answering the program's queries, the session keeps its size, and a page's input and
+///   resize frames (types 1 and 3) are refused, each with a log line: typing into a real session is the user's voice
+///   (`vibeswitcher send`), never a page's (the security architecture's S3). `term.open`'s reply says `readOnly`, and
+///   each replay starts with type 5, the session's size, which the page draws at.
 ///
 /// - **Frames.** One byte of type, four of stream (big-endian), the payload. To the page: 1, the session's bytes
 ///   (the host's replay first, then live), cut to `chunk` bytes a frame; 2, the replay is over; 4, `resync`: what the
-///   page shows is stale, the replay comes again. From the page: 1, input; 3, a resize (columns and rows, 16 bits
-///   each, big-endian). Anything else, or a stream the page doesn't hold, is dropped.
+///   page shows is stale, the replay comes again; 5 (watching only), the session's size (columns and rows, 16 bits
+///   each, big-endian), before each replay. From the page: 1, input; 3, a resize (the same four bytes). Anything else,
+///   or a stream the page doesn't hold, is dropped.
 /// - **One attachment a session.** The link carries a session's terminal once, whatever number of pages show it; each
 ///   page's stream is fed from it. A stream that needs the replay (a new one, one that fell behind) has the session's
 ///   replay start over (`HostLink.resync`), and every stream that had begun on it gets type 4 first: late, never wrong.
@@ -33,6 +41,16 @@ public final class TerminalRelay: @unchecked Sendable {
         case resize = 3
         /// To the page: what it shows is stale; the replay comes again.
         case resync = 4
+        /// To the page, watching only: the session's size, before each replay.
+        case size = 5
+    }
+
+    /// What a page may do with a session's terminal.
+    public enum Mode: Equatable, Sendable {
+        /// Type into it and size it: a scratch server's (`--test-web-terminal`, LW-D12's spike).
+        case readWrite
+        /// Watch it: the user's node's (and `--test-web-terminal-watch`'s, its stand-in on a scratch server).
+        case watch
     }
 
     /// The most bytes of the session in one frame to the page: small enough that a page that stops reading is found
@@ -49,11 +67,15 @@ public final class TerminalRelay: @unchecked Sendable {
     public static let rows = 5...300
 
     public let queue: DispatchQueue
+    public let mode: Mode
     private let link: HostLink
     private let note: @Sendable (String) -> Void
     private var nextStream: UInt32 = 1
     private var streams: [UInt32: Stream] = [:]
     private var attachments: [UUID: Attachment] = [:]
+    /// Watching: the link's session changes, so a session resized elsewhere (its own terminal, the app) is replayed
+    /// again at its new size (type 4, type 5, the replay).
+    private var resizes: Subscription?
 
     /// One page's view of one session's terminal.
     private final class Stream {
@@ -86,13 +108,20 @@ public final class TerminalRelay: @unchecked Sendable {
         var streams: Set<UInt32> = []
         /// A replay was asked of the link and hasn't started yet: a stream that needs one waits for it.
         var starting = true
+        /// Watching: the size the last replay was sent at (type 5).
+        var size: (cols: Int, rows: Int)?
     }
 
-    /// `link`: the server's. `note`: the server's log.
-    public init(link: HostLink, note: @escaping @Sendable (String) -> Void = { _ in }) {
+    /// `link`: the server's. `mode`: `.watch` on the user's node. `note`: the server's log.
+    public init(link: HostLink, mode: Mode = .readWrite, note: @escaping @Sendable (String) -> Void = { _ in }) {
         self.link = link
+        self.mode = mode
         queue = link.queue
         self.note = note
+        guard mode == .watch else { return }
+        resizes = link.changes.subscribe(on: queue) { [weak self] deltas in
+            for delta in deltas { if let session = delta.value { self?.resized(session) } }
+        }
     }
 
     /// How many streams are open (tests). On `queue`.
@@ -100,8 +129,9 @@ public final class TerminalRelay: @unchecked Sendable {
 
     // MARK: Requests (from the hub, on `queue`)
 
-    /// `term.open` `{session, cols, rows}`: replies `{stream}` on `transport`, then the stream's frames follow. A
-    /// carrier that takes no binary frame (the Unix socket's) is `unknown-kind`; a session the host doesn't run, `gone`.
+    /// `term.open` `{session, cols, rows}`: replies `{stream, readOnly}` on `transport`, then the stream's frames follow.
+    /// Watching, `cols` and `rows` are checked and unused (the session keeps its size), and the reply adds the
+    /// session's `cols` and `rows` (each replay's type 5 says them again). A carrier that takes no binary frame (the Unix socket's) is `unknown-kind`; a session the host doesn't run, `gone`.
     func open(_ request: NodeWire.Request, on transport: LiveTransport, rights: LiveRights) {
         dispatchPrecondition(condition: .onQueue(queue))
         guard let carrier = transport as? TerminalTransport else {
@@ -124,13 +154,18 @@ public final class TerminalRelay: @unchecked Sendable {
         }
         let id = nextStream
         nextStream += 1
-        reply(.init(re: request.id, result: .object(["stream": .int(Int(id))])), on: transport)
+        var result: [String: NodeWire.Value] = ["stream": .int(Int(id)), "readOnly": .bool(mode == .watch)]
+        if mode == .watch {
+            result["cols"] = .int(hosted.cols)
+            result["rows"] = .int(hosted.rows)
+        }
+        reply(.init(re: request.id, result: .object(result)), on: transport)
         let stream = Stream(id: id, session: hosted.id, transport: carrier)
         streams[id] = stream
-        note("terminal stream \(id) opened on \(Self.short(hosted.id)) at \(cols)×\(rows)")
+        note("terminal stream \(id) opened on \(Self.short(hosted.id)) \(mode == .watch ? "to watch" : "at \(cols)×\(rows)")")
         if let attachment = attachments[hosted.id] {
             attachment.streams.insert(id)
-            link.resize(hosted.id, cols: cols, rows: rows)
+            if mode == .readWrite { link.resize(hosted.id, cols: cols, rows: rows) }
             replayAgain(hosted.id, attachment)
             return
         }
@@ -138,7 +173,7 @@ public final class TerminalRelay: @unchecked Sendable {
         attachment.streams.insert(id)
         attachments[hosted.id] = attachment
         let held = hosted.id
-        link.attach(held, cols: cols, rows: rows, sink: HostLink.TerminalSink(
+        link.attach(held, cols: cols, rows: rows, watch: mode == .watch, sink: HostLink.TerminalSink(
             restart: { [weak self] in self?.restarted(held) },
             output: { [weak self] in self?.output(of: held, $0) },
             attached: { [weak self] in self?.attached(held) },
@@ -166,6 +201,9 @@ public final class TerminalRelay: @unchecked Sendable {
             return note("a terminal frame for stream \(id) dropped: not this connection's")
         }
         let payload = bytes[5...]
+        if mode == .watch, bytes[0] == Kind.bytes.rawValue || bytes[0] == Kind.resize.rawValue {
+            return note("terminal stream \(id): \(bytes[0] == Kind.bytes.rawValue ? "input" : "a resize") refused: this node's terminals are watched, never typed into from a page")
+        }
         switch Kind(rawValue: bytes[0]) {
         case .bytes?:
             let typed = TerminalReplies.strip(Array(payload))
@@ -206,13 +244,28 @@ public final class TerminalRelay: @unchecked Sendable {
     private func restarted(_ session: UUID) {
         guard let attachment = attachments[session] else { return }
         attachment.starting = false
+        var size: ArraySlice<UInt8>?
+        if mode == .watch, let hosted = link.sessions.first(where: { $0.id == session }) {
+            attachment.size = (hosted.cols, hosted.rows)
+            size = Self.sizePayload(cols: hosted.cols, rows: hosted.rows)
+        }
         for stream in fed(by: attachment) where stream.state != .behind {
             if stream.begun {
                 guard send(.resync, [], on: stream) else { continue }
                 stream.begun = false
             }
+            if let size { guard send(.size, size, on: stream) else { continue } }
             stream.state = .replaying
         }
+    }
+
+    /// Watching: `session` changed; at a size its last replay wasn't sent at, its streams get the replay again.
+    private func resized(_ session: HostSession) {
+        guard let attachment = attachments[session.id], let size = attachment.size,
+              size.cols != session.cols || size.rows != session.rows else { return }
+        note("terminal of \(Self.short(session.id)) resized to \(session.cols)×\(session.rows): its streams from the replay again")
+        attachment.size = nil
+        replayAgain(session.id, attachment)
     }
 
     private func output(of session: UUID, _ bytes: Data) {
@@ -286,6 +339,12 @@ public final class TerminalRelay: @unchecked Sendable {
         frame.append(contentsOf: [UInt8(stream >> 24), UInt8(stream >> 16 & 0xff), UInt8(stream >> 8 & 0xff), UInt8(stream & 0xff)])
         frame.append(contentsOf: payload)
         return frame
+    }
+
+    /// A size's four bytes: columns and rows, 16 bits each, big-endian (clamped to what 16 bits hold).
+    static func sizePayload(cols: Int, rows: Int) -> ArraySlice<UInt8> {
+        let cols = UInt16(clamping: cols), rows = UInt16(clamping: rows)
+        return [UInt8(cols >> 8), UInt8(cols & 0xff), UInt8(rows >> 8), UInt8(rows & 0xff)][...]
     }
 
     private func reply(_ reply: NodeWire.Reply, on transport: LiveTransport) {

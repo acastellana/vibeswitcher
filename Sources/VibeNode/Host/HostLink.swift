@@ -634,6 +634,8 @@ public final class HostLink: @unchecked Sendable {
 
     /// Why a terminal ended when its session went.
     public static let terminalGone = "The session is gone."
+    /// Why a watched terminal ended on a host that can't watch (its welcome doesn't list `watch`).
+    public static let cantWatch = "The session host can't show a terminal without taking it over (it may be older than the node)."
 
     /// A session's terminal on the link: its sink, its size, and where its stream is.
     private final class Terminal {
@@ -648,14 +650,17 @@ public final class HostLink: @unchecked Sendable {
         }
 
         let sink: TerminalSink
+        /// It only watches (`HostRequest.watch`): it sends no size and no keys.
+        let watch: Bool
         var cols: Int
         var rows: Int
         var phase = Phase.waiting
         /// Bumped by each `attach` and `detach` sent: a reply speaks only for the last.
         var generation = 0
 
-        init(sink: TerminalSink, cols: Int, rows: Int) {
+        init(sink: TerminalSink, watch: Bool, cols: Int, rows: Int) {
             self.sink = sink
+            self.watch = watch
             self.cols = cols
             self.rows = rows
         }
@@ -664,15 +669,18 @@ public final class HostLink: @unchecked Sendable {
     /// Carries session `id`'s terminal to `sink`: the host's `attach` at `cols` × `rows` (the server is the app to the
     /// host here), its replay and then its live output, attached again from the replay after every reconnect and every
     /// resync, until `detach`, the session's end in the host's list, or the link's. One sink a session: a second
-    /// `attach` of the same session replaces the first, which is told it ended.
-    public func attach(_ id: UUID, cols: Int, rows: Int, sink: TerminalSink) {
+    /// `attach` of the same session replaces the first, which is told it ended. `watch`: the host's `watch` instead
+    /// (`HostProtocol.Capability.watch`): the replay and the output without taking the terminal over, so the host's
+    /// parser keeps answering the program's queries; no size is sent (`cols` and `rows` are kept, unused) and `input`
+    /// and `resize` do nothing. A host that can't watch ends it (`cantWatch`), never attaching instead.
+    public func attach(_ id: UUID, cols: Int, rows: Int, watch: Bool = false, sink: TerminalSink) {
         perform { [self] in
             if case .gone(let reason) = state { return sink.ended(reason) }
             guard sessions.contains(where: { $0.id == id }) else { return sink.ended(Self.terminalGone) }
             if let replaced = terminals.removeValue(forKey: id) { replaced.sink.ended("Attached again elsewhere.") }
-            let terminal = Terminal(sink: sink, cols: cols, rows: rows)
+            let terminal = Terminal(sink: sink, watch: watch, cols: cols, rows: rows)
             terminals[id] = terminal
-            note("host link: terminal \(id.uuidString.prefix(8)) attached at \(cols)×\(rows)")
+            note("host link: terminal \(id.uuidString.prefix(8)) \(watch ? "watched" : "attached at \(cols)×\(rows)")")
             if state == .connected { replay(id, terminal) }
         }
     }
@@ -709,7 +717,7 @@ public final class HostLink: @unchecked Sendable {
     /// link carries it and is connected; dropped otherwise.
     public func input(_ id: UUID, bytes: Data) {
         perform { [self] in
-            guard terminals[id] != nil, state == .connected, !bytes.isEmpty else { return }
+            guard let terminal = terminals[id], !terminal.watch, state == .connected, !bytes.isEmpty else { return }
             send(.input(id: id, bytes: bytes, reply: false), holdable: false)
         }
     }
@@ -717,7 +725,7 @@ public final class HostLink: @unchecked Sendable {
     /// Session `id`'s terminal at `cols` × `rows`, kept for its next `attach` too.
     public func resize(_ id: UUID, cols: Int, rows: Int) {
         perform { [self] in
-            guard let terminal = terminals[id] else { return }
+            guard let terminal = terminals[id], !terminal.watch else { return }
             terminal.cols = cols
             terminal.rows = rows
             if state == .connected { send(.resize(id: id, cols: cols, rows: rows), holdable: false) }
@@ -729,11 +737,13 @@ public final class HostLink: @unchecked Sendable {
 
     /// `attach` sent: its sink told the replay starts, and then each byte of it, and `attached`.
     private func replay(_ id: UUID, _ terminal: Terminal) {
+        guard !terminal.watch || capabilities.contains(HostProtocol.Capability.watch) else { return endTerminal(id, Self.cantWatch) }
         terminal.generation += 1
         let generation = terminal.generation
         terminal.phase = .replaying
         terminal.sink.restart()
-        send(.attach(id: id, cols: terminal.cols, rows: terminal.rows), holdable: false) { [weak self] event in
+        let request: HostRequest = terminal.watch ? .watch(id: id) : .attach(id: id, cols: terminal.cols, rows: terminal.rows)
+        send(request, holdable: false) { [weak self] event in
             guard let self, self.terminals[id] === terminal, terminal.generation == generation else { return }
             switch event {
             case .attached:

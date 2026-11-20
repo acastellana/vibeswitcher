@@ -123,7 +123,9 @@ export function sidebar(app) {
   const nodeDot = h('span', { class: 'notice-dot', hidden: true });
   const nodeLink = h('a', { class: 'icon-button', href: '#/node', title: 'This node', 'aria-label': 'This node' }, icon('node', 15), nodeDot);
   const el = h('nav', { class: 'sidebar', 'aria-label': 'Sessions' },
-    h('div', { class: 'sidebar-top' }, h('div', { class: 'segmented', role: 'group', 'aria-label': 'Group by' }, tabs)),
+    h('div', { class: 'sidebar-top' }, h('div', { class: 'segmented', role: 'group', 'aria-label': 'Group by' }, tabs),
+      // Starting a session is the start page's (the line that starts it in a terminal).
+      h('a', { class: 'icon-button new-link', href: '#/', title: 'New session', 'aria-label': 'New session' }, icon('plus', 14))),
     h('div', { class: 'list' }, skeleton, groups, empty),
     h('div', { class: 'sidebar-foot' },
       h('label', { class: 'filter' }, icon('filter', 13), filter),

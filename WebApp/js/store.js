@@ -14,9 +14,16 @@
 //   store.openChat(id), closeChat(id), pageChat(id)   what the chat view asks of the feed
 //   store.draft(card, text)      leaves an answer drafted on a card, shown at once (the contract's §8); null clears it
 //   store.draftOf(card)          the draft a card shows: this page's overlay over the node's, or null
+//   store.sessionDraft(id, text, images) leaves a message drafted for a session (`session.draft`), with the paths of
+//                                images attached to it, shown at once; null clears it
+//   store.sessionDraftOf(id)     the message a session shows drafted: this page's overlay over the node's, or null
+//   store.read(kind, args)       a read (no action id): resolves with the feed's reply
+//   store.attach(id, bytes, type) an image for a session's composer, sent in parts (`session.attach`): the last reply,
+//                                whose result has the `path` the node wrote it to
 
 // The keyed collections, and the field each entry is keyed by (a lead and its board by their project's id).
 import { applyOps, reindex } from './chatops.js';
+import { parts as imageParts } from './composing.js';
 
 const KEYS = { sessions: 'id', cards: 'id', leads: 'project', boards: 'project' };
 const COLLECTIONS = Object.keys(KEYS);
@@ -56,6 +63,10 @@ export function createStore() {
     drafts: new Map(),
     // Why the node refused a card's last draft, by card id, until the next one.
     draftRefused: new Map(),
+    // The same for a message drafted for a session (`session.draft`), by session id: the overlay, and why the node
+    // refused the last one.
+    sessionDrafts: new Map(),
+    sessionDraftRefused: new Map(),
   };
 
   const listeners = new Map();
@@ -281,6 +292,24 @@ export function createStore() {
     return feed.request(message);
   }
 
+  // A read: no action id, so nothing is sent again after a reconnect (asked again by whoever wants it).
+  function read(kind, args = {}) {
+    if (!feed) return Promise.resolve({ ok: false, error: { code: 'not-yet', message: 'Not connected to the node yet.' } });
+    return feed.request({ v: 1, id: String(nextRequest++), kind, args });
+  }
+
+  // An image for session `id`'s composer, in the parts the node takes, one after another (each an action: a part is
+  // sent again after a reconnect, and the node answers a repeat as before). The last reply carries the file's `path`.
+  async function attach(id, bytes, type) {
+    const upload = crypto.randomUUID();
+    let reply = { ok: false, error: { code: 'bad-args', message: 'No image.' } };
+    for (const part of imageParts(bytes)) {
+      reply = await request('session.attach', { session: id, upload, type, ...part });
+      if (!reply.ok) return reply;
+    }
+    return reply;
+  }
+
   // An action on a card, shown at once: the card reads as answered or held from this moment, and goes back to open,
   // saying why, if the server refuses.
   function act(card, kind, args = {}) {
@@ -339,6 +368,47 @@ export function createStore() {
     return card?.open && card.draft ? { text: card.draft.text, sending: false, mine: false } : null;
   }
 
+  // A message for a session, drafted on the node beside it (`session.draft`, or `session.draft.clear` for null): shown
+  // at once as an overlay keyed by its action id, and kept until the sessions stream reaches what the node acked
+  // (`applied`), as a card's draft. Nothing is typed: the user sends it with `vibeswitcher send` in a terminal.
+  const sessionTouched = (id) => emit(new Map([['sessions', [{ in: 'sessions', id, drafting: true }]]]));
+  function sessionDraft(id, text, images = []) {
+    if (!state.sessions.get(id)?.hosted) return Promise.resolve({ ok: false, error: { code: 'gone', message: 'This session can’t be typed into.' } });
+    const action = crypto.randomUUID();
+    const clearing = text === null;
+    state.sessionDrafts.set(id, { text: clearing ? null : text, images: clearing ? [] : images, action, sent: false });
+    state.sessionDraftRefused.delete(id);
+    sessionTouched(id);
+    const mine = () => state.sessionDrafts.get(id)?.action === action;
+    const args = clearing ? { session: id } : images.length ? { session: id, text, images } : { session: id, text };
+    return request(clearing ? 'session.draft.clear' : 'session.draft', args, action).then((reply) => {
+      if (!mine()) return reply;
+      if (!reply.ok) {
+        state.sessionDrafts.delete(id);
+        state.sessionDraftRefused.set(id, reply.error?.message || 'The node refused it.');
+        sessionTouched(id);
+        return reply;
+      }
+      state.sessionDrafts.get(id).sent = true;
+      sessionTouched(id);
+      const applied = reply.result?.applied?.sessions;
+      const reached = typeof applied === 'number' && feed?.reached ? feed.reached('sessions', applied) : Promise.resolve();
+      return reached.then(() => {
+        if (mine()) { state.sessionDrafts.delete(id); sessionTouched(id); }
+        return reply;
+      });
+    });
+  }
+
+  // The message session `id` shows drafted, `{ text, images, sending, mine }`, or null: this page's overlay while it has
+  // one, else the node's (left here, in another tab, on another device).
+  function sessionDraftOf(id) {
+    const overlay = state.sessionDrafts.get(id);
+    if (overlay) return overlay.text === null ? null : { text: overlay.text, images: overlay.images || [], sending: !overlay.sent, mine: true };
+    const draft = state.sessions.get(id)?.draft;
+    return draft?.text || draft?.images?.length ? { text: draft.text || '', images: draft.images || [], sending: false, mine: false } : null;
+  }
+
   // A message typed into a session, shown at once as a pending row; the transcript's own row replaces it.
   function send(session, text) {
     const message = { v: 1, id: String(nextRequest++), kind: 'send', args: { session, text }, action: crypto.randomUUID() };
@@ -361,6 +431,10 @@ export function createStore() {
     act,
     draft,
     draftOf,
+    sessionDraft,
+    sessionDraftOf,
+    read,
+    attach,
     send,
     openChat,
     closeChat,

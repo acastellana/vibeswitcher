@@ -264,7 +264,8 @@ public enum NodeWire {
         /// the Unix socket. It changes state (a draft on a card), so the integration task that takes such a kind checks
         /// the right before `Requests.handle`'s user's-voice path is reached.
         case webDraft
-        /// A web client's terminal, on a scratch node only (LW-D12).
+        /// A web client's terminal: watched on the user's node, typed into on a scratch node only (LW-D12, amended
+        /// 2026-11-20).
         case webTerminal
     }
 
@@ -282,11 +283,32 @@ public enum NodeWire {
         "draft": .webDraft, "draft.clear": .webDraft,
         "web.open": .user, "web.revoke": .user,
         "term.open": .webTerminal, "term.close": .webTerminal,
+        // Driving an ordinary session (the parity table's gaps 1, 3 and 6, 2026-11-20): the user's voice, and a page's draft.
+        "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user, "session.reopen": .user,
+        // Between leads (the stability lane, 2026-11-20): a read, but the projects' private record of their leads'
+        // messages, so only the user's (no session's, no page's), with no typed word (`changesNothing`).
+        "mail": .user,
+        // The prompt-audit reminder's snooze, off and on (the stability lane, 2026-11-20).
+        "prompt-audit": .user,
+        // A session renamed or paused (the stability lane, 2026-11-20).
+        "session.rename": .user, "session.pause": .user, "session.resume": .user,
+        // Close Finished Shells (the stability lane, 2026-11-20): the list a read of the user's (no code), the closing
+        // the user's voice.
+        "shells": .user, "session.close-shells": .user,
+        "session.draft": .webDraft, "session.draft.clear": .webDraft,
+        // The composer and launch presets (2026-11-20): what a session's `/` and `@` offer, and the presets, are reads.
+        "session.presets": .anyone, "session.complete": .anyone, "session.attach": .webDraft,
+        // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
+        // user's voice.
+        "settings": .anyone, "set": .user,
+        // Settling the lead's push request (the parity table's push row, 2026-11-20): the user's voice.
+        "push": .user, "push.decline": .user,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
-    /// started; `config.held` and `base.show` make the card the next request takes.
-    public static let changesNothing: Set<String> = ["start", "config.held", "base.show"]
+    /// started; `config.held` and `base.show` make the card the next request takes; `mail` reads the projects' private
+    /// record of their leads' messages; `shells` lists the node's shells for Close Finished Shells.
+    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "mail", "shells"]
 
     /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
     /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
@@ -303,13 +325,23 @@ public enum NodeWire {
     /// from the start plan's S6; `build.switch` from its S8b; the live protocol's `subscribe`, `unsubscribe`, `web.open`
     /// and `web.revoke` from the live plan's I1; `chat.page` from I2; `draft` and `draft.clear` from I3, a web page's
     /// only; `tell` from the node frictions of 2026-11-19; `board` from the board view's; `seen` from the parity gaps
-    /// of 2026-11-19): every kind `kinds` names but the live protocol's later ones (the terminal from I4).
+    /// of 2026-11-19; `send`, `session.new`, `session.end`, `session.reply`, `session.draft` and `session.draft.clear`
+    /// from driving sessions, 2026-11-20; `settings` and `set` from the settings, 2026-11-20; `push` and `push.decline`
+    /// from the push row, 2026-11-20; `session.presets`, `session.complete` and `session.attach` from the composer's lane,
+    /// 2026-11-20): every kind `kinds` names but the live protocol's later ones (the terminal from I4).
     public static let taken = ["status", "start", "stop", "lead", "questions", "draft", "draft.clear", "answer", "hold", "config.held", "config.accept",
                                "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
                                "hooks.install", "hooks.remove", "build.switch", "subscribe", "unsubscribe", "web.open", "web.revoke",
                                "chat.page",
                                "tell",
-                               "board", "seen"]
+                               "board", "seen",
+                               "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
+                               "session.presets", "session.complete", "session.attach",
+
+                               "settings", "set",
+                               "push", "push.decline",
+                               "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
+                               "session.resume", "shells", "session.close-shells"]
 
     // MARK: Lines
 
@@ -320,6 +352,16 @@ public enum NodeWire {
         var data = (try? encoder.encode(value)) ?? Data("{}".utf8)
         data.append(UInt8(ascii: "\n"))
         return data
+    }
+
+    /// `reply` as one line, or, when that line would pass `maxLine` (the reader would drop it and close: 2026-11-19, a
+    /// node's every card past it broke `answer`), an `internal` failure under the same `re` saying how large it was and
+    /// to ask for less. Never a line the other side can't take, unless `re` itself is that long (the caller checks).
+    public static func replyLine(_ reply: Reply) -> Data {
+        let data = line(reply)
+        guard data.count - 1 > maxLine else { return data }
+        return line(Reply(re: reply.re, error: Failure(.internal, "the reply was \(data.count - 1) bytes, past the line's limit of \(maxLine): "
+            + "nothing was dropped, but nothing was sent; ask for less (a folder, a card, without --all)")))
     }
 
     /// JSON text (`line`'s, or JSONSerialization's) for a terminal: every scalar `ConfigSeal.inert` would replace (C1

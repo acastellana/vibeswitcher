@@ -13,8 +13,8 @@ import VibeCore
 /// Not here, as the app has it: the power watch, not needed on Linux (2026-11-19, the parity table: a node runs on a
 /// server or WSL on mains, and has no battery limit setting for a hold to be under): nothing writes `power.json` under
 /// the node's root, so its leads' battery hold (`LeadToolset.checkBattery`, `LeadPipeline.Signals.batteryHold`, both
-/// from `PowerState.load`) reads no state and never holds. Team activity and keep-awake (the Mac's, and after the bootstrap); `rotateIfDue` but
-/// its idle handover (`handOverIfIdle`, `IdleHandover.swift`) and the all-done watch (after the bootstrap); the account watch (after the bootstrap). `keepRunningLeads` (E8's) runs at
+/// from `PowerState.load`) reads no state and never holds. Team activity and keep-awake (the Mac's, and after the bootstrap); the all-done watch
+/// (after the bootstrap); the lead's rotation is here (`rotateIfDue`, `IdleHandover.swift`); the account watch (after the bootstrap). `keepRunningLeads` (E8's) runs at
 /// the server's start, and again here only when the vault couldn't be asked then. The board's questions aren't told
 /// from here (`AlertRules.look`): the user sees only the cards the lead's tool server posts (S3, E6), and the all-done
 /// mark is after the bootstrap. The host's notes are asked by the server's housekeeping and at each `status`
@@ -35,6 +35,7 @@ extension LeadEngine {
     /// On `queue`.
     func refreshNow() {
         startPending()
+        if !promptAuditLooked { lookAtPromptAudits() }
         // A running lead the vault couldn't be asked about at the server's start is bound again now (E8).
         if rebindAgain { keepRunningLeads() }
         sweepRoles()
@@ -101,6 +102,7 @@ extension LeadEngine {
     /// the boards' finished tasks, among the sessions as they were when the read began (see `forgetFinished`).
     func refreshed(roots: Set<String>, loaded: [String: LeadBoard], teams: [String: TeamReading],
                    refusals: [String: LeadVault.BaseMoveRefusal], finished: Set<UUID> = []) {
+        noteAllDone(previous: boards, loaded: loaded)
         if loaded != boards { boards = loaded }
         // A lead with a question or approval card open needs the user (`Session.leadAsks`).
         cardsChanged()
@@ -120,9 +122,9 @@ extension LeadEngine {
                 if !noticed.contains(key ?? title) { note("lead: \(said)") }
             }
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
-            handOverIfIdle(root: root)
+            rotateIfDue(root: root)
         }
-        // A push the lead asked for (push_remote), which nothing on a node offers yet: in `status` while it's open.
+        // A push the lead asked for (push_remote): in `status` while it's open, saying the commands that settle it.
         for (root, request) in pushAsked where roots.contains(root) {
             standing[root, default: []].append(Self.pushNotice(request, root: root))
         }

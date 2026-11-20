@@ -587,12 +587,14 @@ extension LeadEngine {
 
     /// `config held FOLDER [--diff NAME]`: what the vault holds for the project, as a card bound to exactly the hashes
     /// it shows (any earlier open one of the project closed), with the floor and rails workflow.md proposes; `diff`,
-    /// that held thing's difference too. From any thread.
+    /// that held thing's difference too. Asked again with nothing changed, the same open card (its id and code). From
+    /// any thread.
     public func configHeld(root: String, diff: String?, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
         let (vault, home, node) = (cardVault, self.home, self.root)
         work.async { [weak self] in
             // The last accept the snapshot knows (E8): each held thing said the same, changed or new since.
             let held = ConfigHoldStore.held(root: root, vault: vault, home: home, snapshot: AcceptedSnapshot.load(root: node).projects[root])
+                .map { SessionPresets.withPresetsToAccept($0, vault: vault, home: home, nodeRoot: node) }
             let difference: [String]? = { if case .success(let shown) = held, let diff { return ConfigHoldStore.difference(shown, name: diff, home: home) } else { return nil } }()
             guard let self else { return }
             self.queue.async {
@@ -600,10 +602,21 @@ extension LeadEngine {
                 case .failure(let error): then(.failure(.refused("the vault can't be asked what it holds for \(root): \(error)")))
                 case .success(let shown):
                     let project = NodeIds.project(root: root)
-                    for old in self.cards.list(project: project) where old.kind == .configHeld { self.cards.change(old.id) { $0.closed = "superseded by a newer card" } }
-                    var card = CardStore.Card(root: root, kind: .configHeld)
-                    card.config = shown
-                    self.cards.put(card)
+                    let open = self.cards.list(project: project).filter { $0.kind == .configHeld }
+                    // Nothing changed since an open card was drawn: that card again, so a `config held` and a `config
+                    // accept` from two separate calls meet (2026-11-20, the node's frictions). Only a card showing all
+                    // the same (every field of `Shown`) is kept; anything else closes the open ones and draws anew.
+                    let card: CardStore.Card
+                    if let same = open.last(where: { $0.config == shown }) {
+                        for old in open where old.id != same.id { self.cards.change(old.id) { $0.closed = "superseded by a newer card" } }
+                        card = same
+                    } else {
+                        for old in open { self.cards.change(old.id) { $0.closed = "superseded by a newer card" } }
+                        var drawn = CardStore.Card(root: root, kind: .configHeld)
+                        drawn.config = shown
+                        self.cards.put(drawn)
+                        card = drawn
+                    }
                     var result: [String: NodeWire.Value] = ["card": card.value]
                     if let diff { result["difference"] = difference.map { .array($0.map(NodeWire.Value.string)) } ?? .string("nothing held is named \(diff)") }
                     then(.success(.object(result)))
@@ -657,7 +670,12 @@ extension LeadEngine {
             let (root, vault, node) = (card.root, cardVault, self.root)
             work.async { [weak self] in
                 let accepted = ConfigHoldStore.accept(shown, root: root, vault: vault, snapshotRoot: node)
+                // The user's explicit accept of the presets file: the hash it sealed, recorded where a preset's start
+                // asks (`Requests.presetsBaselineRefusal`) before the accept is answered; a look alone records none.
+                var markFailed: Error?
+                if case .success(.sealed) = accepted { markFailed = SessionPresets.markAccepted(shown, vault: vault, nodeRoot: node) }
                 guard let self else { return }
+                if let markFailed { self.note("config accept: the presets file's accept couldn't be recorded: \(markFailed)") }
                 self.queue.async {
                     switch accepted {
                     case .failure(let error): then(.failure(.refused("the vault didn't take the accept: \(error)")))
@@ -670,6 +688,7 @@ extension LeadEngine {
                         then(.failure(.refused(why + " Held now: " + held.map { ConfigSeal.inert($0, limit: 200) }.joined(separator: ", "))))
                     case .success(.sealed(let names, let floor)):
                         self.cards.change(id) { $0.closed = "accepted" }
+
                         if self.leads.leads[card.project] != nil, !names.isEmpty {
                             self.deliver(built: { "The user accepted the change to \(names.joined(separator: ", ")) at the command line: it's sealed as it is, "
                                 + "and workers, verifiers and merges go ahead again." }, from: .system("the user, at the command line"), root: root, action: nil)

@@ -15,13 +15,22 @@ let usage = """
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
            vibeswitcher switch COMMIT | rollback
-           vibeswitcher lead FOLDER [--goal TEXT] [--take-head] [--replace]
+           vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace]
            vibeswitcher questions [FOLDER] [--all] [--json]
            vibeswitcher board [FOLDER] [--json]
            vibeswitcher answer CARD [TEXT] | hold CARD
            vibeswitcher tell FOLDER TEXT
-           vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD
+           vibeswitcher push FOLDER | decline-push FOLDER
+           vibeswitcher send SESSION [TEXT] [--image PATH]... | reply SESSION CHOICE [TEXT]
+           vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M] | end SESSION | presets [FOLDER]
+           vibeswitcher close-shells [FOLDER]
+           vibeswitcher reopen [all | SESSION... | --forget] | resume [SESSION]
+           vibeswitcher rename SESSION [NAME] | pause SESSION [--hours N | --tomorrow | --off]
+           vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]
+           vibeswitcher mail [FOLDER] [--all] [--json] | prompt-audit FOLDER snooze|off|on
+           vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
+           vibeswitcher settings [FOLDER] [--json] | set [FOLDER] KEY VALUE
            vibeswitcher hooks install|remove [--agent claude|codex]
            vibeswitcher web [--revoke]
     """
@@ -50,10 +59,44 @@ case "hold":
     exit(HoldCommand.run(Array(words.dropFirst())))
 case "tell":
     exit(TellCommand.run(Array(words.dropFirst())))
+case "push":
+    exit(PushCommand.run(Array(words.dropFirst()), approve: true))
+case "decline-push":
+    exit(PushCommand.run(Array(words.dropFirst()), approve: false))
+case "send":
+    exit(SendCommand.run(Array(words.dropFirst())))
+case "reply":
+    exit(ReplyCommand.run(Array(words.dropFirst())))
+case "new":
+    exit(NewCommand.run(Array(words.dropFirst())))
+case "close-shells":
+    exit(CloseShellsCommand.run(Array(words.dropFirst())))
+case "presets":
+    exit(PresetsCommand.run(Array(words.dropFirst())))
+case "end":
+    exit(EndCommand.run(Array(words.dropFirst())))
+case "rename":
+    exit(RenameCommand.run(Array(words.dropFirst())))
+case "pause":
+    exit(PauseCommand.run(Array(words.dropFirst())))
+case "resume":
+    exit(ResumeCommand.run(Array(words.dropFirst())))
+case "reopen":
+    exit(ReopenCommand.run(Array(words.dropFirst())))
+case "new-project":
+    exit(NewProjectCommand.run(Array(words.dropFirst())))
+case "mail":
+    exit(MailCommand.run(Array(words.dropFirst())))
+case "prompt-audit":
+    exit(PromptAuditCommand.run(Array(words.dropFirst())))
 case "config":
     exit(ConfigCommand.run(Array(words.dropFirst())))
 case "base":
     exit(BaseCommand.run(Array(words.dropFirst())))
+case "settings":
+    exit(SettingsCommand.run(Array(words.dropFirst())))
+case "set":
+    exit(SetCommand.run(Array(words.dropFirst())))
 case "hooks":
     exit(HooksCommand.run(Array(words.dropFirst())))
 case "web":

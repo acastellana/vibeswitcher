@@ -35,7 +35,7 @@ struct NodeStatusStoreTests {
         for (name, value) in status { #expect(live[name] == value, "\(name)") }
         #expect(Set(live.keys).subtracting(status.keys) == ["shownStatus", "project", "task", "detail", "activity", "activitySince",
                                                             "startedAt", "hasHooks", "leadAsks", "startFolder", "backgroundJobs",
-                                                            "hasTranscript"])
+                                                            "hasTranscript", "name", "pausedUntil", "agentSession"])
         #expect(live["id"] == .string("local:3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f"))
         #expect(live["project"] == .string("acme-site") && live["task"] == .string("Login fix") && live["detail"] == .string("Thinking"))
         #expect(live["activity"] == .string("Run unit tests"))

@@ -117,6 +117,10 @@ needs them starts. The lead accepted LW-D1, D3, D4, D5, D6 and D12 as recommende
    - What ends it: the host binds the port and passes the descriptor to each server it starts, through handovers too
      (shared-file edits in `VibeHost`, kinds 4 and 6). That is Task H1, **not in this plan's slices**; it is required
      before LW-D12's terminal on the user's node and before signed approvals.
+   - **The supervisor's decision, 2026-11-20:** H1 is waived for a *watched* terminal on the user's node (LW-D12's
+     amendment): a watcher sees nothing a `read` token can't already see, since the session's chat streams to it, and
+     nothing it sends reaches the session. H1 stays **required** before any input from a page reaches a real session,
+     and before signed approvals.
    - Rejected: the host's listener first. It is right, and it puts three shared-file edits and the handover in front
      of the first visible page.
 2. **LW-D2: plain sockets and the project's own RFC 6455, no swift-nio.** The server already runs its Unix socket on
@@ -188,6 +192,15 @@ needs them starts. The lead accepted LW-D1, D3, D4, D5, D6 and D12 as recommende
     (AGENTS.md's first hard rule, and the design's "reply rights type only into confined sessions; view rights get
     masked screens"). On the user's node a token opens no terminal. What does (a right on a device key, after H1) is
     decided with the user after the spike's numbers.
+    - **Amended, the supervisor's decision, 2026-11-20: a `read` token may WATCH a session's terminal on the user's
+      node.** `term.open` there is the host's `watch` (`HostRequest.watch`, `Sources/VibeHost/V2/HostWatch.swift`),
+      not its `attach`: the watcher never counts as attached (the host's parser keeps answering the program's queries),
+      never sizes the session or nudges it to redraw, and is never the client whose replies count. The reply says
+      `readOnly` and the session's size; the page's input and resize frames (types 1 and 3) are refused, each with a
+      log line; `web --revoke` closes the streams with their connections. **Typing stays the user's voice**:
+      `vibeswitcher send` on the user's terminal with the typed code, never a page. Typing from a page on the user's
+      node still waits for H1 and a decision with the user. A scratch server keeps the typed spike
+      (`--test-web-terminal`) and takes `--test-web-terminal-watch` as the user's node's stand-in.
 13. **LW-D13: slices 1 to 3 are plain ES modules; nothing is vendored before the user says so.** The design asks for
     a spike of Preact with signals and of xterm.js before anything is built on them, and vendoring is the first thing
     this work would bring in from outside. The lists and cards of slices 1 to 3 need no library; `store.js` and
@@ -723,7 +736,9 @@ document (S11: the port while the server is down; the principals: a web client),
 - **Task B7 (lane B, any time after B1): the hook-to-store latency, measured.** A bench from a hook's state file
   written to `NodeSessions.changes`' delta, and a written proposal (LW-D14). It edits no engine file.
 - **Task H1 (not scheduled here): the host owns the listener** (LW-D1). Its own plan: `ServerChild` binds and
-  passes the descriptor, the handover carries it, the server takes `--web-listener FD`.
+  passes the descriptor, the handover carries it, the server takes `--web-listener FD`. **The supervisor's decision,
+  2026-11-20:** not needed for the user's node's watched terminal (LW-D12's amendment); still required before any page
+  input reaches a real session.
 
 ## Showing slice 1 to the user
 

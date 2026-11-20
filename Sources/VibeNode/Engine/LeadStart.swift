@@ -6,6 +6,8 @@ struct PendingStart {
     var goal: String?
     var takeHead: Bool
     var replace: Bool
+    /// Reopen the lead a host restart ended, in its same conversation (`RestartResume.swift`).
+    var resume = false
 }
 
 /// A request waiting on a start under way (`LeadEngine.starting`): what it asked, the program found for it, and who
@@ -53,8 +55,10 @@ extension LeadEngine {
 
     /// Starts the project lead for the repository holding `folder`, or shows the one already running; `completion`
     /// (on `queue`) hears what it did. A `goal` goes into a new lead's first prompt, or is held for the running one (E5
-    /// delivers it). From any thread.
-    public func startLead(folder: String, goal: String?, takeHead: Bool, replace: Bool, completion: @escaping (StartOutcome) -> Void) {
+    /// delivers it). `resume`: reopen the lead a host restart ended, in its same conversation (`RestartResume.swift`).
+    /// From any thread.
+    public func startLead(folder: String, goal: String?, takeHead: Bool, replace: Bool, resume: Bool = false,
+                          completion: @escaping (StartOutcome) -> Void) {
         let (preflight, looked) = (self.preflight, preflightLooked)
         // git can be slow: the repository is found off the engine's queue, and first what's missing (without git, git
         // below would only say the folder isn't a repository).
@@ -67,7 +71,7 @@ extension LeadEngine {
                     self.note("lead: not started in \(ConfigSeal.inert(folder, limit: 200)): \(why)")
                     return completion(.refused(why))
                 }
-                self.begin(root: root, program: program, start: PendingStart(goal: goal, takeHead: takeHead, replace: replace),
+                self.begin(root: root, program: program, start: PendingStart(goal: goal, takeHead: takeHead, replace: replace, resume: resume),
                            completion: completion)
             }
         }
@@ -98,6 +102,7 @@ extension LeadEngine {
     func begin(root: String, program: String, start: PendingStart, completion: @escaping (StartOutcome) -> Void) {
         guard !stopping else { return completion(.refused(Self.stoppingRefusal)) }
         if case .gone(let why) = link.state { return completion(.refused("the session host is gone (\(why))")) }
+        if start.resume, start.goal != nil { return completion(.refused("--resume takes no goal: give it once the lead is reopened")) }
         // One start per root at a time: a second ask waits for the first, then goes on with what it asked (`finish`).
         if starting[root] != nil {
             starting[root]?.append(JoinedStart(start: start, program: program, completion: completion))
@@ -112,6 +117,9 @@ extension LeadEngine {
             note("lead: the start of \(LeadMail.project(of: root)) waits for the host's welcome")
             return completion(.waiting)
         }
+        // Only now: the welcome is what says the host restarted (`restartLook`), so a reopen asked before it is decided
+        // on the restart it brought.
+        if start.resume, let refusal = reopenRefusal(root: root) { return completion(.refused(refusal)) }
         starting[root] = [JoinedStart(start: start, program: program, completion: completion)]
         leads.lead(root: root) { $0.starting = true }
         // Which lead runs for the root, the board read on the reads queue (even its stat waited seconds on a busy disk).
@@ -138,11 +146,16 @@ extension LeadEngine {
             // order asked, here on the queue.
             let goals = waited.starts.compactMap(\.goal)
             let first = PendingStart(goal: goals.first, takeHead: waited.starts.contains { $0.takeHead },
-                                     replace: waited.starts.contains { $0.replace })
+                                     replace: waited.starts.contains { $0.replace }, resume: waited.starts.contains { $0.resume })
             for start in [first] + goals.dropFirst().map({ PendingStart(goal: $0, takeHead: false, replace: false) }) {
-                begin(root: root, program: waited.program, start: start) { [weak self] outcome in
-                    self?.note("lead: the start of \(LeadMail.project(of: root)) that waited for the welcome: \(Self.word(outcome))")
+                let begun: @Sendable () -> Void = { [weak self] in
+                    self?.begin(root: root, program: waited.program, start: start) { [weak self] outcome in
+                        self?.note("lead: the start of \(LeadMail.project(of: root)) that waited for the welcome: \(Self.word(outcome))")
+                    }
                 }
+                // A reopen is decided on the restart this welcome brings (`welcomed` looks for it after this): next on
+                // the queue, after the welcome.
+                if start.resume { queue.async { begun() } } else { begun() }
             }
         }
     }
@@ -178,6 +191,7 @@ extension LeadEngine {
                         self.leads.hold(.init(text: "New goal: \(goal)", from: Self.goalSender), root: root)
                         notes.append("the goal is held for the running lead until it can be delivered")
                     }
+                    if start.resume { notes.append("a lead runs there already: nothing was reopened") }
                     if start.takeHead {
                         notes.append("--take-head takes the base branch as it is only when a lead starts: the running lead's stays as recorded "
                             + "(`vibeswitcher base accept` takes it)")
@@ -228,12 +242,14 @@ extension LeadEngine {
                 ? session.hostID.flatMap { id in session.transcriptPath.map { (id.uuidString, $0) } } : nil
         }, uniquingKeysWith: { $1 })
         let hosted = link.sessions
+        let record = start.resume ? reopen[root] : nil
         work.async { [weak self] in
             var issued: String?
             var waiting: [SteerMessage] = []
             var replaced: UUID?
             var notes: [String] = []
-            let prepared = Result<(grant: String, launch: LeadLaunch.Prepared), Error> {
+            var resumed: (conversation: String, transcript: String)?
+            let prepared = Result<(grant: String, launch: LeadLaunch.Prepared, run: LeadLaunch.Run), Error> {
                 let boardStore = BoardStore(root: root)
                 let workflowPath = try boardStore.prepare()
                 var workflow = LeadWorkflow.load(from: workflowPath)
@@ -242,6 +258,11 @@ extension LeadEngine {
                 // S7: a fresh vault takes nothing from disk as its baseline: the lead starts once the user accepted the
                 // config held and recorded the base's head.
                 if firstLook, let refusal = try Self.firstLookRefusal(vault: vault, root: root, branch: branch) { throw Refused(refusal) }
+                // A reopen after a host restart: the conversation its record names, only once it checks out.
+                if start.resume {
+                    resumed = try Self.resumable(record, root: root, home: home).get()
+                    notes.append("reopened in its same conversation (\(resumed?.conversation ?? "")), told which workers ended with the restart")
+                }
                 // Merges check nothing else moved the branch since the lead last left it; the start takes the branch
                 // as it is only with --take-head.
                 if !start.takeHead, let moved = vault.headMoved(root: root, branch: branch) {
@@ -271,10 +292,13 @@ extension LeadEngine {
                 let old = verified.flatMap { $0.session.flatMap(UUID.init(uuidString:)) } ?? running?.id
                 if let old, let tty = verified?.tty ?? running?.tty {
                     replaced = old
-                    let transcript = transcripts[old.uuidString]
-                        ?? running.flatMap { TranscriptLocator.claude(cwd: root, name: name, startedAt: $0.startedAt, home: home) }
-                    let turns = transcript.flatMap { LastTurns.read(transcript: $0, tty: tty, home: home) }
-                    if let file = try LeadLaunch.writeTurns(turns, root: root) { handed = (tty, file) }
+                    // A reopened lead carries on its own conversation: no turns handed over.
+                    if resumed == nil {
+                        let transcript = transcripts[old.uuidString]
+                            ?? running.flatMap { TranscriptLocator.claude(cwd: root, name: name, startedAt: $0.startedAt, home: home) }
+                        let turns = transcript.flatMap { LastTurns.read(transcript: $0, tty: tty, home: home) }
+                        if let file = try LeadLaunch.writeTurns(turns, root: root) { handed = (tty, file) }
+                    }
                 }
                 let policy = WorkingPolicy.load(from: nodeRoot.appendingPathComponent("policy.md"))
                 let limits = MacLimits.load(from: nodeRoot.appendingPathComponent("mac-limits.json"))
@@ -284,26 +308,27 @@ extension LeadEngine {
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy, limits: limits),
-                    start: LeadPrompts.leadStart(root: root, goal: start.goal, note: Self.goalNote, replaced: handed),
+                    start: resumed == nil ? LeadPrompts.leadStart(root: root, goal: start.goal, note: Self.goalNote, replaced: handed)
+                        : Self.notice(board: boardStore.load(), root: root),
                     server: server, name: name, model: run.model, advisor: run.advisor,
-                    folder: vault.runFolder(root: root, name: name), cwd: root, temporary: temporary)
-                return (grant, launch)
+                    folder: vault.runFolder(root: root, name: name), cwd: root, temporary: temporary, resume: resumed?.conversation)
+                return (grant, launch, run)
             }
             if case .failure = prepared, let issued { try? vault.revoke(issued, root: root) }
             guard let self else { return }
-            let (taken, replacedLead, said) = (waiting, replaced, notes)
+            let (taken, replacedLead, said, reopened) = (waiting, replaced, notes, resumed)
             self.queue.async {
                 for message in taken { self.leads.hold(.init(text: message.text, from: message.from), root: root) }
                 self.withdrewFromInbox(taken.map(\.id))
                 switch prepared {
                 case .failure(let error):
                     self.finish(root: root, .refused("\(error)"))
-                case .success(let (grant, launch)):
+                case .success(let (grant, launch, run)):
                     // The board names no lead now (`LeadHandover.release`); one replaced is so from now, no board read waited for.
                     self.holders[root] = nil
                     self.leads.lead(root: root) { $0.named = nil }
                     if let replacedLead { self.leads.replacing(replacedLead, root: root) }
-                    self.spawn(root: root, project: project, program: program, grant: grant, launch: launch, notes: said)
+                    self.spawn(root: root, project: project, program: program, grant: grant, launch: launch, notes: said, run: run, resumed: reopened)
                 }
             }
         }
@@ -381,7 +406,8 @@ extension LeadEngine {
         return environment
     }
 
-    private func spawn(root: String, project: String, program: String, grant: String, launch: LeadLaunch.Prepared, notes: [String]) {
+    private func spawn(root: String, project: String, program: String, grant: String, launch: LeadLaunch.Prepared, notes: [String],
+                       run: LeadLaunch.Run, resumed: (conversation: String, transcript: String)?) {
         let vault = link.vault
         guard !stopping else {
             work.async { try? vault.revoke(grant, root: root) }
@@ -412,6 +438,8 @@ extension LeadEngine {
                             $0.named = session.id.uuidString
                         }
                         self.leads.update(sessions: self.link.sessions, holders: self.holders)
+                        self.noteStarted(root: root, session: session.id, run: run, resumed: resumed)
+                        if resumed == nil { self.policyPrompted(session.id) }
                         self.finish(root: root, .started(session: session.id, program: program, notes: notes))
                     }
                 }

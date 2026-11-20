@@ -149,6 +149,7 @@ public struct VoiceRule: Equatable, Sendable {
     /// refused.
     public static let terminalScopes: [Scope] = [
         Scope("/init.scope", basis: "measured on Linux 5.15.167.4-microsoft-standard-WSL2: 2026-11-15, the agent's Bash tool's child and the scratch host's children; confirmed by the user's M4, 2026-11-17: a Windows Terminal tab's shell, a `claude` started there and its Bash tool's child (WSL starts terminals there)"),
+        Scope("/non-systemd", basis: "measured on Linux 6.18.58.1-microsoft-standard-WSL2, 2026-11-20: after WSL's kernel update a Windows Terminal tab's shell, a `claude` started there and its Bash tool's child are in `/non-systemd` (PID 1, systemd, stays in /init.scope; the node's unit and its sessions stay under user@{uid}.service)"),
         Scope("/user.slice/user-{uid}.slice/session-*.scope", basis: "documented: a login over ssh (logind's session scope); not measured, no sshd here"),
     ]
 

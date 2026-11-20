@@ -132,6 +132,22 @@ public final class LeadEngine: @unchecked Sendable {
     /// The engine's refresh every 3 s on its clock (`refresh`, E7).
     private var refreshTimer: Subscription?
 
+    // The all-done mark (`AllDoneLook.swift`), on `queue`: the marks whose summary is being written, and the clock.
+    var allDoneSummarizing: Set<String> = []
+    var allDoneNow: () -> Date = Date.init
+
+    // The prompt-audit reminder (`PromptAuditWatch.swift`), on `queue`.
+    /// The projects due a prompt audit, and why, as the last look found them.
+    public internal(set) var promptAuditsDue: [String: PromptAudit.Due] = [:]
+    /// Whether a look is under way, and whether one ran yet (the first runs at the first refresh).
+    var promptAuditLooking = false
+    var promptAuditLooked = false
+    /// The look every 30 minutes on the engine's clock, and the clock a reminder is judged by (a test's later).
+    var promptAuditTimer: Subscription?
+    var promptAuditNow: () -> Date = Date.init
+    /// The record's reads and writes, one at a time, off the engine's queue.
+    let promptAuditBook = DispatchQueue(label: "vibenode.lead-engine.prompt-audit", qos: .utility)
+
     // Cards, answers and holds (E6), on `queue`.
     /// Every card the user answers: the lead's questions and approvals, held config, base moves.
     public let cards = CardStore()
@@ -179,11 +195,18 @@ public final class LeadEngine: @unchecked Sendable {
     var workingTold: [String: (sessions: Set<String>, at: Date)] = [:]
     /// How often the same working sessions are told the vault again (the app's `LeadController.workingEvery`).
     static let workingEvery: TimeInterval = 30
-    /// Each lead's open push request (push_remote), by root, as the vault last said; the request each lead was told
-    /// nothing here pushes, by root; the roots whose vault look is under way (`PushAsks.swift`). On `queue`.
+    /// Each lead's open push request (push_remote), by root, as the vault last said; the request last noted in the log,
+    /// by root; the roots whose vault look is under way, and whose push the user is settling (`PushAsks.swift`). On
+    /// `queue`.
     var pushAsked: [String: LeadPush.Request] = [:]
-    var pushTold: [String: String] = [:]
+    var pushNoted: [String: String] = [:]
     var pushLooking: Set<String> = []
+    var pushSettling: Set<String> = []
+    /// Settles a push request (`LeadPush.settle`: the request's id, the root, push or decline, the vault), off the
+    /// engine's queue. Faked in tests.
+    var pushSettle: @Sendable (String, String, Bool, LeadVault) -> (request: LeadPush.Request?, outcome: LeadPush.Outcome) = { id, root, push, vault in
+        LeadPush.settle(id: id, root: root, push: push, vault: vault)
+    }
     /// Where those are told, one after another: a later look's never overtakes an earlier one's (`work` is concurrent).
     let workingNotes = DispatchQueue(label: "vibenode.lead-engine.working", qos: .utility)
     /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"
@@ -217,22 +240,34 @@ public final class LeadEngine: @unchecked Sendable {
     /// room watch's 60 s client (`watchRoom`); none until it's started.
     var roomWaits: LeadWitness.RoomWaits?
     var roomTimer: Subscription?
+    /// The working policy's watch (`SettingsWatch.swift`): each running lead told it once when it changes. None until
+    /// `watchRoom`, so a test's engine tells nothing it didn't ask for.
+    var policyWatch: LeadWitness.PolicyWatch?
+    /// Boost as last written to `boost.json` (`lookAtBoost`), and when; the clock it's judged on.
+    var boostWritten: (state: BoostState, at: Date)?
+    var boostNow: () -> Date = Date.init
     /// The machine's load as the room watch reads it, as the leads' tools judge it (`MacLoad.steady`); faked in tests.
     var macLoad: () -> Double? = MacLoad.steady
     /// Each room look's read of the machine's memory (`MacMemory.read`), on the reads queue; faked in tests.
     var memory: () -> MacMemory? = { MacMemory.read() }
 
-    // The idle handover (main's `26923f7c`, `IdleHandover.swift`), on `queue`.
-    /// The time the idle handover judges by (now; a test's later).
+    // The lead's rotation and idle handover (main's `26923f7c`, `IdleHandover.swift`), on `queue`.
+    /// The time the rotation judges by (now; a test's later).
     var handoverNow: () -> Date = Date.init
     /// When this engine started: the node keeps no record of the user's typing into a lead, so its quiet counts from here.
     let handoverStarted = Date()
     /// Roots whose idle look or handover is under way, and when each may be looked at again after a handover ended.
     var handingOver: Set<String> = []
     var handoverRetry: [String: Date] = [:]
-    /// Handovers tried per lead session in its current idle stretch (since its last response).
-    var handoverAttempts: [UUID: (since: Date, count: Int)] = [:]
-    /// Each idle look's or handover's end ("checked", "cancelled", "retained", "handed over"), on `queue` (for tests).
+    /// Handovers tried per lead session in its current idle stretch.
+    var handoverAttempts: [UUID: IdleTries] = [:]
+    /// The handover note asked of each root's lead: of which session, when, why, and the marker its reply starts with.
+    var rotationAsked: [String: (session: UUID, at: Date, reason: String, marker: String)] = [:]
+    /// Sends the ask for a note (the text, the root) and says whether it reached the lead; nil: delivered to the lead
+    /// from VibeSwitcher. Set by tests.
+    var rotationRequest: ((String, String, @escaping (Bool) -> Void) -> Void)?
+    /// Each rotation look's or handover's end ("checked", "asked", "cancelled", "retained", "handed over"), on `queue`
+    /// (for tests).
     var handoverEvent: (String) -> Void = { _ in }
 
     // Restarts (E8), on `queue`.
@@ -242,6 +277,18 @@ public final class LeadEngine: @unchecked Sendable {
     var knownLeads: Set<String> = []
     /// The last host restart the engine saw (its roots whose team it ended, each until a lead starts there again).
     public internal(set) var hostRestart: EngineState.Restart?
+    /// What reopens each project's lead after a host restart, by root (`EngineState.Reopen`, `RestartResume.swift`).
+    public internal(set) var reopen: [String: EngineState.Reopen] = [:]
+    /// The user's own sessions live in the host, as last recorded (`EngineState.OpenSessions`, `SessionReopen.swift`).
+    public internal(set) var openSessions: EngineState.OpenSessions?
+    /// The user's own sessions that ended lately, newest first (`EngineState.Ended`, `vibeswitcher resume`).
+    public internal(set) var endedSessions: [EngineState.Ended] = []
+    /// When each recorded session was first seen ended (or gone from the host's list): kept in the record for
+    /// `openGrace`, since a host going down (a reboot) ends its sessions and may say so before it goes.
+    var openEnded: [UUID: Date] = [:]
+    /// How long an ended session stays in the record (a test's shorter), and the clock it's judged by.
+    var openGrace: TimeInterval = 30
+    var openNow: () -> Date = Date.init
     /// Whether this engine took a welcome yet: its first is the server's start, where the running leads are bound again
     /// and told which questions the user no longer sees.
     var welcomedOnce = false
@@ -275,6 +322,7 @@ public final class LeadEngine: @unchecked Sendable {
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }
         if options.sweepsRoles { roleSweep = makeRoleSweep() }
         refreshTimer = clock?.every(3) { [weak self] in self?.refresh() }
+        promptAuditTimer = clock?.every(Int(Self.promptAuditEvery)) { [weak self] in self?.queue.async { self?.lookAtPromptAudits() } }
     }
 
     /// The vault the cards are built from and the user's answers recorded in: the link's, or a test's.

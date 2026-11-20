@@ -1,0 +1,32 @@
+# The nightly full suite (scripts/nightly.sh), run by vibeswitcher-nightly.timer. A systemd user unit, NOT installed:
+# installing it is the user's call. To install (paths as below: a checkout kept for the nightly, the report in the main
+# checkout's .build/nightly, where the supervisor reads last.md):
+#
+#   git -C ~/projects/vibeswitcher worktree add --detach ~/projects/vibeswitcher-worktrees/nightly origin/v2
+#   (cd ~/projects/vibeswitcher-worktrees/nightly && bash scripts/worktree-init.sh)
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/nightly/vibeswitcher-nightly.service scripts/nightly/vibeswitcher-nightly.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vibeswitcher-nightly.timer
+#   systemctl --user list-timers vibeswitcher-nightly.timer      # when it runs next
+#   systemctl --user start vibeswitcher-nightly.service          # a run now (it takes as long as the suite)
+#   journalctl --user -u vibeswitcher-nightly.service            # what it said; the report: .build/nightly/last.md
+#
+# For the timer to run while you're logged out (WSL: while no terminal is open), `loginctl enable-linger $USER`.
+# To remove: systemctl --user disable --now vibeswitcher-nightly.timer, then delete the two files and daemon-reload.
+#
+# A login shell (bash -l) for the PATH a terminal has (node, the toolchain; nightly.sh sources swiftly's env.sh too).
+# --update origin/v2: the nightly checkout moves to the latest v2 first, only while it has no changes.
+[Unit]
+Description=VibeSwitcher nightly full test suite
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/vibeswitcher-worktrees/nightly
+ExecStart=/bin/bash -lc 'exec bash scripts/nightly.sh --update origin/v2 --out "$HOME/projects/vibeswitcher/.build/nightly"'
+# Below interactive work: the suite is heavy and vs-heavy already queues it behind merges.
+Nice=10
+IOSchedulingClass=idle
+# A full suite with its retry: well under this; a hung run is ended.
+TimeoutStartSec=4h

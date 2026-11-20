@@ -5,8 +5,9 @@ import VibeCore
 /// `--host-connector N --host-socket PATH`, then `--node --node-root PATH` (the user's node) or `--root PATH
 /// --node-root PATH` (a scratch host's), then each `--server-arg X` a scratch host was given. The test flags
 /// (`--test-user-scopes=…`, `--test-cgroup-root=…`, `--test-runner-above`, `--test-housekeeping=…`, `--test-child=…`, `--test-first-look`,
-/// `--test-install-root=…`, and the web's `--test-web-port=…`, `--test-web-root=…`, `--test-web-pair`, `--test-web-terminal`) come only that way; a server with `--node`
-/// refuses each, with a log line, and takes nothing from it.
+/// `--test-install-root=…`, and the web's `--test-web-port=…`, `--test-web-root=…`, `--test-web-pair`, `--test-web-terminal`,
+/// `--test-web-terminal-watch`) come only that way; a server with `--node` refuses each, with a log line, and takes
+/// nothing from it.
 public struct ServerArguments: Equatable, Sendable {
     /// The connector's descriptor, inherited.
     public var connector: Int32
@@ -57,9 +58,12 @@ public struct ServerArguments: Equatable, Sendable {
     /// A scratch server takes `web.open` from any process of the uid, with no voice or typed code (the sandbox's and the
     /// tests' "scratch form"): the user's node never does.
     public var testWebPair = false
-    /// A scratch server opens a session's terminal to a page (`term.open`, the live plan's slice 4 and I4, LW-D12): the
-    /// user's node never does, and answers `unknown-kind`.
+    /// A scratch server opens a session's terminal to a page to type into (`term.open`, the live plan's slice 4 and
+    /// I4, LW-D12): the user's node never does (it only watches, `webTerminal`).
     public var testWebTerminal = false
+    /// A scratch server opens a session's terminal to watch, as the user's node does (`webTerminal`): the end-to-end
+    /// tests' stand-in for the user's node, whose root a scratch server can't take.
+    public var testWebTerminalWatch = false
     /// The test flags a server with `--node` left out, each as given.
     public var refused: [String] = []
 
@@ -74,6 +78,15 @@ public struct ServerArguments: Equatable, Sendable {
     public static let testWebRootFlag = "--test-web-root="
     public static let testWebPairFlag = "--test-web-pair"
     public static let testWebTerminalFlag = "--test-web-terminal"
+    public static let testWebTerminalWatchFlag = "--test-web-terminal-watch"
+
+    /// What a page may do with a session's terminal (`TerminalRelay.Mode`; nil: no terminal, `term.open` is
+    /// `unknown-kind`): on the user's node, watch it; on a scratch server, what its test flag says, read-write first.
+    public var webTerminal: TerminalRelay.Mode? {
+        if node { return .watch }
+        if testWebTerminal { return .readWrite }
+        return testWebTerminalWatch ? .watch : nil
+    }
 
     /// The housekeeping period without a test's: 30 s (S2).
     public static let housekeeping = 30
@@ -96,6 +109,7 @@ public struct ServerArguments: Equatable, Sendable {
         var webRoot: String?
         var webPair = false
         var webTerminal = false
+        var webTerminalWatch = false
         var tests: [String] = []
         var index = 1
         func value() -> String? {
@@ -171,6 +185,9 @@ public struct ServerArguments: Equatable, Sendable {
             case testWebTerminalFlag:
                 tests.append(word)
                 webTerminal = true
+            case testWebTerminalWatchFlag:
+                tests.append(word)
+                webTerminalWatch = true
             default:
                 return .failure(Usage("unknown argument \(word)"))
             }
@@ -183,6 +200,7 @@ public struct ServerArguments: Equatable, Sendable {
                                      testUserScopes: scopes, testHousekeeping: housekeeping, testChild: child, testFirstLook: firstLook,
                                      testInstallRoot: installRoot, testWebPort: webPort, testWebRoot: webRoot, testWebPair: webPair)
         parsed.testWebTerminal = webTerminal
+        parsed.testWebTerminalWatch = webTerminalWatch
         parsed.testCgroupRoot = cgroupRoot
         parsed.testRunnerAbove = runnerAbove
         if node {
@@ -198,6 +216,7 @@ public struct ServerArguments: Equatable, Sendable {
             parsed.testWebRoot = nil
             parsed.testWebPair = false
             parsed.testWebTerminal = false
+            parsed.testWebTerminalWatch = false
         }
         return .success(parsed)
     }

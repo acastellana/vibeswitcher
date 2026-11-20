@@ -24,6 +24,8 @@ final class ClientConnection {
     /// accepted: the app's from its first byte, sent no challenge, not counted toward `maxClients`.
     var viaConnector = false
     var attached: Set<UUID> = []
+    /// The sessions of `attached` it only watches (`HostRequest.watch`, see V2/HostWatch.swift).
+    var watchOnly: Set<UUID> = []
     var onFrame: ((HostFrame.Kind, Data) -> Void)?
     /// After bytes arrive, before any of their frames is handled, with the process that sent them (nil: none known;
     /// see `Platform.Sockets.receive`). Told nil again before a frame made of two senders' bytes is handled.

@@ -60,11 +60,75 @@ public struct EngineState: Codable, Equatable, Sendable {
         public var before: Double
         /// The roots whose lead ran under the old host, each until a lead starts there again.
         public var gone: [String]
+        /// The user's own sessions that ended with the old host (`OpenSessions`' as it last stood), each offered to
+        /// `vibeswitcher reopen` until it's reopened or the offer is put away. Absent from a file written before it.
+        public var sessions: [RestartReopen.Entry]?
 
-        public init(at: Double, before: Double, gone: [String]) {
+        public init(at: Double, before: Double, gone: [String], sessions: [RestartReopen.Entry]? = nil) {
             self.at = at
             self.before = before
             self.gone = gone
+            self.sessions = sessions
+        }
+    }
+
+    /// The user's own sessions live in the host (the app's `RestartReopen.Record`, for a node): Claude sessions the host
+    /// started that aren't a lead's or its team's, each with its folder and Claude's conversation id once its hook said
+    /// it, kept while the host that runs them is the one `hostStartedAt` names. A host restart ends them, and they're
+    /// offered back (`Restart.sessions`). Only a hint, as `Reopen` is: a worker of the user's uid can write this file, so a
+    /// reopen takes from it only the folder, the conversation and the model's name, each checked (`LeadEngine.reopenable`),
+    /// never its command or its label.
+    public struct OpenSessions: Codable, Equatable, Sendable {
+        /// The start time of the host they run under (seconds since 1970).
+        public var hostStartedAt: Double
+        public var entries: [RestartReopen.Entry]
+
+        public init(hostStartedAt: Double, entries: [RestartReopen.Entry]) {
+            self.hostStartedAt = hostStartedAt
+            self.entries = entries
+        }
+    }
+
+    /// What reopens a project's lead after a host restart (`vibeswitcher lead FOLDER --resume`, the app's restart card
+    /// and `RestartReopen.Entry`): the conversation it carried, kept while it runs. Only a hint: a worker of the user's uid
+    /// can write this file, so the reopen takes nothing from it but which conversation to look at, and that only once
+    /// the user asked for it on the command line, the vault's accepts were made and the transcript checks out
+    /// (`LeadEngine.resumable`: inside the agents' folders, in Claude's folder for the project's own repository, named by
+    /// its conversation id and carrying the lead's name). The model, the advisor and the grant are the start's own, as
+    /// for any lead; the workers listed are for `status` to show (the reopened lead is told from its board).
+    public struct Reopen: Codable, Equatable, Sendable {
+        /// A worker running when this was last written: its task, its session and its branch.
+        public struct Worker: Codable, Equatable, Sendable {
+            public var task: String
+            public var session: String
+            public var branch: String
+
+            public init(task: String, session: String, branch: String) {
+                self.task = task
+                self.session = session
+                self.branch = branch
+            }
+        }
+
+        /// The host session the lead ran in.
+        public var session: String
+        /// Claude's own session id for it (its hook's, else its transcript's name): what `--resume` takes.
+        public var conversation: String?
+        /// Its transcript, as `NodeSessions` checked it.
+        public var transcript: String?
+        /// What it was started on.
+        public var model: String?
+        public var advisor: String?
+        public var workers: [Worker]
+
+        public init(session: String, conversation: String? = nil, transcript: String? = nil, model: String? = nil, advisor: String? = nil,
+                    workers: [Worker] = []) {
+            self.session = session
+            self.conversation = conversation
+            self.transcript = transcript
+            self.model = model
+            self.advisor = advisor
+            self.workers = workers
         }
     }
 
@@ -84,9 +148,29 @@ public struct EngineState: Codable, Equatable, Sendable {
     public var leads: [String]?
     /// The last host restart the engine saw, while `status` says so.
     public var restart: Restart?
+    /// What reopens each project's lead after a host restart, by root (`Reopen`). Absent from a file written before it.
+    public var reopen: [String: Reopen]?
+    /// The user's own sessions live in the host (`OpenSessions`). Absent from a file written before it.
+    public var open: OpenSessions?
+    /// The user's own sessions that ended lately, newest first (`Ended`). Absent from a file written before it.
+    public var ended: [Ended]?
+
+    /// One of the user's own sessions that ended (not with a host restart: those are `Restart.sessions`), when, and its
+    /// record: offered to `vibeswitcher resume` (the app's ended sessions and their Resume). Only a hint, as `OpenSessions`.
+    public struct Ended: Codable, Equatable, Sendable {
+        public var entry: RestartReopen.Entry
+        /// When it was seen gone (seconds since 1970).
+        public var at: Double
+
+        public init(entry: RestartReopen.Entry, at: Double) {
+            self.entry = entry
+            self.at = at
+        }
+    }
 
     public init(held: [Held] = [], told: [String]? = nil, firstSightings: [String: Double]? = nil, hostStartedAt: Double? = nil,
-                leads: [String]? = nil, restart: Restart? = nil) {
+                leads: [String]? = nil, restart: Restart? = nil, reopen: [String: Reopen]? = nil, open: OpenSessions? = nil,
+                ended: [Ended]? = nil) {
         format = Self.currentFormat
         self.held = held
         self.told = told
@@ -94,6 +178,9 @@ public struct EngineState: Codable, Equatable, Sendable {
         self.hostStartedAt = hostStartedAt
         self.leads = leads
         self.restart = restart
+        self.reopen = reopen
+        self.open = open
+        self.ended = ended
     }
 
     /// `<root>/v2/engine.json`.

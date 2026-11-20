@@ -11,13 +11,18 @@
 // - A reply that grows is drawn again in its own row only, keeping the blocks that didn't change.
 // - It stays where you are: new rows keep the view at the end only if it was there, and otherwise a small "Latest"
 //   button counts them.
+// - "New since you looked" (the Mac's marker): a line before the first item that came after the last one you saw at the
+//   chat's end, with what came since; worked out when the chat opens, kept until another opens. What you saw is this
+//   browser's (`SEEN`), by session.
 
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES } from '../words.js';
 import { markdown, diffView, codeBlock } from '../text.js';
-import { summaryOf } from '../chatops.js';
+import { summaryOf, newSince, sinceSummary } from '../chatops.js';
 import { questionStack, askCard } from './cards.js';
+import { draftBox, promptCard, queuedStrip, drivable } from './drive.js';
+import { tokenAt, accept, IMAGE_TYPES, MAX_IMAGE } from '../composing.js';
 
 // How close to the end counts as being at the end.
 const NEAR = 48;
@@ -27,6 +32,23 @@ const OVERSCAN = 1.5;
 const FIRST_ROWS = 30;
 // A row's height until it is measured, by type.
 const ESTIMATE = { prompt: 62, reply: 96, tools: 30, team: 70, ask: 160 };
+
+// The last item seen at each chat's end, by session id, in this browser: the newest `SEEN_KEPT` sessions.
+const SEEN = 'vibeswitcher.seen';
+const SEEN_KEPT = 300;
+
+function seenRecord() {
+  try { return JSON.parse(globalThis.localStorage?.getItem(SEEN) || '{}') || {}; } catch { return {}; }
+}
+
+function noteSeen(session, id) {
+  const record = seenRecord();
+  if (record[session] === id) return;
+  delete record[session];
+  record[session] = id;
+  const kept = Object.entries(record).slice(-SEEN_KEPT);
+  try { globalThis.localStorage?.setItem(SEEN, JSON.stringify(Object.fromEntries(kept))); } catch { /* a private window: not kept */ }
+}
 
 // A row's key: its id, but a message sent from here keeps its row when the transcript's own item takes its place.
 const keyOf = (item) => (item.action ? 'pending:' + item.action : item.id);
@@ -224,8 +246,13 @@ export function chatView(app) {
   // in the conversation's place. A lead's questions still follow below it.
   const later = h('p', { class: 'pane-empty', hidden: true }, 'This node doesn’t send this session’s conversation to the page.');
   const stackSlot = h('div');
-  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, above, rowsEl, below, live, stackSlot);
+  // The question open on the session's own screen, under its conversation, where the Mac's answer card sits.
+  const asking = promptCard(app);
+  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, above, rowsEl, below, live, stackSlot, asking.el);
   const scroller = h('div', { class: 'chat-scroll' }, column);
+  // The "New since you looked" line, placed before its row while that row is drawn.
+  const markSummary = h('span', { class: 'new-mark-summary' });
+  const mark = h('div', { class: 'new-mark', role: 'separator' }, h('span', { class: 'new-mark-text' }, h('span', null, 'New since you looked'), markSummary));
   const latestCount = h('span', { class: 'latest-count' });
   const latest = h('button', { class: 'latest', type: 'button', hidden: true, onclick: () => toEnd(true) }, icon('down', 12), 'Latest', latestCount);
 
@@ -233,7 +260,23 @@ export function chatView(app) {
   const sendButton = h('button', { class: 'send', type: 'submit', title: 'Send (↩)', 'aria-label': 'Send', disabled: true }, icon('send', 15));
   const form = h('form', { class: 'composer' }, input, sendButton);
   const hint = h('p', { class: 'composer-hint', hidden: true });
-  const el = h('div', { class: 'chat' }, scroller, latest, form, hint);
+  // The message this page left for the session, over the box, with the line that sends it; Edit puts it and its images
+  // back in the box.
+  const drafted = draftBox(app, { edit: (text, images = []) => {
+    input.value = text;
+    attached = images.map((path) => ({ key: path, name: path.split('/').pop(), path, failed: null, thumb: null }));
+    drawAttached();
+    grow();
+    input.focus();
+  } });
+  // What `vibeswitcher send` sent while a question was open: the node types it in once that closes.
+  const queuedMessages = queuedStrip();
+  // What `/` and `@` complete to (`session.complete`), over the box.
+  const suggestions = h('ul', { class: 'suggestions', role: 'listbox', 'aria-label': 'Completions', hidden: true });
+  // The images pasted or dropped into the box (`session.attach`), as small pictures over it.
+  const attachedEl = h('div', { class: 'attached', hidden: true });
+  const notice = h('p', { class: 'composer-notice', role: 'status', hidden: true });
+  const el = h('div', { class: 'chat' }, scroller, latest, queuedMessages.el, drafted.el, suggestions, attachedEl, notice, form, hint);
 
   const view = {
     app,
@@ -257,6 +300,9 @@ export function chatView(app) {
   let jump = true;
   let shownQuestions = 0;
   let structural = true;
+  // The marker's row (its key) once the chat's items came; `marking`: not worked out yet for this chat.
+  let markKey = null;
+  let marking = true;
   const touched = new Set();
 
   const chat = () => store.state.chats.get(view.session);
@@ -290,9 +336,32 @@ export function chatView(app) {
     start = Math.max(0, Math.min(from, list.length));
     end = Math.max(start, Math.min(to, list.length));
     keyed(rowsEl, rows, list.slice(start, end), keyOf, (item) => makeRow(view, item), { enter: !jump && structural && to === list.length });
+    placeMark();
     above.style.height = sum(list, 0, start) + 'px';
     below.style.height = sum(list, end, list.length) + 'px';
     earlier.hidden = !(start === 0 && chat()?.more);
+  }
+
+  // The marker before its row, while that row is drawn (`keyed` moves rows only: the marker is put back after it).
+  function placeMark() {
+    const row = markKey ? rows.get(markKey) : null;
+    if (row?.el.parentNode === rowsEl) {
+      if (mark.nextSibling !== row.el) rowsEl.insertBefore(mark, row.el);
+    } else {
+      mark.remove();
+    }
+  }
+
+  // At the chat's first items: where the marker goes (from what this browser saw last), then what's seen now.
+  function noteLooked(list) {
+    if (marking) {
+      marking = false;
+      const at = newSince(list, seenRecord()[view.session]);
+      markKey = at >= 0 ? keyOf(list[at]) : null;
+      setText(markSummary, at >= 0 ? sinceSummary(list.slice(at)) : '');
+    }
+    const last = [...list].reverse().find((item) => item.id && !item.pending);
+    if (last) noteSeen(view.session, last.id);
   }
 
   // Each drawn row's height, with the gap above the next: the spacers then stand in for them exactly.
@@ -357,6 +426,7 @@ export function chatView(app) {
     later.hidden = following;
     const list = items();
     empty.hidden = !following || !loaded || list.length > 0 || !!stack;
+    if (loaded && marking) noteLooked(list);
     if (loaded) {
       if (structural) {
         // At the end, `toEnd` below draws the last rows.
@@ -383,7 +453,10 @@ export function chatView(app) {
     const fresh = stack ? stack.update() : 0;
     renderLive(session);
     renderComposer(session);
-    if (loaded && pinned) toEnd(false);
+    if (loaded && pinned) {
+      toEnd(false);
+      noteLooked(list);
+    }
     else if (unseen > 0 || fresh > shownQuestions) {
       latest.hidden = false;
       setText(latestCount, unseen > 0 ? String(unseen) : '');
@@ -402,19 +475,33 @@ export function chatView(app) {
       state === 'background' ? '' : h('time', { data: { since: session.since } }, since(session.since)));
   }
 
+  // On the node's page the box leaves a draft (`session.draft`): `vibeswitcher send` in a terminal types it. Only a
+  // feed that may send (`send` in what it may send, and no drafts) types at once.
+  const drafting = () => store.can('session.draft');
   function renderComposer(session) {
-    const typed = !!session?.hosted && !session.ended && store.can('send');
+    const typed = drivable(session) && (drafting() || store.can('send'));
     form.hidden = !typed;
     hint.hidden = typed;
+    asking.update(session);
+    drafted.update(session);
+    queuedMessages.update(session);
+    attachedEl.hidden = !typed || !attached.length;
     if (!typed) {
+      closeSuggestions();
       setText(hint, !session ? '' : session.ended ? 'This session has ended.'
-        : !store.can('send') ? 'This page follows the node; to type into a session, use its terminal.'
-        : 'Runs in another terminal. It can be read here, not typed into.');
+        : !session.hosted ? 'Runs in another terminal. It can be read here, not typed into.'
+        : 'This page follows the node; to type into a session, use its terminal.');
       return;
     }
     const agent = AGENTS[session.agent] || AGENTS.claude;
     const working = stateOf(session) === 'working';
-    input.placeholder = working ? `Steer ${agent} while it works — ↩ sends it to its next step` : `Message ${agent}…`;
+    if (drafting()) {
+      input.placeholder = `Message ${agent}… (↩ leaves a draft)`;
+      sendButton.title = 'Leave as a draft (↩)';
+      sendButton.setAttribute('aria-label', 'Leave as a draft');
+    } else {
+      input.placeholder = working ? `Steer ${agent} while it works — ↩ sends it to its next step` : `Message ${agent}…`;
+    }
   }
 
   const schedule = framed(render);
@@ -422,6 +509,7 @@ export function chatView(app) {
     if (atEnd()) {
       unseen = 0;
       latest.hidden = true;
+      if (chat()?.loaded) noteLooked(items());
     }
     follow();
   });
@@ -459,10 +547,31 @@ export function chatView(app) {
   function grow() {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 200) + 'px';
-    sendButton.disabled = !input.value.trim();
+    sendButton.disabled = uploading() || (!input.value.trim() && !attached.some((item) => item.path));
   }
-  input.addEventListener('input', grow);
+  input.addEventListener('input', () => { grow(); lookToken(); });
+  input.addEventListener('keyup', (event) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) lookToken(); });
+  input.addEventListener('click', lookToken);
+  input.addEventListener('blur', () => setTimeout(closeSuggestions, 120));
   input.addEventListener('keydown', (event) => {
+    if (completion && !event.isComposing) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        completion.index = (completion.index + (event.key === 'ArrowDown' ? 1 : -1) + completion.items.length) % completion.items.length;
+        drawSuggestions();
+        return;
+      }
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+        event.preventDefault();
+        take(completion.index);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSuggestions();
+        return;
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       form.requestSubmit();
@@ -476,10 +585,147 @@ export function chatView(app) {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const text = input.value.trim();
-    if (!text) return;
+    const images = attached.filter((item) => item.path).map((item) => item.path);
+    if (uploading() || (!text && !images.length)) return;
     input.value = '';
+    attached = [];
+    drawAttached();
+    closeSuggestions();
     grow();
-    store.send(view.session, text);
+    if (drafting()) store.sessionDraft(view.session, text, images); else store.send(view.session, text);
+  });
+
+  // ---- `/` and `@`: what the app's composer completes, asked of the node as you type ----
+
+  let completion = null;     // { token, items, index } while the list shows
+  let completing = 0;        // the newest ask: an older answer is dropped
+  let completeTimer = null;
+  function lookToken() {
+    const session = store.state.sessions.get(view.session);
+    const caret = input.selectionStart;
+    const token = drivable(session) && store.can('session.complete') && caret === input.selectionEnd ? tokenAt(input.value, caret) : null;
+    if (!token) return closeSuggestions();
+    const ask = ++completing;
+    const id = view.session;
+    clearTimeout(completeTimer);
+    completeTimer = setTimeout(() => {
+      store.read('session.complete', { session: id, kind: token.kind, query: token.query }).then((reply) => {
+        if (ask !== completing || id !== view.session) return;
+        const items = reply?.ok ? reply.result.items : [];
+        if (!items.length) return closeSuggestions();
+        completion = { token, items, index: 0 };
+        drawSuggestions();
+      });
+    }, 80);
+  }
+  function drawSuggestions() {
+    suggestions.hidden = !completion;
+    if (!completion) return suggestions.replaceChildren();
+    suggestions.replaceChildren(...completion.items.map((item, index) => h('li', {
+      class: 'suggestion' + (index === completion.index ? ' chosen' : ''), role: 'option', 'aria-selected': String(index === completion.index),
+      onmousedown: (event) => { event.preventDefault(); take(index); },
+    }, h('span', { class: 'suggestion-title' }, item.title), h('span', { class: 'suggestion-note' }, item.subtitle))));
+    suggestions.querySelector('.chosen')?.scrollIntoView({ block: 'nearest' });
+  }
+  function take(index) {
+    const item = completion?.items[index];
+    if (!item) return;
+    const done = accept(input.value, completion.token, item.insert);
+    input.value = done.text;
+    input.setSelectionRange(done.caret, done.caret);
+    closeSuggestions();
+    grow();
+    input.focus();
+  }
+  function closeSuggestions() {
+    completing += 1;
+    clearTimeout(completeTimer);
+    if (!completion && suggestions.hidden) return;
+    completion = null;
+    drawSuggestions();
+  }
+
+  // ---- Images pasted or dropped into the box: sent to the node in parts, named by the draft ----
+
+  let attached = [];         // { key, name, path, failed, thumb }
+  const uploading = () => attached.some((item) => !item.path && !item.failed);
+  const canAttach = () => drafting() && store.can('session.attach') && drivable(store.state.sessions.get(view.session));
+  function say(text) {
+    notice.hidden = !text;
+    setText(notice, text || '');
+  }
+  function drawAttached() {
+    attachedEl.hidden = !attached.length;
+    attachedEl.replaceChildren(...attached.map((item) => h('div', {
+      class: 'attached-item' + (item.path ? '' : item.failed ? ' failed' : ' sending'), title: item.failed || item.name,
+    }, item.thumb || h('span', { class: 'attached-name' }, item.name),
+    h('button', { class: 'attached-remove', type: 'button', 'aria-label': `Remove ${item.name}`, title: 'Remove this image',
+      onclick: () => { attached = attached.filter((one) => one !== item); drawAttached(); grow(); } }, icon('close', 10)))));
+    const failed = attached.find((item) => item.failed);
+    say(failed ? `${failed.name}: ${failed.failed}` : '');
+  }
+  // A small picture of `file`, drawn on a canvas (the page's policy loads no image but its own files).
+  async function thumbnail(file) {
+    const bitmap = await createImageBitmap(file);
+    const canvas = h('canvas', { class: 'attached-thumb', width: 112, height: 112, 'aria-hidden': 'true' });
+    const side = Math.min(bitmap.width, bitmap.height);
+    canvas.getContext('2d').drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 112, 112);
+    bitmap.close?.();
+    return canvas;
+  }
+  // The bytes the node is sent: the file as it is when the node takes its type and size, else drawn again (at most
+  // 2048 pixels a side) as a PNG, or a JPEG when that is still too large.
+  async function prepared(file) {
+    if (IMAGE_TYPES.includes(file.type) && file.size <= MAX_IMAGE) return { bytes: new Uint8Array(await file.arrayBuffer()), type: file.type };
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+    const canvas = h('canvas', { width: Math.round(bitmap.width * scale), height: Math.round(bitmap.height * scale) });
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const encode = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+    let blob = await encode('image/png');
+    if (!blob || blob.size > MAX_IMAGE) blob = await encode('image/jpeg', 0.85);
+    if (!blob || blob.size > MAX_IMAGE) throw new Error('too large');
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), type: blob.type };
+  }
+  async function addImage(file) {
+    const item = { key: crypto.randomUUID(), name: file.name || 'pasted image', path: null, failed: null, thumb: null };
+    attached.push(item);
+    drawAttached();
+    grow();
+    const session = view.session;
+    try {
+      item.thumb = await thumbnail(file);
+      drawAttached();
+      const { bytes, type } = await prepared(file);
+      const reply = await store.attach(session, bytes, type);
+      if (reply.ok && reply.result?.path) item.path = reply.result.path;
+      else item.failed = reply.error?.message || 'The node didn’t keep it.';
+    } catch {
+      item.failed = 'It couldn’t be read as an image, or it is too large.';
+    }
+    if (view.session !== session) return;
+    drawAttached();
+    grow();
+  }
+  function images(list) { return [...(list || [])].filter((file) => file && file.type.startsWith('image/')); }
+  input.addEventListener('paste', (event) => {
+    const files = images([...(event.clipboardData?.items || [])].filter((entry) => entry.kind === 'file').map((entry) => entry.getAsFile()));
+    if (!files.length) return;
+    event.preventDefault();
+    if (!canAttach()) return say('This page can’t attach images to this session.');
+    files.forEach(addImage);
+  });
+  form.addEventListener('dragover', (event) => {
+    if ([...(event.dataTransfer?.types || [])].includes('Files')) event.preventDefault();
+  });
+  form.addEventListener('drop', (event) => {
+    const dropped = [...(event.dataTransfer?.files || [])];
+    if (!dropped.length) return;
+    event.preventDefault();
+    const files = images(dropped);
+    if (!canAttach()) return say('This page can’t attach images to this session.');
+    if (files.length < dropped.length) say('Only images go in from here: a file on this computer isn’t on the node.');
+    files.forEach(addImage);
   });
 
   for (const topic of ['sessions', 'cards', 'leads', 'connection']) store.subscribe(topic, () => { if (view.session && el.isConnected) schedule(); });
@@ -494,6 +740,10 @@ export function chatView(app) {
       if (view.session) store.closeChat(view.session);
       view.session = id;
       view.open = new Set();
+      // What the box held for the last session stays with it: nothing typed here goes to another.
+      attached = [];
+      drawAttached();
+      closeSuggestions();
       rows.clear();
       heights.clear();
       rowsEl.replaceChildren();
@@ -504,6 +754,9 @@ export function chatView(app) {
       structural = true;
       jump = true;
       shownQuestions = 0;
+      markKey = null;
+      marking = true;
+      mark.remove();
       stack = null;
       stackProject = null;
       // The last session's questions leave with it (placeStack only draws when the project changes).

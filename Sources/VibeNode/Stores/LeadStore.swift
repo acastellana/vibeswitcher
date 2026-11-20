@@ -34,6 +34,9 @@ public final class LeadStore: @unchecked Sendable {
         /// What the last start said (`started`, `shown`, `waiting`, or a refusal), and when.
         public var lastStart: String?
         public var lastStartAt: Date?
+        /// The push its lead asked for (push_remote) while it's open, as the vault last said (`PushAsks.swift`): the
+        /// user settles it with `vibeswitcher push` or `decline-push`.
+        public var push: LeadPush.Request?
 
         public init(project: String, root: String) {
             self.project = project
@@ -48,7 +51,17 @@ public final class LeadStore: @unchecked Sendable {
                      "held": .int(held), "reportsWaiting": .int(reportsWaiting),
                      "notice": notice.map(NodeWire.Value.string) ?? .null, "starting": .bool(starting),
                      "lastStart": lastStart.map(NodeWire.Value.string) ?? .null,
-                     "lastStartAt": lastStartAt.map(NodeWire.Value.date) ?? .null])
+                     "lastStartAt": lastStartAt.map(NodeWire.Value.date) ?? .null,
+                     "push": push.map(Self.pushValue) ?? .null])
+        }
+
+        /// A push request as the wire carries it: its URL as it may be shown (`PushText.displayURL`: no credentials),
+        /// every page with a read token sees it.
+        static func pushValue(_ request: LeadPush.Request) -> NodeWire.Value {
+            .object(["id": .string(request.id), "commit": .string(request.commit), "short": .string(request.short),
+                     "branch": .string(request.branch), "remote": .string(request.remote), "target": .string(request.target),
+                     "url": .string(PushText.displayURL(request.url)), "ahead": .int(request.ahead), "subjects": .array(request.subjects.map { .string(PushText.scrub($0)) }),
+                     "askedAt": .date(Date(timeIntervalSince1970: request.askedAt))])
         }
     }
 

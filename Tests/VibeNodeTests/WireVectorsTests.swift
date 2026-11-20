@@ -335,6 +335,8 @@ enum Samples {
         full.starting = true
         full.lastStart = "started"
         full.lastStartAt = at
+        full.push = LeadPush.Request(id: "3c9e1f20", commit: String(repeating: "c", count: 40), remote: "origin", branch: "main",
+                                     url: "git@example.invalid:r.git", ahead: 1, subjects: ["ccccccc One"], askedAt: at.timeIntervalSince1970)
         return [full, LeadStore.Lead(project: NodeIds.project(root: "/home/u/notes"), root: "/home/u/notes")]
     }
 

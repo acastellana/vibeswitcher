@@ -1,6 +1,6 @@
 // What this window shows, as opposed to what the node knows (store.js): the route, the list's grouping and filter,
 // which pane a session shows, which teams are unfolded, the inspector. The route lives in the address
-// (#/s/<session id>, #/p/<project id>, #/node), so the browser's back button works and a session can be linked to.
+// (#/s/<session id>, #/p/<project id>, #/node, #/settings[/<project id>]), so the browser's back button works and a session can be linked to.
 
 import { ATTENTION, stateOf, lastPart, taskCount } from './words.js';
 
@@ -19,6 +19,11 @@ export function parseRoute(hash) {
   const board = hash.match(/^#\/p\/(.+)$/);
   if (board) {
     try { return { name: 'board', id: decodeURIComponent(board[1]) }; } catch { return { name: 'home' }; }
+  }
+  // Settings: the node's, and a project's with its id (views/settings.js).
+  const settings = hash.match(/^#\/settings(?:\/(.+))?$/);
+  if (settings) {
+    try { return { name: 'settings', id: settings[1] ? decodeURIComponent(settings[1]) : null }; } catch { return { name: 'settings', id: null }; }
   }
   return hash === '#/node' ? { name: 'node' } : { name: 'home' };
 }

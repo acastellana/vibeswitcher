@@ -297,7 +297,9 @@ shows them as text nodes only, never as markup, and the command line prints them
 | `cards` | `{questions: int, approvals: int, config: int, base: int}` | open cards counted by kind |
 | `accepted` | [object] | the last 50 user's-voice requests taken: `kind` string, `action` string?, `subject` string? †, `at` date, `pid` int, `cgroup` string?, `commandLine` [string] † |
 | `notices` | [string] † | what the node has to say, each a sentence the server built (the node stopping; a lead whose board names a session the vault doesn't bind; a base move that refused a merge; a host restart; a lead with no role). Shown as they are, in order |
-| `restart` | object? | the last host restart while its notice stands: `at` date, `before` date, `gone` [string] † (roots), `reset` string |
+| `restart` | object? | the last host restart while its notice stands: `at` date, `before` date, `gone` [string] † (roots), `reset` string, `sessions` int (the user's own sessions it ended, still offered; 2026-11-20) |
+| `reopen` **new** (2026-11-20) | [object] | the user's own sessions the last host restart ended, offered to `vibeswitcher reopen`: `session` string (the id they had), `folder` string †, `name` string †, `conversation` string? † (Claude's id; null: unknown, so it can't be reopened) |
+| `ended` **new** (2026-11-20) | [object] | your sessions that ended lately (not with a host restart), newest first, at most 20: `session` string, `folder` string †, `name` string †, `conversation` string? †, `at` date (when it was seen gone); `vibeswitcher resume` starts one again |
 | `builds` | object? | the installed builds (`SwitchRequest.buildsValue`); null on a server with no install root |
 | `web` **new** | `{state: string, port: int?, tokens: int, connections: int}` | the web listener: `state` is `off`, `listening` or `refused: <why>` |
 
@@ -527,6 +529,32 @@ is done once (rule 8). What the first write actions need:
 | `draft.clear` **new** | `card` | refused, `voice` | a token with `draft`, `action` |
 | `web.open`, `web.revoke` **new** | none | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice` |
 | `seen` **new** (2026-11-19) | `session` | anyone (it changes nothing but the session's seen mark: a finished turn reads `idle`, the app's rule) | a token with `read`; the page sends it after 1.5 s on a finished session (`views/session.js`) |
+| `session.draft` **new** (2026-11-20) | `session` (the whole id), `text` | refused, `voice` | a token with `draft`, `action`: the message kept beside the session (its `draft`), told to nobody; the reply's `applied` is the `sessions` stream's seq. `vibeswitcher send SESSION` types it |
+| `session.draft.clear` **new** (2026-11-20) | `session` | refused, `voice` | a token with `draft`, `action` |
+| `send`, `session.new`, `session.end`, `session.reply` **new** (2026-11-20) | `session` and `text`; `folder`, `agent`, `model`; `session`; `session`, `choice`, `text`, `question`, `options` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: the page shows the line that runs each |
+| `settings` **new** (2026-11-20) | `folder?` | anyone | a token with `read`: `{node: {root, settings}, project: {project, root, settings} or null, leftOut: [{title, why}]}`, each setting `{key, title, about, section, scope, form, home, choices, limits, value, default, isDefault, where, guardRail, note}` (the schema's `setting`; the vector `settings`); a folder no lead has worked in is `gone` |
+| `set` **new** (2026-11-20) | `folder?`, `key`, `value` | the user's voice, the typed code from the action id, `action`; recorded: `{key, value, was, scope, project, told}` | refused, `voice` (the vector `set.from-a-page`): the page drafts the `vibeswitcher set` line (`views/settings.js`) |
+| `session.reopen` **new** (2026-11-20) | `all` bool, or `sessions` [string] (ids as `reopen` lists them, or prefixes of 4 or more), or `forget` bool | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: `vibeswitcher reopen` |
+| `mail` **new** (2026-11-20) | `folder` string? (absolute), `all` bool? | the user's voice, no typed code (a read of the projects' private record of their leads' `tell_lead` messages) | refused, `voice`: `vibeswitcher mail` |
+| `prompt-audit` **new** (2026-11-20) | `folder` string (absolute), `do`: `snooze`, `off` or `on` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: `vibeswitcher prompt-audit` |
+| `session.rename` **new** (2026-11-20) | `session` (the whole id), `name` (none or blank: its own name back) | the user's voice, the typed code from the action id, `action`; recorded: `{session, name}` | refused, `voice`: `vibeswitcher rename` |
+| `session.pause` **new** (2026-11-20) | `session`, `for`: `indefinitely`, `morning`, `hours` (with `hours`, 1 to 720) or `off` | the user's voice, the typed code, `action`; recorded: `{session, until}` | refused, `voice`: `vibeswitcher pause` |
+| `session.resume` **new** (2026-11-20) | `session` (an id as `ended` lists it, or a prefix of 4 or more) | the user's voice, the typed code, `action`; recorded: `{reopened, refused}` as `session.reopen`'s | refused, `voice`: `vibeswitcher resume`; the start page shows the line |
+| `shells` **new** (2026-11-20) | `folder` string? (absolute) | the user's voice, no typed code (a read): `{shells: [{session, folder, terminal, finished}]}` | refused, `voice`: `vibeswitcher close-shells` |
+| `session.close-shells` **new** (2026-11-20) | `sessions` [string] (the shells shown) | the user's voice, the typed code, `action`; recorded: `{ended, left}`, each still a finished shell read again right before | refused, `voice` |
+
+| `session.attach` **new** (2026-11-20, the composer) | `session`, `upload` (a UUID), `type` (png, jpeg, gif, webp), `part`, `parts`, `data` (base64) | refused, `voice` | a token with `draft`, `action`: an image in parts (a page's message is at most 64 KiB); the last part's reply carries the `path` it was written to, which `session.draft`'s `images` name |
+| `session.complete` **new** (2026-11-20, the composer) | `session`, `kind` (`slash`, `mention`), `query` | anyone | a token with `read`: `items` [{`insert`, `title`, `subtitle`}], what the app's composer offers |
+| `session.presets` **new** (2026-11-20, the composer) | `folder` (optional) | anyone | a token with `read`: `presets` [{`name`, `kind`, `command`, `env` (names), `keepShell`, `project`, `default`, `digest` (an HMAC under a key only the server run holds: no variable's value can be guessed from it, and a restart makes the user list them again), `refused`}], `problems`; `session.new` takes `preset` and its `digest` |
+
+A session (§5) carries three more fields since 2026-11-20: `prompt` {`question` †, `options` †, `descriptions` †,
+`text` (the options that take words, by index), `multiSelect`, `at`}, the question open on its screen as the node read
+it (`SessionPrompt`), and `draft` {`text` †, `images` (paths), `at`, `action`}, a page's message for it, each null
+when there's none; and `queued` [{`text` †, `images` (a count), `at`, `action`}], the messages `send` holds until the
+question on its screen closes.
+Three more since 2026-11-20 (the stability lane), each null when there's none: `name` †, your name for it
+(`vibeswitcher rename`); `pausedUntil`, the end of your pause (`vibeswitcher pause`; far in the future: until you
+resume it); `agentSession`, the agent's own session id (what `--resume` takes).
 
 **The user's-voice rule is unchanged (S3).** A browser is not a terminal in the user's scope and types no code, and a
 token is a secret in a file the user's processes can read (the security document's S11, item 31). So in the first
@@ -611,13 +639,15 @@ An `answer` sent from a page (`answer.from-a-page`):
 
 ## 9. The terminal (slice 4)
 
-The spike's form (B6, D5, G3), measured on a scratch node. What opens a terminal on the user's node is still open
-(the last point).
+The spike's form (B6, D5, G3), measured on a scratch node; on the user's node a terminal is watched only (the last
+point).
 
-- `term.open` `{session, cols, rows}` replies `{stream: int}`; `term.close` `{stream}`.
+- `term.open` `{session, cols, rows}` replies `{stream: int, readOnly: bool}`, and when `readOnly`, the session's own
+  `cols` and `rows` too (the request's are checked and unused); `term.close` `{stream}`.
 - Binary frames, both ways: one byte of type, four bytes of stream (big-endian), then the payload. Server to client:
   type 1, the session's bytes from the host's `attach` (replay first, then live); type 2, replay is over. Client to
-  server: type 1, input; type 3, a resize (two 16-bit numbers).
+  server: type 1, input; type 3, a resize (two 16-bit numbers). Watched only: type 5 to the client, the session's size
+  (two 16-bit numbers), before each replay; a session resized elsewhere is replayed again (type 4, type 5, the replay).
 - When the client falls behind, the server sends type 4 (`resync`) and starts the stream again from the host's
   replay, as the host does to its own clients.
 - Only the host's parser answers a program's terminal queries: the client's emulator's replies are never sent.
@@ -640,9 +670,14 @@ The spike's form (B6, D5, G3), measured on a scratch node. What opens a terminal
 
   Inside the budget at the median in both runs and at p95 in the warm one; whether stage 5 builds on xterm.js is the
   lead's call on these numbers. The cold run's tail is worth a look on the Mac and a phone first.
-- **Rights.** A token with `read` does not open a terminal: a session's screen is more than a process of the user's
-  uid gets today, and input types into a session. The spike runs on a scratch node. What opens a terminal on the
-  user's node is the lead's and the user's decision (the plan's LW-D12).
+- **Rights.** On the user's node a token with `read` may **watch** a session's terminal (the supervisor's decision,
+  2026-11-20; the plan's LW-D12 as amended): the host's `watch`, never its `attach`, so the page takes nothing over
+  (the host's parser keeps answering the program's queries, the session keeps its size), and the client's types 1 and
+  3 are refused, each with a log line. A watcher sees nothing a `read` token can't already see (the chat streams to
+  it), so H1 (the host binds the web port) is waived for watching; it stays required before any page input reaches a
+  real session. Typing stays the user's voice: `vibeswitcher send` on the user's terminal with the typed code
+  (the security architecture's S3). `web --revoke` closes the streams with their connections. Only a scratch node's
+  server types from a page (`--test-web-terminal`, the spike).
 
 ## 10. Errors and versions
 

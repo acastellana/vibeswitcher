@@ -35,6 +35,8 @@ public final class NodeLive: @unchecked Sendable {
     public private(set) var chats: ChatStore?
     /// The leads' boards (the `boards` stream, `vibeswitcher board`); none for a server with no engine.
     public private(set) var boards: LiveBoards?
+    /// The `sessions` stream's values: each session with its prompt and draft.
+    private var sessionValues: SessionLiveValues?
 
     private let requests: Requests
     private let sessions: NodeSessions?
@@ -51,11 +53,12 @@ public final class NodeLive: @unchecked Sendable {
     public static let sweepEvery = 30
 
     /// `port`: the web's (`NodeWeb.port` on the user's node; a scratch server's `--test-web-port=`, 0 for the kernel's
-    /// pick). `webRoot`: a scratch server's `--test-web-root=`. `terminals`: a scratch server's `--test-web-terminal`
-    /// (`term.open` through a `TerminalRelay`, the live plan's I4; the user's node answers it `unknown-kind`). `clock`:
-    /// the engine's.
+    /// pick). `webRoot`: a scratch server's `--test-web-root=`. `terminals`: what a page may do with a session's
+    /// terminal (`term.open` through a `TerminalRelay`, the live plan's I4; `ServerArguments.webTerminal`: the user's
+    /// node watches, a scratch server's `--test-web-terminal` types); nil, `term.open` is `unknown-kind`. `clock`: the
+    /// engine's.
     public init(requests: Requests, sessions: NodeSessions?, engine: LeadEngine?, clock: NodeClock, port: UInt16 = NodeWeb.port,
-                webRoot: URL? = nil, terminals: Bool = false, note: @escaping @Sendable (String) -> Void = { _ in }) {
+                webRoot: URL? = nil, terminals mode: TerminalRelay.Mode? = nil, note: @escaping @Sendable (String) -> Void = { _ in }) {
         queue = requests.queue
         self.requests = requests
         self.sessions = sessions
@@ -63,7 +66,8 @@ public final class NodeLive: @unchecked Sendable {
         self.clock = clock
         self.note = note
         hub = LiveHub(queue: queue, epoch: requests.epoch)
-        if terminals { hub.terminals = TerminalRelay(link: requests.link, note: note) }
+        let terminals = mode != nil
+        if let mode { hub.terminals = TerminalRelay(link: requests.link, mode: mode, note: note) }
         access = WebAccess(tokens: WebTokens(root: requests.root), note: note)
         let bound = BoundPort()
         let assets = LiveAssets(folder: webRoot, port: { bound.port })
@@ -113,7 +117,7 @@ public final class NodeLive: @unchecked Sendable {
         said.live = self
     }
 
-    /// What a scratch server that opens terminals adds to a page's `hello.kinds`.
+    /// What a server that opens terminals adds to a page's `hello.kinds`.
     public static let terminalKinds = ["term.open", "term.close"]
 
     /// A web connection as `Requests` sees it: no process, no terminal, no cgroup. It is never the user's voice (the
@@ -130,7 +134,10 @@ public final class NodeLive: @unchecked Sendable {
         let nodeStream = LiveStream(collection: "node")
         for stream in [sessionsStream, leadsStream, cardsStream, nodeStream] { hub.add(collection: stream.collection, stream) }
         if let sessions {
-            hub.follow(sessions.changes, into: sessionsStream) { $0.liveValue }
+            let values = SessionLiveValues(queue: queue, sessions: sessions, drafts: requests.sessionDrafts, held: requests.heldSends)
+            values.start()
+            hub.follow(values.changes, into: sessionsStream) { $0 }
+            sessionValues = values
             status.watch(sessions.changes)
             let chats = ChatStore(queue: queue, home: requests.home, sessions: sessions.changes, note: note)
             chats.start(clock: clock)

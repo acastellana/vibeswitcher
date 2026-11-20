@@ -71,6 +71,7 @@ const ICONS = {
   chevron: 'M6 3.5L10.5 8L6 12.5',
   back: 'M10 3L5 8L10 13',
   terminal: 'M2.5 3.5H13.5V12.5H2.5ZM5 6.5L7 8.2L5 9.9M8.5 10H11',
+  eye: 'M1.8 8C3.3 5.3 5.5 3.9 8 3.9S12.7 5.3 14.2 8C12.7 10.7 10.5 12.1 8 12.1S3.3 10.7 1.8 8ZM8 9.9A1.9 1.9 0 1 0 8 6.1A1.9 1.9 0 0 0 8 9.9Z',
   chat: 'M2.5 3.5H13.5V10.5H7.5L4.5 13V10.5H2.5Z',
   team: 'M5.5 7A2 2 0 1 0 5.5 3A2 2 0 0 0 5.5 7ZM10.8 7.2A1.7 1.7 0 1 0 10.8 3.8M1.8 12.5C2 10.4 3.5 9.2 5.5 9.2S9 10.4 9.2 12.5M11 9.4C12.7 9.5 14 10.6 14.2 12.5',
   filter: 'M2.5 4.5H13.5M4.5 8H11.5M6.5 11.5H9.5',
@@ -92,6 +93,7 @@ const ICONS = {
   plus: 'M8 3V13M3 8H13',
   check: 'M3.5 8.5L6.5 11.5L12.5 4.5',
   copy: 'M5.5 5.5H12.5V13H5.5ZM3.5 10.5V3H10.5',
+  settings: 'M2.5 4.5H13.5M2.5 8H13.5M2.5 11.5H13.5M5.5 3V6M10.5 6.5V9.5M7 10V13',
   // A window with its right column: the inspector's toggle (the Mac's sidebar.right).
   inspector: 'M2.5 3.5H13.5V12.5H2.5ZM10 3.5V12.5',
 };

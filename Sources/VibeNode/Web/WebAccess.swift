@@ -228,8 +228,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     /// Why a web connection with `rights` may not send `request` (nil: it may): a kind no server names is
     /// `unknown-kind`; a read kind needs `read` and a draft kind `draft`; every other kind is `voice`, whatever the
     /// token: a web client is never the user's voice (LW-D6), nor the lead's tool server. A terminal's kinds are
-    /// `unknown-kind` but on a scratch server that takes them (`terminals`, LW-D12), where they need `read`: the
-    /// user's node opens no terminal.
+    /// `unknown-kind` but on a server that takes them (`terminals`), where they need `read`: the user's node's
+    /// terminals are watched only (`TerminalRelay.Mode.watch`), a scratch server's may be typed into (LW-D12).
     public static func refusal(for request: NodeWire.Request, rights: LiveRights, terminals: Bool = false) -> NodeWire.Reply? {
         let kind = ConfigSeal.inert(request.kind, limit: 80)
         switch NodeWire.kinds[request.kind] {
@@ -261,7 +261,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
 public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
     private let inner: WebSocketHandler
     private let note: @Sendable (String) -> Void
-    /// A scratch server's: the terminal's kinds go on to the hub (LW-D12).
+    /// A server with terminals (the user's node's watched, a scratch server's typed: LW-D12): the terminal's kinds go
+    /// on to the hub.
     private let terminals: Bool
     private let lock = NSLock()
     private var rights: [ObjectIdentifier: LiveRights] = [:]

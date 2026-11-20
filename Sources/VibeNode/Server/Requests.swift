@@ -12,7 +12,7 @@ public final class Requests: @unchecked Sendable {
     public struct Accepted: Equatable, Sendable {
         public var kind: String
         public var action: String?
-        /// The card or project it named, when it named one.
+        /// The card, project, folder or session it named, when it named one; else a setting's key.
         public var subject: String?
         public var at: Date
         public var pid: pid_t
@@ -56,6 +56,18 @@ public final class Requests: @unchecked Sendable {
     var shutdown: () -> HostEvent? = { nil }
     /// The lead engine `lead` starts leads through, and whose leads `status` lists (E4); none: `lead` is refused.
     public var engine: LeadEngine?
+    /// The messages web pages left for sessions (`session.draft`), by the node's id for each: told to nobody until
+    /// `vibeswitcher send SESSION` types one. On `queue`.
+    public let sessionDrafts = Changes<SessionDraft>()
+    /// The messages `send` holds for sessions while a question is open on their screens (`HeldSend`), by the node's id
+    /// for each, oldest first. On `queue`.
+    public let heldSends = Changes<[HeldSend]>()
+    /// The sessions whose held messages are being typed in now (`pumpHeld`). On `queue`.
+    var pumping: Set<UUID> = []
+    /// What sessions' composers complete (`session.complete`), kept a while.
+    let completionIndex = SessionCompletions()
+    /// Images web pages are sending in parts (`session.attach`). On `queue`.
+    let attachments = SessionAttachments()
     /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]
@@ -145,7 +157,10 @@ public final class Requests: @unchecked Sendable {
 
     /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
-                                               "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell"]
+                                               "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
+                                               "send", "session.new", "session.end", "session.reply",
+                                               "set", "push", "push.decline", "session.reopen", "prompt-audit",
+                                               "session.rename", "session.pause", "session.resume", "session.close-shells"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -164,11 +179,11 @@ public final class Requests: @unchecked Sendable {
         // A draft comes from a web page (`NodeLive` hands those to `draft` itself): from here it is no one's to leave.
         if needs == .webDraft {
             note("refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
-            return reply(.init(re: request.id, error: .init(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers")))
+            return reply(.init(re: request.id, error: .init(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers and `vibeswitcher send SESSION TEXT` sends")))
         }
         if request.kind == "web.open", openWebForAnyone {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
-            return act(request, reply: reply)
+            return act(request, from: facts, reply: reply)
         }
         if needs == .user {
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
@@ -203,7 +218,7 @@ public final class Requests: @unchecked Sendable {
                         again.re = request.id
                         reply(again)
                     case .success(true):
-                        self.act(request) { [weak self] answer in
+                        self.act(request, from: facts) { [weak self] answer in
                             self?.keep(answer, for: action)
                             reply(answer)
                         }
@@ -211,11 +226,11 @@ public final class Requests: @unchecked Sendable {
                 }
             }
         }
-        act(request, reply: reply)
+        act(request, from: facts, reply: reply)
     }
 
     /// What `request` does, once it passed.
-    private func act(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+    private func act(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
         acting(request)
         switch request.kind {
         case "status": status(request, reply: reply)
@@ -224,9 +239,26 @@ public final class Requests: @unchecked Sendable {
         case "lead": lead(request, reply: reply)
         case "questions": questions(request, reply: reply)
         case "board": board(request, reply: reply)
+        case "settings": settings(request, reply: reply)
+        case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)
         case "tell": tell(request, reply: reply)
+        case "push", "push.decline": push(request, reply: reply)
+        case "send": send(request, reply: reply)
+        case "session.new": newSession(request, reply: reply)
+        case "session.end": endSession(request, reply: reply)
+        case "session.reply": replySession(request, reply: reply)
+        case "session.presets": presets(request, terminal: facts.pid != NodeLive.webPeer.pid && facts.uid != nil, reply: reply)
+        case "session.complete": complete(request, reply: reply)
+        case "session.reopen": reopenSessions(request, reply: reply)
+        case "mail": mail(request, reply: reply)
+        case "prompt-audit": promptAudit(request, reply: reply)
+        case "session.rename": renameSession(request, reply: reply)
+        case "session.pause": pauseSession(request, reply: reply)
+        case "session.resume": resumeSession(request, reply: reply)
+        case "shells": shells(request, reply: reply)
+        case "session.close-shells": closeShells(request, reply: reply)
         case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)
@@ -277,6 +309,7 @@ public final class Requests: @unchecked Sendable {
     /// The card or project a request names, as recorded and shown.
     static func subject(_ request: NodeWire.Request) -> String? {
         request.args?["card"]?.string ?? request.args?["project"]?.string ?? request.args?["folder"]?.string
+            ?? request.args?["session"]?.string ?? request.args?["key"]?.string
     }
 
     // MARK: status
@@ -293,6 +326,20 @@ public final class Requests: @unchecked Sendable {
         }
         refreshNotes(answer)
         queue.asyncAfter(deadline: .now() + Self.notesWait) { answer() }
+    }
+
+    /// `status`'s notices, in order: the node stopping; each lead's (E5); the refresh's (E7); a host restart's and a lead
+    /// with no role (E8); a project due a prompt audit, a board that cleared, and a session left alone (2026-11-20). On
+    /// `queue`.
+    func statusNotices() -> [String] {
+        var notices = stopping ? ["the node is stopping"] : []
+        notices += engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []
+        notices += engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []
+        notices += (engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])
+        notices += engine?.promptAuditNotices ?? []
+        notices += engine?.allDoneNotices ?? []
+        notices += sessions?.reminderNotices() ?? []
+        return notices
     }
 
     /// `status`'s result: the node, the server, the host (its live sessions counted: what `stop` ends, its confirmation's
@@ -315,15 +362,17 @@ public final class Requests: @unchecked Sendable {
                              "notes": notes.map { Self.value($0.notes, at: $0.at) } ?? .null]),
             "rule": .object(["mode": .string(rule.mode.rawValue), "says": .string(rule.says),
                              "scopes": .array(rule.scopes.map { .string($0.pattern) })]),
-            "sessions": .array(list.map(\.liveValue)),
+            "sessions": .array(list.map { session in
+                let id = NodeSessions.id(of: session)
+                return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id], queued: heldSends.values[id] ?? [])
+            }),
             "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
             "cards": Self.counts(engine?.cards.counts() ?? [:]),
             "accepted": .array(accepted.map(\.value)),
-            "notices": .array((stopping ? ["the node is stopping"] : []).map(NodeWire.Value.string)
-                + (engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []).map(NodeWire.Value.string)
-                + (engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []).map(NodeWire.Value.string)
-                + ((engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])).map(NodeWire.Value.string)),
+            "notices": .array(statusNotices().map(NodeWire.Value.string)),
             "restart": engine?.restartValue ?? .null,
+            "reopen": engine?.offeredValue ?? .array([]),
+            "ended": engine?.endedValue ?? .array([]),
             "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
         ])
@@ -534,7 +583,7 @@ public final class Requests: @unchecked Sendable {
 
     // MARK: lead
 
-    /// `lead FOLDER [--goal TEXT] [--take-head] [--replace]` (E4): the engine's start, its outcome as the result:
+    /// `lead FOLDER [--goal TEXT] [--take-head] [--replace] [--resume]` (E4): the engine's start, its outcome as the result:
     /// the project's id, the lead's session, what happened (`started`, `shown`, `waiting`), the program's absolute path
     /// (EN-D13), and notes; a refusal is `refused` with the engine's reason.
     private func lead(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
@@ -544,7 +593,7 @@ public final class Requests: @unchecked Sendable {
         let goal = request.args?["goal"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server starts no leads"))) }
         engine.startLead(folder: folder, goal: goal, takeHead: request.args?["takeHead"]?.bool == true,
-                         replace: request.args?["replace"]?.bool == true) { outcome in
+                         replace: request.args?["replace"]?.bool == true, resume: request.args?["resume"]?.bool == true) { outcome in
             reply(Self.reply(request.id, folder: folder, outcome))
         }
     }
@@ -569,7 +618,7 @@ public final class Requests: @unchecked Sendable {
 
     /// One wait of `stop`'s, on `queue`: whether it was answered, its watch of the link's changes, and the sessions
     /// it asked to end.
-    private final class Waiting: @unchecked Sendable {
+    final class Waiting: @unchecked Sendable {
         var answered = false
         var watch: Subscription?
         var ended: Set<UUID> = []
