@@ -109,7 +109,8 @@ struct ToolsTests {
         // Nothing to read is nothing trusted.
         #expect(Platform.Tools.trustedGit(path: "/usr/bin", status: { _ in nil }) == nil)
         // The real one, on this machine, is in such a folder too, and `missing()` would list it otherwise.
-        #expect(Platform.Tools.trustedGit(path: "/usr/bin:/bin", status: Platform.Tools.fileStatus) == "/usr/bin/git")
+        // (In a branch run's box, by the box's rule: `insideABoxRootsFilesReadAsTheOverflowUid…`.)
+        #expect(Platform.Tools.trustedGit(path: "/usr/bin:/bin", status: Platform.Tools.fileStatus, box: Platform.Tools.boxOwners) == "/usr/bin/git")
         #expect(!Platform.Tools.isExecutableFile(Platform.Tools.absentGit))
     }
 
@@ -158,8 +159,10 @@ struct ToolsTests {
         #expect(Platform.Tools.boxOwners(uidMap: "2000 1000 1\n", overflow: overflow, own: own) == nil)
         #expect(Platform.Tools.boxOwners(uidMap: "", overflow: overflow, own: own) == nil)
         #expect(Platform.Tools.boxOwners(uidMap: "1000 x 1\n", overflow: overflow, own: own) == nil)
-        // This test process isn't in a box.
-        #expect(Platform.Tools.boxOwners == nil)
+        // This process: a box exactly when its own map leaves root out (the suite runs in a branch run's box too).
+        let map = Platform.Tools.procText("/proc/self/uid_map") ?? ""
+        #expect((Platform.Tools.boxOwners != nil) == (map.contains(where: { $0.isNumber }) && !map.split(separator: "\n").contains { line in
+            line.split(separator: " ", omittingEmptySubsequences: true).first == "0" }), "\(map)")
     }
 
     /// The Mac's git is today's.

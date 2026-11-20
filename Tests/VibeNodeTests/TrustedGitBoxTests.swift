@@ -34,8 +34,6 @@ struct TrustedGitBoxTests {
         #expect(said.contains("box=yes\n"), "\(said)")
         #expect(said.contains("system=/usr/bin/git\n"), "\(said)")
         #expect(said.contains("writable=none\n"), "\(said)")
-        // Outside, this process's own namespace isn't a box's: today's rule.
-        #expect(Platform.Tools.boxOwners == nil)
     }
 }
 

@@ -457,6 +457,10 @@ public enum BranchRun {
 
         // Where the command starts, and the layers in the run's own folder.
         plan.directory = cwd
+        // A shell's process substitution (`<(…)`, `/dev/fd/63`) and `/dev/stdout` as a path, as a build's and a test's
+        // scripts use them: links into the box's own /proc, as the machine has them.
+        plan.mounts += [.init("/dev/fd", .link(to: "/proc/self/fd")), .init("/dev/stdin", .link(to: "/proc/self/fd/0")),
+                        .init("/dev/stdout", .link(to: "/proc/self/fd/1")), .init("/dev/stderr", .link(to: "/proc/self/fd/2"))]
         var folders = [temporary(in: home)]
         let made = planned.box + "/layers/"
         plan.mounts = plan.mounts.map { entry in
