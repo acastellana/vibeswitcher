@@ -23,6 +23,9 @@ let usage = """
            vibeswitcher push FOLDER | decline-push FOLDER
            vibeswitcher send SESSION [TEXT] | reply SESSION CHOICE [TEXT]
            vibeswitcher new FOLDER [--agent claude|shell] [--model M] | end SESSION
+           vibeswitcher reopen [all | SESSION... | --forget]
+           vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]
+           vibeswitcher mail [FOLDER] [--all] [--json] | prompt-audit FOLDER snooze|off|on
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher settings [FOLDER] [--json] | set [FOLDER] KEY VALUE
@@ -66,6 +69,14 @@ case "new":
     exit(NewCommand.run(Array(words.dropFirst())))
 case "end":
     exit(EndCommand.run(Array(words.dropFirst())))
+case "reopen":
+    exit(ReopenCommand.run(Array(words.dropFirst())))
+case "new-project":
+    exit(NewProjectCommand.run(Array(words.dropFirst())))
+case "mail":
+    exit(MailCommand.run(Array(words.dropFirst())))
+case "prompt-audit":
+    exit(PromptAuditCommand.run(Array(words.dropFirst())))
 case "config":
     exit(ConfigCommand.run(Array(words.dropFirst())))
 case "base":

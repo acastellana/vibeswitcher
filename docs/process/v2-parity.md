@@ -12,9 +12,11 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **33 has it**, **15 partly**, **37 missing** (one of them, Codex workers, on purpose), **9 not needed on
-Linux**, **6 Linux-only new**, **1 unverified** (after the small accidental gaps closed on 2026-11-19: the lead's model,
-small_task_min, the seen mark, the battery hold, the push request told).
+Of 101 features: **40 has it**, **20 partly**, **25 missing** (one of them, Codex workers, on purpose), **9 not needed on
+Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`: after the
+2026-11-20 lanes' rows and that lane's small ones, reopening your own sessions after a restart, the prompt-audit reminder,
+reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads and
+the all-done mark).
 
 The gaps that matter most for daily use, worst first:
 
@@ -39,8 +41,9 @@ The gaps that matter most for daily use, worst first:
    each with its value, default, where it lives and whether it is a guard rail; `vibeswitcher set [FOLDER] KEY VALUE`
    changes one in the user's voice (typed code, recorded in the vault); the page's Settings drafts the line. Running
    leads are told when the policy changes, and a project's lead when its settings do.
-10. **Restarts lose work.** Nothing records the open sessions or reopens a lead with `--resume` after the machine
-    restarts. Rotation is on the node since 2026-11-20 (workflow.md's `lead_rotation:`).
+10. ~~**Restarts lose work.**~~ Closed 2026-11-20: after a host restart `vibeswitcher lead FOLDER --resume` reopens a
+    project's lead in its conversation, and `vibeswitcher reopen` the user's own Claude sessions in theirs. A lead's
+    workers are its to start again (told which). Rotation is on the node since 2026-11-20 (workflow.md's `lead_rotation:`).
 11. **No phone or remote access** (planned for stage 7). The web page is reachable on `127.0.0.1` only.
 
 ## The table
@@ -62,7 +65,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Sessions in other terminals: listed and readable | `SessionStore.swift`, `Sources/VibeCore/SessionScanner.swift` | has it | `Stores/NodeSessions.swift`: listed with `hosted: false`, and never typed into | | |
 | Terminal.app control: Open in Terminal, `--focus`, Move to Window | `TerminalBridge.swift`, `TabOrder.swift`, `Sources/VibeCore/MoveToWindow.swift` | not needed | there's no Terminal.app on Linux (design non-goal) | | |
 | Ended sessions: resume, copy the resume command or session id | `MainWindow/StartPage.swift`, `SessionListView.swift` | missing | the agent's session id isn't on the wire yet (`WebApp/README.md`, "Asked of the node") | S | |
-| Reopen sessions after the machine restarts (the restart card, a lead `--resume`d) | `RestartCard.swift`, `Sources/VibeCore/RestartReopen.swift` | missing | owed in the port map: "nothing offers them back" | M | |
+| Reopen sessions after the machine restarts (the restart card, a lead `--resume`d) | `RestartCard.swift`, `Sources/VibeCore/RestartReopen.swift` | has it | the lead: `vibeswitcher lead FOLDER --resume` (`Engine/RestartResume.swift`); your own Claude sessions: `vibeswitcher reopen [all\|SESSION…\|--forget]` (`Engine/SessionReopen.swift`, `Server/ReopenRequest.swift`, 2026-11-20), each `claude --resume <id>` in its folder, the record checked as a hint; `status` offers both after a host restart | | no launch presets, no Codex sessions (a node starts none) |
 | Status detection: hooks, OSC 7501, titles, the process table | `SessionStore.swift`, `Sources/VibeCore/StatusRules.swift` | has it | `Stores/NodeSessions.swift`, `Sources/VibeHost/V2/ParserReplies.swift` (automatic) | | titles only for sessions the host runs |
 | Background shells shown on a session | `SessionStore.swift` | has it | `Stores/NodeSessions.swift` | | |
 
@@ -91,9 +94,9 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Composer: send, steer while working, queue, `/` commands, `@` files, pasted images | `MainWindow/Chat/ComposerView.swift`, `ComposerOutbox.swift` | partly | `vibeswitcher send SESSION [TEXT]` (`send`, the user's voice) types as the composer does, a working agent taking it after its turn; refused while a question or menu is open. The page's composer leaves a `session.draft` and shows `vibeswitcher send SESSION`. No queue behind a question, `/` commands, `@` files or images | M | send and steer closed 2026-11-20 |
 | Answer a session's own permission prompt or question (⌘1–9 card) | `MainWindow/Chat/ChatView.swift` | has it | `NodeSessions.prompts` reads it off the screen (`SessionPrompt`); `vibeswitcher reply SESSION CHOICE [TEXT]` (`session.reply`) types the app's keys while the same question shows; the page's card shows the line. A multi-select is answered in its terminal | | closed 2026-11-20 |
 | Find in the chat, Export Chat, Copy as Markdown, Edit in Composer, Send Again | `MainWindow/Chat/ChatView.swift` | missing | not in `chat.js` | M | the browser's own find works on the rows drawn |
-| "New since you looked" marker and summary | `MainWindow/Chat/ChatView.swift` | missing | not in `chat.js` | S | |
+| "New since you looked" marker and summary | `MainWindow/Chat/ChatView.swift` | has it | `WebApp/js/views/chat.js`, `chatops.js` `newSince`/`sinceSummary` (2026-11-20): a line before the first item after the last one this browser saw at the chat's end, with what came since ("Ran 1 command · 1 reply"); worked out when the chat opens. What was seen is per browser (the Mac's per app) | | the chat opens at the end, not at the marker |
 | Run a code block (type it into the session after you confirm) | `MainWindow/Chat/ChatRunner.swift` | missing | needs the composer | M | |
-| The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | missing | owed in the port map | S | |
+| The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | partly | `Engine/AllDoneLook.swift` (2026-11-20): a board that clears is marked under its lock with the written summary (`BatchSummary`, no model asked), and `status` says it for a day. No card in the page's lead chat yet, no receipts shown, no seen mark | S | |
 | Push-to-talk dictation | `Dictation/` | missing | "later" in the design | L | |
 | Chat text size (⌘+ ⌘− ⌘0) | `MainWindow/Chat/MarkdownView.swift` | not needed | the browser zooms | | |
 
@@ -102,7 +105,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
 | Start a lead in a folder, with a goal | `MainWindow/Lead/LeadController.swift`, `--lead` | has it | `vibeswitcher lead FOLDER [--goal] [--take-head] [--replace]`; `Engine/LeadStart.swift` | | refuses a folder that isn't a repository or has no commit, where V1 offers to make one |
-| New Project… (make a repository, start its lead) | `MainWindow/NewProject/NewProjectSheet.swift`, `Sources/VibeCore/ProjectCreation.swift` | missing | no caller | S | |
+| New Project… (make a repository, start its lead) | `MainWindow/NewProject/NewProjectSheet.swift`, `Sources/VibeCore/ProjectCreation.swift` | has it | `vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]` (2026-11-20, `vibeswitcher-cli/NewProject.swift`): `ProjectCreation`'s folder, repository and first commit (nothing left on a failure), then `vibeswitcher lead FOLDER --goal`, its own typed code. Default location `~/dev` (the projects folder setting is the settings lane's); on the user's node a new folder also needs its line in `~/.vibeswitcher/v2/projects` (the host's allow-list says so) | | not on the page |
 | Message a running lead, or send it a goal | `LeadController.swift`, `--lead --goal` | has it | `vibeswitcher tell FOLDER TEXT`, `lead FOLDER --goal`; `Engine/Delivery.swift`, `Engine/Tell.swift` | | |
 | Questions to you, proposed answers on a timer, Hold | `LeadController.swift`, `MainWindow/Lead/LeadViews.swift` | has it | `vibeswitcher questions`, `answer CARD`, `hold CARD`; `Engine/Answers.swift`, `Stores/CardStore.swift`; the web page shows the cards | | |
 | Answer a card with one click | `MainWindow/Lead/LeadViews.swift` | partly | the web page leaves a draft and shows the `vibeswitcher answer CARD` line to confirm it in a terminal | | on purpose: a web page is never the user's voice (LW-D6) |
@@ -118,8 +121,8 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Base moves (a base moved outside the lead) | `MainWindow/Lead/BaseMoves.swift` | has it | `vibeswitcher base show/accept/keep`; `Stores/BaseMoveStore.swift` | | V1's typed `!` lines wait for a composer |
 | Push to the remote (`push_remote`, then your Push click) | `MainWindow/Lead/PushRequests.swift` | has it | `vibeswitcher push FOLDER` / `decline-push FOLDER` (the user's voice: typed code, recorded in the vault and journal), settling exactly the request shown through the vault and `LeadPush.settle` in the server; the lead told the outcome; the page shows the request in the lead's chat and drafts both lines, never pushes (`Engine/PushAsks.swift`, `Server/PushRequest.swift`) | | closed 2026-11-20. The tool's own reply still says "click Push … in VibeSwitcher" (`LeadPush.swift`, shared with main) |
 | Fetch from and merge the remote (`fetch_remote`, `merge_remote`) | `LeadToolset.swift` (shared) | unverified | shared tool, so it should work, but no node run has used it | | |
-| Leads messaging each other (`tell_lead`), and the "Between leads" view | `LeadToolset.swift`, `MainWindow/Lead/LeadMailViews.swift` | partly | the messages work (shared tool, delivered by `Engine/Delivery.swift`); `vibeswitcher set lead_mail off` turns them off (2026-11-20). There's no view | S | |
-| The prompt-audit reminder | `MainWindow/Lead/PromptAuditDesk.swift` | missing | owed in the port map | S | |
+| Leads messaging each other (`tell_lead`), and the "Between leads" view | `LeadToolset.swift`, `MainWindow/Lead/LeadMailViews.swift` | partly | the messages work (shared tool, delivered by `Engine/Delivery.swift`); `vibeswitcher mail [FOLDER] [--all]` shows each project's record of them, newest first, which way each went and what became of it (2026-11-20, `Server/MailRequest.swift`; the user's voice, no code: a private record). No page view, and no control to turn it off (the settings lane's) | S | |
+| The prompt-audit reminder | `MainWindow/Lead/PromptAuditDesk.swift` | has it | `Engine/PromptAuditWatch.swift` (2026-11-20): each running lead's project's transcripts looked at every 30 min (`PromptAudit`, shared); a project due one gets a `status` notice saying why and to type `/doctor prompt-audit` in its lead's session; `vibeswitcher prompt-audit FOLDER snooze\|off\|on` (the user's voice) is the card's Remind me in a week and Not for this project. Nothing types the command (the app's Run now is a click; here the user types it); on, every 14 days (the app's settings aren't the node's) | | |
 | `small_task_min` drops a review for tiny work | `LeadController.swift` `noteWorking` | has it | `Engine/Witness.swift` `witnessed`: the vault is told the sessions seen at work (`LeadVault.noteWorking`), on change or every 30 s, as the app's | | closed 2026-11-19 |
 | Fable held back: halted workers restarted on Opus | `LeadController.swift` `WitnessWork` | has it | `Engine/WitnessWork.swift` | | |
 | AI summaries of what each agent is doing | `MainWindow/Lead/TeamSummaryModel.swift`, `Sources/VibeCore/TeamSummaries.swift` | missing | no caller | M | |
@@ -154,9 +157,9 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
-| Banners when a session needs input or finishes | `AppDelegate.swift`, Settings › Notifications | partial | `WebApp/js/notify.js` (2026-11-20): the browser's notification while the page is open, when a card opens, a session's prompt waits (not a worker's or verifier's) or a lead stops; first line only; asked once, a toggle on This node; the title counts what needs you. `vibeswitcher questions --wait` for a terminal. Missing: a finished worker's banner (the Mac's is off for workers too), per-kind choices | M | planned "through the browser" |
-| A sound when a session needs input | Settings › Notifications | missing | | S | |
-| Reminders about waiting or stuck sessions | Settings › Notifications, `Sources/VibeCore/AlertRules.swift` | missing | `AlertRules.baseMoved` is the only alert, shown as a `status` notice | S | |
+| Banners when a session needs input or finishes | `AppDelegate.swift`, Settings › Notifications | partly | `WebApp/js/notify.js` (2026-11-20): the browser's notification while the page is open, when a card opens, a session's prompt waits (not a worker's or verifier's) or a lead stops; first line only; asked once, a toggle on This node; the title counts what needs you. `vibeswitcher questions --wait` for a terminal. Missing: a finished worker's banner (the Mac's is off for workers too), per-kind choices | M | planned "through the browser" |
+| A sound when a session needs input | Settings › Notifications | has it | `WebApp/js/notify.js` (2026-11-20): a short chime made on the page when a card opens or a session's prompt waits (not a lead stopping, nor the session you're looking at), its own toggle on This node, off until turned on; while the page is open | | |
+| Reminders about waiting or stuck sessions | Settings › Notifications, `Sources/VibeCore/AlertRules.swift` | has it | `NodeSessions.reminderNotices` (2026-11-20): the app's `Nudges` and `AlertRules.nudge` as `status` notices while each stands: waiting on you 10 min (a look from the page, `seen`, restarts it), working with no hook event for 15; a team's silent, a lead's only while it waits on you. A notice, not a banner: the page's notifications don't show them yet; no setting turns them off (the settings lane's) | | |
 | Phone push notifications | `Sources/VibeCore/WebPush.swift`, `Web/sw.js` | missing | stage 7 | M | |
 
 ### Updates and install

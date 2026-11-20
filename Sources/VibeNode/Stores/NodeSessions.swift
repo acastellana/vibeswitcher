@@ -227,6 +227,24 @@ public final class NodeSessions: @unchecked Sendable {
         }
     }
 
+    /// The app's reminders about sessions left alone (`Nudges.due`, `AlertRules.nudge`; parity: "Reminders about waiting
+    /// or stuck sessions", 2026-11-20), as `status` notices while each stands: a session waiting on you for 10 minutes
+    /// since it began to or since someone last looked at it (`acknowledge`), or one its hooks say works with no hook event
+    /// for 15. A team's are silent, a lead's only while it waits on you (`AlertRules.nudge`). A wait from before this
+    /// store started counts from its start. Every word a session wrote is inert. On `queue`.
+    public func reminderNotices() -> [String] {
+        let at = now()
+        return sessions.compactMap { session in
+            let activity = session.hasHooks && session.status == .working ? session.eventAt.map(Date.init(timeIntervalSince1970:)) : nil
+            guard let due = Nudges.due(status: session.status, statusSince: max(session.statusSince, launchedAt), lastSeen: acknowledged[session.tty],
+                                       lastActivity: activity, now: at),
+                  let alert = AlertRules.nudge(due.nudge, for: session, settings: AlertRules.Settings()) else { return nil }
+            let subtitle = alert.subtitle.map { " (\(ConfigSeal.inert($0, limit: 160)))" } ?? ""
+            let body = alert.body.isEmpty ? "" : ": " + ConfigSeal.inert(alert.body, limit: 200)
+            return "reminder: \(ConfigSeal.inert(alert.title, limit: 160))\(subtitle), on \(ConfigSeal.inert(session.tty, limit: 20))\(body)"
+        }
+    }
+
     /// Scans now (after the one under way, when one is). Not once stopped.
     public func refresh() {
         perform { [self] in scan() }

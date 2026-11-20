@@ -35,6 +35,7 @@ extension LeadEngine {
     /// On `queue`.
     func refreshNow() {
         startPending()
+        if !promptAuditLooked { lookAtPromptAudits() }
         // A running lead the vault couldn't be asked about at the server's start is bound again now (E8).
         if rebindAgain { keepRunningLeads() }
         sweepRoles()
@@ -101,6 +102,7 @@ extension LeadEngine {
     /// the boards' finished tasks, among the sessions as they were when the read began (see `forgetFinished`).
     func refreshed(roots: Set<String>, loaded: [String: LeadBoard], teams: [String: TeamReading],
                    refusals: [String: LeadVault.BaseMoveRefusal], finished: Set<UUID> = []) {
+        noteAllDone(previous: boards, loaded: loaded)
         if loaded != boards { boards = loaded }
         // A lead with a question or approval card open needs the user (`Session.leadAsks`).
         cardsChanged()

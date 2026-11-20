@@ -150,7 +150,7 @@ public final class Requests: @unchecked Sendable {
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
                                                "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
                                                "send", "session.new", "session.end", "session.reply",
-                                               "set", "push", "push.decline"]
+                                               "set", "push", "push.decline", "session.reopen", "prompt-audit"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -239,6 +239,9 @@ public final class Requests: @unchecked Sendable {
         case "session.new": newSession(request, reply: reply)
         case "session.end": endSession(request, reply: reply)
         case "session.reply": replySession(request, reply: reply)
+        case "session.reopen": reopenSessions(request, reply: reply)
+        case "mail": mail(request, reply: reply)
+        case "prompt-audit": promptAudit(request, reply: reply)
         case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)
@@ -308,6 +311,20 @@ public final class Requests: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + Self.notesWait) { answer() }
     }
 
+    /// `status`'s notices, in order: the node stopping; each lead's (E5); the refresh's (E7); a host restart's and a lead
+    /// with no role (E8); a project due a prompt audit, a board that cleared, and a session left alone (2026-11-20). On
+    /// `queue`.
+    func statusNotices() -> [String] {
+        var notices = stopping ? ["the node is stopping"] : []
+        notices += engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []
+        notices += engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []
+        notices += (engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])
+        notices += engine?.promptAuditNotices ?? []
+        notices += engine?.allDoneNotices ?? []
+        notices += sessions?.reminderNotices() ?? []
+        return notices
+    }
+
     /// `status`'s result: the node, the server, the host (its live sessions counted: what `stop` ends, its confirmation's
     /// count; the review of the start plan's S3) and its notes, the rule, the sessions, leads and cards
     /// (none before E4 and E6), the accepted requests and the notices (the node stopping; a lead whose board names a
@@ -335,11 +352,9 @@ public final class Requests: @unchecked Sendable {
             "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
             "cards": Self.counts(engine?.cards.counts() ?? [:]),
             "accepted": .array(accepted.map(\.value)),
-            "notices": .array((stopping ? ["the node is stopping"] : []).map(NodeWire.Value.string)
-                + (engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []).map(NodeWire.Value.string)
-                + (engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []).map(NodeWire.Value.string)
-                + ((engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])).map(NodeWire.Value.string)),
+            "notices": .array(statusNotices().map(NodeWire.Value.string)),
             "restart": engine?.restartValue ?? .null,
+            "reopen": engine?.offeredValue ?? .array([]),
             "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
         ])

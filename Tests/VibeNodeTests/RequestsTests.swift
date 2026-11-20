@@ -197,7 +197,7 @@ struct RequestsTests {
         // one or the other, every kind recorded in the vault but `start` (a running node's start says when it started)
         // changes state, and a kind no table lists is a state change. The live protocol's kinds too: its reads, a web
         // client's draft and terminal, and opening the web.
-        let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "question.post", "question.revise", "question.withdraw",
+        let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "mail", "question.post", "question.revise", "question.withdraw",
                                   "subscribe", "unsubscribe", "chat.page", "board",
                                   // It changes nothing but a session's seen mark (done or idle), so it needs no voice.
                                   "seen",
@@ -210,7 +210,11 @@ struct RequestsTests {
                                     // A setting changed (2026-11-20).
                                     "set",
                                     // Settling the lead's push request (2026-11-20).
-                                    "push", "push.decline"]
+                                    "push", "push.decline",
+                                    // Reopening the user's sessions after a host restart (2026-11-20).
+                                    "session.reopen",
+                                    // The prompt-audit reminder (2026-11-20).
+                                    "prompt-audit"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

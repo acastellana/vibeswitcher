@@ -297,7 +297,8 @@ shows them as text nodes only, never as markup, and the command line prints them
 | `cards` | `{questions: int, approvals: int, config: int, base: int}` | open cards counted by kind |
 | `accepted` | [object] | the last 50 user's-voice requests taken: `kind` string, `action` string?, `subject` string? †, `at` date, `pid` int, `cgroup` string?, `commandLine` [string] † |
 | `notices` | [string] † | what the node has to say, each a sentence the server built (the node stopping; a lead whose board names a session the vault doesn't bind; a base move that refused a merge; a host restart; a lead with no role). Shown as they are, in order |
-| `restart` | object? | the last host restart while its notice stands: `at` date, `before` date, `gone` [string] † (roots), `reset` string |
+| `restart` | object? | the last host restart while its notice stands: `at` date, `before` date, `gone` [string] † (roots), `reset` string, `sessions` int (the user's own sessions it ended, still offered; 2026-11-20) |
+| `reopen` **new** (2026-11-20) | [object] | the user's own sessions the last host restart ended, offered to `vibeswitcher reopen`: `session` string (the id they had), `folder` string †, `name` string †, `conversation` string? † (Claude's id; null: unknown, so it can't be reopened) |
 | `builds` | object? | the installed builds (`SwitchRequest.buildsValue`); null on a server with no install root |
 | `web` **new** | `{state: string, port: int?, tokens: int, connections: int}` | the web listener: `state` is `off`, `listening` or `refused: <why>` |
 
@@ -532,6 +533,9 @@ is done once (rule 8). What the first write actions need:
 | `send`, `session.new`, `session.end`, `session.reply` **new** (2026-11-20) | `session` and `text`; `folder`, `agent`, `model`; `session`; `session`, `choice`, `text`, `question`, `options` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: the page shows the line that runs each |
 | `settings` **new** (2026-11-20) | `folder?` | anyone | a token with `read`: `{node: {root, settings}, project: {project, root, settings} or null, leftOut: [{title, why}]}`, each setting `{key, title, about, section, scope, form, home, choices, limits, value, default, isDefault, where, guardRail, note}` (the schema's `setting`; the vector `settings`); a folder no lead has worked in is `gone` |
 | `set` **new** (2026-11-20) | `folder?`, `key`, `value` | the user's voice, the typed code from the action id, `action`; recorded: `{key, value, was, scope, project, told}` | refused, `voice` (the vector `set.from-a-page`): the page drafts the `vibeswitcher set` line (`views/settings.js`) |
+| `session.reopen` **new** (2026-11-20) | `all` bool, or `sessions` [string] (ids as `reopen` lists them, or prefixes of 4 or more), or `forget` bool | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: `vibeswitcher reopen` |
+| `mail` **new** (2026-11-20) | `folder` string? (absolute), `all` bool? | the user's voice, no typed code (a read of the projects' private record of their leads' `tell_lead` messages) | refused, `voice`: `vibeswitcher mail` |
+| `prompt-audit` **new** (2026-11-20) | `folder` string (absolute), `do`: `snooze`, `off` or `on` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: `vibeswitcher prompt-audit` |
 
 A session (§5) carries two more fields since 2026-11-20, each null when there's none: `prompt` {`question` †,
 `options` †, `descriptions` †, `text` (the options that take words, by index), `multiSelect`, `at`}, the question open
