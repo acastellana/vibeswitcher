@@ -333,14 +333,15 @@ public final class Requests: @unchecked Sendable {
     }
 
     /// `status`'s notices, in order: the node stopping; each lead's (E5); the refresh's (E7); a host restart's and a lead
-    /// with no role (E8); a project due a prompt audit, a board that cleared, and a session left alone (2026-11-20). On
-    /// `queue`.
+    /// with no role (E8); a project due a prompt audit, a team session behind a dialog nothing reads, a board that
+    /// cleared, and a session left alone (2026-11-20). On `queue`.
     func statusNotices() -> [String] {
         var notices = stopping ? ["the node is stopping"] : []
         notices += engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []
         notices += engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []
         notices += (engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])
         notices += engine?.promptAuditNotices ?? []
+        notices += engine?.unknownDialogNotices ?? []
         notices += engine?.allDoneNotices ?? []
         notices += sessions?.reminderNotices() ?? []
         return notices

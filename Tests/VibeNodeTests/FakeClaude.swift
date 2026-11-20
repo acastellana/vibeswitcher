@@ -103,7 +103,10 @@ enum FakeClaude {
 # written on its terminal, as a command's output) |
 # "trust" (its folder-trust question, as 2.1.30x draws it at the start in a new folder: rows with no numbers, the cursor
 # on "No, exit"; Enter there or Esc quits, Enter on "Yes, I trust this folder" goes on, "trusted" true in STATE; with
-# "lose", that many of its first keys are lost, as a menu not yet taking keys loses them) |
+# "lose", that many of its first keys are lost, as a menu not yet taking keys loses them) | "autoMode" (2.1.329's
+# "Teach auto mode about your environment?" popup over its box: Esc closes it, "autoMode" "declined" in STATE; Enter on
+# Continue "scanned"; Space or Enter on a setting toggles it) | "dialog" (a dialog it draws over its box that nothing
+# reads: "lines", the text drawn; Esc closes it) |
 # "exit" (it quits, as /exit) | "mcp" (the node's: {"op": "mcp", "tool": NAME, "arguments": {...}} starts the tool
 # server its --mcp-config names, a path or inline JSON, "server" or the one named vibeswitcher or the first; sends
 # initialize and the tools/call, and records the reply, or what failed, in "mcp" in STATE)).
@@ -245,6 +248,7 @@ state = {
     "mcp": [],               # the "mcp" op's calls: {"tool", "reply"} or {"tool", "error"}
     "trusted": False,        # "Yes, I trust this folder" chosen on the "trust" op's question
     "trustLose": 0,          # the trust question's keys still to be lost (the op's "lose")
+    "autoMode": "",          # its auto-mode popup: "" never shown, "open", "declined" (Esc), "scanned" (Continue)
 }
 MCP_DONE = threading.Event()  # an "mcp" call has finished: STATE to be written
 MCP_LOCK = threading.Lock()
@@ -266,6 +270,8 @@ question = None              # the AskUserQuestion on screen
 permission = None
 picker = None
 trust = None                 # the "trust" op's question: its cursor's row (0: "No, exit", 1: Yes)
+auto = None                  # the "autoMode" op's popup: {"focus", "shell", "repos"}
+dialog = None                # the "dialog" op's lines
 control_offset = 0
 paste = None                 # bytes of a bracketed paste being read
 reading = None               # a paste whose image paths are being read (see `take_paste`)
@@ -336,6 +342,10 @@ def draw():
         lines = draw_picker()
     elif state["mode"] == "trust":
         lines = draw_trust()
+    elif state["mode"] == "autoMode":
+        lines = draw_auto()
+    elif state["mode"] == "dialog":
+        lines = list(dialog)
     else:
         lines.append("⏺ " + state["reply"])
         lines.append("")
@@ -496,6 +506,38 @@ def draw_trust():
     lines.append("")
     lines.append(" Enter to confirm · Esc to cancel")
     return lines
+
+
+def draw_auto():
+    rows = ["How you use Claude here     Mixed", "Also scan shell history     " + ("on" if auto["shell"] else "off"),
+            "Also scan your other repos  " + ("on" if auto["repos"] else "off"), "Continue"]
+    lines = [" Teach auto mode about your environment?", "",
+             " Claude Code reads this project, your recent Claude sessions, and optionally your shell history and other",
+             " repositories. Claude analyzes this data and customizes auto mode to make better decisions.", ""]
+    for index, row in enumerate(rows):
+        lines.append((" ❯ " if auto["focus"] == index else "   ") + row)
+    lines.append("")
+    lines.append(" ↑/↓ to navigate · Space to toggle · Esc to cancel")
+    return lines
+
+
+def auto_key(key):
+    global auto
+    if key == "up":
+        auto["focus"] = max(0, auto["focus"] - 1)
+    elif key == "down":
+        auto["focus"] = min(3, auto["focus"] + 1)
+    elif key == "esc":
+        auto = None
+        state["autoMode"] = "declined"
+        state["mode"] = "idle"
+    elif key == "enter" and auto["focus"] == 3:
+        auto = None
+        state["autoMode"] = "scanned"
+        state["mode"] = "idle"
+    elif key in ("space", "enter") and auto["focus"] in (1, 2):
+        name = "shell" if auto["focus"] == 1 else "repos"
+        auto[name] = not auto[name]
 
 
 def trust_key(key):
@@ -992,6 +1034,11 @@ def key(name):
         picker_key(name)
     elif mode == "trust":
         trust_key(name)
+    elif mode == "autoMode":
+        auto_key(name)
+    elif mode == "dialog":
+        if name == "esc":
+            state["mode"] = "idle"
     else:
         menu = suggestions()
         if menu and name in ("up", "down", "enter", "esc", "tab"):
@@ -1239,7 +1286,7 @@ def start_child(foreground, program="/bin/sleep"):
 
 
 def control():
-    global control_offset, trust
+    global control_offset, trust, auto, dialog
     try:
         with open(CONTROL) as f:
             f.seek(control_offset)
@@ -1311,6 +1358,13 @@ def control():
             draw()
         elif op == "mcp":
             threading.Thread(target=call_tool, args=(command,), daemon=True).start()
+        elif op == "autoMode":
+            auto = {"focus": 1, "shell": True, "repos": False}
+            state["autoMode"] = "open"
+            state["mode"] = "autoMode"
+        elif op == "dialog":
+            dialog = command["lines"]
+            state["mode"] = "dialog"
         elif op == "trust":
             trust = 0
             state["trustLose"] = command.get("lose", 0)

@@ -64,6 +64,9 @@ public final class NodeSessions: @unchecked Sendable {
     /// (done, idle, unknown) with their background work, every `screenEvery` s: Claude's trust question at a start
     /// comes before any hook says it needs you.
     public let prompts = Changes<SessionPrompt>()
+    /// Told each hosted session's screen as it's read for its question (nil: it couldn't be read), on `queue`: the
+    /// engine's look for Claude Code's popups on team sessions (`LeadEngine.lookAt(screen:of:)`).
+    public var sawScreen: ((HostSession, String?) -> Void)?
     /// The process table `sessions` come from: when it was read and the terminals it couldn't tell an agent on or not.
     /// Set after `sessions`, so a reader never pairs a newer table with older sessions (an agent the newer table finds
     /// would read as quit). On `queue`.
@@ -359,7 +362,10 @@ public final class NodeSessions: @unchecked Sendable {
             link.screen(session.id) { [weak self] text in
                 self?.perform {
                     guard let self, !self.stopped, self.hosted[tty]?.id == session.id else { return }
-                    if self.promptable.contains(tty) { self.prompt(text.flatMap(SessionPrompt.menu(on:)), id: NodeIds.session(host: session.id)) }
+                    if self.promptable.contains(tty) {
+                        self.prompt(text.flatMap(SessionPrompt.menu(on:)), id: NodeIds.session(host: session.id))
+                        self.sawScreen?(session, text)
+                    }
                     guard keep else { return }
                     let before = self.screens[tty].flatMap { BackgroundWork.summary(fromScreen: $0) }
                     self.screens[tty] = text

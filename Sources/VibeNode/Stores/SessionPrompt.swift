@@ -36,7 +36,11 @@ public struct SessionPrompt: Equatable, Sendable {
     ///
     ///     Enter to confirm · Esc to cancel
     ///
-    /// The footer (the last line) says Enter chooses; one row is marked ❯ / ›, the others start where its text does
+    /// Or 2.1.329's "Teach auto mode about your environment?", its rows toggles with their settings in a column
+    /// (`❯ Also scan shell history     on`, the setting read as the row's description) and a Continue, its footer
+    /// `↑/↓ to navigate · Space to toggle · Esc to cancel` (on a team session the engine declines it: `ClaudePopup`).
+    ///
+    /// The footer (the last line) says Enter chooses or the arrows move; one row is marked ❯ / ›, the others start where its text does
     /// (a line further in is the row above's second line), with no blank line between; the question is the text above,
     /// up to a rule (at most 12 lines: the trust question's path and its wrapped sentences). Options in screen order,
     /// the cursor's as `selected`, so `keys(toChoose:)` answers it as the app's keys do (arrows, then Enter). A local
@@ -45,7 +49,7 @@ public struct SessionPrompt: Equatable, Sendable {
         let lines = screen.map(unboxed)
         guard let footer = lines.lastIndex(where: { !$0.allSatisfy(\.isWhitespace) }) else { return nil }
         let hint = lines[footer].trimmingCharacters(in: .whitespaces)
-        guard hint.range(of: #"\bEnter to (confirm|select|continue)\b"#, options: .regularExpression) != nil else { return nil }
+        guard hint.range(of: #"\bEnter to (confirm|select|continue)\b|↑/↓ to navigate"#, options: .regularExpression) != nil else { return nil }
         let indent = { (line: String) in line.prefix { $0 == " " }.count }
         let blank = { (line: String) in line.allSatisfy(\.isWhitespace) }
         let isMarked = { (line: String) in line.drop { $0 == " " }.first.map { "❯›".contains($0) } == true }
@@ -67,7 +71,12 @@ public struct SessionPrompt: Equatable, Sendable {
                 continue
             }
             if index == marked { selected = rows.count }
-            rows.append((content, []))
+            // `Also scan shell history     on`: a row's setting in a column of its own, as its description.
+            if let gap = content.range(of: "  +", options: .regularExpression), !content[gap.upperBound...].isEmpty {
+                rows.append((content[..<gap.lowerBound].trimmingCharacters(in: .whitespaces), [String(content[gap.upperBound...])]))
+            } else {
+                rows.append((content, []))
+            }
         }
         guard rows.count >= 2, rows.allSatisfy({ !$0.label.isEmpty }) else { return nil }
         var question: [String] = []
@@ -90,6 +99,12 @@ public struct SessionPrompt: Equatable, Sendable {
         if let right = characters.indices.last, right > left, "│┃".contains(characters[right]) { characters[right] = " " }
         while characters.last == " " { characters.removeLast() }
         return String(characters)
+    }
+
+    /// Whether option `index` of `menu` is a setting toggled with Space (2.1.329's auto-mode popup: `Also scan shell
+    /// history  on`), which Enter mightn't choose: `reply` leaves it to the terminal.
+    public static func toggles(_ menu: ScreenMenu, _ index: Int) -> Bool {
+        (menu.hint?.contains("Space to toggle") ?? false) && menu.descriptions.indices.contains(index) && menu.descriptions[index] != nil
     }
 
     /// Whether option `index` of `menu` is a free-text one ("Type something."): it takes the answer's words.

@@ -301,6 +301,13 @@ public final class LeadEngine: @unchecked Sendable {
     var rebindAgain = false
     /// The running leads the vault gives no role, by root, while each runs: `status` says so.
     public internal(set) var roleless: [String: Roleless] = [:]
+    /// Claude Code's popups on team sessions (`ClaudePopups.swift`): the sessions an Esc is going into now, each popup
+    /// declined so far (for tests and the log), and the dialogs nothing here reads, by session, while they stay.
+    var declining: Set<UUID> = []
+    public internal(set) var popupsDeclined: [(session: UUID, popup: ClaudePopup)] = []
+    var dialogs: [UUID: UnknownDialog] = [:]
+    /// The clock an unknown dialog's time is judged by (a test's later).
+    var dialogNow: () -> Date = Date.init
 
     /// `root`: the node's root (its policy, limits, sessions' temporary folders; a scratch node's lead gets it as
     /// `VIBESWITCHER_HOME`). `nodeRoot`: the build's folder. `link`: the host. `clock`: the engine's clock.
@@ -325,6 +332,8 @@ public final class LeadEngine: @unchecked Sendable {
         if options.sweepsRoles { roleSweep = makeRoleSweep() }
         refreshTimer = clock?.every(3) { [weak self] in self?.refresh() }
         promptAuditTimer = clock?.every(Int(Self.promptAuditEvery)) { [weak self] in self?.queue.async { self?.lookAtPromptAudits() } }
+        // Each screen the session scan reads: a popup on a team session declined, a dialog nothing reads noted.
+        sessions?.sawScreen = { [weak self] session, text in self?.lookAt(screen: text, of: session) }
     }
 
     /// The vault the cards are built from and the user's answers recorded in: the link's, or a test's.
