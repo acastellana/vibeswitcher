@@ -334,3 +334,7 @@
 - 2026-11-20 17:14 Automatically (auto_advance): Overlap for the-suite-passes-on's start (a warning only: nothing was refused or reordered). Sources/VibeCore/V2/Sandbox/SandboxPlanner.swift: team-sessions-start (review: its branch changes it), windows-access-is-a (planned: its boundaries name it); Tests/VibePlatformTests/SandboxFactsTests.swift: tests-that-write-a (running: its branch changes it).
 - 2026-11-20 17:18 Exception on the-suite-passes-on by lead of vibeswitcher-v2-lead: edits to Sources/VibeCore/LeadToolset.swift, Sources/CVibePlatform/** accepted. Reason: Two edits the goal needs outside the plain list. (4): LeadToolset reads VIBESWITCHER_HEAVY_SLOTS straight from the process environment (TestLock.slotsSet() at lines 317 and 344), so BoostTests can't s…
 - 2026-11-20 17:49 Sent the-node-s-gate's worker contract v2 (it had v1)
+- 2026-11-20 17:59 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 17:59 Started a worker on hookscommandtests-hooks
+- 2026-11-20 17:59 Automatically (auto_advance): Started a worker on hookscommandtests-hooks (HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit).
+- 2026-11-20 17:59 Automatically (auto_advance): Overlap for hookscommandtests-hooks's start (a warning only: nothing was refused or reordered). Tests/VibeNodeTests/HooksCommandTests.swift: tests-that-write-a (running: its branch changes it); Tests/VibeNodeTests/ScratchNode.swift: tests-that-write-a (running: its branch changes it).
