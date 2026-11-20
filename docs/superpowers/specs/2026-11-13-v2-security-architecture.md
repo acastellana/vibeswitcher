@@ -602,6 +602,8 @@ command line alone where it doesn't (a guard rail):
 | `end SESSION` | the user's | yes | ends an ordinary session the node's host started; refused for a lead and its team |
 | `session.attach` | a web page whose token drafts; refused `voice` on the Unix socket | no | an image pasted into a session's composer, in parts, checked to be the image its type says and written to `<root>/attachments` (0600; at most 5 MB, 4 at once, the folder capped at 200 MB); typed nowhere: a draft names it, and `send SESSION` sends it in the user's voice |
 | `session.presets`, `session.complete` | anyone (reads) | no | a folder's launch presets (their variables by name only) and what a session's `/` and `@` complete to (command and skill names, the session folder's file names) |
+| `settings [FOLDER]` | anyone of the uid (a page's token reads it) | no | reads the node's settings and a project's, with where each lives; no secret in them |
+| `set [FOLDER] KEY VALUE` | the user's | yes | changes a setting where the app keeps it: the limits, Boost, leads messaging each other and the working policy under the node's root, a project's models and max_workers in its workflow.md (a guard rail's hash recorded in the vault as the user's, as the app's `setGuardedSettings`, so merge and start_worker take it), its review rules' floor in the vault; the value checked and shown inert before the code. A web page only drafts the line |
 | `draft`, `draft.clear` | a web page whose token drafts; refused `voice` on the Unix socket | no | the user's words left on a card in the server's memory and told to nobody: no lead, no vault, nothing recorded, until `answer CARD` takes them as above (the live plan's B5, I3; LW-D6). A draft a thief plants is shown in full before the code is typed: a guard rail as strong as the typed word |
 | `web.open`, `web.revoke` | the user's | yes (from the action id) | mint a pairing code for a page, or drop every page's token (the live plan's I1) |
 | `config held`, `base show FOLDER [--from COMMIT]` | the user's | no | change nothing; each makes the card the next request takes |
@@ -622,6 +624,11 @@ nobody) and shows the command that sends it, and shows the others as commands to
 a restart of the server drops it) and takes images by path; `new` takes a launch preset; a page attaches images
 (`session.attach`, the `draft` right: a file in the node's attachments folder, typed nowhere) and reads presets and
 completions. Nothing new is the user's voice but what `send` and `new` already were.
+
+**(2026-11-20)** `settings` and `set` added (the parity table's gap 9): `settings` a read; `set` the same voice, code
+and record as `tell`. A guard rail or a floor rule set this way is the user's in the vault, never a session's: a
+session's `vibeswitcher set` is refused for its voice like any other. A web page reads the settings and drafts the
+`vibeswitcher set` line on its own page; nothing is left on the node.
 
 `status --ack` and `start`'s acknowledgment of S11 are not requests: the command line writes each to the journal
 itself, after its own typed code (the engine's EN-D15), so a seized server can't clear them.

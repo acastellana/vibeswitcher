@@ -6,12 +6,18 @@
 // bidirectional and other format characters are taken out first. The title bar counts what needs you: open cards and
 // prompts waiting.
 //
-// What it decides (`summarize`, `changes`, `firstLine`, `titled`) knows nothing of the page and is tested on its own;
-// `notifications(app)` puts it on the page.
+// A sound too, when something new needs you (a card or a prompt; not a lead that stopped), the Mac's Settings ›
+// Notifications sound (2026-11-20): its own toggle on This node, off until turned on (a page can't play before you've
+// clicked on it), a short soft chime made on the page (`chime`: no file fetched), not played for the session you're
+// looking at.
+//
+// What it decides (`summarize`, `changes`, `firstLine`, `titled`, `sounding`) knows nothing of the page and is tested on
+// its own; `notifications(app)` puts it on the page.
 
 import { h } from './dom.js';
 
 const PREF = 'vibeswitcher.notifications';
+const SOUND = 'vibeswitcher.sound';
 const href = (id) => '#/s/' + encodeURIComponent(id);
 const lastPart = (path) => String(path || '').split('/').filter(Boolean).pop() || '';
 
@@ -79,12 +85,35 @@ export function titled(title, count) {
   return count > 0 ? `(${count}) ${bare}` : bare;
 }
 
-function stored(storage) {
-  try { return storage?.getItem(PREF) ?? null; } catch { return null; }
+// Whether what's told calls for the sound: something new that needs you (a card, a prompt), not a lead that stopped.
+export function sounding(told) {
+  return told.some((note) => /^(card|prompt):/.test(note.key));
 }
 
-function store(storage, value) {
-  try { storage?.setItem(PREF, value); } catch { /* a private window: the choice lasts for this page */ }
+// A short soft chime on `context` (an AudioContext): two sine notes, a fifth apart, each fading out within 0.4 s.
+export function chime(context) {
+  const start = context.currentTime;
+  [[660, 0], [990, 0.12]].forEach(([frequency, after]) => {
+    const tone = context.createOscillator();
+    const level = context.createGain();
+    tone.type = 'sine';
+    tone.frequency.value = frequency;
+    level.gain.setValueAtTime(0.0001, start + after);
+    level.gain.exponentialRampToValueAtTime(0.12, start + after + 0.02);
+    level.gain.exponentialRampToValueAtTime(0.0001, start + after + 0.4);
+    tone.connect(level);
+    level.connect(context.destination);
+    tone.start(start + after);
+    tone.stop(start + after + 0.42);
+  });
+}
+
+function stored(storage, key = PREF) {
+  try { return storage?.getItem(key) ?? null; } catch { return null; }
+}
+
+function store(storage, value, key = PREF) {
+  try { storage?.setItem(key, value); } catch { /* a private window: the choice lasts for this page */ }
 }
 
 // The notifier on the page. `env`: what it uses of the browser, for a test's own (Notification, storage, document).
@@ -94,7 +123,9 @@ export function notifications(app, env = {}) {
   const storage = 'storage' in env ? env.storage : globalThis.localStorage;
   const doc = env.document || globalThis.document;
   const supported = typeof Note === 'function';
+  const Audio = 'AudioContext' in env ? env.AudioContext : globalThis.AudioContext;
   let last = null;
+  let audio = null;
 
   const enabled = () => supported && stored(storage) === 'on' && Note.permission === 'granted';
 
@@ -108,14 +139,36 @@ export function notifications(app, env = {}) {
   // The toggle on This node.
   const box = h('input', { type: 'checkbox', class: 'notify-toggle', onchange: () => turn(box.checked) });
   const said = h('span', { class: 'notify-said' });
+  // The sound's toggle beside it.
+  const ring = h('input', { type: 'checkbox', class: 'sound-toggle', onchange: () => sound(ring.checked) });
   const el = h('section', { class: 'node-group notify' }, h('h2', { class: 'section-title' }, 'Notifications'),
-    h('label', { class: 'notify-line' }, box, ' Tell me when something needs me, while this page is open'), said);
+    h('label', { class: 'notify-line' }, box, ' Tell me when something needs me, while this page is open'), said,
+    h('label', { class: 'notify-line' }, ring, ' Play a sound when something needs me'));
+
+  const soundOn = () => typeof Audio === 'function' && stored(storage, SOUND) === 'on';
 
   function draw() {
     box.checked = enabled();
     box.disabled = !supported || Note.permission === 'denied';
     said.textContent = !supported ? 'This browser has no notifications.'
       : Note.permission === 'denied' ? 'Blocked in this browser’s settings for this page.' : '';
+    ring.checked = soundOn();
+    ring.disabled = typeof Audio !== 'function';
+  }
+
+  // Plays the chime; the context made (or woken) on the toggle's click, which is what lets a page play at all.
+  function play() {
+    try {
+      audio = audio || new Audio();
+      if (audio.state === 'suspended') audio.resume?.();
+      chime(audio);
+    } catch { /* no sound here: nothing else depends on it */ }
+  }
+
+  function sound(on) {
+    store(storage, on ? 'on' : 'off', SOUND);
+    if (on) play();
+    draw();
   }
 
   async function turn(on) {
@@ -133,9 +186,10 @@ export function notifications(app, env = {}) {
     if (doc) doc.title = titled(doc.title, summary.asks.size);
   }
 
+  const lookingAt = (note) => doc && doc.visibilityState === 'visible' && doc.hasFocus?.() && ui.state.route.name === 'session' && note.href === href(ui.state.route.id);
+
   function show(note) {
-    const looking = doc && doc.visibilityState === 'visible' && doc.hasFocus?.() && ui.state.route.name === 'session' && note.href === href(ui.state.route.id);
-    if (looking) return;
+    if (lookingAt(note)) return;
     const shown = new Note(note.title, { body: note.body, tag: note.key });
     shown.onclick = () => {
       globalThis.focus?.();
@@ -153,6 +207,7 @@ export function notifications(app, env = {}) {
       const told = changes(last, now);
       if (told.length && supported && Note.permission === 'default' && stored(storage) === null) offer.hidden = false;
       if (enabled()) told.forEach(show);
+      if (soundOn() && sounding(told.filter((note) => !lookingAt(note)))) play();
     }
     last = now;
   }
@@ -165,5 +220,5 @@ export function notifications(app, env = {}) {
   }
   draw();
   look();
-  return { el, offer, look, turn, enabled };
+  return { el, offer, look, turn, enabled, sound };
 }

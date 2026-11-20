@@ -62,7 +62,9 @@ public enum WireSchema {
                                   "board.args", "board.result", "seen.args",
                                   "session.draft.args", "session.draft.result", "session.draft.clear.args",
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
-                                  "session.attach.args", "session.attach.result"]
+                                  "session.attach.args", "session.attach.result",
+
+                                  "settings.args", "settings.result", "set.args", "set.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -171,7 +173,8 @@ public enum WireSchema {
                 field("node", .string), field("epoch", .string), field("root", .string), field("server", .shape("node.server")),
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
-                field("restart", Kind.shape("node.restart").orNull), field("builds", Kind.any.orNull), field("web", .shape("node.web"))]),
+                field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))),
+                field("builds", Kind.any.orNull), field("web", .shape("node.web"))]),
             shape("node.server", from: "Requests.statusValue", [field("pid", .int), field("startedAt", .date), field("commit", .string)]),
             shape("node.host", from: "Requests.statusValue", [
                 field("startedAt", Kind.date.orNull), field("pid", Kind.int.orNull), field("state", .string),
@@ -188,7 +191,9 @@ public enum WireSchema {
                 field("kind", .string), field("action", Kind.string.orNull), field("subject", Kind.string.orNull), field("at", .date),
                 field("pid", .int), field("cgroup", Kind.string.orNull), field("commandLine", strings)]),
             shape("node.restart", from: "LeadEngine.restartValue", [field("at", .date), field("before", .date), field("gone", strings),
-                                                                   field("reset", .string)]),
+                                                                   field("reset", .string), field("sessions", .int)]),
+            shape("node.reopen", from: "LeadEngine.offeredValue (the stability lane, 2026-11-20)", [
+                field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull)]),
             shape("node.web", from: contractNode, [field("state", .string), field("port", Kind.int.orNull), field("tokens", .int),
                                                   field("connections", .int)]),
         ]
@@ -221,9 +226,13 @@ public enum WireSchema {
                 field("project", .string), field("root", .string), field("session", Kind.string.orNull), field("named", Kind.string.orNull),
                 field("bound", Kind.string.orNull), field("replaced", strings), field("held", .int), field("reportsWaiting", .int),
                 field("notice", Kind.string.orNull), field("starting", .bool), field("lastStart", Kind.string.orNull),
-                field("lastStartAt", Kind.date.orNull), pending(field("looks", .int), byStatus),
+                field("lastStartAt", Kind.date.orNull), field("push", Kind.shape("lead.push").orNull), pending(field("looks", .int), byStatus),
                 pending(field("questions", .shape("lead.questions")), byStatus), pending(field("cards", strings), byStatus)]),
             shape("lead.questions", from: "Requests.leadValue", [field("open", .int), field("blocking", .int)]),
+            // The push its lead asked for, while it's open (push_remote, `PushAsks.swift`).
+            shape("lead.push", from: "LeadStore.Lead.pushValue", [
+                field("id", .string), field("commit", .string), field("short", .string), field("branch", .string), field("remote", .string),
+                field("target", .string), field("url", .string), field("ahead", .int), field("subjects", strings), field("askedAt", .date)]),
         ]
 
         // A card (the contract's §5).
@@ -291,6 +300,28 @@ public enum WireSchema {
             shape("board.merged", from: "BoardValue.task", [field("commit", .string), field("at", Kind.date.orNull), field("tested", .bool)]),
             shape("board.args", from: "Requests.board", [optional("folder", .string)]),
             shape("board.result", from: "Requests.board", [field("boards", .list(.shape("board")))]),
+        ]
+
+        // The node's settings (`settings`' result, `set`: the parity table's gap 9, 2026-11-20).
+        shapes += [
+            shape("setting", from: "NodeSettings.Shown.wire", [
+                field("key", .string), field("title", .string), field("about", .string), field("section", .string),
+                field("scope", .words(["node", "project"])), field("form", .words(["flag", "count", "number", "choice", "model", "paths", "text"])),
+                field("home", .words(["limits", "preferences", "policy", "workflow", "floor"])), field("choices", strings),
+                field("limits", Kind.string.orNull), field("value", .string), field("default", .string), field("isDefault", .bool),
+                field("where", .string), field("guardRail", .bool), field("note", Kind.string.orNull)]),
+            shape("settings.node", from: "Requests.settings", [field("root", .string), field("settings", .list(.shape("setting")))]),
+            shape("settings.project", from: "Requests.settings", [field("project", .string), field("root", .string),
+                                                                   field("settings", .list(.shape("setting")))]),
+            shape("settings.left", from: "Requests.settings", [field("title", .string), field("why", .string)]),
+            shape("settings.args", from: "Requests.settings", [optional("folder", .string)]),
+            shape("settings.result", from: "Requests.settings", [field("node", .shape("settings.node")),
+                                                                  field("project", Kind.shape("settings.project").orNull),
+                                                                  field("leftOut", .list(.shape("settings.left")))]),
+            shape("set.args", from: "Requests.set", [optional("folder", .string), field("key", .string), field("value", .string)]),
+            shape("set.result", from: "Requests.set", [field("key", .string), field("value", .string), field("was", .string),
+                                                        field("scope", .words(["node", "project"])), field("project", Kind.string.orNull),
+                                                        field("told", Kind.words(["lead", "leads"]).orNull)]),
         ]
 
         // A chat's items (the contract's §6).

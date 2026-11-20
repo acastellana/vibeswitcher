@@ -9,8 +9,24 @@ import VibeCore
 /// renders a reply's markdown to nodes itself. An image is its type and its size, never its bytes (LW-D11: what an agent
 /// produced is served from a separate origin, which stage 5 builds).
 public enum ChatValue {
-    /// `item` as the wire's, or nil for a case the wire doesn't carry.
+    /// `item` as the wire's, or nil for a case the wire doesn't carry. No URL's credentials reach a page in it
+    /// (`PushText.scrub` on every string: a remote's `https://user:token@…` that a tool's reply, a command or the lead's
+    /// push_remote quotes, a token in a URL's query); nothing else is rewritten.
     public static func value(_ item: ChatItem) -> NodeWire.Value? {
+        unscrubbed(item).map(scrubbed)
+    }
+
+    /// `value` with every string scrubbed of URL credentials.
+    static func scrubbed(_ value: NodeWire.Value) -> NodeWire.Value {
+        switch value {
+        case .string(let text): return .string(PushText.scrub(text))
+        case .array(let values): return .array(values.map(scrubbed))
+        case .object(let fields): return .object(fields.mapValues(scrubbed))
+        default: return value
+        }
+    }
+
+    private static func unscrubbed(_ item: ChatItem) -> NodeWire.Value? {
         switch item {
         case .prompt(let entry): return prompt(entry)
         case .reply(let entry):

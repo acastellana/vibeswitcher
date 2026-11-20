@@ -284,15 +284,26 @@ public enum NodeWire {
         "web.open": .user, "web.revoke": .user,
         "term.open": .webTerminal, "term.close": .webTerminal,
         // Driving an ordinary session (the parity table's gaps 1, 3 and 6, 2026-11-20): the user's voice, and a page's draft.
-        "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user,
+        "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user, "session.reopen": .user,
+        // Between leads (the stability lane, 2026-11-20): a read, but the projects' private record of their leads'
+        // messages, so only the user's (no session's, no page's), with no typed word (`changesNothing`).
+        "mail": .user,
+        // The prompt-audit reminder's snooze, off and on (the stability lane, 2026-11-20).
+        "prompt-audit": .user,
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
         // The composer and launch presets (2026-11-20): what a session's `/` and `@` offer, and the presets, are reads.
         "session.presets": .anyone, "session.complete": .anyone, "session.attach": .webDraft,
+        // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
+        // user's voice.
+        "settings": .anyone, "set": .user,
+        // Settling the lead's push request (the parity table's push row, 2026-11-20): the user's voice.
+        "push": .user, "push.decline": .user,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
-    /// started; `config.held` and `base.show` make the card the next request takes.
-    public static let changesNothing: Set<String> = ["start", "config.held", "base.show"]
+    /// started; `config.held` and `base.show` make the card the next request takes; `mail` reads the projects' private
+    /// record of their leads' messages.
+    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "mail"]
 
     /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
     /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
@@ -310,8 +321,9 @@ public enum NodeWire {
     /// and `web.revoke` from the live plan's I1; `chat.page` from I2; `draft` and `draft.clear` from I3, a web page's
     /// only; `tell` from the node frictions of 2026-11-19; `board` from the board view's; `seen` from the parity gaps
     /// of 2026-11-19; `send`, `session.new`, `session.end`, `session.reply`, `session.draft` and `session.draft.clear`
-    /// from driving sessions, 2026-11-20; `session.presets`, `session.complete` and `session.attach` from the composer's lane, 2026-11-20): every kind `kinds` names but the live protocol's later ones (the terminal from
-    /// I4).
+    /// from driving sessions, 2026-11-20; `settings` and `set` from the settings, 2026-11-20; `push` and `push.decline`
+    /// from the push row, 2026-11-20; `session.presets`, `session.complete` and `session.attach` from the composer's lane,
+    /// 2026-11-20): every kind `kinds` names but the live protocol's later ones (the terminal from I4).
     public static let taken = ["status", "start", "stop", "lead", "questions", "draft", "draft.clear", "answer", "hold", "config.held", "config.accept",
                                "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
                                "hooks.install", "hooks.remove", "build.switch", "subscribe", "unsubscribe", "web.open", "web.revoke",
@@ -319,7 +331,11 @@ public enum NodeWire {
                                "tell",
                                "board", "seen",
                                "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
-                               "session.presets", "session.complete", "session.attach"]
+                               "session.presets", "session.complete", "session.attach",
+
+                               "settings", "set",
+                               "push", "push.decline",
+                               "session.reopen", "mail", "prompt-audit"]
 
     // MARK: Lines
 
