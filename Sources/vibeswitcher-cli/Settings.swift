@@ -67,7 +67,9 @@ enum SettingsCommand {
                 } else {
                     out.append("    \(key) = \(ConfigSeal.inert(value, limit: 400))" + (setting["form"]?.string == "text" ? "" : mark))
                 }
-                var about = ConfigSeal.inert(setting["title"]?.string ?? "", limit: 200)
+                // What it does (the page shows its title), and what it takes.
+                var about = ConfigSeal.inert(setting["about"]?.string ?? "", limit: 300)
+                if about.hasSuffix(".") { about.removeLast() }
                 if let limits = setting["limits"]?.string { about += " (\(ConfigSeal.inert(limits, limit: 120)))" }
                 out.append("        \(about).")
                 var place = "In " + shown(setting["where"]?.string ?? "?")
