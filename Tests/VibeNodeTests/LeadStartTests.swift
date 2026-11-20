@@ -63,6 +63,11 @@ struct LeadStartTests {
             ((try? host.sessions()) ?? []).filter { $0.isLive && $0.label == "Lead · \(name)" }
         }
 
+        /// Each of the host's lead sessions for the repository, live or how it ended (a failure's message).
+        func leadEnds() -> [String] {
+            ((try? host.sessions()) ?? []).filter { $0.label == "Lead · \(name)" }.map { "\($0.id.uuidString.prefix(8)): \($0.exit.map { "\($0.cause) at \($0.at)" } ?? "live")" }
+        }
+
         /// The project's lead as the engine's store has it now.
         var stored: LeadStore.Lead? { queue.sync { engine.leads.leads[project] } }
 
@@ -447,10 +452,13 @@ struct LeadStartTests {
         #expect(world.spawns.value.isEmpty)
         gate.open()
         let outcomes = await [first, second]
-        #expect(outcomes.filter { if case .started = $0 { return true } else { return false } }.count == 1, "\(outcomes)")
-        #expect(Set(outcomes.compactMap(session)).count == 1, "\(outcomes)")
-        #expect(world.leads().count == 1)
-        #expect(world.spawns.value.count == 1)
+        // A lead that ended between the first's spawn and the second's look is started again, rightly (the last test
+        // here): how each ended is said, should that ever be why this fails.
+        let said = "\(outcomes); the host's leads: \(world.leadEnds())"
+        #expect(outcomes.filter { if case .started = $0 { return true } else { return false } }.count == 1, "\(said)")
+        #expect(Set(outcomes.compactMap(session)).count == 1, "\(said)")
+        #expect(world.leads().count == 1, "\(said)")
+        #expect(world.spawns.value.count == 1, "\(said)")
     }
 
     /// Two requests whose second looks only once the first's start is over (its repository's look held until then, as
