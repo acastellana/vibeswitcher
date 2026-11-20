@@ -125,6 +125,41 @@ struct SendTests {
         try #require(await eventually { world.queue.sync { world.requests.heldSends.values[id] == nil } })
     }
 
+    /// The security review of 7ca2061c: a held message's action is spent in the vault before its keys; a spend that fails
+    /// types nothing (it stays held, said in the log), and once the vault takes the spend it goes in.
+    @Test func aHeldMessageWhoseSpendFailsIsNotTyped() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let failing = Locked(true)
+        let tries = Locked(0)
+        world.queue.sync {
+            let real = world.requests.spendUserActions
+            world.requests.spendUserActions = { actions in
+                if failing.value {
+                    tries.mutate { $0 += 1 }
+                    throw HostCall.Failure(description: "the vault refused the spend")
+                }
+                try real(actions)
+            }
+        }
+        let harness = try await claude(world)
+        let id = NodeIds.session(host: harness.session.id)
+        harness.tell(["op": "permission", "command": "rm -rf build"])
+        try await harness.screenShows { $0.contains("Do you want to proceed?") }
+        try await harness.waitFor { harness.agent["mode"] as? String == "permission" }
+        let sent = try #require(await send(world, harness.session.id.uuidString, "Then run the linter"))
+        #expect(sent.ok && sent.result?["queued"]?.bool == true, "\(sent)")
+        let answered = try #require(await world.ask("session.reply", ["session": .string(harness.session.id.uuidString), "choice": .int(1)]))
+        #expect(answered.ok, "\(answered)")
+        try await harness.waitFor { harness.agent["reply"] as? String == "Allowed." }
+        // Its question closed, the pump tries: the spend fails, nothing is typed, it stays held.
+        #expect(await eventually(timeout: 30) { tries.value >= 2 }, "the pump tried twice: \(tries.value)")
+        #expect((harness.agent["queued"] as? [String] ?? []) + prompts(harness) == [], "\(harness.agent)")
+        #expect(world.queue.sync { world.requests.heldSends.values[id]?.map(\.text) } == ["Then run the linter"])
+        failing.value = false
+        try await harness.waitFor { (harness.agent["queued"] as? [String] ?? []) + prompts(harness) == ["Then run the linter"] }
+    }
+
     /// An image goes as its quoted path on a line of its own after the words, as the app's composer sends it, and the
     /// Enter waits until Claude Code's box shows it taken: the fake drops an Enter that comes while it reads one, as
     /// Claude Code 2.1.310 does.

@@ -7,8 +7,9 @@ import VibeCore
 /// engine's rule for its held messages holds here (EN-D9): as a message is held, its digest is recorded in the vault
 /// under the `send` request's action, for that session (`recordUserAction`, kind `message`); at the server's start each
 /// held message is restored only when the vault vouches for its action with the digest of what it would type, for that
-/// session, and only while the session lives; any other is dropped, said in the log. Once typed (or dropped) its action
-/// is spent, so a copy put back in the file is never typed again. The vault's calls and the file's writes go one after
+/// session, and only while the session lives; any other is dropped, said in the log. Its action is spent before it is
+/// typed (`spendHeld`: a failed spend types nothing), or once it's dropped, so a copy put back in the file, or one a crash
+/// left there after its keys, is never typed again. The vault's calls and the file's writes go one after
 /// another on `heldWrites`, so an action is never spent before it was recorded.
 extension Requests {
     /// One held message as the file keeps it.
@@ -43,11 +44,32 @@ extension Requests {
         heldChanged()
     }
 
-    /// The held messages of `actions` were typed or dropped: spent in the vault (after their record), and the file
-    /// written. On `queue`.
+    /// `action` (a held message's) spent in the vault, after its record, before the message is typed (`pumpHeld`): `done`
+    /// on `queue` with nil once it is, or the failure (then nothing is typed). `spendUserActions`: the vault's call, a
+    /// test's failing one.
+    func spendHeld(_ action: String, done: @escaping (Error?) -> Void) {
+        let (spend, queue) = (spendUserActions, self.queue)
+        heldWrites.async {
+            do {
+                try spend([action])
+                queue.async { done(nil) }
+            } catch {
+                queue.async { done(error) }
+            }
+        }
+    }
+
+    /// The held messages of `actions` were dropped untyped (their session ended): spent in the vault (after their
+    /// record), a failure said in the log, and the file written. On `queue`.
     func heldGone(_ actions: [String]) {
-        let client = link.vaultV2
-        if !actions.isEmpty { heldWrites.async { try? client.spendUserActions(actions) } }
+        let (spend, note) = (spendUserActions, note)
+        if !actions.isEmpty {
+            heldWrites.async {
+                do { try spend(actions) } catch {
+                    note("send: \(actions.count) dropped held message(s) not spent in the vault (\(error)): their session ended, so none is restored")
+                }
+            }
+        }
         heldChanged()
     }
 

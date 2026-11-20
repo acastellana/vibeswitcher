@@ -373,17 +373,34 @@ extension Requests {
             queue.async {
                 guard let self else { return }
                 guard runs else { return later(Self.heldEvery) }
-                self.typeIn(first, into: session) { outcome in
-                    switch outcome {
-                    case .menuOpen:
-                        later(Self.heldEvery)
-                    case .typed, .refused:
-                        if case .refused(let why) = outcome { self.note("send to session \(short): a held message dropped: \(why)") }
-                        let rest = Array((self.heldSends.values[id] ?? []).drop { $0.action == first.action })
-                        self.heldSends.send(id, rest.isEmpty ? nil : rest)
-                        self.heldGone([first.action])
-                        // The next once the agent has taken this one's Enter.
-                        later(0.5)
+                // Fail closed against a replay: nothing open on its screen now, then its action spent in the vault before
+                // a key goes (a crash after the keys, or a spend that failed, would leave it restorable and typed twice
+                // after a restart). A spend that fails types nothing: it stays held, said in the log. One that's spent
+                // and then not typed (a question opened in between) is still typed from memory, but no restart brings it
+                // back: lost rather than typed twice.
+                self.link.screen(session.id) { screen in
+                    queue.async {
+                        if let screen, Self.openMenu(screen) != nil { return later(Self.heldEvery) }
+                        self.spendHeld(first.action) { failure in
+                            if let failure {
+                                self.note("send to session \(short): a held message not typed: its action couldn't be spent in the vault first "
+                                          + "(\(failure)), so it would be typed again after a restart; it stays held")
+                                return later(Self.heldEvery)
+                            }
+                            self.typeIn(first, into: session) { outcome in
+                                switch outcome {
+                                case .menuOpen:
+                                    later(Self.heldEvery)
+                                case .typed, .refused:
+                                    if case .refused(let why) = outcome { self.note("send to session \(short): a held message dropped: \(why)") }
+                                    let rest = Array((self.heldSends.values[id] ?? []).drop { $0.action == first.action })
+                                    self.heldSends.send(id, rest.isEmpty ? nil : rest)
+                                    self.heldChanged()
+                                    // The next once the agent has taken this one's Enter.
+                                    later(0.5)
+                                }
+                            }
+                        }
                     }
                 }
             }

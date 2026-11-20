@@ -68,6 +68,8 @@ public final class Requests: @unchecked Sendable {
     /// were restored yet (at the first welcome). On `queue`.
     let heldWrites = DispatchQueue(label: "vibeswitcher-server.held-sends")
     var heldRestored = false
+    /// How a held message's action is spent in the vault (`spendHeld`): the vault's call; a test's that fails.
+    lazy var spendUserActions: @Sendable ([String]) throws -> Void = { [client = link.vaultV2] actions in try client.spendUserActions(actions) }
     /// What sessions' composers complete (`session.complete`), kept a while.
     let completionIndex = SessionCompletions()
     /// Images web pages are sending in parts (`session.attach`). On `queue`.

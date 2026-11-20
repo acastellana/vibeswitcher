@@ -60,4 +60,37 @@ struct HeldSendRestartTests {
         #expect(await eventually(timeout: 60) { node.said.contains("0 held message(s) kept across the restart; 1 dropped") }, "\(node.said)")
         #expect(took().filter { $0 == "Then run the linter" }.count == 1, "\(took())")
     }
+
+    /// The security review of 7ca2061c: the action is spent before the keys. The server crashing after its spend and
+    /// before typing (here, the spend made through the host's vault, then the server killed): the message isn't restored,
+    /// so it isn't typed twice; it's lost rather than replayed.
+    @Test func aCrashAfterTheSpendAndBeforeTheKeysTypesNothingAfterARestart() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let (session, files) = try await NodeAcceptanceTests.newClaude(node)
+        let short = NodeAcceptanceTests.short(session), key = session.id.uuidString.lowercased(), id = NodeIds.session(host: session.id)
+        try EngineEndToEndTests.tell(files, ["op": "permission", "command": "rm -rf build"])
+        try #require(await node.eventuallyStatus { NodeAcceptanceTests.prompt($0, id)?.contains("Do you want to proceed?") == true })
+        let sent = try await node.runOnTerminal(["send", short, "Then run the linter"])
+        #expect(sent.status == 0 && sent.output.contains("queued: "), "\(sent.output)\(sent.errors)")
+        try #require(await eventually(timeout: 60) { held(node)?.sessions[key]?.count == 1 }, "\(String(describing: held(node)))")
+        let action = try #require(held(node)?.sessions[key]?.first?.action)
+        let vault = LeadVaultV2Client { [socket = node.socket] request in
+            guard case .vaultV2(let reply) = try HostCall.request(.vaultV2(request), socket: socket, appKey: nil, timeout: 10) else {
+                throw LeadVaultV2Client.Refused("the host answered something else")
+            }
+            return reply
+        }
+        try await offPool { try vault.spendUserActions([action]) }
+        try await node.restartServer()
+        #expect(await eventually(timeout: 60) { node.said.contains("0 held message(s) kept across the restart; 1 dropped") }, "\(node.said)")
+        try #require(await node.eventuallyStatus { NodeAcceptanceTests.prompt($0, id)?.contains("Do you want to proceed?") == true }, "\(node.said)")
+        let answered = try await node.runOnTerminal(["reply", short, "1"])
+        #expect(answered.status == 0, "\(answered.output)\(answered.errors)")
+        #expect(await eventually(timeout: 60) { EngineEndToEndTests.state(files)["reply"] as? String == "Allowed." })
+        try await Task.sleep(nanoseconds: 3_000_000_000)
+        let took = ((EngineEndToEndTests.state(files)["queued"] as? [String]) ?? []) + EngineEndToEndTests.prompts(files)
+        #expect(!took.contains("Then run the linter"), "\(took)")
+    }
 }
+
