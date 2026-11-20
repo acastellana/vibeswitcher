@@ -462,7 +462,12 @@ public enum BranchRun {
                 folder.hasPrefix(made) ? layers + "/layers/" + folder.dropFirst(made.count) : folder
             }
             folders += [placed(upper), placed(work)]
-            return Platform.Sandbox.Mount(entry.target, .overlay(lower: lower, upper: placed(upper), work: placed(work)))
+            // A package cache of the account's home (SwiftPM's, npm's, what `sandbox_private` names there) is layered
+            // where the run's tools look for it: under the run's own home, its HOME. At the account's spelling a
+            // tool never found it, and a fresh build folder fetched (no network: "Fetching
+            // https://github.com/apple/swift-crypto.git … error").
+            let target = SandboxPolicy.isBelow(entry.target, account) ? home + entry.target.dropFirst(account.count) : entry.target
+            return Platform.Sandbox.Mount(target, .overlay(lower: lower, upper: placed(upper), work: placed(work)))
         }
         if real != account {
             let judge = inputs(real, path: path)

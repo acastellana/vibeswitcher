@@ -327,25 +327,26 @@ struct BranchRunHostTests {
         let outside = [world.account + "/planted", world.account + "/.ssh/planted", world.area + "/beside", world.base + "/planted",
                        world.sessionTemp + "/planted"]
         let setup = world.probe([("--write", home + "/in-home"), ("--write", "in-worktree"),
-                                 ("--write", world.account + "/.cache/org.swift.swiftpm/in-cache")]
+                                 ("--write", home + "/.cache/org.swift.swiftpm/in-cache")]
                                 + outside.map { ("--write", $0) })
         // The test command, in a box of its own after init_command's: what that wrote in the worktree and the home is
         // there (the real folders), what it wrote in the package cache went with its box, and a scratch folder
         // nobody named isn't there.
         let test = world.probe([("--exists", home + "/in-home"), ("--exists", "in-worktree"), ("--exists", world.sessionTemp),
-                                ("--exists", world.account + "/.cache/org.swift.swiftpm/in-cache"),
-                                ("--exists", world.account + "/.cache/org.swift.swiftpm/manifest"),
+                                ("--exists", home + "/.cache/org.swift.swiftpm/in-cache"),
+                                ("--exists", home + "/.cache/org.swift.swiftpm/manifest"),
                                 ("--exists", world.account + "/.ssh/id_ed25519")])
         let run = await world.merge("init", setup: setup, test: test, boxed: true)
         #expect(Self.passed(run.check), "\(run)")
         let facts = Self.facts(run.output)
         #expect(facts["hostname"] == SandboxPlanner.hostname, "\(run.output)")
         #expect(facts["exists \(home)/in-home"] == "yes" && facts["exists in-worktree"] == "yes", "\(run.output)")
-        #expect(facts["exists \(world.sessionTemp)"] == "no" && facts["exists \(world.account)/.cache/org.swift.swiftpm/in-cache"] == "no",
+        #expect(facts["exists \(world.sessionTemp)"] == "no" && facts["exists \(home)/.cache/org.swift.swiftpm/in-cache"] == "no",
                 "\(run.output)")
-        // The cache is read through a layer of the run's own; the key isn't there at all.
-        #expect(facts["exists \(world.account)/.cache/org.swift.swiftpm/manifest"] == "yes")
-        #expect((facts["overlays"] ?? "").split(separator: ",").contains(Substring(world.account + "/.cache/org.swift.swiftpm")), "\(run.output)")
+        // The cache is read through a layer of the run's own, where its tools look for it: under the run's home, its
+        // HOME (a fresh build folder resolves its packages from it, with no network); the key isn't there at all.
+        #expect(facts["exists \(home)/.cache/org.swift.swiftpm/manifest"] == "yes")
+        #expect((facts["overlays"] ?? "").split(separator: ",").contains(Substring(home + "/.cache/org.swift.swiftpm")), "\(run.output)")
         #expect(facts["exists \(world.account)/.ssh/id_ed25519"] == "no")
         // Nothing outside its worktree and home was written, the real cache included.
         for path in outside + [world.account + "/.cache/org.swift.swiftpm/in-cache"] {
@@ -389,7 +390,7 @@ struct BranchRunHostTests {
         #expect(facts["home"] == world.sessionTemp + "/branch-run-home", "\(run.output)")
         // Its package cache came through a layer of the run's own, in the session's TMPDIR, and the prefix took that
         // layer away when the command ended: the session's TMPDIR can be removed whole when the session is.
-        #expect((facts["overlays"] ?? "").split(separator: ",").contains(Substring(world.account + "/.cache/org.swift.swiftpm")), "\(run.output)")
+        #expect((facts["overlays"] ?? "").split(separator: ",").contains(Substring(world.sessionTemp + "/branch-run-home/.cache/org.swift.swiftpm")), "\(run.output)")
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: world.sessionTemp + "/.branch-runs")) ?? []).isEmpty)
         #expect(throws: Never.self) { try FileManager.default.removeItem(atPath: world.sessionTemp) }
     }

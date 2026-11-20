@@ -140,7 +140,10 @@ struct BranchRunTests {
         let layers = layout.area + "/.branch-runs/77-run"
         #expect(planned.layers == layers)
         let cache = layout.account + "/.cache/org.swift.swiftpm"
-        #expect(plan.mounts.contains(.init(cache, .overlay(lower: cache, upper: layers + "/layers/0/upper", work: layers + "/layers/0/work"))))
+        // Layered where the run's tools look for it, under its own home (its HOME), not at the account's spelling.
+        #expect(plan.mounts.contains(.init(layout.home + "/.cache/org.swift.swiftpm",
+                                           .overlay(lower: cache, upper: layers + "/layers/0/upper", work: layers + "/layers/0/work"))), "\(plan.mounts)")
+        #expect(!plan.mounts.contains { $0.target == cache })
         #expect(planned.folders.contains(layers + "/layers/0/upper") && planned.folders.contains(layers + "/layers/0/work"))
         #expect(planned.folders.contains(BranchRun.temporary(in: layout.home)))
         #expect(!sources.contains { $0.hasPrefix(layout.home + "/") && $0 != BranchRun.temporary(in: layout.home) })
