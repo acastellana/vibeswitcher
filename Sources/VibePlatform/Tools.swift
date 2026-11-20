@@ -388,7 +388,7 @@ extension Platform {
         }
 
         /// `lstat`'s answer for `path`, as `trustedGit` reads it; nil when there's nothing there.
-        static func fileStatus(_ path: String) -> FileStatus? {
+        public static func fileStatus(_ path: String) -> FileStatus? {
             var info = stat()
             guard lstat(path, &info) == 0 else { return nil }
             return (info.st_uid, info.st_mode, info.st_mode & S_IFMT == S_IFREG)
@@ -427,14 +427,23 @@ extension Platform {
             case failed
         }
 
-        /// Runs `command` (a path, then its arguments) with this process's environment, nothing on its stdin and
-        /// its stderr dropped, and waits for it: until its output ends, for `timeout` seconds at most (then it and
+        /// What `command` (a path, then its arguments) wrote to its stdout, when it ended by itself with status 0
+        /// within `timeout` seconds; otherwise nil (it failed, couldn't start, or was ended). Run with exactly
+        /// `environment`, nothing on its stdin, its stderr dropped. Blocks while it runs.
+        public static func output(_ command: [String], timeout: TimeInterval, environment: [String]) -> String? {
+            guard case .ended(0, let output) = run(command, timeout: timeout, environment: environment) else { return nil }
+            return output
+        }
+
+        /// Runs `command` (a path, then its arguments) with `environment` (nil: this process's), nothing on its stdin
+        /// and its stderr dropped, and waits for it: until its output ends, for `timeout` seconds at most (then it and
         /// its process group are killed).
-        static func run(_ command: [String], timeout: TimeInterval) -> Ran {
+        static func run(_ command: [String], timeout: TimeInterval, environment: [String]? = nil) -> Ran {
             var ends: [Int32] = [-1, -1]
             // Close-on-exec from its making on Linux (pipe2); the Mac's is pipe, then FD_CLOEXEC, as it always was.
             guard !command.isEmpty, Sys.pipeClosedOnExec(&ends) == 0 else { return .failed }
             var spawn = Platform.Spawn(executable: command[0], arguments: command)
+            spawn.environment = environment
             spawn.stdin = .path("/dev/null", flags: O_RDONLY)
             spawn.stdout = .descriptor(ends[1])
             spawn.stderr = .path("/dev/null", flags: O_WRONLY)

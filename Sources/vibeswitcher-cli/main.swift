@@ -32,7 +32,7 @@ let usage = """
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher settings [FOLDER] [--json] | set [FOLDER] KEY VALUE
            vibeswitcher hooks install|remove [--agent claude|codex]
-           vibeswitcher web [--revoke]
+           vibeswitcher web [--tailnet | --revoke]
     """
 
 let words = Array(CommandLine.arguments.dropFirst())

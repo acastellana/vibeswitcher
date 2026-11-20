@@ -46,8 +46,20 @@ public final class WebTokens: @unchecked Sendable {
     /// A token is 43 characters of base64url; anything much longer is no token and isn't hashed.
     static let longestToken = 128
 
-    /// `<root>/v2/web-tokens.json`.
+    /// The tailnet's tokens (`TailnetWeb`): another file, so a loopback token is never taken on the tailnet nor the
+    /// other way round.
+    public static let tailnetFileName = "web-tokens-tailnet.json"
+    /// How long a tailnet token is taken: a working day.
+    public static let tailnetLife: TimeInterval = 8 * 3600
+    /// The most tailnet tokens alive at once.
+    public static let tailnetCap = 4
+
+    /// `<root>/v2/web-tokens.json` (the tailnet's: `web-tokens-tailnet.json`).
     public let url: URL
+    /// How long a token issued here is taken: `life`, or the tailnet's.
+    public let tokenLife: TimeInterval
+    /// The most alive at once here.
+    public let tokenCap: Int
     private let lock = NSLock()
     /// Every token's record, the oldest first (expired ones included until the next write prunes them).
     private var entries: [(digest: [UInt8], issuedAt: Date, expiresAt: Date)] = []
@@ -55,9 +67,21 @@ public final class WebTokens: @unchecked Sendable {
     private var newerFormat: Int?
 
     /// The tokens kept under `root` (the node's root: `<root>/v2/web-tokens.json`), read now.
-    public init(root: URL) {
-        url = root.appendingPathComponent("v2", isDirectory: true).appendingPathComponent(Self.fileName)
+    public convenience init(root: URL) {
+        self.init(root: root, fileName: Self.fileName, life: Self.life, cap: Self.cap)
+    }
+
+    /// The tokens kept in `<root>/v2/<fileName>`, each `life` long, at most `cap` alive, read now.
+    public init(root: URL, fileName: String, life: TimeInterval, cap: Int) {
+        url = root.appendingPathComponent("v2", isDirectory: true).appendingPathComponent(fileName)
+        tokenLife = life
+        tokenCap = max(1, cap)
         load()
+    }
+
+    /// The tailnet's tokens under `root`: `web-tokens-tailnet.json`, 8 h, at most 4.
+    public static func tailnet(root: URL) -> WebTokens {
+        WebTokens(root: root, fileName: tailnetFileName, life: tailnetLife, cap: tailnetCap)
     }
 
     /// Why nothing can be issued here (nil: it can): a file of a newer format.
@@ -71,10 +95,10 @@ public final class WebTokens: @unchecked Sendable {
         try lock.withLock {
             if let newer = newerFormat { throw Self.newerRefusal(newer, url: url) }
             let token = Self.randomText(bytes: Self.tokenBytes)
-            let expiresAt = now.addingTimeInterval(Self.life)
+            let expiresAt = now.addingTimeInterval(tokenLife)
             var kept = entries.filter { $0.expiresAt > now }
             kept.append((Self.digest(token), now, expiresAt))
-            if kept.count > Self.cap { kept.removeFirst(kept.count - Self.cap) }
+            if kept.count > tokenCap { kept.removeFirst(kept.count - tokenCap) }
             try write(kept)
             entries = kept
             return (token, expiresAt)

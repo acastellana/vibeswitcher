@@ -64,6 +64,9 @@ public final class WebListener: @unchecked Sendable {
     /// Takes a WebSocket the policy allowed, to set its handlers. Set before `start`; called on `queue`. With none,
     /// an upgrade is 404.
     public var onSocket: ((WebSocketConnection) -> Void)?
+    /// Whether a connection from this peer address (numbers) is kept: one it refuses is closed as it is accepted, with
+    /// nothing read or written. None: every peer is. Set before `start`; called on `queue`.
+    public var admitPeer: ((String) -> Bool)?
     /// The subprotocols this server speaks, the one it prefers first: a client that offers some gets the first of
     /// these among them, or none. Set before `start`.
     public var subprotocols: [String] = []
@@ -92,6 +95,8 @@ public final class WebListener: @unchecked Sendable {
     private var pingGeneration = 0
     /// A refusal at the connection limit has been noted since a connection last closed.
     private var capNoted = false
+    /// A peer `admitPeer` refused has been noted (once a listener: the note says nothing of who).
+    private var peerNoted = false
     private var chunk = [UInt8](repeating: 0, count: 64 * 1_024)
 
     /// `queue`: where everything runs and every handler is called. `clock`: the timeouts' and the pings' seconds.
@@ -231,6 +236,14 @@ public final class WebListener: @unchecked Sendable {
                 if code == EINTR || code == ECONNABORTED { continue }
                 if code != EAGAIN, code != EWOULDBLOCK { pauseAccepting(code) }
                 return
+            }
+            if let admitPeer, !(Platform.TCP.peerAddress(fd).map(admitPeer) ?? false) {
+                Sys.close(fd)
+                if !peerNoted {
+                    peerNoted = true
+                    note("the web listener closed a connection from outside the addresses it takes")
+                }
+                continue
             }
             Platform.TCP.configure(fd)
             guard connections.count < limits.maxConnections else {

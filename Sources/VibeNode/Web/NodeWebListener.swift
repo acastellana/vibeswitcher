@@ -5,10 +5,11 @@ import VibeCore
 /// behind the seams (WebSeams.swift, LiveSeams.swift), so the integrator joins the lanes by handing this the files
 /// (`WebAssetSource`), who may connect (`WebGate`) and the hub (`WebSocketHandler`).
 ///
-/// - **One name.** Every request whose Host isn't exactly `127.0.0.1:<port>` is 421 with no body, an upgrade too:
-///   no other name is this listener's, not `localhost`. (No Host, an empty one, or two, are 421 alike.)
+/// - **One name.** Every request whose Host isn't exactly `<name>:<port>` is 421 with no body, an upgrade too: no other
+///   name is this listener's, not `localhost`. (No Host, an empty one, or two, are 421 alike.) The name is `127.0.0.1`
+///   on loopback, the MagicDNS name on the tailnet (`TailnetWeb`, which binds the tailnet's address).
 /// - **Files.** A GET is answered with the source's file for its path, with the file's own headers, or 404.
-/// - **One upgrade.** `/ws`, and only for a request whose Origin is exactly `http://127.0.0.1:<port>` and whose
+/// - **One upgrade.** `/ws`, and only for a request whose Origin is exactly `http://<name>:<port>` and whose
 ///   `Sec-Fetch-Site`, when it sends one, is `same-origin`: else 403. Another path is 404. No subprotocol.
 /// - **`auth` first.** The server says nothing on a WebSocket until its first text message is an `auth` request the
 ///   gate admits, within `authSeconds`. Anything else first, a refusal, or no message in time is `bye` (`auth`) and
@@ -54,7 +55,7 @@ public final class NodeWebListener: @unchecked Sendable {
     /// more message after it still fits the queue.
     public static let busyBytes = 1 << 20
     /// What a client refused at `auth` is told, whatever was wrong with what it sent.
-    static let authRefusal = "not admitted: run `vibeswitcher web` again"
+    var authRefusal: String { "not admitted: run `\(command)` again" }
 
     /// The WebSocket close code that goes with a `bye`'s code: 1001 `stopping`, 1009 `too-long`, 4400 `not-object`,
     /// `not-request` and `must`, 4401 `auth`, 4403 `revoked`, 4426 `version`; 1000 for any other.
@@ -77,6 +78,13 @@ public final class NodeWebListener: @unchecked Sendable {
 
     public let queue: DispatchQueue
     private let requestedPort: UInt16
+    /// The numeric address bound: 127.0.0.1, or the tailnet's (`TailnetWeb`).
+    public let address: String
+    /// The listener's one name, without the port: the address on loopback, the MagicDNS name on the tailnet.
+    public let name: String
+    /// The command a page is told to run again for a new address.
+    public let command: String
+    private let admitPeer: ((String) -> Bool)?
     private let assets: WebAssetSource
     private let gate: WebGate
     private let handler: WebSocketHandler
@@ -98,10 +106,19 @@ public final class NodeWebListener: @unchecked Sendable {
     /// connection, as compact JSON (the integrator's: `Requests.hello` with the admission's `auth`); none, or nil:
     /// nothing is sent before the handler has the connection. `limits`: the contract's unless a test says otherwise;
     /// a full queue closes the connection whatever they say. Handlers and the gate are called on `queue`.
-    public init(port: UInt16 = NodeWeb.port, assets: WebAssetSource, gate: WebGate, handler: WebSocketHandler, queue: DispatchQueue,
+    ///
+    /// `address`: the bind, numeric; one that isn't loopback is the tailnet's (`TailnetWeb`, which checks it first).
+    /// `name`: the Host and Origin's name, without the port (nil: the address). `admitPeer`: which peer addresses are
+    /// kept (nil: all). `command`: what a closed page is told to run again.
+    public init(port: UInt16 = NodeWeb.port, address: String = "127.0.0.1", name: String? = nil, admitPeer: ((String) -> Bool)? = nil,
+                command: String = "vibeswitcher web", assets: WebAssetSource, gate: WebGate, handler: WebSocketHandler, queue: DispatchQueue,
                 clock: NodeClock, limits: WebLimits = NodeWebListener.limits, hello: ((WebAdmission) -> Data?)? = nil,
                 note: @escaping (String) -> Void = { _ in }) {
         requestedPort = port
+        self.address = address
+        self.name = name ?? address
+        self.command = command
+        self.admitPeer = admitPeer
         self.assets = assets
         self.gate = gate
         self.handler = handler
@@ -132,7 +149,7 @@ public final class NodeWebListener: @unchecked Sendable {
         if gate.wanted {
             if port == nil { _ = try? start() }
         } else if port != nil {
-            closeAll(code: "revoked", reason: "the web was closed: run `vibeswitcher web` again")
+            closeAll(code: "revoked", reason: "the web was closed: run `\(command)` again")
             stop()
         } else {
             lock.withLock { current = .off }
@@ -147,12 +164,14 @@ public final class NodeWebListener: @unchecked Sendable {
         guard port == nil else { throw WebListener.Failure.alreadyStarted }
         let own = OwnName()
         let assets = assets
+        let beyond = !Platform.TCP.isLoopback(family: .ipv4, address: address)
         let made = WebListener(queue: queue, clock: clock, limits: limits, policy: { host, origin, path, headers in
             guard let name = own.name, let origin else { return false }
             // Compared byte for byte: String's == is canonical equivalence, and these are one exact string each.
             return path == "/ws" && host.utf8.elementsEqual(name.utf8) && origin.utf8.elementsEqual(("http://" + name).utf8)
                 && headers.all("sec-fetch-site").allSatisfy { $0 == "same-origin" }
-        }, port: requestedPort, note: note)
+        }, address: address, port: requestedPort, allowBeyondLoopback: beyond, note: note)
+        made.admitPeer = admitPeer
         made.refuse = { request in
             guard let name = own.name, let host = request.headers["host"], host.utf8.elementsEqual(name.utf8) else {
                 return WebResponse(status: 421)
@@ -171,14 +190,14 @@ public final class NodeWebListener: @unchecked Sendable {
         made.onSocket = { [weak self] socket in self?.opened(socket) }
         do {
             let port = try made.start()
-            own.set("127.0.0.1:\(port)")
+            own.set("\(name):\(port)")
             lock.withLock {
                 listener = made
                 current = .on(port: port)
             }
             return port
         } catch {
-            let why = "127.0.0.1:\(requestedPort): \(error)"
+            let why = "\(address):\(requestedPort): \(error)"
             lock.withLock { current = .refused(why) }
             note("the web listener couldn't start: \(why)")
             throw error
@@ -223,7 +242,7 @@ public final class NodeWebListener: @unchecked Sendable {
         queue.async { [self] in
             for transport in Array(transports.values) {
                 guard let token = transport.admission?.token, !gate.holds(token) else { continue }
-                transport.close(code: "revoked", reason: "this page's access ran out: run `vibeswitcher web` again")
+                transport.close(code: "revoked", reason: "this page's access ran out: run `\(command)` again")
             }
         }
     }
@@ -269,7 +288,7 @@ public final class NodeWebListener: @unchecked Sendable {
 
     private func took(_ message: Data, isText: Bool, on transport: NodeWebTransport) {
         guard transport.admission != nil else {
-            guard isText else { return transport.close(code: "auth", reason: Self.authRefusal) }
+            guard isText else { return transport.close(code: "auth", reason: authRefusal) }
             return authenticate(message, transport)
         }
         if isText {
@@ -282,17 +301,17 @@ public final class NodeWebListener: @unchecked Sendable {
     /// The first message: an `auth` request the gate admits, or the connection's end.
     private func authenticate(_ message: Data, _ transport: NodeWebTransport) {
         guard let request = NodeWire.decode(NodeWire.Request.self, message), request.kind == "auth" else {
-            return transport.close(code: "auth", reason: Self.authRefusal)
+            return transport.close(code: "auth", reason: authRefusal)
         }
         guard request.v <= NodeWire.version else {
             return transport.close(code: "version", reason: "this server speaks version \(NodeWire.version)")
         }
         guard let admission = gate.admit(request.args ?? [:]) else {
-            return transport.close(code: "auth", reason: Self.authRefusal)
+            return transport.close(code: "auth", reason: authRefusal)
         }
         // A revoke may have landed since the gate said yes: nothing is said to a connection whose token is gone.
         guard gate.holds(admission.token) else {
-            return transport.close(code: "revoked", reason: "this page's access was revoked: run `vibeswitcher web` again")
+            return transport.close(code: "revoked", reason: "this page's access was revoked: run `\(command)` again")
         }
         transport.admission = admission
         rearmClock()
@@ -326,7 +345,7 @@ public final class NodeWebListener: @unchecked Sendable {
         guard armed == generation else { return }
         for transport in Array(transports.values) where transport.admission == nil {
             transport.seconds += 1
-            if transport.seconds > Self.authSeconds { transport.close(code: "auth", reason: Self.authRefusal) }
+            if transport.seconds > Self.authSeconds { transport.close(code: "auth", reason: authRefusal) }
         }
     }
 }

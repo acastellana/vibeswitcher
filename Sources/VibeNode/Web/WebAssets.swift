@@ -130,11 +130,11 @@ struct WebAssetTable: Sendable {
         buildFile = Entry(body: json, sha256: WebAssets.sha256(json), contentType: "application/json")
     }
 
-    func asset(path target: String, port: UInt16) -> WebAsset? {
+    func asset(path target: String, port: UInt16, host: String = "127.0.0.1") -> WebAsset? {
         let path = target.firstIndex(of: "?").map { String(target[..<$0]) } ?? target
         func served(_ entry: Entry?, _ caching: WebSecurityHeaders.Caching) -> WebAsset? {
             entry.map {
-                WebAsset(body: $0.body, headers: WebSecurityHeaders.all(port: port, contentType: $0.contentType,
+                WebAsset(body: $0.body, headers: WebSecurityHeaders.all(port: port, host: host, contentType: $0.contentType,
                                                                         etag: WebAssets.etag(sha256: $0.sha256), caching: caching))
             }
         }
@@ -199,14 +199,16 @@ public struct EmbeddedAssets: WebAssetSource {
     public static var build: String { table.build }
 
     private let port: UInt16
+    private let host: String
 
-    /// `port` is the listener's, for the policy's `connect-src`.
-    public init(port: UInt16) {
+    /// `port` and `host` are the listener's, for the policy's `connect-src`.
+    public init(port: UInt16, host: String = "127.0.0.1") {
         self.port = port
+        self.host = host
     }
 
     public func asset(path: String) -> WebAsset? {
-        Self.table.asset(path: path, port: port)
+        Self.table.asset(path: path, port: port, host: host)
     }
 }
 
@@ -216,17 +218,19 @@ public struct EmbeddedAssets: WebAssetSource {
 public struct FolderAssets: WebAssetSource {
     public let root: URL
     private let port: UInt16
+    private let host: String
 
-    public init(root: URL, port: UInt16) {
+    public init(root: URL, port: UInt16, host: String = "127.0.0.1") {
         self.root = root
         self.port = port
+        self.host = host
     }
 
     /// The folder's build as it is now; nil when it can't be read.
     public var build: String? { table()?.build }
 
     public func asset(path: String) -> WebAsset? {
-        table()?.asset(path: path, port: port)
+        table()?.asset(path: path, port: port, host: host)
     }
 
     private func table() -> WebAssetTable? {

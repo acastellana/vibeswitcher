@@ -14,10 +14,11 @@ public enum WebSecurityHeaders {
 
     /// The page runs its own scripts and styles and nothing else, talks to its own socket only, is framed by nobody,
     /// and makes no element from a string (Trusted Types with no policy: `innerHTML` and its relatives throw). The port
-    /// is in `connect-src` since a browser may not count `ws:` under `'self'`.
-    public static func policy(port: UInt16) -> String {
+    /// is in `connect-src` since a browser may not count `ws:` under `'self'`; so is the listener's name (`host`: the
+    /// loopback's address, or the tailnet's MagicDNS name).
+    public static func policy(port: UInt16, host: String = "127.0.0.1") -> String {
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; "
-            + "connect-src 'self' ws://127.0.0.1:\(port); manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
+            + "connect-src 'self' ws://\(host):\(port); manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
             + "form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
     }
 
@@ -29,12 +30,12 @@ public enum WebSecurityHeaders {
     }
 
     /// Every header of one response, in the order written. No cookie is ever set (the contract's §1).
-    public static func all(port: UInt16, contentType: String, etag: String, caching: Caching = .revalidate) -> [(String, String)] {
+    public static func all(port: UInt16, host: String = "127.0.0.1", contentType: String, etag: String, caching: Caching = .revalidate) -> [(String, String)] {
         [
             ("Content-Type", contentType),
             ("Cache-Control", cacheControl(caching)),
             ("ETag", etag),
-            ("Content-Security-Policy", policy(port: port)),
+            ("Content-Security-Policy", policy(port: port, host: host)),
             ("X-Content-Type-Options", "nosniff"),
             ("X-Frame-Options", "DENY"),
             ("Referrer-Policy", "no-referrer"),
