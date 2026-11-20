@@ -184,7 +184,8 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
     /// One `NAME=value` of `sandbox_env`: a name of letters, digits and `_` not starting with a digit, none of
     /// `refusedNames` or `refusedPrefixes`; a value whose `:`-separated parts that start with `~` are made the
     /// account's (`~` and `~/…`; `~user` is refused), and whose parts that are paths then (each starting with `/`) are
-    /// tidied, their links followed, and refused at or under a hidden place (`hidden`, `hiddenRoots`). A path may hold
+    /// judged, tidied and with their links followed, and refused at or under a hidden place (`hidden`, `hiddenRoots`);
+    /// the value passed on is as written but for `~` (PATH's folders: with their links followed). A path may hold
     /// one (`PYTHONUSERBASE=~/.local` holds `.local/share/keyrings`): a variable shows nothing, `sandbox_read` does,
     /// and that is judged whole. `PATH`'s parts must all be paths.
     public static func variable(_ text: String, home: String, resolve: (String) -> String = SandboxPolicy.resolved)
@@ -225,7 +226,9 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
                     }
                 }
             }
-            parts.append(resolvedPath)
+            // PATH's folders by their links followed, as the box shows a folder; any other value as written, `~` made
+            // the account's home (a URL's `//` and a trailing `/` are the user's): only judged by its tidied paths.
+            parts.append(name == "PATH" ? resolvedPath : spelled)
         }
         return .success((name, parts.joined(separator: ":")))
     }

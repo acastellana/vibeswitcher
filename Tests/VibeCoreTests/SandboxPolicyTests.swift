@@ -201,6 +201,10 @@ struct SandboxPolicyTests {
         #expect(taken.environment == ["MADE_UP_HOME": home + "/sdk", "MADE_UP_PATH": home + "/sdk:lib:/usr/share", "PYTHONUSERBASE": home + "/.local", "FLAG": "1"],
                 "\(taken.environment)")
         #expect(taken.path == [home + "/sdk/bin", "/opt/tool/bin"])
+        // A value is passed on as written but for `~`: a URL's `//`, a trailing `/`.
+        let written = try SandboxPolicy.read(Self.workflow("sandbox_env: REGISTRY=https://registry.example.com:8080/simple/, DIR=~/sdk/"), home: home,
+                                             root: home + "/projects/app").get()
+        #expect(written.environment == ["REGISTRY": "https://registry.example.com:8080/simple/", "DIR": home + "/sdk/"], "\(written.environment)")
         for (value, said) in [("KEY=~/.ssh/id_ed25519", ".ssh"), ("CFG=~/.config", ".config"), ("NODE=~/.vibeswitcher/state", ".vibeswitcher"),
                               ("SOCK=/run/user/1000/bus", "/run"), ("MIXED=~/sdk:~/.gnupg", ".gnupg"), ("PATH=~/.claude/bin", ".claude"),
                               ("PATH=bin", "from / or from ~/"), ("OTHER=~root/x", "isn't this user's"),

@@ -469,11 +469,13 @@ public enum BranchRun {
                 folder.hasPrefix(made) ? layers + "/layers/" + folder.dropFirst(made.count) : folder
             }
             folders += [placed(upper), placed(work)]
-            // A package cache of the account's home (SwiftPM's, npm's, what `sandbox_private` names there) is layered
-            // where the run's tools look for it: under the run's own home, its HOME. At the account's spelling a
-            // tool never found it, and a fresh build folder fetched (no network: "Fetching
-            // https://github.com/apple/swift-crypto.git … error").
-            let target = SandboxPolicy.isBelow(entry.target, account) ? home + entry.target.dropFirst(account.count) : entry.target
+            // The account's standard package caches (SwiftPM's, npm's: `SandboxPlanner.caches`) are layered where the
+            // run's tools look for them by HOME: under the run's own home. At the account's spelling a tool never found
+            // one, and a fresh build folder fetched (no network: "Fetching https://github.com/apple/swift-crypto.git …
+            // error"). What `sandbox_private` names stays at its own path, where a `sandbox_env` variable (`~` the
+            // account's home) points.
+            let standard = SandboxPlanner.caches.contains { entry.target == account + "/" + $0 }
+            let target = standard ? home + entry.target.dropFirst(account.count) : entry.target
             return Platform.Sandbox.Mount(target, .overlay(lower: lower, upper: placed(upper), work: placed(work)))
         }
         if real != account {
@@ -484,7 +486,9 @@ public enum BranchRun {
         }
         plan.environment += passed.compactMap { name in environment[name].map { "\(name)=\($0)" } } + ["CFFIXED_USER_HOME=\(home)"]
         // The tools the project names (`sandbox_env`): told where they are, as the account's home has them.
-        plan.environment += request.policy.environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
+        plan.environment = plan.environment.filter { entry in
+            !request.policy.environment.keys.contains(String(entry.prefix { $0 != "=" }))
+        } + request.policy.environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
         return .success(Planned(plan: plan, folders: folders, layers: layers))
     }
 

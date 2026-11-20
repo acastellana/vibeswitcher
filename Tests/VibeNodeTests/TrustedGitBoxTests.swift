@@ -37,6 +37,9 @@ struct TrustedGitBoxTests {
     }
 }
 
+#if os(Linux)
+// Linux only: ELF's section, which doesn't compile on the Mac, where no box is built (TestSupport.swift's note).
+
 /// The probe's answer, when this binary was started with `TrustedGitBoxTests.probeVariable` (inside a box, by
 /// `insideABoxTheSystemsGitIsFoundAndOneTheBoxCouldWriteIsnt`): whether the kernel says this is a box, the git found on
 /// the system's folders, and the one found in the folder the variable names. Written with libc, then the process ends.
@@ -60,3 +63,4 @@ private func answerProbe() {
 // After the shim's launcher mode (00200), which is what starts this binary inside the box.
 @_used @_section(".init_array.00300")
 private let answerWhenAsked: @convention(c) () -> Void = { answerProbe() }
+#endif
