@@ -32,3 +32,7 @@ The user asked for the retry so one flake doesn't block every merge; no test's o
 
 The user asked for the retry so a flake doesn't block every merge; the note on old-base branches saves the next lead a confusing audit failure.
 
+## 2026-11-20 03:35:09 The repeated ~/.local/bin holds (incident of 2026-11-20): the user decided (answer 06BB12B6) to keep the vault as strict as today and fix the relink at its source: team sessions start Claude Code with its updater off, measured first (task measure-does-claude). The vault-side change (turn-this-incident-into at 93afb7c6) is kept unmerged, because a relink then hides an entry created and removed between two looks. Meanwhile the user's supervisor accepts holds that are only Claude Code's own update, so the lead doesn't ask about each one; a hold on anything else is still asked.
+
+The user's answer; a guard rail isn't loosened for convenience when the cause can be removed.
+

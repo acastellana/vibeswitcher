@@ -246,3 +246,9 @@
 - 2026-11-20 03:30 Planned mac-gitguardtests: Mac: GitGuardTests' baseline message compared against the resolved root
 - 2026-11-20 03:30 Planned toolserverswitchtests-2: ToolServerSwitchTests passes with hosted agents identified from the host's spawn record
 - 2026-11-20 03:31 Merged toolserverswitchtests: ToolServerSwitchTests says why a switch was refused, and expects what the product promises (no audit: review none) (build 5b6eccd929ad)
+- 2026-11-20 03:31 Automatically (auto_advance): Merged toolserverswitchtests (ToolServerSwitchTests says why a switch was refused, and expects what the product promises) into v2 at 6727d6de, review none: on its worker's done report on fda84c5f and the full test run.
+- 2026-11-20 03:31 Automatically (auto_advance): Cleaned up toolserverswitchtests; ended pid 4018520 (Worker: ToolServerSwitchTests says why a switch was refused, and expects what the product promises) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-20 03:33 Started a worker on tests-that-write-a
+- 2026-11-20 03:33 Automatically (auto_advance): Started a worker on tests-that-write-a (Tests that write a program and run it no longer fail with "Text file busy"), its after tasks done (the-vault-s-look).
+- 2026-11-20 03:34 Kept turn-this-incident-into unmerged: The user (2026-11-20, answer 06BB12B6): keep the guard as strict as today; fix the relink at its source (updater off for team sessions, measured first). The vault change at 93afb7c6 stays unmerged and unaudited; its branch is kept in case the source fix doesn't hold.
+- 2026-11-20 03:35 Planned measure-does-claude-code: Measure: does Claude Code stop re-creating its link when its updater is off?
