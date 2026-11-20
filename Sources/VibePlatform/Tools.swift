@@ -13,7 +13,7 @@ extension Platform {
             #if canImport(Darwin)
             return "/usr/bin/git"
             #else
-            return foundGit.path { trustedGit(path: getenv("PATH").map { String(cString: $0) } ?? pathWhenUnset, status: fileStatus) }
+            return foundGit.path { trustedGit(path: getenv("PATH").map { String(cString: $0) } ?? pathWhenUnset, status: fileStatus, box: boxOwners) }
                 ?? absentGit
             #endif
         }
@@ -27,21 +27,92 @@ extension Platform {
         /// so is one that isn't an absolute path or that names `.` or `..`. nil when none is. `status` reads a path
         /// without following a link (`lstat`; tests give a table): a folder that is a link is passed over (Ubuntu's
         /// `/bin`, a link to `usr/bin`, is reached as `/usr/bin`), and so is a `git` that is one.
-        public static func trustedGit(path: String, status: (String) -> FileStatus?) -> String? {
+        /// `box`: this process is in a box's user namespace (`boxOwners`); nil, today's rule exactly.
+        public static func trustedGit(path: String, status: (String) -> FileStatus?, box: BoxOwners? = nil) -> String? {
             for entry in path.split(separator: ":").map(String.init) where entry.hasPrefix("/") {
                 let candidate = (entry.hasSuffix("/") ? entry : entry + "/") + "git"
-                if onlyRootCanChange(candidate, status: status) { return candidate }
+                if onlyRootCanChange(candidate, status: status, box: box) { return candidate }
             }
             return nil
+        }
+
+        /// The owners a box's user namespace shows (`onlyRootCanChange`'s `box`): this process's own uid, and the
+        /// overflow uid, which every file whose owner the namespace doesn't map reads as.
+        ///
+        /// Inside a box (a branch run's, a confined session's) root's files read as the overflow uid and the box's own
+        /// `/` (a tmpfs its keeper made) as this process's uid, so no git there is "root's" and VibeSwitcher's git
+        /// couldn't be found at all. There, an overflow-owned component counts as root's: it is a file of an owner the
+        /// namespace doesn't map (root's, or another outside user's), shown read-only, and nothing with a mapped uid can
+        /// create one or chown to it. And the namespace's `/` alone may be this process's. Every mode check stays. That
+        /// is sound because inside a box everything that runs is the branch's code or the node's helpers on the plan's
+        /// own PATH, and the box itself is the lock: the check there only keeps git findable; a git a process in the
+        /// box could write (a folder of its uid below `/`) is still refused.
+        public struct BoxOwners: Equatable, Sendable {
+            public var own: uid_t
+            public var overflow: uid_t
+            public init(own: uid_t, overflow: uid_t) {
+                self.own = own
+                self.overflow = overflow
+            }
+        }
+
+        /// This process's `BoxOwners`, from what the kernel says and nothing a process can set (no variable, no file
+        /// a box holds, no argument): its own `/proc/self/uid_map` maps neither uid 0 nor the overflow uid
+        /// (`/proc/sys/kernel/overflowuid`), and maps its own uid. nil otherwise (the machine's own namespace maps
+        /// them all), when either can't be read, and on the Mac.
+        public static let boxOwners: BoxOwners? = {
+            #if canImport(Darwin)
+            return nil
+            #else
+            guard let map = procText("/proc/self/uid_map"),
+                  let overflow = procText("/proc/sys/kernel/overflowuid").flatMap({ uid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) else { return nil }
+            return boxOwners(uidMap: map, overflow: overflow, own: getuid())
+            #endif
+        }()
+
+        /// `BoxOwners` from a `uid_map`'s text (lines of "inside outside count"): nil when it maps uid 0 or
+        /// `overflow`, when it doesn't map `own`, or when a line can't be read.
+        public static func boxOwners(uidMap: String, overflow: uid_t, own: uid_t) -> BoxOwners? {
+            var ranges: [(start: UInt64, count: UInt64)] = []
+            for line in uidMap.split(separator: "\n") where !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+                guard fields.count == 3, let start = UInt64(fields[0]), UInt64(fields[1]) != nil, let count = UInt64(fields[2]) else { return nil }
+                ranges.append((start, count))
+            }
+            func mapped(_ id: uid_t) -> Bool { ranges.contains { UInt64(id) >= $0.start && UInt64(id) - $0.start < $0.count } }
+            guard !ranges.isEmpty, !mapped(0), !mapped(overflow), mapped(own), own != overflow else { return nil }
+            return BoxOwners(own: own, overflow: overflow)
+        }
+
+        /// A small file of /proc read whole with libc (its size reads as 0, so Foundation's reads take nothing).
+        static func procText(_ path: String) -> String? {
+            let fd = open(path, O_RDONLY | O_CLOEXEC)
+            guard fd >= 0 else { return nil }
+            defer { Sys.close(fd) }
+            var bytes: [UInt8] = []
+            var chunk = [UInt8](repeating: 0, count: 4096)
+            while bytes.count < 65_536 {
+                let count = Sys.read(fd, &chunk, chunk.count)
+                if count < 0, errno == EINTR { continue }
+                guard count > 0 else { break }
+                bytes += chunk[0..<count]
+            }
+            return String(decoding: bytes, as: UTF8.self)
         }
 
         /// Whether the program at `program` (an absolute path) only root can change: a regular file, not a link, that
         /// someone may run, owned by root and writable by neither its group nor others, in a folder that is the same,
         /// as is every folder above it up to `/` (each read with `status`, no link followed). A path that isn't
         /// absolute, or names `.` or `..`, isn't.
-        public static func onlyRootCanChange(_ program: String, status: (String) -> FileStatus?) -> Bool {
-            func onlyRoots(_ found: FileStatus?, isFolder: Bool) -> Bool {
-                guard let found, found.owner == 0, found.mode & (S_IWGRP | S_IWOTH) == 0 else { return false }
+        /// `box` (`BoxOwners`, only `git` passes one): an overflow-owned component counts as root's, and `/` itself may
+        /// be this process's; nil, exactly as above.
+        public static func onlyRootCanChange(_ program: String, status: (String) -> FileStatus?, box: BoxOwners? = nil) -> Bool {
+            func owned(_ owner: uid_t, isRoot: Bool) -> Bool {
+                guard let box else { return owner == 0 }
+                return owner == 0 || owner == box.overflow || (isRoot && owner == box.own)
+            }
+            func onlyRoots(_ found: FileStatus?, isFolder: Bool, isRoot: Bool = false) -> Bool {
+                guard let found, owned(found.owner, isRoot: isRoot), found.mode & (S_IWGRP | S_IWOTH) == 0 else { return false }
                 return isFolder ? found.mode & S_IFMT == S_IFDIR : found.isFile && found.mode & S_IFMT == S_IFREG && found.mode & 0o111 != 0
             }
             guard program.hasPrefix("/") else { return false }
@@ -50,7 +121,7 @@ extension Platform {
             // `/` first, then each folder below it down to the program's own.
             var folder = ""
             let folders = ["/"] + names.dropLast().map { name -> String in folder += "/" + name; return folder }
-            return folders.allSatisfy({ onlyRoots(status($0), isFolder: true) }) && onlyRoots(status(program), isFolder: false)
+            return folders.allSatisfy({ onlyRoots(status($0), isFolder: true, isRoot: $0 == "/") }) && onlyRoots(status(program), isFolder: false)
         }
 
         /// The shell a node's host and its sessions are told is the user's (`SHELL`): `candidate` (the user database's

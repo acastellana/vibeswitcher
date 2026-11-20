@@ -113,6 +113,55 @@ struct ToolsTests {
         #expect(!Platform.Tools.isExecutableFile(Platform.Tools.absentGit))
     }
 
+    /// Inside a box's user namespace (the kernel's `uid_map` maps neither root nor the overflow uid, and maps this
+    /// process's uid), root's files read as the overflow uid and the box's `/` as the run's own: an overflow-owned
+    /// component counts as root's, and `/` alone may be the run's; every mode check stays, and a folder the run's uid
+    /// owns below `/` is refused. Outside one the rule is today's: an overflow owner is refused.
+    @Test func insideABoxRootsFilesReadAsTheOverflowUidAndStillNothingTheBoxCanWriteIsTrusted() {
+        let own: uid_t = 1000, overflow: uid_t = 65534
+        let folder = S_IFDIR, file = S_IFREG
+        let table: [String: Platform.Tools.FileStatus] = [
+            "/": (own, folder | 0o755, false),
+            "/git": (own, file | 0o755, true),
+            "/usr": (overflow, folder | 0o755, false),
+            "/usr/bin": (overflow, folder | 0o755, false),
+            "/usr/bin/git": (overflow, file | 0o755, true),
+            "/scratch": (own, folder | 0o755, false),
+            "/scratch/bin": (own, folder | 0o755, false),
+            "/scratch/bin/git": (own, file | 0o755, true),
+            "/shared": (overflow, folder | 0o775, false),
+            "/shared/git": (overflow, file | 0o755, true),
+            "/opt": (overflow, folder | 0o755, false),
+            "/opt/users": (own, folder | 0o755, false),
+            "/opt/users/git": (overflow, file | 0o755, true),
+        ]
+        let box = Platform.Tools.BoxOwners(own: own, overflow: overflow)
+        func status(_ path: String) -> Platform.Tools.FileStatus? { table[path] }
+        #expect(Platform.Tools.trustedGit(path: "/usr/bin", status: status, box: box) == "/usr/bin/git")
+        // `/` may be the run's, a git in it may not; nor a folder of the run's below it, nor one others may write.
+        #expect(Platform.Tools.trustedGit(path: "/", status: status, box: box) == nil)
+        #expect(Platform.Tools.trustedGit(path: "/scratch/bin:/shared:/opt/users", status: status, box: box) == nil)
+        #expect(Platform.Tools.trustedGit(path: "/scratch/bin:/shared:/usr/bin", status: status, box: box) == "/usr/bin/git")
+        // Outside a box, exactly today's rule: the overflow uid is nobody's root.
+        #expect(Platform.Tools.trustedGit(path: "/usr/bin", status: status) == nil)
+        #expect(!Platform.Tools.onlyRootCanChange("/usr/bin/git", status: status))
+        #expect(!Platform.Tools.onlyRootCanChange("/usr/bin/git", status: { path in
+            table[path].map { found in (found.owner == own ? 0 : found.owner, found.mode, found.isFile) }
+        }))
+
+        // What the kernel says: a box's map (one id, the run's) is a box; the machine's own namespace, a map that
+        // gives root or the overflow uid, one that leaves out this process's uid, and one that can't be read, aren't.
+        #expect(Platform.Tools.boxOwners(uidMap: "      1000       1000          1\n", overflow: overflow, own: own) == box)
+        #expect(Platform.Tools.boxOwners(uidMap: "         0          0 4294967295\n", overflow: overflow, own: own) == nil)
+        #expect(Platform.Tools.boxOwners(uidMap: "0 1000 1\n", overflow: overflow, own: 0) == nil)
+        #expect(Platform.Tools.boxOwners(uidMap: "1000 1000 1\n65534 65534 1\n", overflow: overflow, own: own) == nil)
+        #expect(Platform.Tools.boxOwners(uidMap: "2000 1000 1\n", overflow: overflow, own: own) == nil)
+        #expect(Platform.Tools.boxOwners(uidMap: "", overflow: overflow, own: own) == nil)
+        #expect(Platform.Tools.boxOwners(uidMap: "1000 x 1\n", overflow: overflow, own: own) == nil)
+        // This test process isn't in a box.
+        #expect(Platform.Tools.boxOwners == nil)
+    }
+
     /// The Mac's git is today's.
     @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's form"))
     func theMacsGitIsStillUsrBinGit() {
