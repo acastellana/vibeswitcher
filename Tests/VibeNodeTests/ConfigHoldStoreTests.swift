@@ -174,6 +174,47 @@ struct ConfigHoldStoreTests {
         #expect(status.result?["cards"]?["config"]?.int == 1, "\(status)")
     }
 
+    /// The node's frictions (2026-11-20): `config held` asked again with nothing changed answers the same open card (its
+    /// id, so its code), so a held and an accept from two separate calls meet; once something held changes, a new card,
+    /// the earlier one closed as superseded; and an accept of the kept card seals.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(5))) func configHeldWithNothingChangedAnswersTheSameCard() async throws {
+        let book = LeadVault.Book()
+        let world = try await CardWorld.make(scratch) { host in
+            book.configHome = host.home.path
+            return book.vault(folder: self.scratch.url("vault"), as: { .app })
+        }
+        defer { world.stop() }
+        let skill = world.host.home.path + "/.claude/skills/mine/SKILL.md"
+        try FileManager.default.createDirectory(atPath: (skill as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try "name: mine\nold\n".write(toFile: skill, atomically: true, encoding: .utf8)
+        let app = book.vault(folder: scratch.url("vault"), as: { .app })
+        try app.bind(try app.startLead(root: world.repo, branch: "main"), root: world.repo, session: "lead-session")
+        #expect(try app.checkConfig(root: world.repo).held.isEmpty)
+        let lead = book.vault(folder: scratch.url("vault"), as: { .session("lead-session") })
+        try "name: mine\nnew\n".write(toFile: skill, atomically: true, encoding: .utf8)
+        #expect(try lead.checkConfig(root: world.repo).held == ["~/.claude/skills"])
+
+        let held = { () async throws -> String in
+            let reply = try #require(await world.ask("config.held", ["folder": .string(world.repo)]))
+            return try #require(reply.result?["card"]?["id"]?.string, "\(reply)")
+        }
+        let first = try await held()
+        #expect(try await held() == first)
+        #expect(try await held() == first)
+        let configCards = { world.queue.sync { world.engine.cards.list(project: world.project, all: true).filter { $0.kind == .configHeld } } }
+        #expect(configCards().map(\.id) == [first])
+
+        try "name: mine\nnewer\n".write(toFile: skill, atomically: true, encoding: .utf8)
+        #expect(try lead.checkConfig(root: world.repo).held == ["~/.claude/skills"])
+        let second = try await held()
+        #expect(second != first)
+        #expect(world.card(first)?.closed == "superseded by a newer card")
+        #expect(try await held() == second)
+        let accepted = try #require(await world.ask("config.accept", ["card": .string(second), "code": .string(NodeIds.code(card: second))]))
+        #expect(accepted.ok && accepted.result?["sealed"]?.array?.compactMap(\.string) == ["~/.claude/skills"], "\(accepted)")
+        #expect(world.card(second)?.closed == "accepted")
+    }
+
     /// The security follow-ups' item 20: `config held`'s look shows the vault nothing, so it never ends a root's held
     /// first look (a voice asks it, no typed code), even with nothing held; `config accept` of the card that showed
     /// nothing does (`acceptMark`), and the floor the card proposed is recorded. Nothing held while the first look
