@@ -86,6 +86,14 @@ struct SessionPresetsTests {
 
     /// The digest is keyed by a secret only the server run holds (the security review of 2026-11-20): a page that may
     /// only read can't test guesses of a variable's value (an API key) by hashing them itself.
+    @Test func withNoVaultOrAnotherFileNothingStarts() throws {
+        let home = scratch.url("home")
+        let root = home.appendingPathComponent(".vibeswitcher")
+        #expect(Requests.presetsBaselineRefusal(vault: nil, home: home.path, nodeRoot: root, folder: "/w")?.contains("no vault") == true)
+        #expect(Requests.presetsBaselineRefusal(vault: nil, home: home.path, nodeRoot: scratch.url("elsewhere"), folder: "/w")?
+            .contains("isn't the one the config seal watches") == true)
+    }
+
     @Test func aVariablesValueCantBeGuessedFromTheDigest() {
         let secret = "value-to-guess-41"
         let real = LaunchPreset(name: "Keyed", kind: .claude, command: "claude", env: ["SOME_TOKEN": secret])
@@ -130,10 +138,15 @@ struct SessionPresetsTests {
         for name in ["NODE_OPTIONS", "PATH", "HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "HTTPS_PROXY",
                      "https_proxy", "ALL_PROXY", "PS0", "PS4", "BASH_ENV", "ENV", "PROMPT_COMMAND", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES",
                      "XDG_CONFIG_HOME", "GIT_SSH_COMMAND", "SSL_CERT_FILE", "PYTHONPATH", "BASH_FUNC_x%%", "VIBESWITCHER_HOME", "TMPDIR",
-                     "AWS_ENDPOINT_URL", "SHELL", "EDITOR", "NPM_CONFIG_PREFIX", "JAVA_TOOL_OPTIONS"] {
+                     "AWS_ENDPOINT_URL", "SHELL", "EDITOR", "NPM_CONFIG_PREFIX", "JAVA_TOOL_OPTIONS",
+                     // The allowlist's families: an agent's own, interpreters, pagers, resolvers, any lower-case name.
+                     "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_SHELL_PREFIX", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_PLUGIN_ROOT",
+                     "NODE_ENV", "PYTHONWARNINGS", "LESSOPEN", "LESSCLOSE", "HOSTALIASES", "RESOLV_HOST_CONF", "PS9", "BASH_COMPAT",
+                     "GIT_DIR", "LD_AUDIT", "DYLD_LIBRARY_PATH", "MY_PROXY", "my_var", "A" + String(repeating: "B", count: 41)] {
             #expect(SessionPresets.envRefusal(name) != nil, "\(name)")
         }
-        for name in ["MAX_THINKING_TOKENS", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "CLAUDE_CODE_USE_BEDROCK", "RUN_SLOW", "DEBUG"] {
+        for name in ["MAX_THINKING_TOKENS", "ANTHROPIC_MODEL", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "DISABLE_TELEMETRY", "DISABLE_AUTOUPDATER",
+                     "RUN_SLOW", "DEBUG", "MY_FLAG", "A" + String(repeating: "B", count: 40)] {
             #expect(SessionPresets.envRefusal(name) == nil, "\(name)")
         }
         let planted = LaunchPreset(name: "Opus", kind: .claude, command: "claude", env: ["NODE_OPTIONS": "--require /home/u/x.js", "RUN_SLOW": "1"])
@@ -153,10 +166,19 @@ struct SessionPresetsTests {
         let claude = SessionPresets.named("Claude", in: listed)
         #expect(claude?.refusal == nil && claude?.project == false && claude?.preset.command == "claude")
         #expect(SessionPresets.named("Shell", in: listed)?.project == false)
-        // The built-in itself, its command edited in the app's Settings (its id kept), is still the user's to start.
+        // The built-ins come from this build: the file's exact copies are left out, and a file's preset that took a
+        // built-in's id (its command edited) is refused, never the built-in; the build's own still starts.
         var edited = LaunchPresets.builtIns()
         edited.global[0].command = "claude --model opus"
-        #expect(SessionPresets.list(edited, folder: nil).first?.refusal == nil)
+        let fromFile = SessionPresets.list(edited, folder: nil)
+        #expect(fromFile.map(\.preset.name) == ["Claude", "Claude", "Codex", "Shell"], "\(fromFile)")
+        #expect(fromFile[0].refusal?.contains("name or id") == true && !fromFile[0].builtIn)
+        #expect(fromFile[1].builtIn && fromFile[1].refusal == nil && fromFile[1].preset.command == "claude")
+        let plain = SessionPresets.list(LaunchPresets.builtIns(), folder: nil)
+        #expect(plain.allSatisfy { $0.builtIn })
+        var renamed = LaunchPresets(global: [LaunchPreset(id: LaunchPresets.builtIns().global[2].id, name: "My shell", kind: .shell, command: "")])
+        renamed.byProject = [:]
+        #expect(SessionPresets.list(renamed, folder: nil).first?.refusal?.contains("name or id") == true, "an id taken alone")
     }
 
     /// The confirmation shows each value but a secret-looking one's; a page never gets values.
@@ -181,9 +203,9 @@ struct SessionPresetsTests {
         #expect(page.ok && page.result?["presets"]?.array?.allSatisfy { $0["values"] == nil } == true, "\(page)")
     }
 
-    /// The presets file is on the config seal's list: a change to it, once the vault holds it, stops any preset starting
-    /// until the user accepts it.
-    @Test func aHeldChangeToThePresetsFileStopsPresetsStarting() async throws {
+    /// Fail closed: a preset of the file starts only from a file the user's accept sealed (the home's config, once for
+    /// every project), and not once it changed since; a built-in needs no accept.
+    @Test func aPresetOfTheFileStartsOnlyFromAnAcceptedFile() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let file = world.host.root.appendingPathComponent("presets.json")
@@ -201,18 +223,37 @@ struct SessionPresetsTests {
             let digest = try #require(list.result?["presets"]?.array?.first?["digest"])
             return try #require(await world.ask("session.new", ["folder": .string(world.repo), "preset": .string("Tests shell"), "digest": digest]))
         }
+        let unaccepted = try await start()
+        #expect(unaccepted.error?.code == NodeWire.Code.refused.rawValue
+                && unaccepted.error?.message.contains("the vault holds no accepted presets: accept the presets first (`vibeswitcher config held") == true,
+                "\(unaccepted)")
+        // A built-in starts all the same.
+        let builtIn = try #require(await world.ask("session.presets", ["folder": .string(world.repo)], action: nil))?.result?["presets"]?.array?
+            .first { $0["name"]?.string == "Shell" }
+        #expect(builtIn?["builtIn"]?.bool == true)
+        #expect(try #require(await world.ask("session.new", ["folder": .string(world.repo), "preset": .string("Shell"),
+                                                             "digest": builtIn?["digest"] ?? .null])).ok)
         try await accept()
         #expect(try await start().ok)
 
         presets.byProject[world.repo]?[0].env["RUN_SLOW"] = "2"
         try presets.save(to: file)
         let refused = try await start()
-        #expect(refused.error?.code == NodeWire.Code.refused.rawValue && refused.error?.message.contains(SessionPresets.sealName) == true, "\(refused)")
+        #expect(refused.error?.code == NodeWire.Code.refused.rawValue && refused.error?.message.contains("accept the presets first") == true, "\(refused)")
         try await accept()
         #expect(try await start().ok)
     }
 
     // MARK: Starting one
+
+    /// The user's `config held` and `config accept` for the world's repository: the home's config, the presets file
+    /// among it, sealed as it is now.
+    private func acceptConfig(_ world: CardWorld) async throws {
+        let held = try #require(await world.ask("config.held", ["folder": .string(world.repo)]))
+        let card = try #require(held.result?["card"]?["id"]?.string, "\(held)")
+        let accepted = try #require(await world.ask("config.accept", ["card": .string(card), "code": .string(NodeIds.code(card: card))]))
+        #expect(accepted.ok, "\(accepted)")
+    }
 
     /// The node's `claude` (`NodePreflight.claudeLink` on a scratch root) linked to the world's fake.
     private func linkClaude(_ world: CardWorld) throws {
@@ -247,6 +288,7 @@ struct SessionPresetsTests {
         let shell = LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["RUN_SLOW": "1"], keepShell: true)
         presets.byProject[world.repo] = [opus, shell]
         try presets.save(to: world.host.root.appendingPathComponent("presets.json"))
+        try await acceptConfig(world)
 
         let list = try #require(await world.ask("session.presets", ["folder": .string(world.repo)], action: nil))
         let names = list.result?["presets"]?.array?.compactMap { $0["name"]?.string }
@@ -310,15 +352,18 @@ struct SessionPresetsTests {
                 "\(listed.output)")
         #expect(listed.output.contains("Codex (codex: `codex`)\n    can't start here: Codex doesn't run on this node yet"), "\(listed.output)")
 
+        // A scratch node's presets file isn't the one its home's seal watches, so no accept covers it: refused, failing
+        // closed, after the confirmation showed it.
         let started = try await node.runOnTerminal(["new", folder, "--preset", "tests shell"])
-        #expect(started.status == 0, "\(started.output)\(started.errors)\n\(node.said)")
+        #expect(started.status == 77 && started.output.contains("isn't the one the config seal watches"), "\(started.output)\(started.errors)\n\(node.said)")
         // The confirmation shows each value but a secret-looking one's (the security review of 2026-11-20).
         #expect(started.output.contains("This starts preset Tests shell (a shell; this project's; sets RUN_SLOW=yes-slow, SOME_TOKEN=<set>"),
                 "\(started.output)")
         #expect(!started.output.contains("value-to-hide-7") && !listed.output.contains("value-to-hide-7"), "\(started.output)")
         // Nor the server's log, either value.
         #expect(!node.said.contains("value-to-hide-7") && !node.said.contains("yes-slow"))
-        #expect(started.output.contains("started: session "), "\(started.output)")
+        let builtIn = try await node.runOnTerminal(["new", folder, "--preset", "shell"])
+        #expect(builtIn.status == 0 && builtIn.output.contains("started: session "), "\(builtIn.output)\(builtIn.errors)")
 
         for words in [["new", folder, "--preset", "Nope"]] {
             let refused = try await node.runOnTerminal(words)

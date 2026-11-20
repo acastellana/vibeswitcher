@@ -24,6 +24,8 @@ public enum SessionPresets {
         public var isDefault: Bool
         /// Why the node can't start it, or nil.
         public var refusal: String?
+        /// One of the built-ins themselves (`LaunchPresets.builtIns`, from this build, never the file).
+        public var builtIn = false
     }
 
     /// The presets the node's `root` keeps, and a line for each thing in the file that couldn't be read (the file as a
@@ -37,21 +39,33 @@ public enum SessionPresets {
         guard var presets = try? JSONDecoder().decode(LaunchPresets.self, from: data) else {
             return (builtIns, ["\(url.lastPathComponent) isn't readable JSON, so the built-in presets are used"])
         }
-        if presets.global.isEmpty { presets.global = builtIns.global }
         return (presets, [])
     }
 
-    /// The presets for `folder` (absolute), as the app's New Session lists them: the default of the nearest project
-    /// folder that has presets (the folder itself or one it is in) first, then that project's own, then the global ones.
+    /// The presets for `folder` (absolute), as the app's New Session lists them: the folder's own (its nearest project
+    /// folder's that has presets), then the file's global ones, then the built-ins, the project's default first. The
+    /// built-ins come from this build alone (the security review of 2026-11-20): the copies the app writes into the
+    /// file are left out when they are the built-ins exactly, and any other preset of the file that takes a built-in's
+    /// name or id is refused (`refusal`), never taken as the built-in.
     public static func list(_ presets: LaunchPresets, folder: String?) -> [Listed] {
         let project = folder.flatMap { projectRoot(of: $0, in: presets) }
-        let own = Set((project.flatMap { presets.byProject[$0] } ?? []).map(\.id))
-        let listed = presets.presets(for: project)
-        return listed.enumerated().map { index, preset in
-            Listed(preset: preset, project: own.contains(preset.id), isDefault: index == 0 && project.flatMap { presets.defaults[$0] } == preset.id,
-                   refusal: refusal(preset))
+        let own = project.flatMap { presets.byProject[$0] } ?? []
+        let global = presets.global.filter { !isBuiltInCopy($0) }
+        var listed = own.map { Listed(preset: $0, project: true, isDefault: false, refusal: refusal($0)) }
+            + global.map { Listed(preset: $0, project: false, isDefault: false, refusal: refusal($0)) }
+            + builtIns.map { Listed(preset: $0, project: false, isDefault: false, refusal: refusal($0, builtIn: true), builtIn: true) }
+        // The default: a built-in's id names the built-in itself, never a file's preset that took its id.
+        if let project, let id = presets.defaults[project],
+           let index = listed.firstIndex(where: { $0.preset.id == id && ($0.builtIn || !builtInIDs.contains(id)) }) {
+            var first = listed.remove(at: index)
+            first.isDefault = true
+            listed.insert(first, at: 0)
         }
+        return listed
     }
+
+    /// Whether `preset` is one of the built-ins exactly as this build makes it (the copy the app writes into the file).
+    static func isBuiltInCopy(_ preset: LaunchPreset) -> Bool { builtIns.contains(preset) }
 
     /// The nearest folder at or above `folder` that `presets` keeps presets or a default for.
     static func projectRoot(of folder: String, in presets: LaunchPresets) -> String? {
@@ -71,23 +85,25 @@ public enum SessionPresets {
         return found.first { $0.refusal == nil } ?? found.first
     }
 
-    /// The built-in presets' ids and names (`LaunchPresets.builtIns`): another preset may not go by one of the names.
+    /// The built-in presets (`LaunchPresets.builtIns`), their names and ids: no other preset may take one.
     static let builtIns = LaunchPresets.builtIns().global
     static let builtInNames = Set(builtIns.map { $0.name.lowercased() })
+    static let builtInIDs = Set(builtIns.map(\.id))
 
-    /// The config seal's name for the presets file (`LinuxSealList.homeEntries`): while the vault holds a change to it,
-    /// no preset starts (`Requests.presetsHeld`).
+    /// The config seal's name for the presets file (`LinuxSealList.homeEntries`): a preset of the file starts only while
+    /// the file is as the user's accept sealed it (`Requests.presetsBaselineRefusal`).
     public static var sealName: String { "~/.vibeswitcher/presets.json" }
 
     /// Why the node can't start `preset` (nil: it can): Codex, a name that is a role's, a Claude command that isn't
     /// `claude` and plain words, an environment variable the host refuses.
-    public static func refusal(_ preset: LaunchPreset) -> String? {
+    public static func refusal(_ preset: LaunchPreset, builtIn: Bool = false) -> String? {
         if preset.kind == .codex { return "Codex doesn't run on this node yet" }
         if LeadTeams.role(label: preset.name) != nil {
             return "its name is a lead's or a team member's label, which only a lead's start gives"
         }
-        if builtInNames.contains(preset.name.lowercased()), !builtIns.contains(where: { $0.id == preset.id }) {
-            return "its name is a built-in preset's (\(ConfigSeal.inert(preset.name, limit: 40))), which it would stand in for: rename it"
+        if !builtIn, builtInNames.contains(preset.name.lowercased()) || builtInIDs.contains(preset.id) {
+            return "it takes a built-in preset's name or id (\(ConfigSeal.inert(preset.name, limit: 40))), which it would stand in for: "
+                + "give it a name and id of its own (the built-ins come from VibeSwitcher itself)"
         }
         if preset.kind == .claude, case .failure(let why) = arguments(preset) { return why.message }
         let names = preset.env.keys.sorted()
@@ -102,42 +118,46 @@ public enum SessionPresets {
 
     struct Refusal: Error { let message: String }
 
-    /// Why a preset may not set the variable `name` (nil: it may), in a few words (the security review of 2026-11-20:
-    /// `presets.json` is a file any process of the uid can write, so a variable that changes what a session runs, where
-    /// it reads its config, whom it talks to or what its shell does first could be planted in a preset the user later
-    /// starts). Besides what the host refuses any spawn (`Platform.Tools.spawnEnvironmentRefused`).
+    /// The variables a preset may set by name though their family is refused: Claude Code's model, token and output
+    /// limits, and its switches that turn traffic, telemetry and updates off (those the app's docs and settings use).
+    public static let allowedVariables: Set<String> = [
+        "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL", "MAX_THINKING_TOKENS", "MAX_MCP_OUTPUT_TOKENS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+        "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+        "CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "CLAUDE_CODE_ENABLE_TODO_TOOLS", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
+        "DISABLE_AUTOUPDATER", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "DISABLE_BUG_COMMAND", "DISABLE_COST_WARNINGS",
+        "DISABLE_NON_ESSENTIAL_MODEL_CALLS",
+    ]
+
+    /// The families of names no preset may set, each with why: what a program loads or runs, where it reads its config,
+    /// whom it talks to, what its shell does first. A name is matched by its prefix, its suffix, or whole.
+    static let refusedFamilies: [(prefixes: [String], suffixes: [String], names: [String], why: String)] = [
+        (["CLAUDE_", "ANTHROPIC_", "OPENAI_", "CODEX_", "VIBESWITCHER_"], [], [], "an agent's own settings, endpoints or keys"),
+        (["NODE_", "NPM_", "PYTHON", "PERL", "RUBY", "GEM_", "BUN_", "DENO_", "JAVA_", "JDK_", "CLASSPATH", "LD_", "DYLD_", "GIT_", "MALLOC_",
+          "GLIBC_", "GCONV_"], [], [], "it changes what a program loads or runs"),
+        (["LESS"], [], ["PAGER", "MANPAGER", "EDITOR", "VISUAL", "BROWSER", "SUDO_ASKPASS", "SSH_ASKPASS"], "a program the session would run"),
+        ([], ["PATH"], ["HOME", "SHELL", "USER", "LOGNAME", "PWD", "OLDPWD", "TMPDIR", "TMP", "TEMP", "ZDOTDIR", "INPUTRC", "ENV", "IFS",
+                        "PROMPT_COMMAND", "TERMINFO", "TERM"], "where a session's home, shell or files are"),
+        (["BASH_", "PS", "HIST"], [], [], "a shell's prompt, startup or history"),
+        (["XDG_", "SSL_", "SSH_", "GNUPG", "GPG", "DOCKER_", "KUBE", "AWS_", "GOOGLE_", "AZURE_", "DBUS_", "WAYLAND_"],
+         ["_HOME", "_CONFIG", "_CONFIG_DIR", "_CONFIG_FILE", "_DIR"], ["DISPLAY", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"],
+         "where a program reads its config, keys or trust"),
+        (["HOSTALIASES", "RESOLV_", "PROXY", "NO_PROXY"], ["_PROXY", "_URL", "_HOST", "_ENDPOINT", "_API_BASE"], [], "whom a program talks to"),
+    ]
+
+    /// Why a preset may not set the variable `name` (nil: it may) (the security review of 2026-11-20: `presets.json` is a
+    /// file any process of the uid can write, so the class is closed, not chased by name). An allowlist: the reviewed few
+    /// (`allowedVariables`), and plain user variables, `[A-Z][A-Z0-9_]{0,40}`, outside the refused families
+    /// (`refusedFamilies`) and what the host refuses any spawn (`Platform.Tools.spawnEnvironmentRefused`).
     public static func envRefusal(_ name: String) -> String? {
-        let upper = name.uppercased()
+        if allowedVariables.contains(name) { return nil }
+        guard name.range(of: #"^[A-Z][A-Z0-9_]{0,40}$"#, options: .regularExpression) != nil else {
+            return "a preset's variables are capitals, digits and _, starting with a letter, at most 41 long"
+        }
         if !Platform.Tools.spawnEnvironmentRefused([name]).isEmpty { return "the host refuses it for any session" }
-        if upper.hasPrefix("VIBESWITCHER_") { return "VibeSwitcher's own" }
-        if upper.hasPrefix("LD_") || upper.hasPrefix("DYLD_") { return "a loader hook" }
-        let loaders: Set<String> = ["NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED", "PYTHONPATH", "PYTHONSTARTUP",
-                                    "PYTHONHOME", "PYTHONUSERBASE", "PERL5LIB", "PERL5OPT", "PERLLIB", "RUBYOPT", "RUBYLIB", "JAVA_TOOL_OPTIONS",
-                                    "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH", "GEM_HOME", "GEM_PATH", "BUN_INSTALL", "DENO_DIR", "NPM_CONFIG_PREFIX",
-                                    "GCONV_PATH", "GLIBC_TUNABLES", "MALLOC_CONF"]
-        if loaders.contains(upper) || upper.hasPrefix("NPM_CONFIG_") || upper.hasPrefix("GIT_") { return "it changes what a program loads or runs" }
-        if ["PATH", "MANPATH", "CDPATH", "FPATH", "INFOPATH"].contains(upper) || upper.hasSuffix("_PATH") { return "a search path" }
-        if ["HOME", "USER", "LOGNAME", "SHELL", "PWD", "OLDPWD", "TMPDIR", "TMP", "TEMP", "ZDOTDIR", "INPUTRC", "TERMINFO"].contains(upper) {
-            return "where a session's home, shell or files are"
-        }
-        if upper.hasPrefix("XDG_") || upper.hasSuffix("_CONFIG_DIR") || upper.hasSuffix("_CONFIG_FILE") || upper.hasSuffix("_CONFIG_HOME")
-            || upper.hasSuffix("_HOME") || ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "GNUPGHOME", "KUBECONFIG", "DOCKER_CONFIG", "AWS_SHARED_CREDENTIALS_FILE"].contains(upper) {
-            return "where a program reads its config"
-        }
-        if upper.hasSuffix("_BASE_URL") || upper.hasSuffix("_API_URL") || upper.hasSuffix("_URL") || upper.contains("ENDPOINT") || upper.hasSuffix("_HOST")
-            || upper.hasSuffix("_API_BASE") {
-            return "whom a program talks to"
-        }
-        if upper.hasSuffix("_PROXY") || upper == "PROXY" { return "a proxy" }
-        if ["SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSLKEYLOGFILE"].contains(upper) { return "what TLS trusts" }
-        if upper.hasPrefix("PS") && upper.dropFirst(2).allSatisfy(\.isNumber) || ["PROMPT_COMMAND", "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "IFS",
-                                                                                 "PS4", "BASH_XTRACEFD", "HISTFILE"].contains(upper)
-            || upper.hasPrefix("BASH_FUNC_") {
-            return "a shell's prompt or startup hook"
-        }
-        if ["EDITOR", "VISUAL", "PAGER", "BROWSER", "SSH_ASKPASS", "SUDO_ASKPASS", "SSH_AUTH_SOCK", "DISPLAY", "WAYLAND_DISPLAY",
-            "DBUS_SESSION_BUS_ADDRESS"].contains(upper) {
-            return "a program the session would run, or a socket it would use"
+        for family in refusedFamilies where family.names.contains(name) || family.prefixes.contains(where: name.hasPrefix)
+            || family.suffixes.contains(where: name.hasSuffix) {
+            return family.why
         }
         return nil
     }
@@ -227,7 +247,7 @@ public enum SessionPresets {
         var fields: [String: NodeWire.Value] = [
             "name": .string(preset.name), "kind": .string(preset.kind.rawValue), "command": .string(preset.command),
             "env": .array(preset.env.keys.sorted().map(NodeWire.Value.string)), "keepShell": .bool(preset.keepShell),
-            "project": .bool(listed.project), "default": .bool(listed.isDefault),
+            "project": .bool(listed.project), "default": .bool(listed.isDefault), "builtIn": .bool(listed.builtIn),
             "digest": .string(digest(preset, key: key)), "refused": listed.refusal.map(NodeWire.Value.string) ?? .null,
         ]
         // For a terminal's confirmation only, never a page's: each variable's value, a secret-looking one masked.

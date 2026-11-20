@@ -163,7 +163,7 @@ public enum WireSchema {
             shape("session.completion", from: "SessionCompletions.value", [field("insert", .string), field("title", .string), field("subtitle", .string)]),
             shape("session.preset", from: "SessionPresets.value", [
                 field("name", .string), field("kind", .words(["claude", "codex", "shell"])), field("command", .string), field("env", strings),
-                field("keepShell", .bool), field("project", .bool), field("default", .bool), field("digest", .string),
+                field("keepShell", .bool), field("project", .bool), field("default", .bool), field("builtIn", .bool), field("digest", .string),
                 field("refused", Kind.string.orNull), optional("values", .map(.string))]),
         ]
 
