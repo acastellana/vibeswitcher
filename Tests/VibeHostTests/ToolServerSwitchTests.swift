@@ -4,9 +4,9 @@ import Testing
 @testable import VibeHost
 
 /// The real `vibeswitcher-mcp` through an install of a new build of itself (`MCPHandover`), end to end: a lead's and a
-/// worker's sessions of a scratch host, each running a stand-in for Claude Code (a shell whose argv[0] is `claude`) with
-/// its tool server, installed from a scratch copy of the built one as the app's is. The copy is replaced by another
-/// one; each server switches to it in place, on the same pid and pipes, and the host still knows it as its session's:
+/// worker's sessions of a scratch host, each running a stand-in for Claude Code (a shell whose argv[0] is `claude`, started
+/// as Claude, as the engine starts a lead and a lead's tool server a worker: `SpawnRequest.agent`) with its tool server,
+/// installed from a scratch copy of the built one as the app's is. The copy is replaced by another one; each server switches to it in place, on the same pid and pipes, and the host still knows it as its session's:
 /// the lead's status answers, its auto_advance loop holds its lock again and its sealed report verifies, and so does a
 /// worker's report. Under the keeper Claude Code runs them through (`MCPKeeper`), the same, and then each server is
 /// killed (SIGKILL): its keeper starts another, which the host knows as its session's too, with the same role and seals.
@@ -147,7 +147,8 @@ import Testing
         }
 
         let client = try TestClient(host)
-        // Each session: a stand-in for Claude Code (argv[0] `claude`, so the tools find it as the session's agent),
+        // Each session: a stand-in for Claude Code, started as Claude (the host's record, which the tools take on Linux;
+        // its argv[0] `claude`, the process table's answer on the Mac),
         // starting its tool server once the test says, as Claude Code starts it for the session's role.
         func session(_ name: String, _ arguments: String) async throws -> HostSession {
             files.createFile(atPath: "\(folder)/\(name).in", contents: nil)
@@ -160,7 +161,7 @@ import Testing
             """.write(toFile: script, atomically: true, encoding: .utf8)
             // Its home is the scratch one, for Foundation too (CFFIXED_USER_HOME) and VibeSwitcher's folder: never the user's.
             return try await client.spawn("export HOME='\(home)' CFFIXED_USER_HOME='\(home)' VIBESWITCHER_HOME='\(vibe)'; cd '\(root)'; "
-                                    + "exec /bin/bash -c 'exec -a claude /bin/bash \(script)'", cwd: root)
+                                    + "exec /bin/bash -c 'exec -a claude /bin/bash \(script)'", cwd: root, agent: "claude")
         }
         let leadSession = try await session("lead", "--role lead")
         let workerSession = try await session("worker", "--role worker --task t")

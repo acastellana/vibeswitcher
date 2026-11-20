@@ -60,7 +60,8 @@ import Testing
             """.write(toFile: script, atomically: true, encoding: .utf8)
             // Its home is the scratch one, for Foundation too (CFFIXED_USER_HOME) and VibeSwitcher's folder: never the user's.
             let session = try await app.spawn("export HOME='\(home)' CFFIXED_USER_HOME='\(home)' VIBESWITCHER_HOME='\(vibe)'; cd '\(root)'; "
-                                        + "exec /bin/bash -c 'exec -a claude /bin/bash \(script)'", cwd: root, label: "Lead · \(name)")
+                                        + "exec /bin/bash -c 'exec -a claude /bin/bash \(script)'", cwd: root, label: "Lead · \(name)",
+                                        agent: "claude")
             // The app starts the lead; the lead, its workers (scratch programs in their worktrees, as the lead names them).
             guard case .grant(let grant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
                 Issue.record("no lead grant for \(name)"); return
