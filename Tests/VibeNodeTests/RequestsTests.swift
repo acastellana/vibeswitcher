@@ -201,6 +201,9 @@ struct RequestsTests {
                                   "subscribe", "unsubscribe", "chat.page", "board",
                                   // It changes nothing but a session's seen mark (done or idle), so it needs no voice.
                                   "seen",
+                                  // What a composer completes and the launch presets (the composer's lane, 2026-11-20).
+                                  "session.complete", "session.presets",
+
                                   // The node's settings, read (2026-11-20).
                                   "settings",
                                   // The node's shells, listed (2026-11-20).
@@ -209,13 +212,18 @@ struct RequestsTests {
                                     "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close",
                                     // Driving an ordinary session (2026-11-20).
                                     "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
+                                    // A page's pasted image (the composer's lane, 2026-11-20).
+                                    "session.attach",
+
+                                    // A setting changed (2026-11-20).
+                                    "set",
+                                    // Settling the lead's push request (2026-11-20).
+                                    "push", "push.decline",
                                     // Reopening the user's sessions after a host restart (2026-11-20).
                                     "session.reopen",
                                     // The prompt-audit reminder (2026-11-20).
                                     "prompt-audit",
-                                    // A setting changed (2026-11-20).
-                                    "set",
-                                    // A session renamed or paused (2026-11-20).
+                                    // A session renamed, paused, resumed; finished shells closed (2026-11-20).
                                     "session.rename", "session.pause", "session.resume", "session.close-shells"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }

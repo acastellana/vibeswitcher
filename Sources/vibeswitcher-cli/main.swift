@@ -20,8 +20,10 @@ let usage = """
            vibeswitcher board [FOLDER] [--json]
            vibeswitcher answer CARD [TEXT] | hold CARD
            vibeswitcher tell FOLDER TEXT
-           vibeswitcher send SESSION [TEXT] | reply SESSION CHOICE [TEXT]
-           vibeswitcher new FOLDER [--agent claude|shell] [--model M] | end SESSION | close-shells [FOLDER]
+           vibeswitcher push FOLDER | decline-push FOLDER
+           vibeswitcher send SESSION [TEXT] [--image PATH]... | reply SESSION CHOICE [TEXT]
+           vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M] | end SESSION | presets [FOLDER]
+           vibeswitcher close-shells [FOLDER]
            vibeswitcher reopen [all | SESSION... | --forget] | resume [SESSION]
            vibeswitcher rename SESSION [NAME] | pause SESSION [--hours N | --tomorrow | --off]
            vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]
@@ -57,6 +59,10 @@ case "hold":
     exit(HoldCommand.run(Array(words.dropFirst())))
 case "tell":
     exit(TellCommand.run(Array(words.dropFirst())))
+case "push":
+    exit(PushCommand.run(Array(words.dropFirst()), approve: true))
+case "decline-push":
+    exit(PushCommand.run(Array(words.dropFirst()), approve: false))
 case "send":
     exit(SendCommand.run(Array(words.dropFirst())))
 case "reply":
@@ -65,6 +71,8 @@ case "new":
     exit(NewCommand.run(Array(words.dropFirst())))
 case "close-shells":
     exit(CloseShellsCommand.run(Array(words.dropFirst())))
+case "presets":
+    exit(PresetsCommand.run(Array(words.dropFirst())))
 case "end":
     exit(EndCommand.run(Array(words.dropFirst())))
 case "rename":

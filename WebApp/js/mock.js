@@ -54,7 +54,7 @@ export function createMock(store, options = {}) {
     const hex = /^[0-9a-f]{8}$/.test(sid.slice(6, 14)) ? sid.slice(6, 14) : 'c7e40b18';
     return {
       id: sid, terminal: 'pts/' + (3 + sessions.size), agent, cwd: SITE, status: 'idle', since: ago(60), hosted, role: null,
-      title: null, detail: null, paused: false, lead: null, task: null, prompt: null, draft: null,
+      title: null, detail: null, paused: false, lead: null, task: null, prompt: null, draft: null, queued: [],
       startedAt: fields.since || ago(60), activity: null, activitySince: null, branch: 'main',
       agentSession: `${hex.split('').reverse().join('')}-0c2e-4a71-b3d5-9f6e8a1c2b40`, pid: 51022 + 37 * sessions.size,
       command: hosted ? agent : null, size: hosted ? { cols: 132, rows: 38 } : null, ...fields,
@@ -72,7 +72,8 @@ export function createMock(store, options = {}) {
     add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py',
       prompt: { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
         descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },
-      draft: { text: 'Once the tests pass, also add one for two regions at once.', at: ago(8), action: 'mock-draft' } });
+      draft: { text: 'Once the tests pass, also add one for two regions at once.', images: [], at: ago(8), action: 'mock-draft' },
+      queued: [{ text: 'And keep the old job name in the logs.', images: 0, at: ago(5), action: 'mock-queued' }] });
     add(WEBHOOKS, { agent: 'codex', cwd: PAYOUTS, status: 'working', since: ago(95), startedAt: ago(400), branch: 'retry-webhooks', title: 'Retry failed bank webhooks', detail: 'Running the retry tests', activity: 'pytest tests/test_webhook_retry.py', activitySince: ago(95) });
     add(DARK, { status: 'done', since: ago(380), startedAt: ago(1900), branch: 'settings-dark-mode', title: 'Add dark mode to the settings page' });
     add(PREVIEW, { cwd: DOCS, status: 'background', since: ago(720), startedAt: ago(760), title: 'Preview the docs site', detail: '1 shell · 12m: npm run dev' });
@@ -82,6 +83,10 @@ export function createMock(store, options = {}) {
   const leads = new Map(options.empty ? [] : [[SITE_PROJECT, {
     project: SITE_PROJECT, root: SITE, session: LEAD, named: null, bound: LEAD, replaced: [], held: 0, reportsWaiting: 0, notice: null,
     starting: false, lastStart: null, lastStartAt: ago(5400), looks: 14, questions: { open: 1, blocking: 1 }, cards: [CARD_LAUNCH],
+    // The push the lead asked for (push_remote), open: its card in the lead's chat drafts the two lines that settle it.
+    push: { id: '3c9e1f20', commit: 'c41d7e09b2a65f38d1e0c7b94a2f6e1d3b8c5a70', short: 'c41d7e09', branch: 'landing-base', remote: 'origin',
+      target: 'origin/landing-base', url: 'git@example.invalid:example-site.git', ahead: 2,
+      subjects: ['c41d7e0 Landing copy', '9b2a65f Hero image'], askedAt: ago(600) },
   }]]);
 
   const task = (slug, title, status, fields = {}) => ({ id: slug, slug, title, status, since: ago(300), worker: null, verifier: null, branch: 'agent/' + slug, after: [], checkpoints: [], blocker: null, merged: null, ...fields });
@@ -585,9 +590,34 @@ export function createMock(store, options = {}) {
       const target = sessions.get(args.session);
       if (!target) return { ok: false, error: { code: 'gone', message: 'That session has ended.' } };
       if (!target.hosted) return refused('That session runs in a terminal of yours: VibeSwitcher only types into the sessions it started.');
-      const drafted = message.kind === 'session.draft' ? { text: args.text, at: new Date().toISOString(), action: message.action } : null;
+      const drafted = message.kind === 'session.draft' ? { text: args.text, images: args.images || [], at: new Date().toISOString(), action: message.action } : null;
       emit(setSession(args.session, { draft: drafted }));
       return { ok: true, result: { session: args.session } };
+    }
+    // The composer's lane: what `/` and `@` complete to, a pasted image's parts, and the launch presets.
+    if (message.kind === 'session.complete') {
+      const query = String(args.query || '').toLowerCase();
+      const items = args.kind === 'slash'
+        ? [['compact', 'Summarize the conversation to free context'], ['clear', 'Start a new conversation'], ['model', 'Switch model'],
+          ['review', 'Review the current changes'], ['deploy', 'Ship it to staging'], ['context', 'Show what fills the context']]
+          .filter(([name]) => name.includes(query)).map(([name, note]) => ({ insert: `/${name} `, title: `/${name}`, subtitle: note }))
+        : ['payouts/worker.py', 'payouts/schedule.py', 'tests/test_payouts.py', 'README.md', 'docs/regions.md']
+          .filter((path) => path.toLowerCase().includes(query)).map((path) => ({ insert: `@${path} `, title: path.split('/').pop(), subtitle: path }));
+      return { ok: true, result: { items } };
+    }
+    if (message.kind === 'session.attach') {
+      if (args.part + 1 < args.parts) return { ok: true, result: { session: args.session, received: args.part + 1 } };
+      const ext = { 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }[args.type] || 'png';
+      return { ok: true, result: { session: args.session, received: args.parts, path: `/home/you/.vibeswitcher/attachments/pasted-mock-${next('i')}.${ext}` } };
+    }
+    if (message.kind === 'session.presets') {
+      const presets = [
+        { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, digest: 'mock-opus', refused: null },
+        { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, digest: 'mock-claude', refused: null },
+        { name: 'Codex', kind: 'codex', command: 'codex', env: [], keepShell: false, project: false, default: false, digest: 'mock-codex', refused: 'Codex doesn’t run on this node yet' },
+        { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, digest: 'mock-shell', refused: null },
+      ];
+      return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
     }
     if (message.kind === 'settings') {
       if (args.folder && args.folder !== SITE) return { ok: false, error: { code: 'gone', message: `no lead has worked in ${args.folder} yet: \`vibeswitcher lead ${args.folder}\` starts one` } };

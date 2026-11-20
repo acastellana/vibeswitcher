@@ -59,6 +59,15 @@ public final class Requests: @unchecked Sendable {
     /// The messages web pages left for sessions (`session.draft`), by the node's id for each: told to nobody until
     /// `vibeswitcher send SESSION` types one. On `queue`.
     public let sessionDrafts = Changes<SessionDraft>()
+    /// The messages `send` holds for sessions while a question is open on their screens (`HeldSend`), by the node's id
+    /// for each, oldest first. On `queue`.
+    public let heldSends = Changes<[HeldSend]>()
+    /// The sessions whose held messages are being typed in now (`pumpHeld`). On `queue`.
+    var pumping: Set<UUID> = []
+    /// What sessions' composers complete (`session.complete`), kept a while.
+    let completionIndex = SessionCompletions()
+    /// Images web pages are sending in parts (`session.attach`). On `queue`.
+    let attachments = SessionAttachments()
     /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]
@@ -149,9 +158,9 @@ public final class Requests: @unchecked Sendable {
     /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
                                                "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
-                                               "send", "session.new", "session.end", "session.reply", "session.reopen",
-                                               "prompt-audit", "set", "session.rename", "session.pause",
-                                               "session.resume", "session.close-shells"]
+                                               "send", "session.new", "session.end", "session.reply",
+                                               "set", "push", "push.decline", "session.reopen", "prompt-audit",
+                                               "session.rename", "session.pause", "session.resume", "session.close-shells"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -174,7 +183,7 @@ public final class Requests: @unchecked Sendable {
         }
         if request.kind == "web.open", openWebForAnyone {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
-            return act(request, reply: reply)
+            return act(request, from: facts, reply: reply)
         }
         if needs == .user {
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
@@ -209,7 +218,7 @@ public final class Requests: @unchecked Sendable {
                         again.re = request.id
                         reply(again)
                     case .success(true):
-                        self.act(request) { [weak self] answer in
+                        self.act(request, from: facts) { [weak self] answer in
                             self?.keep(answer, for: action)
                             reply(answer)
                         }
@@ -217,11 +226,11 @@ public final class Requests: @unchecked Sendable {
                 }
             }
         }
-        act(request, reply: reply)
+        act(request, from: facts, reply: reply)
     }
 
     /// What `request` does, once it passed.
-    private func act(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+    private func act(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
         acting(request)
         switch request.kind {
         case "status": status(request, reply: reply)
@@ -235,10 +244,13 @@ public final class Requests: @unchecked Sendable {
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)
         case "tell": tell(request, reply: reply)
+        case "push", "push.decline": push(request, reply: reply)
         case "send": send(request, reply: reply)
         case "session.new": newSession(request, reply: reply)
         case "session.end": endSession(request, reply: reply)
         case "session.reply": replySession(request, reply: reply)
+        case "session.presets": presets(request, terminal: facts.pid != NodeLive.webPeer.pid && facts.uid != nil, reply: reply)
+        case "session.complete": complete(request, reply: reply)
         case "session.reopen": reopenSessions(request, reply: reply)
         case "mail": mail(request, reply: reply)
         case "prompt-audit": promptAudit(request, reply: reply)
@@ -352,7 +364,7 @@ public final class Requests: @unchecked Sendable {
                              "scopes": .array(rule.scopes.map { .string($0.pattern) })]),
             "sessions": .array(list.map { session in
                 let id = NodeSessions.id(of: session)
-                return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id])
+                return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id], queued: heldSends.values[id] ?? [])
             }),
             "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
             "cards": Self.counts(engine?.cards.counts() ?? [:]),

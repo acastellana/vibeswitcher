@@ -261,6 +261,90 @@ struct SessionDriveTests {
         #expect(status(world, requests, id)?["draft"] == .null)
     }
 
+    /// An image a page pastes comes in parts, is written to the node's attachments folder as the app saves a pasted
+    /// one, and the page's draft names it; `send` with the draft's words and image types both, and the draft goes. A
+    /// draft names no file but an attached image.
+    @Test func aPastedImageIsKeptAndTheDraftThatNamesItIsSent() async throws {
+        let (world, sessions, requests) = try await scanned()
+        defer { world.stop(); sessions.stop() }
+        let harness = try await NodeHarness.start(on: world.host, fake: world.fake, cwd: world.repo, label: "Claude")
+        let id = NodeIds.session(host: harness.session.id)
+        try #require(await eventually(timeout: 60) { sessions.refresh(); return status(world, requests, id) != nil })
+        func page(_ kind: String, _ args: [String: NodeWire.Value]) async -> NodeWire.Reply? {
+            let reply = Locked<NodeWire.Reply?>(nil)
+            let request = NodeWire.Request(id: "1", kind: kind, args: args, action: UUID().uuidString.lowercased())
+            world.queue.async { requests.draft(request) { reply.value = $0 } }
+            _ = await eventually(timeout: 60) { reply.value != nil }
+            return reply.value
+        }
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] + Array(repeating: 7, count: 100))
+        let upload = UUID().uuidString
+        var path: String?
+        for (index, part) in [png.prefix(40), png.dropFirst(40).prefix(40), png.dropFirst(80)].enumerated() {
+            let reply = try #require(await page("session.attach", ["session": .string(id), "upload": .string(upload), "type": .string("image/png"),
+                                                                    "part": .int(index), "parts": .int(3), "data": .string(Data(part).base64EncodedString())]))
+            #expect(reply.ok && reply.result?["received"]?.int == index + 1, "\(reply)")
+            path = reply.result?["path"]?.string
+        }
+        let saved = try #require(path)
+        #expect(saved.hasPrefix(world.host.root.appendingPathComponent("attachments").path + "/pasted-") && saved.hasSuffix(".png"), "\(saved)")
+        #expect(FileManager.default.contents(atPath: saved) == png)
+        let mode = try FileManager.default.attributesOfItem(atPath: saved)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+
+        let elsewhere = try #require(await page("session.draft", ["session": .string(id), "text": .string("Look"), "images": .array([.string("/etc/hostname.png")])]))
+        #expect(elsewhere.error?.code == NodeWire.Code.badArgs.rawValue && elsewhere.error?.message.contains("isn't an image attached") == true, "\(elsewhere)")
+        let left = try #require(await page("session.draft", ["session": .string(id), "text": .string("What's this?"), "images": .array([.string(saved)])]))
+        #expect(left.ok, "\(left)")
+        #expect(status(world, requests, id)?["draft"]?["images"] == .array([.string(saved)]))
+
+        let sent = Locked<NodeWire.Reply?>(nil)
+        let request = NodeWire.Request(id: "2", kind: "send", args: ["session": .string(id), "text": .string("What's this?"), "images": .array([.string(saved)])],
+                                       action: UUID().uuidString.lowercased())
+        world.queue.async { requests.handle(request, from: CardWorld.user) { sent.value = $0 } }
+        try #require(await eventually(timeout: 60) { sent.value != nil })
+        #expect(sent.value?.ok == true, "\(String(describing: sent.value))")
+        try await harness.waitFor { harness.transcript.contains { line in
+            ((line["message"] as? [String: Any])?["content"] as? [[String: Any]])?.contains { $0["type"] as? String == "image" } == true
+        } }
+        #expect(status(world, requests, id)?["draft"] == .null)
+    }
+
+    @Test func anImagesPartsAreCheckedAsTheyCome() {
+        let attachments = SessionAttachments()
+        let id = UUID().uuidString.lowercased()
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2])
+        // Out of order, and a part again (a page's retry): taken once.
+        if case .partial(1) = attachments.take(id: id, session: "s", type: "image/png", part: 1, parts: 2, data: png.dropFirst(5)) {} else { Issue.record("part 1") }
+        if case .partial(1) = attachments.take(id: id, session: "s", type: "image/png", part: 1, parts: 2, data: png.dropFirst(5)) {} else { Issue.record("again") }
+        if case .refused = attachments.take(id: id, session: "other", type: "image/png", part: 0, parts: 2, data: png.prefix(5)) {} else { Issue.record("another's") }
+        guard case .whole(let whole, "image/png") = attachments.take(id: id, session: "s", type: "image/png", part: 0, parts: 2, data: png.prefix(5)) else {
+            Issue.record("whole")
+            return
+        }
+        #expect(whole == png)
+        // Not what its type says; too large; not a type; four at once.
+        if case .refused(_, let why) = attachments.take(id: UUID().uuidString, session: "s", type: "image/gif", part: 0, parts: 1, data: png) {
+            #expect(why.contains("isn't a image/gif"))
+        } else { Issue.record("gif") }
+        let big = Data(count: SessionAttachments.maxBytes / 2 + 1)
+        let large = UUID().uuidString
+        _ = attachments.take(id: large, session: "s", type: "image/png", part: 0, parts: 3, data: big)
+        if case .refused(_, let why) = attachments.take(id: large, session: "s", type: "image/png", part: 1, parts: 3, data: big) {
+            #expect(why.contains("at most"))
+        } else { Issue.record("large") }
+        if case .refused = attachments.take(id: UUID().uuidString, session: "s", type: "image/svg+xml", part: 0, parts: 1, data: png) {} else { Issue.record("svg") }
+        for _ in 0..<SessionAttachments.maxUploads { _ = attachments.take(id: UUID().uuidString, session: "s", type: "image/png", part: 0, parts: 2, data: png) }
+        if case .refused(_, let why) = attachments.take(id: UUID().uuidString, session: "s", type: "image/png", part: 0, parts: 2, data: png) {
+            #expect(why.contains("coming in already"))
+        } else { Issue.record("many") }
+        // Waiting parts go after a while.
+        if case .partial = attachments.take(id: UUID().uuidString, session: "s", type: "image/png", part: 0, parts: 2, data: png,
+                                            now: Date().addingTimeInterval(SessionAttachments.uploadLife + 1)) {} else { Issue.record("expired") }
+        #expect(SessionAttachments.looks(Data("RIFF\0\0\0\0WEBPVP8 ".utf8), like: "image/webp"))
+        #expect(SessionAttachments.looks(Data([0xFF, 0xD8, 0xFF, 0xE0]), like: "image/jpeg"))
+    }
+
     // MARK: the command line
 
     /// Asks `condition` (a command run, say) until it holds or `timeout` passes, a fifth of a second between asks.

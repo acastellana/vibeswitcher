@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import VibeCore
+@testable import VibeCore
 @testable import VibeNode
 
 /// The node's settings (`NodeSettings`, the parity table's gap 9): each key reads where the app keeps it, a value is
@@ -77,13 +77,24 @@ struct NodeSettingsTests {
         for key in LeadWorkflow.macKeys { #expect(NodeSettings.setting(key)?.scope != .project, "\(key)") }
     }
 
-    @Test func anEmptyNodeReadsEveryDefault() throws {
-        let shown = NodeSettings.node(files: try files())
-        #expect(shown.count == NodeSettings.all.filter { $0.scope == .node }.count)
-        for item in shown { #expect(item.isDefault, "\(item.setting.key): \(item.value)") }
-        #expect(value("policy", shown) == WorkingPolicy.defaultText)
-        #expect(value("lead_mail", shown) == "on")
-        #expect(value("boost", shown) == "off")
+    /// On any machine: Boost's ceilings follow the cores (4× them), so on a small one its defaults are kept under them,
+    /// and those are what a node reads as its defaults.
+    @Test(arguments: [nil, 2, 4, 24] as [Int?])
+    func anEmptyNodeReadsEveryDefault(cores: Int?) throws {
+        let files = try files()
+        try MacLoad.$simulatedProcessors.withValue(cores ?? MacLoad.processors) { () throws in
+            let shown = NodeSettings.node(files: files)
+            #expect(shown.count == NodeSettings.all.filter { $0.scope == .node }.count)
+            for item in shown { #expect(item.isDefault, "\(cores.map(String.init) ?? "this machine's") cores: \(item.setting.key): \(item.value)") }
+            #expect(value("policy", shown) == WorkingPolicy.defaultText)
+            #expect(value("lead_mail", shown) == "on")
+            #expect(value("boost", shown) == "off")
+            // Each default is a value `set` takes back.
+            for item in shown where item.setting.form == .count || item.setting.form == .number {
+                #expect(try NodeSettings.parse(item.setting, item.defaultValue).get() == (item.defaultValue == "default" ? nil : item.defaultValue),
+                        "\(item.setting.key): \(item.defaultValue)")
+            }
+        }
     }
 
     // MARK: Taking a value
@@ -141,11 +152,13 @@ struct NodeSettingsTests {
     @Test func boostAndLeadMailAreTheAppsDefaultsKeys() throws {
         let files = try files()
         _ = try set("boost", "on", files: files)
-        _ = try set("boost_max_workers", "9", files: files)
+        // Within the ceiling on any machine (4× the cores).
+        let workers = min(9, BoostLimits.countCeiling)
+        _ = try set("boost_max_workers", String(workers), files: files)
         _ = try set("lead_mail", "off", files: files)
         let store = try #require(Platform.settings(domain: files.preferencesDomain))
         #expect(store.string(forKey: "boostMode") == "on")
-        #expect(NodeSettings.boostLimits(store).maxWorkers == 9 && NodeSettings.boostLimits(store).maxSessions == BoostLimits.defaultMaxSessions)
+        #expect(NodeSettings.boostLimits(store).maxWorkers == workers && NodeSettings.boostLimits(store).maxSessions == BoostLimits().maxSessions)
         #expect(!LeadMail.isOn(store))
         _ = try set("lead_mail", "default", files: files)
         #expect(LeadMail.isOn(store) && store.object(forKey: LeadMail.enabledKey) == nil)

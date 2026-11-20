@@ -56,7 +56,9 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
 | `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
 | `js/notify.js` | The browser's notifications while the page is open (a card opens, a session's prompt waits, a lead stops), asked once and toggled on This node; the title bar's count of what needs you. |
+| `js/composing.js` | The composer's word at the caret (`/` and `@`, as the app's composer finds it) and an image's parts for `session.attach`. In the box, `/` and `@` complete from the node (`session.complete`); a pasted or dropped image goes to the node and the draft names it; the messages the node holds behind a question show over the box. |
 | `js/settings.js` | The settings' parts with no page in them: grouped by section, a change's `vibeswitcher set` line quoted as the shell needs, what a draft is checked against. |
+| `js/push.js` | The push a lead asks for (the lead's `push`), in words: what goes where, its commits, and the two lines that settle it in a terminal; the card heads the lead's question stack. Nothing on the page pushes. |
 | `js/activity.js` | The inspector's Activity, made from a chat's items: files changed with their line counts, commands run. |
 | `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `node`, `settings`, `start`, `palette`. |
 
@@ -171,7 +173,10 @@ Messages are the design's live protocol ("State as snapshot and deltas"), in `No
 { in: 'node', id: 'local', value }
 
 // A request, as NodeWire.Request: `action` is a new UUID, sent again on a retry so it's done once.
-{ v: 1, id, kind: 'draft' | 'draft.clear' | 'session.draft' | 'session.draft.clear' | 'seen' | 'chat.page' | …, args, action }
+{ v: 1, id, kind: 'draft' | 'draft.clear' | 'session.draft' | 'session.draft.clear' | 'session.attach' | 'seen' | …, args, action }
+
+// A read (no action: nothing is sent again after a reconnect), e.g. what a session's / and @ complete to.
+{ v: 1, id, kind: 'chat.page' | 'session.complete' | 'session.presets' | …, args }
 ```
 
 A snapshot with another `epoch` (the server restarted) replaces everything and the open chats are asked for again. A

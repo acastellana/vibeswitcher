@@ -290,20 +290,21 @@ public enum WireVectors {
     static func session(id: String, terminal: String, agent: String, cwd: String?, status: String, since: String, hosted: Bool,
                         role: String?, shown: String, project: String, task: String?, startedAt: String, hasHooks: Bool,
                         leadAsks: Bool, startFolder: String?, hasTranscript: Bool, prompt: NodeWire.Value = .null,
-                        draft: NodeWire.Value = .null) -> NodeWire.Value {
+                        draft: NodeWire.Value = .null, queued: NodeWire.Value = .array([])) -> NodeWire.Value {
         func text(_ value: String?) -> NodeWire.Value { value.map(NodeWire.Value.string) ?? .null }
         return .object(["id": .string(id), "terminal": .string(terminal), "agent": .string(agent), "cwd": text(cwd),
                         "status": .string(status), "since": .string(since), "hosted": .bool(hosted), "role": text(role),
                         "shownStatus": .string(shown), "project": .string(project), "task": text(task), "detail": .null,
                         "activity": .null, "activitySince": .null, "startedAt": .string(startedAt), "hasHooks": .bool(hasHooks),
                         "leadAsks": .bool(leadAsks), "startFolder": text(startFolder), "backgroundJobs": .int(0),
-                        "hasTranscript": .bool(hasTranscript), "prompt": prompt, "draft": draft,
+                        "hasTranscript": .bool(hasTranscript), "prompt": prompt, "draft": draft, "queued": queued,
                         "name": .null, "pausedUntil": .null, "agentSession": .null])
     }
 
     /// An ordinary Claude session asking its own question, a message drafted for it on a page (driving sessions,
-    /// 2026-11-20): `SessionPrompt.value` and `SessionDraft.value` as the node writes them.
-    static func asking(draft: Bool) -> NodeWire.Value {
+    /// 2026-11-20): `SessionPrompt.value` and `SessionDraft.value` as the node writes them; with `queued`, a message
+    /// `vibeswitcher send` sent meanwhile, held until the question closes (`HeldSend.value`, the composer's lane).
+    static func asking(draft: Bool, queued: Bool = false) -> NodeWire.Value {
         let menu = ScreenMenu(question: "Bash command\n  npm test\nDo you want to proceed?",
                               options: ["Yes", "Yes, and don't ask again for this command", "No, and tell Claude what to do differently (esc)"],
                               descriptions: [nil, nil, nil], selected: 0)
@@ -312,7 +313,9 @@ public enum WireVectors {
         return session(id: plainSession, terminal: "pts/6", agent: "claude", cwd: "/home/u/acme-site", status: "needs-you",
                        since: "2026-11-17T09:23:10.200Z", hosted: true, role: nil, shown: "needs-you", project: "acme-site", task: "Fix the tests",
                        startedAt: "2026-11-17T09:20:00.000Z", hasHooks: true, leadAsks: false, startFolder: "/home/u/acme-site",
-                       hasTranscript: true, prompt: prompt, draft: draft ? drafted : .null)
+                       hasTranscript: true, prompt: prompt, draft: draft ? drafted : .null,
+                       queued: .array(queued ? [HeldSend(message: "And the docs", text: "And the docs", images: [], at: date("2026-11-17T09:23:50.000Z"),
+                                                         action: "5d0b7c1e-2f3a-4e6b-8c9d-0a1b2c3d4e5f").value] : []))
     }
 
     static func lead(status: String, since: String) -> NodeWire.Value {
@@ -358,6 +361,10 @@ public enum WireVectors {
         lead.bound = leadHost.uuidString.lowercased()
         lead.lastStart = "started"
         lead.lastStartAt = date("2026-11-17T08:40:02.410Z")
+        lead.push = LeadPush.Request(id: "3c9e1f20", commit: "c41d7e09b2a65f38d1e0c7b94a2f6e1d3b8c5a70", remote: "origin", branch: "main",
+                                     url: "git@example.invalid:example-site.git", ahead: 2,
+                                     subjects: ["c41d7e0 Landing copy", "9b2a65f Hero image"],
+                                     askedAt: date("2026-11-17T09:02:11.000Z").timeIntervalSince1970)
         guard case .object(var fields) = lead.value else { return lead.value }
         fields["looks"] = .int(211)
         fields["questions"] = .object(["open": .int(1), "blocking": .int(1)])
@@ -381,12 +388,27 @@ public enum WireVectors {
         ])
     }
 
+    /// The launch presets of the vectors' example: the project's own Opus (its default, with a variable set) and the
+    /// built-ins, Codex among them (the node can't start it).
+    /// A fixed key for the example's digests, so the generated files are the same each time (a node's is random).
+    static let presetsKey = SymmetricKey(data: Data(repeating: 0x5a, count: 32))
+
+    static var presetsExample: LaunchPresets {
+        var presets = LaunchPresets.builtIns()
+        let opus = LaunchPreset(id: UUID(uuidString: "6f1d2c3b-4a5e-4f60-8a71-92b3c4d5e6f7")!, name: "Opus", kind: .claude,
+                                command: "claude --model opus", env: ["MAX_THINKING_TOKENS": "16000"])
+        presets.byProject[root] = [opus]
+        presets.defaults[root] = opus.id
+        return presets
+    }
+
     static var hello: NodeWire.Hello {
         NodeWire.Hello(node: NodeIds.node, epoch: epoch,
                        server: .init(commit: "f62aef61", startedAt: "2026-11-17T09:12:44.031Z", pid: 41822),
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
                        kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
-                               "session.draft", "session.draft.clear", "settings"],
+                               "session.draft", "session.draft.clear", "session.presets", "session.complete", "session.attach",
+                               "settings"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -628,6 +650,31 @@ public enum WireVectors {
             ("session.draft.clear", [request(.init(id: "16", kind: "session.draft.clear", args: ["session": .string(plainSession)],
                                                    action: "1c5e8a20-4b7d-4f3e-9a61-0d2c7b5e8f13")),
                                      delta("s1", "sessions", prev: 50, seq: 51, at: "2026-11-17T09:23:41.020Z", changes: [(plainSession, asking(draft: false))])]),
+            // A message sent while the question is open waits for it (the composer's lane, 2026-11-20).
+            ("session.queued", [delta("s1", "sessions", prev: 51, seq: 52, at: "2026-11-17T09:23:50.010Z", changes: [(plainSession, asking(draft: false, queued: true))])]),
+            // A pasted screenshot, in its one part, then the draft that names it (the composer's lane, 2026-11-20).
+            ("session.attach", [request(.init(id: "40", kind: "session.attach", args: [
+                                    "session": .string(plainSession), "upload": .string("7a1e2b3c-4d5e-4f60-8172-93a4b5c6d7e8"), "type": .string("image/png"),
+                                    "part": .int(0), "parts": .int(1), "data": .string("iVBORw0KGgo=")], action: "2b8f1c3d-5e6a-4b7c-9d0e-1f2a3b4c5d6e")),
+                                reply("reply.session.attach", .init(re: "40", result: .object([
+                                    "session": .string(plainSession), "received": .int(1),
+                                    "path": .string("/home/u/.vibeswitcher/attachments/pasted-2026-11-17-092400-3f2a.png")])))]),
+            ("session.draft.image", [request(.init(id: "41", kind: "session.draft", args: [
+                                         "session": .string(plainSession), "text": .string("What's wrong here?"),
+                                         "images": .array([.string("/home/u/.vibeswitcher/attachments/pasted-2026-11-17-092400-3f2a.png")])],
+                                                   action: "3c9a2d4e-6f7b-4c8d-8e1f-2a3b4c5d6e7f"))]),
+            // What the composer offers as `@` and `/` are typed (the composer's lane, 2026-11-20).
+            ("session.complete", [request(.init(id: "39", kind: "session.complete", args: ["session": .string(plainSession), "kind": .string("mention"),
+                                                                                       "query": .string("logn")])),
+                                  reply("reply.session.complete", .init(re: "39", result: .object(["items": .array([
+                                      SessionCompletions.value(insert: "@src/login.ts ", title: "login.ts", subtitle: "src/login.ts"),
+                                      SessionCompletions.value(insert: "@tests/login.test.ts ", title: "login.test.ts", subtitle: "tests/login.test.ts")])])))]),
+            // The launch presets for a folder (2026-11-20): the page's New session form offers them; `vibeswitcher new FOLDER
+            // --preset NAME` starts one, the user's voice.
+            ("session.presets", [request(.init(id: "38", kind: "session.presets", args: ["folder": .string(root)])),
+                                 reply("reply.session.presets", .init(re: "38", result: .object([
+                                     "presets": .array(SessionPresets.list(presetsExample, folder: root).map { SessionPresets.value($0, key: presetsKey) }),
+                                     "problems": .array([])])))]),
             // The node's settings (2026-11-20): read by a page, which drafts the line that sets one; `set` is never a page's.
             ("settings", [request(.init(id: "18", kind: "settings", args: ["folder": .string(root)])),
                           reply("reply.settings", .init(re: "18", result: settingsValue))]),

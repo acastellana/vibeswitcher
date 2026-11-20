@@ -532,6 +532,8 @@ is done once (rule 8). What the first write actions need:
 | `session.draft` **new** (2026-11-20) | `session` (the whole id), `text` | refused, `voice` | a token with `draft`, `action`: the message kept beside the session (its `draft`), told to nobody; the reply's `applied` is the `sessions` stream's seq. `vibeswitcher send SESSION` types it |
 | `session.draft.clear` **new** (2026-11-20) | `session` | refused, `voice` | a token with `draft`, `action` |
 | `send`, `session.new`, `session.end`, `session.reply` **new** (2026-11-20) | `session` and `text`; `folder`, `agent`, `model`; `session`; `session`, `choice`, `text`, `question`, `options` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: the page shows the line that runs each |
+| `settings` **new** (2026-11-20) | `folder?` | anyone | a token with `read`: `{node: {root, settings}, project: {project, root, settings} or null, leftOut: [{title, why}]}`, each setting `{key, title, about, section, scope, form, home, choices, limits, value, default, isDefault, where, guardRail, note}` (the schema's `setting`; the vector `settings`); a folder no lead has worked in is `gone` |
+| `set` **new** (2026-11-20) | `folder?`, `key`, `value` | the user's voice, the typed code from the action id, `action`; recorded: `{key, value, was, scope, project, told}` | refused, `voice` (the vector `set.from-a-page`): the page drafts the `vibeswitcher set` line (`views/settings.js`) |
 | `session.reopen` **new** (2026-11-20) | `all` bool, or `sessions` [string] (ids as `reopen` lists them, or prefixes of 4 or more), or `forget` bool | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: `vibeswitcher reopen` |
 | `mail` **new** (2026-11-20) | `folder` string? (absolute), `all` bool? | the user's voice, no typed code (a read of the projects' private record of their leads' `tell_lead` messages) | refused, `voice`: `vibeswitcher mail` |
 | `prompt-audit` **new** (2026-11-20) | `folder` string (absolute), `do`: `snooze`, `off` or `on` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: `vibeswitcher prompt-audit` |
@@ -540,12 +542,16 @@ is done once (rule 8). What the first write actions need:
 | `session.resume` **new** (2026-11-20) | `session` (an id as `ended` lists it, or a prefix of 4 or more) | the user's voice, the typed code, `action`; recorded: `{reopened, refused}` as `session.reopen`'s | refused, `voice`: `vibeswitcher resume`; the start page shows the line |
 | `shells` **new** (2026-11-20) | `folder` string? (absolute) | the user's voice, no typed code (a read): `{shells: [{session, folder, terminal, finished}]}` | refused, `voice`: `vibeswitcher close-shells` |
 | `session.close-shells` **new** (2026-11-20) | `sessions` [string] (the shells shown) | the user's voice, the typed code, `action`; recorded: `{ended, left}`, each still a finished shell read again right before | refused, `voice` |
-| `settings` **new** (2026-11-20) | `folder?` | anyone | a token with `read`: `{node: {root, settings}, project: {project, root, settings} or null, leftOut: [{title, why}]}`, each setting `{key, title, about, section, scope, form, home, choices, limits, value, default, isDefault, where, guardRail, note}` (the schema's `setting`; the vector `settings`); a folder no lead has worked in is `gone` |
-| `set` **new** (2026-11-20) | `folder?`, `key`, `value` | the user's voice, the typed code from the action id, `action`; recorded: `{key, value, was, scope, project, told}` | refused, `voice` (the vector `set.from-a-page`): the page drafts the `vibeswitcher set` line (`views/settings.js`) |
 
-A session (§5) carries two more fields since 2026-11-20, each null when there's none: `prompt` {`question` †,
-`options` †, `descriptions` †, `text` (the options that take words, by index), `multiSelect`, `at`}, the question open
-on its screen as the node read it (`SessionPrompt`), and `draft` {`text` †, `at`, `action`}, a page's message for it.
+| `session.attach` **new** (2026-11-20, the composer) | `session`, `upload` (a UUID), `type` (png, jpeg, gif, webp), `part`, `parts`, `data` (base64) | refused, `voice` | a token with `draft`, `action`: an image in parts (a page's message is at most 64 KiB); the last part's reply carries the `path` it was written to, which `session.draft`'s `images` name |
+| `session.complete` **new** (2026-11-20, the composer) | `session`, `kind` (`slash`, `mention`), `query` | anyone | a token with `read`: `items` [{`insert`, `title`, `subtitle`}], what the app's composer offers |
+| `session.presets` **new** (2026-11-20, the composer) | `folder` (optional) | anyone | a token with `read`: `presets` [{`name`, `kind`, `command`, `env` (names), `keepShell`, `project`, `default`, `digest` (an HMAC under a key only the server run holds: no variable's value can be guessed from it, and a restart makes the user list them again), `refused`}], `problems`; `session.new` takes `preset` and its `digest` |
+
+A session (§5) carries three more fields since 2026-11-20: `prompt` {`question` †, `options` †, `descriptions` †,
+`text` (the options that take words, by index), `multiSelect`, `at`}, the question open on its screen as the node read
+it (`SessionPrompt`), and `draft` {`text` †, `images` (paths), `at`, `action`}, a page's message for it, each null
+when there's none; and `queued` [{`text` †, `images` (a count), `at`, `action`}], the messages `send` holds until the
+question on its screen closes.
 Three more since 2026-11-20 (the stability lane), each null when there's none: `name` †, your name for it
 (`vibeswitcher rename`); `pausedUntil`, the end of your pause (`vibeswitcher pause`; far in the future: until you
 resume it); `agentSession`, the agent's own session id (what `--resume` takes).

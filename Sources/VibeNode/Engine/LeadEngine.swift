@@ -195,11 +195,18 @@ public final class LeadEngine: @unchecked Sendable {
     var workingTold: [String: (sessions: Set<String>, at: Date)] = [:]
     /// How often the same working sessions are told the vault again (the app's `LeadController.workingEvery`).
     static let workingEvery: TimeInterval = 30
-    /// Each lead's open push request (push_remote), by root, as the vault last said; the request each lead was told
-    /// nothing here pushes, by root; the roots whose vault look is under way (`PushAsks.swift`). On `queue`.
+    /// Each lead's open push request (push_remote), by root, as the vault last said; the request last noted in the log,
+    /// by root; the roots whose vault look is under way, and whose push the user is settling (`PushAsks.swift`). On
+    /// `queue`.
     var pushAsked: [String: LeadPush.Request] = [:]
-    var pushTold: [String: String] = [:]
+    var pushNoted: [String: String] = [:]
     var pushLooking: Set<String> = []
+    var pushSettling: Set<String> = []
+    /// Settles a push request (`LeadPush.settle`: the request's id, the root, push or decline, the vault), off the
+    /// engine's queue. Faked in tests.
+    var pushSettle: @Sendable (String, String, Bool, LeadVault) -> (request: LeadPush.Request?, outcome: LeadPush.Outcome) = { id, root, push, vault in
+        LeadPush.settle(id: id, root: root, push: push, vault: vault)
+    }
     /// Where those are told, one after another: a later look's never overtakes an earlier one's (`work` is concurrent).
     let workingNotes = DispatchQueue(label: "vibenode.lead-engine.working", qos: .utility)
     /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"
@@ -244,17 +251,23 @@ public final class LeadEngine: @unchecked Sendable {
     /// Each room look's read of the machine's memory (`MacMemory.read`), on the reads queue; faked in tests.
     var memory: () -> MacMemory? = { MacMemory.read() }
 
-    // The idle handover (main's `26923f7c`, `IdleHandover.swift`), on `queue`.
-    /// The time the idle handover judges by (now; a test's later).
+    // The lead's rotation and idle handover (main's `26923f7c`, `IdleHandover.swift`), on `queue`.
+    /// The time the rotation judges by (now; a test's later).
     var handoverNow: () -> Date = Date.init
     /// When this engine started: the node keeps no record of the user's typing into a lead, so its quiet counts from here.
     let handoverStarted = Date()
     /// Roots whose idle look or handover is under way, and when each may be looked at again after a handover ended.
     var handingOver: Set<String> = []
     var handoverRetry: [String: Date] = [:]
-    /// Handovers tried per lead session in its current idle stretch (since its last response).
-    var handoverAttempts: [UUID: (since: Date, count: Int)] = [:]
-    /// Each idle look's or handover's end ("checked", "cancelled", "retained", "handed over"), on `queue` (for tests).
+    /// Handovers tried per lead session in its current idle stretch.
+    var handoverAttempts: [UUID: IdleTries] = [:]
+    /// The handover note asked of each root's lead: of which session, when, why, and the marker its reply starts with.
+    var rotationAsked: [String: (session: UUID, at: Date, reason: String, marker: String)] = [:]
+    /// Sends the ask for a note (the text, the root) and says whether it reached the lead; nil: delivered to the lead
+    /// from VibeSwitcher. Set by tests.
+    var rotationRequest: ((String, String, @escaping (Bool) -> Void) -> Void)?
+    /// Each rotation look's or handover's end ("checked", "asked", "cancelled", "retained", "handed over"), on `queue`
+    /// (for tests).
     var handoverEvent: (String) -> Void = { _ in }
 
     // Restarts (E8), on `queue`.

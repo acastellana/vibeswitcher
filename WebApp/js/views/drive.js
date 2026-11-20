@@ -27,18 +27,19 @@ export const drivable = (session) => !!session?.hosted && !session.ended;
 export function draftBox(app, { edit }) {
   const label = h('span', { class: 'confirm-label' });
   const text = h('p', { class: 'confirm-text' });
+  const pictures = h('p', { class: 'confirm-note draft-images', hidden: true });
   const lineSlot = h('div');
   const refused = h('p', { class: 'card-notice', role: 'alert', hidden: true });
   let id = null;
   let drawn = '';
   const editButton = h('button', { class: 'confirm-clear', type: 'button', title: 'Put the message back in the box', onclick: () => {
     const drafted = app.store.sessionDraftOf(id);
-    if (drafted) edit(drafted.text);
+    if (drafted) edit(drafted.text, drafted.images || []);
   } }, 'Edit');
   const discard = h('button', { class: 'confirm-clear', type: 'button', title: 'Take the draft off the session', onclick: () => app.store.sessionDraft(id, null) }, 'Discard');
   const note = h('p', { class: 'confirm-note' }, 'Run it in a terminal: it shows the message and asks for a code. Nothing is typed into the session before that.');
   const el = h('div', { class: 'confirm composer-draft', role: 'group', 'aria-label': 'Send your message from a terminal', hidden: true },
-    h('div', { class: 'confirm-head' }, label, h('span', { class: 'confirm-actions' }, editButton, discard)), text, lineSlot, note, refused);
+    h('div', { class: 'confirm-head' }, label, h('span', { class: 'confirm-actions' }, editButton, discard)), text, pictures, lineSlot, note, refused);
 
   return {
     el,
@@ -53,11 +54,37 @@ export function draftBox(app, { edit }) {
       setClass(el, 'sending', drafted.sending);
       setText(label, drafted.sending ? 'Saving your message…' : `Your message for ${AGENTS[session.agent] || 'the agent'}`);
       setText(text, drafted.text);
+      text.hidden = !drafted.text;
+      const images = drafted.images || [];
+      pictures.hidden = !images.length;
+      setText(pictures, images.length ? `With ${images.length === 1 ? 'an image' : `${images.length} images`}: ${images.map((path) => path.split('/').pop()).join(', ')}` : '');
       const line = `vibeswitcher send ${sessionShort(id)}`;
       if (line !== drawn) {
         drawn = line;
         lineSlot.replaceChildren(copyLine(line, 'the command that sends it'));
       }
+    },
+  };
+}
+
+// The messages `vibeswitcher send` sent while a question or picker was open on the session's screen, which the node
+// holds and types in once it closes (`queued`, as the app's composer holds them). Returns { el, update(session) }.
+export function queuedStrip() {
+  const head = h('span', { class: 'confirm-label' });
+  const list = h('ol', { class: 'queued-list' });
+  const el = h('div', { class: 'confirm composer-draft queued', role: 'status', hidden: true }, head, list,
+    h('p', { class: 'confirm-note' }, 'Typed in, in this order, once what is open on its screen closes: answer it, or close it in the session’s terminal.'));
+  let drawn = '';
+  return {
+    el,
+    update(session) {
+      const queued = drivable(session) ? session.queued || [] : [];
+      el.hidden = !queued.length;
+      const now = JSON.stringify(queued.map((item) => [item.action, item.text, item.images]));
+      if (now === drawn) return;
+      drawn = now;
+      setText(head, queued.length === 1 ? 'A message waits to go in' : `${queued.length} messages wait to go in`);
+      list.replaceChildren(...queued.map((item) => h('li', null, item.text || '', item.images ? h('span', { class: 'queued-images' }, ` (+${item.images} image${item.images === 1 ? '' : 's'})`) : null)));
     },
   };
 }
@@ -147,37 +174,73 @@ export function endStrip() {
   };
 }
 
-// Starting a session: a folder, Claude or a shell, Claude's model; the line that starts it, as you type. `folder()`
-// gives the folder to offer first. Returns { el, update() }.
+// Starting a session: a folder, one of the launch presets the node keeps for it (`session.presets`: the folder's own
+// and its default first, as the app's New Session lists them; Claude and Shell when the node lists none), Claude's model;
+// the line that starts it, as you type. `folder()` gives the folder to offer first. Returns { el, update() }.
 export function newSessionForm(app, { folder }) {
-  let agent = 'claude';
+  const BUILT_IN = [{ name: 'Claude', kind: 'claude', builtIn: true }, { name: 'Shell', kind: 'shell', builtIn: true }];
+  let presets = BUILT_IN;
+  let chosen = 'Claude';
+  // Whether you picked one: until then the folder's default (the first listed) is.
+  let picked = false;
+  let asked = null;
+  let timer = null;
   const path = h('input', { class: 'answer-input', type: 'text', placeholder: '/path/to/project', 'aria-label': 'Folder', spellcheck: 'false', autocomplete: 'off' });
   const model = h('input', { class: 'answer-input model-input', type: 'text', placeholder: 'Model (optional)', 'aria-label': 'Model', spellcheck: 'false', autocomplete: 'off' });
-  const kinds = ['claude', 'shell'].map((kind) => h('button', { type: 'button', onclick: () => { agent = kind; draw(); } }, kind === 'claude' ? 'Claude' : 'Shell'));
+  const kinds = h('div', { class: 'segmented presets', role: 'group', 'aria-label': 'Preset' });
+  const about = h('p', { class: 'confirm-note preset-about', hidden: true });
   const lineSlot = h('div', { class: 'prompt-line' });
   const el = h('section', { class: 'new-session', 'aria-label': 'Start a session' },
     h('h2', { class: 'new-title' }, 'Start a session'),
-    h('div', { class: 'new-fields' }, path, h('div', { class: 'segmented', role: 'group', 'aria-label': 'Agent' }, kinds), model),
+    h('div', { class: 'new-fields' }, path, kinds, model),
+    about,
     lineSlot,
     h('p', { class: 'confirm-note' }, 'Run it in a terminal on this node: it asks for a code, then starts the session here.'));
   let offered = false;
 
-  function draw() {
-    kinds.forEach((button, index) => button.setAttribute('aria-pressed', String((index === 0) === (agent === 'claude'))));
-    model.hidden = agent !== 'claude';
-    // `~/` is the node's home, as a shell would read it (the command line takes the folder as given).
+  // `~/` is the node's home, as a shell would read it (the command line takes the folder as given).
+  function where() {
     const home = app.store.state.node?.home;
     const typed = path.value.trim();
-    const where = home && (typed === '~' || typed.startsWith('~/')) ? home + typed.slice(1) : typed;
-    if (!where) {
+    return home && (typed === '~' || typed.startsWith('~/')) ? home + typed.slice(1) : typed;
+  }
+
+  // The node's presets for the folder, asked a moment after it changes (an absolute path only).
+  function ask() {
+    const folder = where();
+    if (!app.store.can('session.presets') || folder === asked) return;
+    asked = folder;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      app.store.read('session.presets', folder.startsWith('/') ? { folder } : {}).then((reply) => {
+        if (asked !== folder || !reply?.ok) return;
+        presets = reply.result.presets.length ? reply.result.presets : BUILT_IN;
+        chosen = presetChosen(presets, chosen, picked);
+        draw();
+      });
+    }, 250);
+  }
+
+  function draw() {
+    const preset = presets.find((one) => one.name === chosen && !one.refused) || presets.find((one) => one.name === chosen) || presets[0];
+    kinds.replaceChildren(...presets.map((one) => h('button', {
+      type: 'button', 'aria-pressed': String(one === preset), disabled: !!one.refused, title: one.refused ? `Can’t start here: ${one.refused}` : presetNote(one),
+      onclick: () => { chosen = one.name; picked = true; draw(); },
+    }, one.name)));
+    model.hidden = preset.kind !== 'claude';
+    about.hidden = preset.builtIn || !presetNote(preset);
+    setText(about, preset.builtIn ? '' : presetNote(preset));
+    const folder = where();
+    if (!folder) {
       lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, 'Give a folder: the line that starts it shows here.'));
       return;
     }
-    const chosenModel = agent === 'claude' ? model.value.trim() : '';
-    const line = `vibeswitcher new ${shellWord(where)}${agent === 'shell' ? ' --agent shell' : ''}${chosenModel ? ` --model ${shellWord(chosenModel)}` : ''}`;
+    const chosenModel = preset.kind === 'claude' ? model.value.trim() : '';
+    const how = preset.builtIn ? (preset.kind === 'shell' ? ' --agent shell' : '') : ` --preset ${shellWord(preset.name)}`;
+    const line = `vibeswitcher new ${shellWord(folder)}${how}${chosenModel ? ` --model ${shellWord(chosenModel)}` : ''}`;
     lineSlot.replaceChildren(copyLine(line, 'the command that starts it'));
   }
-  path.addEventListener('input', draw);
+  path.addEventListener('input', () => { draw(); ask(); });
   model.addEventListener('input', draw);
 
   return {
@@ -187,7 +250,27 @@ export function newSessionForm(app, { folder }) {
         const given = folder();
         if (given) { path.value = given; offered = true; }
       }
+      ask();
       draw();
     },
   };
+}
+
+// The preset the form shows chosen once the node's list comes: the one you picked while it can start, else the first
+// that can (the folder's default, as the node orders them). One the node refuses (a project's preset that takes a
+// built-in's name, a variable a preset may not set) is never chosen for you.
+export function presetChosen(presets, chosen, picked) {
+  if (picked && presets.some((preset) => preset.name === chosen && !preset.refused)) return chosen;
+  return presets.find((preset) => !preset.refused)?.name || chosen;
+}
+
+// A preset in a few words: what it runs, the variables it sets (by name), whether a shell stays.
+export function presetNote(preset) {
+  const parts = [];
+  if (preset.kind === 'shell') parts.push('a shell');
+  else if (preset.command) parts.push(`runs ${preset.command}`);
+  if (preset.env?.length) parts.push(`sets ${preset.env.join(', ')}`);
+  if (preset.keepShell) parts.push('a shell stays when it ends');
+  if (preset.default) parts.push('this folder’s default');
+  return parts.join(' · ');
 }

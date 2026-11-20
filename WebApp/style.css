@@ -375,6 +375,7 @@ code, pre, kbd { font-family: var(--mono); }
 .stack-title { font-size: var(--text); font-weight: 600; }
 .stack-note { color: var(--ink-3); font-size: var(--small); }
 .stack-cards { display: grid; gap: 10px; }
+.stack-cards:not(:empty) + .stack-cards { margin-top: 10px; }
 
 .card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px 12px; padding: 14px 16px 12px; border-radius: 12px; background: var(--raised); box-shadow: 0 0 0 1px var(--line); outline: none; }
 .card > * { grid-column: 1 / -1; }
@@ -459,7 +460,7 @@ code, pre, kbd { font-family: var(--mono); }
 .end-text { flex: none; color: var(--ink-2); font-size: var(--small); }
 .end-text strong { color: var(--ink); font-weight: 600; }
 .end-strip > div:nth-child(2) { flex: 1; min-width: 0; }
-.new-session { display: grid; gap: 9px; margin: 22px 0 26px; padding: 14px 16px 15px; border-radius: 12px; background: var(--fill); }
+.new-session { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; margin: 22px 0 26px; padding: 14px 16px 15px; border-radius: 12px; background: var(--fill); }
 .new-title { color: var(--ink-2); font-size: var(--small); font-weight: 600; }
 /* Your sessions that ended lately, on the start page: a name and folder, the line that resumes it, its id. */
 .ended { display: grid; gap: 9px; margin: 0 0 26px; }
@@ -470,6 +471,26 @@ code, pre, kbd { font-family: var(--mono); }
 .new-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .new-fields > .answer-input:first-child { flex: 2 1 220px; }
 .new-fields > .model-input { flex: 1 1 120px; }
+/* The composer's lane: what / and @ complete to, the images pasted into the box, the messages held behind a question,
+   and the presets a new session starts from. */
+.suggestions { flex: none; width: calc(100% - 48px); max-width: 752px; max-height: 232px; margin: 4px auto 0; padding: 4px; overflow-y: auto; border-radius: 10px; background: var(--raised); box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgb(0 0 0 / 0.12); list-style: none; }
+.suggestion { display: flex; align-items: baseline; gap: 10px; padding: 5px 9px; border-radius: 7px; cursor: pointer; }
+.suggestion.chosen { background: var(--fill-2); }
+.suggestion-title { flex: none; font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
+.suggestion-note { min-width: 0; overflow: hidden; color: var(--ink-3); font-size: var(--small); text-overflow: ellipsis; white-space: nowrap; }
+.attached { flex: none; display: flex; flex-wrap: wrap; gap: 8px; width: calc(100% - 48px); max-width: 752px; margin: 6px auto 0; }
+.attached-item { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; overflow: hidden; border-radius: 8px; background: var(--fill-2); box-shadow: 0 0 0 1px var(--line); }
+.attached-item.sending { opacity: 0.55; }
+.attached-item.failed { box-shadow: 0 0 0 1.5px var(--needs-you); }
+.attached-thumb { width: 56px; height: 56px; }
+.attached-name { padding: 0 4px; overflow: hidden; color: var(--ink-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.attached-remove { position: absolute; top: 3px; right: 3px; display: inline-flex; padding: 3px; border-radius: 50%; background: rgb(0 0 0 / 0.55); color: #fff; }
+.composer-notice { flex: none; width: calc(100% - 48px); max-width: 752px; margin: 4px auto 0; color: var(--ink-3); font-size: var(--small); }
+.queued-list { display: grid; gap: 3px; margin: 0; padding-left: 20px; }
+.queued-list li { overflow-wrap: anywhere; }
+.queued-images { color: var(--ink-3); }
+.segmented.presets { flex: 0 1 auto; flex-wrap: wrap; max-width: 100%; }
+.segmented button:disabled { opacity: 0.45; cursor: not-allowed; }
 .sidebar-top { position: relative; }
 .sidebar-top .new-link { position: absolute; right: 10px; top: 10px; }
 @media (max-width: 760px) {
@@ -478,6 +499,7 @@ code, pre, kbd { font-family: var(--mono); }
   .composer-draft { width: calc(100% - 32px); }
   .composer-draft .confirm-text { -webkit-line-clamp: 2; }
   .composer-draft .confirm-note { display: none; }
+  .suggestions, .attached, .composer-notice { width: calc(100% - 32px); }
 }
 .card-hold { display: grid; gap: 4px; }
 .card-hold-label { color: var(--ink-3); font-size: var(--small); }

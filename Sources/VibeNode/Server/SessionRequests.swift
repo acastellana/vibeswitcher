@@ -57,92 +57,16 @@ extension Requests {
         engine?.leads.leads.values.contains { $0.replaced[session.id] != nil } ?? false
     }
 
-    // MARK: send
-
-    /// `send` with `session` and `text` (2026-11-20, the parity table's gap 1): the user's words typed into the session's
-    /// agent the way the app's composer types them (`ComposerText.writes`: a bracketed paste, then Enter 60 ms later, as
-    /// one unit of the host's: nothing else typed goes in between). A working agent takes them after its turn (Claude
-    /// Code queues what's typed during one), as the app's ⌥↩ does; an idle one at once. Refused, nothing typed: a
-    /// session the host didn't start, a plain shell (no agent: the app's composer refuses it too), one whose agent left
-    /// its terminal, a lead another one replaced (`vibeswitcher tell` reaches the live lead), and one with a question,
-    /// a picker or a slash-command menu open on its screen (typed there, the words would go into it as keys: the app
-    /// holds the message until it closes; here the user answers it first, `vibeswitcher reply`). That screen is read in
-    /// the unit's gate, right before its first write, so nothing typed meanwhile can come between. The reply names the
-    /// session, its terminal, and whether its agent was working. A page's draft for the session that is the text sent goes.
-    func send(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
-        guard let text = request.args?["text"]?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return reply(.init(re: request.id, error: .init(.badArgs, "send needs text")))
-        }
-        guard text.utf8.count <= Self.sendLimit else {
-            return reply(.init(re: request.id, error: .init(.badArgs, "too long to type into a terminal (at most \(Self.sendLimit / 1024) KB): "
-                                                            + "save it to a file and mention the file instead")))
-        }
-        let session: HostSession
-        switch hostedSession(request.args?["session"]?.string, for: "send", id: request.id) {
-        case .failure(let refusal): return reply(refusal)
-        case .found(let found): session = found
-        }
-        let short = String(session.id.uuidString.lowercased().prefix(8))
-        guard HostedAgents.agent(of: session) != nil else {
-            return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a shell, not an agent's: send types only into Claude or Codex")))
-        }
-        guard !isReplacedLead(session) else {
-            return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a lead another one replaced: what you type there reaches "
-                                                            + "no live lead (`vibeswitcher tell FOLDER TEXT` tells the running one)")))
-        }
-        let working = sessions?.sessions.first { $0.hostID == session.id }?.status == .working
-        let (link, queue, note, drafts) = (self.link, self.queue, self.note, sessionDrafts)
-        let id = NodeIds.session(host: session.id)
-        // Off the engine's queue: the agent's process is read from /proc.
-        DispatchQueue.global(qos: .userInitiated).async {
-            let runs = HostedAgents.agentPid(of: session) != nil
-            queue.async {
-                guard runs else {
-                    return reply(.init(re: request.id, error: .init(.refused, "no agent runs in session \(short)'s terminal now (it quit, or ended): nothing typed")))
-                }
-                let stopped = Locked<String?>(nil)
-                let writes = ComposerText.writes(text, bracketed: true)
-                link.type(writes, into: session.id, gate: { index, go in
-                    guard index == 0 else { return go(true) }
-                    link.screen(session.id) { screen in
-                        guard let screen else {
-                            stopped.set("its screen couldn't be read, so whether a question is open there can't be told: try again")
-                            return go(false)
-                        }
-                        if let open = Self.openMenu(screen) {
-                            stopped.set(open)
-                            return go(false)
-                        }
-                        go(true)
-                    }
-                }, confirmed: { typed in
-                    // Nothing of the text in the log: it is the user's words.
-                    note("send to session \(short): \(typed ? "typed in, \(text.count) characters" : "not typed: \(stopped.get() ?? "the host didn't take it")")")
-                    guard typed else {
-                        let why = stopped.get().map { "session \(short): \($0)" } ?? "the host didn't take all of it into session \(short): it may not have gone in"
-                        return reply(.init(re: request.id, error: .init(.refused, why)))
-                    }
-                    // The page's draft it was is sent: it goes from beside the session.
-                    if drafts.values[id]?.text == text { drafts.send(id, nil) }
-                    reply(.init(re: request.id, result: .object([
-                        "session": .string(id), "terminal": .string(session.tty),
-                        "working": .bool(working), "characters": .int(text.count),
-                    ])))
-                })
-            }
-        }
-    }
-
-    /// What's open on `screen` that takes keys instead of the agent's prompt box, said for a refusal: an agent's
+    /// What's open on `screen` that takes keys instead of the agent's prompt box, said for a held message: an agent's
     /// question (a numbered menu: a permission prompt, a question, a plan to approve), a local command's picker or
     /// dialog, or the slash-command menu. Nil when none is (`ScreenMenu`'s readers, the app's `onScreenNow`).
     static func openMenu(_ screen: String) -> String? {
         let lines = Platform.lines(screen.replacingOccurrences(of: "\u{0}", with: " "))
         if ScreenMenu.parse(lines) != nil {
-            return "a question is open on its screen: answer it first (`vibeswitcher reply SESSION CHOICE`), then send again"
+            return "a question is open on its screen"
         }
         if ScreenMenu.parsePicker(lines) != nil || ScreenMenu.parseCommands(lines) != nil {
-            return "a picker or menu is open on its screen: close it in the session's terminal (Esc), then send again"
+            return "a picker or menu is open on its screen"
         }
         return nil
     }
@@ -169,19 +93,30 @@ extension Requests {
     /// The labels the app gives an ordinary session (its built-in presets' names): never a role's (`LeadTeams.role`).
     static let sessionLabels = ["claude": "Claude", "shell": "Shell"]
 
-    /// `session.new` with `folder` (absolute), `agent` (`claude`, the default, or `shell`) and `model` (Claude's, optional)
+    /// `session.new` with `folder` (absolute), `agent` (`claude`, the default, or `shell`) or `preset` (a launch
+    /// preset's name, with the `digest` `session.presets` gave for it), and `model` (Claude's, optional)
     /// (2026-11-20, the parity table's gap 3): an ordinary session started in the node's host, as the app's New Session
-    /// starts its built-in Claude or Shell preset: labelled as one, the agent recorded with it (`HostedAgents`), 120 by 36.
+    /// starts its built-in Claude or Shell preset, or the preset named (`SessionPresets`: its environment, whether a
+    /// shell stays): labelled as one, the agent recorded with it (`HostedAgents`), 120 by 36.
     /// Claude is the program the node's `claude` link names (`NodePreflight`, never a PATH or a login shell: EN-D13),
-    /// with `--model` when given; a shell is the host's plain shell. Nothing answers its first questions (Claude's trust
-    /// question shows as the session's prompt: `vibeswitcher reply`). Refused: a folder that isn't one, a model name
-    /// that isn't a word, Claude with no `claude` link.
+    /// with a preset's arguments and `--model` when given; a shell is the host's plain shell. Nothing answers its first
+    /// questions (Claude's trust question shows as the session's prompt: `vibeswitcher reply`). Refused: a folder that
+    /// isn't one, a model name that isn't a word, Claude with no `claude` link, a preset the folder hasn't or the node
+    /// can't start, and one whose digest isn't the one shown (it changed since).
     func newSession(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let folder = request.args?["folder"]?.string, folder.hasPrefix("/") else {
             return reply(.init(re: request.id, error: .init(.badArgs, "session.new needs folder, an absolute path")))
         }
+        let presetName = request.args?["preset"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        let shownDigest = request.args?["digest"]?.string
+        if presetName != nil {
+            guard request.args?["agent"] == nil else { return reply(.init(re: request.id, error: .init(.badArgs, "session.new takes agent or preset, not both"))) }
+            guard shownDigest != nil else {
+                return reply(.init(re: request.id, error: .init(.badArgs, "session.new with a preset needs its digest, as `session.presets` gave it")))
+            }
+        }
         let agent = request.args?["agent"]?.string ?? "claude"
-        guard let label = Self.sessionLabels[agent] else {
+        guard Self.sessionLabels[agent] != nil else {
             return reply(.init(re: request.id, error: .init(.badArgs, "session.new's agent is claude or shell, not \(ConfigSeal.inert(agent, limit: 40))")))
         }
         let model = request.args?["model"]?.string.flatMap { $0.isEmpty ? nil : $0 }
@@ -193,41 +128,105 @@ extension Requests {
         }
         let claudeLink = engine?.preflight.claudeLink ?? NodePreflight.claudeLink(root: root)
         let scratch = !VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome)
-        let (link, queue, note, nodeRoot) = (self.link, self.queue, self.note, root)
-        // Off the queue: the folder and the link are read from the disk.
+        let (link, queue, note, nodeRoot, repositoryOf) = (self.link, self.queue, self.note, root, self.repositoryOf)
+        // The projects whose config the vault keeps: a change to the presets file it holds stops any preset starting.
+        let (vault, leadRoots) = (engine?.cardVault, engine.map { $0.leads.leads.values.map(\.root) } ?? [])
+        let refuse = { (why: String) in queue.async { reply(.init(re: request.id, error: .init(.refused, why))) } }
+        // Off the queue: the folder, the presets and the link are read from the disk.
         DispatchQueue.global(qos: .userInitiated).async {
             var isFolder: ObjCBool = false
             let standard = (folder as NSString).standardizingPath
             guard FileManager.default.fileExists(atPath: standard, isDirectory: &isFolder), isFolder.boolValue else {
-                return queue.async { reply(.init(re: request.id, error: .init(.refused, "\(ConfigSeal.inert(folder, limit: 200)) isn't a folder"))) }
+                return refuse("\(ConfigSeal.inert(folder, limit: 200)) isn't a folder")
+            }
+            // The built-in Claude or Shell, else the preset named.
+            var preset = agent == "shell" ? LaunchPreset(name: "Shell", kind: .shell, command: "") : LaunchPreset(name: "Claude", kind: .claude, command: "")
+            if let presetName {
+                if let vault, let held = Self.presetsHeld(vault: vault, roots: leadRoots + [repositoryOf(standard)]) {
+                    return refuse("the presets file changed and the vault holds that change (\(SessionPresets.sealName), seen from "
+                                  + "\(ConfigSeal.inert(held, limit: 200))): no preset starts until you accept it "
+                                  + "(`vibeswitcher config held \(ConfigSeal.inert(held, limit: 200))`, then `config accept CARD`)")
+                }
+                let listed = SessionPresets.list(SessionPresets.load(root: nodeRoot).presets, folder: standard)
+                let shown = ConfigSeal.inert(presetName, limit: 80)
+                guard let found = SessionPresets.named(presetName, in: listed) else {
+                    return refuse("no preset \(shown) for \(ConfigSeal.inert(standard, limit: 200)) (`vibeswitcher presets \(ConfigSeal.inert(standard, limit: 200))` lists them)")
+                }
+                if let why = found.refusal { return refuse("preset \(shown) can't start here: \(why)") }
+                guard SessionPresets.matches(found.preset, digest: shownDigest) else {
+                    return refuse("preset \(shown) changed since it was shown (or the node's server restarted since): nothing started; "
+                                  + "run the command again to see it as it is now")
+                }
+                guard model == nil || found.preset.kind == .claude else { return refuse("preset \(shown) starts a shell, which takes no model") }
+                preset = found.preset
             }
             var command: String?
-            if agent == "claude" {
+            if preset.kind == .claude {
                 let found = NodePreflight.resolve(claudeLink)
-                guard let program = found.path else {
-                    return queue.async { reply(.init(re: request.id, error: .init(.refused, found.why ?? "no claude for this node"))) }
-                }
-                command = Self.claudeCommand(program: program, model: model)
+                guard let program = found.path else { return refuse(found.why ?? "no claude for this node") }
+                command = SessionPresets.command(preset, program: program).map { $0 + (model.map { " --model " + RecentProjects.shellQuote($0) } ?? "") }
             }
             // A scratch node's hooks and tools keep to its root, as its leads' do.
-            let environment = scratch ? ["VIBESWITCHER_HOME": nodeRoot.path] : [:]
-            let spawn = SpawnRequest(cwd: standard, command: command, env: environment, cols: 120, rows: 36, keepShell: false,
-                                     label: label, agent: agent == "claude" ? "claude" : nil)
+            var environment = preset.env
+            if scratch { environment["VIBESWITCHER_HOME"] = nodeRoot.path }
+            let (kind, label) = (preset.kind == .claude ? "claude" : "shell", preset.name)
+            let spawn = SpawnRequest(cwd: standard, command: command, env: environment, cols: 120, rows: 36, keepShell: preset.keepShell,
+                                     label: preset.name, agent: preset.kind == .claude ? "claude" : nil)
             queue.async {
                 link.spawn(spawn) { result in
                     queue.async {
                         switch result {
                         case .success(let session):
-                            note("session.new: \(label) started in session \(session.id.uuidString.prefix(8)) (\(session.tty))")
+                            note("session.new: \(presetName == nil ? kind : "a preset's \(kind)") started in session \(session.id.uuidString.prefix(8)) (\(session.tty))")
                             reply(.init(re: request.id, result: .object([
                                 "session": .string(NodeIds.session(host: session.id)), "terminal": .string(session.tty),
-                                "agent": .string(agent), "folder": .string(standard), "model": model.map(NodeWire.Value.string) ?? .null,
+                                "agent": .string(kind), "folder": .string(standard), "model": model.map(NodeWire.Value.string) ?? .null,
+                                "preset": presetName.map { _ in .string(label) } ?? .null,
                             ])))
                         case .failure(let failure):
                             reply(.init(re: request.id, error: .init(.refused, "the session host didn't start it: \(failure.message)")))
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// The first of `roots` whose config the vault keeps and holds a change to the presets file in
+    /// (`SessionPresets.sealName`, on the config seal's Linux list), after a look as `config held` makes one (a card
+    /// that showed nothing: nothing sealed); nil when none does. A root the vault has no record for isn't looked at, so
+    /// no first look starts here. Asks the vault: never on the engine's queue.
+    static func presetsHeld(vault: LeadVault, roots: [String]) -> String? {
+        for root in Set(roots).sorted() {
+            guard case .some(.some) = try? vault.guardedRecord(root: root) else { continue }
+            _ = try? vault.checkConfig(root: root, shown: [:])
+            if case .some(let record) = try? vault.guardedRecord(root: root), ConfigSeal.held(in: record).contains(SessionPresets.sealName) {
+                return root
+            }
+        }
+        return nil
+    }
+
+    /// `session.presets` with `folder` (absolute, optional) and `values` (a terminal's), a read (the parity table's launch presets, 2026-11-20): the
+    /// launch presets the node keeps for that folder (`SessionPresets.list`: its default first), each with the `digest`
+    /// `session.new` takes back, and the lines about what in the file couldn't be read. Off the queue: the file is read.
+    func presets(_ request: NodeWire.Request, terminal: Bool = false, reply: @escaping (NodeWire.Reply) -> Void) {
+        // The variables' values (a secret-looking one masked) only to a process of the uid asking for them, for its
+        // confirmation: never to a web page, whatever it asks.
+        let values = terminal && request.args?["values"]?.bool == true
+        let folder = request.args?["folder"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        if let folder, !folder.hasPrefix("/") {
+            return reply(.init(re: request.id, error: .init(.badArgs, "session.presets' folder is an absolute path")))
+        }
+        let (queue, nodeRoot) = (self.queue, root)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loaded = SessionPresets.load(root: nodeRoot)
+            let listed = SessionPresets.list(loaded.presets, folder: folder)
+            queue.async {
+                reply(.init(re: request.id, result: .object([
+                    "presets": .array(listed.map { SessionPresets.value($0, values: values) }),
+                    "problems": .array(loaded.problems.map(NodeWire.Value.string)),
+                ])))
             }
         }
     }
@@ -355,7 +354,8 @@ extension Requests {
 // MARK: session.draft, session.draft.clear
 
 extension Requests {
-    /// `session.draft` with `session` (the node's whole id for it, as a page holds it) and `text`, and
+    /// `session.draft` with `session` (the node's whole id for it, as a page holds it), `text` and `images` (the paths
+    /// `session.attach` gave, optional; text may be empty when there are some), and
     /// `session.draft.clear` with `session`, from a web page whose token drafts (2026-11-20, the parity table's gap 1):
     /// the message the page's composer left for the session, kept beside it (`sessionDrafts`, the session's `draft`) or
     /// taken off, and told to nobody, as a card's draft is (`draft`, LW-D6): nothing is typed, nothing recorded.
@@ -374,13 +374,22 @@ extension Requests {
             return done(.init(re: request.id, error: .init(.refused, "that session runs in a terminal of yours: VibeSwitcher only types into the sessions it started")))
         }
         if request.kind == "session.draft" {
-            guard let text = request.args?["text"]?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return done(.init(re: request.id, error: .init(.badArgs, "session.draft needs text")))
+            let text = request.args?["text"]?.string ?? ""
+            let images = request.args?["images"]?.array?.map { $0.string ?? "" } ?? []
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else {
+                return done(.init(re: request.id, error: .init(.badArgs, "session.draft needs text or images")))
             }
             guard text.utf8.count <= Self.sendLimit else {
                 return done(.init(re: request.id, error: .init(.badArgs, "a message is at most \(Self.sendLimit / 1024) KB")))
             }
-            sessionDrafts.send(id, SessionDraft(text: text, at: Date(), action: action))
+            guard images.count <= Self.imagesLimit else {
+                return done(.init(re: request.id, error: .init(.badArgs, "at most \(Self.imagesLimit) images a message")))
+            }
+            // Only images a page attached (`session.attach`): a page names no other file for `send` to paste.
+            if let odd = images.first(where: { !SessionAttachments.isAttached($0, root: root) }) {
+                return done(.init(re: request.id, error: .init(.badArgs, "\(ConfigSeal.inert(odd, limit: 200)) isn't an image attached on this node")))
+            }
+            sessionDrafts.send(id, SessionDraft(text: text, images: images, at: Date(), action: action))
         } else {
             sessionDrafts.send(id, nil)
         }
