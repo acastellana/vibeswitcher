@@ -99,11 +99,16 @@ struct TestScriptWebTests {
             .components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         // Under vs-heavy (the Mac-wide lock for heavy work), as one command, on its slot's share of the cores (slot_width, heavy_swift).
         let build = #"Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@""#
-        let swift = lines.firstIndex(of: build), web = lines.firstIndex(of: "run_web_tests Tests/Web || status=1")
-        #expect(swift != nil, "scripts/test.sh has no line `\(build)`")
+        // In `swift_tests`, which the run calls (or `swift_tests_retrying_failed`, which calls it: TestScriptRetryTests),
+        // keeping its status before the web tests run.
+        let defined = lines.firstIndex(of: "swift_tests() {"), web = lines.firstIndex(of: "run_web_tests Tests/Web || status=1")
+        #expect(defined.map { lines[$0 + 1] } == build, "scripts/test.sh has no `swift_tests() {` running `\(build)`")
         #expect(web != nil, "scripts/test.sh doesn't run the web tests: no line `run_web_tests Tests/Web || status=1`")
-        guard let swift, let web else { return }
-        #expect(swift < web, "the web tests run before swift test")
-        #expect(lines[swift + 1] == "status=$?", "swift test's status isn't kept before the web tests run")
+        let called = lines.firstIndex(of: "swift_tests \"$@\"")
+        #expect(called != nil, "scripts/test.sh never calls `swift_tests \"$@\"`")
+        guard let called, let web else { return }
+        #expect(called < web, "the web tests run before swift test")
+        #expect(lines[called...].first { $0.hasPrefix("status=") } == "status=$?" && lines[called + 1] == "fi" && lines[called + 2] == "status=$?",
+                "swift test's status isn't kept before the web tests run")
     }
 }
