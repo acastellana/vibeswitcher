@@ -4232,3 +4232,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-20 09:24 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 09:24.
 - 2026-11-20 09:24 Update: Today: Nov 19 — the Fable backlog cleared, merges rerun less, reviews have fallbacks — **What landed (about 20 tasks, all merged and pushed; GitHub is at 69600a0b):**
 - 2026-11-20 09:29 Automatically (auto_advance): Released: on AC power, after 5 min.
+- 2026-11-20 22:07 Planned agents-md-the-wallet: AGENTS.md: the wallet e2e line stops naming a case count
+- 2026-11-20 22:07 Started a worker on agents-md-the-wallet
+- 2026-11-20 22:07 Automatically (auto_advance): Started a worker on agents-md-the-wallet (AGENTS.md: the wallet e2e line stops naming a case count).
