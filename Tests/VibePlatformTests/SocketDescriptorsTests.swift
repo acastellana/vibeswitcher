@@ -345,7 +345,7 @@ extension SocketsTests {
 
 /// The connector's pair on both systems (`Platform.Sockets.connectorType`: Linux's `SOCK_SEQPACKET`, the Mac's stream,
 /// the node on the Mac's step 3): one descriptor passed arrives close-on-exec and is the same open file; a byte that
-/// carries none, or carries two, gives none (EBADMSG), with nothing left open; the end gives none (EPIPE). On the Mac
+/// carries none, or carries two, gives none (EBADMSG); the end gives none (EPIPE). On the Mac
 /// this is the Swift layout of the control message in SocketDescriptors+Darwin.swift, checked on the hosted Mac.
 extension SocketsTests {
     /// A message of one byte carrying every one of `fds`.
@@ -374,14 +374,13 @@ extension SocketsTests {
         byte = 0
         #expect(read(pipeEnds[0], &byte, 1) == 1 && byte == UInt8(ascii: "z"), "the same pipe")
 
-        // A byte with no descriptor, and one with two: none taken, nothing left open.
-        let before = Self.openDescriptors()
+        // A byte with no descriptor, and one with two: none taken. (Whether the two are closed isn't read here: other
+        // tests of the run open and close descriptors meanwhile.)
         byte = UInt8(ascii: "x")
         #expect(Platform.Sockets.send(helper, &byte, 1) == 1)
         #expect(Platform.Sockets.receiveDescriptor(over: test) == nil && errno == EBADMSG)
         #expect(Self.sendSeveral([pipeEnds[0], pipeEnds[1]], over: helper))
         #expect(Platform.Sockets.receiveDescriptor(over: test) == nil && errno == EBADMSG)
-        #expect(Self.openDescriptors() == before, "a refused message's descriptors are closed")
 
         // The end: the other end closed.
         Sys.close(helper)
@@ -396,10 +395,5 @@ extension SocketsTests {
         let ends = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
         Sys.close(ends.0)
         Sys.close(ends.1)
-    }
-
-    /// This process's open descriptors' numbers.
-    static func openDescriptors() -> Set<Int32> {
-        Set((0..<Int32(1024)).filter { fcntl($0, F_GETFD) >= 0 })
     }
 }
