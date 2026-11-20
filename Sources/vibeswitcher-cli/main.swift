@@ -23,6 +23,7 @@ let usage = """
            vibeswitcher send SESSION [TEXT] | reply SESSION CHOICE [TEXT]
            vibeswitcher new FOLDER [--agent claude|shell] [--model M] | end SESSION
            vibeswitcher reopen [all | SESSION... | --forget]
+           vibeswitcher mail [FOLDER] [--all] [--json]
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher hooks install|remove [--agent claude|codex]
@@ -63,6 +64,8 @@ case "end":
     exit(EndCommand.run(Array(words.dropFirst())))
 case "reopen":
     exit(ReopenCommand.run(Array(words.dropFirst())))
+case "mail":
+    exit(MailCommand.run(Array(words.dropFirst())))
 case "config":
     exit(ConfigCommand.run(Array(words.dropFirst())))
 case "base":

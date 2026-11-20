@@ -532,6 +532,7 @@ is done once (rule 8). What the first write actions need:
 | `session.draft.clear` **new** (2026-11-20) | `session` | refused, `voice` | a token with `draft`, `action` |
 | `send`, `session.new`, `session.end`, `session.reply` **new** (2026-11-20) | `session` and `text`; `folder`, `agent`, `model`; `session`; `session`, `choice`, `text`, `question`, `options` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: the page shows the line that runs each |
 | `session.reopen` **new** (2026-11-20) | `all` bool, or `sessions` [string] (ids as `reopen` lists them, or prefixes of 4 or more), or `forget` bool | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: `vibeswitcher reopen` |
+| `mail` **new** (2026-11-20) | `folder` string? (absolute), `all` bool? | the user's voice, no typed code (a read of the projects' private record of their leads' `tell_lead` messages) | refused, `voice`: `vibeswitcher mail` |
 
 A session (§5) carries two more fields since 2026-11-20, each null when there's none: `prompt` {`question` †,
 `options` †, `descriptions` †, `text` (the options that take words, by index), `multiSelect`, `at`}, the question open

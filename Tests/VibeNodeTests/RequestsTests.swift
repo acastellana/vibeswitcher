@@ -197,7 +197,7 @@ struct RequestsTests {
         // one or the other, every kind recorded in the vault but `start` (a running node's start says when it started)
         // changes state, and a kind no table lists is a state change. The live protocol's kinds too: its reads, a web
         // client's draft and terminal, and opening the web.
-        let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "question.post", "question.revise", "question.withdraw",
+        let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "mail", "question.post", "question.revise", "question.withdraw",
                                   "subscribe", "unsubscribe", "chat.page", "board",
                                   // It changes nothing but a session's seen mark (done or idle), so it needs no voice.
                                   "seen"]

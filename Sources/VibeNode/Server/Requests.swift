@@ -236,6 +236,7 @@ public final class Requests: @unchecked Sendable {
         case "session.end": endSession(request, reply: reply)
         case "session.reply": replySession(request, reply: reply)
         case "session.reopen": reopenSessions(request, reply: reply)
+        case "mail": mail(request, reply: reply)
         case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)

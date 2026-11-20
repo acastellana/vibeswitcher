@@ -285,12 +285,16 @@ public enum NodeWire {
         "term.open": .webTerminal, "term.close": .webTerminal,
         // Driving an ordinary session (the parity table's gaps 1, 3 and 6, 2026-11-20): the user's voice, and a page's draft.
         "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user, "session.reopen": .user,
+        // Between leads (the stability lane, 2026-11-20): a read, but the projects' private record of their leads'
+        // messages, so only the user's (no session's, no page's), with no typed word (`changesNothing`).
+        "mail": .user,
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
-    /// started; `config.held` and `base.show` make the card the next request takes.
-    public static let changesNothing: Set<String> = ["start", "config.held", "base.show"]
+    /// started; `config.held` and `base.show` make the card the next request takes; `mail` reads the projects' private
+    /// record of their leads' messages.
+    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "mail"]
 
     /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
     /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
@@ -317,7 +321,7 @@ public enum NodeWire {
                                "tell",
                                "board", "seen",
                                "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
-                               "session.reopen"]
+                               "session.reopen", "mail"]
 
     // MARK: Lines
 
