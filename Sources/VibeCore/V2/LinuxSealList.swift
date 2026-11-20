@@ -41,6 +41,9 @@ public enum LinuxSealList {
         (".config/gh", .listing),
         // The node's allowed projects, its installed builds, the roles' launch files and the lead's accepted hooks.
         (".vibeswitcher/v2/projects", .file),
+        // The launch presets (`SessionPresets`, the composer's lane, 2026-11-20): a variable or argument planted in one
+        // runs in the session the user later starts from it; while a change is held, no preset starts.
+        (".vibeswitcher/presets.json", .file),
         // The user's known Startup shortcuts (`StartupShortcuts`): a line added is a held change.
         (StartupShortcuts.listFile, .file),
         (".vibeswitcher/v2/builds", .listing),

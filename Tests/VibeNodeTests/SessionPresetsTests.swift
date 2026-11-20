@@ -124,6 +124,94 @@ struct SessionPresetsTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: root.path) == ["presets.json"])
     }
 
+    /// A preset may not set a variable that changes what a session runs, where it reads its config, whom it talks to
+    /// or what its shell does first (the security review of 2026-11-20: any process of the uid can write the file).
+    @Test func aPresetMayNotSetAVariableThatChangesWhatRuns() {
+        for name in ["NODE_OPTIONS", "PATH", "HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "HTTPS_PROXY",
+                     "https_proxy", "ALL_PROXY", "PS0", "PS4", "BASH_ENV", "ENV", "PROMPT_COMMAND", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES",
+                     "XDG_CONFIG_HOME", "GIT_SSH_COMMAND", "SSL_CERT_FILE", "PYTHONPATH", "BASH_FUNC_x%%", "VIBESWITCHER_HOME", "TMPDIR",
+                     "AWS_ENDPOINT_URL", "SHELL", "EDITOR", "NPM_CONFIG_PREFIX", "JAVA_TOOL_OPTIONS"] {
+            #expect(SessionPresets.envRefusal(name) != nil, "\(name)")
+        }
+        for name in ["MAX_THINKING_TOKENS", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "CLAUDE_CODE_USE_BEDROCK", "RUN_SLOW", "DEBUG"] {
+            #expect(SessionPresets.envRefusal(name) == nil, "\(name)")
+        }
+        let planted = LaunchPreset(name: "Opus", kind: .claude, command: "claude", env: ["NODE_OPTIONS": "--require /home/u/x.js", "RUN_SLOW": "1"])
+        let why = SessionPresets.refusal(planted)
+        #expect(why?.contains("NODE_OPTIONS (it changes what a program loads or runs)") == true, "\(String(describing: why))")
+    }
+
+    /// A project's preset named as a built-in one never stands in for it: it can't start, and the name finds the built-in.
+    @Test func aPresetCantShadowABuiltInsName() {
+        var presets = LaunchPresets.builtIns()
+        presets.byProject[Self.project] = [LaunchPreset(name: "Claude", kind: .claude, command: "claude --model opus"),
+                                           LaunchPreset(name: "shell", kind: .shell, command: "")]
+        presets.defaults[Self.project] = presets.byProject[Self.project]?.first?.id
+        let listed = SessionPresets.list(presets, folder: Self.project)
+        #expect(listed.first?.refusal?.contains("a built-in preset's") == true, "\(listed)")
+        #expect(listed[1].refusal?.contains("a built-in preset's") == true)
+        let claude = SessionPresets.named("Claude", in: listed)
+        #expect(claude?.refusal == nil && claude?.project == false && claude?.preset.command == "claude")
+        #expect(SessionPresets.named("Shell", in: listed)?.project == false)
+        // The built-in itself, its command edited in the app's Settings (its id kept), is still the user's to start.
+        var edited = LaunchPresets.builtIns()
+        edited.global[0].command = "claude --model opus"
+        #expect(SessionPresets.list(edited, folder: nil).first?.refusal == nil)
+    }
+
+    /// The confirmation shows each value but a secret-looking one's; a page never gets values.
+    @Test func valuesAreShownToATerminalMaskedWhereTheyLookSecret() async throws {
+        let preset = LaunchPreset(name: "Mine", kind: .claude, command: "claude",
+                                  env: ["RUN_SLOW": "1", "SOME_TOKEN": "abc", "API_PASSWORD": "x", "DEBUG_LEVEL": "sk-" + "abcdef"])
+        #expect(SessionPresets.shownValues(preset) == ["RUN_SLOW": "1", "SOME_TOKEN": "<set>", "API_PASSWORD": "<set>", "DEBUG_LEVEL": "<set>"])
+        let listed = SessionPresets.Listed(preset: preset, project: false, isDefault: false, refusal: nil)
+        #expect(SessionPresets.value(listed)["values"] == nil)
+        #expect(SessionPresets.value(listed, values: true)["values"]?["SOME_TOKEN"]?.string == "<set>")
+
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        var presets = LaunchPresets.builtIns()
+        presets.byProject[world.repo] = [preset]
+        try presets.save(to: world.host.root.appendingPathComponent("presets.json"))
+        let args: [String: NodeWire.Value] = ["folder": .string(world.repo), "values": .bool(true)]
+        let terminal = try #require(await world.ask("session.presets", args, action: nil))
+        #expect(terminal.result?["presets"]?.array?.first?["values"]?["RUN_SLOW"]?.string == "1", "\(terminal)")
+        #expect(WireSchema.check(try #require(terminal.result), as: "session.presets.result", strict: true) == nil)
+        let page = try #require(await world.ask("session.presets", args, action: nil, from: NodeLive.webPeer))
+        #expect(page.ok && page.result?["presets"]?.array?.allSatisfy { $0["values"] == nil } == true, "\(page)")
+    }
+
+    /// The presets file is on the config seal's list: a change to it, once the vault holds it, stops any preset starting
+    /// until the user accepts it.
+    @Test func aHeldChangeToThePresetsFileStopsPresetsStarting() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let file = world.host.root.appendingPathComponent("presets.json")
+        var presets = LaunchPresets.builtIns()
+        presets.byProject[world.repo] = [LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["RUN_SLOW": "1"])]
+        try presets.save(to: file)
+        func accept() async throws {
+            let held = try #require(await world.ask("config.held", ["folder": .string(world.repo)]))
+            let card = try #require(held.result?["card"]?["id"]?.string, "\(held)")
+            let accepted = try #require(await world.ask("config.accept", ["card": .string(card), "code": .string(NodeIds.code(card: card))]))
+            #expect(accepted.ok, "\(accepted)")
+        }
+        func start() async throws -> NodeWire.Reply {
+            let list = try #require(await world.ask("session.presets", ["folder": .string(world.repo)], action: nil))
+            let digest = try #require(list.result?["presets"]?.array?.first?["digest"])
+            return try #require(await world.ask("session.new", ["folder": .string(world.repo), "preset": .string("Tests shell"), "digest": digest]))
+        }
+        try await accept()
+        #expect(try await start().ok)
+
+        presets.byProject[world.repo]?[0].env["RUN_SLOW"] = "2"
+        try presets.save(to: file)
+        let refused = try await start()
+        #expect(refused.error?.code == NodeWire.Code.refused.rawValue && refused.error?.message.contains(SessionPresets.sealName) == true, "\(refused)")
+        try await accept()
+        #expect(try await start().ok)
+    }
+
     // MARK: Starting one
 
     /// The node's `claude` (`NodePreflight.claudeLink` on a scratch root) linked to the world's fake.
@@ -212,20 +300,24 @@ struct SessionPresetsTests {
         let folder = node.root.appendingPathComponent("work").path
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         var presets = LaunchPresets.builtIns()
-        presets.byProject[folder] = [LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["RUN_SLOW": "yes-slow"], keepShell: true)]
+        presets.byProject[folder] = [LaunchPreset(name: "Tests shell", kind: .shell, command: "", env: ["RUN_SLOW": "yes-slow", "SOME_TOKEN": "value-to-hide-7"],
+                                                  keepShell: true)]
         try presets.save(to: node.root.appendingPathComponent("presets.json"))
 
         let listed = try await node.run(["presets", folder])
         #expect(listed.status == 0, "\(listed.output)\(listed.errors)")
-        #expect(listed.output.hasPrefix("Tests shell (a shell; this project's; sets RUN_SLOW; a shell stays when it ends)"), "\(listed.output)")
+        #expect(listed.output.hasPrefix("Tests shell (a shell; this project's; sets RUN_SLOW=yes-slow, SOME_TOKEN=<set>; a shell stays when it ends)"),
+                "\(listed.output)")
         #expect(listed.output.contains("Codex (codex: `codex`)\n    can't start here: Codex doesn't run on this node yet"), "\(listed.output)")
 
         let started = try await node.runOnTerminal(["new", folder, "--preset", "tests shell"])
         #expect(started.status == 0, "\(started.output)\(started.errors)\n\(node.said)")
-        #expect(started.output.contains("This starts preset Tests shell (a shell; this project's; sets RUN_SLOW"), "\(started.output)")
-        #expect(!started.output.contains("yes-slow") && !listed.output.contains("yes-slow"), "\(started.output)")
-        // Nor the server's log.
-        #expect(!node.said.contains("yes-slow"))
+        // The confirmation shows each value but a secret-looking one's (the security review of 2026-11-20).
+        #expect(started.output.contains("This starts preset Tests shell (a shell; this project's; sets RUN_SLOW=yes-slow, SOME_TOKEN=<set>"),
+                "\(started.output)")
+        #expect(!started.output.contains("value-to-hide-7") && !listed.output.contains("value-to-hide-7"), "\(started.output)")
+        // Nor the server's log, either value.
+        #expect(!node.said.contains("value-to-hide-7") && !node.said.contains("yes-slow"))
         #expect(started.output.contains("started: session "), "\(started.output)")
 
         for words in [["new", folder, "--preset", "Nope"]] {

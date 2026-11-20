@@ -63,11 +63,21 @@ public enum SessionPresets {
         }.max { tidy($0).count < tidy($1).count }
     }
 
-    /// The preset `name` names among `listed`: the same name, else the same ignoring case; the first such (the
-    /// folder's own come first).
+    /// The preset `name` names among `listed`: the same name, else the same ignoring case; of those, the first the node
+    /// can start (a project's preset that shadows a built-in's name never stands in for the built-in), else the first.
     public static func named(_ name: String, in listed: [Listed]) -> Listed? {
-        listed.first { $0.preset.name == name } ?? listed.first { $0.preset.name.caseInsensitiveCompare(name) == .orderedSame }
+        let same = listed.filter { $0.preset.name == name }
+        let found = same.isEmpty ? listed.filter { $0.preset.name.caseInsensitiveCompare(name) == .orderedSame } : same
+        return found.first { $0.refusal == nil } ?? found.first
     }
+
+    /// The built-in presets' ids and names (`LaunchPresets.builtIns`): another preset may not go by one of the names.
+    static let builtIns = LaunchPresets.builtIns().global
+    static let builtInNames = Set(builtIns.map { $0.name.lowercased() })
+
+    /// The config seal's name for the presets file (`LinuxSealList.homeEntries`): while the vault holds a change to it,
+    /// no preset starts (`Requests.presetsHeld`).
+    public static var sealName: String { "~/.vibeswitcher/presets.json" }
 
     /// Why the node can't start `preset` (nil: it can): Codex, a name that is a role's, a Claude command that isn't
     /// `claude` and plain words, an environment variable the host refuses.
@@ -76,18 +86,78 @@ public enum SessionPresets {
         if LeadTeams.role(label: preset.name) != nil {
             return "its name is a lead's or a team member's label, which only a lead's start gives"
         }
+        if builtInNames.contains(preset.name.lowercased()), !builtIns.contains(where: { $0.id == preset.id }) {
+            return "its name is a built-in preset's (\(ConfigSeal.inert(preset.name, limit: 40))), which it would stand in for: rename it"
+        }
         if preset.kind == .claude, case .failure(let why) = arguments(preset) { return why.message }
         let names = preset.env.keys.sorted()
         if let bad = names.first(where: { !LaunchPlan.validEnvName($0) }) {
             return "its environment names \(ConfigSeal.inert(bad, limit: 64)), which isn't a variable's name"
         }
-        let refused = Platform.Tools.spawnEnvironmentRefused(names) + names.filter { $0.hasPrefix("VIBESWITCHER_") }
-        if !refused.isEmpty { return "its environment sets \(refused.joined(separator: ", ")), which a session can't be started with" }
+        let refused = names.compactMap { name in envRefusal(name).map { "\(name) (\($0))" } }
+        if !refused.isEmpty { return "its environment sets \(refused.joined(separator: ", ")), which a preset may not set" }
         if preset.env.values.contains(where: { $0.contains("\u{0}") }) { return "an environment value holds a NUL" }
         return nil
     }
 
     struct Refusal: Error { let message: String }
+
+    /// Why a preset may not set the variable `name` (nil: it may), in a few words (the security review of 2026-11-20:
+    /// `presets.json` is a file any process of the uid can write, so a variable that changes what a session runs, where
+    /// it reads its config, whom it talks to or what its shell does first could be planted in a preset the user later
+    /// starts). Besides what the host refuses any spawn (`Platform.Tools.spawnEnvironmentRefused`).
+    public static func envRefusal(_ name: String) -> String? {
+        let upper = name.uppercased()
+        if !Platform.Tools.spawnEnvironmentRefused([name]).isEmpty { return "the host refuses it for any session" }
+        if upper.hasPrefix("VIBESWITCHER_") { return "VibeSwitcher's own" }
+        if upper.hasPrefix("LD_") || upper.hasPrefix("DYLD_") { return "a loader hook" }
+        let loaders: Set<String> = ["NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED", "PYTHONPATH", "PYTHONSTARTUP",
+                                    "PYTHONHOME", "PYTHONUSERBASE", "PERL5LIB", "PERL5OPT", "PERLLIB", "RUBYOPT", "RUBYLIB", "JAVA_TOOL_OPTIONS",
+                                    "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH", "GEM_HOME", "GEM_PATH", "BUN_INSTALL", "DENO_DIR", "NPM_CONFIG_PREFIX",
+                                    "GCONV_PATH", "GLIBC_TUNABLES", "MALLOC_CONF"]
+        if loaders.contains(upper) || upper.hasPrefix("NPM_CONFIG_") || upper.hasPrefix("GIT_") { return "it changes what a program loads or runs" }
+        if ["PATH", "MANPATH", "CDPATH", "FPATH", "INFOPATH"].contains(upper) || upper.hasSuffix("_PATH") { return "a search path" }
+        if ["HOME", "USER", "LOGNAME", "SHELL", "PWD", "OLDPWD", "TMPDIR", "TMP", "TEMP", "ZDOTDIR", "INPUTRC", "TERMINFO"].contains(upper) {
+            return "where a session's home, shell or files are"
+        }
+        if upper.hasPrefix("XDG_") || upper.hasSuffix("_CONFIG_DIR") || upper.hasSuffix("_CONFIG_FILE") || upper.hasSuffix("_CONFIG_HOME")
+            || upper.hasSuffix("_HOME") || ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "GNUPGHOME", "KUBECONFIG", "DOCKER_CONFIG", "AWS_SHARED_CREDENTIALS_FILE"].contains(upper) {
+            return "where a program reads its config"
+        }
+        if upper.hasSuffix("_BASE_URL") || upper.hasSuffix("_API_URL") || upper.hasSuffix("_URL") || upper.contains("ENDPOINT") || upper.hasSuffix("_HOST")
+            || upper.hasSuffix("_API_BASE") {
+            return "whom a program talks to"
+        }
+        if upper.hasSuffix("_PROXY") || upper == "PROXY" { return "a proxy" }
+        if ["SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSLKEYLOGFILE"].contains(upper) { return "what TLS trusts" }
+        if upper.hasPrefix("PS") && upper.dropFirst(2).allSatisfy(\.isNumber) || ["PROMPT_COMMAND", "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "IFS",
+                                                                                 "PS4", "BASH_XTRACEFD", "HISTFILE"].contains(upper)
+            || upper.hasPrefix("BASH_FUNC_") {
+            return "a shell's prompt or startup hook"
+        }
+        if ["EDITOR", "VISUAL", "PAGER", "BROWSER", "SSH_ASKPASS", "SUDO_ASKPASS", "SSH_AUTH_SOCK", "DISPLAY", "WAYLAND_DISPLAY",
+            "DBUS_SESSION_BUS_ADDRESS"].contains(upper) {
+            return "a program the session would run, or a socket it would use"
+        }
+        return nil
+    }
+
+    /// Whether a variable's value is shown masked: a name that looks secret (a key, a token, a password…), or a value
+    /// shaped like a known kind of key.
+    public static func looksSecret(name: String, value: String) -> Bool {
+        let upper = name.uppercased()
+        let words = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "PASS", "AUTH", "CREDENTIAL", "COOKIE", "PRIVATE", "SESSION", "SIGNATURE", "BEARER"]
+        if words.contains(where: { upper.contains($0) }) { return true }
+        return ["sk-", "ghp_", "gho_", "ghs_", "github_pat_", "xoxb-", "xoxp-", "AKIA", "glpat-"].contains { value.hasPrefix($0) }
+    }
+
+    /// `preset`'s variables as the user's confirmation shows them: each value, inert and short, or `<set>` for one that
+    /// looks secret (`looksSecret`). Never sent to a web page (`Requests.presets`).
+    public static func shownValues(_ preset: LaunchPreset) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: preset.env.map { name, value in
+            (name, looksSecret(name: name, value: value) ? "<set>" : ConfigSeal.inert(value, limit: 120))
+        })
+    }
 
     /// The words after `claude` in a Claude preset's command (none: plain `claude`), or why it can't run on the node.
     static func arguments(_ preset: LaunchPreset) -> Result<[String], Refusal> {
@@ -149,15 +219,19 @@ public enum SessionPresets {
     }
 
     /// A preset as the wire carries it (`session.presets`): its name, kind, command and the names of its environment's
-    /// variables (never their values: a key may be among them), whether a shell stays, where it is from, and why the
-    /// node can't start it.
-    static func value(_ listed: Listed, key: SymmetricKey = SessionPresets.key) -> NodeWire.Value {
+    /// variables, whether a shell stays, where it is from, and why the node can't start it; with `values` (a terminal's
+    /// request, never a page's), each variable's value as the confirmation shows it (`shownValues`: a secret-looking one
+    /// `<set>`).
+    static func value(_ listed: Listed, key: SymmetricKey = SessionPresets.key, values: Bool = false) -> NodeWire.Value {
         let preset = listed.preset
-        return .object([
+        var fields: [String: NodeWire.Value] = [
             "name": .string(preset.name), "kind": .string(preset.kind.rawValue), "command": .string(preset.command),
             "env": .array(preset.env.keys.sorted().map(NodeWire.Value.string)), "keepShell": .bool(preset.keepShell),
             "project": .bool(listed.project), "default": .bool(listed.isDefault),
             "digest": .string(digest(preset, key: key)), "refused": listed.refusal.map(NodeWire.Value.string) ?? .null,
-        ])
+        ]
+        // For a terminal's confirmation only, never a page's: each variable's value, a secret-looking one masked.
+        if values { fields["values"] = .object(shownValues(preset).mapValues(NodeWire.Value.string)) }
+        return .object(fields)
     }
 }

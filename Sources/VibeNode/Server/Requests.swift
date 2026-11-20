@@ -182,7 +182,7 @@ public final class Requests: @unchecked Sendable {
         }
         if request.kind == "web.open", openWebForAnyone {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
-            return act(request, reply: reply)
+            return act(request, from: facts, reply: reply)
         }
         if needs == .user {
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
@@ -217,7 +217,7 @@ public final class Requests: @unchecked Sendable {
                         again.re = request.id
                         reply(again)
                     case .success(true):
-                        self.act(request) { [weak self] answer in
+                        self.act(request, from: facts) { [weak self] answer in
                             self?.keep(answer, for: action)
                             reply(answer)
                         }
@@ -225,11 +225,11 @@ public final class Requests: @unchecked Sendable {
                 }
             }
         }
-        act(request, reply: reply)
+        act(request, from: facts, reply: reply)
     }
 
     /// What `request` does, once it passed.
-    private func act(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+    private func act(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
         acting(request)
         switch request.kind {
         case "status": status(request, reply: reply)
@@ -248,7 +248,7 @@ public final class Requests: @unchecked Sendable {
         case "session.new": newSession(request, reply: reply)
         case "session.end": endSession(request, reply: reply)
         case "session.reply": replySession(request, reply: reply)
-        case "session.presets": presets(request, reply: reply)
+        case "session.presets": presets(request, terminal: facts.pid != NodeLive.webPeer.pid && facts.uid != nil, reply: reply)
         case "session.complete": complete(request, reply: reply)
         case "session.reopen": reopenSessions(request, reply: reply)
         case "mail": mail(request, reply: reply)

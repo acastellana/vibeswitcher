@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tokenAt, accept, parts, base64, PART } from '../js/composing.js';
 import { createStore } from '../js/store.js';
+import { presetChosen } from '../js/views/drive.js';
 import { validate } from '../wire/validators.js';
 
 const vectors = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'wire', 'vectors.json'), 'utf8'));
@@ -75,4 +76,15 @@ test('the store sends an image part by part, then a draft that names it', async 
   const read = sent.length;
   await store.read('session.complete', { session, kind: 'mention', query: 'lo' });
   assert.equal(sent[read].action, undefined, 'a read carries no action id');
+});
+
+test('a preset the node refuses is never the form’s default, a built-in’s name taken by a project’s included', () => {
+  const presets = [
+    { name: 'Claude', kind: 'claude', default: true, refused: 'its name is a built-in preset’s (Claude), which it would stand in for: rename it' },
+    { name: 'Opus', kind: 'claude', refused: null },
+    { name: 'Claude', kind: 'claude', refused: null },
+  ];
+  assert.equal(presetChosen(presets, 'Claude', false), 'Opus');
+  assert.equal(presetChosen(presets, 'Claude', true), 'Claude', 'picked, a Claude the node can start is there');
+  assert.equal(presetChosen([{ name: 'Shell', refused: 'x' }, { name: 'Tests', refused: null }], 'Shell', true), 'Tests');
 });
