@@ -72,3 +72,7 @@ A lead after the next restart or handover must find why nothing merges, why one 
 
 The user's answer; the next lead must know the install is the supervisor's, from the branch, and that the lead owes the commit and the keys the moment the worker reports.
 
+## 2026-11-20 17:49:10 the-node-s-gate is general, not swiftly-only (the user, 2026-11-20 about 17:40, from the supervisor's acceptance run on a Python project: a merge's test command with a scratch HOME can't see pip --user packages, swiftly or nvm). The project's sandbox policy lets its runs see the user's tool installs read-only (sandbox_read: the tool's own folder, e.g. ~/.local/share/swiftly, ~/.local/lib/python3.x/site-packages, ~/.nvm) and one new guarded key of the sandbox* family carries the variables any tool needs (SWIFTLY_*, PYTHONUSERBASE, NVM_DIR) and its bin on PATH, for boxed runs and for unboxed scratch-home runs alike; no tool's name is hard-coded in the product. Contract v2 of the-node-s-gate carries it; its report names the exact keys for this project, for a pip --user project and for an nvm project.
+
+The user's instruction; a later lead or the worker of branch-runs-get-the must reuse this one key and reader rather than add a per-tool rule.
+
