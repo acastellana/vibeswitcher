@@ -218,6 +218,22 @@ struct SandboxPolicyTests {
             }
             #expect(refusal.key == "sandbox_env" && refusal.description.contains(said), "\(value): \(refusal)")
         }
+        // PATH's folders are shown read-only in the box: each judged as a `sandbox_read` path (the review of the gate
+        // fix): not the home, `/` or a folder holding the home, nothing hidden under it, no other repository.
+        try FileManager.default.createDirectory(atPath: home + "/projects/other/.git", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: home + "/projects/app/.git", withIntermediateDirectories: true)
+        for (value, said) in [("PATH=~/projects", "another repository"), ("PATH=~/projects/other/bin", "another repository"), ("PATH=~", "the home"),
+                              ("PATH=/", "the home"), ("PATH=~/.local", ".local/share/keyrings"), ("PATH=~/sdk/bin:~/projects", "another repository")] {
+            let result = SandboxPolicy.read(Self.workflow("sandbox_env: \(value)"), home: home, root: home + "/projects/app")
+            guard case .failure(let refusal) = result else {
+                Issue.record("sandbox_env: \(value) was taken: \(result)")
+                continue
+            }
+            #expect(refusal.key == "sandbox_env" && refusal.description.contains(said), "\(value): \(refusal)")
+        }
+        // The project's own folders, and a value that isn't PATH, are as before.
+        #expect(try SandboxPolicy.read(Self.workflow("sandbox_env: PATH=~/projects/app/bin, TOOLS=~/projects"), home: home,
+                                       root: home + "/projects/app").get().path == [home + "/projects/app/bin"])
         // Guarded as the others: a change to it is a change of the guard rails' hashes.
         #expect(LeadVault.guardedKeys.contains("sandbox_env"))
         let before = Self.workflow("sandbox_env: MADE_UP_HOME=~/sdk"), after = Self.workflow("sandbox_env: MADE_UP_HOME=~/sdk, EXTRA=~/sdk")

@@ -112,7 +112,7 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
             policy.hosts = try list("sandbox_hosts").map { try host($0, key: "sandbox_hosts").get() }
             policy.runHosts = try list("sandbox_run_hosts").map { try host($0, key: "sandbox_run_hosts").get() }
             for pair in list("sandbox_env") {
-                switch variable(pair, home: home, resolve: resolve) {
+                switch variable(pair, home: home, root: root, resolve: resolve, isRepository: isRepository) {
                 case .failure(let refusal): throw refusal
                 case .success(let read) where read.name == "PATH": policy.path += read.value.split(separator: ":").map(String.init)
                 case .success(let read):
@@ -187,8 +187,12 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
     /// judged, tidied and with their links followed, and refused at or under a hidden place (`hidden`, `hiddenRoots`);
     /// the value passed on is as written but for `~` (PATH's folders: with their links followed). A path may hold
     /// one (`PYTHONUSERBASE=~/.local` holds `.local/share/keyrings`): a variable shows nothing, `sandbox_read` does,
-    /// and that is judged whole. `PATH`'s parts must all be paths.
-    public static func variable(_ text: String, home: String, resolve: (String) -> String = SandboxPolicy.resolved)
+    /// and that is judged whole. `PATH`'s parts must all be paths, and each is judged as `sandbox_read`'s are (`path`:
+    /// not the home nor a folder holding it, nothing hidden under it, no other repository than `root`'s): a box shows
+    /// each read-only, so a PATH folder is a read like any other (the review of the gate fix, 2026-11-20: `PATH=~/projects`
+    /// showed every other project's code to the run).
+    public static func variable(_ text: String, home: String, root: String? = nil, resolve: (String) -> String = SandboxPolicy.resolved,
+                                isRepository: (String) -> Bool = SandboxPolicy.holdsGit)
         -> Result<(name: String, value: String), SandboxRefusal> {
         func refuse(_ reason: String) -> Result<(name: String, value: String), SandboxRefusal> {
             .failure(SandboxRefusal(key: "sandbox_env", value: text, reason: reason))
@@ -214,6 +218,14 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
                 if name == "PATH" { return refuse("PATH's folders are written from / or from ~/") }
                 parts.append(part)
                 continue
+            }
+            if name == "PATH" {
+                switch path(spelled, key: "sandbox_env", home: home, root: root, resolve: resolve, isRepository: isRepository) {
+                case .failure(let refusal): return refuse("its folder \(part) \(refusal.reason)")
+                case .success(let folder):
+                    parts.append(folder)
+                    continue
+                }
             }
             let normalized = lexical(spelled), resolvedPath = resolve(normalized)
             for candidate in Set([normalized, resolvedPath]) {
