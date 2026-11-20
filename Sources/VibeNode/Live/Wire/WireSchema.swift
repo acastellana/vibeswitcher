@@ -60,7 +60,8 @@ public enum WireSchema {
                                   "subscribe.args", "subscribe.result", "unsubscribe.args", "chat.page.args", "chat.page.result",
                                   "draft.args", "draft.result", "draft.clear.args",
                                   "board.args", "board.result", "seen.args",
-                                  "session.draft.args", "session.draft.result", "session.draft.clear.args"]
+                                  "session.draft.args", "session.draft.result", "session.draft.clear.args",
+                                  "settings.args", "settings.result", "set.args", "set.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -266,6 +267,28 @@ public enum WireSchema {
             shape("board.merged", from: "BoardValue.task", [field("commit", .string), field("at", Kind.date.orNull), field("tested", .bool)]),
             shape("board.args", from: "Requests.board", [optional("folder", .string)]),
             shape("board.result", from: "Requests.board", [field("boards", .list(.shape("board")))]),
+        ]
+
+        // The node's settings (`settings`' result, `set`: the parity table's gap 9, 2026-11-20).
+        shapes += [
+            shape("setting", from: "NodeSettings.Shown.wire", [
+                field("key", .string), field("title", .string), field("about", .string), field("section", .string),
+                field("scope", .words(["node", "project"])), field("form", .words(["flag", "count", "number", "choice", "model", "paths", "text"])),
+                field("home", .words(["limits", "preferences", "policy", "workflow", "floor"])), field("choices", strings),
+                field("limits", Kind.string.orNull), field("value", .string), field("default", .string), field("isDefault", .bool),
+                field("where", .string), field("guardRail", .bool), field("note", Kind.string.orNull)]),
+            shape("settings.node", from: "Requests.settings", [field("root", .string), field("settings", .list(.shape("setting")))]),
+            shape("settings.project", from: "Requests.settings", [field("project", .string), field("root", .string),
+                                                                   field("settings", .list(.shape("setting")))]),
+            shape("settings.left", from: "Requests.settings", [field("title", .string), field("why", .string)]),
+            shape("settings.args", from: "Requests.settings", [optional("folder", .string)]),
+            shape("settings.result", from: "Requests.settings", [field("node", .shape("settings.node")),
+                                                                  field("project", Kind.shape("settings.project").orNull),
+                                                                  field("leftOut", .list(.shape("settings.left")))]),
+            shape("set.args", from: "Requests.set", [optional("folder", .string), field("key", .string), field("value", .string)]),
+            shape("set.result", from: "Requests.set", [field("key", .string), field("value", .string), field("was", .string),
+                                                        field("scope", .words(["node", "project"])), field("project", Kind.string.orNull),
+                                                        field("told", Kind.words(["lead", "leads"]).orNull)]),
         ]
 
         // A chat's items (the contract's §6).

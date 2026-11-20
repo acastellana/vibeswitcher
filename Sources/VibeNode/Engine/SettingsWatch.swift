@@ -103,8 +103,8 @@ extension LeadEngine {
                 return then(false)
             default:
                 guard let root, let told else { return then(false) }
-                // A lead that doesn't run (as the last refresh read the host's list) reads the file when it starts:
-                // nothing is held for it.
+                leads.update(sessions: link.sessions, holders: holders)
+                // A lead that doesn't run reads the file when it starts: nothing is held for it.
                 guard leads.leads[NodeIds.project(root: root)]?.session != nil else { return then(false) }
                 deliver(built: { told }, from: .system("settings"), root: root, action: nil)
                 then(true)
