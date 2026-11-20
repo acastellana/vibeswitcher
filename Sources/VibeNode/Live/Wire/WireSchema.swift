@@ -196,9 +196,13 @@ public enum WireSchema {
                 field("project", .string), field("root", .string), field("session", Kind.string.orNull), field("named", Kind.string.orNull),
                 field("bound", Kind.string.orNull), field("replaced", strings), field("held", .int), field("reportsWaiting", .int),
                 field("notice", Kind.string.orNull), field("starting", .bool), field("lastStart", Kind.string.orNull),
-                field("lastStartAt", Kind.date.orNull), pending(field("looks", .int), byStatus),
+                field("lastStartAt", Kind.date.orNull), field("push", Kind.shape("lead.push").orNull), pending(field("looks", .int), byStatus),
                 pending(field("questions", .shape("lead.questions")), byStatus), pending(field("cards", strings), byStatus)]),
             shape("lead.questions", from: "Requests.leadValue", [field("open", .int), field("blocking", .int)]),
+            // The push its lead asked for, while it's open (push_remote, `PushAsks.swift`).
+            shape("lead.push", from: "LeadStore.Lead.pushValue", [
+                field("id", .string), field("commit", .string), field("short", .string), field("branch", .string), field("remote", .string),
+                field("target", .string), field("url", .string), field("ahead", .int), field("subjects", strings), field("askedAt", .date)]),
         ]
 
         // A card (the contract's §5).

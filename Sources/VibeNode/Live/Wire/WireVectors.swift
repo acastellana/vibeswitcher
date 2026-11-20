@@ -357,6 +357,10 @@ public enum WireVectors {
         lead.bound = leadHost.uuidString.lowercased()
         lead.lastStart = "started"
         lead.lastStartAt = date("2026-11-17T08:40:02.410Z")
+        lead.push = LeadPush.Request(id: "3c9e1f20", commit: "c41d7e09b2a65f38d1e0c7b94a2f6e1d3b8c5a70", remote: "origin", branch: "main",
+                                     url: "git@example.invalid:example-site.git", ahead: 2,
+                                     subjects: ["c41d7e0 Landing copy", "9b2a65f Hero image"],
+                                     askedAt: date("2026-11-17T09:02:11.000Z").timeIntervalSince1970)
         guard case .object(var fields) = lead.value else { return lead.value }
         fields["looks"] = .int(211)
         fields["questions"] = .object(["open": .int(1), "blocking": .int(1)])
