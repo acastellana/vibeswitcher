@@ -48,31 +48,40 @@ public enum SessionPresets {
     /// The node's presets file, read once (`PresetsFile`). `opener` opens it (a test's counts, and changes the file
     /// once it is open).
     public static func read(root: URL, opener: (String) -> Int32 = { Sys.open($0, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC) }) -> PresetsFile {
-        let builtIns = LaunchPresets.builtIns()
+        switch bytes(root: root, opener: opener) {
+        case .failure(let refusal): return PresetsFile(presets: LaunchPresets.builtIns(), problems: [refusal.message + ": the built-in presets alone"], fingerprint: nil)
+        case .success(nil): return PresetsFile(presets: LaunchPresets.builtIns(), problems: [], fingerprint: nil)
+        case .success(let data?): return decode(data)
+        }
+    }
+
+    /// The presets file's bytes, read once through `opener` (`O_NOFOLLOW`: a link is refused, never followed): nil when
+    /// there is none, else at most `fileLimit` bytes of a regular file, or why it can't be read. `read` and the user's
+    /// edits (`Requests.editPreset`) both read it so.
+    static func bytes(root: URL, opener: (String) -> Int32 = { Sys.open($0, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC) }) -> Result<Data?, Refusal> {
         let path = root.appendingPathComponent(VibePaths.presetsFile.lastPathComponent).path
         let fd = opener(path)
         guard fd >= 0 else {
             let failure = errno
-            if failure == ENOENT { return PresetsFile(presets: builtIns, problems: [], fingerprint: nil) }
-            let why = failure == ELOOP ? "is a link, which is never followed" : "can't be opened (errno \(failure))"
-            return PresetsFile(presets: builtIns, problems: ["presets.json \(why): the built-in presets alone"], fingerprint: nil)
+            if failure == ENOENT { return .success(nil) }
+            return .failure(Refusal(message: failure == ELOOP ? "presets.json is a link, which is never followed" : "presets.json can't be opened (errno \(failure))"))
         }
         defer { Sys.close(fd) }
         var info = stat()
         guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_size <= Int64(fileLimit) else {
-            return PresetsFile(presets: builtIns, problems: ["presets.json isn't a regular file of at most 1 MB: the built-in presets alone"], fingerprint: nil)
+            return .failure(Refusal(message: "presets.json isn't a regular file of at most 1 MB"))
         }
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         while true {
             let count = Sys.read(fd, &buffer, buffer.count)
             if count < 0, errno == EINTR { continue }
-            guard count >= 0 else { return PresetsFile(presets: builtIns, problems: ["presets.json couldn't be read: the built-in presets alone"], fingerprint: nil) }
+            guard count >= 0 else { return .failure(Refusal(message: "presets.json couldn't be read")) }
             if count == 0 { break }
             data.append(contentsOf: buffer[0..<count])
-            guard data.count <= fileLimit else { return PresetsFile(presets: builtIns, problems: ["presets.json is over 1 MB: the built-in presets alone"], fingerprint: nil) }
+            guard data.count <= fileLimit else { return .failure(Refusal(message: "presets.json is over 1 MB")) }
         }
-        return decode(data)
+        return .success(data)
     }
 
     /// `data` (the presets file's bytes) decoded, with the seal's hash of exactly those bytes.
