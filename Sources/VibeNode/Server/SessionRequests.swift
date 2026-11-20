@@ -128,9 +128,10 @@ extension Requests {
         }
         let claudeLink = engine?.preflight.claudeLink ?? NodePreflight.claudeLink(root: root)
         let scratch = !VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome)
-        let (link, queue, note, nodeRoot, repositoryOf) = (self.link, self.queue, self.note, root, self.repositoryOf)
-        // The projects whose config the vault keeps: a change to the presets file it holds stops any preset starting.
-        let (vault, leadRoots) = (engine?.cardVault, engine.map { $0.leads.leads.values.map(\.root) } ?? [])
+        let (link, queue, note, nodeRoot) = (self.link, self.queue, self.note, root)
+        // The vault that keeps the user's accepted config, and the home the config seal reads: a preset of the file
+        // starts only while the file is as an accept sealed it.
+        let (vault, home) = (engine?.cardVault, engine?.home ?? self.home)
         let refuse = { (why: String) in queue.async { reply(.init(re: request.id, error: .init(.refused, why))) } }
         // Off the queue: the folder, the presets and the link are read from the disk.
         DispatchQueue.global(qos: .userInitiated).async {
@@ -142,11 +143,6 @@ extension Requests {
             // The built-in Claude or Shell, else the preset named.
             var preset = agent == "shell" ? LaunchPreset(name: "Shell", kind: .shell, command: "") : LaunchPreset(name: "Claude", kind: .claude, command: "")
             if let presetName {
-                if let vault, let held = Self.presetsHeld(vault: vault, roots: leadRoots + [repositoryOf(standard)]) {
-                    return refuse("the presets file changed and the vault holds that change (\(SessionPresets.sealName), seen from "
-                                  + "\(ConfigSeal.inert(held, limit: 200))): no preset starts until you accept it "
-                                  + "(`vibeswitcher config held \(ConfigSeal.inert(held, limit: 200))`, then `config accept CARD`)")
-                }
                 let listed = SessionPresets.list(SessionPresets.load(root: nodeRoot).presets, folder: standard)
                 let shown = ConfigSeal.inert(presetName, limit: 80)
                 guard let found = SessionPresets.named(presetName, in: listed) else {
@@ -158,6 +154,10 @@ extension Requests {
                                   + "run the command again to see it as it is now")
                 }
                 guard model == nil || found.preset.kind == .claude else { return refuse("preset \(shown) starts a shell, which takes no model") }
+                // Fail closed: a preset of the file (not a built-in) only from a file the user's accept sealed.
+                if !found.builtIn, let why = Self.presetsBaselineRefusal(vault: vault, home: home, nodeRoot: nodeRoot, folder: standard) {
+                    return refuse("preset \(shown) can't start: " + why)
+                }
                 preset = found.preset
             }
             var command: String?
@@ -192,18 +192,26 @@ extension Requests {
         }
     }
 
-    /// The first of `roots` whose config the vault keeps and holds a change to the presets file in
-    /// (`SessionPresets.sealName`, on the config seal's Linux list), after a look as `config held` makes one (a card
-    /// that showed nothing: nothing sealed); nil when none does. A root the vault has no record for isn't looked at, so
-    /// no first look starts here. Asks the vault: never on the engine's queue.
-    static func presetsHeld(vault: LeadVault, roots: [String]) -> String? {
-        for root in Set(roots).sorted() {
-            guard case .some(.some) = try? vault.guardedRecord(root: root) else { continue }
-            _ = try? vault.checkConfig(root: root, shown: [:])
-            if case .some(let record) = try? vault.guardedRecord(root: root), ConfigSeal.held(in: record).contains(SessionPresets.sealName) {
-                return root
-            }
+    /// Why a preset of the node's presets file can't start now (nil: it can), failing closed (the security review of
+    /// 2026-11-20): the file must be the one the config seal watches in the home (`SessionPresets.sealName`), the
+    /// vault must hold a sealed baseline of it (the home's config, sealed once for every project by the user's
+    /// `config accept`), no change to it held, and the file as it is now must hash as that baseline did. A vault that
+    /// can't be asked, or holds no record of it, refuses. Asks the vault and reads the file: never on the engine's queue.
+    static func presetsBaselineRefusal(vault: LeadVault?, home: String, nodeRoot: URL, folder: String) -> String? {
+        let accept = "accept the presets first (`vibeswitcher config held \(ConfigSeal.inert(folder, limit: 200))`, then `config accept CARD`)"
+        let file = nodeRoot.appendingPathComponent("presets.json").standardizedFileURL.path
+        guard let watched = ConfigSeal.homeWatched(home: home).first(where: { $0.name == SessionPresets.sealName }),
+              URL(fileURLWithPath: watched.path).standardizedFileURL.path == file else {
+            return "this node's presets file (\(ConfigSeal.inert(file, limit: 200))) isn't the one the config seal watches, so no accept covers it"
         }
+        guard let vault else { return "this node keeps no vault to accept them in" }
+        let record: [String: String]?
+        do { record = try vault.guardedRecord(root: folder) } catch {
+            return "the vault couldn't be asked (\(ConfigSeal.inert("\(error)", limit: 200))): " + accept
+        }
+        guard let record, let sealed = record[ConfigSeal.keyPrefix + SessionPresets.sealName] else { return "the vault holds no accepted presets: " + accept }
+        if ConfigSeal.held(in: record).contains(SessionPresets.sealName) { return "the vault holds a change to the presets file: " + accept }
+        guard ConfigSeal.fingerprint(watched) == sealed else { return "the presets file changed since you accepted it: " + accept }
         return nil
     }
 
