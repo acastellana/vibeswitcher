@@ -151,7 +151,7 @@ public final class Requests: @unchecked Sendable {
                                                "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
                                                "send", "session.new", "session.end", "session.reply", "session.reopen",
                                                "prompt-audit", "set", "session.rename", "session.pause",
-                                               "session.resume"]
+                                               "session.resume", "session.close-shells"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -245,6 +245,8 @@ public final class Requests: @unchecked Sendable {
         case "session.rename": renameSession(request, reply: reply)
         case "session.pause": pauseSession(request, reply: reply)
         case "session.resume": resumeSession(request, reply: reply)
+        case "shells": shells(request, reply: reply)
+        case "session.close-shells": closeShells(request, reply: reply)
         case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)

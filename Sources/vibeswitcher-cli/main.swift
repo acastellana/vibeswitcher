@@ -21,7 +21,7 @@ let usage = """
            vibeswitcher answer CARD [TEXT] | hold CARD
            vibeswitcher tell FOLDER TEXT
            vibeswitcher send SESSION [TEXT] | reply SESSION CHOICE [TEXT]
-           vibeswitcher new FOLDER [--agent claude|shell] [--model M] | end SESSION
+           vibeswitcher new FOLDER [--agent claude|shell] [--model M] | end SESSION | close-shells [FOLDER]
            vibeswitcher reopen [all | SESSION... | --forget] | resume [SESSION]
            vibeswitcher rename SESSION [NAME] | pause SESSION [--hours N | --tomorrow | --off]
            vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]
@@ -63,6 +63,8 @@ case "reply":
     exit(ReplyCommand.run(Array(words.dropFirst())))
 case "new":
     exit(NewCommand.run(Array(words.dropFirst())))
+case "close-shells":
+    exit(CloseShellsCommand.run(Array(words.dropFirst())))
 case "end":
     exit(EndCommand.run(Array(words.dropFirst())))
 case "rename":

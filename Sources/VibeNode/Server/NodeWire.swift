@@ -292,6 +292,9 @@ public enum NodeWire {
         "prompt-audit": .user,
         // A session renamed or paused (the stability lane, 2026-11-20).
         "session.rename": .user, "session.pause": .user, "session.resume": .user,
+        // Close Finished Shells (the stability lane, 2026-11-20): the list a read of the user's (no code), the closing
+        // the user's voice.
+        "shells": .user, "session.close-shells": .user,
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
         // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
         // user's voice.
@@ -300,8 +303,8 @@ public enum NodeWire {
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
     /// started; `config.held` and `base.show` make the card the next request takes; `mail` reads the projects' private
-    /// record of their leads' messages.
-    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "mail"]
+    /// record of their leads' messages; `shells` lists the node's shells for Close Finished Shells.
+    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "mail", "shells"]
 
     /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
     /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
@@ -329,7 +332,7 @@ public enum NodeWire {
                                "board", "seen",
                                "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
-                               "session.resume", "settings", "set"]
+                               "session.resume", "shells", "session.close-shells", "settings", "set"]
 
     // MARK: Lines
 
