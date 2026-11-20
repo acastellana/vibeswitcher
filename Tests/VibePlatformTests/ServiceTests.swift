@@ -26,6 +26,18 @@ struct ServiceTests {
             #expect(Platform.Service.runtimeFolder(uid: uid) == "/run/user/\(uid)")
             #expect(Platform.Service.runtimeFolder(uid: 1234) == "/run/user/1234")
         }
+        // The node's root under the account's home: the account's own folder on Linux, a folder of its own beside the
+        // app's on the Mac (the node on the Mac's step 2).
+        if Platform.CodeIdentity.isAvailable {
+            #expect(Platform.Service.nodeRootFolder == ".vibeswitcher/v2/node")
+            #expect(!Platform.Service.nodeRootIsTheAccountRoot)
+            #expect(Platform.Service.nodeRoot(accountHome: "/Users/someone") == "/Users/someone/.vibeswitcher/v2/node")
+        } else {
+            #expect(Platform.Service.nodeRootFolder == ".vibeswitcher")
+            #expect(Platform.Service.nodeRootIsTheAccountRoot)
+            #expect(Platform.Service.nodeRoot(accountHome: "/home/someone") == "/home/someone/.vibeswitcher")
+        }
+        #expect(Platform.Service.nodeRoot(accountHome: "/home/someone/") == "/home/someone/" + Platform.Service.nodeRootFolder)
         // Every tool named is an absolute path, never a name to look up on PATH.
         let named = [Platform.Service.systemctl, Platform.Service.journalctl, Platform.Service.launchctl, Platform.Service.unifiedLogTool].compactMap { $0 }
         #expect(named.count == 2 && named.allSatisfy { $0.hasPrefix("/") }, "\(named)")

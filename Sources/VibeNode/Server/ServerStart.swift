@@ -23,6 +23,13 @@ public enum ServerStart {
         _ = fcntl(connector, F_SETFD, fcntl(connector, F_GETFD) | FD_CLOEXEC)
     }
 
+    /// What the user's server (`--node`) sets `VIBESWITCHER_HOME` to, the account's home `accountHome` from the user
+    /// database: nil (unset, the root then `<HOME>/.vibeswitcher`) where the node's root is the account's own folder
+    /// (Linux), else the node's root (the Mac's `~/.vibeswitcher/v2/node`). Never the environment's.
+    public static func nodeRootVariable(accountHome: String) -> String? {
+        Platform.Service.nodeRootIsTheAccountRoot ? nil : NodeFolders.nodeRoot(accountHome: accountHome)
+    }
+
     /// A line on the server's stderr, which the host's stderr is (the unit sends it to the journal).
     public static func say(_ line: String) {
         FileHandle.standardError.write(Data("vibeswitcher-server: \(line)\n".utf8))
@@ -49,7 +56,9 @@ public enum ServerStart {
             }
             accountHome = home
             setenv("HOME", home, 1)
-            unsetenv("VIBESWITCHER_HOME")
+            // The node's root: the account's ~/.vibeswitcher on Linux (VIBESWITCHER_HOME unset), its own folder beside
+            // the app's on the Mac (`Platform.Service.nodeRoot`), named so.
+            if let own = nodeRootVariable(accountHome: home) { setenv("VIBESWITCHER_HOME", own, 1) } else { unsetenv("VIBESWITCHER_HOME") }
             unsetenv("CFFIXED_USER_HOME")
         } else if let root = parsed.root {
             setenv("VIBESWITCHER_HOME", root, 1)
@@ -77,7 +86,7 @@ public enum ServerStart {
         }
         // A scratch node (a root other than the account's) lists only the sessions its host started.
         let sessions = NodeSessions(root: root, home: VibePaths.home, queue: queue, link: link, clock: clock,
-                                    onlyHosted: !VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome), note: say)
+                                    onlyHosted: !NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome), note: say)
         let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes, usersNode: parsed.node)
         say("voice rule: \(rule.says)")
         if let root = parsed.testCgroupRoot { say("a scratch node's test: each sender's cgroup is read from \(ConfigSeal.inert(root, limit: .max))") }

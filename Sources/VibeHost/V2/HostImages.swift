@@ -48,8 +48,11 @@ public enum HostImages {
     // MARK: --node
 
     /// The environment a `--node` host runs with, from `environment`: `HOME` the account's own home (`accountHome`, from
-    /// the user database), and neither `VIBESWITCHER_HOME` nor `CFFIXED_USER_HOME`, each of which would move
-    /// `VibePaths.root` (and with it the lock `ownsLaunchers` compares) away from the account's.
+    /// the user database), no `CFFIXED_USER_HOME`, and `VIBESWITCHER_HOME` the node's root or nothing, never the
+    /// environment's, each of which would move `VibePaths.root` (and with it the lock `ownsLaunchers` compares) away from
+    /// the node's: on Linux the node's root is the account's `~/.vibeswitcher`, so `VIBESWITCHER_HOME` is unset; on the
+    /// Mac it is `~/.vibeswitcher/v2/node` (`Platform.Service.nodeRoot`), beside the app's folder and never it, so
+    /// `VIBESWITCHER_HOME` names it, and the host's lock, socket, log and vault are there.
     ///
     /// And what the host passes on to every session (`Platform.Tools.sessionEnvironmentNames`) fixed from the user
     /// database too, not taken from the user manager's environment, whose values `start` doesn't check and any worker
@@ -60,7 +63,7 @@ public enum HostImages {
     public static func nodeEnvironment(_ environment: [String: String], accountHome: String, accountName: String?, shell: String) -> [String: String] {
         var node = environment
         node["HOME"] = accountHome
-        node["VIBESWITCHER_HOME"] = nil
+        node["VIBESWITCHER_HOME"] = Platform.Service.nodeRootIsTheAccountRoot ? nil : Platform.Service.nodeRoot(accountHome: accountHome)
         node["CFFIXED_USER_HOME"] = nil
         node["SHELL"] = shell
         node["USER"] = accountName
@@ -91,7 +94,8 @@ public enum HostImages {
     }
 
     /// Why `--node` is refused on the Mac (`startAsNode`).
-    public static let macNodeRefusal = "\(nodeFlag): the node's host isn't built for the Mac yet, and this host would be the app's own (its ~/.vibeswitcher lock and socket)"
+    public static let macNodeRefusal = "\(nodeFlag): the node's host isn't built for the Mac yet (its server beside it, the rule for the user's voice, its launchd agent); "
+        + "its root would be ~/.vibeswitcher/v2/node, never the app's ~/.vibeswitcher"
 
     /// The account's own home, from the user database (`getpwuid`): never the environment's. Nil when it has none.
     public static var accountHome: String? {
@@ -104,9 +108,10 @@ public enum HostImages {
     /// `--server`, and the server must be its build's own (`openServer`), whose descriptor is then held for `load`
     /// (`holdServer`), which copies the server from it; then this process's environment is made `nodeEnvironment`'s.
     /// Why it may not start, or nil. Without `--node`: nil, nothing done. On the Mac `--node` is refused
-    /// (`macNodeRefusal`): the node's host isn't built there, and a host that ignored the flag would be the app's host
-    /// on the app's own `~/.vibeswitcher` lock and socket (the node on the Mac's design, 2026-11-19). The app never
-    /// passes `--node`, so its host is unchanged.
+    /// (`macNodeRefusal`): the node's host isn't built there (the node on the Mac's design, 2026-11-19, steps 3 to 5).
+    /// Its root there is already its own (`nodeEnvironment`: `~/.vibeswitcher/v2/node`, step 2), so once the refusal
+    /// goes, a `--node` host never takes the app's `~/.vibeswitcher` lock and socket. The app never passes `--node`, so
+    /// its host is unchanged.
     public static func startAsNode(arguments: [String]) -> String? {
         guard arguments.contains(nodeFlag) else { return nil }
         guard !Platform.CodeIdentity.isAvailable else { return macNodeRefusal }

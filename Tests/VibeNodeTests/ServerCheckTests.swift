@@ -151,18 +151,46 @@ struct ServerCheckTests {
 
     /// The step 8 sweep: the user's node's root (its socket, its record) is the account's, from the user database,
     /// whatever `HOME` or `CFFIXED_USER_HOME` move `VibePaths.root` to: its host listens there. Only a scratch node's
-    /// is the environment's.
+    /// is the environment's. On the Mac the account's node root is `~/.vibeswitcher/v2/node`, beside the app's folder
+    /// (the node on the Mac's step 2).
     @Test func theUsersNodeRootIsTheAccountsWhateverHomeSays() {
         let account = "/home/someone"
         let moved = "/scratch/elsewhere/.vibeswitcher"
-        #expect(NodeCheck.root(of: .node, environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
-        #expect(NodeCheck.root(of: .detached(record: nil), environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
+        let own = Platform.CodeIdentity.isAvailable ? "/home/someone/.vibeswitcher/v2/node" : "/home/someone/.vibeswitcher"
+        #expect(NodeFolders.nodeRoot(accountHome: account) == own)
+        #expect(NodeCheck.root(of: .node, environmentRoot: moved, accountHome: account) == own)
+        #expect(NodeCheck.root(of: .detached(record: nil), environmentRoot: moved, accountHome: account) == own)
         #expect(NodeCheck.root(of: .detached(record: NodeRecord(pid: 4, startTicks: 5)), environmentRoot: moved, accountHome: account)
             == NodeFolders.nodeRoot(accountHome: account))
         #expect(NodeCheck.root(of: .scratch(root: "/srv/vsn-1"), environmentRoot: "/srv/vsn-1", accountHome: account) == "/srv/vsn-1")
         // The mode itself never looks at HOME: VIBESWITCHER_HOME unset is the user's node.
         let mode = NodeCheck.mode(vibeswitcherHome: nil, accountHome: account)
-        #expect(NodeCheck.root(of: mode, environmentRoot: moved, accountHome: account) == "/home/someone/.vibeswitcher")
+        #expect(NodeCheck.root(of: mode, environmentRoot: moved, accountHome: account) == own)
+    }
+
+    /// The node on the Mac's step 2: `VIBESWITCHER_HOME` naming the node's root, or the account's own `~/.vibeswitcher`,
+    /// is the user's node on both systems (on Linux they are one folder): on the Mac the account's folder is the app's,
+    /// and a node there is the user's, which is refused, never a scratch node on the app's files. Anything else is a
+    /// scratch node, a folder under the node's root included.
+    @Test func theNodesRootAndTheAccountsFolderAreBothTheUsersNode() {
+        let account = "/home/someone"
+        let own = NodeFolders.nodeRoot(accountHome: account)
+        for spelled in [own, own + "/", own + "/.", account + "/.vibeswitcher", account + "/./.vibeswitcher/"] {
+            #expect(NodeCheck.mode(vibeswitcherHome: spelled, accountHome: account) == .node, "\(spelled)")
+            #expect(NodeFolders.isUsersRoot(URL(fileURLWithPath: spelled, isDirectory: true), accountHome: account), "\(spelled)")
+        }
+        for scratch in ["/home/someone/.vibeswitcher/v2/builds", "/home/someone/.vibeswitcher/v2/node/v2", "/srv/vsn-1"] {
+            #expect(NodeCheck.mode(vibeswitcherHome: scratch, accountHome: account) == .scratch(root: scratch), "\(scratch)")
+            #expect(!NodeFolders.isUsersRoot(URL(fileURLWithPath: scratch, isDirectory: true), accountHome: account), "\(scratch)")
+        }
+        // The user's server's VIBESWITCHER_HOME: unset where the node's root is the account's folder (Linux), the node's
+        // root otherwise (the Mac); never the environment's.
+        #expect(ServerStart.nodeRootVariable(accountHome: account) == (Platform.CodeIdentity.isAvailable ? own : nil))
+        if let variable = ServerStart.nodeRootVariable(accountHome: account) {
+            #expect(VibePaths.root(environment: ["HOME": account, "VIBESWITCHER_HOME": variable], fallbackHome: "/elsewhere").path == own)
+        } else {
+            #expect(VibePaths.root(environment: ["HOME": account], fallbackHome: "/elsewhere").path == own)
+        }
     }
 
     @Test func aScratchHomeThatIsTheAccountsOwnGetsTheNodesCheck() {

@@ -13,7 +13,7 @@ struct NodeSystemTests {
         let mac = try #require(NodeSystem.usersNodeRefusal(manager: .launchd))
         #expect(mac == NodeSystem.macUnbuilt)
         // It says what isn't built, that the app is left alone, what does run, and where the design is.
-        for words in ["isn't built for the Mac", "launchd", "the app's ~/.vibeswitcher", "your voice", "Mac app is unchanged",
+        for words in ["isn't built for the Mac", "launchd", "~/.vibeswitcher/v2/node", "the app's ~/.vibeswitcher", "your voice", "Mac app is unchanged",
                       "scratch node", "docs/superpowers/specs/2026-11-19-v2-node-on-macos.md"] {
             #expect(mac.contains(words), "\(words)")
         }

@@ -23,7 +23,7 @@ public struct NodePreflight: Sendable {
     /// The link a node with root `root` reads: on a scratch node (a root other than the account's own `~/.vibeswitcher`)
     /// only `<root>/v2/test/claude`; on the user's node `<home>/.local/bin/claude`, the home from the user database.
     public static func claudeLink(root: URL, accountHome: String = VibePaths.accountHome) -> String {
-        guard VibePaths.isAccountRoot(root, accountHome: accountHome) else {
+        guard NodeFolders.isUsersRoot(root, accountHome: accountHome) else {
             return root.appendingPathComponent("v2/test/claude").path
         }
         return URL(fileURLWithPath: accountHome, isDirectory: true).appendingPathComponent(".local/bin/claude").path

@@ -4,9 +4,9 @@ import VibeCore
 /// Whether the user's node is built for this system, and what each command says where it isn't (the node on the Mac's
 /// design, docs/superpowers/specs/2026-11-19-v2-node-on-macos.md, step 1). The user's node is built where the service
 /// manager is systemd (Linux): its unit, its detached start, its journal, its voice rule. On the Mac (launchd) none of
-/// that exists yet: no LaunchAgent, no host in a root of its own beside the app's, no rule that tells the user's voice
-/// from a session's. So there every command that would reach, start or stop the user's node refuses at once, before it
-/// reads or runs anything, with this text and exit 69, rather than failing later on a Linux path (`/proc/self/exe`,
+/// that exists yet: no LaunchAgent, no host beside the app's (its root, `~/.vibeswitcher/v2/node`, is decided), no rule
+/// that tells the user's voice from a session's. So there every command that would reach, start or stop the user's node
+/// refuses at once, before it reads or runs anything, with this text and exit 69, rather than failing later on a Linux path (`/proc/self/exe`,
 /// `/run/user/<uid>`, `systemctl`); and a user's server started there anyway takes no peer as the user's
 /// (`VoiceRule.at`'s unbuilt closed rule). A scratch node is not refused: its harness starts it, and its tests decide.
 public enum NodeSystem {
@@ -23,7 +23,7 @@ public enum NodeSystem {
     public static let refusalExitCode: Int32 = 69
 
     /// What the Mac's refusal says.
-    public static let macUnbuilt = "the user's node isn't built for the Mac yet: no launchd agent starts it, its host would share the app's ~/.vibeswitcher, "
+    public static let macUnbuilt = "the user's node isn't built for the Mac yet: no launchd agent starts it, its host and server (in ~/.vibeswitcher/v2/node, beside the app's ~/.vibeswitcher) aren't built there, "
         + "and no rule tells your voice from a session's there. The Mac app is unchanged; only a scratch node (VIBESWITCHER_HOME) runs here. "
         + "See docs/superpowers/specs/2026-11-19-v2-node-on-macos.md"
 

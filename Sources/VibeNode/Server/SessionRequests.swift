@@ -185,7 +185,7 @@ extension Requests {
             }
         }
         let claudeLink = engine?.preflight.claudeLink ?? NodePreflight.claudeLink(root: root)
-        let scratch = !VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome)
+        let scratch = !NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome)
         let (link, queue, note, nodeRoot) = (self.link, self.queue, self.note, root)
         // Off the queue: the folder and the link are read from the disk.
         DispatchQueue.global(qos: .userInitiated).async {

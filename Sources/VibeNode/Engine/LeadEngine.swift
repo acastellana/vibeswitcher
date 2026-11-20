@@ -289,7 +289,7 @@ public final class LeadEngine: @unchecked Sendable {
     var toolServer: String? { nodeRoot.map { $0.appendingPathComponent("bin/vibeswitcher-mcp").path } }
 
     /// Whether `root` is a scratch node's (not the account's own `~/.vibeswitcher`): its lead gets `VIBESWITCHER_HOME`.
-    var isScratch: Bool { !VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome) }
+    var isScratch: Bool { !NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome) }
 
     /// The node's home: its agents' transcripts.
     var home: String { options.home ?? VibePaths.home }
