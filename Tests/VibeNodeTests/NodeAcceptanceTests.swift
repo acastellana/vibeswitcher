@@ -238,8 +238,12 @@ struct NodeAcceptanceTests {
         }
         let status = try await node.run(["status"])
         #expect(listed, "\(status.output)")
+        let running = await Self.polled(timeout: 60) {
+            let board = try? await node.run(["board", repo.path])
+            return board?.output.contains("Add subtract") == true && board?.output.contains("1 waiting") == false
+        }
         let board = try await node.run(["board", repo.path])
-        #expect(board.status == 0 && board.output.contains("Add subtract") && !board.output.contains("1 waiting"), "\(board.output)")
+        #expect(running, "\(board.output)")
     }
 
     @Test("A12: board shows the task, and questions --wait ends with the lead's question as a card")
@@ -250,8 +254,10 @@ struct NodeAcceptanceTests {
         let lead = try await Self.startLead(node, repo, goal: "add a subtract function with a test")
         try lead.tools.call("add_task", ["title": "Add subtract", "goal": "Add subtract.", "acceptance": ["it builds"], "auto_advance": false])
         try #require(await eventually(timeout: 120) { lead.tools.calls().count == 2 }, "\(lead.tools.calls())")
+        // The server's board is the one its refresh read (every 3 s): shown once it has.
+        let shown = await Self.polled(timeout: 60) { (try? await node.run(["board", repo.path]))?.output.contains("Add subtract") == true }
         let board = try await node.run(["board", repo.path])
-        #expect(board.status == 0 && board.output.contains("Add subtract"), "\(board.output)\(board.errors)")
+        #expect(shown, "\(board.output)\(board.errors)")
         async let waited = node.run(["questions", repo.path, "--wait"])
         try await Task.sleep(nanoseconds: 1_000_000_000)
         try lead.tools.call("ask_user", ["question": "Name it subtract or minus?", "options": ["subtract", "minus"]])
