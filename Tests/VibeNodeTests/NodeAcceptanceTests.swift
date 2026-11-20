@@ -247,6 +247,70 @@ struct NodeAcceptanceTests {
         #expect(!took.hasPrefix(LeadDelivery.prefix), "as the user's: \(took)")
     }
 
+    @Test("A14: the task's audit by two finders, then its merge through the gate: the tests run, merged into main")
+    func a14AuditAndMerge() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let team = try await Self.auditedTask(node, finders: 2, policy: "auto")
+        #expect(team.verifiers == 2, "two finders: \(team.verifiers)")
+        let merged = try await ScratchRunTests.reply(team.lead.tools, try ScratchRunTests.send(team.lead.tools, "merge", ["task": team.slug], seconds: 300),
+                                                     timeout: 360)
+        #expect(merged.contains("Merged \(team.slug) into main"), "\(merged)\n\(node.said)")
+        #expect(try await scratchGit(team.repo.path, ["show", "main:src/parser.txt"]) == "Write the parser", "the worker's change on main")
+        #expect(ScratchRunTests.ranForMerge(team.repo, task: team.slug), "the gate's tests: \(String(describing: BoardStore(root: team.repo.path).load().task(team.slug)?.receipt))")
+    }
+
+    @Test("A15: a merge touching a sensitive path waits for an approval card, and answer approves exactly the audited commit")
+    func a15ApprovalCard() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let team = try await Self.auditedTask(node, finders: 1, policy: "ask_sensitive")
+        let tools = team.lead.tools
+        let held = try await ScratchRunTests.reply(tools, try ScratchRunTests.send(tools, "merge", ["task": team.slug]))
+        let approval = LeadWorkflow.approval(of: team.commit)
+        #expect(held.contains("Not merged yet") && held.contains(approval), "\(held)")
+        let asking = "Merge \(team.slug) at \(team.commit.prefix(8))?"
+        _ = try await ScratchRunTests.reply(tools, try ScratchRunTests.send(tools, "ask_user", ["question": asking, "options": [approval, "Not yet"],
+                                                                                              "priority": "blocking", "task": team.slug]))
+        let card = try await EngineEndToEndTests.card(node, question: asking)
+        let shown = try await node.run(["questions"])
+        #expect(shown.output.contains(card) && shown.output.contains(String(team.commit.prefix(8))), "\(shown.output)")
+        let approved = try await node.runOnTerminal(["answer", card, approval])
+        #expect(approved.status == 0, "\(approved.output)\(approved.errors)\n\(node.said)")
+        #expect(try await ScratchRunTests.approved(node, team.repo, task: team.slug, commit: team.commit), "\(approved.output)")
+        let merged = try await ScratchRunTests.reply(tools, try ScratchRunTests.send(tools, "merge", ["task": team.slug], seconds: 300), timeout: 360)
+        #expect(merged.contains("Merged \(team.slug) into main"), "\(merged)\n\(node.said)")
+    }
+
+    @Test("A16: the lead's push request shows the remote without credentials; push pushes that commit, decline-push settles it")
+    func a16PushAndDecline() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let origin = node.root.appendingPathComponent("origin.git").path
+        for arguments in [["init", "-q", "--bare", "-b", "main", origin], ["-C", repo.path, "remote", "add", "origin", origin],
+                          ["-C", repo.path, "push", "-q", "origin", "main"]] {
+            _ = try await scratchGit(repo.path, arguments)
+        }
+        let lead = try await Self.startLead(node, repo, goal: "ship it")
+        let first = try await scratchGit(repo.path, ["rev-parse", "HEAD"])
+        let commit = try await Self.commitOnMain(repo, "Second")
+        // The user's own commit on the base, accepted as theirs (`base show`, `base accept`), as the lead's refusal asks.
+        try await node.acceptBase(repo, from: first)
+        try await Self.askToPush(node, lead)
+        let pushed = try await node.runOnTerminal(["push", repo.path])
+        #expect(pushed.status == 0 && pushed.output.contains("Pushed"), "\(pushed.output)\(pushed.errors)\n\(node.said)")
+        #expect(pushed.output.contains(origin) && !pushed.output.contains("@"), "the remote shown, no credentials: \(pushed.output)")
+        #expect(Git.run(["--git-dir", origin, "rev-parse", "refs/heads/main"], in: repo.path).output == commit)
+
+        _ = try await Self.commitOnMain(repo, "Third")
+        try await node.acceptBase(repo, from: commit)
+        try await Self.askToPush(node, lead)
+        let declined = try await node.runOnTerminal(["decline-push", repo.path])
+        #expect(declined.status == 0 && declined.output.lowercased().contains("declined"), "\(declined.output)\(declined.errors)")
+        #expect(Git.run(["--git-dir", origin, "rev-parse", "refs/heads/main"], in: repo.path).output == commit, "nothing pushed")
+    }
+
     // MARK: A17, settings
 
     @Test("A17: settings shows a project's; set records it, the lead is told, and config held holds nothing for it")
@@ -386,6 +450,82 @@ extension NodeAcceptanceTests {
         #expect(lead.tools.text(of: lead.tools.calls()[before + 1]).contains("Worker started on \(slug)"), "\(lead.tools.calls())",
                 sourceLocation: sourceLocation)
         return worker
+    }
+
+    /// A team through its audit: ScratchRunTests' repository (src/, check.sh as the test command) with `finders` finders
+    /// and `policy` as the merge policy over src/**, its lead started, one task whose worker commits src/parser.txt in
+    /// its worktree, audited by the finders, each giving a passing verdict through its own tool server.
+    struct AuditedTask {
+        var repo: URL
+        var lead: Lead
+        var slug: String
+        var commit: String
+        var verifiers: Int
+    }
+
+    static func auditedTask(_ node: ScratchNode, finders: Int, policy: String, sourceLocation: SourceLocation = #_sourceLocation) async throws -> AuditedTask {
+        let repo = node.root.appendingPathComponent("repo")
+        _ = try await ScratchRunTests.scratchRepository(in: repo)
+        try """
+            ---
+            test_command: sh ./check.sh
+            merge_policy: \(policy)
+            sensitive_paths: src/**
+            audit_finders: \(finders)
+            ---
+
+            """.write(toFile: ConfigHoldStore.workflowPath(root: repo.path), atomically: true, encoding: .utf8)
+        let lead = try await startLead(node, repo, goal: "add the parser")
+        try node.noLoadHold(maxSessions: 6)
+        _ = try await planAndStart(node, lead, title: "Write the parser", sourceLocation: sourceLocation)
+        let slug = "write-the-parser"
+        let worktree = Worktrees.path(root: repo.path, slug: slug)
+        try "Write the parser\n".write(toFile: (worktree as NSString).appendingPathComponent("src/parser.txt"), atomically: true, encoding: .utf8)
+        try await scratchGit(worktree, ["add", "--", "src/parser.txt"])
+        try await scratchGit(worktree, ["commit", "-q", "-m", "Write the parser"])
+        let commit = try await scratchGit(worktree, ["rev-parse", "HEAD"])
+        let auditSent = try ScratchRunTests.send(lead.tools, "audit", ["task": slug])
+        // Each finder's session, its tool server up (its first call) as it comes: a panel starts its finders one after
+        // another, each once the one before has connected. Then each gives its verdict.
+        var verifiers: [HostSession] = []
+        let connected = await eventually(timeout: 240) {
+            for verifier in ((try? node.sessions()) ?? []) where verifier.isLive && verifier.label.hasPrefix("Verifier: Write the parser")
+                && !verifiers.contains(where: { $0.id == verifier.id }) {
+                let files = node.fake.files(terminal: verifier.tty)
+                guard EngineEndToEndTests.state(files)["pid"] != nil, (try? files.call("board", ["task": slug])) != nil else { continue }
+                verifiers.append(verifier)
+            }
+            return verifiers.count == finders
+        }
+        try #require(connected, "\(verifiers.map(\.label)) \(lead.tools.calls().dropFirst(auditSent).map { lead.tools.text(of: $0) })\n\(node.said)",
+                     sourceLocation: sourceLocation)
+        _ = try await ScratchRunTests.reply(lead.tools, auditSent, sourceLocation: sourceLocation)
+        for verifier in verifiers {
+            let files = node.fake.files(terminal: verifier.tty)
+            let sent = try ScratchRunTests.send(files, "submit_audit", ["task": slug, "completion": "complete", "integrity": "clean",
+                                                                       "summary": "src/parser.txt is there; sh ./check.sh passed", "tests": "passed"])
+            _ = try await ScratchRunTests.reply(files, sent, sourceLocation: sourceLocation)
+        }
+        let verdict = try #require(try await ScratchRunTests.verdict(node, repo, task: slug), "no verdict: \(node.said)", sourceLocation: sourceLocation)
+        #expect(verdict.commit == commit && verdict.passes, "\(verdict)", sourceLocation: sourceLocation)
+        return AuditedTask(repo: repo, lead: lead, slug: slug, commit: commit, verifiers: verifiers.count)
+    }
+
+    /// An empty commit on `repo`'s main (the base moves on): its hash.
+    static func commitOnMain(_ repo: URL, _ subject: String) async throws -> String {
+        try await scratchGit(repo.path, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "--allow-empty", "-m", subject])
+        return try await scratchGit(repo.path, ["rev-parse", "HEAD"])
+    }
+
+    /// The lead fetches its remote and asks to push its base (fetch_remote, push_remote), and the node sees the request.
+    static func askToPush(_ node: ScratchNode, _ lead: Lead, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let fetched = try await ScratchRunTests.reply(lead.tools, try ScratchRunTests.send(lead.tools, "fetch_remote", [:]), sourceLocation: sourceLocation)
+        #expect(!fetched.contains("Refused"), "\(fetched)", sourceLocation: sourceLocation)
+        let asked = try await ScratchRunTests.reply(lead.tools, try ScratchRunTests.send(lead.tools, "push_remote", [:]), sourceLocation: sourceLocation)
+        #expect(asked.lowercased().contains("push request"), "\(asked)", sourceLocation: sourceLocation)
+        try #require(await node.eventuallyStatus { status in
+            ((status["leads"] as? [[String: Any]]) ?? []).contains { $0["push"] is [String: Any] }
+        }, "\(asked)\n\(node.said)", sourceLocation: sourceLocation)
     }
 
     /// `new FOLDER [--model M]` on a terminal, the code typed: the session it started, its fake up.
