@@ -66,6 +66,8 @@ public final class Requests: @unchecked Sendable {
     var pumping: Set<UUID> = []
     /// What sessions' composers complete (`session.complete`), kept a while.
     let completionIndex = SessionCompletions()
+    /// Images web pages are sending in parts (`session.attach`). On `queue`.
+    let attachments = SessionAttachments()
     /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]

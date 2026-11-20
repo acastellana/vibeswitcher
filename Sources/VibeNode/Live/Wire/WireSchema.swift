@@ -61,7 +61,8 @@ public enum WireSchema {
                                   "draft.args", "draft.result", "draft.clear.args",
                                   "board.args", "board.result", "seen.args",
                                   "session.draft.args", "session.draft.result", "session.draft.clear.args",
-                                  "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result"]
+                                  "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
+                                  "session.attach.args", "session.attach.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -141,12 +142,18 @@ public enum WireSchema {
             shape("draft.result", from: "Requests.draft", [field("applied", .map(.int)), field("card", .string)]),
             shape("draft.clear.args", from: "the contract's §8", [field("card", .string)]),
             shape("seen.args", from: "Requests.seen (the parity gaps of 2026-11-19)", [field("session", .string)]),
-            shape("session.draft.args", from: "Requests.sessionDraft (driving sessions, 2026-11-20)", [field("session", .string), field("text", .string)]),
+            shape("session.draft.args", from: "Requests.sessionDraft (driving sessions, 2026-11-20)", [field("session", .string), field("text", .string),
+                                                                                                    optional("images", strings)]),
             shape("session.draft.result", from: "Requests.sessionDraft", [field("applied", .map(.int)), field("session", .string)]),
             shape("session.draft.clear.args", from: "Requests.sessionDraft", [field("session", .string)]),
             // The launch presets (the composer's lane, 2026-11-20): a read, what the page's New session form offers.
             shape("session.presets.args", from: "Requests.presets (launch presets, 2026-11-20)", [optional("folder", .string)]),
             shape("session.presets.result", from: "Requests.presets", [field("presets", .list(.shape("session.preset"))), field("problems", strings)]),
+            // An image a page pasted into a session's composer, in parts (the composer's lane, 2026-11-20).
+            shape("session.attach.args", from: "Requests.attach (the composer, 2026-11-20)", [
+                field("session", .string), field("upload", .string), field("type", .words(["image/png", "image/jpeg", "image/gif", "image/webp"])),
+                field("part", .int), field("parts", .int), field("data", .string)]),
+            shape("session.attach.result", from: "Requests.attach", [field("session", .string), field("received", .int), optional("path", .string)]),
             // What a session's composer completes (the composer's lane, 2026-11-20): a read, at the page's keystrokes.
             shape("session.complete.args", from: "Requests.complete (the composer, 2026-11-20)", [
                 field("session", .string), field("kind", .words(["slash", "mention"])), field("query", .string)]),

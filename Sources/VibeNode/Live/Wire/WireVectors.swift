@@ -399,7 +399,7 @@ public enum WireVectors {
                        server: .init(commit: "f62aef61", startedAt: "2026-11-17T09:12:44.031Z", pid: 41822),
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
                        kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
-                               "session.draft", "session.draft.clear", "session.presets", "session.complete"],
+                               "session.draft", "session.draft.clear", "session.presets", "session.complete", "session.attach"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -617,6 +617,17 @@ public enum WireVectors {
                                      delta("s1", "sessions", prev: 50, seq: 51, at: "2026-11-17T09:23:41.020Z", changes: [(plainSession, asking(draft: false))])]),
             // A message sent while the question is open waits for it (the composer's lane, 2026-11-20).
             ("session.queued", [delta("s1", "sessions", prev: 51, seq: 52, at: "2026-11-17T09:23:50.010Z", changes: [(plainSession, asking(draft: false, queued: true))])]),
+            // A pasted screenshot, in its one part, then the draft that names it (the composer's lane, 2026-11-20).
+            ("session.attach", [request(.init(id: "20", kind: "session.attach", args: [
+                                    "session": .string(plainSession), "upload": .string("7a1e2b3c-4d5e-4f60-8172-93a4b5c6d7e8"), "type": .string("image/png"),
+                                    "part": .int(0), "parts": .int(1), "data": .string("iVBORw0KGgo=")], action: "2b8f1c3d-5e6a-4b7c-9d0e-1f2a3b4c5d6e")),
+                                reply("reply.session.attach", .init(re: "20", result: .object([
+                                    "session": .string(plainSession), "received": .int(1),
+                                    "path": .string("/home/u/.vibeswitcher/attachments/pasted-2026-11-17-092400-3f2a.png")])))]),
+            ("session.draft.image", [request(.init(id: "21", kind: "session.draft", args: [
+                                         "session": .string(plainSession), "text": .string("What's wrong here?"),
+                                         "images": .array([.string("/home/u/.vibeswitcher/attachments/pasted-2026-11-17-092400-3f2a.png")])],
+                                                   action: "3c9a2d4e-6f7b-4c8d-8e1f-2a3b4c5d6e7f"))]),
             // What the composer offers as `@` and `/` are typed (the composer's lane, 2026-11-20).
             ("session.complete", [request(.init(id: "19", kind: "session.complete", args: ["session": .string(plainSession), "kind": .string("mention"),
                                                                                        "query": .string("logn")])),

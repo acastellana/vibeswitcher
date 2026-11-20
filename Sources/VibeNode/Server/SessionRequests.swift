@@ -321,7 +321,8 @@ extension Requests {
 // MARK: session.draft, session.draft.clear
 
 extension Requests {
-    /// `session.draft` with `session` (the node's whole id for it, as a page holds it) and `text`, and
+    /// `session.draft` with `session` (the node's whole id for it, as a page holds it), `text` and `images` (the paths
+    /// `session.attach` gave, optional; text may be empty when there are some), and
     /// `session.draft.clear` with `session`, from a web page whose token drafts (2026-11-20, the parity table's gap 1):
     /// the message the page's composer left for the session, kept beside it (`sessionDrafts`, the session's `draft`) or
     /// taken off, and told to nobody, as a card's draft is (`draft`, LW-D6): nothing is typed, nothing recorded.
@@ -340,13 +341,22 @@ extension Requests {
             return done(.init(re: request.id, error: .init(.refused, "that session runs in a terminal of yours: VibeSwitcher only types into the sessions it started")))
         }
         if request.kind == "session.draft" {
-            guard let text = request.args?["text"]?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return done(.init(re: request.id, error: .init(.badArgs, "session.draft needs text")))
+            let text = request.args?["text"]?.string ?? ""
+            let images = request.args?["images"]?.array?.map { $0.string ?? "" } ?? []
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else {
+                return done(.init(re: request.id, error: .init(.badArgs, "session.draft needs text or images")))
             }
             guard text.utf8.count <= Self.sendLimit else {
                 return done(.init(re: request.id, error: .init(.badArgs, "a message is at most \(Self.sendLimit / 1024) KB")))
             }
-            sessionDrafts.send(id, SessionDraft(text: text, at: Date(), action: action))
+            guard images.count <= Self.imagesLimit else {
+                return done(.init(re: request.id, error: .init(.badArgs, "at most \(Self.imagesLimit) images a message")))
+            }
+            // Only images a page attached (`session.attach`): a page names no other file for `send` to paste.
+            if let odd = images.first(where: { !SessionAttachments.isAttached($0, root: root) }) {
+                return done(.init(re: request.id, error: .init(.badArgs, "\(ConfigSeal.inert(odd, limit: 200)) isn't an image attached on this node")))
+            }
+            sessionDrafts.send(id, SessionDraft(text: text, images: images, at: Date(), action: action))
         } else {
             sessionDrafts.send(id, nil)
         }
