@@ -33,12 +33,12 @@ The gaps that matter most for daily use, worst first:
    screen into its `prompt`, `vibeswitcher reply SESSION CHOICE [TEXT]` answers it, and the page shows it as a card
    with the line that answers it. A multi-select is still answered in the session's terminal.
 7. ~~**The lead ignores `lead_model` and `lead_advisor`**~~: closed 2026-11-19, the node starts its lead as the app does.
-8. **`push_remote` does nothing on a node.** The request is recorded, but no Push button or command acts on it. Since
-   2026-11-19 the lead is told so and `status` lists the request.
+8. ~~**`push_remote` does nothing on a node.**~~ Closed 2026-11-20: `vibeswitcher push FOLDER` and
+   `vibeswitcher decline-push FOLDER` settle the request; the page shows it in the lead's chat with both lines to run.
 9. **No settings.** Limits, Ignore usage limits, the working policy, Boost and leads messaging each other can only be
    changed by editing files by hand. Running leads aren't told when the policy changes.
 10. **Restarts lose work.** Nothing records the open sessions or reopens a lead with `--resume` after the machine
-    restarts. Rotation is only the cold idle handover.
+    restarts. Rotation is on the node since 2026-11-20 (workflow.md's `lead_rotation:`).
 11. **No phone or remote access** (planned for stage 7). The web page is reachable on `127.0.0.1` only.
 
 ## The table
@@ -110,11 +110,11 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Codex workers, `agent: auto` routing to Codex | `LeadToolset.swift`, `docs/guide/project-lead.md` | missing | turned off with `VIBESWITCHER_CODEX_WORKERS=0` (`Engine/LeadStart.swift`) | | on purpose: security decision 15 |
 | The lead's own model (`lead_model`, `lead_advisor`) | `LeadController.swift` `leadRun` | has it | `Engine/LeadStart.swift` `leadRun` (`LeadLaunch.leadRun`, the app's rule), for a start and the idle handover; Fable held back by the account usage kept under the node's root | | closed 2026-11-19 |
 | The witness: stalls, the room watch, the role sweep, declining stuck prompts, the disk watch | `LeadController.swift`, `RoleSweep.swift`, `PromptDecline.swift` | has it | `Engine/Witness.swift`, `RoomWatch.swift`, `RoleSweep.swift`, `PromptDecline.swift` (automatic) | | |
-| Rotation: a fresh lead when the context is large | `LeadController.swift`, `Sources/VibeCore/LeadRotation.swift` | partly | only the cold idle handover (`Engine/IdleHandover.swift`). Missing: asking a warm lead for its own note, and the "Start a fresh lead session" setting | M | |
+| Rotation: a fresh lead when the context is large | `LeadController.swift`, `Sources/VibeCore/LeadRotation.swift` | has it | `Engine/IdleHandover.swift`: daily, at 60% context or idle with a large context, a warm lead asked for its own note, a cold one's written by VibeSwitcher; workflow.md's `lead_rotation:` (`daily`, `context`, `never`) stands in for the setting. The user's typing into the lead isn't seen (the two-minute quiet counts from the engine's start) | | closed 2026-11-20 |
 | A server or host restart: the lead rebound, held messages kept | `LeadController.swift` | has it | `Engine/Restarts.swift`; `status` says how the host ended | | |
 | The config seal and Accept cards | `MainWindow/Lead/ConfigHolds.swift` | has it | `vibeswitcher config held [--diff]`, `config accept CARD`; `Stores/ConfigHoldStore.swift` | | |
 | Base moves (a base moved outside the lead) | `MainWindow/Lead/BaseMoves.swift` | has it | `vibeswitcher base show/accept/keep`; `Stores/BaseMoveStore.swift` | | V1's typed `!` lines wait for a composer |
-| Push to the remote (`push_remote`, then your Push click) | `MainWindow/Lead/PushRequests.swift` | partly | the tool records the request; `Engine/PushAsks.swift` tells the lead once that nothing on the node pushes it and no outcome will come, and `status` lists it while open (2026-11-19). Nothing offers or does the push | M | owed: a user's-voice `vibeswitcher push PROJECT` / `decline-push PROJECT` (typed code, recorded in the vault and journal like `answer`), settling through the vault (`settlePush`, which must take the node's server as the app) and running `LeadPush.settle` off the engine's queue, the outcome told to the lead as the app's `onSettled`; the web page shows the request and drafts the command, never pushes. The tool's own reply still says "click Push … in VibeSwitcher" (`LeadPush.swift`, shared with main): the engine's message corrects it right after |
+| Push to the remote (`push_remote`, then your Push click) | `MainWindow/Lead/PushRequests.swift` | has it | `vibeswitcher push FOLDER` / `decline-push FOLDER` (the user's voice: typed code, recorded in the vault and journal), settling exactly the request shown through the vault and `LeadPush.settle` in the server; the lead told the outcome; the page shows the request in the lead's chat and drafts both lines, never pushes (`Engine/PushAsks.swift`, `Server/PushRequest.swift`) | | closed 2026-11-20. The tool's own reply still says "click Push … in VibeSwitcher" (`LeadPush.swift`, shared with main) |
 | Fetch from and merge the remote (`fetch_remote`, `merge_remote`) | `LeadToolset.swift` (shared) | unverified | shared tool, so it should work, but no node run has used it | | |
 | Leads messaging each other (`tell_lead`), and the "Between leads" view | `LeadToolset.swift`, `MainWindow/Lead/LeadMailViews.swift` | partly | the messages work (shared tool, delivered by `Engine/Delivery.swift`). There's no view, and no control to turn it off | S | |
 | The prompt-audit reminder | `MainWindow/Lead/PromptAuditDesk.swift` | missing | owed in the port map | S | |
@@ -238,8 +238,8 @@ doesn't yet confine anything.
 - ~~The battery hold never applies on the node, because no one writes the power state.~~ Now on purpose (2026-11-19):
   not needed on a server or WSL on mains; recorded in the table and in `Engine/Refresh.swift`.
 - Running leads aren't told when `policy.md` changes.
-- `push_remote` tells the lead it recorded a request that only you can push, but no client offers the push. Since
-  2026-11-19 the node tells the lead so and lists the request in `status`; the push itself is owed.
+- ~~`push_remote` tells the lead it recorded a request that only you can push, but no client offers the push.~~ Closed
+  2026-11-20: `vibeswitcher push` and `decline-push`.
 - The node's restart ends every session, and nothing records or reopens them.
 
 ## Keeping it current
