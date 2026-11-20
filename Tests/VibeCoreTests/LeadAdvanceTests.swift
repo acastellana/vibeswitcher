@@ -64,6 +64,8 @@ struct LeadAdvanceTests: LeadTeamFixture {
     final class Advancing: @unchecked Sendable {
         private let lock = NSCondition()
         private var count = 0
+        /// The highest-numbered pass a run of passes ended with (`LeadAdvance.passesBegun` numbers them).
+        private var lastPass = 0
         let lead: LeadToolset
 
         init(_ lead: LeadToolset, run: ((@escaping () -> Void) -> Bool)? = nil) {
@@ -77,12 +79,13 @@ struct LeadAdvanceTests: LeadTeamFixture {
                 thread.start()
                 return true
             })
-            lead.advancing?.passed = { [weak self] in self?.ended() }
+            lead.advancing?.passed = { [weak self] in self?.ended($0) }
         }
 
-        private func ended() {
+        private func ended(_ pass: Int) {
             lock.lock()
             count += 1
+            lastPass = max(lastPass, pass)
             lock.broadcast()
             lock.unlock()
         }
@@ -108,12 +111,17 @@ struct LeadAdvanceTests: LeadTeamFixture {
             }
         }
 
-        /// One more run of passes, and waits for it: what a change the folder watch might not see would bring.
+        /// One more run of passes, and waits for it: what a change the folder watch might not see would bring. Waits
+        /// for a run that ends with a pass begun after this call, so one that read what the test set before it; not
+        /// just the next end of a run: one under way may end with a pass that read the folders (or the power reading)
+        /// before the change (2026-11-19: a battery hold's AC reading was never read, in 3 runs of the suite in 5).
         func settle() async {
-            let before = passes
+            let after = lead.advancing?.passesBegun ?? 0
             lead.advancing?.trigger()
             let deadline = MacTime.real.awake() + 60
-            while passes == before, MacTime.real.awake() < deadline, !Task.isCancelled { try? await Task.sleep(nanoseconds: 10_000_000) }
+            while lock.withLock({ lastPass <= after }), MacTime.real.awake() < deadline, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
         }
 
         /// No more passes, the one under way ended: nothing writes the test's folders after it.
@@ -121,6 +129,16 @@ struct LeadAdvanceTests: LeadTeamFixture {
     }
 
     func task(_ slug: String, _ root: String) -> LeadTask? { BoardStore(root: root).load().task(slug) }
+
+    /// The verifier the vault grants for `slug` once its audit has started: bound to its session, and the board naming
+    /// that session. Not the grant alone: it's issued before the session is started and bound, and the board names the
+    /// session only after (2026-11-19: a test waiting for the grant found no session started, or the board's verifier
+    /// nil, the earlier one taken off it).
+    func audits(_ slug: String, _ root: String) -> LeadVault.Member? {
+        guard let member = vault.current(.verifier, root: root, task: slug), let session = member.session,
+              task(slug, root)?.verifier == session else { return nil }
+        return member
+    }
 
     /// The lead's reports from the loop.
     func reports(_ runtime: FakeRuntime) -> [String] {
@@ -664,7 +682,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"])
         #expect(await advancing.until { task("add-b", root)?.status == .running })
         try work("add-b", file: "b.txt", root: root, runtime)
-        #expect(await advancing.until { vault.current(.verifier, root: root, task: "add-b") != nil })
+        #expect(await advancing.until { audits("add-b", root) != nil })
         let finding: [String: Any] = ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "b.txt says bee, the contract wants b", "failure_scenario": "cat b.txt gives bee where the contract wants b", "status": "open"]
         let verdict = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "one problem",
                                                                                 "tests": "passed", "findings": [finding]])
@@ -693,7 +711,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"])
         #expect(await advancing.until { task("add-b", root)?.status == .running })
         try work("add-b", file: "b.txt", root: root, runtime)
-        #expect(await advancing.until { vault.current(.verifier, root: root, task: "add-b") != nil })
+        #expect(await advancing.until { audits("add-b", root) != nil })
         return ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "b.txt says bee, the contract wants b",
                 "failure_scenario": "cat b.txt gives bee where the contract wants b", "status": "open"]
     }
@@ -752,16 +770,17 @@ struct LeadAdvanceTests: LeadTeamFixture {
         try work("add-b", file: "b.txt", root: root, runtime)
         let finding: [String: Any] = ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "b.txt says bee, the contract wants b", "failure_scenario": "cat b.txt gives bee where the contract wants b", "status": "open"]
         let verdict: [String: Any] = ["completion": "incomplete", "integrity": "clean", "summary": "one problem", "tests": "passed"]
-        #expect(await advancing.until { vault.current(.verifier, root: root, task: "add-b") != nil })
+        #expect(await advancing.until { audits("add-b", root) != nil })
         _ = try seat("verify-add-b", runtime).call("submit_audit", verdict.merging(["findings": [finding]]) { $1 })
         // Round 1: back to its worker, which tries again.
         #expect(await advancing.until { toWorker("add-b", root, runtime).contains { $0.contains("F1") } && task("add-b", root)?.autoSentBack != nil })
         #expect(toWorker("add-b", root, runtime).last { $0.contains("F1") }?.contains("answer_findings") == true)
         try commit("b.txt", "be\n", in: Worktrees.path(root: root, slug: "add-b"))
+        // Read before the report: after it the loop may start the next audit before this line runs.
+        let first = vault.current(.verifier, root: root, task: "add-b")?.id
         let again = try seat("worker-add-b", runtime).call("report", doneReport("tried b"))
         #expect(!again.isError, "\(again.text)")
-        let first = vault.current(.verifier, root: root, task: "add-b")?.id
-        #expect(await advancing.until { vault.current(.verifier, root: root, task: "add-b").map { $0.id != first } ?? false })
+        #expect(await advancing.until { audits("add-b", root).map { $0.id != first } ?? false })
         // Round 2 leaves it open too: the ledger says reconsider, and the loop leaves the task to the lead.
         let still = finding.merging(["id": "F1", "evidence": "b.txt still says bee"]) { $1 }
         let second = try seat("verify-add-b", runtime).call("submit_audit", verdict.merging(["findings": [still]]) { $1 })
@@ -854,7 +873,8 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(await advancing.until { task("add-b", root)?.verifierRetry != nil })
         let second = try #require(task("add-b", root)?.verifier)
         quits(second, runtime, root: root)
-        #expect(await advancing.until { task("add-b", root)?.verifierRetry?.second != nil })
+        // And its report: the pass writes the board, the report goes out after it (a run's end may come between).
+        #expect(await advancing.until { task("add-b", root)?.verifierRetry?.second != nil && reports(runtime).contains { $0.contains("ended without a verdict twice") } })
         // Closed: it no longer counts as a live member of the team.
         #expect(killed(second, runtime))
         #expect(try runtime.sessions().first { $0.id == second }?.live == false)
@@ -1551,7 +1571,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         _ = lead.call("add_task", ["title": "Findings d", "goal": "g", "acceptance": ["a"], "review": "audit"])
         #expect(await advancing.until { ["add-b", "audit-c", "findings-d"].allSatisfy { task($0, root)?.status == .running } })
         try work("findings-d", file: "d.txt", root: root, runtime)
-        #expect(await advancing.until { vault.current(.verifier, root: root, task: "findings-d") != nil })
+        #expect(await advancing.until { audits("findings-d", root) != nil })
 
         try work("add-b", file: "b.txt", root: root, runtime)
         #expect(await appears(held.started))
@@ -1619,7 +1639,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         _ = lead.call("add_task", ["title": "Held b", "goal": "g", "acceptance": ["a"], "review": "audit"])
         #expect(await advancing.until { task("held-b", root)?.status == .running })
         try work("held-b", file: "secret.txt", root: root, runtime)
-        #expect(await advancing.until { vault.current(.verifier, root: root, task: "held-b") != nil })
+        #expect(await advancing.until { audits("held-b", root) != nil })
         let verdict = try seat("verify-held-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "checked", "tests": "passed"])
         #expect(!verdict.isError, "\(verdict.text)")
         #expect(await advancing.until { reports(runtime).contains { $0.contains("Didn't merge held-b") } }, "\(reports(runtime))")

@@ -176,13 +176,13 @@ extension LeadAdvanceTests {
         #expect(await advancing.until { task("add-b", root)?.status == .running })
         try work("add-b", file: "b.txt", root: root, runtime)
         let first = head("agent/add-b", root)
-        #expect(await advancing.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == first })
+        #expect(await advancing.until { audits("add-b", root)?.auditing == first })
         let earlier = try #require(task("add-b", root)?.verifier)
         // Its verifier never submits; the worker commits more and reports done again on a new head.
         try work("add-b", file: "c.txt", root: root, runtime)
         let second = head("agent/add-b", root)
         #expect(second != first)
-        #expect(await advancing.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == second })
+        #expect(await advancing.until { audits("add-b", root)?.auditing == second })
         runtime.calls.lock()
         let killed = runtime.killed
         runtime.calls.unlock()

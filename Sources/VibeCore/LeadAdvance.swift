@@ -120,8 +120,9 @@ public final class LeadAdvance: @unchecked Sendable {
     private var batteryHeldAt: Double?
     /// The usage holds whose reset has a look again armed (`usageHeld`), each armed once.
     private var wakes: Set<String> = []
-    /// Called after each run of passes (tests wait on it).
-    var passed: (() -> Void)? {
+    /// Called after each run of passes, with its last pass's number (tests wait on it: for a pass numbered above
+    /// `passesBegun` as it was after a change, one that read the change).
+    var passed: ((Int) -> Void)? {
         get {
             lock.lock()
             defer { lock.unlock() }
@@ -133,7 +134,10 @@ public final class LeadAdvance: @unchecked Sendable {
             lock.unlock()
         }
     }
-    private var ended: (() -> Void)?
+    private var ended: ((Int) -> Void)?
+    /// Passes begun, each numbered by it as it begins.
+    private var begun = 0
+    var passesBegun: Int { lock.withLock { begun } }
     /// A step's room wait recorded already (the Mac was full or loaded): not again until it's nudged.
     private var waitingRoom = false
     private var nudgedAt: Date?
@@ -240,6 +244,8 @@ public final class LeadAdvance: @unchecked Sendable {
             // A probe of `running` that held the lock for a moment when the loop started (or since) left it untaken.
             lock.lock()
             if runningLock == nil, !stopped { runningLock = FileLock.attempt(Self.runningLock(lead.store)) }
+            begun += 1
+            let number = begun
             lock.unlock()
             Self.automatically { (try? lead.advanceExclusively { pass() }) ?? () }
             lock.lock()
@@ -264,7 +270,7 @@ public final class LeadAdvance: @unchecked Sendable {
                 lock.broadcast()
             }
             lock.unlock()
-            ended?()
+            ended?(number)
             if !more { return }
         }
     }
