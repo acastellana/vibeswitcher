@@ -335,6 +335,30 @@ struct NodeAcceptanceTests {
         #expect(!rail.contains("changed since"), "set by the user, no second hold: \(held.output)")
     }
 
+    // MARK: A18, presets
+
+    @Test("A18: presets lists them; preset add is strict, its preset waits for config accept; new --preset starts one")
+    func a18Presets() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let listed = try await node.run(["presets", repo.path])
+        #expect(listed.status == 0 && listed.output.contains("Claude") && listed.output.contains("Shell"), "\(listed.output)\(listed.errors)")
+        let refused = try await node.runOnTerminal(["preset", "add", "Evil", "--folder", repo.path, "--env", "LD_PRELOAD=/x.so"])
+        #expect(refused.status == 77 && (refused.output + refused.errors).contains("LD_PRELOAD"), "strict: \(refused.output)\(refused.errors)")
+        let added = try await node.runOnTerminal(["preset", "add", "Fast", "--folder", repo.path, "--args", "--model haiku"])
+        #expect(added.status == 0 && added.output.contains("added: preset Fast"), "\(added.output)\(added.errors)")
+        let early = try await node.runOnTerminal(["new", repo.path, "--preset", "Fast"])
+        #expect(early.status != 0 && (early.output + early.errors).contains("accept"), "accept needed first: \(early.output)\(early.errors)")
+        // A scratch node's presets file isn't where its home's seal watches (`<home>/.vibeswitcher` is a link to its root,
+        // `SessionPresets.withPresetsToAccept`), so no accept covers it there: that the accepted file's preset starts is
+        // SessionPresetsTests.aPresetOfTheFileStartsOnlyFromAnAcceptedFile's, on the host's own vault. A built-in preset
+        // needs no accept, and starts through `new --preset`.
+        let started = try await node.runOnTerminal(["new", repo.path, "--preset", "Shell"])
+        #expect(started.status == 0 && started.output.contains("started: session"), "\(started.output)\(started.errors)\n\(node.said)")
+        #expect(await Self.liveSession(node) { $0.label == "Shell" && $0.cwd == repo.path } != nil, "\(node.said)")
+    }
+
     // MARK: A22-A23, who may act as the user
 
     @Test("A22: vibeswitcher answer run from inside a session is refused: not the user's voice")
