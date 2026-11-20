@@ -173,7 +173,7 @@ struct TerminalRelayTests {
     static func fakeClaude(_ node: ScratchNode) async throws -> (HostSession, FakeClaude.Files) {
         let project = node.home.appendingPathComponent("project", isDirectory: true)
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
-        let session = try await node.spawn("exec \(FakeClaude.quoted(node.fake.launcher.path))", cwd: project.path)
+        let session = try await node.spawn("exec \(FakeClaude.quoted(node.fake.launcher.path))", cwd: project.path, agent: "claude")
         let files = node.fake.files(terminal: session.tty)
         try #require(await eventually(timeout: 60) { state(files)["pid"] != nil }, "the fake never ran: \(node.said)")
         return (session, files)

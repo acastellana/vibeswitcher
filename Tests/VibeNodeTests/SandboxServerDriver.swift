@@ -61,14 +61,15 @@ struct SandboxServerDriver {
         for name in ["README.md", "package.json", "src/index.js"] {
             try Data("// \(name)\n".utf8).write(to: shellFolder.appendingPathComponent(name))
         }
-        // The node lists agents' sessions: the shell runs as a copy of bash named `claude` (as the fake agents run as a
-        // copy of sleep), with a hook state saying its turn is done.
+        // The node lists agents' sessions, as the host started them (`HostedAgents`): the shell is started as Claude, a copy
+        // of bash named `claude` (as the fake agents run as a copy of sleep), with a hook state saying its turn is done.
         let shellBin = node.root.appendingPathComponent("shell-bin")
         try FileManager.default.createDirectory(at: shellBin, withIntermediateDirectories: true)
         let bash = shellBin.appendingPathComponent("claude")
         try copyClosedOnExec(URL(fileURLWithPath: "/bin/bash").resolvingSymlinksInPath().path, to: bash.path)
         let shell = try await node.spawn("printf '\\033[1mexample-shell\\033[0m: a scratch session, typed into from the page.\\n\\n'; "
-            + "PS1='\\[\\033[32m\\]example-shell\\[\\033[0m\\] $ ' exec '\(bash.path)' --noprofile --norc -i", cwd: shellFolder.path, label: "Shell")
+            + "PS1='\\[\\033[32m\\]example-shell\\[\\033[0m\\] $ ' exec '\(bash.path)' --noprofile --norc -i", cwd: shellFolder.path, label: "Shell",
+                                     agent: "claude")
         try HookedAgent(session: shell, pid: shell.childPID, folder: shellFolder).hook(node, "Stop")
 
         // A lead on a scratch repository, started as the user starts one (the accepts, then `lead`, each code typed),

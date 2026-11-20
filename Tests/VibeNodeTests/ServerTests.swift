@@ -122,7 +122,7 @@ struct ServerTests {
         // Copied through a close-on-exec descriptor: a child another test forks meanwhile can't hold it open for
         // writing, which refuses the exec below ("Text file busy") and ended the session before the agent ran.
         try copyClosedOnExec(URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path, to: claude.path)
-        let session = try await node.spawn("exec '\(claude.path)' 600", cwd: project.path)
+        let session = try await node.spawn("exec '\(claude.path)' 600", cwd: project.path, agent: "claude")
         var found: pid_t = 0
         let started = await eventually(timeout: 60) {
             found = Platform.Processes.children(session.childPID).first ?? session.childPID
