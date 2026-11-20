@@ -37,8 +37,9 @@ The gaps that matter most for daily use, worst first:
    2026-11-19 the lead is told so and `status` lists the request.
 9. **No settings.** Limits, Ignore usage limits, the working policy, Boost and leads messaging each other can only be
    changed by editing files by hand. Running leads aren't told when the policy changes.
-10. **Restarts lose work.** Nothing records the open sessions or reopens a lead with `--resume` after the machine
-    restarts. Rotation is only the cold idle handover.
+10. ~~**Restarts lose work.**~~ Closed 2026-11-20: after a host restart `vibeswitcher lead FOLDER --resume` reopens a
+    project's lead in its conversation, and `vibeswitcher reopen` the user's own Claude sessions in theirs. A lead's
+    workers are its to start again (told which). Rotation is only the cold idle handover.
 11. **No phone or remote access** (planned for stage 7). The web page is reachable on `127.0.0.1` only.
 
 ## The table
@@ -60,7 +61,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Sessions in other terminals: listed and readable | `SessionStore.swift`, `Sources/VibeCore/SessionScanner.swift` | has it | `Stores/NodeSessions.swift`: listed with `hosted: false`, and never typed into | | |
 | Terminal.app control: Open in Terminal, `--focus`, Move to Window | `TerminalBridge.swift`, `TabOrder.swift`, `Sources/VibeCore/MoveToWindow.swift` | not needed | there's no Terminal.app on Linux (design non-goal) | | |
 | Ended sessions: resume, copy the resume command or session id | `MainWindow/StartPage.swift`, `SessionListView.swift` | missing | the agent's session id isn't on the wire yet (`WebApp/README.md`, "Asked of the node") | S | |
-| Reopen sessions after the machine restarts (the restart card, a lead `--resume`d) | `RestartCard.swift`, `Sources/VibeCore/RestartReopen.swift` | missing | owed in the port map: "nothing offers them back" | M | |
+| Reopen sessions after the machine restarts (the restart card, a lead `--resume`d) | `RestartCard.swift`, `Sources/VibeCore/RestartReopen.swift` | has it | the lead: `vibeswitcher lead FOLDER --resume` (`Engine/RestartResume.swift`); your own Claude sessions: `vibeswitcher reopen [all\|SESSION…\|--forget]` (`Engine/SessionReopen.swift`, `Server/ReopenRequest.swift`, 2026-11-20), each `claude --resume <id>` in its folder, the record checked as a hint; `status` offers both after a host restart | | no launch presets, no Codex sessions (a node starts none) |
 | Status detection: hooks, OSC 7501, titles, the process table | `SessionStore.swift`, `Sources/VibeCore/StatusRules.swift` | has it | `Stores/NodeSessions.swift`, `Sources/VibeHost/V2/ParserReplies.swift` (automatic) | | titles only for sessions the host runs |
 | Background shells shown on a session | `SessionStore.swift` | has it | `Stores/NodeSessions.swift` | | |
 
