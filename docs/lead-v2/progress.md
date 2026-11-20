@@ -253,3 +253,7 @@
 - 2026-11-20 03:34 Kept turn-this-incident-into unmerged: The user (2026-11-20, answer 06BB12B6): keep the guard as strict as today; fix the relink at its source (updater off for team sessions, measured first). The vault change at 93afb7c6 stays unmerged and unaudited; its branch is kept in case the source fix doesn't hold.
 - 2026-11-20 03:35 Planned measure-does-claude-code: Measure: does Claude Code stop re-creating its link when its updater is off?
 - 2026-11-20 03:46 Automatically (auto_advance): Didn't audit turn-this-incident-into: Not audited, no finder started: the lead held turn-this-incident-into's audit (update_task hold_audit). It starts once an exception is recorded (update_task(turn-this-incident-into, exception: {scope, reason, evidence})), or with hold_audit: false.
+- 2026-11-20 03:57 Started a worker on mac-gitguardtests
+- 2026-11-20 03:57 Automatically (auto_advance): Started a worker on mac-gitguardtests (Mac: GitGuardTests' baseline message compared against the resolved root).
+- 2026-11-20 03:57 Sent sb5-the-host-confines's worker contract v7 (it had v6)
+- 2026-11-20 03:58 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
