@@ -213,3 +213,10 @@
 - 2026-11-20 01:52 Automatically (auto_advance): Cleaned up the-merge-s-test (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-20 01:52 Workflow: test_command = `Resources/bin/vs-heavy bash scripts/test.sh --retry-failed`
 - 2026-11-20 02:05 Merged sb3-the-launcher-builds: SB3: the launcher builds the box (SessionSandbox) (build 5b6eccd929ad)
+- 2026-11-20 02:05 Automatically (auto_advance): Merged sb3-the-launcher-builds (SB3: the launcher builds the box (SessionSandbox)) into v2 at 626a7163, on its passing audit and the full test run.
+- 2026-11-20 02:05 Started a worker on sb5-the-host-confines
+- 2026-11-20 02:05 Automatically (auto_advance): Started a worker on sb5-the-host-confines (SB5: the host confines what a lead starts), its after tasks done (sb3-the-launcher-builds, planner-a-worker-s).
+- 2026-11-20 02:05 Automatically (auto_advance): Overlap for sb5-the-host-confines's start (a warning only: nothing was refused or reordered). Package.swift: branch-runs-get-the (planned, set to start after this one: its boundaries name it), sb6-2-2-a (planned: its boundaries name it).
+- 2026-11-20 02:05 Automatically (auto_advance): Cleaned up sb3-the-launcher-builds; ended pid 408937 (Worker: SB3: the launcher builds the box (SessionSandbox)) (freed 2.1 GB of build output and temporary folders). It stays done.
+- 2026-11-20 02:13 Sent sb5-the-host-confines's worker contract v5 (it had v4)
+- 2026-11-20 02:16 Merged sb6-1-2-branch: SB6 (1/2): branch code runs in a box of its own (BranchRun) (build 5b6eccd929ad)
