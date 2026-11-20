@@ -48,6 +48,37 @@ struct NodeAcceptanceTests {
         #expect(after.status == 0 && after.output.contains("nothing held"), "\(after.output)\(after.errors)")
     }
 
+    // MARK: A3, the page
+
+    @Test("A3: web opens a page that pairs and gets the sessions, leads, cards and boards, every frame as the wire says")
+    func a3Web() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
+        defer { node.stop() }
+        let (session, _) = try await Self.newClaude(node)
+        try #require(await node.eventuallyStatus { Self.listed($0, NodeIds.session(host: session.id)) != nil }, "\(node.said)")
+        let opened = try LiveScratch.open(node)
+        let page = try RawClient.ask(port: opened.port, "GET / HTTP/1.1", ["Host: 127.0.0.1:\(opened.port)"])
+        #expect(page.status == 200 && String(decoding: page.body, as: UTF8.self).contains("<html"), "\(page.head)")
+        #expect(page.head.contains("Content-Security-Policy: default-src 'none'"), "\(page.head)")
+        let socket = try LivePage(port: opened.port)
+        _ = try socket.send("auth", ["pair": .string(opened.code), "client": .string("test")])
+        let hello = try #require(try socket.next())
+        #expect(hello["kind"]?.string == "hello", "\(hello)")
+        for (sub, collection) in [("s0", "node"), ("s1", "sessions"), ("s2", "leads"), ("s3", "cards"), ("s4", "boards")] {
+            let id = try socket.send("subscribe", ["sub": .string(sub), "collection": .string(collection)])
+            let reply = try #require(try socket.next())
+            #expect(reply["re"]?.string == id && reply["ok"]?.bool == true, "\(collection): \(reply)")
+            let snapshot = try #require(try socket.next())
+            #expect(snapshot["kind"]?.string == "snapshot" && snapshot["sub"]?.string == sub, "\(snapshot)")
+            if collection == "sessions" {
+                #expect(snapshot["entries"]?.array?.contains { $0["id"]?.string == NodeIds.session(host: session.id) } == true, "\(snapshot)")
+            }
+        }
+        #expect(socket.unsound.isEmpty, "\(socket.unsound)")
+        // That the page renders them with no console error is a browser's to see: the WebApp's own tests render each view
+        // (WebApp/tests), and the terminal's console is checked in a real Chrome by hand (the acceptance doc).
+    }
+
     // MARK: A4-A9, a session of the user's
 
     @Test("A4: new starts a Claude session, listed in status")
@@ -494,6 +525,20 @@ struct NodeAcceptanceTests {
         #expect(drafted["ok"]?.bool == true, "\(drafted)")
         #expect(EngineEndToEndTests.prompts(files).isEmpty, "\(EngineEndToEndTests.prompts(files))")
     }
+
+    // MARK: The rows a scratch node can't run
+
+    @Test("A19: the page notifies of a question or prompt, and its title counts them",
+          .disabled("needs a browser's Notification API and a page shown: WebApp/tests/notify.test.mjs covers what the page decides"))
+    func a19Notifications() {}
+
+    @Test("A24: scripts/nightly.sh on the merged v2 passes the full suite",
+          .disabled("the nightly run itself, which runs this suite; not a case inside it"))
+    func a24Nightly() {}
+
+    @Test("A25: VibeSwitcher's own lead on its clone merges its tasks through the gate and keeps a goal list",
+          .disabled("needs a real Claude Code lead working on a real clone, run on the user's go-ahead"))
+    func a25SelfImprovement() {}
 }
 
 /// The suite's gate and helpers.
