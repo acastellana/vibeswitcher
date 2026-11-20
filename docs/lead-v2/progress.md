@@ -264,3 +264,19 @@
 - 2026-11-20 04:07 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
 - 2026-11-20 04:07 Started a worker on mac-gitguardtests
 - 2026-11-20 04:07 Automatically (auto_advance): Started a worker on mac-gitguardtests (Mac: GitGuardTests' baseline message compared against the resolved root).
+- 2026-11-20 04:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 04:17 Automatically (auto_advance): Didn't start measure-does-claude-code: measure-does-claude-code's worker not started: ~/.local/bin changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the …
+- 2026-11-20 04:18 Audit of sb5-the-host-confines: finder 1 of 2 submitted (incomplete, clean, 9 findings)
+- 2026-11-20 04:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 04:20 Audit of sb5-the-host-confines: incomplete, suspect, round 1: 6 Important (3 open, 3 unconfirmed), 5 Nit unconfirmed (2 finders voted: 3 new findings confirmed, 8 unconfirmed, 3 Nits past audit_nit_cap (5) left out)
+- 2026-11-20 04:20 Exception on sb5-the-host-confines by lead of vibeswitcher-v2-lead: edits to Sources/VibeCore/V2/Sandbox/SandboxRole.swift, Sources/VibeHost/HostNotesAnswer.swift, Sources/vibeswitcher-cli/Start.swift, scripts/temporary-folder-lint.txt accepted. Reason: Small edits SB5 needs to say which roles a node confines: SandboxRole.confinedByTheNode (one property the host and status both read), HostNotesAnswer filling the `confined` field, one line in the CLI'…
+- 2026-11-20 04:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 04:28 Automatically (auto_advance): Didn't merge mac-gitguardtests: Not merged: mac-gitguardtests's tests passed, and after them: ~/.local/bin changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change, they accept it there; if not, they set it back first.
+- 2026-11-20 04:31 Sent tests-that-write-a's worker contract v5 (it had v4)
+- 2026-11-20 10:39 Started a worker on measure-does-claude-code
+- 2026-11-20 10:39 Automatically (auto_advance): Started a worker on measure-does-claude-code (Measure: does Claude Code stop re-creating its link when its updater is off?).
+- 2026-11-20 10:40 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 10:40 Started a worker on sb5-the-host-confines
+- 2026-11-20 10:41 Workflow: max_workers = `3`
+- 2026-11-20 10:41 Started a worker on mac-gitguardtests
+- 2026-11-20 10:43 Planned the-merge-s-test-2: The merge's test run: where its 11 minutes go, and the cheap cuts
