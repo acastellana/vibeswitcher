@@ -60,6 +60,8 @@ public final class TailnetWeb: @unchecked Sendable {
         didSet { lock.withLock { held = listener } }
     }
     private var waiting: [(Result<TailnetPlace, WebTokens.Refusal>) -> Void] = []
+    /// Listeners let go whose descriptors aren't all closed yet.
+    private var closing = 0
 
     /// `root`: the node's (its `v2/web-tokens-tailnet.json`). `port`: the web's. `find`: where to bind (`Tailnet.find`;
     /// a test's own). `admitPeer`: which peers are kept (Tailscale's ranges; a test's own). `folder`: a scratch
@@ -80,7 +82,7 @@ public final class TailnetWeb: @unchecked Sendable {
         self.note = note
         access = WebAccess(tokens: WebTokens.tailnet(root: root), now: now, note: { note("tailnet: " + $0) })
         access.listen = { [weak self] in
-            guard let self, let port = self.port(of: self.state) else { return .failure(WebTokens.Refusal("the tailnet listener isn't up")) }
+            guard let self, let port = self.lock.withLock({ self.held })?.port else { return .failure(WebTokens.Refusal("the tailnet listener isn't up")) }
             return .success(port)
         }
         access.onChange = { [weak self] in self?.follow() }
@@ -130,11 +132,16 @@ public final class TailnetWeb: @unchecked Sendable {
                 }
             } else if let listener {
                 listener.closeAll(code: "revoked", reason: "the tailnet page was closed: run `\(Self.command)` again")
-                listener.stop()
                 self.listener = nil
-                set(.off)
+                closing += 1
+                // `off` once every descriptor is closed (nothing listens then), unless a listener was bound meanwhile.
+                listener.stop { [weak self] in
+                    guard let self else { return }
+                    closing -= 1
+                    if self.listener == nil, closing == 0, waiting.isEmpty { set(.off) }
+                }
                 note("tailnet: the listener was let go: no code or token is alive")
-            } else if waiting.isEmpty {
+            } else if waiting.isEmpty, closing == 0 {
                 set(.off)
             }
         }
@@ -196,11 +203,6 @@ public final class TailnetWeb: @unchecked Sendable {
     }
 
     private func set(_ state: State) { lock.withLock { current = state } }
-
-    private func port(of state: State) -> UInt16? {
-        if case .on(_, let port) = state { return port }
-        return nil
-    }
 
     /// The listener, once made: its port is in its files' policy.
     private final class Bound: @unchecked Sendable {
