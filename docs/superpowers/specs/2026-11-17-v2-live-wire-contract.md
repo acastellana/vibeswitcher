@@ -531,9 +531,15 @@ is done once (rule 8). What the first write actions need:
 | `session.draft.clear` **new** (2026-11-20) | `session` | refused, `voice` | a token with `draft`, `action` |
 | `send`, `session.new`, `session.end`, `session.reply` **new** (2026-11-20) | `session` and `text`; `folder`, `agent`, `model`; `session`; `session`, `choice`, `text`, `question`, `options` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: the page shows the line that runs each |
 
-A session (§5) carries two more fields since 2026-11-20, each null when there's none: `prompt` {`question` †,
-`options` †, `descriptions` †, `text` (the options that take words, by index), `multiSelect`, `at`}, the question open
-on its screen as the node read it (`SessionPrompt`), and `draft` {`text` †, `at`, `action`}, a page's message for it.
+| `session.attach` **new** (2026-11-20, the composer) | `session`, `upload` (a UUID), `type` (png, jpeg, gif, webp), `part`, `parts`, `data` (base64) | refused, `voice` | a token with `draft`, `action`: an image in parts (a page's message is at most 64 KiB); the last part's reply carries the `path` it was written to, which `session.draft`'s `images` name |
+| `session.complete` **new** (2026-11-20, the composer) | `session`, `kind` (`slash`, `mention`), `query` | anyone | a token with `read`: `items` [{`insert`, `title`, `subtitle`}], what the app's composer offers |
+| `session.presets` **new** (2026-11-20, the composer) | `folder` (optional) | anyone | a token with `read`: `presets` [{`name`, `kind`, `command`, `env` (names), `keepShell`, `project`, `default`, `digest`, `refused`}], `problems`; `session.new` takes `preset` and its `digest` |
+
+A session (§5) carries three more fields since 2026-11-20: `prompt` {`question` †, `options` †, `descriptions` †,
+`text` (the options that take words, by index), `multiSelect`, `at`}, the question open on its screen as the node read
+it (`SessionPrompt`), and `draft` {`text` †, `images` (paths), `at`, `action`}, a page's message for it, each null
+when there's none; and `queued` [{`text` †, `images` (a count), `at`, `action`}], the messages `send` holds until the
+question on its screen closes.
 
 **The user's-voice rule is unchanged (S3).** A browser is not a terminal in the user's scope and types no code, and a
 token is a secret in a file the user's processes can read (the security document's S11, item 31). So in the first

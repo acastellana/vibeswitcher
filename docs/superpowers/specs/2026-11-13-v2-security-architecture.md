@@ -596,10 +596,12 @@ command line alone where it doesn't (a guard rail):
 | `lead FOLDER --goal …` | the user's | yes | opens an app session, whose git commands `isYours` treats as the user's; refused on a fresh vault until `config accept` and `base accept` are done (S7) |
 | `answer CARD [TEXT]`, `hold CARD` | the user's | yes (the card's) | the user's answer to the lead, an approval included, bound to the card's id; with no TEXT, the card's draft, printed whole and inert before the code is asked, and sent as the text shown (the live plan's F3) |
 | `tell FOLDER TEXT` | the user's | yes | the user's words to the project's running lead that answer no card: recorded in the vault and delivered as an answer's message is, held until the lead can take it; refused when no lead runs there |
-| `send SESSION [TEXT]` | the user's | yes | the user's words typed into an agent's session the node's host started, as the app's composer types them (a working agent takes them after its turn); refused for a session the host didn't start, a shell, a replaced lead, and one with a question or picker open on its screen; with no TEXT, the message a page drafted for the session (`session.draft`), shown whole before the code |
+| `send SESSION [TEXT] [--image PATH]...` | the user's | yes | the user's words, and images by their paths (png, jpg, gif, webp files), typed into an agent's session the node's host started, as the app's composer types them (a working agent takes them after its turn); with a question, picker or menu open on its screen, held in the server's memory and typed once it closes, as the app holds it; refused for a session the host didn't start, a shell and a replaced lead; with no TEXT and no image, the message a page drafted for the session (`session.draft`, its images too), shown whole before the code |
 | `reply SESSION CHOICE [TEXT]` | the user's | yes | the question open on a session's screen answered with the app's keys, typed only while the question shown is still there (read again in the unit's gate) |
-| `new FOLDER [--agent claude\|shell] [--model M]` | the user's | yes | starts an ordinary session in the node's host: Claude by the node's `claude` link (never a PATH), or the host's plain shell |
+| `new FOLDER [--agent claude\|shell \| --preset NAME] [--model M]` | the user's | yes | starts an ordinary session in the node's host: Claude by the node's `claude` link (never a PATH), or the host's plain shell, or a launch preset of the node's `presets.json` (its arguments plain words after `claude`, its variables none the host refuses a spawn nor `VIBESWITCHER_*`), shown before the code and bound to what was shown by its digest |
 | `end SESSION` | the user's | yes | ends an ordinary session the node's host started; refused for a lead and its team |
+| `session.attach` | a web page whose token drafts; refused `voice` on the Unix socket | no | an image pasted into a session's composer, in parts, checked to be the image its type says and written to `<root>/attachments` (0600; at most 5 MB, 4 at once, the folder capped at 200 MB); typed nowhere: a draft names it, and `send SESSION` sends it in the user's voice |
+| `session.presets`, `session.complete` | anyone (reads) | no | a folder's launch presets (their variables by name only) and what a session's `/` and `@` complete to (command and skill names, the session folder's file names) |
 | `draft`, `draft.clear` | a web page whose token drafts; refused `voice` on the Unix socket | no | the user's words left on a card in the server's memory and told to nobody: no lead, no vault, nothing recorded, until `answer CARD` takes them as above (the live plan's B5, I3; LW-D6). A draft a thief plants is shown in full before the code is typed: a guard rail as strong as the typed word |
 | `web.open`, `web.revoke` | the user's | yes (from the action id) | mint a pairing code for a page, or drop every page's token (the live plan's I1) |
 | `config held`, `base show FOLDER [--from COMMIT]` | the user's | no | change nothing; each makes the card the next request takes |
@@ -615,6 +617,11 @@ command line alone where it doesn't (a guard rail):
 and 6): the same voice, code and record as `tell`; each acts only on a session the node's host started. A web page
 leaves a message as a draft beside the session (`session.draft`, a token's `draft` right, recorded nowhere, told to
 nobody) and shows the command that sends it, and shows the others as commands to run.
+
+**(2026-11-20, the composer's lane)** `send` holds a message behind an open question as the app does (in memory only:
+a restart of the server drops it) and takes images by path; `new` takes a launch preset; a page attaches images
+(`session.attach`, the `draft` right: a file in the node's attachments folder, typed nowhere) and reads presets and
+completions. Nothing new is the user's voice but what `send` and `new` already were.
 
 `status --ack` and `start`'s acknowledgment of S11 are not requests: the command line writes each to the journal
 itself, after its own typed code (the engine's EN-D15), so a seized server can't clear them.
