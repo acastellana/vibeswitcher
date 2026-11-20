@@ -234,6 +234,9 @@ struct SandboxPolicyTests {
         // The project's own folders, and a value that isn't PATH, are as before.
         #expect(try SandboxPolicy.read(Self.workflow("sandbox_env: PATH=~/projects/app/bin, TOOLS=~/projects"), home: home,
                                        root: home + "/projects/app").get().path == [home + "/projects/app/bin"])
+        // A folder below ~/.local that holds nothing hidden is a PATH folder like any other.
+        #expect(try SandboxPolicy.read(Self.workflow("sandbox_env: PATH=~/.local/bin"), home: home, root: home + "/projects/app").get().path
+                == [home + "/.local/bin"])
         // Guarded as the others: a change to it is a change of the guard rails' hashes.
         #expect(LeadVault.guardedKeys.contains("sandbox_env"))
         let before = Self.workflow("sandbox_env: MADE_UP_HOME=~/sdk"), after = Self.workflow("sandbox_env: MADE_UP_HOME=~/sdk, EXTRA=~/sdk")
