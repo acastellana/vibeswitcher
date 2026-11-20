@@ -501,7 +501,7 @@ struct VoiceRuleTests {
         #expect(Self.judged(escaped, rule: weaker) == .user)
         // A state change from it is refused; with a terminal (no session's) it isn't.
         // A kind missing from `NodeWire.kinds` needs the user's voice (`Requests.handle`) and so changes state.
-        for kind in ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch", "unlisted"] {
+        for kind in ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch", "send", "unlisted"] {
             let why = Voice.handsRefusal(escaped, kind: kind, rule: weaker)
             #expect(why?.contains("controlling terminal") == true, "\(kind): \(String(describing: why))")
             #expect(Voice.handsRefusal(Self.peer(cgroup: nil, terminal: .named("ttypts0")), kind: kind, rule: weaker) == nil, "\(kind)")

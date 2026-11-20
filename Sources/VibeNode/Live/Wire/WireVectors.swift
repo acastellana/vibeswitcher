@@ -247,6 +247,9 @@ public enum WireVectors {
     static let leadHost = UUID(uuidString: "3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f")!
     static var leadSession: String { NodeIds.session(host: leadHost) }
     static let notesSession = NodeIds.session(terminal: "pts/9")
+    /// An ordinary session the host runs (driving sessions, 2026-11-20).
+    static var plainSession: String { NodeIds.session(host: UUID(uuidString: "9a4e7c21-3b6d-4f80-a1c2-5d8e0f3b7a64")!) }
+    static let sessionDraftAction = "e2b74c91-6a3d-4f05-8c1e-7b9d2f4a6c30"
     static let card = "local:card:5b2e9c0a-7d41-4f6e-b3a8-1c9d0e2f4a67"
     static let assets = "9f2c61d0"
     /// A token's shape (32 bytes, base64url), no real one.
@@ -286,14 +289,29 @@ public enum WireVectors {
     /// A session as the contract's §5 gives it (B2's `Session.liveValue` writes it after).
     static func session(id: String, terminal: String, agent: String, cwd: String?, status: String, since: String, hosted: Bool,
                         role: String?, shown: String, project: String, task: String?, startedAt: String, hasHooks: Bool,
-                        leadAsks: Bool, startFolder: String?, hasTranscript: Bool) -> NodeWire.Value {
+                        leadAsks: Bool, startFolder: String?, hasTranscript: Bool, prompt: NodeWire.Value = .null,
+                        draft: NodeWire.Value = .null) -> NodeWire.Value {
         func text(_ value: String?) -> NodeWire.Value { value.map(NodeWire.Value.string) ?? .null }
         return .object(["id": .string(id), "terminal": .string(terminal), "agent": .string(agent), "cwd": text(cwd),
                         "status": .string(status), "since": .string(since), "hosted": .bool(hosted), "role": text(role),
                         "shownStatus": .string(shown), "project": .string(project), "task": text(task), "detail": .null,
                         "activity": .null, "activitySince": .null, "startedAt": .string(startedAt), "hasHooks": .bool(hasHooks),
                         "leadAsks": .bool(leadAsks), "startFolder": text(startFolder), "backgroundJobs": .int(0),
-                        "hasTranscript": .bool(hasTranscript)])
+                        "hasTranscript": .bool(hasTranscript), "prompt": prompt, "draft": draft])
+    }
+
+    /// An ordinary Claude session asking its own question, a message drafted for it on a page (driving sessions,
+    /// 2026-11-20): `SessionPrompt.value` and `SessionDraft.value` as the node writes them.
+    static func asking(draft: Bool) -> NodeWire.Value {
+        let menu = ScreenMenu(question: "Bash command\n  npm test\nDo you want to proceed?",
+                              options: ["Yes", "Yes, and don't ask again for this command", "No, and tell Claude what to do differently (esc)"],
+                              descriptions: [nil, nil, nil], selected: 0)
+        let prompt = SessionPrompt(menu: menu, at: date("2026-11-17T09:23:10.400Z")).value
+        let drafted = SessionDraft(text: "Then run the linter too", at: date("2026-11-17T09:23:30.000Z"), action: sessionDraftAction).value
+        return session(id: plainSession, terminal: "pts/6", agent: "claude", cwd: "/home/u/acme-site", status: "needs-you",
+                       since: "2026-11-17T09:23:10.200Z", hosted: true, role: nil, shown: "needs-you", project: "acme-site", task: "Fix the tests",
+                       startedAt: "2026-11-17T09:20:00.000Z", hasHooks: true, leadAsks: false, startFolder: "/home/u/acme-site",
+                       hasTranscript: true, prompt: prompt, draft: draft ? drafted : .null)
     }
 
     static func lead(status: String, since: String) -> NodeWire.Value {
@@ -366,7 +384,8 @@ public enum WireVectors {
         NodeWire.Hello(node: NodeIds.node, epoch: epoch,
                        server: .init(commit: "f62aef61", startedAt: "2026-11-17T09:12:44.031Z", pid: 41822),
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
-                       kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen"],
+                       kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
+                               "session.draft", "session.draft.clear"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -571,6 +590,19 @@ public enum WireVectors {
                       reply(.init(re: "7", result: .object([:]))),
                       delta("s1", "sessions", prev: 47, seq: 48, at: "2026-11-17T09:22:02.114Z",
                             changes: [(leadSession, lead(status: "idle", since: "2026-11-17T09:21:58.300Z"))])]),
+            // Driving sessions (2026-11-20): a session asks its own question; a page leaves a message for it (the user
+            // sends it with `vibeswitcher send SESSION`), and takes it off again.
+            ("session.prompt", [delta("s1", "sessions", prev: 48, seq: 49, at: "2026-11-17T09:23:10.500Z", changes: [(plainSession, asking(draft: false))])]),
+            ("session.draft", [request(.init(id: "15", kind: "session.draft", args: ["session": .string(plainSession), "text": .string("Then run the linter too")],
+                                             action: sessionDraftAction)),
+                               delta("s1", "sessions", prev: 49, seq: 50, at: "2026-11-17T09:23:30.010Z", changes: [(plainSession, asking(draft: true))]),
+                               reply("reply.session.draft", .init(re: "15", result: .object(["applied": .object(["sessions": .int(50)]),
+                                                                                              "session": .string(plainSession)])))]),
+            ("session.draft.clear", [request(.init(id: "16", kind: "session.draft.clear", args: ["session": .string(plainSession)],
+                                                   action: "1c5e8a20-4b7d-4f3e-9a61-0d2c7b5e8f13")),
+                                     delta("s1", "sessions", prev: 50, seq: 51, at: "2026-11-17T09:23:41.020Z", changes: [(plainSession, asking(draft: false))])]),
+            ("send.from-a-page", [reply(.init(re: "17", error: .init(.voice,
+                                                                    "send is the user's voice: a web page is never that; run it with `vibeswitcher` in a terminal")))]),
             // §8: a draft, acked; refused.
             ("draft.acked", [request(.init(id: "12", kind: "draft", args: ["card": .string(card), "text": .string("Yes, merge it"),
                                                                           "version": .int(2)], action: draftAction)),

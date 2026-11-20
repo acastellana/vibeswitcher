@@ -54,7 +54,7 @@ export function createMock(store, options = {}) {
     const hex = /^[0-9a-f]{8}$/.test(sid.slice(6, 14)) ? sid.slice(6, 14) : 'c7e40b18';
     return {
       id: sid, terminal: 'pts/' + (3 + sessions.size), agent, cwd: SITE, status: 'idle', since: ago(60), hosted, role: null,
-      title: null, detail: null, paused: false, lead: null, task: null,
+      title: null, detail: null, paused: false, lead: null, task: null, prompt: null, draft: null,
       startedAt: fields.since || ago(60), activity: null, activitySince: null, branch: 'main',
       agentSession: `${hex.split('').reverse().join('')}-0c2e-4a71-b3d5-9f6e8a1c2b40`, pid: 51022 + 37 * sessions.size,
       command: hosted ? agent : null, size: hosted ? { cols: 132, rows: 38 } : null, ...fields,
@@ -67,7 +67,12 @@ export function createMock(store, options = {}) {
     add(W_SYNC, { status: 'working', since: ago(252), role: 'worker', lead: SITE_PROJECT, task: 'sync-landing-base', branch: 'agent/sync-landing-base', title: 'Sync landing-base with main', detail: 'Resolving the hero’s conflicts', activity: 'Edit pages/hero.html', activitySince: ago(12) });
     add(W_CLEAN, { agent: 'codex', status: 'idle', since: ago(130), startedAt: ago(1300), role: 'worker', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders' });
     add(V_CLEAN, { status: 'working', since: ago(118), role: 'verifier', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders', detail: 'Checking the work', activity: 'Read tools/cleanup.py', activitySince: ago(60) });
-    add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py' });
+    // Its own question, as the node reads it off the session's screen (`prompt`, SessionPrompt.value), and a message
+    // drafted for it on a page (`draft`, session.draft).
+    add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py',
+      prompt: { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
+        descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },
+      draft: { text: 'Once the tests pass, also add one for two regions at once.', at: ago(8), action: 'mock-draft' } });
     add(WEBHOOKS, { agent: 'codex', cwd: PAYOUTS, status: 'working', since: ago(95), startedAt: ago(400), branch: 'retry-webhooks', title: 'Retry failed bank webhooks', detail: 'Running the retry tests', activity: 'pytest tests/test_webhook_retry.py', activitySince: ago(95) });
     add(DARK, { status: 'done', since: ago(380), startedAt: ago(1900), branch: 'settings-dark-mode', title: 'Add dark mode to the settings page' });
     add(PREVIEW, { cwd: DOCS, status: 'background', since: ago(720), startedAt: ago(760), title: 'Preview the docs site', detail: '1 shell · 12m: npm run dev' });
@@ -145,7 +150,6 @@ export function createMock(store, options = {}) {
       read(`${API}/jobs/scheduler.py`, 126),
       reply('The job takes its lock after it reads the schedule, so two workers can both see a run as due:\n\n- the scheduler starts one worker per region\n- each reads the schedule before it takes the lock\n- the second to get the lock runs the job again\n\nThe fix is to take the lock first, in `jobs/payouts.py`. Running its tests before I change it.', 60),
       command('pytest tests/test_payouts.py', '', 21, null),
-      { id: next('a'), kind: 'ask', at: ago(20), title: 'Bash command', text: 'pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently'], answer: null },
     ]);
     chats.set(LEAD, [
       prompt('Sync the landing pages and finish the sidebar review.', 5400),
@@ -514,6 +518,14 @@ export function createMock(store, options = {}) {
         else emit(setSession(args.session, { status: 'done', since: new Date().toISOString() }));
       }));
       return { ok: true, result: {} };
+    }
+    if (message.kind === 'session.draft' || message.kind === 'session.draft.clear') {
+      const target = sessions.get(args.session);
+      if (!target) return { ok: false, error: { code: 'gone', message: 'That session has ended.' } };
+      if (!target.hosted) return refused('That session runs in a terminal of yours: VibeSwitcher only types into the sessions it started.');
+      const drafted = message.kind === 'session.draft' ? { text: args.text, at: new Date().toISOString(), action: message.action } : null;
+      emit(setSession(args.session, { draft: drafted }));
+      return { ok: true, result: { session: args.session } };
     }
     if (message.kind === 'seen') {
       const target = sessions.get(args.session);

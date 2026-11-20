@@ -58,7 +58,7 @@ const sample = (option) => (option && /^[^"$`\\!\n]*$/.test(option) ? option : '
 
 // The line a terminal confirms the draft with, and a button that copies it: one click, then "Copied" for a moment.
 // Where the clipboard is refused, the line is selected instead, for the keyboard's copy.
-function copyLine(text, label) {
+export function copyLine(text, label) {
   const code = h('code', { class: 'copy-text' }, text);
   const word = h('span', { class: 'copy-word' }, 'Copy');
   let timer = null;

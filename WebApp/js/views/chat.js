@@ -18,6 +18,7 @@ import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES } from '../
 import { markdown, diffView, codeBlock } from '../text.js';
 import { summaryOf } from '../chatops.js';
 import { questionStack, askCard } from './cards.js';
+import { draftBox, promptCard, drivable } from './drive.js';
 
 // How close to the end counts as being at the end.
 const NEAR = 48;
@@ -224,7 +225,9 @@ export function chatView(app) {
   // in the conversation's place. A lead's questions still follow below it.
   const later = h('p', { class: 'pane-empty', hidden: true }, 'This node doesn’t send this session’s conversation to the page.');
   const stackSlot = h('div');
-  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, above, rowsEl, below, live, stackSlot);
+  // The question open on the session's own screen, under its conversation, where the Mac's answer card sits.
+  const asking = promptCard(app);
+  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, above, rowsEl, below, live, stackSlot, asking.el);
   const scroller = h('div', { class: 'chat-scroll' }, column);
   const latestCount = h('span', { class: 'latest-count' });
   const latest = h('button', { class: 'latest', type: 'button', hidden: true, onclick: () => toEnd(true) }, icon('down', 12), 'Latest', latestCount);
@@ -233,7 +236,9 @@ export function chatView(app) {
   const sendButton = h('button', { class: 'send', type: 'submit', title: 'Send (↩)', 'aria-label': 'Send', disabled: true }, icon('send', 15));
   const form = h('form', { class: 'composer' }, input, sendButton);
   const hint = h('p', { class: 'composer-hint', hidden: true });
-  const el = h('div', { class: 'chat' }, scroller, latest, form, hint);
+  // The message this page left for the session, over the box, with the line that sends it.
+  const drafted = draftBox(app, { edit: (text) => { input.value = text; grow(); input.focus(); } });
+  const el = h('div', { class: 'chat' }, scroller, latest, drafted.el, form, hint);
 
   const view = {
     app,
@@ -402,19 +407,30 @@ export function chatView(app) {
       state === 'background' ? '' : h('time', { data: { since: session.since } }, since(session.since)));
   }
 
+  // On the node's page the box leaves a draft (`session.draft`): `vibeswitcher send` in a terminal types it. Only a
+  // feed that may send (`send` in what it may send, and no drafts) types at once.
+  const drafting = () => store.can('session.draft');
   function renderComposer(session) {
-    const typed = !!session?.hosted && !session.ended && store.can('send');
+    const typed = drivable(session) && (drafting() || store.can('send'));
     form.hidden = !typed;
     hint.hidden = typed;
+    asking.update(session);
+    drafted.update(session);
     if (!typed) {
       setText(hint, !session ? '' : session.ended ? 'This session has ended.'
-        : !store.can('send') ? 'This page follows the node; to type into a session, use its terminal.'
-        : 'Runs in another terminal. It can be read here, not typed into.');
+        : !session.hosted ? 'Runs in another terminal. It can be read here, not typed into.'
+        : 'This page follows the node; to type into a session, use its terminal.');
       return;
     }
     const agent = AGENTS[session.agent] || AGENTS.claude;
     const working = stateOf(session) === 'working';
-    input.placeholder = working ? `Steer ${agent} while it works — ↩ sends it to its next step` : `Message ${agent}…`;
+    if (drafting()) {
+      input.placeholder = `Message ${agent}… (↩ leaves a draft)`;
+      sendButton.title = 'Leave as a draft (↩)';
+      sendButton.setAttribute('aria-label', 'Leave as a draft');
+    } else {
+      input.placeholder = working ? `Steer ${agent} while it works — ↩ sends it to its next step` : `Message ${agent}…`;
+    }
   }
 
   const schedule = framed(render);
@@ -479,7 +495,7 @@ export function chatView(app) {
     if (!text) return;
     input.value = '';
     grow();
-    store.send(view.session, text);
+    if (drafting()) store.sessionDraft(view.session, text); else store.send(view.session, text);
   });
 
   for (const topic of ['sessions', 'cards', 'leads', 'connection']) store.subscribe(topic, () => { if (view.session && el.isConnected) schedule(); });

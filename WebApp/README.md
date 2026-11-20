@@ -169,7 +169,7 @@ Messages are the design's live protocol ("State as snapshot and deltas"), in `No
 { in: 'node', id: 'local', value }
 
 // A request, as NodeWire.Request: `action` is a new UUID, sent again on a retry so it's done once.
-{ v: 1, id, kind: 'answer' | 'hold' | 'send' | 'ask.answer' | 'seen', args, action }
+{ v: 1, id, kind: 'draft' | 'draft.clear' | 'session.draft' | 'session.draft.clear' | 'seen' | 'chat.page' | …, args, action }
 ```
 
 A snapshot with another `epoch` (the server restarted) replaces everything and the open chats are asked for again. A

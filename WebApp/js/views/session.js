@@ -10,6 +10,7 @@ import { chatView } from './chat.js';
 import { teamStrip } from './lead.js';
 import { inspector } from './inspector.js';
 import { terminalView } from './terminal.js';
+import { endStrip } from './drive.js';
 
 const PANES = [
   { id: 'terminal', label: 'Terminal', key: '1' },
@@ -34,10 +35,14 @@ export function sessionView(app) {
     class: 'icon-button inspect-toggle', type: 'button', 'aria-label': 'Inspector', 'aria-controls': 'inspector', 'aria-expanded': 'false',
     title: `Toggle Inspector (${KEY.mod}${KEY.alt}0)`, onclick: () => ui.toggleInspector(),
   }, icon('inspector', 16));
+  // Ending an ordinary session: the line that ends it, under the header (a lead and its team aren't ended here).
+  const ending = endStrip();
+  const end = h('button', { class: 'button quiet end-button', type: 'button', title: 'End this session…', onclick: () => ending.toggle() }, 'End…');
   const head = h('header', { class: 'head' },
     h('a', { class: 'back icon-button', href: '#/', 'aria-label': 'Sessions' }, icon('back', 16)),
     markSlot,
     h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, title, state), place),
+    end,
     h('div', { class: 'segmented', role: 'group', 'aria-label': 'Show' }, tabs),
     toggle);
 
@@ -52,7 +57,7 @@ export function sessionView(app) {
   // The session's own column, and the inspector over its right edge: open as a column, the session's column gives
   // it the room (style.css), so the inspector itself never moves anything.
   const body = h('div', { class: 'session-body' }, h('div', { class: 'session-main' }, strip.el, chat.el, terminal), inspect.scrim, inspect.el);
-  const el = h('section', { class: 'session', 'aria-label': 'Session' }, head, body, gone, loading);
+  const el = h('section', { class: 'session', 'aria-label': 'Session' }, head, ending.el, body, gone, loading);
 
   let shownAgent = null;
   let shownPane = null;
@@ -93,6 +98,7 @@ export function sessionView(app) {
     loading.hidden = !connecting;
     gone.hidden = connecting || !!session;
     for (const part of [head, body]) part.hidden = !session;
+    end.hidden = !ending.update(session);
     if (!session) {
       // It ended and left the list (or the link is another node's): its stream went with it on the node.
       if (!connecting) term.hide({ gone: true });

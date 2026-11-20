@@ -169,7 +169,7 @@ struct WebSecurityTests {
         #expect(hello["peer"]?["voice"]?.string == "other", "\(hello)")
         let closed = NodeWire.kinds.filter { $0.value != .anyone && $0.value != .webDraft }.map(\.key).sorted()
         for name in ["answer", "hold", "tell", "stop", "lead", "start", "web.open", "web.revoke", "hooks.install", "build.switch",
-                     "config.accept", "question.post", "term.open"] {
+                     "config.accept", "question.post", "term.open", "send"] {
             #expect(closed.contains(name), "\(name)")
         }
         for (index, kind) in closed.enumerated() {
