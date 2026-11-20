@@ -12,7 +12,7 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **51 has it**, **14 partly**, **20 missing** (one of them, Codex workers, on purpose), **9 not needed on
+Of 101 features: **52 has it**, **13 partly**, **20 missing** (one of them, Codex workers, on purpose), **9 not needed on
 Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`, after the
 settings, composer, push and rotation lanes' merges and that lane's rows: reopening your own sessions after a restart, the prompt-audit reminder,
 reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads, the
@@ -80,7 +80,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | The session list with its states (needs you, working, background, done, idle) | `MainWindow/SessionListView.swift`, `Sources/VibeCore/Attention.swift` | has it | `vibeswitcher status`; the web sidebar (`WebApp/js/views/sidebar.js`), live | | |
 | Group by attention or by project, filter | `MainWindow/MainMenu.swift` | has it | the web page (`WebApp/js/ui.js`), ⌥F | | |
 | Next needing you (⌘J), sessions 1–9, next and previous | `MainWindow/MainMenu.swift` | has it | the web page's keys (`WebApp/README.md`, Keys) | | ⌥ in place of ⌘ where the browser keeps ⌘ |
-| Command palette (⌘K) | `MainWindow/CommandPalette.swift` | partly | `WebApp/js/views/palette.js`: jumps to sessions and view commands; the session's Rename, Pause, End and Close Finished Shells; "New PRESET in FOLDER" for the recent folders and each one's presets (2026-11-20: the start page's form with them, and its line). There's no "Start Project Lead in …" | S | |
+| Command palette (⌘K) | `MainWindow/CommandPalette.swift` | has it | `WebApp/js/views/palette.js`: jumps to sessions and view commands; the session's Rename, Pause, End and Close Finished Shells; "New PRESET in FOLDER" for the recent folders and each one's presets (2026-11-20: the start page's form with them, and its line); "Start Project Lead in FOLDER" for the shown session's folder and the recent ones, the Mac's (2026-11-20: the start page's lead form with that folder, a goal to write, and its `vibeswitcher lead FOLDER --goal …` line) | S | closed 2026-11-20 |
 | Start page: recent projects, ended sessions, Choose Folder | `MainWindow/StartPage.swift` | partly | `WebApp/js/views/start.js`: what needs you, and the keys. Nothing can be started from it | M | |
 | Inspector: Overview, Activity, Team | `MainWindow/InspectorView.swift` | partly | `WebApp/js/views/inspector.js`. Missing: branch, pid, command, size, exit status, tokens and cost, the Team tab's tasks | M | the fields are listed in `WebApp/README.md` |
 | A finished session counts as seen once you look at it | `SessionStore.swift` | has it | `Stores/NodeSessions.swift` `acknowledge` and the app's rule (a turn that ended before the node started, or before your last look, reads `idle`); the page sends `seen` after 1.5 s on a finished session (`WebApp/js/views/session.js`), a `read` kind (`Requests.seen`) | | closed 2026-11-19; no command-line way, as the app has none but looking |

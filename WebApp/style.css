@@ -498,6 +498,8 @@ code, pre, kbd { font-family: var(--mono); }
 .new-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .new-fields > .answer-input:first-child { flex: 2 1 220px; }
 .new-fields > .model-input { flex: 1 1 120px; }
+/* A lead's goal: a line of its own under the folder, as long as it needs. */
+.new-fields > .lead-goal { flex: 1 1 100%; min-height: 3em; resize: vertical; font: inherit; }
 /* The composer's lane: what / and @ complete to, the images pasted into the box, the messages held behind a question,
    and the presets a new session starts from. */
 .suggestions { flex: none; width: calc(100% - 48px); max-width: 752px; max-height: 232px; margin: 4px auto 0; padding: 4px; overflow-y: auto; border-radius: 10px; background: var(--raised); box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgb(0 0 0 / 0.12); list-style: none; }

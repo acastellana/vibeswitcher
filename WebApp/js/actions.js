@@ -78,6 +78,22 @@ export function recentFolders(sessions, ended, limit = 5) {
   return folders;
 }
 
+// The folders the palette offers to start a project lead in (the Mac's "Start Project Lead in …"): the shown session's
+// folder first, then the recent ones (`recentFolders`), each once, at most `limit`.
+export function leadFolders(selected, sessions, ended, limit = 6) {
+  const folders = [];
+  for (const folder of [selected?.hosted && !selected.role ? selected.cwd : null, ...recentFolders(sessions, ended, limit)]) {
+    if (folder && !folders.includes(folder)) folders.push(folder);
+  }
+  return folders.slice(0, limit);
+}
+
+// `vibeswitcher lead FOLDER --goal GOAL` (no goal: the lead plans from its records), each one word.
+export function leadLine(folder, goal = '') {
+  const said = String(goal || '').trim();
+  return `vibeswitcher lead ${shellWord(folder)}${said ? ` --goal ${shellWord(said)}` : ''}`;
+}
+
 // The palette's "New … in …" entries for `folders`: each folder's presets as the node lists them (`presetsOf(folder)`,
 // its default first; Claude and Shell until the node answers), but those it can't start there.
 export function newEntries(folders, presetsOf) {
