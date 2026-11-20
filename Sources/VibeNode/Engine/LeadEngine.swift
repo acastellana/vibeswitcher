@@ -96,10 +96,12 @@ public final class LeadEngine: @unchecked Sendable {
     private var watch: Subscription?
 
     // Delivery and wake (E5), on `queue`.
-    /// Whether an agent runs on its terminal (`ProcessTable.info`): the lead the board names gets nothing otherwise, and
-    /// nothing is typed into a terminal its agent left (a shell). For tests.
-    public var leadRuns: (LeadAgent) -> Bool = { agent in
-        ProcessTable.info(pid: agent.pid).map { $0.tty == agent.tty && $0.agent != nil } == true
+    /// Whether an agent runs on its terminal: the lead the board names gets nothing otherwise, and nothing is typed into
+    /// a terminal its agent left (a shell). On a terminal the host runs (`hosted`, the link's list), by the host's record
+    /// of what it started (`HostedAgents.runs`: the session's program, started as an agent), never a process's name;
+    /// elsewhere (the Mac) by the process table (`ProcessTable.info`). For tests.
+    public var leadRuns: (LeadAgent, [HostSession]) -> Bool = { agent, hosted in
+        HostedAgents.runs(agent, hosted: hosted) ?? (ProcessTable.info(pid: agent.pid).map { $0.tty == agent.tty && $0.agent != nil } == true)
     }
     /// What an agent is doing, from its hooks' state under `root` and its transcript under the node's home.
     let observer: LeadObserver

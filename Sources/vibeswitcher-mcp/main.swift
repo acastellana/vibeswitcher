@@ -324,7 +324,7 @@ final class HostRuntime: LeadRuntime {
         case .session(let id):
             hosted = try HostCall.sessions(socket: socket)
             guard let tty = hosted.first(where: { $0.id.uuidString == id && $0.isLive })?.tty,
-                  let found = ProcessTable.trySnapshot().flatMap({ LeadAgent.running(on: tty, session: id, in: $0) }) else {
+                  let found = HostedAgents.decided(HostedAgents.running(on: tty, session: id, hosted: hosted), or: { ProcessTable.trySnapshot().flatMap({ LeadAgent.running(on: tty, session: id, in: $0) }) }) else {
                 throw HostCall.Failure(description: "That session isn't running an agent.")
             }
             agent = found
@@ -358,8 +358,9 @@ final class HostRuntime: LeadRuntime {
     /// A host that can't be read is an error, never "no sessions": the tools that act on that answer (start a second
     /// worker in a live worktree, remove one) refuse with it.
     func sessions() throws -> [LeadSessionInfo] {
-        try HostCall.sessions(socket: socket).map { session in
-            let reading = session.isLive ? waiting(session, agent: Self.agentPid(on: session.tty)) : nil
+        let hosted = try HostCall.sessions(socket: socket)
+        return hosted.map { session in
+            let reading = session.isLive ? waiting(session, agent: Self.agentPid(on: session.tty, hosted: hosted)) : nil
             return LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
                                    status: reading?.activity.text, tty: session.tty, pid: session.childPID, waiting: reading?.waiting,
                                    usageLimit: reading.flatMap { if case .usageLimit(let limit) = $0.activity { return limit } else { return nil } })
@@ -367,9 +368,10 @@ final class HostRuntime: LeadRuntime {
     }
 
     func transcript(of session: String) throws -> String? {
-        guard let hosted = try HostCall.sessions(socket: socket).first(where: { $0.id.uuidString == session }) else { return nil }
+        let list = try HostCall.sessions(socket: socket)
+        guard let hosted = list.first(where: { $0.id.uuidString == session }) else { return nil }
         // An ended session's terminal may hold another agent now: only its own hooks' record counts.
-        let pid = hosted.isLive ? Self.agentPid(on: hosted.tty) : nil
+        let pid = hosted.isLive ? Self.agentPid(on: hosted.tty, hosted: list) : nil
         return observer.transcript(hosted, hook: hosted.isLive ? observer.hook(hosted, agentPid: pid) : nil)
     }
 
@@ -398,19 +400,22 @@ final class HostRuntime: LeadRuntime {
     }
 
     func currentAgent() -> LeadAgent? {
+        if HostedAgents.enabled, let hosted = HostedAgents.current(ancestors: ProcessTable.ancestors(of: getpid()), hosted: (try? HostCall.sessions(socket: socket)) ?? []) { return hosted }
         guard let agent = ProcessTable.ancestors(of: getpid()).first(where: { $0.agent != nil }), let tty = agent.tty else { return nil }
         let session = ((try? HostCall.sessions(socket: socket)) ?? []).first { $0.tty == tty && $0.isLive }?.id.uuidString
         return LeadAgent(pid: agent.pid, tty: tty, session: session)
     }
 
     func isRunning(_ agent: LeadAgent) -> Bool {
-        ProcessTable.info(pid: agent.pid).map { $0.tty == agent.tty && $0.agent != nil } ?? false
+        if HostedAgents.enabled, let hosted = HostedAgents.runsForTeam(agent, hosted: (try? HostCall.sessions(socket: socket)) ?? []) { return hosted }
+        return ProcessTable.info(pid: agent.pid).map { $0.tty == agent.tty && $0.agent != nil } ?? false
     }
 
     /// The oldest agent process on a terminal (the session's own, not a tool it runs); nil when there's none, or the
-    /// process table couldn't be read in time.
-    static func agentPid(on tty: String) -> Int32? {
-        ProcessTable.trySnapshot().flatMap { LeadAgent.running(on: tty, session: nil, in: $0) }?.pid
+    /// process table couldn't be read in time. On a terminal the host runs, the agent it started (`HostedAgents`).
+    static func agentPid(on tty: String, hosted: [HostSession]) -> Int32? {
+        if let decided = HostedAgents.running(on: tty, session: nil, hosted: hosted) { return decided?.pid }
+        return ProcessTable.trySnapshot().flatMap { LeadAgent.running(on: tty, session: nil, in: $0) }?.pid
     }
 }
 
