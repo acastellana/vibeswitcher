@@ -153,29 +153,73 @@ extension Platform {
         /// The address `fd` is bound to on this machine, written as numbers ("127.0.0.1", "::1"). Nil when `fd` isn't a
         /// TCP socket.
         public static func localAddress(_ fd: Int32) -> String? {
+            address(of: fd) { getsockname($0, $1, $2) }
+        }
+
+        /// The address at the other end of the connection `fd`, written as numbers. Nil when `fd` isn't a connected TCP
+        /// socket.
+        public static func peerAddress(_ fd: Int32) -> String? {
+            address(of: fd) { getpeername($0, $1, $2) }
+        }
+
+        /// Every IPv4 and IPv6 address on this machine's interfaces now (`getifaddrs`), written as numbers, each once.
+        /// Empty when they can't be read.
+        public static func interfaceAddresses() -> [String] {
+            var first: UnsafeMutablePointer<ifaddrs>?
+            guard getifaddrs(&first) == 0 else { return [] }
+            defer { freeifaddrs(first) }
+            var found: [String] = []
+            var next = first
+            while let entry = next {
+                next = entry.pointee.ifa_next
+                guard let socketAddress = entry.pointee.ifa_addr, let text = text(socketAddress) else { continue }
+                if !found.contains(text) { found.append(text) }
+            }
+            return found
+        }
+
+        /// Whether `address` is a numeric address in Tailscale's ranges: 100.64.0.0/10 (IPv4's shared address space,
+        /// where Tailscale numbers a tailnet's devices) or fd7a:115c:a1e0::/48 (its IPv6 prefix). False for what isn't
+        /// an address, and for an IPv4 address written as IPv6.
+        public static func isTailscaleAddress(_ address: String) -> Bool {
+            var four = in_addr()
+            if inet_pton(AF_INET, address, &four) == 1 {
+                return withUnsafeBytes(of: &four) { $0[0] == 100 && $0[1] & 0xc0 == 64 }
+            }
+            var six = in6_addr()
+            guard inet_pton(AF_INET6, address, &six) == 1 else { return false }
+            return withUnsafeBytes(of: &six) { Array($0.prefix(6)) == [0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0] }
+        }
+
+        /// The address `ask` fills for `fd` (`getsockname`, `getpeername`), of either family, written as numbers.
+        private static func address(of fd: Int32, _ ask: (Int32, UnsafeMutablePointer<sockaddr>, UnsafeMutablePointer<socklen_t>) -> Int32) -> String? {
             var storage = sockaddr_storage()
             var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
             let answered = withUnsafeMutablePointer(to: &storage) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) }
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { ask(fd, $0, &length) }
             }
             guard answered == 0 else { return nil }
+            return withUnsafePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { text($0) } }
+        }
+
+        /// A socket address of IPv4 or IPv6 written as numbers; nil for another family.
+        private static func text(_ socketAddress: UnsafePointer<sockaddr>) -> String? {
             var text = [CChar](repeating: 0, count: 64)
             let size = socklen_t(text.count)
-            let written = withUnsafePointer(to: &storage) { stored -> Bool in
-                switch Int32(stored.pointee.ss_family) {
-                case AF_INET:
-                    return stored.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
-                        var address = $0.pointee.sin_addr
-                        return inet_ntop(AF_INET, &address, &text, size) != nil
-                    }
-                case AF_INET6:
-                    return stored.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
-                        var address = $0.pointee.sin6_addr
-                        return inet_ntop(AF_INET6, &address, &text, size) != nil
-                    }
-                default:
-                    return false
+            let written: Bool
+            switch Int32(socketAddress.pointee.sa_family) {
+            case AF_INET:
+                written = socketAddress.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                    var address = $0.pointee.sin_addr
+                    return inet_ntop(AF_INET, &address, &text, size) != nil
                 }
+            case AF_INET6:
+                written = socketAddress.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
+                    var address = $0.pointee.sin6_addr
+                    return inet_ntop(AF_INET6, &address, &text, size) != nil
+                }
+            default:
+                written = false
             }
             return written ? text.withUnsafeBufferPointer { String(cString: $0.baseAddress!) } : nil
         }
