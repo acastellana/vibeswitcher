@@ -19,7 +19,7 @@ import VibeCore
 ///   which its chat on the page shows as it lands. Its transcript starts with a short conversation.
 /// - `answer`: `vibeswitcher answer CARD` with no text on the lead's open card, on a terminal of its own with the
 ///   card's code typed, as the user confirms what the page drafted (the live plan's slice 3); its output.
-/// - Its server opens terminals to its pages (`--test-web-terminal`, a scratch server's alone: LW-D12), and a third
+/// - Its server opens terminals to its pages (`--test-web-terminal`, typed: a scratch server's alone, LW-D12), and a third
 ///   session is a shell in a scratch folder (`example-shell`), whose screen the page's Terminal pane shows and types
 ///   into: the only session typed into from a page, and a scratch one (AGENTS.md's first hard rule).
 /// - Unless `VIBESWITCHER_SANDBOX_STILL` is set, the second session's status changes by itself every 20 s too, and the

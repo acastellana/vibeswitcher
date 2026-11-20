@@ -261,7 +261,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
 public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
     private let inner: WebSocketHandler
     private let note: @Sendable (String) -> Void
-    /// A scratch server's: the terminal's kinds go on to the hub (LW-D12).
+    /// A server with terminals (the user's node's watched, a scratch server's typed: LW-D12): the terminal's kinds go
+    /// on to the hub.
     private let terminals: Bool
     private let lock = NSLock()
     private var rights: [ObjectIdentifier: LiveRights] = [:]
