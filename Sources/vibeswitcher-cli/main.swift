@@ -15,7 +15,7 @@ let usage = """
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
            vibeswitcher switch COMMIT | rollback
-           vibeswitcher lead FOLDER [--goal TEXT] [--take-head] [--replace]
+           vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace]
            vibeswitcher questions [FOLDER] [--all] [--json]
            vibeswitcher board [FOLDER] [--json]
            vibeswitcher answer CARD [TEXT] | hold CARD

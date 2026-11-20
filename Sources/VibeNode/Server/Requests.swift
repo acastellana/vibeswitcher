@@ -534,7 +534,7 @@ public final class Requests: @unchecked Sendable {
 
     // MARK: lead
 
-    /// `lead FOLDER [--goal TEXT] [--take-head] [--replace]` (E4): the engine's start, its outcome as the result:
+    /// `lead FOLDER [--goal TEXT] [--take-head] [--replace] [--resume]` (E4): the engine's start, its outcome as the result:
     /// the project's id, the lead's session, what happened (`started`, `shown`, `waiting`), the program's absolute path
     /// (EN-D13), and notes; a refusal is `refused` with the engine's reason.
     private func lead(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
@@ -544,7 +544,7 @@ public final class Requests: @unchecked Sendable {
         let goal = request.args?["goal"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server starts no leads"))) }
         engine.startLead(folder: folder, goal: goal, takeHead: request.args?["takeHead"]?.bool == true,
-                         replace: request.args?["replace"]?.bool == true) { outcome in
+                         replace: request.args?["replace"]?.bool == true, resume: request.args?["resume"]?.bool == true) { outcome in
             reply(Self.reply(request.id, folder: folder, outcome))
         }
     }
