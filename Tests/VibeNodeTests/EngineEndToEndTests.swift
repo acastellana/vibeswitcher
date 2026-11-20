@@ -311,6 +311,148 @@ struct EngineEndToEndTests {
         #expect(handed, "the question isn't in the lead's inbox: \(node.inbox(lead.session.tty))\n\(node.said)")
     }
 
+    // MARK: Hosted sessions' identity is the host's record
+
+    /// A hosted session's status line, as `status --json` lists it on `terminal`.
+    static func listed(_ status: [String: Any], terminal: String) -> [String: Any]? {
+        ((status["sessions"] as? [[String: Any]]) ?? []).first { $0["terminal"] as? String == terminal }
+    }
+
+    /// The lead and its worker run a program by a name nothing in the process table takes for an agent (`runner`, not
+    /// `claude` and not under `claude/versions`): each is still its role's agent, by the host's record of what it started
+    /// (`HostedAgents`). The user's answer reaches the lead, the worker's `ask_lead` reaches it, and `status` lists both.
+    @Test func aHostedLeadAndWorkerByAnyNameAreStillTheLeadAndTheWorker() async throws {
+        let node = try await ScratchNode(scratch, claudeProgram: "share/agent-bin/runner")
+        defer { node.stop() }
+        let lead = try await node.askingLead("Which name for the parser?", options: ["Parser", "Reader"])
+        let agent = try #require(ProcessTable.info(pid: lead.agentPid))
+        #expect(agent.comm == "runner" && agent.agent == nil && agent.tty == lead.session.tty, "the process table takes it for none: \(agent)")
+        #expect(lead.agentPid == lead.session.childPID, "the program the host started is the agent: \(lead.session)")
+        #expect(await node.eventuallyStatus { status in
+            Self.listed(status, terminal: lead.session.tty).map { $0["agent"] as? String == "claude" && $0["hosted"] as? Bool == true && $0["role"] as? String == "lead" } == true
+        }, "\(node.said)")
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Reader"])
+        #expect(answered.status == 0 && answered.output.contains("answered: the lead is told"), "\(answered.output)\n\(node.said)")
+        let message = try await Self.usersMessage(node, card: lead.card)
+        let reached = await eventually(timeout: 60) {
+            node.inbox(lead.session.tty).contains { $0.from == .user && LeadVaultV2.digest($0.text) == message.digest && $0.agentPid == lead.agentPid }
+        }
+        #expect(reached, "the answer isn't in the lead's inbox: \(node.inbox(lead.session.tty))\n\(node.said)")
+        #expect(!node.said.contains("holding a message"), "\(node.said)")
+
+        // Its worker, started by the same program: its question reaches the lead, and `status` lists it as the worker.
+        let tools = node.fake.files(terminal: lead.session.tty)
+        let before = tools.calls().count
+        try Self.limits(node, maxSessions: 10)
+        try tools.call("add_task", ["title": "Write the parser", "goal": "Write the parser.", "acceptance": ["it builds"], "auto_advance": false])
+        try #require(await eventually(timeout: 120) { tools.calls().count == before + 1 }, "\(tools.calls())")
+        try tools.call("start_worker", ["task": "write-the-parser"])
+        let worker = try await Self.connected(node, label: "Worker: Write the parser", calling: "progress",
+                                              ["task": "write-the-parser", "text": "starting"])
+        try #require(await eventually(timeout: 120) { tools.calls().count == before + 2 }, "\(tools.calls())")
+        #expect(tools.text(of: tools.calls()[before + 1]).contains("Worker started on write-the-parser"), "\(tools.calls()[before + 1])")
+        let workerTools = node.fake.files(terminal: worker.tty)
+        try workerTools.call("ask_lead", ["task": "write-the-parser", "question": "Which grammar?"])
+        try #require(await eventually(timeout: 120) { workerTools.calls().count == 2 }, "\(node.said)")
+        let asked = workerTools.text(of: workerTools.calls()[1])
+        #expect(!asked.contains("no lead running"), "\(asked)")
+        let handed = await eventually(timeout: 60) {
+            node.inbox(lead.session.tty).contains { $0.text.contains("Which grammar?") && $0.agentPid == lead.agentPid }
+        }
+        #expect(handed, "the question isn't in the lead's inbox: \(node.inbox(lead.session.tty))\n\(node.said)")
+        #expect(await node.eventuallyStatus { status in
+            Self.listed(status, terminal: worker.tty).map { $0["agent"] as? String == "claude" && $0["role"] as? String == "worker" } == true
+        }, "\(node.said)")
+    }
+
+    /// A lead by any name after the host hands over to a new image: the record of what it started went with its
+    /// sessions, so the lead is still the lead (`status` lists it, the user's answer reaches it).
+    @Test func aHostedLeadByAnyNameIsStillTheLeadAfterAHostHandover() async throws {
+        let node = try await ScratchNode(scratch, claudeProgram: "share/agent-bin/runner")
+        defer { node.stop() }
+        let lead = try await node.askingLead("Which name for the parser?", options: ["Parser", "Reader"])
+        try await node.handOver()
+        #expect(await node.eventuallyStatus { ($0["host"] as? [String: Any])?["state"] as? String == "connected" }, "\(node.said)")
+        let after = try #require(try node.sessions().first { $0.id == lead.session.id })
+        #expect(after.isLive && after.agent == "claude" && after.childPID == lead.agentPid && after.tty == lead.session.tty, "\(after)")
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Reader"])
+        #expect(answered.status == 0 && answered.output.contains("answered: the lead is told"), "\(answered.output)\n\(node.said)")
+        let message = try await Self.usersMessage(node, card: lead.card)
+        let reached = await eventually(timeout: 60) {
+            node.inbox(lead.session.tty).contains { $0.from == .user && LeadVaultV2.digest($0.text) == message.digest && $0.agentPid == lead.agentPid }
+        }
+        #expect(reached, "the answer isn't in the lead's inbox: \(node.inbox(lead.session.tty))\n\(node.said)")
+        #expect(await node.eventuallyStatus { status in
+            Self.listed(status, terminal: lead.session.tty).map { $0["agent"] as? String == "claude" && $0["role"] as? String == "lead" } == true
+        }, "\(node.said)")
+    }
+
+    /// A process on the lead's own terminal that names itself `claude` (a child of the lead's, by a link of that name to
+    /// `sleep`), the board naming it as the lead's agent: it isn't the program the host started, so the user's answer is
+    /// held, never posted for it.
+    @Test func aProcessThatNamesItselfClaudeOnTheLeadsTerminalIsNotTheLead() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let lead = try await node.askingLead("Which name for the parser?", options: ["Parser", "Reader"])
+        let impostor = node.root.appendingPathComponent("impostor/claude")
+        try FileManager.default.createDirectory(at: impostor.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: impostor.path, withDestinationPath: "/bin/sleep")
+        let files = node.fake.files(terminal: lead.session.tty)
+        try Self.tell(files, ["op": "child", "program": impostor.path])
+        try #require(await eventually(timeout: 60) { ((Self.state(files)["children"] as? [Int]) ?? []).count == 1 }, "\(Self.state(files))")
+        let child = try #require(((Self.state(files)["children"] as? [Int]) ?? []).first.map(Int32.init))
+        defer { kill(child, SIGKILL) }
+        let named = try #require(ProcessTable.info(pid: child))
+        #expect(named.agent == .claude && named.tty == lead.session.tty, "the process table takes it for Claude on the lead's terminal: \(named)")
+        try BoardStore(root: lead.repo.path).update { $0.leadPid = child }
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Parser"])
+        try #require(answered.status == 0, "\(answered.output)\n\(node.said)")
+        #expect(await node.eventuallyLead(lead.repo) { ($0["held"] as? Int) == 1 }, "\(node.said)")
+        #expect(!node.inbox(lead.session.tty).contains { $0.agentPid == child }, "\(node.inbox(lead.session.tty))")
+    }
+
+    /// A scratch node lists the sessions its host started as agents, by its record, and nothing else: not a hosted plain
+    /// shell's program named `claude`, nor a `claude` on a terminal of the machine's it didn't start.
+    @Test func aScratchNodeListsOnlyTheAgentSessionsItsHostStarted() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let links = node.root.appendingPathComponent("links")
+        try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+        for name in ["claude", "runner"] {
+            try FileManager.default.createSymbolicLink(atPath: links.appendingPathComponent(name).path, withDestinationPath: "/bin/sleep")
+        }
+        let quote = RecentProjects.shellQuote
+        // Started as an agent, by any name.
+        let request = SpawnRequest(cwd: node.home.path, command: "exec \(quote(links.appendingPathComponent("runner").path)) 600", env: [:],
+                                   cols: 100, rows: 30, keepShell: false, label: "Agent", agent: "claude")
+        let reply = try await offPool { [socket = node.socket] in try HostCall.request(.spawn(request), socket: socket, appKey: nil, timeout: 60) }
+        guard case .spawned(let agentSession) = reply else { Issue.record("\(reply)"); return }
+        // A plain shell whose program names itself `claude`.
+        let shell = try await node.spawn("exec \(quote(links.appendingPathComponent("claude").path)) 600")
+        // A `claude` on a terminal of its own, outside the host: a session leader on a pty (`pty.fork`).
+        let outside = Process()
+        outside.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        outside.arguments = ["-I", "-c", "import os, pty, sys, time\npid, fd = pty.fork()\nif pid == 0:\n    os.execv(sys.argv[1], [sys.argv[1], '600'])\ntime.sleep(600)",
+                             links.appendingPathComponent("claude").path]
+        try outside.run()
+        defer { outside.terminate() }
+        var stray: ProcInfo?
+        try #require(await eventually(timeout: 60) {
+            stray = ProcessTable.trySnapshot()?.values.first { $0.ppid == outside.processIdentifier && $0.comm == "claude" && $0.tty != nil }
+            return stray != nil
+        })
+        let strayTTY = try #require(stray?.tty)
+        defer { if let pid = stray?.pid { kill(pid, SIGKILL) } }
+        #expect(stray?.agent == .claude && ProcessTable.info(pid: shell.childPID)?.agent == .claude, "both named Claude: \(String(describing: stray))")
+        // A scan that lists the agent session has run: by then neither of the others is listed.
+        var status: [String: Any] = [:]
+        #expect(await node.eventuallyStatus { now in
+            status = now
+            return Self.listed(now, terminal: agentSession.tty).map { $0["agent"] as? String == "claude" && $0["hosted"] as? Bool == true } == true
+        }, "\(status)\n\(node.said)")
+        #expect(Self.listed(status, terminal: shell.tty) == nil && Self.listed(status, terminal: strayTTY) == nil, "\(status)")
+    }
+
     // MARK: A real lead
 
     /// The user's throwaway Claude Code config folder, named on the run's command line only.

@@ -3,10 +3,12 @@
 
 import { h, keyed, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
-import { TASKS, TASK_ORDER, FINISHED, taskCount, since, clock } from '../words.js';
-import { sessionHref } from '../ui.js';
+import { TASKS, TASK_ORDER, TASK_GROUPS, taskCount, taskGroup, taskState, taskTone, since, clock } from '../words.js';
+import { sessionHref, boardHref } from '../ui.js';
 
-const byAttention = (a, b) => TASK_ORDER.indexOf(a.status) - TASK_ORDER.indexOf(b.status);
+// The node's groups first (needs attention, running, waiting, done), then the board's order; the mock's boards by status.
+const groupRank = (task) => TASK_GROUPS.findIndex((group) => group.id === taskGroup(task));
+const byAttention = (a, b) => groupRank(a) - groupRank(b) || (a.position ?? 0) - (b.position ?? 0) || TASK_ORDER.indexOf(a.status) - TASK_ORDER.indexOf(b.status);
 const dot = (status) => h('span', { class: `dot tone-${TASKS[status]?.tone || 'idle'}`, 'aria-hidden': 'true' });
 
 // The session to open for a task: its verifier while it's in review, else its worker.
@@ -15,13 +17,16 @@ const sessionOf = (task) => (task.status === 'review' && task.verifier) || task.
 export function teamStrip(app) {
   const counts = h('span', { class: 'strip-counts' });
   const teamButton = h('button', { class: 'strip-team', type: 'button', title: 'Show the team in the inspector', onclick: () => app.ui.showInspector('team') }, icon('team', 14), 'Team');
-  const el = h('section', { class: 'strip', 'aria-label': 'Team' }, teamButton, counts);
+  const boardLink = h('a', { class: 'strip-board', title: 'The lead’s board, on a page of its own' }, 'Board');
+  const el = h('section', { class: 'strip', 'aria-label': 'Team' }, teamButton, counts, boardLink);
   let drawn = '';
 
   return {
     el,
     update(lead) {
       const tasks = app.store.state.boards.get(lead.lead)?.tasks || [];
+      boardLink.hidden = !app.store.state.boards.has(lead.lead);
+      if (!boardLink.hidden) boardLink.setAttribute('href', boardHref(lead.lead));
       const said = TASK_ORDER.map((status) => [status, tasks.filter((task) => task.status === status).length]).filter(([, count]) => count > 0);
       const now = JSON.stringify(said);
       if (now === drawn) return;
@@ -31,8 +36,10 @@ export function teamStrip(app) {
   };
 }
 
-// What a task's row says under its title: what it waits on, else its last checkpoint.
+// What a task's row says under its title: the node's line, else (the mock's boards) what it waits on, else its last
+// checkpoint.
 function dimLine(task, board) {
+  if (task.line !== undefined) return task.line || '';
   if (task.status === 'blocked' && task.after?.length) {
     const titles = task.after.map((slug) => board.tasks.find((other) => other.slug === slug)?.title || slug);
     return 'Waits on ' + titles.join(', ');
@@ -75,10 +82,9 @@ export function teamTasks(app) {
     return {
       el,
       update(task) {
-        const word = TASKS[task.status] || { label: task.status, tone: 'idle' };
-        mark.className = `dot tone-${word.tone}`;
+        mark.className = `dot tone-${taskTone(task)}`;
         setText(title, task.title);
-        setText(state, word.label);
+        setText(state, taskState(task));
         time.dataset.since = task.since;
         setText(time, since(task.since));
         setText(dim, dimLine(task, board));
@@ -96,8 +102,8 @@ export function teamTasks(app) {
       board = app.store.state.boards.get(session.lead);
       selected = session.role === 'lead' ? null : session.id;
       const tasks = [...(board?.tasks || [])].sort(byAttention);
-      const current = tasks.filter((task) => !FINISHED.has(task.status));
-      const finished = tasks.filter((task) => FINISHED.has(task.status));
+      const current = tasks.filter((task) => taskGroup(task) !== 'done');
+      const finished = tasks.filter((task) => taskGroup(task) === 'done');
       empty.hidden = tasks.length > 0;
       keyed(list, rows, current, (task) => task.slug, row, { move: true, enter: true });
       keyed(finishedList, finishedRows, finished, (task) => task.slug, row);

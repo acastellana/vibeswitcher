@@ -137,9 +137,11 @@ final class TestClient {
     }
 
     /// Spawns a scratch program and waits for the reply. `label`: as the app or a lead names it ("Worker: fix-x").
-    func spawn(_ command: String?, cwd: String = "/tmp", label: String = "Test") async throws -> HostSession {
+    /// `agent`: the agent the host records the session was started as (on Linux the tools take a hosted session's agent
+    /// from that record, `HostedAgents`, never from its program's name).
+    func spawn(_ command: String?, cwd: String = "/tmp", label: String = "Test", agent: String? = nil) async throws -> HostSession {
         let seq = send(.spawn(SpawnRequest(cwd: cwd, command: command, env: [:], cols: 80, rows: 24, keepShell: false,
-                                           label: label, agent: nil)))
+                                           label: label, agent: agent)))
         #expect(await eventually { reply(to: seq) != nil })
         guard case .spawned(let session) = reply(to: seq) else { throw CancellationError() }
         return session

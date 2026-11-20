@@ -16,6 +16,8 @@ const vector = (name) => structuredClone(vectors[name]);
 const EPOCH = vector('hello.web').epoch;
 const LEAD = 'local:3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f';
 const CARD = vector('snapshot.cards').entries[0].id;
+// The collections a page follows (socket.js): node, sessions, leads, cards and the leads' boards.
+const FOLLOWED = 5;
 
 // A page on a fake socket and clock. `hash`: the address's fragment; `token`: one this tab kept.
 function rig({ hash = '#pair=k3J1mZ0vY8q2Xw5rT7uB9A', token = null, build = vector('hello.web').assets } = {}) {
@@ -59,7 +61,7 @@ function rig({ hash = '#pair=k3J1mZ0vY8q2Xw5rT7uB9A', token = null, build = vect
 function serve(r, { epoch = EPOCH, snapshots = {}, hello = {} } = {}) {
   r.socket().accept();
   r.socket().say({ ...vector('hello.web'), epoch, ...hello });
-  const subscribes = r.sent('subscribe').slice(-4);
+  const subscribes = r.sent('subscribe').slice(-FOLLOWED);
   for (const request of subscribes) {
     const { sub, collection } = request.args;
     const given = snapshots[collection];
@@ -114,12 +116,12 @@ test('a page with neither a code nor a token says it isn’t paired and opens no
   assert.equal(r.store.state.connection, 'unpaired');
 });
 
-test('the four subscriptions are asked after hello, and the page is live once each has its snapshot', async () => {
+test('the five subscriptions are asked after hello, and the page is live once each has its snapshot', async () => {
   const r = rig();
   await r.feed.start();
   r.socket().accept();
   r.socket().say(vector('hello.web'));
-  assert.deepEqual(r.sent('subscribe').map((m) => [m.args.sub, m.args.collection]), [['s0', 'node'], ['s1', 'sessions'], ['s2', 'leads'], ['s3', 'cards']]);
+  assert.deepEqual(r.sent('subscribe').map((m) => [m.args.sub, m.args.collection]), [['s0', 'node'], ['s1', 'sessions'], ['s2', 'leads'], ['s3', 'cards'], ['s4', 'boards']]);
   for (const message of r.sent('subscribe')) assert.equal(validate('frame', message), null);
   assert.equal(r.store.state.connection, 'connecting', 'no half-loaded list');
   serveSnapshotsOnly(r);
@@ -156,7 +158,7 @@ test('aDuplicateDeltaIsDropped', async () => {
   delta.changes[0].value.shownStatus = 'idle';
   r.socket().say(delta);
   assert.equal(statusOf(r), 'needs-you', 'seq 42 held already: not applied twice');
-  assert.equal(r.sent('subscribe').length, 4, 'and it’s no gap');
+  assert.equal(r.sent('subscribe').length, FOLLOWED, 'and it’s no gap');
 });
 
 test('aDeltaOutOfOrderIsNeverApplied', async () => {
@@ -171,12 +173,12 @@ test('aDeltaOutOfOrderIsNeverApplied', async () => {
 test('aGapSubscribesAgainWithSince', async () => {
   const r = await live();
   r.socket().say(vector('delta.session-gone'));
-  const again = r.sent('subscribe').slice(4);
+  const again = r.sent('subscribe').slice(FOLLOWED);
   assert.equal(again.length, 1);
   assert.deepEqual(again[0].args, { sub: 's1', collection: 'sessions', since: { epoch: EPOCH, seq: 41 } });
   // One ask per gap, not one per delta that follows it.
   r.socket().say({ ...vector('delta.session-gone'), prev: 45, seq: 46 });
-  assert.equal(r.sent('subscribe').length, 5);
+  assert.equal(r.sent('subscribe').length, FOLLOWED + 1);
   // Answered as a resume: the catch-up delta from 41 applies.
   r.socket().say({ v: 1, re: again[0].id, ok: true, result: { sub: 's1', mode: 'resume' } });
   r.socket().say({ ...vector('delta.session-gone'), prev: 41, seq: 47 });

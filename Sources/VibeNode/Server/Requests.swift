@@ -82,6 +82,8 @@ public final class Requests: @unchecked Sendable {
     /// The `seq` a live stream is at, by collection (`LiveHub.seq(of:)`, set by `NodeLive`): a draft's `applied`. On
     /// `queue`.
     public var liveSeq: ((String) -> Int)?
+    /// Each lead's board value by project (`LiveBoards`, set by `NodeLive`): `board`'s answer. On `queue`.
+    public var boards: (() -> [String: NodeWire.Value])?
     /// A scratch server's `--test-web-pair`: `web.open` is taken from any process of the uid, its voice and typed code
     /// not asked (the sandbox's and the tests' scratch form). Never on the user's node (`ServerArguments` refuses it).
     public var openWebForAnyone = false
@@ -221,9 +223,11 @@ public final class Requests: @unchecked Sendable {
         case "stop": stop(request, reply: reply)
         case "lead": lead(request, reply: reply)
         case "questions": questions(request, reply: reply)
+        case "board": board(request, reply: reply)
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)
         case "tell": tell(request, reply: reply)
+        case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)
         case "base.show": baseShow(request, reply: reply)
@@ -371,6 +375,22 @@ public final class Requests: @unchecked Sendable {
     /// `needs-you`, `working`, …: the glossary's word in kebab case, as `LocalSession.statusWord`.
     public static func statusWord(_ status: SessionStatus) -> String {
         status.word.rawValue.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1-$2", options: .regularExpression).lowercased()
+    }
+
+    // MARK: seen
+
+    /// `seen` with `session` (a node's session id): the session counts as seen now (`NodeSessions.acknowledge`,
+    /// the app's looking at its tab), so its finished turn reads `idle`. A web page sends it while it has the session
+    /// open. It changes nothing but the seen mark, so it needs no voice: anyone that reads (a page's `read` right).
+    private func seen(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let id = request.args?["session"]?.string, !id.isEmpty else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "seen needs a session")))
+        }
+        guard let sessions else { return reply(.init(re: request.id, error: .init(.notYet, "this server keeps no session list"))) }
+        sessions.acknowledge(id) { found in
+            reply(found ? .init(re: request.id, result: .object([:]))
+                : .init(re: request.id, error: .init(.gone, "no session \(ConfigSeal.inert(id, limit: 80)) on this node")))
+        }
     }
 
     // MARK: hooks

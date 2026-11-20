@@ -707,6 +707,49 @@ struct LeadStartTests {
         #expect(command.contains(world.host.folder.appendingPathComponent("build/bin/vibeswitcher-mcp").path))
     }
 
+    /// The lead starts on the run the app gives it (`LeadLaunch.leadRun`): with workflow.md naming neither, Fable and no
+    /// advisor (lead_advisor is only for a lead on Opus).
+    @Test func aLeadStartsOnFableByDefault() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        _ = try started(await world.start())
+        let command = try #require(world.spawns.value.first?.command ?? nil)
+        #expect(command.contains("--model 'fable'"), "\(command.prefix(400))")
+        #expect(!command.contains("--advisor"), "\(command.prefix(400))")
+    }
+
+    /// workflow.md's lead_model and lead_advisor are on the lead's command line.
+    @Test func aLeadStartsOnTheWorkflowsModelAndAdvisor() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        try Self.writeWorkflow("lead_model: opus\nlead_advisor: fable", repo: world.repo)
+        _ = try started(await world.start())
+        let command = try #require(world.spawns.value.first?.command ?? nil)
+        #expect(command.contains("--model 'opus'"), "\(command.prefix(400))")
+        #expect(command.contains("--advisor 'fable'"), "\(command.prefix(400))")
+    }
+
+    /// While the account's kept usage holds Fable back (under the node's root, where its tool servers keep it), a lead
+    /// meant for Fable starts on Opus and its Fable advisor is dropped, as the app's.
+    @Test func aLeadMeantForFableStartsOnOpusWhileFableIsHeldBack() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let now = Date().timeIntervalSince1970
+        AccountUsageStore(file: world.host.root.appendingPathComponent("account-usage.json"), home: world.host.home.path)
+            .record([AccountUsage.Limit(name: "weekly", model: "fable", usedPercent: 100, resetsAt: now + 3600, at: now, reached: true)])
+        _ = try started(await world.start())
+        let command = try #require(world.spawns.value.first?.command ?? nil)
+        #expect(command.contains("--model 'opus'"), "\(command.prefix(400))")
+        #expect(!command.contains("--advisor"), "\(command.prefix(400))")
+    }
+
+    /// Writes the repository's workflow.md with `settings` as its front matter.
+    static func writeWorkflow(_ settings: String, repo: String) throws {
+        let file = URL(fileURLWithPath: BoardStore(root: repo).folder).appendingPathComponent("workflow.md")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("---\n\(settings)\n---\n\n# Workflow\n".utf8).write(to: file)
+    }
+
     /// The lead's session gets its TMPDIR under the scratch node's root (`<root>/tmp`, as `HostLink`'s sweep reads it),
     /// never the shared temporary folder the user's node uses.
     @Test func theLeadsTemporaryFolderIsUnderTheScratchRoot() async throws {

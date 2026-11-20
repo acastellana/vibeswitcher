@@ -335,6 +335,31 @@ struct WitnessTests {
         #expect(BoardStore(root: world.repo).load().task("budgeted")?.overBudget?.minutes == 1)
     }
 
+    /// The app's `noteWorking` (`03d03896`): the witness tells the vault which sessions it sees at work, so the vault's
+    /// own count of a worker's time (what small_task_min goes by) runs on a node too.
+    @Test func theWitnessTellsTheVaultWhichWorkersItSeesAtWork() async throws {
+        let world = try await DeliveryWorld.make(scratch, scan: true)
+        defer { world.stop() }
+        let lead = try await world.lead(idle: false)
+        let worker = try await NodeHarness.start(on: world.host, fake: world.fake, cwd: try worktree(world, "small"), label: "Worker: small")
+        let sessions = try #require(world.sessions)
+        try #require(await eventually(timeout: 60) { world.queue.sync { sessions.sessions.contains { $0.hostID == worker.session.id } } })
+        let (book, folder, repo) = (world.host.book, world.host.folder, world.repo)
+        let (leadID, workerID) = (lead.session.id.uuidString, worker.session.id.uuidString)
+        try await offPool {
+            let tools = book.vault(folder: folder, as: { .session(leadID) })
+            try tools.bind(try tools.issue(role: .worker, root: repo, task: "small"), root: repo, session: workerID)
+        }
+        try task(world, "small", .running) { $0.worker = workerID }
+        // Mid-turn, as its hooks say.
+        try world.hook(worker, "PreToolUse")
+        let vault = world.host.vault
+        let counting = { (try? vault.smallTaskFacts(root: repo, task: "small"))??.workingSince != nil }
+        #expect(!counting())
+        #expect(await eventually(timeout: 60) { world.engine.refresh(); return counting() }, "\(String(describing: try? vault.smallTaskFacts(root: repo, task: "small")))")
+        #expect(world.queue.sync { world.engine.workingTold[repo]?.sessions.contains(workerID) } == true)
+    }
+
     /// The ended workers and verifiers of a finished task leave the host's list; an ended worker of a task still under
     /// way stays (why it died is worth a look).
     @Test func finishedTeamsEndedSessionsAreRemoved() async throws {

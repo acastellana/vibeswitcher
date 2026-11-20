@@ -22,6 +22,7 @@ enum StopCommand {
     static func run(_ arguments: [String]) -> Int32 {
         guard arguments.isEmpty else { return Say.usage(usage) }
         let context = NodeContext.current()
+        if let unbuilt = context.usersNodeRefusal { return Say.unbuilt(unbuilt) }
         context.sayScratch()
         let home = VibePaths.accountHome
         let prefix = NodeFolders.defaultPrefix(accountHome: home)
@@ -33,7 +34,7 @@ enum StopCommand {
         // The record the fallback showed for the code: the stopper ends only that one (the step 8 sweep).
         let shown = Shown()
         let steps = StopSequence.Steps(
-            kind: { StopSequence.kind(isScratch: context.isScratch, onTheMac: Platform.CodeIdentity.isAvailable,
+            kind: { StopSequence.kind(isScratch: context.isScratch, onTheMac: Platform.Service.manager == .launchd,
                                       mode: { NodeFolders.mode(runtimeFolder: runtime) }) },
             installedBuild: { NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: prefix) },
             server: { server(context, connection) },

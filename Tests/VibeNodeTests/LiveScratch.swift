@@ -37,7 +37,7 @@ struct HookedAgent {
         if !FileManager.default.fileExists(atPath: claude.path) {
             try copyClosedOnExec(URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path, to: claude.path)
         }
-        let session = try await node.spawn("exec '\(claude.path)' 600", cwd: folder.path)
+        let session = try await node.spawn("exec '\(claude.path)' 600", cwd: folder.path, agent: "claude")
         var found: pid_t = 0
         let started = await eventually(timeout: 60) {
             found = Platform.Processes.children(session.childPID).first ?? session.childPID

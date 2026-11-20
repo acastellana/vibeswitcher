@@ -188,7 +188,7 @@ extension LeadEngine {
                     if let why = Self.notTheLead(agent, root: root, board: files.names.board(root), vault: vault, hosted: hosted, runs: runs) {
                         return .failure(why)
                     }
-                } else if !runs(agent) {
+                } else if !runs(agent, hosted) {
                     return .failure(Refusal("its agent doesn't run on its terminal (it left to a shell, or ended)"))
                 }
                 guard box == .empty else { return .failure(Refusal("its box isn't empty (\(Self.word(box)))")) }
@@ -264,7 +264,7 @@ extension LeadEngine {
     /// the lead's role to another session (or none), the board names it on another terminal than the session host runs
     /// it on, or its agent left its terminal; nil when it is.
     static func notTheLead(_ lead: LeadAgent, root: String, board: LeadBoard, vault: LeadVault, hosted: [HostSession],
-                           runs: (LeadAgent) -> Bool) -> Refusal? {
+                           runs: (LeadAgent, [HostSession]) -> Bool) -> Refusal? {
         guard let named = LeadHandover.named(board), named.pid == lead.pid, named.tty == lead.tty, named.session == lead.session else {
             return Refusal("the board names another lead now")
         }

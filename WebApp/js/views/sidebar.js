@@ -5,7 +5,7 @@
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { sessionMark, icon } from '../marks.js';
 import { STATES, stateOf, since, plural } from '../words.js';
-import { arrange, summary, sessionHref, projectOf, teamSummary } from '../ui.js';
+import { arrange, summary, sessionHref, boardHref, projectOf, teamSummary } from '../ui.js';
 
 function sessionRow(app) {
   const mark = sessionMark(20);
@@ -79,13 +79,23 @@ function section(app) {
   const title = h('span');
   const count = h('span', { class: 'count' });
   const list = h('ul', { class: 'rows' });
-  const el = h('section', { class: 'group' }, h('h2', { class: 'group-head' }, title, count), list);
+  // A project with a lead's board: its header opens the board (Projects only; Attention groups by state).
+  const board = h('a', { class: 'group-board', title: 'The lead’s board', hidden: true }, icon('team', 12), 'Board');
+  const el = h('section', { class: 'group' }, h('h2', { class: 'group-head' }, title, count, board), list);
   const rows = new Map();
   return {
     el,
     update(group) {
       setText(title, group.title);
       setText(count, String(group.rows.filter((row) => !row.nested).length));
+      const lead = app.ui.state.grouping === 'projects'
+        ? group.rows.find((row) => row.session.role === 'lead' && app.store.state.boards.has(row.session.lead)) : null;
+      board.hidden = !lead;
+      if (lead) {
+        board.setAttribute('href', boardHref(lead.session.lead));
+        const current = app.ui.state.route.name === 'board' && app.ui.state.route.id === lead.session.lead;
+        if (current) board.setAttribute('aria-current', 'page'); else board.removeAttribute('aria-current');
+      }
       keyed(list, rows, group.rows, (row) => row.session.id, () => sessionRow(app), { enter: true });
     },
   };

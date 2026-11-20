@@ -278,11 +278,15 @@ extension LeadEngine {
                 }
                 let policy = WorkingPolicy.load(from: nodeRoot.appendingPathComponent("policy.md"))
                 let limits = MacLimits.load(from: nodeRoot.appendingPathComponent("mac-limits.json"))
+                // lead_model (Fable unless set), Opus while Fable is held back; lead_advisor only on Opus.
+                let base = RecentProjects.shellQuote(program)
+                let run = Self.leadRun(workflow, base: base, nodeRoot: nodeRoot, home: home)
                 let launch = try LeadLaunch.prepare(
-                    role: .lead, root: root, task: nil, base: RecentProjects.shellQuote(program),
+                    role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy, limits: limits),
                     start: LeadPrompts.leadStart(root: root, goal: start.goal, note: Self.goalNote, replaced: handed),
-                    server: server, name: name, folder: vault.runFolder(root: root, name: name), cwd: root, temporary: temporary)
+                    server: server, name: name, model: run.model, advisor: run.advisor,
+                    folder: vault.runFolder(root: root, name: name), cwd: root, temporary: temporary)
                 return (grant, launch)
             }
             if case .failure = prepared, let issued { try? vault.revoke(issued, root: root) }
@@ -357,6 +361,15 @@ extension LeadEngine {
     /// and audits never wait on the account's slots nor show in them: a suite that runs under `vs-heavy` holds one of
     /// those itself, and on a machine with a single slot (under 12 cores) its scratch lead's merge waited for it until
     /// the suite ended (the `v2 linux` run of 2026-11-17, a 4-core runner).
+    /// What a lead starts on, by the app's rule (`LeadController.leadRun`, `LeadLaunch.leadRun`): `base`'s model (else
+    /// Claude's settings in `home`) is what no `--model` would run, and the account's usage kept under the node's root
+    /// (where its leads' tool servers keep it, `AccountUsageStore` at `VibePaths.root`) says whether Fable is held back.
+    static func leadRun(_ workflow: LeadWorkflow, base: String, nodeRoot: URL, home: String) -> LeadLaunch.Run {
+        let usage = AccountUsageStore(file: nodeRoot.appendingPathComponent("account-usage.json"), home: home)
+        return LeadLaunch.leadRun(workflow, defaultModel: LeadWorkflow.claudeModel(command: base, home: home),
+                                  fableHeldBack: usage.load().fableHeldBack() != nil)
+    }
+
     func environment(_ launch: LeadLaunch.Prepared, program: String) -> [String: String] {
         var environment = launch.environment
         environment[RoleProgram.variable] = program

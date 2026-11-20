@@ -4,7 +4,7 @@ import VibeCore
 @testable import VibeNode
 
 /// `scripts/sandbox-server.sh`'s node (the live plan's G1): a `ScratchNode` with the server's web on, two fake sessions
-/// and a fake lead with a question open, for a person to look at in a browser. **Not a test:** it runs only when the
+/// and a fake lead with a question open and a made-up board, for a person to look at in a browser. **Not a test:** it runs only when the
 /// script names its folder (`VIBESWITCHER_SANDBOX_SERVER`), and it lives until it is told to quit, or until the 24 h
 /// limit. Everything is the tests' own: the scratch host and server built from this worktree, `FakeClaude` as the
 /// lead, stage 1's fake agent as the sessions; nothing reaches the user's `~/.vibeswitcher`, `~/.claude` or node.
@@ -12,12 +12,16 @@ import VibeCore
 /// The script talks to it through `<folder>/control`: it writes `req-<id>` (one word: `url`, `flip`, `quit`) and reads
 /// `rep-<id>` (`ok` or `error` on the first line, then the answer). It writes `started` once the node is up.
 ///
+/// - `shell`: the shell session's id on the page (its address is `#/s/<id>`).
 /// - `url`: a fresh pairing code (`web.open` in a scratch server's form, `--test-web-pair`), the page's address.
 /// - `flip`: the first session's turn ends, or starts again (`done` and `working` by turns), as its hook would say.
 /// - `chat`: the first session's agent takes its next step in its transcript (a command and its output, or a reply),
 ///   which its chat on the page shows as it lands. Its transcript starts with a short conversation.
 /// - `answer`: `vibeswitcher answer CARD` with no text on the lead's open card, on a terminal of its own with the
 ///   card's code typed, as the user confirms what the page drafted (the live plan's slice 3); its output.
+/// - Its server opens terminals to its pages (`--test-web-terminal`, a scratch server's alone: LW-D12), and a third
+///   session is a shell in a scratch folder (`example-shell`), whose screen the page's Terminal pane shows and types
+///   into: the only session typed into from a page, and a scratch one (AGENTS.md's first hard rule).
 /// - Unless `VIBESWITCHER_SANDBOX_STILL` is set, the second session's status changes by itself every 20 s too, and the
 ///   first session's agent takes a step every 8 s, so an open page shows the list and the chat living.
 @Suite(NodeTraits.linuxOnly)
@@ -31,7 +35,8 @@ struct SandboxServerDriver {
         let control = folder.appendingPathComponent("control", isDirectory: true)
         let environment = ProcessInfo.processInfo.environment
         let port = environment["VIBESWITCHER_SANDBOX_PORT"].flatMap(UInt16.init) ?? 0
-        var arguments = ["--server-arg", ServerArguments.testWebPortFlag + String(port), "--server-arg", ServerArguments.testWebPairFlag]
+        var arguments = ["--server-arg", ServerArguments.testWebPortFlag + String(port), "--server-arg", ServerArguments.testWebPairFlag,
+                         "--server-arg", ServerArguments.testWebTerminalFlag]
         if let root = environment["VIBESWITCHER_SANDBOX_WEB_ROOT"] { arguments += ["--server-arg", ServerArguments.testWebRootFlag + root] }
         let scratch = Scratch()
         let node = try await ScratchNode(scratch, holdFirstLook: true, hostArguments: arguments)
@@ -47,6 +52,25 @@ struct SandboxServerDriver {
         try site.hook(node, "UserPromptSubmit", transcript: transcript)
         let api = try await HookedAgent.start(node, project: "example-api")
         try api.hook(node, "PermissionRequest")
+
+        // A shell for the Terminal pane, in a scratch folder with a few files, its prompt short.
+        let shellFolder = node.home.appendingPathComponent("example-shell")
+        for name in ["src", "tests"] {
+            try FileManager.default.createDirectory(at: shellFolder.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
+        for name in ["README.md", "package.json", "src/index.js"] {
+            try Data("// \(name)\n".utf8).write(to: shellFolder.appendingPathComponent(name))
+        }
+        // The node lists agents' sessions, as the host started them (`HostedAgents`): the shell is started as Claude, a copy
+        // of bash named `claude` (as the fake agents run as a copy of sleep), with a hook state saying its turn is done.
+        let shellBin = node.root.appendingPathComponent("shell-bin")
+        try FileManager.default.createDirectory(at: shellBin, withIntermediateDirectories: true)
+        let bash = shellBin.appendingPathComponent("claude")
+        try copyClosedOnExec(URL(fileURLWithPath: "/bin/bash").resolvingSymlinksInPath().path, to: bash.path)
+        let shell = try await node.spawn("printf '\\033[1mexample-shell\\033[0m: a scratch session, typed into from the page.\\n\\n'; "
+            + "PS1='\\[\\033[32m\\]example-shell\\[\\033[0m\\] $ ' exec '\(bash.path)' --noprofile --norc -i", cwd: shellFolder.path, label: "Shell",
+                                     agent: "claude")
+        try HookedAgent(session: shell, pid: shell.childPID, folder: shellFolder).hook(node, "Stop")
 
         // A lead on a scratch repository, started as the user starts one (the accepts, then `lead`, each code typed),
         // asking the user one question through its tool server.
@@ -66,6 +90,14 @@ struct SandboxServerDriver {
         try tools.call("ask_user", ["question": "Launch the onboarding page to the testers on Thursday, or wait for the copy review?",
                                     "options": ["Thursday", "Wait for the review"]])
         try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)")
+        // A made-up board for the lead (the board view's): its running task worked by example-site, so its row opens
+        // that session's chat; example-api checks the one in review.
+        let made = WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id, verifier: api.session.id)
+        try BoardStore(root: repo.path).update { $0.tasks = made.tasks }
+        // A new task's `since` is stamped its creation: the times it has been in its state, set again (no status changes).
+        try BoardStore(root: repo.path).update { board in
+            for index in board.tasks.indices { board.tasks[index].since = made.tasks.first { $0.id == board.tasks[index].id }?.since }
+        }
 
         try Data("\(getpid())\n\(node.root.path)\n".utf8).write(to: control.appendingPathComponent("started"))
 
@@ -90,6 +122,8 @@ struct SandboxServerDriver {
                 try? FileManager.default.removeItem(at: request)
                 var reply = "ok\n"
                 switch word {
+                case "shell":
+                    reply += NodeIds.session(host: shell.id)
                 case "url":
                     do { reply += try LiveScratch.open(node).url } catch { reply = "error\n\(error)" }
                 case "flip":
@@ -111,7 +145,7 @@ struct SandboxServerDriver {
                 case "quit":
                     reply += "quitting"
                 default:
-                    reply = "error\nunknown command \(word): url, flip, chat, answer, quit"
+                    reply = "error\nunknown command \(word): url, shell, flip, chat, answer, quit"
                 }
                 let answer = control.appendingPathComponent("rep-" + name.dropFirst(4))
                 try Data(reply.utf8).write(to: answer.appendingPathExtension("part"))

@@ -1,0 +1,250 @@
+import Foundation
+import VibeCore
+
+/// A lead's board as the `boards` stream and `vibeswitcher board` carry it (the parity table's gap 4): one value per
+/// project, its tasks as a person reads them at a glance. What each task is (its status as the board has it), the group
+/// it is shown in, its state in the Mac's Team words ("Working", "Rework 1", "Ready to merge", "Blocked"…), the one dim
+/// line under it (what it waits on, why it failed, its last checkpoint), and the facts behind them: its worker's
+/// session (the page links to its chat), its review, times, attempts, budget, audit and merge.
+///
+/// **A board is the sessions' writing** (the lead's tool server writes it, and what a worker reports lands in it), so
+/// every string here is inert text: controls, format characters and the like replaced (`text`), combining marks at most
+/// `marksKept` a character, each string capped in bytes of UTF-8, a blocker at most `blockerLines` lines, and at most
+/// `mostTasks` tasks and `mostBytes` encoded a board (the ones that need someone first: the rest are counted in
+/// `more`). No path in it is read or followed: a worktree isn't sent, and a worker's id is sent only
+/// as a session id when it is a host's UUID. A finished task is sent for a day after it finished (`doneFor`), so the
+/// page can show what was done today; older ones are the board's history.
+///
+/// The groups (`group`), in the order shown:
+/// - `attention`: blocked, failed (but one cleaned up without merging), a worker the witness saw stall, a worker waiting
+///   on the lead's answer. What someone has to look at.
+/// - `running`: a worker at it, or its review (in review, needs audit, ready to merge).
+/// - `waiting`: planned (queued, or waiting on other tasks), kept back on purpose.
+/// - `done`: merged, folded, abandoned or reverted.
+public enum BoardValue {
+    /// The most tasks a board's value carries.
+    public static let mostTasks = 150
+    /// How long a finished task is still sent, in seconds.
+    public static let doneFor: TimeInterval = 24 * 3600
+    /// A blocker's most lines, and bytes of UTF-8.
+    public static let blockerLines = 40
+    public static let blockerLimit = 4000
+    /// The most bytes of UTF-8 a task's title, and its dim line or checkpoint, carry.
+    public static let titleBytes = 400
+    public static let lineBytes = 600
+    /// The most combining marks kept on one base character (a Zalgo string is a few characters of thousands of marks).
+    public static let marksKept = 4
+    /// The most bytes a project's whole value takes, encoded: past it, the last tasks go to `more` until it fits.
+    public static let mostBytes = 512 << 10
+    /// The groups, in the order shown.
+    public static let groups = ["attention", "running", "waiting", "done"]
+
+    /// `board`'s value for `project` (at `root`) at `now`; `refusal` instead when the board couldn't be read (it is too
+    /// large, or isn't a board this build knows): the value then says so and has no tasks.
+    public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date) -> NodeWire.Value {
+        var shown: [(group: Int, position: Int, value: NodeWire.Value)] = []
+        var slugs: Set<String> = []
+        if let board {
+            for (position, task) in board.tasks.enumerated() where slugs.insert(task.slug).inserted {
+                guard let (group, value) = Self.task(task, position: position, board: board, now: now) else { continue }
+                shown.append((group, position, value))
+            }
+        }
+        shown.sort { ($0.group, $0.position) < ($1.group, $1.position) }
+        var kept = Array(shown.prefix(mostTasks))
+        // The byte budget: the tasks' encoded sizes and the rest of the value's, the last tasks dropped till it fits.
+        var size = 2_048 + root.utf8.count + project.utf8.count + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
+        while size > mostBytes, let last = kept.popLast() { size -= NodeWire.message(last.value).count + 1 }
+        let more = shown.count - kept.count
+        var counts: [String: NodeWire.Value] = [:]
+        for (index, name) in groups.enumerated() { counts[name] = .int(kept.filter { $0.group == index }.count) }
+        return .object([
+            "project": .string(project), "root": .string(root),
+            "baseBranch": board?.baseBranch.map { .string(text($0, limit: 200)) } ?? .null,
+            "tasks": .array(kept.map(\.value)), "counts": .object(counts), "more": .int(more),
+            "unreadable": refusal.map { .string(text($0, limit: 300)) } ?? .null,
+        ])
+    }
+
+    /// One task's value and its group's place in `groups`; nil when it isn't shown (finished more than `doneFor` ago).
+    static func task(_ task: LeadTask, position: Int, board: LeadBoard, now: Date) -> (Int, NodeWire.Value)? {
+        let shown = Shown(task, board: board)
+        if shown.group == "done", now.timeIntervalSince1970 - finishedAt(task) > doneFor { return nil }
+        var fields: [String: NodeWire.Value] = [
+            "id": .string(text(task.id, limit: 80)), "slug": .string(text(task.slug, limit: 120)), "title": .string(text(task.title, limit: titleBytes)),
+            "status": .string(task.status.rawValue), "group": .string(shown.group), "state": .string(shown.state),
+            "line": shown.line.map { .string(line($0)) } ?? .null,
+            "blocker": task.status == .blocked ? task.blocker.map { .string(text($0, limit: blockerLimit, lines: blockerLines)) } ?? .null : .null,
+            "worker": session(task.worker), "verifier": session(task.verifier),
+            "review": .string(task.reviewLevel.rawValue), "position": .int(position),
+            "createdAt": date(task.createdAt), "since": date(task.since), "startedAt": date(task.startedAt),
+            "attempts": .int(max(1, task.attempts ?? 1)),
+            "budgetMin": task.budgetMin.flatMap { $0 > 0 ? .int($0) : nil } ?? .null, "overBudget": .bool(task.overBudget != nil),
+            "branch": task.branch.map { .string(text($0, limit: 200)) } ?? .null,
+            "after": .array((task.after ?? []).prefix(20).map { .string(text($0, limit: 120)) }),
+        ]
+        fields["checkpoint"] = task.checkpoints?.last.map { .object(["text": .string(line($0.text)), "at": date($0.at)]) } ?? .null
+        fields["audit"] = audit(task)
+        fields["merged"] = task.merged.map { merged in
+            .object(["commit": .string(text(merged.commit, limit: 40)), "at": date(merged.at), "tested": .bool(merged.tested)])
+        } ?? .null
+        return (groups.firstIndex(of: shown.group) ?? groups.count, .object(fields))
+    }
+
+    /// Its audit as the board shows it: the last verdict (`passed`, `failed`; null while none came), its open and all
+    /// findings, and its rounds. Null for a task never audited.
+    static func audit(_ task: LeadTask) -> NodeWire.Value {
+        let ledger = task.audits
+        guard ledger != nil || task.evidence != nil else { return .null }
+        let verdict: NodeWire.Value
+        if let evidence = task.evidence { verdict = .string(evidence.passes ? "passed" : "failed") } else {
+            verdict = ledger?.passed.map { .string($0 ? "passed" : "failed") } ?? .null
+        }
+        return .object(["verdict": verdict, "open": .int(ledger?.open.count ?? 0), "findings": .int(ledger?.findings.count ?? 0),
+                        "rounds": .int(ledger?.rounds ?? 0)])
+    }
+
+    /// What a task's row says, from the board alone (the Mac's `TeamRow.row`, less what its sessions are doing now).
+    struct Shown {
+        var group = "waiting"
+        var state = "Queued"
+        var line: String?
+
+        init(_ task: LeadTask, board: LeadBoard) {
+            switch task.status {
+            case .done:
+                (group, state) = ("done", "Merged")
+            case .folded:
+                (group, state) = ("done", "Folded")
+                line = "Folded into " + (task.foldedInto.map { board.task($0)?.title ?? $0 } ?? "another task")
+            case .abandoned:
+                (group, state, line) = ("done", "Abandoned", task.abandonedBecause)
+            case .reverted:
+                (group, state, line) = ("done", "Reverted", task.merged?.revertReason)
+            case .failed where task.worktree == nil && task.worker != nil:
+                (group, state) = ("done", "Abandoned")
+            case .planned:
+                (group, state, line) = ("waiting", "Queued", BoardValue.waitsOn(task, board: board))
+            case .kept:
+                (group, state, line) = ("waiting", "Kept", task.keptBecause)
+            case .running:
+                if let stall = task.stall, stall.showsAsStalled {
+                    (group, state, line) = ("attention", "Stalled", stall.why())
+                } else if task.leadQuestionAt != nil {
+                    (group, state, line) = ("attention", "Waits on lead", "The worker asked the lead something.")
+                } else {
+                    group = "running"
+                    state = task.rework > 0 ? "Rework \(task.rework)" : "Working"
+                    line = task.checkpoints?.last?.text ?? (task.rework > 0 ? task.setback?.reason : nil)
+                }
+            case .review:
+                group = "running"
+                if task.evidence?.passes == true {
+                    state = "Ready to merge"
+                } else if task.verifier == nil, task.evidence == nil, let why = task.auditNeeded ?? task.riskRaised.map({ "Raised to audit: \($0.reason)" }) {
+                    (state, line) = ("Needs audit", why)
+                } else if task.reviewLevel == .none, task.verifier == nil, task.evidence == nil {
+                    state = "Ready to merge"
+                } else {
+                    state = "In review"
+                    line = task.panel.flatMap { task.evidence == nil ? $0.progress : nil } ?? (task.verifier == nil ? "Waiting for the audit" : "Checking the work")
+                }
+            case .failed:
+                group = "attention"
+                if let audits = task.audits, audits.reconsider {
+                    (state, line) = ("Reconsider", "Reconsider the approach: \(audits.reconsiderCause)")
+                } else {
+                    (state, line) = ("Failed", task.setback?.reason ?? task.evidence?.summary ?? "It failed; the lead decides what next.")
+                }
+            case .blocked:
+                group = "attention"
+                state = "Blocked"
+                line = BoardValue.waitsOn(task, board: board) ?? task.blocker
+            }
+        }
+    }
+
+    /// "Waits on <title>, <title>": the tasks it comes after that aren't merged yet; nil when none is left.
+    static func waitsOn(_ task: LeadTask, board: LeadBoard) -> String? {
+        guard let after = task.after, !after.isEmpty else { return nil }
+        let open = after.prefix(20).compactMap { slug -> String? in
+            guard let other = board.task(slug), other.status != .done, other.status != .folded else { return nil }
+            return other.title
+        }
+        return open.isEmpty ? nil : "Waits on " + open.joined(separator: ", ")
+    }
+
+    static func finishedAt(_ task: LeadTask) -> Double { task.merged?.at ?? task.since ?? task.createdAt }
+
+    /// A worker's or verifier's id as the page's session id: only a host's UUID, never anything else a board says.
+    static func session(_ id: String?) -> NodeWire.Value {
+        guard let id, id.count == 36, let uuid = UUID(uuidString: id) else { return .null }
+        return .string(NodeIds.session(host: uuid))
+    }
+
+    /// A board's time as a date; null when it is none (not a number, before 2001, past 2100).
+    static func date(_ seconds: Double?) -> NodeWire.Value {
+        guard let seconds, seconds.isFinite, seconds > 978_307_200, seconds < 4_102_444_800 else { return .null }
+        return .date(Date(timeIntervalSince1970: seconds))
+    }
+
+    /// The first line of `text`, inert, at most `lineBytes` bytes.
+    static func line(_ text: String) -> String {
+        let first = text.split(whereSeparator: \.isNewline).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        return Self.text(first.map(String.init) ?? "", limit: lineBytes)
+    }
+
+    /// `text` as inert text: newlines kept (at most `lines` of them), a tab a space, any other control, format,
+    /// separator, private-use or unassigned scalar replaced, at most `marksKept` combining marks after one base, and at
+    /// most `limit` bytes of UTF-8 (cut between scalars, "…" where it was). Capped by bytes, not characters: one
+    /// character can be a base with thousands of marks on it.
+    static func text(_ text: String, limit: Int, lines: Int = 1) -> String {
+        var kept = String.UnicodeScalarView()
+        var bytes = 0
+        var count = 0
+        var marks = 0
+        var cut = false
+        func keep(_ scalar: Unicode.Scalar) -> Bool {
+            let size = scalar.utf8.count
+            guard bytes + size <= limit else { return false }
+            bytes += size
+            kept.append(scalar)
+            return true
+        }
+        scalars: for scalar in text.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars {
+            var taken = scalar
+            switch scalar.properties.generalCategory {
+            case .nonspacingMark, .spacingMark, .enclosingMark:
+                marks += 1
+                if marks > marksKept {
+                    cut = true
+                    continue scalars
+                }
+            case .control where scalar == "\n":
+                marks = 0
+                guard lines > 1 else {
+                    taken = " "
+                    break
+                }
+                count += 1
+                if count >= lines {
+                    cut = true
+                    break scalars
+                }
+            case .control where scalar == "\t" || scalar == "\r":
+                marks = 0
+                taken = " "
+            case .control, .format, .lineSeparator, .paragraphSeparator, .privateUse, .unassigned, .surrogate:
+                marks = 0
+                taken = "\u{FFFD}"
+            default:
+                marks = 0
+            }
+            guard keep(taken) else {
+                cut = true
+                break
+            }
+        }
+        return cut ? String(kept) + "…" : String(kept)
+    }
+}

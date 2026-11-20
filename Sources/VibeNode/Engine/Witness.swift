@@ -192,6 +192,15 @@ extension LeadEngine {
                 }
             }
         }
+        // The vault's own count of working time (`LeadVault.noteWorking`), which small_task_min goes by: the board's is
+        // anyone's to write. Told when the set changes, else at most every `workingEvery` (the app's rule). Asked off
+        // the engine's queue, in order (`workingNotes`).
+        let busy = work.busySessions
+        if workingTold[root].map({ $0.sessions != busy || now.timeIntervalSince($0.at) >= Self.workingEvery }) ?? !busy.isEmpty {
+            workingTold[root] = (busy, now)
+            let vault = link.vault
+            workingNotes.async { try? vault.noteWorking(root: root, sessions: Array(busy), at: at) }
+        }
         // On the board too, for status, until the worker moves again.
         let stalls = work.stalls
         if work.notesStalls { reads.async { _ in try? BoardStore(root: root).update { $0.noteStalls(stalls) } } }

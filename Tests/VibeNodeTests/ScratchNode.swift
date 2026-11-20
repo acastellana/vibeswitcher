@@ -339,10 +339,12 @@ final class ScratchNode: @unchecked Sendable {
         }
     }
 
-    /// Starts `command` (a shell line) in a new session of this node's host, as its app, and returns it.
-    func spawn(_ command: String, cwd: String? = nil, label: String = "Test") async throws -> HostSession {
+    /// Starts `command` (a shell line) in a new session of this node's host, as its app, and returns it. `agent`: the
+    /// agent the host records it was started as (`HostedAgents`: a session started as none is no agent's, whatever its
+    /// program is named).
+    func spawn(_ command: String, cwd: String? = nil, label: String = "Test", agent: String? = nil) async throws -> HostSession {
         let request = SpawnRequest(cwd: cwd ?? home.path, command: command, env: [:], cols: 100, rows: 30, keepShell: false,
-                                   label: label, agent: nil)
+                                   label: label, agent: agent)
         let reply = try await offPool { [socket] in try HostCall.request(.spawn(request), socket: socket, appKey: nil, timeout: 60) }
         guard case .spawned(let session) = reply else { throw HostCall.Failure(description: "the scratch host didn't start the session: \(reply)") }
         return session

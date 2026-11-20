@@ -6,12 +6,13 @@ import { createStore } from './js/store.js';
 import { createMock } from './js/mock.js';
 import { connectSocket } from './js/socket.js';
 import { validate } from './wire/validators.js';
-import { createUI, arrange, teamOf } from './js/ui.js';
+import { createUI, arrange, teamOf, boardHref } from './js/ui.js';
 import { h, setText } from './js/dom.js';
-import { since, until, stateOf, KEY, MAC } from './js/words.js';
+import { since, until, stateOf, lastPart, KEY, MAC } from './js/words.js';
 import { sidebar } from './js/views/sidebar.js';
 import { sessionView } from './js/views/session.js';
 import { nodeView } from './js/views/node.js';
+import { boardView } from './js/views/board.js';
 import { startView } from './js/views/start.js';
 import { palette } from './js/views/palette.js';
 
@@ -37,6 +38,8 @@ if (['dark', 'light'].includes(params.get('theme'))) document.documentElement.da
 const app = {
   store,
   ui,
+  // The feed itself, for what goes past the store: a session's terminal (binary frames).
+  feed,
   // The sessions from top to bottom, as the list shows them.
   order: () => list.order(),
   commands,
@@ -45,12 +48,13 @@ const app = {
 const list = sidebar(app);
 const session = sessionView(app);
 const node = nodeView(app);
+const board = boardView(app);
 const start = startView(app);
 const offline = h('div', { class: 'offline', role: 'status', hidden: true }, 'Reconnecting to the node…');
 // The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
 // had stay readable underneath.
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
-const main = h('main', { class: 'main' }, start.el, session.el, node.el);
+const main = h('main', { class: 'main' }, start.el, session.el, node.el, board.el);
 const root = document.getElementById('app');
 root.replaceChildren(list.el, main, palette(app).el, offline, unpaired);
 
@@ -60,6 +64,8 @@ function route() {
   start.el.hidden = name !== 'home';
   session.el.hidden = name !== 'session';
   node.el.hidden = name !== 'node';
+  board.el.hidden = name !== 'board';
+  if (name === 'board') return; // the board names itself (views/board.js)
   const shown = store.state.sessions.get(ui.state.route.id);
   document.title = name === 'session' && shown ? `${shown.title || 'Session'} · VibeSwitcher` : name === 'node' ? 'This node · VibeSwitcher' : 'VibeSwitcher';
 }
@@ -104,6 +110,8 @@ function commands() {
     // The inspector's, for a session: the Mac's View › Toggle Inspector, and its Team tab for a lead or its team.
     ...(selected && teamOf(store.state, selected) ? [{ title: 'Team', about: 'The team’s tasks, in the inspector', keys: `${KEY.mod}${KEY.alt}3`, icon: 'team', run: () => ui.showInspector('team') }] : []),
     ...(selected ? [{ title: 'Toggle Inspector', about: 'Team, Overview and Activity', keys: `${KEY.mod}${KEY.alt}0`, icon: 'inspector', run: () => ui.toggleInspector() }] : []),
+    // Each lead's board: its team's tasks, grouped (views/board.js).
+    ...[...store.state.boards.values()].map((board) => ({ title: `Board: ${lastPart(board.root) || 'a project'}`, about: 'Its lead’s tasks, as they move', icon: 'team', run: () => ui.go(boardHref(board.project)) })),
     { title: 'Start Page', icon: 'home', run: () => ui.go('#/') },
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
     { title: 'Group by Attention', icon: 'filter', run: () => ui.setGrouping('attention') },
@@ -119,6 +127,10 @@ function commands() {
 // in an installed window), so ⌥1–9 does the same everywhere. ⌥⌘0 is the inspector's, as on the Mac.
 
 addEventListener('keydown', (event) => {
+  // In a session's terminal the keyboard is the program's: Ctrl+K, Ctrl+J, Alt+F and the rest are its keys. A Mac's ⌘
+  // keys stay the page's (the terminal sends none), and so do Ctrl+Alt+1 2 (Terminal, Chat) elsewhere.
+  if (event.target?.closest?.('.terminal-screen') && !(MAC && event.metaKey)
+    && !(!MAC && event.ctrlKey && event.altKey && /^Digit[12]$/.test(event.code))) return;
   const mod = MAC ? event.metaKey : event.ctrlKey;
   const digit = /^Digit[1-9]$/.test(event.code) ? Number(event.code.slice(5)) : 0;
   if (mod && !event.altKey && event.code === 'KeyK') {

@@ -198,7 +198,9 @@ struct RequestsTests {
         // changes state, and a kind no table lists is a state change. The live protocol's kinds too: its reads, a web
         // client's draft and terminal, and opening the web.
         let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "question.post", "question.revise", "question.withdraw",
-                                  "subscribe", "unsubscribe", "chat.page"]
+                                  "subscribe", "unsubscribe", "chat.page", "board",
+                                  // It changes nothing but a session's seen mark (done or idle), so it needs no voice.
+                                  "seen"]
         let changes: Set<String> = ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
                                     "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
@@ -232,5 +234,50 @@ struct RequestsTests {
         #expect(status.ok, "\(status)")
         #expect(status.result?["rule"]?["mode"]?.string == "closed", "\(status)")
         #expect(status.result?["rule"]?["says"]?.string?.contains("couldn't be read") == true, "\(status)")
+    }
+
+    /// `seen` (the parity gaps of 2026-11-19), as a web page's with the session open sends it (no voice, nor a
+    /// terminal): the session counts as seen, so its finished turn reads idle; a session the node doesn't list is
+    /// `gone`, one not named `bad-args`.
+    @Test func aSessionSeenFromAPageMarksItsFinishedTurnSeen() async throws {
+        let stub = try StubHost(scratch)
+        defer { stub.quit() }
+        let link = HostLink(dialer: stub.dialer, root: scratch.url("link-root"), queue: DispatchQueue(label: "engine"), sweep: { _ in })
+        let root = scratch.url("node-root")
+        let state = root.appendingPathComponent("state")
+        try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
+        var hook = HookState(agent: .claude, tty: "ttypts975", lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970 + 60)
+        hook.agentPid = 975
+        try hook.save(to: state.appendingPathComponent("ttypts975.json"))
+        let table = [Int32(975): ProcInfo(pid: 975, ppid: 1, tty: "ttypts975", comm: "claude", startTime: Date().addingTimeInterval(-600), agent: .claude)]
+        let clock = Locked(Date())
+        let nodes = NodeSessions(root: root, home: scratch.url("home").path, queue: link.queue,
+                                 scanner: SessionScanner(processes: { table }, stateDir: { state }, cwd: { _ in "/r/x" }, arguments: { _ in [] }),
+                                 now: { clock.value })
+        nodes.start()
+        defer { nodes.stop() }
+        let requests = Requests(link: link, sessions: nodes, rule: Self.rule, root: root, hostSocket: stub.path, commit: "test", hostPID: 1)
+        try #require(await eventually { nodes.queue.sync { nodes.sessions.first?.status == .done } })
+        let id = try #require(nodes.queue.sync { nodes.sessions.first.map(NodeSessions.id(of:)) })
+        clock.value = clock.value.addingTimeInterval(120)
+        func seen(_ args: [String: NodeWire.Value]) async -> NodeWire.Reply? {
+            let reply = Locked<NodeWire.Reply?>(nil)
+            requests.queue.async {
+                requests.handle(NodeWire.Request(id: "s1", kind: "seen", args: args), from: NodeLive.webPeer) { reply.value = $0 }
+            }
+            _ = await eventually { reply.value != nil }
+            return reply.value
+        }
+        let reply = try #require(await seen(["session": .string(id)]))
+        #expect(reply.ok, "\(reply)")
+        #expect(nodes.queue.sync { nodes.sessions.first?.status } == .idle)
+        let gone = try #require(await seen(["session": .string("t-nobody")]))
+        #expect(gone.error?.code == NodeWire.Code.gone.rawValue, "\(gone)")
+        let bad = try #require(await seen([:]))
+        #expect(bad.error?.code == NodeWire.Code.badArgs.rawValue, "\(bad)")
+        // A web page's token that reads may send it; one that doesn't, not.
+        let request = NodeWire.Request(id: "s2", kind: "seen", args: ["session": .string(id)])
+        #expect(WebAccess.refusal(for: request, rights: [.read]) == nil)
+        #expect(WebAccess.refusal(for: request, rights: [])?.error?.code == NodeWire.Code.voice.rawValue)
     }
 }

@@ -75,8 +75,10 @@ public enum ServerStart {
             say("the session host is gone (\(why)): exiting")
             exit(0)
         }
-        let sessions = NodeSessions(root: root, home: VibePaths.home, queue: queue, link: link, clock: clock, note: say)
-        let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes)
+        // A scratch node (a root other than the account's) lists only the sessions its host started.
+        let sessions = NodeSessions(root: root, home: VibePaths.home, queue: queue, link: link, clock: clock,
+                                    onlyHosted: !VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome), note: say)
+        let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes, usersNode: parsed.node)
         say("voice rule: \(rule.says)")
         if let root = parsed.testCgroupRoot { say("a scratch node's test: each sender's cgroup is read from \(ConfigSeal.inert(root, limit: .max))") }
         // Read once, here, of this process alone: no argument, file or request names a runner.

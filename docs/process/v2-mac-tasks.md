@@ -73,6 +73,21 @@ that two pushes haven't explained comes here too, with the experiment that will 
   (one older than auto mode would refuse every role's launch); a role started where `~/.claude/settings.json` sets a
   `defaultMode` (`plan`, `acceptEdits`, `manual`) runs in auto mode; the lead's, workers' and verifiers' approvals
   behave as they do on main.
+- **`e1df3188`** (the node on the Mac's step 1, [its design](../superpowers/specs/2026-11-19-v2-node-on-macos.md)):
+  `vibeswitcher-host --node` is refused on the Mac (`HostImages.macNodeRefusal`); it was ignored, so a host started as
+  the node's ran as an ordinary Mac host on the app's `~/.vibeswitcher/host.lock`. The app never passes `--node`. The
+  command line's user's node is refused on the Mac before anything is read or run (`NodeSystem.usersNodeRefusal`, exit
+  69: `start`, `stop`, `status --ack` and every connection; `status --probe` still runs), and a user's server
+  (`--node`) on a system with no cgroups is on the closed voice rule (`VoiceRule.at(…, usersNode: true)`), where it got
+  the weaker one. New platform code, written on Linux and never run on a Mac: `Platform.Service`'s Darwin arm
+  (`Service+Darwin.swift`). The hosted Mac checks `ServiceTests`, `NodeSystemTests`,
+  `VoiceRuleTests.theUsersServerWithoutCgroupsIsClosedUntilItsRuleIsBuilt` (its "this system's default" arm) and
+  `HostHardeningTests.theNodesRootIsNeverFromTheEnvironment` (its Mac arm). **Needs a real Mac run**, by hand, with the
+  app running and no node installed: `vibeswitcher start`, `stop`, `status`, `status --ack` and `lead ~/x` each print
+  the refusal and exit 69 at once, no prompt; `vibeswitcher status --probe` lists the sessions; a built
+  `vibeswitcher-host --node --node-root X --server X/bin/vibeswitcher-server` exits 1 with the refusal, and the app's
+  host and its `~/.vibeswitcher/host.*` files are as they were. The design's measurements (the environment line under
+  SIP, the voice candidates, LocalAuthentication from a LaunchAgent) are its steps 4 to 9.
 
 ## What `v2` found on the Mac and doesn't change
 

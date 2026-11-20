@@ -96,10 +96,12 @@ public final class LeadEngine: @unchecked Sendable {
     private var watch: Subscription?
 
     // Delivery and wake (E5), on `queue`.
-    /// Whether an agent runs on its terminal (`ProcessTable.info`): the lead the board names gets nothing otherwise, and
-    /// nothing is typed into a terminal its agent left (a shell). For tests.
-    public var leadRuns: (LeadAgent) -> Bool = { agent in
-        ProcessTable.info(pid: agent.pid).map { $0.tty == agent.tty && $0.agent != nil } == true
+    /// Whether an agent runs on its terminal: the lead the board names gets nothing otherwise, and nothing is typed into
+    /// a terminal its agent left (a shell). On a terminal the host runs (`hosted`, the link's list), by the host's record
+    /// of what it started (`HostedAgents.runs`: the session's program, started as an agent), never a process's name;
+    /// elsewhere (the Mac) by the process table (`ProcessTable.info`). For tests.
+    public var leadRuns: (LeadAgent, [HostSession]) -> Bool = { agent, hosted in
+        HostedAgents.runs(agent, hosted: hosted) ?? (ProcessTable.info(pid: agent.pid).map { $0.tty == agent.tty && $0.agent != nil } == true)
     }
     /// What an agent is doing, from its hooks' state under `root` and its transcript under the node's home.
     let observer: LeadObserver
@@ -173,6 +175,17 @@ public final class LeadEngine: @unchecked Sendable {
     /// When the witness first saw each verifier that auto_advance audits again end without a verdict (by root and
     /// session; see `LeadWitness.leftToAdvance`), and each worker it released.
     var advanceSeen: [String: Date] = [:]
+    /// The sessions the witness last told the vault were at work (`LeadVault.noteWorking`), by root, and when.
+    var workingTold: [String: (sessions: Set<String>, at: Date)] = [:]
+    /// How often the same working sessions are told the vault again (the app's `LeadController.workingEvery`).
+    static let workingEvery: TimeInterval = 30
+    /// Each lead's open push request (push_remote), by root, as the vault last said; the request each lead was told
+    /// nothing here pushes, by root; the roots whose vault look is under way (`PushAsks.swift`). On `queue`.
+    var pushAsked: [String: LeadPush.Request] = [:]
+    var pushTold: [String: String] = [:]
+    var pushLooking: Set<String> = []
+    /// Where those are told, one after another: a later look's never overtakes an earlier one's (`work` is concurrent).
+    let workingNotes = DispatchQueue(label: "vibenode.lead-engine.working", qos: .utility)
     /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"
     /// on the engine's queue once a look is applied (`witnessed`); tests watch or slow them. Set on `queue`.
     var witnessStep: ((String) -> Void)?

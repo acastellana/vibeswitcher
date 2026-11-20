@@ -629,7 +629,7 @@ struct RestartTests {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
         // An agent (the fake Claude), so the node's session list has it too.
-        let session = try await node.spawn("exec \(FakeClaude.quoted(node.fake.launcher.path))")
+        let session = try await node.spawn("exec \(FakeClaude.quoted(node.fake.launcher.path))", agent: "claude")
         let before = try WireClient(node).hello
         let id = NodeIds.session(host: session.id)
         #expect(await node.eventuallyStatus { ($0["sessions"] as? [[String: Any]])?.contains { $0["id"] as? String == id } == true })

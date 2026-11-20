@@ -112,12 +112,14 @@ extension LeadEngine {
                 let policy = WorkingPolicy.load(from: nodeRoot.appendingPathComponent("policy.md"))
                 let limits = MacLimits.load(from: nodeRoot.appendingPathComponent("mac-limits.json"))
                 let name = "lead-\(Slug.make(project, taken: []))"
+                let base = RecentProjects.shellQuote(program)
+                let run = Self.leadRun(workflow, base: base, nodeRoot: nodeRoot, home: home)
                 let launch = try LeadLaunch.prepare(
-                    role: .lead, root: root, task: nil, base: RecentProjects.shellQuote(program),
+                    role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy, limits: limits),
                     start: LeadPrompts.leadStart(root: root, goal: nil, note: Self.goalNote, replaced: (old.tty, file), scheduledNote: noteFile),
-                    server: server, name: name, folder: vault.runFolder(root: root, name: "scheduled-\(UUID().uuidString)"), cwd: root,
-                    temporary: temporary)
+                    server: server, name: name, model: run.model, advisor: run.advisor,
+                    folder: vault.runFolder(root: root, name: "scheduled-\(UUID().uuidString)"), cwd: root, temporary: temporary)
                 return (program, launch)
             }
             guard let self else { gate.release(); return }

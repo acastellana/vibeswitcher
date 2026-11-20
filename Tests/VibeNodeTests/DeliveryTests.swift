@@ -49,7 +49,7 @@ struct DeliveryTests {
         defer { world.stop() }
         let lead = try await world.lead(idle: false)
         let runs = world.queue.sync { world.engine.leadRuns }
-        world.queue.sync { world.engine.leadRuns = { _ in false } }
+        world.queue.sync { world.engine.leadRuns = { _, _ in false } }
         #expect(await world.deliver("first words", from: .user, action: "action-1") == false)
         // A look sends what's held again (its read on the reads queue), and a second message is sent meanwhile.
         let second = Locked<Bool?>(nil)
@@ -270,7 +270,7 @@ struct DeliveryTests {
         defer { world.stop() }
         let lead = try await world.lead(idle: false)
         let runs = world.queue.sync { world.engine.leadRuns }
-        world.queue.sync { world.engine.leadRuns = { _ in false } }
+        world.queue.sync { world.engine.leadRuns = { _, _ in false } }
         let words = "The user is holding your question: don't go ahead with ‘P’."
         #expect(await world.deliver(words, from: .user, action: UUID().uuidString.lowercased()) == false)
         let id = try #require(world.held().first?.id)
@@ -370,9 +370,9 @@ struct DeliveryTests {
         let asked = Locked(0)
         // Not running at the first look, running from the second on (its agent just started).
         world.queue.sync {
-            world.engine.leadRuns = { agent in
+            world.engine.leadRuns = { agent, hosted in
                 asked.mutate { $0 += 1 }
-                return asked.value > 1 && runs(agent)
+                return asked.value > 1 && runs(agent, hosted)
             }
         }
         let (first, second) = (Locked<Bool?>(nil), Locked<Bool?>(nil))

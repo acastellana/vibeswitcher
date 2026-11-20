@@ -86,7 +86,7 @@ enum FakeClaude {
 # command runs until "background", which moves it to the background as the 120 s Bash timeout does) | "imageRead" (how
 # long a pasted image path takes to read, "seconds") | "child" (it starts `sleep 600` and goes on: in its own process
 # group, as a background shell, or with "foreground" in one of its own that takes the terminal's foreground; its pid
-# goes in "children") | "realShell" (from now on a `!` command really runs, in zsh, its output what it printed: the
+# goes in "children"; "program": another path to run as `sleep`, a link to it by another name) | "realShell" (from now on a `!` command really runs, in zsh, its output what it printed: the
 # sandbox's, to show a code block's Run) | "voice" (its /voice, as code.claude.com/docs/en/voice-dictation tells it: "mode"
 # off | hold | tap, "account" yes | none (no claude.ai sign-in: "Unknown command: /voice") | expired (it can't use the
 # sign-in: "Voice mode requires a Claude.ai account"), "transcript", "interim" (what it shows dim while it listens; the
@@ -1163,7 +1163,7 @@ def call_tool(command):
     MCP_DONE.set()
 
 
-def start_child(foreground):
+def start_child(foreground, program="/bin/sleep"):
     if foreground:
         # The terminal is the child's: reading or writing it from here would stop this process.
         signal.signal(signal.SIGTTIN, signal.SIG_IGN)
@@ -1172,9 +1172,9 @@ def start_child(foreground):
         def take_terminal():
             os.setpgid(0, 0)
             os.tcsetpgrp(0, os.getpgid(0))
-        child = subprocess.Popen(["/bin/sleep", "600"], preexec_fn=take_terminal)
+        child = subprocess.Popen([program, "600"], preexec_fn=take_terminal)
     else:
-        child = subprocess.Popen(["/bin/sleep", "600"], stdin=subprocess.DEVNULL)
+        child = subprocess.Popen([program, "600"], stdin=subprocess.DEVNULL)
     state["children"].append(child.pid)
 
 
@@ -1223,7 +1223,7 @@ def control():
             finish_shell("Command did not complete within its 120s timeout and was moved to the background (ID: bfake). "
                          "Output is being written to: bfake.output. You will be notified when it completes.")
         elif op == "child":
-            start_child(command.get("foreground", False))
+            start_child(command.get("foreground", False), command.get("program", "/bin/sleep"))
         elif op == "exit":
             state["mode"] = "exited"
             save_state()

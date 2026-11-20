@@ -106,7 +106,7 @@ extension LeadEngine {
 
     /// Where a message for `root`'s lead goes, read on `reads` (EN-D14): the session the vault binds the lead's role to,
     /// on the terminal the session host runs it on (`hosted`, the link's list), with the agent the board names there
-    /// while it runs on that terminal (`ProcessTable`: only a process of that session has it as its terminal). The board
+    /// while it runs on that terminal (`leadRuns`: the session's program, as the host started it). The board
     /// is a cross-check: it must name that session on that terminal. Else why not.
     enum Target {
         case lead(LeadAgent)
@@ -122,14 +122,14 @@ extension LeadEngine {
     }
 
     /// The target, on `reads`.
-    static func target(root: String, board: LeadBoard, vault: LeadVault, hosted: [HostSession], runs: (LeadAgent) -> Bool) -> Target {
+    static func target(root: String, board: LeadBoard, vault: LeadVault, hosted: [HostSession], runs: (LeadAgent, [HostSession]) -> Bool) -> Target {
         guard let named = LeadHandover.named(board) else { return .noLead }
         let bound = vault.current(.lead, root: root, task: nil)?.session
         guard let session = named.session, session == bound else { return .notBound(named: named.session, bound: bound) }
         guard let id = UUID(uuidString: session), let host = hosted.first(where: { $0.id == id && $0.isLive }) else { return .notRunning }
         guard host.tty == named.tty else { return .otherTerminal(named: named.tty, runs: host.tty) }
         let lead = LeadAgent(pid: named.pid, tty: host.tty, session: session)
-        return runs(lead) ? .lead(lead) : .notRunning
+        return runs(lead, hosted) ? .lead(lead) : .notRunning
     }
 
     /// Posts the message, as `id`, into the inbox of `root`'s lead if it has one now (`went`), and wakes it; else sets or
