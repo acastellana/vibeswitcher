@@ -327,8 +327,13 @@ struct BranchRunTests {
 
         // Unboxed, the same for a run this thread starts: its variables, and its folders first on the PATH given.
         let scope = BranchRun.Scope(policy: SandboxPolicy(environment: ["MADE_UP_HOME": tool], path: [tool + "/bin"]))
-        let told = BranchRun.with(scope) { BranchRun.tools(["TMPDIR": "/t/"], inherited: ["PATH": "/usr/bin"]) }
+        let told = BranchRun.with(scope) { BranchRun.tools(["TMPDIR": "/t/"], inherited: ["PATH": "/usr/bin"], facts: Self.unable, onTheMac: false) }
         #expect(told == ["TMPDIR": "/t/", "MADE_UP_HOME": tool, "PATH": tool + "/bin:/usr/bin"])
+        // A run that will be boxed gets them from its plan: its launcher, the tool server's image, none.
+        var launched = scope
+        launched.launcher = Self.server
+        #expect(BranchRun.with(launched) { BranchRun.tools(["TMPDIR": "/t/"], facts: Self.able, onTheMac: false) } == ["TMPDIR": "/t/"])
+        #expect(BranchRun.with(launched) { BranchRun.tools(["TMPDIR": "/t/"], inherited: ["PATH": "/usr/bin"], facts: Self.able, onTheMac: true) }["MADE_UP_HOME"] == tool)
         #expect(BranchRun.tools(["TMPDIR": "/t/"]) == ["TMPDIR": "/t/"])
     }
 

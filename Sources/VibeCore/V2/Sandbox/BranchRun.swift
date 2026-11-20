@@ -277,10 +277,13 @@ public enum BranchRun {
     /// `environment`, for a run this thread starts, with what the project's settings tell its tools (`sandbox_env`):
     /// its variables, and its folders first on the PATH (the PATH given, else this process's). Boxed or not: a run's
     /// home is a scratch one (`Worktrees.runChecks`), where a tool installed in the account finds nothing of itself
-    /// even with no box. A box passes them on by its own plan (`plan`), its allow-list dropping what a launcher was
-    /// given. As given when this thread has no such settings.
-    static func tools(_ environment: [String: String], inherited: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+    /// even with no box. A run that will be boxed gets them from its plan (`plan`) instead, and its launcher, the tool
+    /// server's image before it enters, is given none of them. As given when this thread has no such settings.
+    static func tools(_ environment: [String: String], inherited: [String: String] = ProcessInfo.processInfo.environment,
+                      facts: Platform.Sandbox.Facts? = nil, onTheMac: Bool = Platform.CodeIdentity.isAvailable) -> [String: String] {
         guard let policy = scope?.policy, scope?.refusal == nil, !(policy.environment.isEmpty && policy.path.isEmpty) else { return environment }
+        let boxed = !onTheMac && policy.enabled && (scope?.launcher ?? own.launcher) != nil && (facts ?? Platform.Sandbox.probe()).why == nil
+        guard !boxed else { return environment }
         var given = environment.merging(policy.environment) { $1 }
         if !policy.path.isEmpty {
             given["PATH"] = (policy.path + [environment["PATH"] ?? inherited["PATH"] ?? ""]).filter { !$0.isEmpty }.joined(separator: ":")
