@@ -1430,14 +1430,31 @@ final class ServerChildHost {
         #expect(server.queue.sync { server.tallyForHandover } == state.tally)
     }
 
-    /// The Mac: no server child, and no connector opened for one.
-    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac has no server child; Linux's tests are above"))
+    /// The Mac (the node on the Mac's step 3): the app's own host, started without `--server`, gets no server child and
+    /// no connector, and `openAppConnector` stays nil there (the app proves itself by its code); a `--server` file with
+    /// no code signature (a script) starts nothing and opens nothing; a signed one is a server child, started from the
+    /// file its cdhash was read from (`MacServerChildTests`, VibeNodeTests, starts the real server and sees it connect).
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's server child; Linux's tests are above"))
     func theMacStartsNoServerChild() throws {
         let host = try TestHost(appConnector: false)
-        let binary = try #require(Bundle.main.executablePath)
-        let child = ServerChild.start(.init(image: binary, socketPath: host.socket, arguments: [], environment: [:]), server: host.server)
-        #expect(child == nil)
+        let none = ServerChild.adopt(arguments: ["vibeswitcher-host"], ownsLaunchers: false, nodeRoot: "/nonexistent", config: host.server.config,
+                                     server: host.server)
+        #expect(none == nil)
+        #expect(host.server.openAppConnector(expecting: nil, requireNonDumpable: false, onDumpable: nil) == nil)
         #expect(host.server.queue.sync { host.server.appConnectors.isEmpty && host.server.serverChild == nil })
+
+        let script = scratchSocketPath() + ".sh"
+        FileManager.default.createFile(atPath: script, contents: Data("#!/bin/sh\nexit 0\n".utf8), attributes: [.posixPermissions: 0o755])
+        defer { unlink(script) }
+        let unsigned = ServerChild.start(.init(image: script, socketPath: host.socket, arguments: [], environment: [:]), server: host.server)
+        #expect(unsigned == nil)
+        #expect(host.server.queue.sync { host.server.appConnectors.isEmpty && host.server.serverChild == nil })
+
+        // A signed program that exits at once (`/usr/bin/true`, Apple's): a server child, as the host's start makes one.
+        let signed = try #require(ServerChild.start(.init(image: "/usr/bin/true", socketPath: host.socket, arguments: [], environment: [:]),
+                                                    server: host.server))
+        defer { signed.stop() }
+        #expect(host.server.queue.sync { host.server.serverChild === signed })
     }
 }
 
