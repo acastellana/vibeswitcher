@@ -35,8 +35,10 @@ struct SandboxServerDriver {
         let control = folder.appendingPathComponent("control", isDirectory: true)
         let environment = ProcessInfo.processInfo.environment
         let port = environment["VIBESWITCHER_SANDBOX_PORT"].flatMap(UInt16.init) ?? 0
+        // `--watch`: the terminals watched, as on the user's node; by default typed, a scratch server's spike.
+        let terminal = environment["VIBESWITCHER_SANDBOX_WATCH"] != nil ? ServerArguments.testWebTerminalWatchFlag : ServerArguments.testWebTerminalFlag
         var arguments = ["--server-arg", ServerArguments.testWebPortFlag + String(port), "--server-arg", ServerArguments.testWebPairFlag,
-                         "--server-arg", ServerArguments.testWebTerminalFlag]
+                         "--server-arg", terminal]
         if let root = environment["VIBESWITCHER_SANDBOX_WEB_ROOT"] { arguments += ["--server-arg", ServerArguments.testWebRootFlag + root] }
         let scratch = Scratch()
         let node = try await ScratchNode(scratch, holdFirstLook: true, hostArguments: arguments)
@@ -67,7 +69,8 @@ struct SandboxServerDriver {
         try FileManager.default.createDirectory(at: shellBin, withIntermediateDirectories: true)
         let bash = shellBin.appendingPathComponent("claude")
         try copyClosedOnExec(URL(fileURLWithPath: "/bin/bash").resolvingSymlinksInPath().path, to: bash.path)
-        let shell = try await node.spawn("printf '\\033[1mexample-shell\\033[0m: a scratch session, typed into from the page.\\n\\n'; "
+        let says = environment["VIBESWITCHER_SANDBOX_WATCH"] != nil ? "watched from the page" : "typed into from the page"
+        let shell = try await node.spawn("printf '\\033[1mexample-shell\\033[0m: a scratch session, \(says).\\n\\n'; "
             + "PS1='\\[\\033[32m\\]example-shell\\[\\033[0m\\] $ ' exec '\(bash.path)' --noprofile --norc -i", cwd: shellFolder.path, label: "Shell",
                                      agent: "claude")
         try HookedAgent(session: shell, pid: shell.childPID, folder: shellFolder).hook(node, "Stop")
