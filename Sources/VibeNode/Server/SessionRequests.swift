@@ -373,7 +373,8 @@ extension Requests {
 
 extension Requests {
     /// `session.draft` with `session` (the node's whole id for it, as a page holds it), `text` and `images` (the paths
-    /// `session.attach` gave, optional; text may be empty when there are some), and
+    /// `session.attach` gave, optional; text may be empty when there are some; `now`, optional: to go mid-turn, as
+    /// `send`'s `--now`), and
     /// `session.draft.clear` with `session`, from a web page whose token drafts (2026-11-20, the parity table's gap 1):
     /// the message the page's composer left for the session, kept beside it (`sessionDrafts`, the session's `draft`) or
     /// taken off, and told to nobody, as a card's draft is (`draft`, LW-D6): nothing is typed, nothing recorded.
@@ -407,7 +408,7 @@ extension Requests {
             if let odd = images.first(where: { !SessionAttachments.isAttached($0, root: root) }) {
                 return done(.init(re: request.id, error: .init(.badArgs, "\(ConfigSeal.inert(odd, limit: 200)) isn't an image attached on this node")))
             }
-            sessionDrafts.send(id, SessionDraft(text: text, images: images, at: Date(), action: action))
+            sessionDrafts.send(id, SessionDraft(text: text, images: images, at: Date(), action: action, now: request.args?["now"]?.bool == true))
         } else {
             sessionDrafts.send(id, nil)
         }

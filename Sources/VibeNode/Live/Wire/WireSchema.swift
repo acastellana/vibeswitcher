@@ -145,7 +145,7 @@ public enum WireSchema {
             shape("draft.clear.args", from: "the contract's §8", [field("card", .string)]),
             shape("seen.args", from: "Requests.seen (the parity gaps of 2026-11-19)", [field("session", .string)]),
             shape("session.draft.args", from: "Requests.sessionDraft (driving sessions, 2026-11-20)", [field("session", .string), field("text", .string),
-                                                                                                    optional("images", strings)]),
+                                                                                                    optional("images", strings), optional("now", .bool)]),
             shape("session.draft.result", from: "Requests.sessionDraft", [field("applied", .map(.int)), field("session", .string)]),
             shape("session.draft.clear.args", from: "Requests.sessionDraft", [field("session", .string)]),
             // The launch presets (the composer's lane, 2026-11-20): a read, what the page's New session form offers.
@@ -218,7 +218,7 @@ public enum WireSchema {
             field("question", .string), field("options", strings), field("descriptions", .list(Kind.string.orNull)), field("text", .list(.int)),
             field("multiSelect", .bool), field("at", .date)]))
         shapes.append(shape("session.draft", from: "SessionDraft.value", [field("text", .string), field("images", strings), field("at", .date),
-                                                                          field("action", .string)]))
+                                                                          field("action", .string), optional("now", .bool)]))
         // A message `send` holds until the question on the session's screen closes (the composer's lane, 2026-11-20).
         shapes.append(shape("session.queued", from: "HeldSend.value", [field("text", .string), field("images", .int), field("at", .date),
                                                                        field("action", .string)]))

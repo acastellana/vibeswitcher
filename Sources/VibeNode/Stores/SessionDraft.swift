@@ -12,15 +12,23 @@ public struct SessionDraft: Equatable, Sendable {
     public var at: Date
     /// The page's action id it was left with.
     public var action: String
+    /// Left to go now (the page's "send now" while its agent works): `vibeswitcher send SESSION` steers it mid-turn, as
+    /// `--now` does (2026-11-20).
+    public var now: Bool
 
-    public init(text: String, images: [String] = [], at: Date, action: String) {
+    public init(text: String, images: [String] = [], at: Date, action: String, now: Bool = false) {
         self.text = text
         self.images = images
         self.at = at
         self.action = action
+        self.now = now
     }
 
+    /// `now` only when set.
     public var value: NodeWire.Value {
-        .object(["text": .string(text), "images": .array(images.map(NodeWire.Value.string)), "at": .date(at), "action": .string(action)])
+        var fields: [String: NodeWire.Value] = ["text": .string(text), "images": .array(images.map(NodeWire.Value.string)), "at": .date(at),
+                                                "action": .string(action)]
+        if now { fields["now"] = .bool(true) }
+        return .object(fields)
     }
 }
