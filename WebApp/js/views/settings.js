@@ -143,7 +143,7 @@ export function settingsView(app) {
     if (picker.dataset.drawn !== key) {
       picker.dataset.drawn = key;
       picker.replaceChildren(h('option', { value: '' }, 'This node'),
-        choices.map((lead) => h('option', { value: lead.project, selected: lead.project === id }, lastPart(lead.root))));
+        ...choices.map((lead) => h('option', { value: lead.project, selected: lead.project === id }, lastPart(lead.root))));
       picker.value = id && choices.some((lead) => lead.project === id) ? id : '';
       picker.hidden = choices.length === 0;
     }
