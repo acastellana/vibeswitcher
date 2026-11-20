@@ -82,6 +82,10 @@ export function createMock(store, options = {}) {
   const leads = new Map(options.empty ? [] : [[SITE_PROJECT, {
     project: SITE_PROJECT, root: SITE, session: LEAD, named: null, bound: LEAD, replaced: [], held: 0, reportsWaiting: 0, notice: null,
     starting: false, lastStart: null, lastStartAt: ago(5400), looks: 14, questions: { open: 1, blocking: 1 }, cards: [CARD_LAUNCH],
+    // The push the lead asked for (push_remote), open: its card in the lead's chat drafts the two lines that settle it.
+    push: { id: '3c9e1f20', commit: 'c41d7e09b2a65f38d1e0c7b94a2f6e1d3b8c5a70', short: 'c41d7e09', branch: 'landing-base', remote: 'origin',
+      target: 'origin/landing-base', url: 'git@example.invalid:example-site.git', ahead: 2,
+      subjects: ['c41d7e0 Landing copy', '9b2a65f Hero image'], askedAt: ago(600) },
   }]]);
 
   const task = (slug, title, status, fields = {}) => ({ id: slug, slug, title, status, since: ago(300), worker: null, verifier: null, branch: 'agent/' + slug, after: [], checkpoints: [], blocker: null, merged: null, ...fields });

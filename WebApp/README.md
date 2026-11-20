@@ -55,6 +55,7 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
 | `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
 | `js/notify.js` | The browser's notifications while the page is open (a card opens, a session's prompt waits, a lead stops), asked once and toggled on This node; the title bar's count of what needs you. |
+| `js/push.js` | The push a lead asks for (the lead's `push`), in words: what goes where, its commits, and the two lines that settle it in a terminal; the card heads the lead's question stack. Nothing on the page pushes. |
 | `js/activity.js` | The inspector's Activity, made from a chat's items: files changed with their line counts, commands run. |
 | `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `node`, `start`, `palette`. |
 

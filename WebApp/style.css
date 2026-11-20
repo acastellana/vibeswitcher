@@ -368,6 +368,7 @@ code, pre, kbd { font-family: var(--mono); }
 .stack-title { font-size: var(--text); font-weight: 600; }
 .stack-note { color: var(--ink-3); font-size: var(--small); }
 .stack-cards { display: grid; gap: 10px; }
+.stack-cards:not(:empty) + .stack-cards { margin-top: 10px; }
 
 .card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px 12px; padding: 14px 16px 12px; border-radius: 12px; background: var(--raised); box-shadow: 0 0 0 1px var(--line); outline: none; }
 .card > * { grid-column: 1 / -1; }
