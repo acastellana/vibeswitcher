@@ -612,10 +612,10 @@ export function createMock(store, options = {}) {
     }
     if (message.kind === 'session.presets') {
       const presets = [
-        { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, digest: 'mock-opus', refused: null },
-        { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, digest: 'mock-claude', refused: null },
-        { name: 'Codex', kind: 'codex', command: 'codex', env: [], keepShell: false, project: false, default: false, digest: 'mock-codex', refused: 'Codex doesn’t run on this node yet' },
-        { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, digest: 'mock-shell', refused: null },
+        { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, builtIn: false, digest: 'mock-opus', refused: null },
+        { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-claude', refused: null },
+        { name: 'Codex', kind: 'codex', command: 'codex', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-codex', refused: 'Codex doesn’t run on this node yet' },
+        { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-shell', refused: null },
       ];
       return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
     }

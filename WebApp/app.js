@@ -8,7 +8,7 @@ import { connectSocket } from './js/socket.js';
 import { validate } from './wire/validators.js';
 import { createUI, arrange, teamOf, boardHref } from './js/ui.js';
 import { h, setText } from './js/dom.js';
-import { since, until, stateOf, lastPart, KEY, MAC } from './js/words.js';
+import { since, until, stateOf, lastPart, tilde, KEY, MAC } from './js/words.js';
 import { sidebar } from './js/views/sidebar.js';
 import { sessionView } from './js/views/session.js';
 import { nodeView } from './js/views/node.js';
@@ -17,6 +17,7 @@ import { settingsView, settingsHref } from './js/views/settings.js';
 import { startView } from './js/views/start.js';
 import { palette } from './js/views/palette.js';
 import { notifications } from './js/notify.js';
+import { recentFolders, newEntries, endable } from './js/actions.js';
 
 const params = new URLSearchParams(location.search);
 const store = createStore();
@@ -61,7 +62,8 @@ const offline = h('div', { class: 'offline', role: 'status', hidden: true }, 'Re
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
 const main = h('main', { class: 'main' }, start.el, session.el, node.el, board.el, settings.el);
 const root = document.getElementById('app');
-root.replaceChildren(list.el, main, palette(app).el, offline, unpaired, app.notifications.offer);
+const commandPalette = palette(app);
+root.replaceChildren(list.el, main, commandPalette.el, offline, unpaired, app.notifications.offer);
 
 function route() {
   const name = ui.state.route.name;
@@ -107,6 +109,49 @@ function step(by) {
   ui.select(order[at < 0 ? 0 : (at + by + order.length) % order.length].id);
 }
 
+// The palette's "New … in …" (the Mac's palette): each recent folder's presets as the node lists them, asked once a
+// minute at most while the palette is open (Claude and Shell until the node answers). Running one shows the start
+// page's form with that folder and preset, and the line that starts it.
+const BUILT_INS = [{ name: 'Claude', kind: 'claude', builtIn: true }, { name: 'Shell', kind: 'shell', builtIn: true }];
+const presetsByFolder = new Map();
+function presetsOf(folder) {
+  const known = presetsByFolder.get(folder);
+  if ((!known || Date.now() - known.at > 60_000) && !known?.asking && store.can('session.presets')) {
+    presetsByFolder.set(folder, { presets: known?.presets || BUILT_INS, at: known?.at || 0, asking: true });
+    store.read('session.presets', { folder }).then((reply) => {
+      const presets = reply?.ok && reply.result.presets.length ? reply.result.presets : presetsByFolder.get(folder)?.presets || BUILT_INS;
+      presetsByFolder.set(folder, { presets, at: Date.now(), asking: false });
+      commandPalette.refresh();
+    }, () => presetsByFolder.set(folder, { presets: known?.presets || BUILT_INS, at: Date.now(), asking: false }));
+  }
+  return presetsByFolder.get(folder)?.presets || BUILT_INS;
+}
+
+function newCommands() {
+  if (store.state.connection === 'unpaired' || store.state.connection === 'revoked') return [];
+  const home = store.state.node?.home;
+  const folders = recentFolders(store.state.sessions.values(), store.state.node?.ended);
+  return newEntries(folders, presetsOf).map(({ folder, preset }) => ({
+    title: `New ${preset.name} in ${lastPart(folder) || folder}`,
+    about: `${tilde(folder, home)} · the line that starts it`,
+    icon: 'plus',
+    run: () => { ui.go('#/'); start.choose(folder, preset.name); },
+  }));
+}
+
+// The Mac's row menu for the session shown: each opens the line that does it, under its header.
+function sessionCommands(selected) {
+  if (!selected || selected.ended) return [];
+  const act = (tab) => () => session.act(tab);
+  return [
+    { title: 'Rename Session…', about: 'Your name for it, kept across a resume', icon: 'pencil', run: act('rename') },
+    selected.paused ? { title: 'Resume Notifications', about: 'It’s reminded and notified of again', icon: 'pause', run: act('pause') }
+      : { title: 'Pause Session…', about: 'Greyed out, never reminded or notified of', icon: 'pause', run: act('pause') },
+    ...(endable(selected) ? [{ title: 'End Session…', about: 'Its agent stops, with everything in its terminal', icon: 'close', run: act('end') }] : []),
+    ...(selected.hosted && selected.cwd ? [{ title: 'Close Finished Shells…', about: `In ${lastPart(selected.cwd)}: the shells back at their prompt`, icon: 'terminal', run: act('shells') }] : []),
+  ];
+}
+
 function commands() {
   const selected = ui.state.route.name === 'session' ? store.state.sessions.get(ui.state.route.id) : null;
   const pane = (id, title, key) => ({ title, keys: `${KEY.mod}${KEY.alt}${key}`, icon: id, run: () => ui.setPane(selected.id, id) });
@@ -118,6 +163,7 @@ function commands() {
     ...(selected ? [{ title: 'Toggle Inspector', about: 'Team, Overview and Activity', keys: `${KEY.mod}${KEY.alt}0`, icon: 'inspector', run: () => ui.toggleInspector() }] : []),
     // Each lead's board: its team's tasks, grouped (views/board.js).
     ...[...store.state.boards.values()].map((board) => ({ title: `Board: ${lastPart(board.root) || 'a project'}`, about: 'Its lead’s tasks, as they move', icon: 'team', run: () => ui.go(boardHref(board.project)) })),
+    ...sessionCommands(selected),
     { title: 'Start Page', icon: 'home', run: () => ui.go('#/') },
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
     // The node's settings, and each lead's project's (views/settings.js).
@@ -127,6 +173,7 @@ function commands() {
     { title: 'Group by Attention', icon: 'filter', run: () => ui.setGrouping('attention') },
     { title: 'Group by Project', icon: 'filter', run: () => ui.setGrouping('projects') },
     { title: 'Filter Sessions', keys: `${KEY.alt}F`, icon: 'search', run: () => list.focusFilter() },
+    ...newCommands(),
     // The mock's own: what a server restart looks like from here.
     ...(feed.restart ? [{ title: 'Restart the Mock Server', about: 'Shows the reconnect: nothing is lost, nothing reloads', icon: 'node', run: () => feed.restart() }] : []),
   ];

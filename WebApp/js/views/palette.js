@@ -117,5 +117,6 @@ export function palette(app) {
   // The rows stay true while it's open: a status that changes shows here as it does in the list.
   store.subscribe('sessions', () => { if (ui.state.palette) draw(); });
 
-  return { el };
+  // `refresh`: the commands changed while it's open (a folder's presets came from the node).
+  return { el, refresh: () => { if (ui.state.palette) draw(); } };
 }

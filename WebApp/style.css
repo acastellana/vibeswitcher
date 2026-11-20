@@ -460,6 +460,12 @@ code, pre, kbd { font-family: var(--mono); }
 .end-text { flex: none; color: var(--ink-2); font-size: var(--small); }
 .end-text strong { color: var(--ink); font-weight: 600; }
 .end-strip > div:nth-child(2) { flex: 1; min-width: 0; }
+/* The session's actions (rename, pause, end, close shells, resume): the choice, then what it takes and its line. */
+.action-strip { align-items: flex-start; }
+.action-strip > .segmented { flex: none; }
+.action-panel { display: grid; gap: 6px; }
+.action-panel .confirm-note { margin: 0; }
+.gone-resume { width: 100%; text-align: left; }
 .new-session { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; margin: 22px 0 26px; padding: 14px 16px 15px; border-radius: 12px; background: var(--fill); }
 .new-title { color: var(--ink-2); font-size: var(--small); font-weight: 600; }
 /* Your sessions that ended lately, on the start page: a name and folder, the line that resumes it, its id. */
@@ -496,6 +502,8 @@ code, pre, kbd { font-family: var(--mono); }
 @media (max-width: 760px) {
   .end-strip { flex-wrap: wrap; }
   .end-text { flex: 1 1 100%; }
+  .action-strip > .action-panel { flex: 1 1 100%; order: 3; }
+  .action-strip > .segmented { flex: 1 1 auto; }
   .composer-draft { width: calc(100% - 32px); }
   .composer-draft .confirm-text { -webkit-line-clamp: 2; }
   .composer-draft .confirm-note { display: none; }

@@ -7,17 +7,10 @@ import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { AGENTS } from '../words.js';
 import { copyLine } from './cards.js';
+import { sessionShort, shellWord, sessionWord, renameLine, PAUSES, pauseLine, endable, endLine, closeShellsLine, resumeLine, endedEntry, newLine } from '../actions.js';
 
-// A session as the command line names it: the first 8 characters of its host id (`vibeswitcher send` takes any prefix
-// of 4 or more that only one session has).
-export const sessionShort = (id) => String(id || '').replace(/^[^:]*:/, '').slice(0, 8);
-
-// `text` as one shell word: as it is when it needs no quoting, else in single quotes, each ' written '\''. What the
-// user typed never becomes a command that does something else when pasted.
-export function shellWord(text) {
-  const value = String(text);
-  return /^[A-Za-z0-9._\/:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
-}
+// The command line's words for a session and for what the user typed (js/actions.js, where the page's lines are made).
+export { sessionShort, shellWord };
 
 // Whether the page may drive `session` at all: one the node's host started, still running.
 export const drivable = (session) => !!session?.hosted && !session.ended;
@@ -149,26 +142,112 @@ export function promptCard(app) {
   };
 }
 
-// Ending a session, under its header: the line that ends it and what that does. A lead and a lead's team aren't ended
-// from here (their lead and `vibeswitcher stop` are). Returns { el, toggle(), update(session) }.
-export function endStrip() {
-  const lineSlot = h('div');
+// What the Mac's row menu does to a session (Rename…, Pause, Resume Notifications, End Session…, Close Finished
+// Shells…), under its header: pick one, and the line that does it shows, a click to copy. A lead and a lead's team
+// aren't ended from here (their lead and `vibeswitcher stop` are). A session that ended has its Resume line, where the
+// node knows its conversation. Returns { el, open(tab), toggle(), update(session, node) → whether it offers anything }.
+export function actionsStrip() {
+  const TABS = [
+    { id: 'rename', label: 'Rename' },
+    { id: 'pause', label: 'Pause' },
+    { id: 'end', label: 'End' },
+    { id: 'shells', label: 'Close shells' },
+    { id: 'resume', label: 'Resume' },
+  ];
+  const tabs = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Do' });
+  const panel = h('div', { class: 'action-panel' });
   const close = h('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close', title: 'Close' }, icon('close', 13));
-  const el = h('div', { class: 'end-strip', role: 'group', 'aria-label': 'End this session', hidden: true },
-    h('div', { class: 'end-text' }, h('strong', null, 'End this session'), h('span', null, ' — its agent stops, with everything running in its terminal.')),
-    lineSlot, close);
-  let open = false;
+  const el = h('div', { class: 'end-strip action-strip', role: 'group', 'aria-label': 'Rename, pause or end this session', hidden: true }, tabs, panel, close);
+  let opened = false;
+  let tab = 'rename';
   let id = null;
-  close.addEventListener('click', () => { open = false; el.hidden = true; });
+  let session = null;
+  let node = null;
+  let typed = null;
+  let pause = 'indefinitely';
+  let drawn = '';
+  close.addEventListener('click', () => { opened = false; el.hidden = true; });
+
+  // What can be done to it now: renamed and paused while the node lists it (any session, one in your own terminal
+  // too: a name types nothing), ended when the page may end it, its folder's shells closed, resumed once ended.
+  function offered() {
+    if (!session) return [];
+    const ended = endedEntry(node, session.id);
+    if (session.ended) return ended ? ['resume'] : [];
+    return ['rename', 'pause', ...(endable(session) ? ['end'] : []), ...(session.hosted && session.cwd ? ['shells'] : [])];
+  }
+
+  function line(text, label, note) {
+    return [text ? copyLine(text, label) : null, note ? h('p', { class: 'confirm-note' }, note) : null];
+  }
+
+  function body() {
+    if (tab === 'rename') {
+      if (typed === null) typed = session.name || '';
+      const input = h('input', { class: 'answer-input', type: 'text', value: typed, placeholder: session.task || 'Its own name', 'aria-label': 'Name', spellcheck: 'false', autocomplete: 'off' });
+      const slot = h('div');
+      const fill = () => {
+        const text = renameLine(session, typed);
+        slot.replaceChildren(...line(text, 'the command that renames it',
+          text ? (typed.trim() ? 'Kept across a resume; the list and status show it.' : 'Gives it its own name back.')
+            : typed.trim() ? 'That’s its name now.' : 'Type a name.'));
+      };
+      input.addEventListener('input', () => { typed = input.value; fill(); });
+      fill();
+      return [input, slot];
+    }
+    if (tab === 'pause') {
+      if (session.paused) {
+        return line(pauseLine(session, 'off'), 'the command that resumes its notifications',
+          'Paused: greyed out, never reminded or notified of. This resumes its notifications.');
+      }
+      const choices = h('div', { class: 'segmented presets', role: 'group', 'aria-label': 'For how long' }, PAUSES.map((one) => h('button', {
+        type: 'button', 'aria-pressed': String(one.id === pause), onclick: () => { pause = one.id; draw(true); },
+      }, one.label)));
+      return [choices, ...line(pauseLine(session, pause), 'the command that pauses it', 'Greyed out, and nothing reminds or notifies you of it until then.')];
+    }
+    if (tab === 'end') return line(endLine(session), 'the command that ends it', 'Its agent stops, with everything running in its terminal.');
+    if (tab === 'shells') {
+      return line(closeShellsLine(session.cwd), 'the command that closes the finished shells',
+        'Ends this node’s shells in this folder or below that are back at their prompt; one still running something stays.');
+    }
+    const ended = endedEntry(node, session.id);
+    const resume = resumeLine(ended);
+    return [...line(resume, 'the command that resumes it', resume ? 'Starts it again in its same conversation.' : 'Its conversation id wasn’t known: it can’t be resumed.'),
+      ended?.conversation ? copyLine(ended.conversation, 'its conversation id') : null];
+  }
+
+  function draw(force = false) {
+    const can = offered();
+    if (!can.includes(tab)) tab = can[0] || 'rename';
+    const key = JSON.stringify([session?.id, session?.name, session?.paused, session?.cwd, can, tab, pause, endedEntry(node, session?.id)]);
+    if (!force && key === drawn) return;
+    drawn = key;
+    tabs.replaceChildren(...TABS.filter((one) => can.includes(one.id)).map((one) => h('button', {
+      type: 'button', 'aria-pressed': String(one.id === tab), onclick: () => { tab = one.id; draw(true); el.querySelector('.action-panel input, .action-panel .copy-button')?.focus(); },
+    }, one.id === 'pause' && session?.paused ? 'Resume notifications' : one.label)));
+    tabs.hidden = can.length < 2;
+    panel.replaceChildren(...(session && can.length ? body() : []).filter(Boolean));
+  }
+
   return {
     el,
-    toggle() { open = !open; el.hidden = !open; if (open) el.querySelector('.copy-button')?.focus(); },
-    update(session) {
-      if (session?.id !== id) { open = false; id = session?.id || null; }
-      const can = drivable(session) && !session.role;
-      if (!can) open = false;
-      el.hidden = !open;
-      if (can) lineSlot.replaceChildren(copyLine(`vibeswitcher end ${sessionShort(session.id)}`, 'the command that ends it'));
+    open(which) {
+      if (which) tab = which;
+      opened = true;
+      draw(true);
+      el.hidden = !offered().length;
+      el.querySelector('.action-panel input, .action-panel .copy-button')?.focus();
+    },
+    toggle() { opened ? (opened = false, el.hidden = true) : this.open(); },
+    update(next, nodeValue) {
+      if (next?.id !== id) { opened = false; id = next?.id || null; typed = null; pause = 'indefinitely'; }
+      session = next || null;
+      node = nodeValue || null;
+      const can = offered().length > 0;
+      if (!can) opened = false;
+      el.hidden = !opened;
+      if (opened) draw();
       return can;
     },
   };
@@ -235,16 +314,24 @@ export function newSessionForm(app, { folder }) {
       lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, 'Give a folder: the line that starts it shows here.'));
       return;
     }
-    const chosenModel = preset.kind === 'claude' ? model.value.trim() : '';
-    const how = preset.builtIn ? (preset.kind === 'shell' ? ' --agent shell' : '') : ` --preset ${shellWord(preset.name)}`;
-    const line = `vibeswitcher new ${shellWord(folder)}${how}${chosenModel ? ` --model ${shellWord(chosenModel)}` : ''}`;
-    lineSlot.replaceChildren(copyLine(line, 'the command that starts it'));
+    lineSlot.replaceChildren(copyLine(newLine(folder, preset, model.value), 'the command that starts it'));
   }
   path.addEventListener('input', () => { draw(); ask(); });
   model.addEventListener('input', draw);
 
   return {
     el,
+    // The palette's "New … in …": that folder and preset in the form, and its line ready to copy.
+    choose(given, name) {
+      path.value = given;
+      offered = true;
+      chosen = name;
+      picked = true;
+      ask();
+      draw();
+      lineSlot.querySelector('.copy-button')?.focus();
+      el.scrollIntoView?.({ block: 'nearest' });
+    },
     update() {
       if (!offered && !path.value) {
         const given = folder();

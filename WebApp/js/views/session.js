@@ -10,7 +10,9 @@ import { chatView } from './chat.js';
 import { teamStrip } from './lead.js';
 import { inspector } from './inspector.js';
 import { terminalView } from './terminal.js';
-import { endStrip } from './drive.js';
+import { actionsStrip } from './drive.js';
+import { copyLine } from './cards.js';
+import { endedEntry, resumeLine } from '../actions.js';
 
 const PANES = [
   { id: 'terminal', label: 'Terminal', key: '1' },
@@ -35,9 +37,9 @@ export function sessionView(app) {
     class: 'icon-button inspect-toggle', type: 'button', 'aria-label': 'Inspector', 'aria-controls': 'inspector', 'aria-expanded': 'false',
     title: `Toggle Inspector (${KEY.mod}${KEY.alt}0)`, onclick: () => ui.toggleInspector(),
   }, icon('inspector', 16));
-  // Ending an ordinary session: the line that ends it, under the header (a lead and its team aren't ended here).
-  const ending = endStrip();
-  const end = h('button', { class: 'button quiet end-button', type: 'button', title: 'End this session…', onclick: () => ending.toggle() }, 'End…');
+  // Renaming, pausing, ending a session and the rest of the Mac's row menu: the line that does each, under the header.
+  const acting = actionsStrip();
+  const end = h('button', { class: 'button quiet end-button', type: 'button', title: 'Rename, pause or end this session…', onclick: () => acting.toggle() }, 'Actions…');
   const head = h('header', { class: 'head' },
     h('a', { class: 'back icon-button', href: '#/', 'aria-label': 'Sessions' }, icon('back', 16)),
     markSlot,
@@ -51,13 +53,28 @@ export function sessionView(app) {
   const inspect = inspector(app);
   const term = terminalView(app);
   const terminal = term.el;
+  // A session that ended lately (the node's `ended`) says so, with the line that resumes it where its conversation is known.
+  const goneWhy = h('p', null, 'It ended, or its link is from another node.');
+  const goneResume = h('div', { class: 'gone-resume', hidden: true });
   const gone = h('div', { class: 'pane', hidden: true },
-    h('div', { class: 'placeholder' }, h('h2', null, 'This session isn’t here any more'), h('p', null, 'It ended, or its link is from another node.'), h('a', { class: 'button quiet', href: '#/' }, 'Start Page')));
+    h('div', { class: 'placeholder' }, h('h2', null, 'This session isn’t here any more'), goneWhy, goneResume, h('a', { class: 'button quiet', href: '#/' }, 'Start Page')));
+  let goneDrawn = '';
+  function drawGone(id) {
+    const entry = endedEntry(store.state.node, id);
+    const key = JSON.stringify(entry);
+    if (key === goneDrawn) return;
+    goneDrawn = key;
+    const line = resumeLine(entry);
+    setText(goneWhy, !entry ? 'It ended, or its link is from another node.'
+      : line ? 'It ended. This starts it again in its same conversation, from a terminal on this node:' : 'It ended, and its conversation id wasn’t known: it can’t be resumed.');
+    goneResume.hidden = !line;
+    goneResume.replaceChildren(...(line ? [copyLine(line, 'the command that resumes it')] : []));
+  }
   const loading = h('div', { class: 'pane head-skeleton', hidden: true, 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }));
   // The session's own column, and the inspector over its right edge: open as a column, the session's column gives
   // it the room (style.css), so the inspector itself never moves anything.
   const body = h('div', { class: 'session-body' }, h('div', { class: 'session-main' }, strip.el, chat.el, terminal), inspect.scrim, inspect.el);
-  const el = h('section', { class: 'session', 'aria-label': 'Session' }, head, ending.el, body, gone, loading);
+  const el = h('section', { class: 'session', 'aria-label': 'Session' }, head, acting.el, body, gone, loading);
 
   let shownAgent = null;
   let shownPane = null;
@@ -98,10 +115,11 @@ export function sessionView(app) {
     loading.hidden = !connecting;
     gone.hidden = connecting || !!session;
     for (const part of [head, body]) part.hidden = !session;
-    end.hidden = !ending.update(session);
+    end.hidden = !acting.update(session, store.state.node);
     if (!session) {
       // It ended and left the list (or the link is another node's): its stream went with it on the node.
       if (!connecting) term.hide({ gone: true });
+      drawGone(id);
       return;
     }
 
@@ -152,10 +170,10 @@ export function sessionView(app) {
   }
 
   const schedule = framed(render);
-  for (const topic of ['sessions', 'leads', 'boards', 'connection']) store.subscribe(topic, schedule);
+  for (const topic of ['sessions', 'leads', 'boards', 'connection', 'node']) store.subscribe(topic, schedule);
   ui.subscribe((what) => { if (what === 'route' || what === 'pane' || what === 'inspector') render(); });
   document.addEventListener('visibilitychange', schedule);
   render();
 
-  return { el, focusComposer: () => chat.focus() };
+  return { el, focusComposer: () => chat.focus(), act: (tab) => acting.open(tab) };
 }
