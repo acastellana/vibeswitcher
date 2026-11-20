@@ -257,3 +257,10 @@
 - 2026-11-20 03:57 Automatically (auto_advance): Started a worker on mac-gitguardtests (Mac: GitGuardTests' baseline message compared against the resolved root).
 - 2026-11-20 03:57 Sent sb5-the-host-confines's worker contract v7 (it had v6)
 - 2026-11-20 03:58 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-20 04:07 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-20 04:07 Audit of sb5-the-host-confines at 3dbad682 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-20 04:07 Sent sb5-the-host-confines's audit contract v7 (it had v6)
+- 2026-11-20 04:07 Automatically (auto_advance): Started the audit of sb5-the-host-confines at 3dbad682 (Its review is audit).
+- 2026-11-20 04:07 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-20 04:07 Started a worker on mac-gitguardtests
+- 2026-11-20 04:07 Automatically (auto_advance): Started a worker on mac-gitguardtests (Mac: GitGuardTests' baseline message compared against the resolved root).
