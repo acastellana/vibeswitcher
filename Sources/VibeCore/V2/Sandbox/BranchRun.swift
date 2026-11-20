@@ -231,6 +231,49 @@ public enum BranchRun {
                        server: launcher, facts: facts, accountHome: account, onTheMac: onTheMac).arguments
     }
 
+    // MARK: A verifier's commands
+
+    /// The variable a verifier's session carries its project's settings in, fixed when the tool server started it
+    /// (`LeadLaunch.prepare`'s `box`, read by `LeadVault.sandboxPolicy` as for the tool server's own runs): its shell
+    /// prefix (`BranchCode.runPrefix`), the tool server's binary started once per command, boxes each command by them.
+    /// It is in the verifier's `--settings` file and its process's environment, which its commands can't write: they
+    /// run in their box, where neither is (the file is in the vault's run folder, the process outside the box's pid
+    /// namespace), and a command that sets it for another prefix it starts inside changes no more than its own box
+    /// shows. A policy accepted after the verifier started doesn't reach it.
+    public static let policyVariable = "VIBESWITCHER_BRANCH_RUN_POLICY"
+
+    /// `policy` as `policyVariable` carries it: JSON, the settings or their refusal.
+    public static func carried(_ policy: Result<SandboxPolicy, SandboxRefusal>) -> String {
+        let carried: Carried
+        switch policy {
+        case .success(let read): carried = Carried(policy: read)
+        case .failure(let refusal): carried = Carried(refusal: .init(key: refusal.key, value: refusal.value, reason: refusal.reason))
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(carried)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+    }
+
+    /// What `policyVariable`'s `value` carries: none, the standard settings (a verifier started before it was set);
+    /// one that can't be read, a refusal, so its runs start nothing.
+    public static func carried(from value: String?) -> Result<SandboxPolicy, SandboxRefusal> {
+        guard let value else { return .success(.standard) }
+        let read = try? JSONDecoder().decode(Carried.self, from: Data(value.utf8))
+        if let policy = read?.policy, read?.refusal == nil { return .success(policy) }
+        if let refusal = read?.refusal, read?.policy == nil { return .failure(SandboxRefusal(key: refusal.key, value: refusal.value, reason: refusal.reason)) }
+        return .failure(SandboxRefusal(value: policyVariable, reason: "the settings this verifier was started with can't be read"))
+    }
+
+    private struct Carried: Codable {
+        struct Refusal: Codable {
+            var key: String?
+            var value: String
+            var reason: String
+        }
+        var policy: SandboxPolicy?
+        var refusal: Refusal?
+    }
+
     /// `environment`, for a run this thread starts, with what the project's settings tell its tools (`sandbox_env`):
     /// its variables, and its folders first on the PATH (the PATH given, else this process's). Boxed or not: a run's
     /// home is a scratch one (`Worktrees.runChecks`), where a tool installed in the account finds nothing of itself

@@ -576,7 +576,8 @@ public enum LeadLaunch {
                                server: String, name: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
                                branch: String? = nil, records: String? = nil, folder: URL? = nil, cwd: String? = nil,
                                temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil,
-                               teamPlugins: [String] = [], listedPlugins: [String]? = nil) throws -> Prepared {
+                               teamPlugins: [String] = [], listedPlugins: [String]? = nil,
+                               box: Result<SandboxPolicy, SandboxRefusal> = .success(.standard)) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -609,6 +610,8 @@ public enum LeadLaunch {
             // Never started with its commands as itself (see `verifierEnvironment`).
             guard BranchCode.prefixable(server) else { throw VerifierUnsafe(server: server) }
             env.merge(verifierEnvironment(server: server)) { $1 }
+            // Its commands' boxes: the project's settings as the user accepted them now (`BranchRun.policyVariable`).
+            env[BranchRun.policyVariable] = BranchRun.carried(box)
             settings["autoMemoryEnabled"] = false
             setAsideMemory(cwd: cwd)
         }
@@ -658,6 +661,7 @@ public enum LeadLaunch {
         if role == .lead, let model { prepared.environment[leadModelVariable] = model }
         // Also from the start (Claude Code takes the settings' env as it reads them).
         if role == .verifier { prepared.environment.merge(verifierEnvironment(server: server)) { $1 } }
+        if role == .verifier { prepared.environment[BranchRun.policyVariable] = env[BranchRun.policyVariable] }
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
         return try LinuxLaunch.inline(prepared, prompt: prompt, mcp: mcp, settings: settings, start: start)  // Files on the Mac (S10).

@@ -73,7 +73,9 @@ struct LeadLaunchTests {
         // Its session's git takes no optional index.lock either; its commands run as branch code, with no auto-memory
         // (`LeadLaunch.verifierEnvironment`).
         let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
-        #expect(settings?["env"] as? [String: String] == ["GIT_OPTIONAL_LOCKS": "0"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 })
+        // And the settings for its commands' boxes it was started with (none given: the standard ones).
+        #expect(settings?["env"] as? [String: String] == ["GIT_OPTIONAL_LOCKS": "0"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 }
+            .merging([BranchRun.policyVariable: BranchRun.carried(.success(.standard))]) { $1 })
         // On Linux none is left: each is on the command line (aRolesLaunchSettingsAreInlineOnLinux).
         for file in [launch.mcpFile, launch.promptFile, launch.settingsFile] {
             if Platform.Tools.roleSettingsInline { #expect(!FileManager.default.fileExists(atPath: file), "\(file)"); continue }

@@ -28,6 +28,7 @@ struct BranchRunPolicyTests: LeadTeamFixture {
         let shared: String
         let lead: LeadToolset
         let worker: LeadToolset
+        let runtime: FakeRuntime
         var workflowPath: String { root + "/.vibeswitcher/workflow.md" }
         var scope: BranchRun.Scope { BranchRun.Scope(launcher: BranchRunPolicyTests.launcher, accountHome: account) }
     }
@@ -56,7 +57,7 @@ struct BranchRunPolicyTests: LeadTeamFixture {
         try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
         Git.run(["commit", "-q", "-m", "add b"], in: worktree)
-        return Team(account: account, root: root, shared: shared, lead: lead, worker: try seat("worker-add-b", runtime))
+        return Team(account: account, root: root, shared: shared, lead: lead, worker: try seat("worker-add-b", runtime), runtime: runtime)
     }
 
     /// Writes `changes` into the project's workflow.md, as anyone of the team could; `accept`: and records them in the
@@ -195,5 +196,29 @@ struct BranchRunPolicyTests: LeadTeamFixture {
         }
         #expect(!outside.isEmpty)
         for name in outside { #expect(!names.contains(name), "\(name) reached a branch run") }
+    }
+
+    /// A verifier's commands are started by its own Claude Code through its shell prefix, not by the tool server: the
+    /// settings are fixed when the tool server starts the verifier, read as for its own runs, and carried in the
+    /// verifier's settings and environment (`BranchRun.policyVariable`), which the prefix boxes each command by
+    /// (`BranchRunHostTests.aVerifiersCommandIsBoxedByTheSettingsItWasStartedWith`).
+    @Test func aVerifierIsStartedCarryingTheAcceptedSettingsForItsCommandsBoxes() throws {
+        let team = try team { _ in "true" }
+        try write([("sandbox_read", team.shared), ("sandbox_env", "MADE_UP_HOME=~/shared")], in: team, accept: true)
+        #expect(!report(team).isError)
+        // The scratch account's home for `~`; no launcher, so the audit's own run is plain.
+        let audit = BranchRun.with(BranchRun.Scope(accountHome: team.account)) { team.lead.call("audit", ["task": "add-b"]) }
+        #expect(!audit.isError, "\(audit.text)")
+        let spawn = try #require(team.runtime.spawned.last { $0.command.contains("--name 'verify-add-b'") }, "\(team.runtime.spawned)")
+        func read(_ carried: String?) -> (read: [String], environment: [String: String])? {
+            guard let data = carried?.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let policy = object["policy"] as? [String: Any] else { return nil }
+            return (policy["read"] as? [String] ?? [], policy["environment"] as? [String: String] ?? [:])
+        }
+        let variable = "VIBESWITCHER_BRANCH_RUN_POLICY", shared = SandboxPolicy.resolved(team.shared)
+        let given = read(team.runtime.environments[spawn.id]?[variable])
+        #expect(given?.read == [shared] && given?.environment == ["MADE_UP_HOME": shared], "\(team.runtime.environments[spawn.id] ?? [:])")
+        let settings = try LaunchArguments.json("--settings", in: spawn.command)
+        #expect(read((settings["env"] as? [String: Any])?[variable] as? String)?.read == [shared], "\(settings)")
     }
 }

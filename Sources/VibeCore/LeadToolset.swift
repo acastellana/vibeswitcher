@@ -2849,7 +2849,8 @@ public final class LeadToolset: MCPToolset {
                                          start: start, server: runtime.server, name: name, model: model, advisor: advisor, effort: effort, branch: branch,
                                          records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
                                          cwd: folder, temporary: sessionTempRoot, home: claudeHome, teamPlugins: workflow.teamPlugins,
-                                         listedPlugins: listPlugins(command: command, role: role))
+                                         listedPlugins: listPlugins(command: command, role: role),
+                                         box: role == .verifier ? vault.sandboxPolicy(workflow, root: root, home: BranchRun.accountHome) : .success(.standard))
             // The project's heavy_slots for its sessions' vs-heavy too.
             var environment = launch.environment
             if let slots = workflow.heavySlots { environment[TestLock.slotsVariable] = String(slots) }
