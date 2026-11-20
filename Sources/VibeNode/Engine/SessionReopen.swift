@@ -25,7 +25,8 @@ import VibeCore
 extension LeadEngine {
     /// The user's own sessions the host runs, recorded in `engine.json` when they changed (their window sizes aside),
     /// while the host that runs them is the one `lastHostStart` names (a new host's empty list before `restartLook`
-    /// saw it is no change). On `queue`.
+    /// saw it is no change). One that ended stays recorded for `openGrace` first: a host going down (a reboot) ends
+    /// every session and may say so before it goes, and those are the ones to offer back. On `queue`.
     func noteOpenSessions() {
         guard link.state == .connected, let started = link.hostStartedAt?.timeIntervalSince1970,
               let last = lastHostStart, abs(last - started) <= 0.001 else { return }
@@ -33,7 +34,7 @@ extension LeadEngine {
         let hooked = sessions?.sessions ?? []
         let transcripts = Dictionary(hooked.compactMap { session in session.hostID.map { ($0, session.transcriptPath) } }, uniquingKeysWith: { $1 })
         let previous = openSessions.flatMap { abs($0.hostStartedAt - started) <= 0.001 ? $0.entries : nil } ?? []
-        let entries = RestartReopen.entries(hosted: link.sessions, sessions: hooked, previous: previous, replacedLeads: replaced)
+        let live = RestartReopen.entries(hosted: link.sessions, sessions: hooked, previous: previous, replacedLeads: replaced)
             .filter { $0.role == .user && $0.agent == .claude }
             .map { entry -> RestartReopen.Entry in
                 guard entry.agentSessionID == nil, let path = transcripts[entry.id] ?? nil else { return entry }
@@ -41,6 +42,18 @@ extension LeadEngine {
                 entry.agentSessionID = Self.conversation(ofTranscript: path)
                 return entry
             }
+        let now = openNow(), liveIDs = Set(live.map(\.id))
+        for id in liveIDs { openEnded[id] = nil }
+        let ended = previous.filter { entry in
+            guard !liveIDs.contains(entry.id) else { return false }
+            let since = openEnded[entry.id] ?? now
+            openEnded[entry.id] = since
+            return now.timeIntervalSince(since) < openGrace
+        }
+        let recorded = Set(ended.map(\.id))
+        openEnded = openEnded.filter { recorded.contains($0.key) }
+        let entries = previous.compactMap { entry in live.first { $0.id == entry.id } ?? (recorded.contains(entry.id) ? entry : nil) }
+            + live.filter { entry in !previous.contains { $0.id == entry.id } }
         if let open = openSessions, abs(open.hostStartedAt - started) <= 0.001,
            open.entries.map(RestartReopen.withoutSize) == entries.map(RestartReopen.withoutSize) { return }
         if openSessions == nil, entries.isEmpty { return }

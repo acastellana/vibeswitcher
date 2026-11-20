@@ -246,6 +246,12 @@ public final class LeadEngine: @unchecked Sendable {
     public internal(set) var reopen: [String: EngineState.Reopen] = [:]
     /// The user's own sessions live in the host, as last recorded (`EngineState.OpenSessions`, `SessionReopen.swift`).
     public internal(set) var openSessions: EngineState.OpenSessions?
+    /// When each recorded session was first seen ended (or gone from the host's list): kept in the record for
+    /// `openGrace`, since a host going down (a reboot) ends its sessions and may say so before it goes.
+    var openEnded: [UUID: Date] = [:]
+    /// How long an ended session stays in the record (a test's shorter), and the clock it's judged by.
+    var openGrace: TimeInterval = 30
+    var openNow: () -> Date = Date.init
     /// Whether this engine took a welcome yet: its first is the server's start, where the running leads are bound again
     /// and told which questions the user no longer sees.
     var welcomedOnce = false
