@@ -113,6 +113,7 @@ extension LeadEngine {
                 // in the inbox, under its lock, before it's typed: a Stop hook or a step before the prompt goes in leaves
                 // them to the prompt's hook, so they don't come twice.
                 let box = screen.map(LeadDelivery.box(in:))
+                self.behindDialog(box, screen: screen, session: id)
                 let (vault, runs, inbox, inboxRead, hosted) = (self.link.vault, self.leadRuns, self.root, self.inboxRead, self.link.sessions)
                 self.reads.async({ files -> Result<[SteerMessage], Refusal> in
                     if let why = Self.notTheLead(lead, root: root, board: files.names.board(root), vault: vault, hosted: hosted, runs: runs) {
@@ -180,6 +181,7 @@ extension LeadEngine {
             self.wakeStep(.screenRead(session: id))
             // Claude's dim suggested prompt isn't a draft: typing replaces it.
             let box = screen.map(LeadDelivery.box(in:))
+            self.behindDialog(box, screen: screen, session: id) { [weak self] in self?.flush(agent, lead: root) }
             let (vault, runs, inbox, inboxRead, hosted) = (self.link.vault, self.leadRuns, self.root, self.inboxRead, self.link.sessions)
             // A lead's only while the vault binds it and its board still names it, any agent's only while it runs on its
             // terminal: read on `reads`, and what's taken from the inbox typed on the engine's queue.
@@ -275,6 +277,16 @@ extension LeadEngine {
         case .notRunning: return Refusal("the lead's agent doesn't run on its terminal (it left to a shell, or ended)")
         case .noLead: return Refusal("the board names no lead now")
         }
+    }
+
+    /// A dialog where the box should be: Claude Code's popup declined on a team session (then `deliver`), or one nothing
+    /// here reads noted for `status` (`ClaudePopups.swift`). On `queue`.
+    private func behindDialog(_ box: LeadDelivery.Box?, screen: LeadDelivery.Screen?, session id: UUID, deliver: (() -> Void)? = nil) {
+        guard case .dialog? = box, let hosted = link.sessions.first(where: { $0.id == id }) else {
+            if box != nil { dialogs[id] = nil }
+            return
+        }
+        lookAt(screen: screen?.text, of: hosted, deliver: deliver)
     }
 
     /// A box that isn't empty, in a word.

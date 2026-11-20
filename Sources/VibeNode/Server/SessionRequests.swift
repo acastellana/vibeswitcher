@@ -339,6 +339,10 @@ extension Requests {
                 guard menu.options.indices.contains(index) else {
                     return refuse("its question has \(menu.options.count) options, not \(choice)")
                 }
+                guard !SessionPrompt.toggles(menu, index) else {
+                    return refuse("option \(choice) is a setting toggled with Space (\(ConfigSeal.inert(menu.options[index], limit: 80))): "
+                                  + "set it in the session's terminal, or choose its Continue")
+                }
                 let writes: [HostInput.Write]
                 if SessionPrompt.takesText(menu, index) {
                     guard let text else { return refuse("option \(choice) takes your words: give them after the choice") }
