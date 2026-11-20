@@ -408,6 +408,32 @@ struct NodeAcceptanceTests {
         #expect(again.command?.hasSuffix("--resume '\(ownConversation)'") == true, "\(String(describing: again.command))")
     }
 
+    // MARK: A21, a switch
+
+    @Test("A21: switch to another installed build hands the node over; the user's sessions survive it, and hooks install after")
+    func a21Switch() async throws {
+        let (a, b) = (String(repeating: "a", count: 40), String(repeating: "b", count: 40))
+        let installs = scratch.url("builds")
+        let buildA = try ScratchBuilds.install(commit: a, into: installs)
+        _ = try ScratchBuilds.install(commit: b, into: installs)
+        let node = try await ScratchNode(scratch, build: buildA, installRoot: installs)
+        defer { node.stop() }
+        let (session, files) = try await Self.newClaude(node)
+        let pid = EngineEndToEndTests.state(files)["pid"] as? Int
+        let switched = try await node.runOnTerminal(["switch", b])
+        #expect(switched.status == 0 && switched.output.contains("handed over") && switched.output.contains("build \(b)"),
+                "\(switched.output)\(switched.errors)\n\(node.said)")
+        #expect(await node.eventuallyStatus { (($0["host"] as? [String: Any])?["notes"] as? [String: Any])?["build"] as? String == b }, "\(node.said)")
+        // The same session, its agent the same process, and it still takes what the user sends.
+        #expect(try node.sessions().contains { $0.id == session.id && $0.isLive }, "\(node.said)")
+        #expect(EngineEndToEndTests.state(files)["pid"] as? Int == pid)
+        let sent = try await node.runOnTerminal(["send", Self.short(session), "still here?"])
+        #expect(sent.status == 0, "\(sent.output)\(sent.errors)\n\(node.said)")
+        _ = try await EngineEndToEndTests.prompt(files) { $0 == "still here?" }
+        let hooks = try await node.runOnTerminal(["hooks", "install", "--agent", "claude"])
+        #expect(hooks.status == 0 && hooks.output.contains("Claude: hooks installed"), "\(hooks.output)\(hooks.errors)\n\(node.said)")
+    }
+
     // MARK: A22-A23, who may act as the user
 
     @Test("A22: vibeswitcher answer run from inside a session is refused: not the user's voice")
