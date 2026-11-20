@@ -102,6 +102,10 @@ extension NodeSettings {
             }
         }
         let wasShown = project(root: root, workflow: LeadWorkflow.load(from: path), floor: nil, files: files).first { $0.setting.key == key }?.value ?? ""
+        // Whether the last accept's snapshot is one this host's vault vouches for now, before the record moves (`AcceptedSnapshot`).
+        let snapshot = AcceptedSnapshot.load(root: files.root).projects[root]
+        let vouched = setting.guardRail
+            && AcceptedSnapshot.vouches(snapshot, root: root, vault: vault, record: (try? vault.guardedRecord(root: root)) ?? nil)
         try exclusively(root: root) {
             let current = FileManager.default.contents(atPath: path) ?? Data(LeadWorkflow.template.utf8)
             try LeadWorkflow.write(LeadWorkflow.updating(current, with: [(key, value ?? "")]), to: path)
@@ -121,6 +125,17 @@ extension NodeSettings {
             } catch {
                 throw Refusal("wrote workflow.md, but the session host didn't record \(key) as yours (\(error)): merge and start_worker "
                               + "refuse it until it does. Run the same `vibeswitcher set` again")
+            }
+            // Your `set` of a rail is your accept of that key (acceptance run, 2026-11-20: `config held` said a rail just
+            // set had "changed since your last accept"): the last accept's snapshot takes this key's new value, sealed
+            // again, so the card says it is the same. Only this key, and only a snapshot the vault vouched for before:
+            // one a worker rewrote isn't sealed anew over its rewrite. A diff aid only: the vault's record is what holds.
+            if vouched, snapshot?.configAt != nil {
+                let now = LeadVault.guardedValue(key, in: after)
+                try? AcceptedSnapshot.update(root: files.root, project: root) { project in
+                    if now.isEmpty { project.guarded[key] = nil } else { project.guarded[key] = now }
+                    project.seal = try? vault.seal(AcceptedSnapshot.sealMessage(project, root: root))
+                }
             }
         }
         let now = project(root: root, workflow: LeadWorkflow.load(from: path), floor: nil, files: files).first { $0.setting.key == key }?.value ?? ""
